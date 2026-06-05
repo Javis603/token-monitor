@@ -1313,7 +1313,8 @@ function setLiveDot(connected) {
 
 async function refreshStats(options = {}) {
   try {
-    state.stats = await window.tokenMonitor.getStats(options);
+    const request = options.force && !options.period ? { ...options, period: state.period } : options;
+    state.stats = await window.tokenMonitor.getStats(request);
     setStatus(statusTextFor(state.mode, state.streamConnected));
     render();
     renderLimitProviderCheckboxes();
@@ -2399,13 +2400,15 @@ async function init() {
 }
 
 for (const tab of document.querySelectorAll('.tab')) {
-  tab.addEventListener('click', () => {
-    setPeriod(tab.dataset.period);
+  tab.addEventListener('click', async () => {
+    const changed = setPeriod(tab.dataset.period);
     syncPeriodTabs();
     if (state.openSession) openSessionDetail(state.openSession);
     state.currentTotal = 0;
     state.rowSignature = '';
     render();
+    // Show the cached period immediately, then force-refresh the selected period to calibrate it.
+    if (changed) await refreshStats({ force: true, forceLimits: false, period: state.period });
   });
 }
 

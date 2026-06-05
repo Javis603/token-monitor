@@ -10,7 +10,7 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
-const { emptyPeriod, extractUsageFromTokscale } = require('./usage');
+const { PERIODS, emptyPeriod, extractUsageFromTokscale, normalizePeriod } = require('./usage');
 const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
@@ -130,9 +130,226 @@ function runTokscale({ clients, flags, commandTimeoutMs }) {
   });
 }
 
+function normalizeRequestedPeriods(value) {
+  if (value === undefined || value === null || value === '') return PERIODS.slice();
+  const raw = Array.isArray(value) ? value : String(value).split(',');
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const period = String(item || '').trim();
+    if (!PERIODS.includes(period) || seen.has(period)) continue;
+    seen.add(period);
+    out.push(period);
+  }
+  return out.length > 0 ? out : PERIODS.slice();
+}
+
+function periodFlags(periodName, allTimeSince) {
+  if (periodName === 'today') return ['--today'];
+  if (periodName === 'month') return ['--month'];
+  return ['--since', allTimeSince];
+}
+
+function cachedPeriods(previousPeriods) {
+  const periods = {};
+  for (const periodName of PERIODS) periods[periodName] = normalizePeriod(previousPeriods?.[periodName]);
+  return periods;
+}
+
+function hasPeriodUsage(period) {
+  return Number(period?.totalTokens || 0) > 0
+    || Number(period?.costUsd || 0) > 0
+    || Object.keys(period?.clients || {}).length > 0
+    || Object.keys(period?.sessions || {}).length > 0;
+}
+
+function objectDelta(previousObject, nextObject) {
+  return Object.fromEntries(Array.from(new Set([
+    ...Object.keys(previousObject || {}),
+    ...Object.keys(nextObject || {})
+  ])).map((key) => [key, (nextObject?.[key] || 0) - (previousObject?.[key] || 0)]));
+}
+
+function nestedObjectDelta(previousObject, nextObject) {
+  return Object.fromEntries(Array.from(new Set([
+    ...Object.keys(previousObject || {}),
+    ...Object.keys(nextObject || {})
+  ])).map((key) => [key, objectDelta(previousObject?.[key], nextObject?.[key])]));
+}
+
+function deltaHasChanges(delta) {
+  if (delta.totalTokens !== 0 || delta.costUsd !== 0) return true;
+  const hasObjectChanges = (object) => Object.values(object || {}).some((value) => Number(value || 0) !== 0);
+  const hasNestedChanges = (object) => Object.values(object || {}).some((value) => hasObjectChanges(value));
+  return hasObjectChanges(delta.clients)
+    || hasObjectChanges(delta.clientCosts)
+    || hasObjectChanges(delta.models)
+    || hasObjectChanges(delta.modelCosts)
+    || hasNestedChanges(delta.clientModels)
+    || hasNestedChanges(delta.clientModelCosts)
+    || Object.values(delta.sessions || {}).some((session) => deltaHasChanges(session));
+}
+
+// The period windows are nested (today -> month -> allTime), so a source delta can
+// be projected upward when both old and new source snapshots are known.
+function periodDelta(previous, next) {
+  const previousPeriod = normalizePeriod(previous);
+  const nextPeriod = normalizePeriod(next);
+  return {
+    totalTokens: nextPeriod.totalTokens - previousPeriod.totalTokens,
+    costUsd: nextPeriod.costUsd - previousPeriod.costUsd,
+    clients: objectDelta(previousPeriod.clients, nextPeriod.clients),
+    clientCosts: objectDelta(previousPeriod.clientCosts, nextPeriod.clientCosts),
+    models: objectDelta(previousPeriod.models, nextPeriod.models),
+    modelCosts: objectDelta(previousPeriod.modelCosts, nextPeriod.modelCosts),
+    clientModels: nestedObjectDelta(previousPeriod.clientModels, nextPeriod.clientModels),
+    clientModelCosts: nestedObjectDelta(previousPeriod.clientModelCosts, nextPeriod.clientModelCosts),
+    sessions: Object.fromEntries(Array.from(new Set([
+      ...Object.keys(previousPeriod.sessions || {}),
+      ...Object.keys(nextPeriod.sessions || {})
+    ])).map((key) => [key, sessionDelta(previousPeriod.sessions?.[key], nextPeriod.sessions?.[key])]))
+  };
+}
+
+function sessionDelta(previous, next) {
+  const previousSession = previous || {};
+  const nextSession = next || {};
+  return {
+    client: nextSession.client || previousSession.client || '',
+    sessionId: nextSession.sessionId || previousSession.sessionId || '',
+    totalTokens: Number(nextSession.totalTokens || 0) - Number(previousSession.totalTokens || 0),
+    costUsd: Number(nextSession.costUsd || 0) - Number(previousSession.costUsd || 0),
+    messageCount: Number(nextSession.messageCount || 0) - Number(previousSession.messageCount || 0),
+    inputTokens: Number(nextSession.inputTokens || 0) - Number(previousSession.inputTokens || 0),
+    outputTokens: Number(nextSession.outputTokens || 0) - Number(previousSession.outputTokens || 0),
+    cacheReadTokens: Number(nextSession.cacheReadTokens || 0) - Number(previousSession.cacheReadTokens || 0),
+    cacheWriteTokens: Number(nextSession.cacheWriteTokens || 0) - Number(previousSession.cacheWriteTokens || 0),
+    reasoningTokens: Number(nextSession.reasoningTokens || 0) - Number(previousSession.reasoningTokens || 0),
+    startedAt: nextSession.startedAt || previousSession.startedAt || '',
+    lastUsedAt: nextSession.lastUsedAt || previousSession.lastUsedAt || '',
+    models: objectDelta(previousSession.models, nextSession.models),
+    modelCosts: objectDelta(previousSession.modelCosts, nextSession.modelCosts),
+    providers: objectDelta(previousSession.providers, nextSession.providers)
+  };
+}
+
+function addPositiveDelta(object, key, value, round = true) {
+  const nextValue = Math.max(0, (object[key] || 0) + value);
+  const normalizedValue = round ? Math.round(nextValue) : nextValue;
+  if (normalizedValue > 0) object[key] = normalizedValue; else delete object[key];
+}
+
+function addNestedPositiveDelta(object, outerKey, innerKey, value, round = true) {
+  if (!object[outerKey]) object[outerKey] = {};
+  addPositiveDelta(object[outerKey], innerKey, value, round);
+  if (Object.keys(object[outerKey]).length === 0) delete object[outerKey];
+}
+
+function applySessionDeltaEstimate(sessions, key, delta) {
+  const existing = sessions[key] || {
+    client: delta.client,
+    sessionId: delta.sessionId,
+    totalTokens: 0,
+    costUsd: 0,
+    messageCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    startedAt: '',
+    lastUsedAt: '',
+    models: {},
+    modelCosts: {},
+    providers: {}
+  };
+  existing.client = existing.client || delta.client;
+  existing.sessionId = existing.sessionId || delta.sessionId;
+  for (const keyName of ['totalTokens', 'messageCount', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens']) {
+    existing[keyName] = Math.max(0, Math.round(Number(existing[keyName] || 0) + Number(delta[keyName] || 0)));
+  }
+  existing.costUsd = Math.max(0, Number(existing.costUsd || 0) + Number(delta.costUsd || 0));
+  if (delta.startedAt && (!existing.startedAt || Date.parse(delta.startedAt) < Date.parse(existing.startedAt || 0))) existing.startedAt = delta.startedAt;
+  if (delta.lastUsedAt && (!existing.lastUsedAt || Date.parse(delta.lastUsedAt) > Date.parse(existing.lastUsedAt || 0))) existing.lastUsedAt = delta.lastUsedAt;
+  for (const [model, value] of Object.entries(delta.models || {})) addPositiveDelta(existing.models, model, value);
+  for (const [model, value] of Object.entries(delta.modelCosts || {})) addPositiveDelta(existing.modelCosts, model, value, false);
+  for (const [provider, value] of Object.entries(delta.providers || {})) addPositiveDelta(existing.providers, provider, value);
+  if (existing.totalTokens > 0 || existing.costUsd > 0) sessions[key] = existing; else delete sessions[key];
+}
+
+function applyPeriodDeltaEstimate(period, delta) {
+  const next = normalizePeriod(period);
+  next.totalTokens = Math.max(0, Math.round(next.totalTokens + delta.totalTokens));
+  next.costUsd = Math.max(0, next.costUsd + delta.costUsd);
+  for (const [client, value] of Object.entries(delta.clients || {})) {
+    addPositiveDelta(next.clients, client, value);
+  }
+  for (const [client, value] of Object.entries(delta.clientCosts || {})) {
+    addPositiveDelta(next.clientCosts, client, value, false);
+  }
+  for (const [model, value] of Object.entries(delta.models || {})) {
+    addPositiveDelta(next.models, model, value);
+  }
+  for (const [model, value] of Object.entries(delta.modelCosts || {})) {
+    addPositiveDelta(next.modelCosts, model, value, false);
+  }
+  for (const [client, models] of Object.entries(delta.clientModels || {})) {
+    for (const [model, value] of Object.entries(models || {})) {
+      addNestedPositiveDelta(next.clientModels, client, model, value);
+    }
+  }
+  for (const [client, models] of Object.entries(delta.clientModelCosts || {})) {
+    for (const [model, value] of Object.entries(models || {})) {
+      addNestedPositiveDelta(next.clientModelCosts, client, model, value, false);
+    }
+  }
+  for (const [key, value] of Object.entries(delta.sessions || {})) {
+    applySessionDeltaEstimate(next.sessions, key, value);
+  }
+  return next;
+}
+
+function estimateBroaderPeriods(previousPeriods, nextPeriods, refreshedNames, loadedPeriods, logger) {
+  const estimatedNames = [];
+  if (!previousPeriods) return estimatedNames;
+  const sources = [
+    { source: 'today', targets: ['month', 'allTime'] },
+    { source: 'month', targets: ['allTime'] }
+  ];
+  for (const { source, targets } of sources) {
+    if (!refreshedNames.includes(source)) continue;
+    const sourceLoaded = loadedPeriods?.has(source) || hasPeriodUsage(previousPeriods[source]);
+    // Without a source baseline, a first refresh would look like a giant delta.
+    if (!sourceLoaded) continue;
+    const nextTargets = targets.filter((periodName) => !refreshedNames.includes(periodName) && hasPeriodUsage(nextPeriods[periodName]));
+    if (nextTargets.length === 0) continue;
+    const delta = periodDelta(previousPeriods[source], nextPeriods[source]);
+    if (!deltaHasChanges(delta)) continue;
+    if (delta.totalTokens < 0 || delta.costUsd < 0) {
+      logger?.(`Usage estimate: ${source} delta decreased tokens=${delta.totalTokens} cost=${delta.costUsd.toFixed(6)}`);
+    }
+    for (const periodName of nextTargets) {
+      nextPeriods[periodName] = { ...applyPeriodDeltaEstimate(nextPeriods[periodName], delta), estimated: true };
+      estimatedNames.push(periodName);
+    }
+    logger?.(`Usage estimate: applied ${source} delta tokens=${delta.totalTokens} cost=${delta.costUsd.toFixed(6)} to ${nextTargets.join(',')}`);
+  }
+  return estimatedNames;
+}
+
 function isoFromDate(value) {
   const date = value instanceof Date ? value : new Date(value || '');
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function localDateKeys(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value || '');
+  if (Number.isNaN(date.getTime())) return { day: '', month: '' };
+  // Match the desktop UI's local calendar semantics for Today/Month boundaries.
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return { day: `${year}-${month}-${day}`, month: `${year}-${month}` };
 }
 
 function timestampFromSessionId(id) {
@@ -287,19 +504,49 @@ async function maybeSyncAntigravity(clientsCsv, logger) {
 async function collectUsageOnce(options) {
   const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '' } = options;
   const normalizedClients = normalizeClientsCsv(clients);
-  let today = emptyPeriod();
-  let month = emptyPeriod();
-  let allTime = emptyPeriod();
+  const requestedPeriods = normalizeRequestedPeriods(options.periods);
+  const periods = normalizedClients ? cachedPeriods(options.previousPeriods) : cachedPeriods(null);
   if (normalizedClients) {
-    await maybeSyncCursor(normalizedClients, options.logger);
-    await maybeSyncAntigravity(normalizedClients, options.logger);
-    const todayJson = await runTokscale({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
-    const monthJson = await runTokscale({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs });
-    const allTimeJson = await runTokscale({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
-    today = extractUsageFromTokscale(todayJson);
-    month = extractUsageFromTokscale(monthJson);
-    allTime = extractUsageFromTokscale(allTimeJson);
-    applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
+    const refreshedPeriods = {};
+    const loadedPeriods = options.loadedPeriods instanceof Set ? options.loadedPeriods : new Set(options.loadedPeriods || []);
+    const dirtyPeriods = options.dirtyPeriods instanceof Set ? options.dirtyPeriods : new Set(options.dirtyPeriods || []);
+    const onlyIfDirty = Boolean(options.onlyIfDirty);
+    const periodsToRefresh = [];
+    const refreshedNames = [];
+    const cachedNames = [];
+    for (const periodName of requestedPeriods) {
+      const periodLoaded = loadedPeriods.has(periodName);
+      if (onlyIfDirty && periodLoaded && !dirtyPeriods.has(periodName)) {
+        cachedNames.push(periodName);
+        continue;
+      }
+      periodsToRefresh.push(periodName);
+    }
+    if (periodsToRefresh.length > 0) {
+      await maybeSyncCursor(normalizedClients, options.logger);
+      await maybeSyncAntigravity(normalizedClients, options.logger);
+    }
+    for (const periodName of periodsToRefresh) {
+      const startedAt = Date.now();
+      const json = await runTokscale({ clients: normalizedClients, flags: periodFlags(periodName, allTimeSince), commandTimeoutMs });
+      periods[periodName] = extractUsageFromTokscale(json);
+      refreshedPeriods[periodName] = periods[periodName];
+      refreshedNames.push(periodName);
+      if (options.logger) {
+        options.logger(`Usage period ${periodName}: refreshed in ${Date.now() - startedAt}ms tokens=${periods[periodName].totalTokens}`);
+      }
+    }
+    if (options.logger && (refreshedNames.length > 0 || cachedNames.length > 0)) {
+      const parts = [];
+      if (refreshedNames.length > 0) parts.push(`refreshed=${refreshedNames.join(',')}`);
+      if (cachedNames.length > 0) parts.push(`cache-hit=${cachedNames.join(',')}`);
+      options.logger(`Usage periods: ${parts.join(' ')}`);
+    }
+    const estimatedNames = estimateBroaderPeriods(options.previousPeriods, periods, refreshedNames, loadedPeriods, options.logger);
+    const timestampPeriods = { ...refreshedPeriods };
+    // Estimated periods may now contain real session deltas from the refreshed source period.
+    for (const periodName of estimatedNames) timestampPeriods[periodName] = periods[periodName];
+    applySessionTimestamps(timestampPeriods, options.homeDir || os.homedir());
   }
   const summary = {
     deviceId,
@@ -309,9 +556,9 @@ async function collectUsageOnce(options) {
     agentVersion,
     ...(agentRuntime ? { agentRuntime } : {}),
     trackedClients: normalizedClients ? normalizedClients.split(',') : [],
-    today,
-    month,
-    allTime
+    today: periods.today || emptyPeriod(),
+    month: periods.month || emptyPeriod(),
+    allTime: periods.allTime || emptyPeriod()
   };
   if (options.limitsEnabled !== false) {
     summary.limits = options.limitsCollector
@@ -353,7 +600,7 @@ function watchPathsForClients(clientsCsv) {
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
-    intervalMs, watchEnabled, watchDebounceMs, limitsEnabled,
+    intervalMs, watchEnabled, watchDebounceMs, watchCooldownMs = 5_000, limitsEnabled,
     onUpdate, onError, logger
   } = options;
   const log = logger || (() => {});
@@ -361,11 +608,26 @@ function startCollector(options) {
   let tickInFlight = false;
   let tickPending = false;
   let pendingForceLimits = false;
+  const pendingPeriods = new Set();
+  let pendingOnlyIfDirty = true;
   let pendingWaiters = [];
   let debounceTimer = null;
   let intervalTimer = null;
   let stopped = false;
   const watchers = [];
+  let lastPeriods = null;
+  let lastUsageTickFinishedAt = 0;
+  const loadedPeriods = new Set();
+  const dirtyPeriods = new Set(PERIODS);
+  let dirtyVersion = 0;
+  const periodDirtyVersions = new Map(PERIODS.map((periodName) => [periodName, dirtyVersion]));
+  const now = typeof options.now === 'function' ? options.now : () => new Date();
+  const nowMs = () => {
+    const value = now();
+    const date = value instanceof Date ? value : new Date(value || '');
+    return Number.isNaN(date.getTime()) ? Date.now() : date.getTime();
+  };
+  let lastDateKeys = null;
 
   function resolvePendingWaiters() {
     const waiters = pendingWaiters;
@@ -373,7 +635,73 @@ function startCollector(options) {
     for (const resolve of waiters) resolve();
   }
 
+  function requestedPeriodsForTick(tickOptions = {}) {
+    return normalizeRequestedPeriods(tickOptions.periods || options.periods);
+  }
+
+  function tickOptionsWithDateBoundary(tickOptions = {}) {
+    const currentDateKeys = localDateKeys(now());
+    const crossedBoundary = lastDateKeys && (
+      lastDateKeys.day !== currentDateKeys.day ||
+      lastDateKeys.month !== currentDateKeys.month
+    );
+    lastDateKeys = currentDateKeys;
+    if (!crossedBoundary) return tickOptions;
+    log(`Usage date boundary crossed: ${currentDateKeys.day}; refreshing all periods`);
+    markAllPeriodsDirty();
+    return { ...tickOptions, periods: PERIODS };
+  }
+
+  function addPendingTick(tickOptions = {}) {
+    tickPending = true;
+    pendingForceLimits = pendingForceLimits || Boolean(tickOptions.forceLimits);
+    for (const periodName of requestedPeriodsForTick(tickOptions)) pendingPeriods.add(periodName);
+    // Any explicit non-dirty refresh in the batch should make the coalesced tick force-refresh.
+    pendingOnlyIfDirty = pendingOnlyIfDirty && Boolean(tickOptions.onlyIfDirty);
+  }
+
+  function takePendingTickOptions() {
+    const forceLimits = pendingForceLimits;
+    const periods = pendingPeriods.size > 0 ? Array.from(pendingPeriods) : undefined;
+    const onlyIfDirty = pendingOnlyIfDirty;
+    tickPending = false;
+    pendingForceLimits = false;
+    pendingPeriods.clear();
+    pendingOnlyIfDirty = true;
+    return { forceLimits, periods, onlyIfDirty };
+  }
+
+  function markAllPeriodsDirty() {
+    dirtyVersion += 1;
+    for (const periodName of PERIODS) {
+      dirtyPeriods.add(periodName);
+      periodDirtyVersions.set(periodName, dirtyVersion);
+    }
+  }
+
+  function scheduleDirtyRefresh(reason, delayMs, cooldownMs) {
+    // This keeps exactly one delayed watch refresh alive; re-entry replaces the timer.
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      const cooldownRemaining = Math.max(0, cooldownMs - (nowMs() - lastUsageTickFinishedAt));
+      if (tickInFlight || cooldownRemaining > 0) {
+        const nextDelayMs = Math.max(watchDebounceMs, cooldownRemaining);
+        log(`Usage refresh delayed (${reason}); next watch refresh in ${nextDelayMs}ms`);
+        scheduleDirtyRefresh(reason, nextDelayMs, cooldownMs);
+        return;
+      }
+      runTick(reason);
+    }, delayMs);
+  }
+
   async function performTick(reason, tickOptions = {}) {
+    tickOptions = tickOptionsWithDateBoundary(tickOptions);
+    const requestedPeriods = requestedPeriodsForTick(tickOptions);
+    const startedDirtyVersions = new Map(requestedPeriods.map((periodName) => [
+      periodName,
+      periodDirtyVersions.get(periodName) || 0
+    ]));
     try {
       const summary = await collectUsageOnce({
         ...options,
@@ -384,30 +712,41 @@ function startCollector(options) {
         agentVersion,
         agentRuntime,
         limitsCollector,
-        forceLimits: Boolean(tickOptions.forceLimits)
+        forceLimits: Boolean(tickOptions.forceLimits),
+        periods: requestedPeriods,
+        previousPeriods: lastPeriods,
+        loadedPeriods,
+        dirtyPeriods,
+        onlyIfDirty: Boolean(tickOptions.onlyIfDirty)
       });
       if (stopped) return;
+      lastPeriods = { today: summary.today, month: summary.month, allTime: summary.allTime };
+      for (const periodName of requestedPeriods) {
+        loadedPeriods.add(periodName);
+        // If another watch event arrived mid-refresh, keep the dirty bit for the next tick.
+        if ((periodDirtyVersions.get(periodName) || 0) === (startedDirtyVersions.get(periodName) || 0)) {
+          dirtyPeriods.delete(periodName);
+        }
+      }
       await onUpdate?.(summary, reason);
     } catch (error) {
       if (stopped) return;
       if (onError) onError(error, reason); else log(`collector tick failed (${reason}): ${error.message}`);
+    } finally {
+      lastUsageTickFinishedAt = nowMs();
     }
   }
 
   async function runTick(reason, tickOptions = {}) {
     if (tickInFlight) {
-      tickPending = true;
-      pendingForceLimits = pendingForceLimits || Boolean(tickOptions.forceLimits);
+      addPendingTick(tickOptions);
       return new Promise((resolve) => pendingWaiters.push(resolve));
     }
     tickInFlight = true;
     try {
       await performTick(reason, tickOptions);
       while (tickPending && !stopped) {
-        const forceLimits = pendingForceLimits;
-        tickPending = false;
-        pendingForceLimits = false;
-        await performTick('coalesced', { forceLimits });
+        await performTick('coalesced', takePendingTickOptions());
       }
     } finally {
       tickInFlight = false;
@@ -417,8 +756,12 @@ function startCollector(options) {
 
   function scheduleTick(reason) {
     if (stopped) return;
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => { debounceTimer = null; runTick(reason); }, watchDebounceMs);
+    markAllPeriodsDirty();
+    const cooldownMs = Number(watchCooldownMs || 0);
+    const elapsedSinceFinished = nowMs() - lastUsageTickFinishedAt;
+    const delayMs = Math.max(watchDebounceMs, Math.max(0, cooldownMs - elapsedSinceFinished));
+    log(`Usage cache dirty: ${PERIODS.join(',')} (${reason}); next watch refresh in ${delayMs}ms`);
+    scheduleDirtyRefresh(reason, delayMs, cooldownMs);
   }
 
   function setupWatchers() {
@@ -446,9 +789,13 @@ function startCollector(options) {
     }
   }
 
+  let firstLoopTick = true;
+
   function loop() {
     if (stopped) return;
-    runTick('interval').finally(() => {
+    const tickOptions = firstLoopTick && options.initialPeriods ? { periods: options.initialPeriods } : {};
+    firstLoopTick = false;
+    runTick('interval', tickOptions).finally(() => {
       if (stopped) return;
       intervalTimer = setTimeout(loop, intervalMs);
     });

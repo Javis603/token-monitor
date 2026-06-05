@@ -604,6 +604,11 @@ function trackedClientSet(value) {
   return new Set(String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean));
 }
 
+function normalizeStatsPeriod(value) {
+  const period = String(value || '').trim();
+  return ['today', 'month', 'allTime'].includes(period) ? period : 'today';
+}
+
 function removedTrackedClients(previousClients, nextClients) {
   const previous = trackedClientSet(previousClients);
   const next = trackedClientSet(nextClients);
@@ -847,9 +852,12 @@ function startSyncCollector() {
     deviceId: settings.deviceId || defaultDeviceId(),
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
+    initialPeriods: ['today', 'month', 'allTime'],
+    periods: ['today'],
     intervalMs: 5 * 60 * 1000,
     watchEnabled: true,
     watchDebounceMs: 1500,
+    watchCooldownMs: 5000,
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? defaultLimitProviders(),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
@@ -926,9 +934,12 @@ function startLocalCollector() {
     deviceId: settings.deviceId || defaultDeviceId(),
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
+    initialPeriods: ['today', 'month', 'allTime'],
+    periods: ['today'],
     intervalMs: 5 * 60 * 1000,
     watchEnabled: true,
     watchDebounceMs: 1500,
+    watchCooldownMs: 5000,
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? defaultLimitProviders(),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
@@ -1230,7 +1241,11 @@ function requestAppQuit() {
 
 async function fetchStats(options = {}) {
   const force = Boolean(options?.force);
-  const tickOptions = force ? { forceLimits: true } : {};
+  const tickOptions = force ? {
+    forceLimits: options?.forceLimits !== false,
+    periods: [normalizeStatsPeriod(options?.period)],
+    onlyIfDirty: Boolean(options?.onlyIfDirty)
+  } : {};
   if (mode === 'local') {
     if (force && localCollectorHandle) await localCollectorHandle.tick('manual', tickOptions);
     if (localStats) return localStats;
