@@ -131,8 +131,9 @@ function runTokscale({ clients, flags, commandTimeoutMs }) {
 }
 
 function normalizeRequestedPeriods(value) {
-  if (value === undefined || value === null || value === '') return PERIODS.slice();
-  const raw = Array.isArray(value) ? value : String(value).split(',');
+  const resolved = typeof value === 'function' ? value() : value;
+  if (resolved === undefined || resolved === null || resolved === '') return PERIODS.slice();
+  const raw = Array.isArray(resolved) ? resolved : String(resolved).split(',');
   const seen = new Set();
   const out = [];
   for (const item of raw) {
@@ -600,7 +601,7 @@ function watchPathsForClients(clientsCsv) {
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
-    intervalMs, watchEnabled, watchDebounceMs, watchCooldownMs = 5_000, limitsEnabled,
+    intervalMs, watchEnabled, watchDebounceMs, limitsEnabled,
     onUpdate, onError, logger
   } = options;
   const log = logger || (() => {});
@@ -616,7 +617,6 @@ function startCollector(options) {
   let stopped = false;
   const watchers = [];
   let lastPeriods = null;
-  let lastUsageTickFinishedAt = 0;
   const loadedPeriods = new Set();
   const dirtyPeriods = new Set(PERIODS);
   let dirtyVersion = 0;
@@ -679,19 +679,12 @@ function startCollector(options) {
     }
   }
 
-  function scheduleDirtyRefresh(reason, delayMs, cooldownMs) {
+  function scheduleDirtyRefresh(reason, delayMs) {
     // This keeps exactly one delayed watch refresh alive; re-entry replaces the timer.
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      const cooldownRemaining = Math.max(0, cooldownMs - (nowMs() - lastUsageTickFinishedAt));
-      if (tickInFlight || cooldownRemaining > 0) {
-        const nextDelayMs = Math.max(watchDebounceMs, cooldownRemaining);
-        log(`Usage refresh delayed (${reason}); next watch refresh in ${nextDelayMs}ms`);
-        scheduleDirtyRefresh(reason, nextDelayMs, cooldownMs);
-        return;
-      }
-      runTick(reason);
+      runTick(reason, { onlyIfDirty: true });
     }, delayMs);
   }
 
@@ -732,8 +725,6 @@ function startCollector(options) {
     } catch (error) {
       if (stopped) return;
       if (onError) onError(error, reason); else log(`collector tick failed (${reason}): ${error.message}`);
-    } finally {
-      lastUsageTickFinishedAt = nowMs();
     }
   }
 
@@ -757,11 +748,9 @@ function startCollector(options) {
   function scheduleTick(reason) {
     if (stopped) return;
     markAllPeriodsDirty();
-    const cooldownMs = Number(watchCooldownMs || 0);
-    const elapsedSinceFinished = nowMs() - lastUsageTickFinishedAt;
-    const delayMs = Math.max(watchDebounceMs, Math.max(0, cooldownMs - elapsedSinceFinished));
+    const delayMs = Math.max(0, Number(watchDebounceMs || 0));
     log(`Usage cache dirty: ${PERIODS.join(',')} (${reason}); next watch refresh in ${delayMs}ms`);
-    scheduleDirtyRefresh(reason, delayMs, cooldownMs);
+    scheduleDirtyRefresh(reason, delayMs);
   }
 
   function setupWatchers() {

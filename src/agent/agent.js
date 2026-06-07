@@ -16,7 +16,6 @@ const deviceId = String(args.device || args.deviceId || process.env.TOKEN_MONITO
 const intervalMs = Number(args.interval || args.intervalMs || process.env.TOKEN_MONITOR_INTERVAL_MS || 5 * 60 * 1000);
 const watchEnabled = String(args.watch ?? process.env.TOKEN_MONITOR_WATCH ?? '1') !== '0';
 const watchDebounceMs = Number(args.watchDebounceMs || process.env.TOKEN_MONITOR_WATCH_DEBOUNCE_MS || 1500);
-const watchCooldownMs = Number(args.watchCooldownMs || args.watchMinIntervalMs || process.env.TOKEN_MONITOR_WATCH_COOLDOWN_MS || process.env.TOKEN_MONITOR_WATCH_MIN_INTERVAL_MS || 5000);
 const clients = clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS);
 const allTimeSince = String(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01');
 const commandTimeoutMs = Number(args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS || 120 * 1000);
@@ -70,7 +69,6 @@ async function main() {
     intervalMs,
     watchEnabled,
     watchDebounceMs,
-    watchCooldownMs,
     onUpdate: (summary, reason) => {
       deliver(summary).catch((error) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`));
     },

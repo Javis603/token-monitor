@@ -719,10 +719,11 @@ test('startCollector preserves a manual period request while another tick is run
   }
 });
 
-test('startCollector can use full initial periods and lightweight later ticks', async () => {
+test('startCollector can use full initial periods and dynamic visible later ticks', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
+  let visiblePeriod = 'today';
   childProcess.spawn = (_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
@@ -746,7 +747,7 @@ test('startCollector can use full initial periods and lightweight later ticks', 
     const handle = startCollector({
       clients: 'claude',
       initialPeriods: ['today', 'month', 'allTime'],
-      periods: ['today'],
+      periods: () => [visiblePeriod],
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
@@ -764,12 +765,13 @@ test('startCollector can use full initial periods and lightweight later ticks', 
     assert.ok(calls[1].includes('--month'));
     assert.ok(calls[2].includes('--since'));
 
+    visiblePeriod = 'month';
     await handle.tick('manual');
     await waitForUpdates(updates, 2);
     handle.stop();
 
     assert.equal(calls.length, 4);
-    assert.ok(calls[3].includes('--today'));
+    assert.ok(calls[3].includes('--month'));
   } finally {
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];
@@ -885,7 +887,6 @@ test('startCollector keeps a period dirty when a watch event arrives during its 
       intervalMs: 60000,
       watchEnabled: true,
       watchDebounceMs: 50,
-      watchCooldownMs: 0,
       limitsEnabled: false,
       onUpdate: (summary, reason) => updates.push({ summary, reason })
     });
