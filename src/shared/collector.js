@@ -285,7 +285,7 @@ async function maybeSyncAntigravity(clientsCsv, logger) {
 }
 
 async function collectUsageOnce(options) {
-  const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '' } = options;
+  const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '', skipAllTime = false } = options;
   const normalizedClients = normalizeClientsCsv(clients);
   let today = emptyPeriod();
   let month = emptyPeriod();
@@ -295,10 +295,12 @@ async function collectUsageOnce(options) {
     await maybeSyncAntigravity(normalizedClients, options.logger);
     const todayJson = await runTokscale({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
     const monthJson = await runTokscale({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs });
-    const allTimeJson = await runTokscale({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
+    if (!skipAllTime) {
+      const allTimeJson = await runTokscale({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
+      allTime = extractUsageFromTokscale(allTimeJson);
+    }
     today = extractUsageFromTokscale(todayJson);
     month = extractUsageFromTokscale(monthJson);
-    allTime = extractUsageFromTokscale(allTimeJson);
     applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
   }
   const summary = {
@@ -374,6 +376,7 @@ function startCollector(options) {
   }
 
   async function performTick(reason, tickOptions = {}) {
+    const skipAllTime = typeof tickOptions.skipAllTime === 'boolean' ? tickOptions.skipAllTime : String(reason).startsWith('watch:');
     try {
       const summary = await collectUsageOnce({
         ...options,
@@ -384,7 +387,8 @@ function startCollector(options) {
         agentVersion,
         agentRuntime,
         limitsCollector,
-        forceLimits: Boolean(tickOptions.forceLimits)
+        forceLimits: Boolean(tickOptions.forceLimits),
+        skipAllTime
       });
       if (stopped) return;
       await onUpdate?.(summary, reason);
@@ -428,19 +432,20 @@ function startCollector(options) {
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
     }
+    const pollIntervalMs = 10000;
     try {
       const watcher = chokidar.watch(dirs, {
         ignoreInitial: true,
         persistent: true,
         usePolling: true,
-        interval: 2000,
-        binaryInterval: 5000,
-        awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 200 }
+        interval: pollIntervalMs,
+        binaryInterval: 15000,
+        awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 1000 }
       });
       watcher.on('all', (event, filePath) => scheduleTick(`watch:${event}:${path.basename(filePath || '')}`));
       watcher.on('error', (error) => log(`chokidar error: ${error.message}`));
       watchers.push(watcher);
-      for (const dir of dirs) log(`Watching ${dir} (polling 2s)`);
+      for (const dir of dirs) log(`Watching ${dir} (polling ${Math.round(pollIntervalMs / 1000)}s)`);
     } catch (error) {
       log(`Cannot watch ${dirs.join(', ')}: ${error.message}`);
     }
@@ -471,10 +476,49 @@ function startCollector(options) {
   return { stop, tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions) };
 }
 
+function discoverEarliestActivity(home = os.homedir()) {
+  const candidates = [
+    path.join(home, '.claude', 'projects'),
+    path.join(home, '.claude', 'transcripts'),
+    path.join(home, '.codex', 'sessions'),
+    process.env.HERMES_HOME,
+    path.join(home, '.hermes'),
+    path.join(home, '.local', 'share', 'opencode'),
+    path.join(home, '.openclaw', 'agents'),
+    path.join(home, '.config', 'tokscale', 'cursor-cache'),
+    path.join(home, '.config', 'tokscale', 'antigravity-cache'),
+  ].filter(Boolean);
+
+  let earliest = null;
+  const MAX_PER_DIR = 100;
+
+  for (const dir of candidates) {
+    try {
+      const stat = fs.statSync(dir);
+      if (!stat.isDirectory()) continue;
+      const dirTime = stat.birthtime || stat.mtime;
+      if (!earliest || dirTime < earliest) earliest = dirTime;
+
+      const entries = fs.readdirSync(dir);
+      const limit = Math.min(entries.length, MAX_PER_DIR);
+      for (let i = 0; i < limit; i++) {
+        try {
+          const entryStat = fs.statSync(path.join(dir, entries[i]));
+          const entryTime = entryStat.birthtime || entryStat.mtime;
+          if (entryTime < earliest) earliest = entryTime;
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  return earliest ? earliest.toISOString().slice(0, 10) : null;
+}
+
 module.exports = {
   applySessionTimestamps,
   collectUsageOnce,
   decideResolver,
+  discoverEarliestActivity,
   sessionTimestampMap,
   locateBundledBinary,
   readDownloadedPointer,

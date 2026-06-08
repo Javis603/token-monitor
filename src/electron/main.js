@@ -7,7 +7,7 @@ const { app, BrowserWindow, globalShortcut, ipcMain, nativeImage, screen, sessio
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const { appVersion } = require('../shared/appVersion');
 const { DEFAULT_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { startCollector } = require('../shared/collector');
+const { startCollector, discoverEarliestActivity } = require('../shared/collector');
 const { createHub } = require('../hub/server');
 const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limitCollector');
 const {
@@ -147,7 +147,7 @@ function defaultSettings() {
     hiddenServiceProviders: '',
     serviceStatusRefreshMs: 60000,
     archivedClientUsage: { version: 1, clients: {} },
-    allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
+    allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().slice(0, 10); })(),
     limitsEnabled: parseBoolean(process.env.TOKEN_MONITOR_LIMITS_ENABLED, true),
     limitProviders: parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(','),
     limitProviderOrder: defaultLimitProviderOrder(),
@@ -546,6 +546,15 @@ function readSettings() {
     const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved };
+    // Auto-discover earliest activity date on first run (user hasn't set a value).
+    // Scans AI tool data directories for the oldest creation time and persists it
+    // so --since only scans from the date that actually has data.
+    if (!saved.allTimeSince && !process.env.TOKEN_MONITOR_ALL_TIME_SINCE) {
+      try {
+        const discovered = discoverEarliestActivity();
+        if (discovered) merged.allTimeSince = discovered;
+      } catch (_) {}
+    }
     // Migrate older configs that predate hubMode: infer from hubUrl.
     if (saved.hubMode === undefined) {
       merged.hubMode = (saved.hubUrl && String(saved.hubUrl).trim()) ? 'client' : 'local';
@@ -870,14 +879,14 @@ function startSyncCollector() {
   if (!effectiveHubConfig().url) return;
   syncCollectorHandle = startCollector({
     clients: clientsCsvForSetting(settings.clients),
-    allTimeSince: settings.allTimeSince || '2024-01-01',
+    allTimeSince: settings.allTimeSince || (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().slice(0, 10); })(),
     commandTimeoutMs: 120 * 1000,
     deviceId: settings.deviceId || defaultDeviceId(),
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     intervalMs: 5 * 60 * 1000,
     watchEnabled: true,
-    watchDebounceMs: 1500,
+    watchDebounceMs: 10000,
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? defaultLimitProviders(),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
@@ -950,14 +959,14 @@ function startLocalCollector() {
   sendStatus(false, { reason: 'collecting' });
   localCollectorHandle = startCollector({
     clients: clientsCsvForSetting(settings.clients),
-    allTimeSince: settings.allTimeSince || '2024-01-01',
+    allTimeSince: settings.allTimeSince || (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().slice(0, 10); })(),
     commandTimeoutMs: 120 * 1000,
     deviceId: settings.deviceId || defaultDeviceId(),
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     intervalMs: 5 * 60 * 1000,
     watchEnabled: true,
-    watchDebounceMs: 1500,
+    watchDebounceMs: 10000,
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? defaultLimitProviders(),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
