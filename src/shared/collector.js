@@ -518,6 +518,12 @@ function deriveClientStatus(clientsCsv, allTimePeriod) {
   return statusFromSignals(clients, clientDataDirPresence(clientsCsv), allTimePeriod?.clients || {});
 }
 
+function configFingerprint(clientsCsv, allTimeSince) {
+  // Deterministic string that captures the config inputs anchor correctness
+  // depends on. When this changes, the persisted anchor is invalidated.
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}`;
+}
+
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
@@ -542,6 +548,22 @@ function startCollector(options) {
   let intervalTimer = null;
   let stopped = false;
   const watchers = [];
+
+  // On-disk anchor: persist full-scan snapshots so the collector can reuse
+  // month/allTime across restarts. On the first interval tick the anchor is
+  // valid for today and configFingerprint matches, only --today is scanned
+  // and month/allTime are derived via applyPeriodDelta.
+  const anchorPath = path.join(sharedDataDir(), 'collector-anchor.json');
+  try {
+    const saved = readJson(anchorPath, null);
+    if (saved && saved.dateKey === localTodayKey()) {
+      const fp = configFingerprint(clients, allTimeSince);
+      if (saved.configFingerprint === fp) {
+        anchor = { dateKey: saved.dateKey, today: saved.today, month: saved.month, allTime: saved.allTime };
+        wslAnchor = saved.wslBundle || null;
+      }
+    }
+  } catch (_) {}
 
   function resolvePendingWaiters() {
     const waiters = pendingWaiters;
@@ -575,6 +597,17 @@ function startCollector(options) {
       if (!anchored && captured) {
         anchor = { dateKey: todayKey, today: captured.windowsPeriods.today, month: captured.windowsPeriods.month, allTime: captured.windowsPeriods.allTime };
         wslAnchor = captured.wslBundle;
+        try {
+          fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
+          fs.writeFileSync(anchorPath, JSON.stringify({
+            dateKey: anchor.dateKey,
+            today: anchor.today,
+            month: anchor.month,
+            allTime: anchor.allTime,
+            wslBundle: wslAnchor,
+            configFingerprint: configFingerprint(clients, allTimeSince)
+          }));
+        } catch (_) {}
       }
       await onUpdate?.(summary, reason);
     } catch (error) {
@@ -646,7 +679,8 @@ function startCollector(options) {
 
   function loop() {
     if (stopped) return;
-    runTick('interval').finally(() => {
+    const anchorToday = Boolean(anchor && anchor.dateKey === localTodayKey());
+    runTick('interval', anchorToday ? { todayOnly: true } : {}).finally(() => {
       if (stopped) return;
       intervalTimer = setTimeout(loop, intervalMs);
     });
@@ -674,6 +708,7 @@ module.exports = {
   collectHistoryOnce,
   collectUsageOnce,
   clientDataDirPresence,
+  configFingerprint,
   deriveClientStatus,
   statusFromSignals,
   decideResolver,
