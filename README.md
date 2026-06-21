@@ -146,7 +146,7 @@ App state lives in the OS user-data dir — delete it along with the app to full
 
 ## Build from source
 
-Releases are unsigned, so you may prefer to build your own installer — same code, your machine. Needs Node.js 18.17+ and the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
+Releases are unsigned, so you may prefer to build your own installer — same code, your machine. Needs Node.js 22.13+ and the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
 
 ```bash
 npm install
@@ -232,7 +232,7 @@ are gitignored.
 ## Requirements
 
 - macOS or Windows
-- Node.js 18.17+
+- Node.js 22.13+
 - For sync mode only: network reachability from each agent/widget to the hub
 
 ## Acknowledgments

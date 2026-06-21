@@ -146,7 +146,7 @@ App 狀態存在 OS 使用者資料目錄——解除安裝時一併刪除該資
 
 ## 從原始碼建置
 
-Release 都未簽章，你可能會想自己從原始碼打包安裝檔——同一份程式碼、在你自己的機器上建置。需要 Node.js 18.17+ 與**對應的**作業系統（electron-builder 無法在 Windows 上交叉建置 macOS 的 `.dmg`，反之亦然）。
+Release 都未簽章，你可能會想自己從原始碼打包安裝檔——同一份程式碼、在你自己的機器上建置。需要 Node.js 22.13+ 與**對應的**作業系統（electron-builder 無法在 Windows 上交叉建置 macOS 的 `.dmg`，反之亦然）。
 
 ```bash
 npm install
@@ -229,7 +229,7 @@ hub 與代理只傳輸摘要欄位：
 ## 系統需求
 
 - macOS 或 Windows
-- Node.js 18.17+
+- Node.js 22.13+
 - 僅同步模式：每個代理／小工具到 hub 的網路連通性
 
 ## 致謝

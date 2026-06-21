@@ -110,7 +110,7 @@ function discoverDbPaths(env = process.env) {
     try { if (fs.statSync(override).isFile()) return [override]; } catch (_) { /* fall through */ }
   }
   const dataDir = resolveDataDir(env);
-  let entries = [];
+  let entries;
   try { entries = fs.readdirSync(dataDir); } catch (_) { return []; }
   return entries.filter(isOpenCodeDbFilename).sort().map((name) => path.join(dataDir, name));
 }

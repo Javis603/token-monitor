@@ -15,7 +15,7 @@ Why use this instead of the Node hub:
 ## Prerequisites
 
 - Cloudflare account (free).
-- Node.js 18.17+.
+- Node.js 22+ (Wrangler v4 requires `>=22.0.0`).
 
 ## Deploy
 

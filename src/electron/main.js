@@ -1194,10 +1194,6 @@ function startHostStats() {
   emit(embeddedHub.hub.getStats(), 'snapshot');
 }
 
-function isHubConfigured() {
-  return Boolean(effectiveHubConfig().url);
-}
-
 // Detection status is about this machine's local files, so stamp the freshly
 // collected local clientStatus onto the local device in whatever stats we hand the
 // renderer. This keeps the采集 tags correct in sync mode without depending on the

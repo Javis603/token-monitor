@@ -658,7 +658,7 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}) {
   return { ...currentCredentials, ...refreshed };
 }
 
-async function fetchClaudeLimits(options = {}, deps = {}) {
+async function fetchClaudeLimits(_options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const platform = deps.platform || process.platform;
   try {
@@ -1151,19 +1151,6 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
   });
 }
 
-async function readCodexAuthIdentity(deps = {}) {
-  const env = deps.env || process.env;
-  const filePath = deps.codexAuthPath || codexAuthPath(env);
-  try {
-    const auth = await readJsonFile(filePath, deps);
-    const account = auth?.tokens?.id_token || auth?.id_token || auth?.account || auth?.chatgpt || auth;
-    return { filePath, auth, account };
-  } catch (error) {
-    if (error.code === 'ENOENT') throw errorWithStatus('notConfigured', 'Codex auth.json not found');
-    throw error;
-  }
-}
-
 function pathDelimiterForPlatform(platform = process.platform) {
   return platform === 'win32' ? ';' : ':';
 }
@@ -1337,7 +1324,7 @@ function windowsCodexBinCandidates(binDir, deps = {}) {
   const pathApi = pathApiForPlatform('win32');
   const candidates = [pathApi.join(binDir, 'codex.exe')];
   const readdirSync = deps.readdirSync || fs.readdirSync;
-  let entries = [];
+  let entries;
   try {
     entries = readdirSync(binDir, { withFileTypes: true });
   } catch (_) {
@@ -1401,7 +1388,7 @@ function windowsCodexStoreCandidates(env = process.env, deps = {}) {
     envValue(env, 'ProgramW6432')
   ])) {
     const appxDir = pathApi.join(root, 'WindowsApps');
-    let entries = [];
+    let entries;
     try {
       entries = readdirSync(appxDir, { withFileTypes: true });
     } catch (_) {
@@ -1612,7 +1599,7 @@ function codexAccountKeyFromSeed(seed) {
   return raw.startsWith('sha256:') ? raw : hashKey('codex', raw || 'account');
 }
 
-async function fetchManagedCodexAccountLimits(account, options = {}, deps = {}) {
+async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const env = {
     ...(deps.env || process.env),
@@ -1720,7 +1707,7 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   return providers;
 }
 
-async function fetchAntigravityLimits(options = {}, deps = {}) {
+async function fetchAntigravityLimits(_options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
   const probeFn = deps.antigravityProbe || antigravityProbe.probe;
@@ -2113,7 +2100,7 @@ function cursorBillingWindow(label, fields = {}) {
   };
 }
 
-async function fetchCursorLimits(options = {}, deps = {}) {
+async function fetchCursorLimits(_options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = new Date(nowMs).toISOString();
   const readActiveAccount = deps.readActiveAccount || cursorAuth.readActiveAccount;

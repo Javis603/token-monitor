@@ -10,7 +10,7 @@ function findSessionFiles(root, sessionIds) {
 
   function walk(dir) {
     if (found.size >= wanted.size) return;
-    let entries = [];
+    let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
     for (const entry of entries) {
       if (found.size >= wanted.size) return;

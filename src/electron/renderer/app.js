@@ -675,7 +675,7 @@ function rowTemplate(rowData) {
   return row;
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, max, color, stale, platform, local, client, kind, title, cacheReadTokens, cacheWriteTokens, outputTokens }) {
+function updateRow(row, { name, subtitle, detail, value, cost, max, color, stale, platform, local, client, kind, cacheReadTokens, outputTokens }) {
   const width = rowWidth(value, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
@@ -892,7 +892,7 @@ function ensureBreakdownVisible() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
-function limitStatusLabel(status, stale) {
+function limitStatusLabel(status) {
   if (status === 'ok') return 'Live';
   if (status === 'disabled') return 'Disabled';
   if (status === 'notConfigured') return 'Not signed in';
@@ -3630,7 +3630,7 @@ function renderToolPreferences() {
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
   if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
   els.clientDisplayList.replaceChildren();
-  for (const [index, { id, label }] of clients.entries()) {
+  for (const { id, label } of clients) {
     const row = document.createElement('div');
     row.className = 'tool-preference-row';
     row.dataset.client = id;
@@ -3698,7 +3698,7 @@ function renderLimitProviderCheckboxes() {
   const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
   els.limitProviderCheckboxes.replaceChildren();
-  for (const [index, { id, label, settingsLabel }] of providers.entries()) {
+  for (const { id, label, settingsLabel } of providers) {
     const provider = enabled.has(id)
       ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };

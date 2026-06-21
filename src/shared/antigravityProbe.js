@@ -167,7 +167,7 @@ async function detectProcessInfo(deps = {}) {
 }
 
 async function listeningPortsPosix(pid, deps = {}) {
-  let stdout = '';
+  let stdout;
   try {
     stdout = await runProcessText('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-a', '-p', String(pid)], { deps, timeoutMs: 6000 });
   } catch (err) {

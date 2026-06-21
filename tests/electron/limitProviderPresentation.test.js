@@ -10,7 +10,6 @@ const {
   limitProviderCapabilityTags,
   limitProviderMainDeviceLabel,
   limitProviderProvenance,
-  limitProviderSourceLabel,
   limitProviderSettingsTags
 } = require('../../src/electron/renderer/limitProviderPresentation');
 

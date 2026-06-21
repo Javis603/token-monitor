@@ -27,10 +27,6 @@ function toUnpackedPath(p) {
 
 const TOKSCALE_BIN_JS = toUnpackedPath(require.resolve('tokscale/bin.js'));
 
-function tokscaleBinaryName(platform = process.platform) {
-  return platform === 'win32' ? 'tokscale.exe' : 'tokscale';
-}
-
 function bundledPackageCandidates() {
   const primary = tokscalePackageNameForPlatform();
   if (primary) return [primary];
