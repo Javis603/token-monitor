@@ -2054,18 +2054,6 @@ let cursorStatusCache = { value: null, at: 0 };
 let opencodeStatusCache = { value: null, at: 0 };
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
 
-// Used by collectors to get the cookie for limit collection.
-// Collector options already pass opencodeProfiles directly;
-// this fallback is for any remaining single-cookie path.
-function currentOpenCodeCookie() {
-  // 优先使用 profiles 中的第一个启用 cookie
-  const profiles = settings?.opencodeProfiles || {};
-  const enabled = Object.entries(profiles).find(([, p]) => p.enabled);
-  if (enabled) return enabled[1].cookie || '';
-  return settings?.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
-}
-
-
 function normalizeManualCookie(input) {
   let s = String(input || '').trim();
   if (!s) return '';

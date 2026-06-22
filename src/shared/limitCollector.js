@@ -1904,7 +1904,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       windows,
       balanceUsd
     });
-  } catch (err) {
+  } catch {
     clearTimeout(timer);
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return normalizeLimitProvider({
