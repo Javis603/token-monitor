@@ -1,12 +1,12 @@
 'use strict';
 
 const path = require('node:path');
-const { Tray, Menu, nativeImage, screen } = require('electron');
 const { formatTrayText, pickWorstLimit } = require('../shared/trayText');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
 function buildTrayIcon() {
+  const { nativeImage } = require('electron');
   // macOS menu bar items render at 16–22pt; 18px is a good middle ground.
   // Resize handles HiDPI itself; 20px matches typical menubar item size.
   return nativeImage.createFromPath(ICON_PATH).resize({ width: 20, height: 20 });
@@ -45,6 +45,7 @@ function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = [
 }
 
 function createTray({ onToggle, onQuit, onSwitchToWindowMode }) {
+  const { Tray, Menu } = require('electron');
   const tray = new Tray(buildTrayIcon());
   tray.setToolTip('Token Monitor');
 
@@ -64,6 +65,7 @@ function createTray({ onToggle, onQuit, onSwitchToWindowMode }) {
 }
 
 function popoverBounds(tray, popoverWidth, popoverHeight) {
+  const { screen } = require('electron');
   const trayBounds = tray?.getBounds?.() || { x: 0, y: 0, width: 0, height: 0 };
   const cursor = screen.getCursorScreenPoint();
   const anchor = trayBounds.width > 0
