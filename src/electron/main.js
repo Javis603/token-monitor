@@ -36,7 +36,8 @@ const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
 const semver = require('semver');
-const { normalizeCurrency } = require('../shared/currency');
+const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
+const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
   applyArchivedClientUsage,
   captureArchivedClientUsage,
@@ -182,6 +183,7 @@ function defaultSettings() {
     trayContent: 'tokens',
     windowToggleShortcut: '',
     currency: normalizeCurrency(process.env.TOKEN_MONITOR_CURRENCY || 'USD'),
+    currencyRates: {},
     startAtLogin: false,
     language: 'auto',
     opencodeCookie: '',
@@ -731,6 +733,20 @@ function adjustZoom(delta) {
   setZoomFactor(clampZoom(settings.zoomFactor) + delta);
 }
 
+function normalizeCurrencyOverrides(value) {
+  const out = {};
+  if (value && typeof value === 'object') {
+    for (const [code, raw] of Object.entries(value)) {
+      const key = normalizeCurrency(code, '');
+      const num = Number(raw);
+      // normalizeCurrency falls back to 'USD' for unknown codes; excluding 'USD'
+      // drops both unknown codes and any attempt to override the USD base (always 1).
+      if (key !== 'USD' && Number.isFinite(num) && num > 0) out[key] = num;
+    }
+  }
+  return out;
+}
+
 function readSettings() {
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
   try {
@@ -785,6 +801,7 @@ function readSettings() {
     merged.hubMode = normalizeHubMode(merged.hubMode);
     merged.language = normalizeLanguageSetting(merged.language);
     merged.currency = normalizeCurrency(merged.currency);
+    merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
@@ -1217,6 +1234,45 @@ function sendPush(payload) {
   }
 }
 
+let rateCache = null;            // { rates, date, source, fetchedAt }
+let effectiveRates = null;       // { CODE: number }
+let rateRefreshTimer = null;
+
+function exchangeRateCachePath() {
+  return path.join(app.getPath('userData'), 'exchange-rates.json');
+}
+
+function readRateCache() {
+  try { return JSON.parse(fs.readFileSync(exchangeRateCachePath(), 'utf8')); }
+  catch (_) { return null; }
+}
+
+function writeRateCache(data) {
+  try { fs.writeFileSync(exchangeRateCachePath(), JSON.stringify(data)); }
+  catch (_) {}
+}
+
+function applyEffectiveRates() {
+  effectiveRates = resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {});
+  configureRates(effectiveRates);          // main process's own currency module
+  return effectiveRates;
+}
+
+async function refreshExchangeRates({ force = false } = {}) {
+  if (rateCache === null) rateCache = readRateCache();
+  if (force || isCacheStale(rateCache)) {
+    try {
+      const result = await fetchRates();
+      rateCache = { rates: result.rates, date: result.date, source: result.source, fetchedAt: Date.now() };
+      writeRateCache(rateCache);
+    } catch (_) { /* silent: keep last cache / built-in defaults */ }
+  }
+  applyEffectiveRates();
+  updateTrayDisplay();
+  if (settings?.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
+  pushSettingsToRenderer();
+}
+
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
   const mode = settings?.trayContent || 'tokens';
@@ -1437,13 +1493,24 @@ function settingsForRenderer() {
     codexManagedAccounts: codexAccountsForRenderer(),
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
     deepseekApiKeySource,
+    currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
+    currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
   };
 }
 
 function pushSettingsToRenderer() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('settings:push', settingsForRenderer()); } catch (_) {}
+  const payload = settingsForRenderer();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
+  // The trends dashboard is a separate renderer with its own currency module
+  // instance; it must receive effective-rate updates too, otherwise an
+  // already-open dashboard keeps showing the previous rate after an auto
+  // refresh or manual override until it is reopened.
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    try { dashboardWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
 }
 
 function unregisterWindowToggleShortcut() {
@@ -2110,6 +2177,10 @@ app.whenReady().then(() => {
   regenerateTokscalePricing();
   startMode();
   if (settings.discordRpcEnabled) startDiscordRpc();
+  rateCache = readRateCache();
+  applyEffectiveRates();                 // use cache/defaults immediately, avoid first-paint gap
+  refreshExchangeRates();                // non-blocking: only fetches when stale
+  rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('pricing:lookup', async (_event, modelId) => {
@@ -2187,6 +2258,7 @@ app.whenReady().then(() => {
       floatingBubbleContent: normalizeTrayContent(patch.floatingBubbleContent ?? settings.floatingBubbleContent, 'icon'),
       windowToggleShortcut: normalizeWindowToggleShortcut(patch.windowToggleShortcut ?? settings.windowToggleShortcut),
       currency: normalizedCurrency,
+      currencyRates: patch.currencyRates !== undefined ? normalizeCurrencyOverrides(patch.currencyRates) : normalizeCurrencyOverrides(settings.currencyRates),
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       deepseekApiKey: patch.deepseekApiKey !== undefined ? normalizeDeepSeekApiKey(patch.deepseekApiKey) : (settings.deepseekApiKey || ''),
@@ -2247,6 +2319,12 @@ app.whenReady().then(() => {
       else exitTrayMode();
     } else if (settings.trayContent !== previousTrayContent || settings.currency !== previousCurrency) {
       updateTrayDisplay();
+    }
+    if (patch.currency !== undefined || patch.currencyRates !== undefined) {
+      applyEffectiveRates();               // sync: settingsForRenderer() below sees fresh effective map
+      updateTrayDisplay();
+      if (settings.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
+      refreshExchangeRates();              // async: fetch if stale, then re-push
     }
     return settingsForRenderer();
   });
@@ -2622,7 +2700,7 @@ app.whenReady().then(() => {
 
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { quitRequested = true; unregisterWindowToggleShortcut(); stopAll(); });
+app.on('before-quit', () => { quitRequested = true; if (rateRefreshTimer) clearInterval(rateRefreshTimer); unregisterWindowToggleShortcut(); stopAll(); });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.once(signal, requestAppQuit);
 }

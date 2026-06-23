@@ -324,6 +324,9 @@ async function boot() {
   try { settings = await window.tokenMonitor.getSettings(); } catch (_) {}
   state.locale = i18n.resolveLocale(settings.language, navigator.languages);
   state.currency = settings.currency || 'USD';
+  if (settings.currencyRatesEffective && window.TokenMonitorCurrency?.configureRates) {
+    window.TokenMonitorCurrency.configureRates(settings.currencyRatesEffective);
+  }
   state.flat = settings.dashboardFlat === true;
   applyAppearance(settings);
   applyTranslations();
@@ -331,6 +334,25 @@ async function boot() {
   render();
   await refresh();
 }
+
+// Effective rates can change after boot (auto refresh / manual override). The
+// dashboard shares the main window's preload, so it receives the same push.
+window.tokenMonitor.onSettingsPush?.((next) => {
+  if (!next) return;
+  let needsRender = false;
+  if (next.currencyRatesEffective && window.TokenMonitorCurrency?.configureRates) {
+    window.TokenMonitorCurrency.configureRates(next.currencyRatesEffective);
+    // A rate-only change (auto refresh / same-currency manual override) keeps
+    // the currency code identical, so the code-change branch below won't fire —
+    // repaint explicitly or the already-rendered costs stay stale.
+    needsRender = true;
+  }
+  if (next.currency && state.currency !== next.currency) {
+    state.currency = next.currency;
+    needsRender = true;
+  }
+  if (needsRender) render();
+});
 
 els.tabs.forEach((tab) => tab.addEventListener('click', () => { state.tab = tab.dataset.tab; els.tabs.forEach((x) => x.classList.toggle('active', x === tab)); render(); }));
 els.stackBtns.forEach((b) => b.addEventListener('click', () => { state.stackBy = b.dataset.stack; render(); }));

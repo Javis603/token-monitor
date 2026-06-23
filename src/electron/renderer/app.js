@@ -164,7 +164,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), showActiveAccountInput: document.getElementById('showActiveAccountInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutRecordButton: document.getElementById('windowToggleShortcutRecordButton'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), openConfigButton: document.getElementById('openConfigButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), showActiveAccountInput: document.getElementById('showActiveAccountInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutRecordButton: document.getElementById('windowToggleShortcutRecordButton'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), openConfigButton: document.getElementById('openConfigButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
@@ -411,6 +411,44 @@ function compactMonthLabel(label) {
 }
 function currentCurrency() { return currencyApi.normalizeCurrency(state.settings?.currency); }
 function formatCost(value) { return currencyApi.formatCurrencyFromUsd(value, currentCurrency()); }
+function applyEffectiveCurrencyRates() {
+  if (state.settings?.currencyRatesEffective) currencyApi.configureRates(state.settings.currencyRatesEffective);
+}
+function formatRate(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  return String(Number(num.toFixed(num >= 1 ? 2 : 4)));   // trim noise: 31.6749… -> 31.67
+}
+function currencyRateMode(code) {
+  const override = Number(state.settings?.currencyRates?.[code]);
+  return Number.isFinite(override) && override > 0 ? 'manual' : 'auto';
+}
+function syncCurrencyRateControls() {
+  const code = currentCurrency();
+  if (!els.currencyRateRow) return;
+  if (code === 'USD') { els.currencyRateRow.classList.add('hidden'); return; }
+  els.currencyRateRow.classList.remove('hidden');
+  const mode = currencyRateMode(code);
+  if (els.currencyRateModeAuto) els.currencyRateModeAuto.checked = mode === 'auto';
+  if (els.currencyRateModeManual) els.currencyRateModeManual.checked = mode === 'manual';
+  const eff = Number(state.settings?.currencyRatesEffective?.[code]);
+  if (mode === 'manual') {
+    els.currencyRateManualField?.classList.remove('hidden');
+    if (els.currencyRateStatus) els.currencyRateStatus.textContent = '';
+    // Don't clobber the field while the user is typing in it.
+    if (els.currencyRateOverrideInput && document.activeElement !== els.currencyRateOverrideInput) {
+      els.currencyRateOverrideInput.value = formatRate(eff);
+    }
+  } else {
+    els.currencyRateManualField?.classList.add('hidden');
+    if (els.currencyRateStatus) {
+      const info = state.settings?.currencyRateInfo;
+      if (!Number.isFinite(eff)) els.currencyRateStatus.textContent = '';
+      else if (info?.source) els.currencyRateStatus.textContent = t('settings.currency.rateLive', { rate: formatRate(eff), date: (info.date || '').slice(5) });
+      else els.currencyRateStatus.textContent = t('settings.currency.rateDefault', { rate: formatRate(eff) });
+    }
+  }
+}
 function formatTime(value) { const date = value ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'; }
 function formatReset(value) {
@@ -3137,6 +3175,7 @@ function syncSettingsForm() {
   syncHubModeUi();
   if (els.languageInput) els.languageInput.value = currentLanguage();
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
+  syncCurrencyRateControls();
   els.hubUrlInput.value = state.settings.hubUrl || '';
   els.secretInput.value = state.settings.secret || '';
   els.deviceIdInput.value = state.settings.deviceId || '';
@@ -3989,6 +4028,7 @@ function preserveSettingsPanelScroll(callback) {
 
 async function saveSettings(patch) {
   state.settings = await window.tokenMonitor.updateSettings(patch);
+  applyEffectiveCurrencyRates();
   preserveSettingsPanelScroll(syncSettingsForm);
   restartTimer();
   maybeUpdateBarsIcon();
@@ -4026,6 +4066,7 @@ window.addEventListener('blur', () => {
 async function init() {
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
   state.settings = await window.tokenMonitor.getSettings();
+  applyEffectiveCurrencyRates();
   state.appUpdate = await window.tokenMonitor.getAppUpdateState();
   renderAppUpdatePill();
   renderSettingsAppUpdateRow();
@@ -4128,6 +4169,35 @@ els.languageInput?.addEventListener('change', async () => {
 
 els.currencyInput?.addEventListener('change', async () => {
   await saveSettings({ currency: els.currencyInput.value });
+});
+
+els.currencyRateModeAuto?.addEventListener('change', async () => {
+  if (!els.currencyRateModeAuto.checked) return;
+  const code = currentCurrency();
+  if (code === 'USD') return;
+  const next = { ...(state.settings?.currencyRates || {}) };
+  delete next[code];                       // auto = no override
+  await saveSettings({ currencyRates: next });
+});
+
+els.currencyRateModeManual?.addEventListener('change', async () => {
+  if (!els.currencyRateModeManual.checked) return;
+  const code = currentCurrency();
+  if (code === 'USD') return;
+  const current = Number(state.settings?.currencyRatesEffective?.[code]);  // seed with the live rate
+  const seed = Number(formatRate(current)) || 1;                            // stored == what's shown
+  await saveSettings({ currencyRates: { ...(state.settings?.currencyRates || {}), [code]: seed } });
+  els.currencyRateOverrideInput?.focus();
+});
+
+els.currencyRateOverrideInput?.addEventListener('change', async () => {
+  const code = currentCurrency();
+  if (code === 'USD') return;
+  const next = { ...(state.settings?.currencyRates || {}) };
+  const num = Number(els.currencyRateOverrideInput.value);
+  if (Number.isFinite(num) && num > 0) next[code] = num;
+  else delete next[code];                  // cleared/invalid -> revert to auto
+  await saveSettings({ currencyRates: next });
 });
 
 els.hubSecretCopyButton?.addEventListener('click', () => {
@@ -4273,6 +4343,7 @@ els.appUpdateViewReleaseButton.addEventListener('click', async () => {
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   state.settings = next;
+  applyEffectiveCurrencyRates();
   syncSettingsForm();
   renderDeepseekStatus();
   maybeUpdateBarsIcon();

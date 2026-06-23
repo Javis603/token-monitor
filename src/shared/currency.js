@@ -13,6 +13,41 @@
   });
   const CURRENCY_CODES = Object.freeze(Object.keys(CURRENCY_RATES));
 
+  function defaultRateMap() {
+    const map = {};
+    for (const code of CURRENCY_CODES) map[code] = CURRENCY_RATES[code].rate;
+    return map;
+  }
+
+  // Process-scoped overlay; main and each renderer configure their own copy.
+  let activeRates = defaultRateMap();
+
+  function isValidRate(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0;
+  }
+
+  function configureRates(map) {
+    const next = defaultRateMap();
+    if (map && typeof map === 'object') {
+      for (const code of CURRENCY_CODES) {
+        if (isValidRate(map[code])) next[code] = Number(map[code]);
+      }
+    }
+    activeRates = next;
+  }
+
+  // Precedence: override > fetched > built-in floor.
+  function resolveEffectiveRates(fetched = {}, overrides = {}) {
+    const out = {};
+    for (const code of CURRENCY_CODES) {
+      if (isValidRate(overrides?.[code])) out[code] = Number(overrides[code]);
+      else if (isValidRate(fetched?.[code])) out[code] = Number(fetched[code]);
+      else out[code] = CURRENCY_RATES[code].rate;
+    }
+    return out;
+  }
+
   function normalizeCurrency(value, fallback = 'USD') {
     const code = String(value || '').trim().toUpperCase();
     if (Object.prototype.hasOwnProperty.call(CURRENCY_RATES, code)) return code;
@@ -22,8 +57,8 @@
 
   function convertUsd(value, currency = 'USD') {
     const amount = Number(value || 0);
-    const config = CURRENCY_RATES[normalizeCurrency(currency)];
-    return Number((amount * config.rate).toFixed(6));
+    const code = normalizeCurrency(currency);
+    return Number((amount * activeRates[code]).toFixed(6));
   }
 
   function fractionDigitsFor(amount, currency) {
@@ -43,6 +78,8 @@
     CURRENCY_RATES,
     convertUsd,
     formatCurrencyFromUsd,
-    normalizeCurrency
+    normalizeCurrency,
+    configureRates,
+    resolveEffectiveRates
   };
 });

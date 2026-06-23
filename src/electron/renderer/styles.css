@@ -833,6 +833,42 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
+.currency-rate-row { display: grid; gap: 8px; min-width: 0; }
+.currency-rate-row.hidden, .currency-rate-manual-field.hidden { display: none; }
+.currency-rate-mode {
+  display: inline-flex;
+  width: max-content;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(var(--sunken-rgb), 0.48);
+}
+.settings-panel .rate-mode-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 16px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.settings-panel .rate-mode-option:hover { color: var(--text); }
+.settings-panel .rate-mode-option input[type="radio"] {
+  position: absolute;
+  width: 0;
+  height: 0;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.settings-panel .rate-mode-option:has(input:checked) { background: rgba(var(--blue-rgb), 0.16); color: var(--text); }
+.currency-rate-manual-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.currency-rate-prefix { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.settings-panel .currency-rate-manual-field input { flex: 1 1 0; width: 0; min-width: 0; font-size: 11px; }
+.settings-note.currency-rate-status { font-variant-numeric: tabular-nums; }
 .tokscale-lines {
   display: grid;
   gap: 5px;

@@ -99,6 +99,20 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /dashboard\.minimize\(\)/);
 });
 
+test('dashboard repains on a rate-only settings push, not just a currency-code change', () => {
+  // A same-currency rate update (auto refresh or manual override) keeps the
+  // currency code identical, so the render() inside the code-change branch
+  // never fires. configureRates mutates module state but the already-rendered
+  // costs would stay stale unless render() also runs on the rate path.
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
+  assert.ok(handler, 'dashboard should subscribe to onSettingsPush for rate updates');
+  assert.match(handler[1], /configureRates\(next\.currencyRatesEffective\)/);
+  // Both the rate path and the currency-code path must be able to trigger render.
+  assert.match(handler[1], /needsRender\s*=\s*true/);
+  assert.match(handler[1], /if \(needsRender\) render\(\)/);
+});
+
 test('the trends preview opens the dashboard via IPC', () => {
   const app = read('src', 'electron', 'renderer', 'app.js');
   assert.match(app, /trendsPanel\.addEventListener/);
