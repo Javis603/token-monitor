@@ -173,12 +173,11 @@ WSL agent 和 Windows widget 默认使用相同的主机名作为设备 ID。如
 - **方式一：** 设置 `NO_PROXY` 环境变量，排除 hub IP 和 WSL 内网段
 - **方式二：** 取消设置 HTTP 代理变量：`env -u HTTP_PROXY -u HTTPS_PROXY npm run agent -- --once`
 
-### 3. Codex 双端共存
+### 3. WSL 工具的重复计算（重要）
 
-如果你的 **Codex 同时在 Windows 原生环境和 WSL 内使用**，注意：
-- Windows 端的 Codex 数据通过 widget 本地 collector 推送到 hub
-- WSL 端的 Codex 数据通过 agent 推送到 hub
-- 两者会自动叠加显示，Codex 总量为两者之和
+Windows widget 内建的 WSL 扫描本来就会隔着 `\\wsl$` 读到 WSL 里走 JSONL 的工具（Codex、Claude 等）。如果 WSL agent 又上报同样的工具，由于用的是不同 deviceId，hub 会把两份相加（不去重），导致这些工具被算两次。Hermes 不受影响——它是 SQLite，隔着 `\\wsl$` 读不到，只有 WSL 内的 agent 读得到。
+
+**建议**：把 WSL agent 的 `TOKEN_MONITOR_CLIENTS` 只填 Windows 侧读不到的工具（比如就填 `hermes`），让 Windows 侧继续负责 Codex 那类 JSONL 工具，两边不重叠就不会重复。
 
 ### 4. Windows 防火墙
 
