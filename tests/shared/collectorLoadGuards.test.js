@@ -111,14 +111,15 @@ test('watchPathsForClients includes Kimi, Qwen, and Grok Build local roots', () 
   }
 });
 
-test('watchPathsForClients includes the GitHub Copilot CLI otel root', () => {
-  const tmp = withTmpHome([path.join('.copilot', 'otel')]);
+test('watchPathsForClients includes GitHub Copilot otel and CLI session-state roots', () => {
+  const tmp = withTmpHome([path.join('.copilot', 'otel'), path.join('.copilot', 'session-state')]);
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
     const dirs = watchPathsForClients('copilot');
     assert.ok(dirs.includes(path.join(tmp, '.copilot', 'otel')));
+    assert.ok(dirs.includes(path.join(tmp, '.copilot', 'session-state')));
     assert.deepEqual(clientDataDirPresence('copilot'), { copilot: true });
   } finally {
     os.homedir = originalHomedir;

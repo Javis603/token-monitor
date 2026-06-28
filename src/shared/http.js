@@ -30,15 +30,18 @@ function sendText(res, statusCode, body, contentType = 'text/plain; charset=utf-
 function readJsonBody(req, maxBytes = 1024 * 256) {
   return new Promise((resolve, reject) => {
     let body = '';
+    let tooLarge = false;
     req.setEncoding('utf8');
     req.on('data', (chunk) => {
+      if (tooLarge) return;
       body += chunk;
       if (body.length > maxBytes) {
-        reject(new Error('Request body too large'));
-        req.destroy();
+        tooLarge = true;
+        body = '';
       }
     });
     req.on('end', () => {
+      if (tooLarge) return reject(new Error('Request body too large'));
       if (!body.trim()) return resolve({});
       try { resolve(JSON.parse(body)); }
       catch (error) { reject(new Error(`Invalid JSON body: ${error.message}`)); }

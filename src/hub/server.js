@@ -25,6 +25,7 @@ function createHub({
   host = '0.0.0.0',
   secret = '',
   staleAfterMs = 10 * 60 * 1000,
+  maxBodyBytes = 16 * 1024 * 1024,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
   logger = console
 } = {}) {
@@ -133,11 +134,12 @@ function createHub({
 
     if (req.method === 'POST' && url.pathname === '/api/ingest') {
       try {
-        const payload = await readJsonBody(req);
+        const payload = await readJsonBody(req, maxBodyBytes);
         const record = ingest(payload);
         return sendJson(res, 200, { ok: true, deviceId: record.deviceId, stats: getStats() });
       } catch (error) {
         if (error.message === 'deviceId_required') return sendJson(res, 400, { error: 'deviceId_required' });
+        if (error.message === 'Request body too large') return sendJson(res, 413, { error: 'request_body_too_large', maxBytes: maxBodyBytes });
         return sendJson(res, 400, { error: 'bad_request', message: error.message });
       }
     }
@@ -186,9 +188,10 @@ if (require.main === module) {
   const host = String(args.host || process.env.TOKEN_MONITOR_HOST || '0.0.0.0');
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
   const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || 10 * 60 * 1000);
+  const maxBodyBytes = Number(args.maxBodyBytes || process.env.TOKEN_MONITOR_MAX_BODY_BYTES || 16 * 1024 * 1024);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
 
-  const hub = createHub({ port, host, secret, staleAfterMs, dataFile });
+  const hub = createHub({ port, host, secret, staleAfterMs, maxBodyBytes, dataFile });
   hub.start().then(() => {
     console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
     console.log(`Data file: ${dataFile}`);

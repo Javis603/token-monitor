@@ -84,3 +84,60 @@ test('onStats fires on ingest and on deleteDevice, and unsubscribe stops it', ()
     fs.rmSync(dataFile, { force: true });
   }
 });
+
+test('HTTP ingest accepts payloads larger than the old 256KB default', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const payload = {
+      deviceId: 'large-device',
+      today: {
+        totalTokens: 1,
+        sessions: {
+          'codex:large': {
+            client: 'codex',
+            sessionId: 'large',
+            totalTokens: 1,
+            models: { 'gpt-5': 1 },
+            transcriptPreview: 'x'.repeat(300 * 1024)
+          }
+        }
+      }
+    };
+    const response = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.deviceId, 'large-device');
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('HTTP ingest returns 413 when a configured body limit is exceeded', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', maxBodyBytes: 128, dataFile, logger: { error() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'too-large', today: { totalTokens: 1 }, padding: 'x'.repeat(256) })
+    });
+    assert.equal(response.status, 413);
+    const body = await response.json();
+    assert.equal(body.error, 'request_body_too_large');
+    assert.equal(body.maxBytes, 128);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});

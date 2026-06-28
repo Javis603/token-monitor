@@ -120,7 +120,6 @@
     "@eslint/js": "^10.0.1",
     "electron": "42.2.0",
     "electron-builder": "^26.8.1",
-    "electron-icon-builder": "^2.0.1",
     "eslint": "^10.5.0",
     "globals": "^17.6.0"
   },

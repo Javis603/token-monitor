@@ -11,6 +11,7 @@ const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
+const { collectCopilotCliPeriods } = require('./copilotCliUsage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { parseGraphResult, normalizeHistory } = require('./history');
 const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
@@ -407,6 +408,16 @@ async function collectUsageOnce(options) {
       const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
+    if (normalizedClients.split(',').includes('copilot')) {
+      const copilotCli = collectCopilotCliPeriods({
+        homeDir: options.homeDir || os.homedir(),
+        allTimeSince,
+        now: collectedAt
+      });
+      today = mergePeriods(today, copilotCli.today);
+      month = mergePeriods(month, copilotCli.month);
+      allTime = mergePeriods(allTime, copilotCli.allTime);
+    }
     applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
   }
 
@@ -542,7 +553,7 @@ function clientWatchCandidates(clientsCsv) {
   add('kimi', path.join(home, '.kimi', 'sessions'), path.join(process.env.KIMI_CODE_HOME || path.join(home, '.kimi-code'), 'sessions'));
   add('qwen', path.join(home, '.qwen', 'projects'));
   add('grok', path.join(process.env.GROK_HOME || path.join(home, '.grok'), 'sessions'));
-  add('copilot', path.join(home, '.copilot', 'otel'));
+  add('copilot', path.join(home, '.copilot', 'otel'), path.join(home, '.copilot', 'session-state'));
   add('pi', path.join(home, '.pi', 'agent', 'sessions'), path.join(home, '.omp', 'agent', 'sessions'));
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
