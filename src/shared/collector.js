@@ -93,8 +93,15 @@ function resolvePlatformBinary() {
 function tokscaleCommand() {
   const resolved = resolvePlatformBinary();
   const useDirect = Boolean(resolved && resolved.source !== 'shim');
-  if (useDirect) return { bin: resolved.path, prefixArgs: [], env: process.env };
-  return { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
+  const env = { ...process.env };
+  // OMP (Oh My Pi) stores sessions at ~/.omp/agent/sessions — tokscaler only
+  // knows about ~/.pi/agent/sessions. Pass the extra dir so both are scanned.
+  if (!env.TOKSCALE_EXTRA_DIRS) {
+    const ompPath = path.join(os.homedir(), '.omp', 'agent', 'sessions');
+    env.TOKSCALE_EXTRA_DIRS = `pi:${ompPath}`;
+  }
+  if (useDirect) return { bin: resolved.path, prefixArgs: [], env };
+  return { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
 function parseJsonOutput(stdout) {
