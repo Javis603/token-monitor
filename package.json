@@ -21,7 +21,10 @@
     "dist:mac": "electron-builder --mac --arm64",
     "dist:win": "electron-builder --win --x64",
     "lint": "eslint .",
-    "verify": "npm run lint && npm test"
+    "verify": "npm run lint && npm test",
+    "launchd:install": "bash scripts/launchd-install.sh",
+    "launchd:uninstall": "bash scripts/launchd-uninstall.sh",
+    "launchd:status": "bash scripts/launchd-status.sh"
   },
   "build": {
     "appId": "com.javis.tokenmonitor",

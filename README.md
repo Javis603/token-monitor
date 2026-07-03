@@ -106,6 +106,16 @@ npm install
 npm start
 ```
 
+**macOS dev auto-start (optional):** register a login LaunchAgent so a source checkout starts hidden on sign-in:
+
+```bash
+npm run launchd:install   # install LaunchAgent
+npm run launchd:status    # check status
+npm run launchd:uninstall # remove
+```
+
+Uses `scripts/launch-token-monitor.sh` and unsets `ELECTRON_RUN_AS_NODE`. Set `TOKEN_MONITOR_APP=/Applications/Token Monitor.app` to launch a packaged build instead.
+
 ### Multi-device sync
 
 Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
