@@ -18,27 +18,74 @@
     return String(n);
   }
 
-  function pickWorstLimit(stats) {
+  function providerLimitOk(provider) {
+    return Boolean(provider && provider.status === 'ok' && !provider.stale);
+  }
+
+  function limitWindowEligible(window) {
+    return Boolean(window && window.showMeter !== false && Number.isFinite(Number(window.remainingPercent)));
+  }
+
+  function pickWorstBarPair(stats, windowFilter = null) {
     const providers = stats?.limits?.providers || [];
-    let worst = null;
+    let best = null;
     for (const provider of providers) {
-      if (provider.status !== 'ok' || provider.stale) continue;
-      for (const window of provider.windows || []) {
-        const remaining = Number(window.remainingPercent);
-        if (!Number.isFinite(remaining)) continue;
-        if (!worst || remaining < worst.remaining) {
-          worst = { remaining, provider: provider.provider };
-        }
+      if (!providerLimitOk(provider)) continue;
+      const matching = (provider.windows || [])
+        .filter(limitWindowEligible)
+        .filter((window) => !windowFilter || windowFilter(window))
+        .sort((a, b) => Number(a.remainingPercent) - Number(b.remainingPercent));
+      if (!matching.length) continue;
+      const primary = matching[0];
+      if (!best || Number(primary.remainingPercent) < Number(best.firstWindow.remainingPercent)) {
+        best = {
+          provider,
+          firstWindow: matching[0],
+          secondWindow: matching[1] || null
+        };
       }
     }
-    return worst;
+    return best;
+  }
+
+  function pickBarPairForTrayMode(stats, contentMode = 'bars') {
+    if (contentMode === 'barsSession') {
+      return pickWorstBarPair(stats, (window) => window.kind === 'session')
+        || pickWorstBarPair(stats, (window) => window.kind === 'billing')
+        || pickWorstBarPair(stats, null);
+    }
+    if (contentMode === 'barsWeekly') {
+      return pickWorstBarPair(stats, (window) => window.kind === 'weekly')
+        || pickWorstBarPair(stats, null);
+    }
+    if (contentMode === 'barsAllSessions') {
+      return pickWorstBarPair(stats, (window) => window.kind === 'session');
+    }
+    if (contentMode === 'bars') {
+      return pickWorstBarPair(stats, null);
+    }
+    return null;
+  }
+
+  function pickWorstLimit(stats) {
+    return pickWorstLimitForMode(stats, 'bars');
+  }
+
+  function pickWorstLimitForMode(stats, contentMode = 'bars') {
+    const pair = pickBarPairForTrayMode(stats, contentMode);
+    if (!pair?.firstWindow) return null;
+    return {
+      remaining: Number(pair.firstWindow.remainingPercent),
+      provider: pair.provider.provider
+    };
   }
 
   function formatTrayText(stats, contentMode = 'tokens', currencyCode = 'USD') {
     if (contentMode === 'icon') return '';
     if (contentMode === 'bars' || contentMode === 'barsSession' || contentMode === 'barsWeekly' || contentMode === 'barsAllSessions') {
-      // Icon carries all the info; only show text if we have no limit data at all.
-      if (pickWorstLimit(stats)) return '';
+      const worst = pickWorstLimitForMode(stats, contentMode);
+      if (worst) return `${Math.round(worst.remaining)}%`;
+      return '—';
     }
     const today = stats?.periods?.today || {};
     const allTime = stats?.periods?.allTime || {};
@@ -50,5 +97,13 @@
     return formatCompactNumber(today.totalTokens);
   }
 
-  return { formatCompactNumber, pickWorstLimit, formatTrayText };
+  return {
+    formatCompactNumber,
+    limitWindowEligible,
+    pickWorstBarPair,
+    pickBarPairForTrayMode,
+    pickWorstLimit,
+    pickWorstLimitForMode,
+    formatTrayText
+  };
 });

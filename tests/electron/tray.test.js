@@ -55,3 +55,66 @@ test('tray cost text uses the selected display currency', () => {
   assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'cost', 'TWD'), 'NT$31.50');
   assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'both', 'HKD'), '12.0K · HK$7.80');
 });
+
+const limitStats = {
+  limits: {
+    providers: [{
+      provider: 'claude',
+      status: 'ok',
+      stale: false,
+      windows: [
+        { kind: 'session', remainingPercent: 38.2 },
+        { kind: 'weekly', remainingPercent: 72.5 }
+      ]
+    }]
+  }
+};
+
+test('tray limit modes show the worst remaining percent instead of hiding text', () => {
+  assert.equal(formatTrayText(limitStats, 'bars'), '38%');
+  assert.equal(formatTrayText(limitStats, 'barsSession'), '38%');
+  assert.equal(formatTrayText(limitStats, 'barsWeekly'), '73%');
+  assert.equal(formatTrayText(limitStats, 'barsAllSessions'), '38%');
+  assert.equal(formatTrayText({ limits: { providers: [] } }, 'bars'), '—');
+});
+
+test('barsSession falls back to billing windows when session data is missing', () => {
+  const { pickBarPairForTrayMode } = require('../../src/shared/trayText');
+  const stats = {
+    limits: {
+      providers: [{
+        provider: 'cursor',
+        status: 'ok',
+        stale: false,
+        windows: [
+          { kind: 'billing', label: 'Total', remainingPercent: 46, showMeter: true },
+          { kind: 'billing', label: 'API', remainingPercent: 0, showMeter: true }
+        ]
+      }]
+    }
+  };
+  const pair = pickBarPairForTrayMode(stats, 'barsSession');
+  assert.equal(pair.firstWindow.label, 'API');
+  assert.equal(pair.secondWindow.label, 'Total');
+  assert.equal(formatTrayText(stats, 'barsSession'), '0%');
+});
+
+test('barsWeekly uses weekly windows from providers like Antigravity', () => {
+  const { pickBarPairForTrayMode } = require('../../src/shared/trayText');
+  const stats = {
+    limits: {
+      providers: [{
+        provider: 'antigravity',
+        status: 'ok',
+        stale: false,
+        windows: [
+          { kind: 'weekly', label: 'Gemini Pro', remainingPercent: 100, showMeter: true },
+          { kind: 'weekly', label: 'Gemini Flash', remainingPercent: 80, showMeter: true }
+        ]
+      }]
+    }
+  };
+  const pair = pickBarPairForTrayMode(stats, 'barsWeekly');
+  assert.equal(pair.firstWindow.label, 'Gemini Flash');
+  assert.equal(formatTrayText(stats, 'barsWeekly'), '80%');
+});

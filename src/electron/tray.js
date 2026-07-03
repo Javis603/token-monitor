@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-const { formatTrayText, pickWorstLimit } = require('../shared/trayText');
+const { formatTrayText, pickWorstLimit, pickWorstLimitForMode } = require('../shared/trayText');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
@@ -90,4 +90,4 @@ function popoverBounds(tray, popoverWidth, popoverHeight) {
   return { x, y, width: popoverWidth, height: popoverHeight };
 }
 
-module.exports = { createTray, formatTrayText, popoverBounds, pickWorstLimit, pickUsageTrayIconId, buildTrayIcon };
+module.exports = { createTray, formatTrayText, popoverBounds, pickWorstLimit, pickWorstLimitForMode, pickUsageTrayIconId, buildTrayIcon };
