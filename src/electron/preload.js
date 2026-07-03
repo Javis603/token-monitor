@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
+  exportNow: () => ipcRenderer.invoke('export:now'),
+  pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),
   checkTokscaleNpm: () => ipcRenderer.invoke('tokscale:checkNpm'),
   downloadTokscaleFromNpm: () => ipcRenderer.invoke('tokscale:downloadFromNpm'),

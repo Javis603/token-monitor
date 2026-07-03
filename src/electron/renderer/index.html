@@ -284,6 +284,38 @@
               <p class="settings-note" data-i18n="settings.collection.wslScanDesc">When off, Windows no longer scans WSL tools over \\wsl$.</p>
               <div id="wslPanel" class="wsl-panel"></div>
             </div>
+            <div class="settings-subgroup settings-export-block">
+              <div class="settings-group-header"><span data-i18n="settings.export.title">Data export</span></div>
+              <p class="settings-note" data-i18n="settings.export.desc">Export your usage as CSV + JSON for spreadsheets, Obsidian, Grafana, or scripts.</p>
+              <div class="export-auto-head">
+                <label class="checkbox-label export-auto-toggle"><input id="exportAutoInput" type="checkbox" /><span data-i18n="settings.export.autoLabel">Auto-export to a folder</span></label>
+                <span id="exportAutoStatus" class="cursor-status-pill export-status-pill hidden"></span>
+              </div>
+              <div id="exportAutoDetails" class="export-auto-details hidden">
+                <div class="export-dir-row">
+                  <span id="exportDirLabel" class="export-dir-path"></span>
+                  <div class="settings-actions export-dir-actions">
+                    <button id="exportPickDirButton" type="button" data-i18n="settings.export.pickDir">Choose folder…</button>
+                  </div>
+                </div>
+                <label class="export-interval-row"><span data-i18n="settings.export.interval">Auto-export frequency</span>
+                  <select id="exportIntervalInput">
+                    <option value="30000" data-i18n="settings.export.interval.30s">Every 30 seconds</option>
+                    <option value="60000" data-i18n="settings.export.interval.1m">Every minute</option>
+                    <option value="300000" data-i18n="settings.export.interval.5m">Every 5 minutes</option>
+                    <option value="900000" data-i18n="settings.export.interval.15m">Every 15 minutes</option>
+                    <option value="1800000" data-i18n="settings.export.interval.30m">Every 30 minutes</option>
+                    <option value="3600000" data-i18n="settings.export.interval.60m">Every 60 minutes</option>
+                  </select>
+                </label>
+              </div>
+              <div class="export-manual-row">
+                <span class="settings-note export-manual-note" data-i18n="settings.export.manualDesc">Or export once to a folder you pick:</span>
+                <div class="settings-actions">
+                  <button id="exportNowButton" type="button" data-i18n="settings.export.manualNow">Manual export…</button>
+                </div>
+              </div>
+            </div>
             <div id="customPricingAccountGroup" class="settings-group cursor-account-group">
               <button id="customPricingSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="customPricingSettingsDetails">
                 <span data-i18n="settings.customPricing.title">Custom model pricing</span>

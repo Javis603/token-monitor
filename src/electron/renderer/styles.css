@@ -392,6 +392,25 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-wsl-block.hidden { display: none; }
 .settings-wsl-block .wsl-scan-toggle { justify-content: flex-start; gap: 8px; }
 .wsl-panel { display: grid; gap: 4px; margin-top: 4px; }
+.settings-export-block { display: grid; gap: 8px; min-width: 0; }
+/* Give the section description room under the header so the two small-text lines don't merge. */
+.settings-export-block > .settings-note { margin: 2px 0 4px; }
+/* The group after Data export is a .settings-group (no subgroup divider), so add the
+   standard subgroup top-rule to it — closes the Data export section off from 自訂模型單價. */
+.settings-export-block + .settings-group { padding-top: 9px; border-top: 1px solid rgba(var(--line-rgb), 0.075); }
+.export-auto-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.export-auto-head .export-auto-toggle { justify-content: flex-start; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.export-status-pill { flex: 0 0 auto; }
+.export-status-pill.hidden { display: none; }
+.export-status-pill.is-active { color: var(--green); border-color: rgba(var(--accent-rgb), 0.5); background: rgba(var(--accent-rgb), 0.08); }
+.export-auto-details { display: grid; gap: 8px; }
+.export-auto-details.hidden { display: none; }
+.export-dir-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.export-dir-actions { flex: 0 0 auto; }
+.export-dir-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+.export-interval-row { display: grid; gap: 4px; min-width: 0; }
+.export-manual-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.export-manual-note { flex: 1 1 auto; min-width: 0; }
 .wsl-panel:empty { display: none; }
 .wsl-panel-header, .wsl-panel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .wsl-panel-title { font-size: 11px; color: var(--muted); }

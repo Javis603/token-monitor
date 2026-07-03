@@ -4,10 +4,11 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
+const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
 
 // Install EPIPE suppression before anything that might log. Without this,
 // a closed parent pipe turns the next log call into an unhandled 'error'
@@ -184,6 +185,9 @@ function defaultSettings() {
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, true),
+    exportAutoEnabled: false,
+    exportDir: '',
+    exportIntervalMs: 60 * 1000,
     collectionMode: 'live',
     collectionIntervalMs: 5 * 60 * 1000,
     serviceProviderDisplayOrder: '',
@@ -1088,6 +1092,15 @@ let syncCollectorHandle = null;
 let lastCollectedDevice = null;
 let tray = null;
 let latestStats = null;
+const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
+let lastExportAt = 0;
+let lastAutoExport = { dir: null, signature: null };
+
+// User-chosen auto-export throttle (Settings), clamped to a sane floor.
+function exportIntervalMs() {
+  const v = Number(settings.exportIntervalMs);
+  return Number.isFinite(v) && v >= 1000 ? v : DEFAULT_EXPORT_INTERVAL_MS;
+}
 let suppressNextBlurHide = false;
 const providerTrayIcons = {};
 let registeredWindowToggleShortcut = '';
@@ -1362,6 +1375,11 @@ function sendPush(payload) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     updateTrayDisplay();
+    if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
+      lastExportAt = Date.now();
+      writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
+        .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
+    }
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
@@ -1878,6 +1896,55 @@ function requestAppQuit() {
   stopAll();
   if (app.isReady()) app.quit();
   else app.exit(0);
+}
+
+// Write the export file set (JSON + CSVs) into `dir`, atomically (temp + rename)
+// so a synced vault / iCloud never reads a half-written file. Pulls history
+// itself; callers pass only `periods` (privacy: devices/limits never enter).
+async function writeExportTo(dir, periods, options = {}) {
+  if (!dir) return { ok: false, reason: 'no-dir' };
+  const history = await getDashboardHistory().catch(() => null);
+  // History unavailable (e.g. a transient hub fetch failure) is NOT the same as
+  // "no history": writing a snapshot-only set would emit empty time-series JSON
+  // AND the orphan cleanup below would delete an existing daily.csv. Never write a
+  // destructive partial — skip and report, so auto-export retries next tick and
+  // manual export can surface the failure instead of silently losing data.
+  if (!history) return { ok: false, reason: 'history-unavailable' };
+  // Auto-export skips rewriting a synced folder when the data is unchanged
+  // (keyed by dir so pointing at a fresh folder always writes). Manual export
+  // never skips. Signature compares inputs, not files, to ignore the volatile
+  // generatedAt in the JSON.
+  let signature = null;
+  if (options.skipUnchanged) {
+    signature = exportSignature(periods || {}, history);
+    if (dir === lastAutoExport.dir && signature === lastAutoExport.signature) return { ok: true, skipped: true };
+  }
+  const files = exportFileSet({
+    periods: periods || {},
+    history,
+    meta: { generatedAt: new Date().toISOString(), app: { name: 'token-monitor', version: appVersion() } }
+  });
+  await fs.promises.mkdir(dir, { recursive: true });
+  // Per-call token so a concurrent auto + manual export to the same folder never
+  // share a temp filename (which would break one side's rename or write half an update).
+  const runToken = crypto.randomUUID();
+  const written = new Set();
+  for (const file of files) {
+    const dest = path.join(dir, file.name);
+    const tmp = `${dest}.tmp-${process.pid}-${runToken}`;
+    await fs.promises.writeFile(tmp, file.contents);
+    await fs.promises.rename(tmp, dest);
+    written.add(file.name);
+  }
+  // Remove orphaned generated files (e.g. a stale daily.csv once history empties)
+  // so consumers never read outdated data.
+  for (const name of EXPORT_FILENAMES) {
+    if (!written.has(name)) await fs.promises.rm(path.join(dir, name), { force: true });
+  }
+  // Record the signature only after a fully successful write, so a failed write
+  // retries next tick instead of being skipped forever.
+  if (options.skipUnchanged) lastAutoExport = { dir, signature };
+  return { ok: true };
 }
 
 async function fetchStats(options = {}) {
@@ -2663,6 +2730,25 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', (_event, options) => fetchStats(options));
+  ipcMain.handle('export:now', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: settings.exportDir || app.getPath('home')
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    const stats = await fetchStats();
+    const written = await writeExportTo(result.filePaths[0], stats.periods);
+    if (!written.ok) return { ok: false, dir: result.filePaths[0], reason: written.reason || 'write-failed' };
+    return { ok: true, dir: result.filePaths[0] };
+  });
+  ipcMain.handle('export:pickAutoDir', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: settings.exportDir || app.getPath('home')
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    return { ok: true, dir: result.filePaths[0] };
+  });
   ipcMain.handle('session:getDetail', (_event, args) => {
     const { client, sessionId, period, sessionCost } = args || {};
     return readSessionDetail({ client, sessionId, period, sessionCost, home: os.homedir() });
