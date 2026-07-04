@@ -18,6 +18,7 @@ const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector')
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
+const { collectZcodeUsage } = require('./zcodeUsage');
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...
@@ -420,6 +421,27 @@ async function collectUsageOnce(options) {
       allTime = extractUsageFromTokscale(allTimeJson);
     }
     applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
+
+    // ZCode direct SQLite read: tokscale scans ~/.zcode/projects which rarely exists;
+    // the real per-request data lives in ~/.zcode/cli/db/db.sqlite::model_usage.
+    // Read it directly via node:sqlite and merge into the tokscale-derived periods.
+    // Only runs when zcode is in the enabled clients list.
+    const enabledClients = new Set(
+      String(normalizedClients).split(',').map((c) => c.trim().toLowerCase()).filter(Boolean)
+    );
+    if (enabledClients.has('zcode')) {
+      try {
+        const zc = collectZcodeUsage({
+          homeDir: options.homeDir || os.homedir(),
+          nowMs: collectedAt.getTime()
+        });
+        if (zc.today) today = mergePeriods(today, extractUsageFromTokscale(zc.today));
+        if (zc.month) month = mergePeriods(month, extractUsageFromTokscale(zc.month));
+        if (zc.allTime) allTime = mergePeriods(allTime, extractUsageFromTokscale(zc.allTime));
+      } catch (error) {
+        if (typeof options.logger === 'function') options.logger(`zcode usage read failed: ${error.message}`);
+      }
+    }
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -578,7 +600,11 @@ function clientWatchCandidates(clientsCsv) {
     path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')
   );
   add('micode', path.join(home, '.local', 'share', 'mimocode'));
-  add('zcode', path.join(home, '.zcode', 'projects'));
+  // ZCode: tokscale scans ~/.zcode/projects which rarely exists on real installs;
+  // the actual data is in ~/.zcode/cli/db/db.sqlite::model_usage, read directly
+  // via node:sqlite in zcodeUsage.js. Watch the db dir (chokidar sees db + -wal/-shm
+  // sidecar changes) so seconds-level refresh fires on every completed request.
+  add('zcode', path.join(home, '.zcode', 'cli', 'db'));
   // CodeBuddy (Tencent): tokscale reads the home-relative CLI/WebUI JSONL dir on
   // every platform, plus the IDE / VS Code extension logs under a platform-
   // specific CodeBuddyExtension/Logs root (scanner.rs). Watch both so CLI and
