@@ -72,7 +72,7 @@ const escapedEntries = Object.entries(merged)
   .map(([key, value]) => `      '${key.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}': '${String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}',`);
 const localeBlock = `\n    ${locale}: {\n${escapedEntries.join('\n')}\n    }`;
 
-const insertRe = /\n    \}\n  \};\n\n  function localeFromTag\(value\) \{/;
+const insertRe = /\n {4}\}\n {2}\};\n\n {2}function localeFromTag\(value\) \{/;
 if (!insertRe.test(source)) throw new Error('Could not find MESSAGES closing block');
 source = source.replace(insertRe, `\n    },${localeBlock}\n  };\n\n  function localeFromTag(value) {`);
 
