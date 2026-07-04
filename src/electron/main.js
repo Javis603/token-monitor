@@ -27,6 +27,7 @@ const {
   normalizeHiddenClients,
   normalizePinnedClients
 } = require('./renderer/clientDisplayPreferences');
+const { LANGUAGE_OPTIONS } = require('./renderer/i18n');
 const {
   defaultViewDisplayPreferences,
   normalizeHiddenViews,
@@ -119,7 +120,7 @@ const CSP_HEADER = [
 ].join('; ');
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
-const LANGUAGE_VALUES = new Set(['auto', 'en', 'zh-TW', 'zh-CN']);
+const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'interval']);
 const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;

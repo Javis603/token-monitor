@@ -117,12 +117,24 @@ test('appearance settings expose a settings-position checkbox wired to the layou
   assert.match(app, /els\.settingsInTitlebarInput\.addEventListener\('change', saveAppearanceFromControls\)/, 'change persists + applies');
 });
 
-test('settings-position label exists in bundled locales', () => {
+test('settings-position label exists in every bundled locale', () => {
   const { MESSAGES } = require('../../src/electron/renderer/i18n.js');
-  for (const locale of ['en', 'zh-TW', 'zh-CN']) {
+  for (const locale of Object.keys(MESSAGES)) {
     assert.ok(
       MESSAGES[locale]?.['settings.appearance.settingsInTitlebar'],
       `${locale} should define settings.appearance.settingsInTitlebar`
+    );
+  }
+});
+
+test('index.html language dropdown offers an option for every language', () => {
+  const { LANGUAGE_OPTIONS } = require('../../src/electron/renderer/i18n.js');
+  const html = readRendererFile('index.html');
+  for (const { value } of LANGUAGE_OPTIONS) {
+    assert.match(
+      html,
+      new RegExp(`<option value="${value}"`),
+      `index.html language dropdown should offer "${value}"`
     );
   }
 });
