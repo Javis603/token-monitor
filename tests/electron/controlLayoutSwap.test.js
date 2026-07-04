@@ -117,10 +117,14 @@ test('appearance settings expose a settings-position checkbox wired to the layou
   assert.match(app, /els\.settingsInTitlebarInput\.addEventListener\('change', saveAppearanceFromControls\)/, 'change persists + applies');
 });
 
-test('settings-position label exists in all three locales', () => {
-  const i18n = readRendererFile('i18n.js');
-  const occurrences = i18n.match(/'settings\.appearance\.settingsInTitlebar':/g) || [];
-  assert.equal(occurrences.length, 3, 'en / zh-TW / zh-CN each define the label');
+test('settings-position label exists in bundled locales', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n.js');
+  for (const locale of ['en', 'zh-TW', 'zh-CN']) {
+    assert.ok(
+      MESSAGES[locale]?.['settings.appearance.settingsInTitlebar'],
+      `${locale} should define settings.appearance.settingsInTitlebar`
+    );
+  }
 });
 
 test('refresh button exposes busy, success, and error feedback states', () => {
