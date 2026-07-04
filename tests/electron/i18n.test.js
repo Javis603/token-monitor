@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   applyTranslations,
+  LANGUAGE_OPTIONS,
   MESSAGES,
   normalizeLanguage,
   resolveLocale,
@@ -49,11 +50,21 @@ test('translate falls back to English and interpolates values', () => {
   assert.equal(translate('zh-TW', 'missing.key'), 'missing.key');
 });
 
-test('Chinese dictionaries cover every English settings key', () => {
+test('every bundled locale defines every English settings key', () => {
   const englishKeys = Object.keys(MESSAGES.en).sort();
-  for (const locale of ['zh-TW', 'zh-CN']) {
+  for (const locale of Object.keys(MESSAGES).filter((code) => code !== 'en')) {
     const missing = englishKeys.filter((key) => MESSAGES[locale][key] === undefined);
     assert.deepEqual(missing, [], `${locale} should not rely on English fallback`);
+  }
+});
+
+test('every language option has a dictionary, normalizes to itself, and is reachable via auto-detect', () => {
+  for (const { value } of LANGUAGE_OPTIONS) {
+    assert.equal(normalizeLanguage(value), value, `${value} should normalize to itself`);
+    if (value !== 'auto') {
+      assert.ok(MESSAGES[value], `${value} should have a message dictionary`);
+      assert.equal(resolveLocale('auto', [value]), value, `auto should resolve a ${value} system locale`);
+    }
   }
 });
 

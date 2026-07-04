@@ -5,6 +5,8 @@ const semver = require('semver');
 const GITHUB_REPO = 'Javis603/token-monitor';
 const RELEASES_LATEST_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 const REQUEST_TIMEOUT_MS = 10 * 1000;
+const APP_UPDATE_BACKGROUND_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const APP_UPDATE_OUTDATED_COOLDOWN_MS = 60 * 60 * 1000;
 
 function parseTag(tag) {
   if (typeof tag !== 'string') return null;
@@ -28,6 +30,27 @@ function parseLatestReleasePayload(payload) {
     htmlUrl,
     publishedAt: typeof payload.published_at === 'string' ? payload.published_at : ''
   };
+}
+
+function shouldSkipAppUpdateCheck({
+  force = false,
+  lastCheckedAt,
+  latest,
+  dismissedVersion,
+  currentVersion,
+  nowMs = Date.now()
+} = {}) {
+  if (force || !lastCheckedAt) return false;
+  const last = Date.parse(lastCheckedAt);
+  if (!Number.isFinite(last)) return false;
+  const latestVersion = latest?.version;
+  const current = semver.valid(currentVersion);
+  const cachedUpdate = semver.valid(latestVersion)
+    && current
+    && semver.gt(latestVersion, current)
+    && latestVersion !== dismissedVersion;
+  const cooldownMs = cachedUpdate ? APP_UPDATE_OUTDATED_COOLDOWN_MS : APP_UPDATE_BACKGROUND_COOLDOWN_MS;
+  return nowMs - last < cooldownMs;
 }
 
 async function withTimeout(ms, task) {
@@ -70,7 +93,10 @@ async function checkLatestRelease(currentVersion) {
 module.exports = {
   parseTag,
   parseLatestReleasePayload,
+  shouldSkipAppUpdateCheck,
   checkLatestRelease,
   RELEASES_LATEST_URL,
-  GITHUB_REPO
+  GITHUB_REPO,
+  APP_UPDATE_BACKGROUND_COOLDOWN_MS,
+  APP_UPDATE_OUTDATED_COOLDOWN_MS
 };

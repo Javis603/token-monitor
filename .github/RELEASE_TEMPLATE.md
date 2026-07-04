@@ -5,18 +5,12 @@
 ## What's changed
 
 ### Added
-- **Claude Fable weekly cap:** Claude now shows a temporary Fable-only weekly window.
-
-### Changed
-- **Usage Trends setup:** Fresh installs collect Trends history by default, saved opt-out settings stay off, and Settings now includes 5, 10, 15, 30, or 60 minute scan intervals.
+- **Data export:** Settings -> Collection -> Data export can now write CSV / JSON files once or auto-export them to a folder for Excel, Obsidian, scripts, and dashboards. (#61)
+- **CodeBuddy and WorkBuddy tracking:** Token Monitor now collects and displays usage from CodeBuddy and WorkBuddy alongside the existing tools.
+- **Trends active time:** Trends and history summaries now include Active time when tokscale provides session timing data.
 
 ### Improved
-- **Bundled Tokscale 4.0.9:** fixes Grok `signals.json` compaction-total reconciliation and parses Kiro execution files plus GitHub Copilot Desktop SQLite usage.
-- **Hermes profile tracking:** Hermes Agent scans now include profile databases under the Hermes home folder or Windows `LOCALAPPDATA`, so profile-specific usage updates live with the rest of the tool list. (#43)
-- **Home overview polish:** Home device rows now prioritize the highest-usage devices, disabled Trends has a direct turn-on action, and active tools are labeled as "Tracking" instead of "Detecting."
-
-### Fixed
-- **Archived client breakdowns:** cache hit, cache write, and output-token splits are restored when archived or untracked client sessions are shown in expanded rows.
+- **AI Tool Limits bars:** Settings -> AI Tool Limits now lets quota bars show either Remaining or Used, and the Limits and Home surfaces use the same display mode.
 
 ## Which file should I download?
 
@@ -51,18 +45,12 @@ open-source: https://github.com/junhoyeo/tokscale
 ## 更新内容
 
 ### 新增
-- **Claude Fable 每周上限：** Claude 现在会显示临时的 Fable-only 每周窗口。
-
-### 变更
-- **使用趋势设定：** 全新安装会默认采集趋势历史，已保存的关闭设定仍会保留；设置中也新增每 5、10、15、30、60 分钟扫描的间隔选项。
+- **数据导出：** 设置 -> 采集 -> 数据导出 现在可以一次性写出 CSV / JSON，也可以自动导出到文件夹，方便接入 Excel、Obsidian、自写脚本和仪表盘。（#61）
+- **CodeBuddy 和 WorkBuddy 追踪：** Token Monitor 现在会采集并显示 CodeBuddy 与 WorkBuddy 的用量，和现有工具一起统计。
+- **趋势活跃时间：** 当 tokscale 提供 session 时间数据时，趋势与历史摘要现在会显示活跃时间。
 
 ### 改进
-- **升级内置 Tokscale 至 4.0.9：** 修复 Grok `signals.json` 压缩总量对账，并解析 Kiro 执行文件与 GitHub Copilot Desktop SQLite 用量。
-- **Hermes 设定档追踪：** Hermes Agent 现在会扫描 Hermes home 或 Windows `LOCALAPPDATA` 下的 profile 数据库，profile 用量也会随工具列表一起更新。（#43）
-- **主页概览细节：** 主页设备列表现在优先显示用量最高的设备；趋势关闭时有直接启用按钮；活跃工具状态也从“检测中”改为“追踪中”。
-
-### 修复
-- **归档客户端明细：** 展开已归档或未追踪客户端的 session 时，会恢复缓存命中、缓存写入和输出 token 拆分，不再全部落到粗略明细里。
+- **AI 工具额度条：** 设置 -> AI 工具额度 现在可以选择额度条显示“剩余”或“已用”，额度页和主页会使用同一显示方式。
 
 ## 应该下载哪个文件？
 
