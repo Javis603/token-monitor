@@ -11,11 +11,19 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # Full Node coverage on Linux; latest-Node smoke on macOS/Windows to
+        # catch platform-specific bugs (tray on macOS, WSL/paths on Windows).
+        os: [ubuntu-latest]
         node-version: ['22', '24']
+        include:
+          - os: macos-latest
+            node-version: '24'
+          - os: windows-latest
+            node-version: '24'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,6 +32,9 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Verify vendored worker shared code is in sync
+        # Drift check is OS-independent; running it once on Linux avoids
+        # false positives from Windows CRLF checkout vs the LF sync writes.
+        if: runner.os == 'Linux'
         run: |
           npm run sync:worker
           git diff --exit-code worker/src/shared \
