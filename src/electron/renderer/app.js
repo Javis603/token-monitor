@@ -5222,19 +5222,6 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   restartTimer();
 });
 
-function pickWorstProvider(stats, windowFilter) {
-  const pair = window.TokenMonitorTrayText.pickWorstBarPair(stats, windowFilter || null);
-  return pair?.provider || null;
-}
-
-function pickWorstSessionProvider(stats) {
-  return pickBarPairForTrayMode(stats, 'barsSession')?.provider || null;
-}
-
-function pickWorstWeeklyProvider(stats) {
-  return pickBarPairForTrayMode(stats, 'barsWeekly')?.provider || null;
-}
-
 function pickBarPairForTrayMode(stats, mode) {
   return window.TokenMonitorTrayText.pickBarPairForTrayMode(stats, mode);
 }
@@ -5255,14 +5242,6 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 }
 
 const trayProviderImages = {};
-
-function trayBarWindowsForProvider(provider, windowFilter = null) {
-  const windows = (provider?.windows || [])
-    .filter(limitWindowEligible)
-    .filter((window) => !windowFilter || windowFilter(window))
-    .sort((a, b) => Number(a.remainingPercent) - Number(b.remainingPercent));
-  return [windows[0] || null, windows[1] || null];
-}
 
 function renderBarsIconFromPair(pick, height = 44, colors = {}, options = {}) {
   if (!pick?.firstWindow) return null;
@@ -5302,14 +5281,6 @@ function renderBarsIconFromPair(pick, height = 44, colors = {}, options = {}) {
   drawBar(layout.barsStartY, Number(pick.firstWindow.remainingPercent));
   drawBar(layout.barsStartY + layout.barHeight + layout.barGap, secondPercent);
   return canvas.toDataURL('image/png');
-}
-
-function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors = {}, options = {}) {
-  const provider = picker(stats);
-  if (!provider) return null;
-  const [firstWindow, secondWindow] = trayBarWindowsForProvider(provider);
-  if (!firstWindow) return null;
-  return renderBarsIconFromPair({ provider, firstWindow, secondWindow }, height, colors, options);
 }
 
 function pickConfiguredSessionProviders(stats, configOrder) {
@@ -5389,12 +5360,13 @@ function trayBarColors() {
   return dark
     ? { track: 'rgba(255, 255, 255, 0.35)', fill: 'rgba(255, 255, 255, 0.95)' }
     : { track: 'rgba(0, 0, 0, 0.32)', fill: 'rgba(0, 0, 0, 1)' };
+}
 
 async function maybeUpdateBarsIcon() {
   const mode = state.settings?.trayContent;
   if (mode !== 'bars' && mode !== 'barsSession' && mode !== 'barsWeekly' && mode !== 'barsAllSessions') return;
   if (!window.tokenMonitor.setTrayIcons) return;
-  const dataUrl = barsDataUrlForMode(mode, 44);
+  const dataUrl = barsDataUrlForMode(mode, 44, trayBarColors());
   if (!dataUrl) return;
   try { await window.tokenMonitor.setTrayIcons({ [mode]: dataUrl }); } catch (_) {}
 }
