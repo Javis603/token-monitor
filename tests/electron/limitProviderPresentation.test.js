@@ -431,16 +431,26 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
 });
 
 test('tray bars draw the billing window for a billing-only provider instead of two empty bars', () => {
-  // renderBarsIcon used to unconditionally draw session+weekly, painting two
-  // empty tracks for a Grok-only selection. It must now branch: session/weekly
-  // when present, else the single billing bar on the top track.
-  const app = readRendererFile('app.js');
-  const renderBarsIcon = functionBody(app, 'renderBarsIcon', 'renderAllSessionsIcon');
+  const { pickBarPairForTrayMode } = require('../../src/shared/trayText');
+  const stats = {
+    limits: {
+      providers: [{
+        provider: 'grok',
+        status: 'ok',
+        stale: false,
+        windows: [{ kind: 'billing', label: 'Monthly', remainingPercent: 42, showMeter: true }]
+      }]
+    }
+  };
+  const pick = pickBarPairForTrayMode(stats, 'barsSession');
+  assert.ok(pick, 'billing-only providers should still produce a tray bar pair');
+  assert.equal(pick.firstWindow.kind, 'billing');
 
-  assert.match(renderBarsIcon, /w\.kind === 'billing'/);
-  assert.match(renderBarsIcon, /if \(session \|\| weekly\)/);
-  assert.match(renderBarsIcon, /} else if \(billing\)/);
-  assert.match(renderBarsIcon, /drawBar\(layout\.barsStartY, Number\(billing\.remainingPercent\)\)/);
+  const app = readRendererFile('app.js');
+  const renderBarsIconFromPair = functionBody(app, 'renderBarsIconFromPair', 'pickConfiguredSessionProviders');
+  assert.match(renderBarsIconFromPair, /pick\.firstWindow/);
+  assert.match(renderBarsIconFromPair, /pick\.secondWindow/);
+  assert.match(renderBarsIconFromPair, /Number\(pick\.firstWindow\.remainingPercent\)/);
 });
 
 test('DeepSeek main Limits row uses a balance meter without since-tracking copy', () => {
