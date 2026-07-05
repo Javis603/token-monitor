@@ -46,6 +46,7 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
       ok: false,
       status: 500
     }),
+    existsSync: () => false,
     spawn: fakeSpawnForClaudeUsage()
   });
 

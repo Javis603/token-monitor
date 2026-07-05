@@ -391,6 +391,42 @@ test('extractUsageFromTokscale normalizes MiMo Code and ZCode client ids', () =>
   assert.equal(period.clients.zcode, 29);
 });
 
+test('extractUsageFromTokscale does not double-count zcode cacheRead because input is cache-inclusive', () => {
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      {
+        client: 'ZCode',
+        sessionId: 'sess-z1',
+        model: 'glm-5.2',
+        provider: 'zhipu',
+        input: 1000,
+        output: 50,
+        cacheRead: 800,
+        cacheWrite: 0,
+        reasoning: 10,
+        messageCount: 1,
+        cost: 0.1,
+        timestamp: '2026-07-05T00:00:00.000Z'
+      }
+    ]
+  });
+
+  assert.equal(period.clients.zcode, 1050);
+  assert.equal(period.totalTokens, 1050);
+  assert.equal(period.cacheReadTokens, 800);
+  assert.equal(period.clientCacheReads.zcode, 800);
+  assert.equal(period.clientOutputs.zcode, 50);
+
+  const session = period.sessions['zcode:sess-z1'];
+  assert.equal(session.totalTokens, 1050);
+  assert.equal(session.inputTokens, 200);
+  assert.equal(session.cacheReadTokens, 800);
+  assert.equal(session.outputTokens, 50);
+  assert.equal(session.reasoningTokens, 10);
+  assert.equal(session.models['glm-5.2'], 1050);
+});
+
 test('extractUsageFromTokscale normalizes Kiro client ids', () => {
   const period = extractUsageFromTokscale([
     { client: 'kiro', model: 'claude-sonnet-4', totalTokens: 31 },
