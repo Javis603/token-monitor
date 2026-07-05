@@ -68,18 +68,6 @@ function makeDb({ rows = [] } = {}) {
 
 // Use a fixed "now" so today/month boundaries are deterministic.
 const NOW = Date.UTC(2026, 5, 4, 14, 30, 0); // 2026-06-04T14:30:00Z
-// Today start: local midnight of that date. We compute it in local time.
-function todayStartMs() {
-  const d = new Date(NOW);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-function monthStartMs() {
-  const d = new Date(NOW);
-  d.setDate(1);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
 
 // Row timestamps relative to NOW:
 const T_TODAY_1  = NOW - 3 * 60 * 60 * 1000; // 3h ago — today
