@@ -93,15 +93,24 @@ function readZcodeRows(dbPath, sqliteMod, nowMs) {
     for (const row of rows) {
       const completedMs = num(row.completed_at);
       if (completedMs <= 0) continue; // should not happen given WHERE, but defensive
+      // ZCode's input_tokens is cache-INCLUSIVE (includes cache_read, like
+      // OpenAI/Gemini). usage.js's additive total formula is
+      // fresh_input + cache_read + output + cache_creation, so we MUST pass the
+      // FRESH input (input - cache_read) here — otherwise extractUsageFromTokscale
+      // would add cache_read twice (input already absorbed it + explicit cache_read).
+      // See cc-switch docs/guides/zcode-usage-tracking.md §3 ("getFreshInputTokens").
+      const inputTokensRaw = Math.max(0, num(row.input_tokens));
+      const cacheReadTokens = Math.max(0, num(row.cache_read_input_tokens));
+      const freshInput = Math.max(0, inputTokensRaw - cacheReadTokens);
       const neutral = {
         client: 'zcode',
         session_id: String(row.session_id || ''),
         model: String(row.model_id || ''),
         provider: String(row.provider_id || ''),
-        input_tokens: num(row.input_tokens),
+        input_tokens: freshInput,
         output_tokens: num(row.output_tokens),
         cache_write_tokens: num(row.cache_creation_input_tokens),
-        cache_read_tokens: num(row.cache_read_input_tokens),
+        cache_read_tokens: cacheReadTokens,
         // reasoning is informational only; not added to total (output already pure).
         // Kept in the row so extractUsageFromTokscale's REASONING_TOKEN_KEYS picks it up
         // for display, but tokenValue() won't sum it (see usage.js TOKEN_COMPONENT_KEYS).

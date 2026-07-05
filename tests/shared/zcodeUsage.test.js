@@ -117,10 +117,13 @@ maybe('cache read/write split preserved; reasoning not added to output', () => {
     ]
   });
 
-  const zc = collectZcodeUsage({ dbPath: file, nowMs: NOW });
+const zc = collectZcodeUsage({ dbPath: file, nowMs: NOW });
   assert.equal(zc.today.length, 1);
   const row = zc.today[0];
-  assert.equal(row.input_tokens, 7655);
+  // input stored in DB is cache-INCLUSIVE (7655 already absorbs the 2000 cache_read).
+  // zcodeUsage.js converts to fresh input = 7655 - 2000 = 5655 so usage.js's additive
+  // total formula (fresh_input + cache_read + output + cache_creation) doesn't double-count.
+  assert.equal(row.input_tokens, 5655);
   assert.equal(row.output_tokens, 71);
   assert.equal(row.cache_write_tokens, 500);
   assert.equal(row.cache_read_tokens, 2000);
@@ -128,17 +131,22 @@ maybe('cache read/write split preserved; reasoning not added to output', () => {
   // reasoning is informational only, not added to output
   assert.equal(row.output_tokens, 71);
 
-  // Now run through extractUsageFromTokscale and verify the period shape
+  // Now run through extractUsageFromTokscale and verify the period shape.
+  // Expected total = fresh_input + cache_read + output + cache_write
+  //               = 5655 + 2000 + 71 + 500 = 8226
+  // which equals the cache-inclusive input (7655) + output (71) + cache_creation (500)
+  // — the same number ZCode's own UI shows. This is the regression guard for the
+  // cache_read double-count bug (buggy impl summed to 10226).
   const period = extractUsageFromTokscale(zc.today);
-  assert.equal(period.clients.zcode, 7655 + 71 + 500 + 2000); // input+output+cache_creation+cache_read
+  assert.equal(period.clients.zcode, 8226);
   assert.equal(period.clientCacheReads.zcode, 2000);
   assert.equal(period.clientCacheWrites.zcode, 500);
   assert.equal(period.clientOutputs.zcode, 71);
   // model and session aggregation
-  assert.equal(period.models['deepseek-v4'], 7655 + 71 + 500 + 2000);
+  assert.equal(period.models['deepseek-v4'], 8226);
   const sessionKey = 'zcode:s1';
   assert.ok(period.sessions[sessionKey]);
-  assert.equal(period.sessions[sessionKey].inputTokens, 7655);
+  assert.equal(period.sessions[sessionKey].inputTokens, 5655); // fresh input
   assert.equal(period.sessions[sessionKey].outputTokens, 71);
   assert.equal(period.sessions[sessionKey].cacheReadTokens, 2000);
   assert.equal(period.sessions[sessionKey].cacheWriteTokens, 500);
