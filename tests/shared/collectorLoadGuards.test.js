@@ -137,7 +137,7 @@ test('watchPathsForClients watches Pi (incl. Oh My Pi), Zed (incl. native macOS)
     path.join('.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
     path.join('Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
     path.join('.local', 'share', 'mimocode'),
-    path.join('.zcode', 'projects'),
+    path.join('.zcode', 'cli', 'db'),
     path.join('.kiro', 'sessions', 'cli'),
     path.join('Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent'),
     path.join('.local', 'share', 'kiro-cli'),
@@ -159,7 +159,7 @@ test('watchPathsForClients watches Pi (incl. Oh My Pi), Zed (incl. native macOS)
     // so we must not watch it (would be a dead watch + a false "active" status).
     assert.ok(!dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
-    assert.ok(dirs.includes(path.join(tmp, '.zcode', 'projects')));
+    assert.ok(dirs.includes(path.join(tmp, '.zcode', 'cli', 'db')));
     // Kiro: tokscale reads the CLI sessions dir, the Kiro IDE globalStorage root,
     // and the kiro-cli sqlite dir — all home-relative, so we watch each.
     assert.ok(dirs.includes(path.join(tmp, '.kiro', 'sessions', 'cli')));
