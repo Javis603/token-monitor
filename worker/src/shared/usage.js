@@ -247,12 +247,13 @@ function looksLikeUsageRow(obj) {
 function freshInputRow(row, clientName) {
   if (!CACHE_INCLUSIVE_CLIENTS.has(clientName)) return row;
   const cacheRead = firstNumber(row, CACHE_READ_TOKEN_KEYS);
-  if (!cacheRead) return row;
+  const cacheWrite = firstNumber(row, CACHE_WRITE_TOKEN_KEYS);
+  if (!cacheRead && !cacheWrite) return row;
   const inputKey = INPUT_TOKEN_KEYS.find((key) => Object.prototype.hasOwnProperty.call(row, key));
   if (!inputKey) return row;
   const input = asNumber(row[inputKey]);
   if (!input) return row;
-  return { ...row, [inputKey]: Math.max(0, input - cacheRead) };
+  return { ...row, [inputKey]: Math.max(0, input - cacheRead - cacheWrite) };
 }
 
 function collectUsageRows(node, rows) {
