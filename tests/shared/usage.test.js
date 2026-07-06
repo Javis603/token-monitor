@@ -391,7 +391,11 @@ test('extractUsageFromTokscale normalizes MiMo Code and ZCode client ids', () =>
   assert.equal(period.clients.zcode, 29);
 });
 
-test('extractUsageFromTokscale does not double-count zcode cacheRead because input is cache-inclusive', () => {
+test('extractUsageFromTokscale passes zcode input straight through (tokscale normalizes cache upstream)', () => {
+  // tokscale >= 4.0.11 emits zcode rows whose `input` already excludes cache
+  // overlap (junhoyeo/tokscale#825), so zcode is aggregated like any other
+  // client with no local subtraction. If the removed workaround still ran it
+  // would subtract cache a second time (200 - 800 clamped to 0) and under-count.
   const period = extractUsageFromTokscale({
     groupBy: 'client,session,model',
     entries: [
@@ -400,7 +404,7 @@ test('extractUsageFromTokscale does not double-count zcode cacheRead because inp
         sessionId: 'sess-z1',
         model: 'glm-5.2',
         provider: 'zhipu',
-        input: 1000,
+        input: 200,
         output: 50,
         cacheRead: 800,
         cacheWrite: 0,
@@ -425,39 +429,6 @@ test('extractUsageFromTokscale does not double-count zcode cacheRead because inp
   assert.equal(session.outputTokens, 50);
   assert.equal(session.reasoningTokens, 10);
   assert.equal(session.models['glm-5.2'], 1050);
-});
-
-test('extractUsageFromTokscale strips both cache reads and writes from cache-inclusive zcode input', () => {
-  const period = extractUsageFromTokscale({
-    groupBy: 'client,session,model',
-    entries: [
-      {
-        client: 'ZCode',
-        sessionId: 'sess-z2',
-        model: 'claude-sonnet-5',
-        provider: 'anthropic',
-        input: 1000,
-        output: 50,
-        cacheRead: 600,
-        cacheWrite: 200,
-        messageCount: 1,
-        cost: 0.2,
-        timestamp: '2026-07-05T00:00:00.000Z'
-      }
-    ]
-  });
-
-  assert.equal(period.clients.zcode, 1050);
-  assert.equal(period.totalTokens, 1050);
-  assert.equal(period.cacheReadTokens, 600);
-  assert.equal(period.cacheWriteTokens, 200);
-
-  const session = period.sessions['zcode:sess-z2'];
-  assert.equal(session.totalTokens, 1050);
-  assert.equal(session.inputTokens, 200);
-  assert.equal(session.cacheReadTokens, 600);
-  assert.equal(session.cacheWriteTokens, 200);
-  assert.equal(session.outputTokens, 50);
 });
 
 test('extractUsageFromTokscale normalizes Kiro client ids', () => {
