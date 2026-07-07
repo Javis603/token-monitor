@@ -59,6 +59,24 @@ test('renderer uses the Kiro brand icon for the Kiro tool row', () => {
   assert.match(styles, /\.row-icon-kiro\s*\{[^}]*assets\/icons\/kiro\.svg/s);
 });
 
+test('renderer wires limit provider brand icons for Z.ai, Volcengine, and Qoder', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+
+  assert.match(source, /clientsWithIcon = new Set\(\[[\s\S]*'zai'[\s\S]*'volcengine'[\s\S]*'qoder'/);
+  assert.match(styles, /\.limit-icon-zai\s*\{[^}]*assets\/icons\/zai\.svg/s);
+  assert.match(styles, /\.limit-icon-volcengine\s*\{[^}]*assets\/icons\/volcengine\.svg/s);
+  assert.match(styles, /\.limit-icon-qoder\s*\{[^}]*assets\/icons\/qoder\.svg/s);
+});
+
+test('renderer wires the Doubao vendor icon for Doubao model rows', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+
+  assert.match(source, /clientsWithIcon = new Set\(\[[\s\S]*'doubao'[\s\S]*'volcengine'[\s\S]*'qoder'/);
+  assert.match(styles, /\.row-icon-doubao\s*\{[^}]*assets\/icons\/doubao\.svg/s);
+});
+
 test('renderer uses the CodeBuddy and WorkBuddy brand icons for their tool rows', () => {
   const styles = rendererStyles();
   assert.match(styles, /\.row-icon-codebuddy\s*\{[^}]*assets\/icons\/codebuddy\.svg/s);

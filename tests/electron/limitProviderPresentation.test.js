@@ -84,6 +84,16 @@ test('Minimax capability tags are localized in settings', () => {
   assert.match(i18n, /'settings\.limits\.capability\.apiKey': 'API 密钥'/);
 });
 
+test('Coding Plan capability tags are localized in settings', () => {
+  const app = readRendererFile('app.js');
+  const i18n = readRendererFile('i18n.js');
+
+  assert.match(app, /'Coding Plan': 'settings\.limits\.capability\.codingPlan'/);
+  assert.match(app, /'AK\/SK': 'settings\.limits\.capability\.akSk'/);
+  assert.match(i18n, /'settings\.limits\.capability\.codingPlan': 'Coding Plan'/);
+  assert.match(i18n, /'settings\.limits\.capability\.akSk': 'AK\/SK'/);
+});
+
 test('Grok CLI/Web capability tag is localized in settings', () => {
   const app = readRendererFile('app.js');
   const i18n = readRendererFile('i18n.js');
@@ -326,6 +336,44 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
+test('Qoder renders its single Credits billing window full-width', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'qoder'/);
+  assert.match(renderProviderWindows, /const credits = windowForKind\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /formatLimitCount\(credits, Boolean\(state\.settings\?\.showLimitUsed\)\)/);
+  assert.match(renderProviderWindows, /limit-window-wide/);
+});
+
+test('Volcengine renders 5-hour, Weekly, and Monthly quota windows', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'volcengine'/);
+  assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
+  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
+  assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /limitWindowNode\(session\.label \|\| '5-hour', session, color, 0\.95\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\('Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\)/);
+});
+
+test('Z.ai renders 5-hour and Weekly first, then MCP full-width', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'zai'/);
+  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
+  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
+  assert.match(renderProviderWindows, /const mcp = windowForKind\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /limitWindowNode\('5-hour', fiveHour, color, 0\.95\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /const mcpNode = limitWindowNode\('MCP', mcp, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /mcpNode\.classList\.add\('limit-window-wide'\)/);
+});
+
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
@@ -470,9 +518,9 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   assert.doesNotMatch(renderSettings, /state\.stats \? missingLimitProviderStatus\(\) : 'unavailable'/);
   assert.match(refreshStats, /renderLimitProviderCheckboxes\(\);/);
   assert.match(statsPush, /renderLimitProviderCheckboxes\(\);/);
-  // DeepSeek/Minimax account cards read state.stats, so every path that refreshes
-  // stats must re-render both. Grok is automatic and belongs only to the generic
-  // provider list, so it must not retain a separate account-card renderer.
+  // Account cards read state.stats, so every path that refreshes stats must
+  // re-render them. Grok is automatic and belongs only to the generic provider
+  // list, so it must not retain a separate account-card renderer.
   // Settings pushes route through syncSettingsForm (which init() also calls), so
   // the two cards are re-rendered there and
   // onSettingsPush itself does not duplicate the calls.
@@ -480,6 +528,11 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(refreshStats, new RegExp(`${fn}\\(\\);`), `${fn} missing from refreshStats`);
     assert.match(statsPush, new RegExp(`${fn}\\(\\);`), `${fn} missing from onStatsPush`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
+  }
+  for (const provider of ['zai', 'volcengine', 'qoder']) {
+    assert.match(refreshStats, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from refreshStats`);
+    assert.match(statsPush, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from onStatsPush`);
+    assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
   for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
     assert.doesNotMatch(settingsPush, new RegExp(`${fn}\\(\\);`), `${fn} should not be duplicated in onSettingsPush (syncSettingsForm covers it)`);
@@ -563,15 +616,21 @@ test('Copilot env token is documented in env example, not the README overview', 
   assert.doesNotMatch(readmeTw, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
 });
 
-test('Accounts summary counts Copilot as the sixth managed account group', () => {
+test('Accounts summary counts API-key and cookie account groups', () => {
   const app = readRendererFile('app.js');
   const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
 
   assert.match(summaryBody, /const minimaxLinked = minimaxAccountLinked\(\);/);
+  assert.match(summaryBody, /const zaiLinked = externalProviderAccountLinked\('zai'\);/);
+  assert.match(summaryBody, /const volcengineLinked = externalProviderAccountLinked\('volcengine'\);/);
+  assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(zaiLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 6/);
+  assert.match(summaryBody, /total: 9/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
@@ -636,5 +695,30 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'copilot', status: 'notConfigured' }),
     { label: 'Sign in', tone: 'setup' }
+  );
+});
+
+test('Z.ai, Volcengine, and Qoder source labels and setup statuses', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Coding Plan', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Coding Plan', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'qoder', source: 'web' }), 'Web');
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'zai', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'volcengine', status: 'unauthorized' }),
+    { label: 'Update API key', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'qoder', status: 'notConfigured' }),
+    { label: 'Sign in', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'qoder', status: 'unauthorized' }),
+    { label: 'Sign in again', tone: 'setup' }
   );
 });

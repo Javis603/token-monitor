@@ -4,7 +4,7 @@ const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', 
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy',
-  'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'cohere', 'xiaomi', 'minimax'
+  'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'cohere', 'xiaomi', 'minimax', 'doubao', 'volcengine', 'qoder'
 ]);
 
 function osIconFor(platform) {
@@ -69,7 +69,10 @@ const LIMIT_PROVIDERS = [
   { id: 'minimax', label: 'Minimax' },
   { id: 'grok', label: 'Grok' },
   { id: 'copilot', label: 'GitHub Copilot' },
-  { id: 'kiro', label: 'Kiro' }
+  { id: 'kiro', label: 'Kiro' },
+  { id: 'zai', label: 'GLM' },
+  { id: 'volcengine', label: 'Volcengine' },
+  { id: 'qoder', label: 'Qoder' }
 ];
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
@@ -106,7 +109,9 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Pay-as-you-go': 'settings.limits.capability.payg',
   Subscription: 'settings.limits.capability.subscription',
   'Token Plan': 'settings.limits.capability.tokenPlan',
+  'Coding Plan': 'settings.limits.capability.codingPlan',
   'API key': 'settings.limits.capability.apiKey',
+  'AK/SK': 'settings.limits.capability.akSk',
   'GitHub OAuth': 'settings.limits.capability.githubOAuth',
   API: 'settings.limits.capability.api',
   'Add API key': 'settings.limits.status.addApiKey',
@@ -181,7 +186,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, settingsInTitlebar: false };
 let preferenceDrag = null;
@@ -376,11 +381,14 @@ function settingsSectionSummary(section) {
     const opencodeCount = state.opencodeProfileCount || 0;
     const deepseekLinked = deepseekAccountLinked();
     const minimaxLinked = minimaxAccountLinked();
+    const zaiLinked = externalProviderAccountLinked('zai');
+    const volcengineLinked = externalProviderAccountLinked('volcengine');
+    const qoderLinked = externalProviderAccountLinked('qoder');
     const copilotLinked = copilotAccountLinked();
     const codexLinked = (state.settings?.codexManagedAccounts || []).length > 0;
     return t('settings.summary.accounts', {
-      linked: (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
-      total: 6
+      linked: (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (zaiLinked ? 1 : 0) + (volcengineLinked ? 1 : 0) + (qoderLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
+      total: 9
     });
   }
   if (section === 'limits') {
@@ -1055,15 +1063,15 @@ function formatLimitAmount(value) {
   return `$${number.toFixed(2)}`;
 }
 
-// "remaining/total" count for windows that expose absolute units (Kiro credits).
-// Trims trailing zeros so 49.91/50 and 18/50 both read cleanly. Empty when the
-// window has no used/limit pair.
-function formatLimitCount(window) {
+// Absolute count for windows that expose units (credits). It follows the same
+// display mode as percent bars: remaining/total in quota mode, used/total in
+// used mode.
+function formatLimitCount(window, showUsed = false) {
   const used = Number(window?.used);
   const limit = Number(window?.limit);
   if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return '';
   const trim = (n) => Number(Math.max(0, n).toFixed(2)).toString();
-  return `${trim(limit - used)}/${trim(limit)}`;
+  return `${trim(showUsed ? used : limit - used)}/${trim(limit)}`;
 }
 
 // One-line Overage value: "12.5 credits · $3.20" (credits used, then est. cost).
@@ -1442,6 +1450,32 @@ function renderProviderWindows(provider, color) {
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
+  } else if (provider.provider === 'zai') {
+    const fiveHour = windowForKind(provider, 'session');
+    const weekly = windowForKind(provider, 'weekly');
+    const mcp = windowForKind(provider, 'billing');
+    if (fiveHour) windows.append(limitWindowNode('5-hour', fiveHour, color, 0.95));
+    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
+    if (mcp) {
+      const mcpNode = limitWindowNode('MCP', mcp, color, 0.68);
+      mcpNode.classList.add('limit-window-wide');
+      windows.append(mcpNode);
+    }
+  } else if (provider.provider === 'volcengine') {
+    const session = windowForKind(provider, 'session');
+    const weekly = windowForKind(provider, 'weekly');
+    const monthly = windowForKind(provider, 'billing');
+    if (session) {
+      const sessionNode = limitWindowNode(session.label || '5-hour', session, color, 0.95);
+      if (!weekly && !monthly && session.label) sessionNode.classList.add('limit-window-wide');
+      windows.append(sessionNode);
+    }
+    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
+    if (monthly) {
+      const monthlyNode = limitWindowNode('Monthly', monthly, color, 0.68);
+      monthlyNode.classList.add('limit-window-wide');
+      windows.append(monthlyNode);
+    }
   } else if (provider.provider === 'kiro') {
     // Kiro exposes monthly credits (plus an optional bonus pool), both billing
     // windows. Render them full-width like Copilot's quota windows.
@@ -1455,10 +1489,32 @@ function renderProviderWindows(provider, color) {
         node.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(node);
       } else {
-        const node = limitWindowNode(billing?.label || 'Credits', billing, color, 0.68, null, formatLimitCount(billing));
+        const node = limitWindowNode(
+          billing?.label || 'Credits',
+          billing,
+          color,
+          0.68,
+          null,
+          formatLimitCount(billing, Boolean(state.settings?.showLimitUsed))
+        );
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
+    }
+  } else if (provider.provider === 'qoder') {
+    windows.classList.add('limit-windows-qoder');
+    const credits = windowForKind(provider, 'billing');
+    if (credits) {
+      const node = limitWindowNode(
+        credits?.label || 'Credits',
+        credits,
+        color,
+        0.68,
+        null,
+        formatLimitCount(credits, Boolean(state.settings?.showLimitUsed))
+      );
+      node.classList.add('limit-window-wide');
+      windows.append(node);
     }
   } else if (provider.provider === 'claude') {
     // Claude usually shows session + one all-models weekly, but can carry a second
@@ -1479,7 +1535,7 @@ function renderProviderWindows(provider, color) {
     // Default: render only the windows the provider actually has. Providers
     // that only expose a single window shouldn't leave a half-empty bar next to
     // the real one. (Grok is handled above; this branch covers minimax's
-    // 5h session + weekly pair and any future session/weekly provider.)
+    // session + weekly pair and any future session/weekly provider.)
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
@@ -2810,6 +2866,9 @@ async function refreshStats(options = {}) {
     renderWslPanel();
     renderDeepseekStatus();
     renderMinimaxStatus();
+    renderExternalProviderStatus('zai');
+    renderExternalProviderStatus('volcengine');
+    renderExternalProviderStatus('qoder');
     renderCopilotStatus();
     maybeUpdateBarsIcon();
     if (feedback) settleRefreshButtonState('refreshed');
@@ -3652,6 +3711,9 @@ function syncSettingsForm() {
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   renderDeepseekStatus();
   renderMinimaxStatus();
+  renderExternalProviderStatus('zai');
+  renderExternalProviderStatus('volcengine');
+  renderExternalProviderStatus('qoder');
   renderCopilotStatus();
   renderViewPreferences();
   renderToolPreferences();
@@ -5216,6 +5278,9 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     renderWslPanel();
     renderDeepseekStatus();
     renderMinimaxStatus();
+    renderExternalProviderStatus('zai');
+    renderExternalProviderStatus('volcengine');
+    renderExternalProviderStatus('qoder');
     renderCopilotStatus();
     maybeUpdateBarsIcon();
   }
@@ -5700,6 +5765,58 @@ function clearCopilotProviderStatus() {
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'copilot');
 }
 
+const externalLimitAccountConfig = {
+  zai: {
+    configuredKey: 'zaiApiKeyConfigured',
+    sourceKey: 'zaiApiKeySource',
+    pendingKey: 'zaiPendingCheckSince'
+  },
+  volcengine: {
+    configuredKey: 'volcengineCredentialsConfigured',
+    sourceKey: 'volcengineCredentialsSource',
+    pendingKey: 'volcenginePendingCheckSince'
+  },
+  qoder: {
+    configuredKey: 'qoderCookieConfigured',
+    sourceKey: 'qoderCookieSource',
+    pendingKey: 'qoderPendingCheckSince'
+  }
+};
+
+function externalProviderForAccount(providerName) {
+  const provider = localProviderStatus(providerName);
+  const config = externalLimitAccountConfig[providerName];
+  const pendingSince = Number(config ? state[config.pendingKey] : 0);
+  if (!provider || !pendingSince) return provider;
+  const updatedAt = Date.parse(provider.updatedAt || '');
+  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
+  state[config.pendingKey] = 0;
+  return provider;
+}
+
+function externalProviderAccountLinked(providerName) {
+  const config = externalLimitAccountConfig[providerName];
+  const provider = externalProviderForAccount(providerName);
+  return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
+}
+
+function markExternalProviderCheckPending(providerName) {
+  const config = externalLimitAccountConfig[providerName];
+  if (!config) return;
+  state[config.pendingKey] = Date.now();
+  clearExternalProviderPendingStatus(providerName);
+}
+
+function clearExternalProviderCheckPending(providerName) {
+  const config = externalLimitAccountConfig[providerName];
+  if (config) state[config.pendingKey] = 0;
+}
+
+function clearExternalProviderPendingStatus(providerName) {
+  if (!Array.isArray(state.stats?.limits?.providers)) return;
+  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
+}
+
 function nextCopilotSignInFlowId() {
   return `copilot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -5754,6 +5871,79 @@ function minimaxPlatformUrl() {
   return region === 'en'
     ? 'https://platform.minimax.io/user-center/payment/token-plan'
     : 'https://platform.minimaxi.com/user-center/payment/token-plan';
+}
+
+function setExternalAccountExpanded(providerName, expanded) {
+  const details = document.getElementById(`${providerName}SettingsDetails`);
+  const toggle = document.getElementById(`${providerName}SettingsToggle`);
+  if (!details || !toggle) return;
+  state[`${providerName}AccountExpanded`] = expanded;
+  details.classList.toggle('hidden', !expanded);
+  toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
+function zaiPlatformUrl() {
+  const selectedRegion = document.getElementById('zaiApiRegionInput')?.value;
+  const region = selectedRegion || (state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global');
+  return region === 'bigmodel-cn'
+    ? 'https://bigmodel.cn/coding-plan/personal/usage'
+    : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
+}
+
+function volcenginePlatformUrl() {
+  return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
+}
+
+function selectedQoderSite() {
+  const selectedSite = document.getElementById('qoderSiteInput')?.value;
+  return selectedSite || (state.settings?.qoderSite === 'cn' ? 'cn' : 'global');
+}
+
+function qoderUsagePagePath() {
+  return selectedQoderSite() === 'cn' ? 'qoder.com.cn/account/usage' : 'qoder.com/account/usage';
+}
+
+function qoderPlatformUrl() {
+  return `https://${qoderUsagePagePath()}`;
+}
+
+function updateQoderUsagePageHint() {
+  const hint = document.getElementById('qoderUsagePageHint');
+  if (hint) hint.textContent = qoderUsagePagePath();
+}
+
+function renderExternalProviderStatus(providerName) {
+  const config = externalLimitAccountConfig[providerName];
+  const statusEl = document.getElementById(`${providerName}AccountStatus`);
+  const openBtn = document.getElementById(`${providerName}OpenBrowser`);
+  const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
+  const refreshBtn = document.getElementById(`${providerName}RefreshButton`);
+  const manualPanel = document.getElementById(`${providerName}ManualPanel`);
+  const errorEl = document.getElementById(`${providerName}ErrorMessage`);
+  if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
+
+  errorEl.classList.add('hidden');
+  errorEl.textContent = '';
+
+  const source = state.settings?.[config.sourceKey] || '';
+  const provider = externalProviderForAccount(providerName);
+  const configured = Boolean(state.settings?.[config.configuredKey]);
+  const linked = externalProviderAccountLinked(providerName);
+  if (providerName === 'zai') {
+    const regionInput = document.getElementById('zaiApiRegionInput');
+    if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
+  }
+  if (providerName === 'qoder') {
+    const siteInput = document.getElementById('qoderSiteInput');
+    if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
+    updateQoderUsagePageHint();
+  }
+  setCursorStatusText(statusEl, apiKeyAccountStatusText(providerName, provider, configured, source));
+  manualPanel.classList.toggle('hidden', linked);
+  openBtn.classList.toggle('hidden', linked);
+  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
+  refreshBtn.classList.toggle('hidden', !configured);
+  renderSettingsSummaries();
 }
 
 function setMinimaxAccountExpanded(expanded) {
@@ -6521,6 +6711,169 @@ function setupCursorAccountUI() {
     });
   }
 
+  const zaiToggle = document.getElementById('zaiSettingsToggle');
+  if (zaiToggle) {
+    const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
+    if (zaiApiRegionInput) zaiApiRegionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
+    zaiApiRegionInput?.addEventListener('change', () => void saveSettings({ zaiApiRegion: zaiApiRegionInput.value || 'global' }));
+    zaiToggle.addEventListener('click', () => setExternalAccountExpanded('zai', !state.zaiAccountExpanded));
+    setExternalAccountExpanded('zai', false);
+    renderExternalProviderStatus('zai');
+
+    document.getElementById('zaiOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(zaiPlatformUrl());
+    });
+
+    document.getElementById('zaiLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ zaiApiKey: '' });
+      clearExternalProviderCheckPending('zai');
+      clearExternalProviderPendingStatus('zai');
+      renderExternalProviderStatus('zai');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('zaiRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('zaiApiKeySubmit').addEventListener('click', async () => {
+      const input = document.getElementById('zaiApiKeyInput');
+      const regionInput = document.getElementById('zaiApiRegionInput');
+      const errorEl = document.getElementById('zaiErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.zai.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('zai');
+        await saveSettings({ zaiApiKey: input.value, zaiApiRegion: regionInput?.value || 'global' });
+        input.value = '';
+        renderExternalProviderStatus('zai');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('zai', !externalProviderAccountLinked('zai'));
+        renderExternalProviderStatus('zai');
+      } catch (err) {
+        clearExternalProviderCheckPending('zai');
+        errorEl.textContent = t('settings.zai.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const volcengineToggle = document.getElementById('volcengineSettingsToggle');
+  if (volcengineToggle) {
+    volcengineToggle.addEventListener('click', () => setExternalAccountExpanded('volcengine', !state.volcengineAccountExpanded));
+    setExternalAccountExpanded('volcengine', false);
+    renderExternalProviderStatus('volcengine');
+
+    document.getElementById('volcengineOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(volcenginePlatformUrl());
+    });
+
+    document.getElementById('volcengineLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '' });
+      clearExternalProviderCheckPending('volcengine');
+      clearExternalProviderPendingStatus('volcengine');
+      renderExternalProviderStatus('volcengine');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('volcengineRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async () => {
+      const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
+      const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
+      const regionInput = document.getElementById('volcengineRegionInput');
+      const errorEl = document.getElementById('volcengineErrorMessage');
+      errorEl.classList.add('hidden');
+      const accessKeyValue = String(accessKeyInput.value || '').trim();
+      const secretValue = String(secretInput.value || '').trim();
+      if (!accessKeyValue || (/^AKLT/i.test(accessKeyValue) && !secretValue)) {
+        errorEl.textContent = t('settings.volcengine.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('volcengine');
+        await saveSettings({
+          volcengineAccessKeyId: accessKeyInput.value,
+          volcengineSecretAccessKey: secretInput.value,
+          volcengineRegion: regionInput.value || 'cn-beijing'
+        });
+        accessKeyInput.value = '';
+        secretInput.value = '';
+        renderExternalProviderStatus('volcengine');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('volcengine', !externalProviderAccountLinked('volcengine'));
+        renderExternalProviderStatus('volcengine');
+      } catch (err) {
+        clearExternalProviderCheckPending('volcengine');
+        errorEl.textContent = t('settings.volcengine.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const qoderToggle = document.getElementById('qoderSettingsToggle');
+  if (qoderToggle) {
+    qoderToggle.addEventListener('click', () => setExternalAccountExpanded('qoder', !state.qoderAccountExpanded));
+    setExternalAccountExpanded('qoder', false);
+    renderExternalProviderStatus('qoder');
+
+    const qoderSiteInput = document.getElementById('qoderSiteInput');
+    if (qoderSiteInput) qoderSiteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
+    updateQoderUsagePageHint();
+    qoderSiteInput?.addEventListener('change', () => {
+      updateQoderUsagePageHint();
+      void saveSettings({ qoderSite: qoderSiteInput.value || 'global' });
+    });
+
+    document.getElementById('qoderOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(qoderPlatformUrl());
+    });
+
+    document.getElementById('qoderLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ qoderCookie: '' });
+      clearExternalProviderCheckPending('qoder');
+      clearExternalProviderPendingStatus('qoder');
+      renderExternalProviderStatus('qoder');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('qoderRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('qoderCookieSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('qoderCookieInput');
+      const siteInput = document.getElementById('qoderSiteInput');
+      const errorEl = document.getElementById('qoderErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.qoder.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('qoder');
+        await saveSettings({ qoderCookie: input.value, qoderSite: siteInput?.value || 'global' });
+        input.value = '';
+        renderExternalProviderStatus('qoder');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('qoder', !externalProviderAccountLinked('qoder'));
+        renderExternalProviderStatus('qoder');
+      } catch (err) {
+        clearExternalProviderCheckPending('qoder');
+        errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
   const copilotToggle = document.getElementById('copilotSettingsToggle');
   if (copilotToggle) {
     copilotToggle.addEventListener('click', () => setCopilotAccountExpanded(!state.copilotAccountExpanded));
@@ -6665,7 +7018,10 @@ function initSettingsAnimationWrappers() {
     '#cursorManualPanel',
     '#opencodeManualPanel',
     '#deepseekManualPanel',
-    '#minimaxManualPanel'
+    '#minimaxManualPanel',
+    '#zaiManualPanel',
+    '#volcengineManualPanel',
+    '#qoderManualPanel'
   ].join(', ');
 
   document.querySelectorAll(selectors).forEach(el => {

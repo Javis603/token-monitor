@@ -216,22 +216,23 @@ test('DeepSeek account panel provides a first-class API key entry', () => {
   assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured\)/);
 });
 
-test('MiniMax key entry shares DeepSeek styling and Copilot uses the folded token entry', () => {
+test('API key account entries share styling and Copilot uses the folded token entry', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel'/);
+  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   assert.match(css, /#deepseekManualPanel\.hidden,\n#minimaxManualPanel\.hidden,/);
-  assert.match(css, /#minimaxManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
+  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
-  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -277,6 +278,49 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(flowBody, /const current = String\(state\.copilotSignInFlowId \|\| ''\);/);
   assert.match(flowBody, /const incoming = String\(flowId \|\| ''\);/);
   assert.match(flowBody, /return current && incoming === current;/);
+});
+
+test('Z.ai, Volcengine, and Qoder account panels are exposed in settings', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /<div id="zaiAccountGroup"[\s\S]*?<select id="zaiApiRegionInput">[\s\S]*?<input id="zaiApiKeyInput" type="password"[\s\S]*?<button id="zaiApiKeySubmit"[\s\S]*data-i18n="settings\.zai\.saveApiKey">/);
+  assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">API key \/ Access key ID[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="ark-\.\.\. or AKLT\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
+  assert.match(html, /<div id="qoderAccountGroup"[\s\S]*?<select id="qoderSiteInput">[\s\S]*?<textarea id="qoderCookieInput"[\s\S]*?<button id="qoderCookieSubmit"[\s\S]*data-i18n="settings\.qoder\.saveCookie">/);
+  const qoderDetails = html.match(/<div id="qoderSettingsDetails"[\s\S]*?<div id="qoderErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(qoderDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.qoder\.step1Before">[\s\S]*?<code id="qoderUsagePageHint">qoder\.com\/account\/usage<\/code>[\s\S]*?<span data-i18n="settings\.qoder\.step1After">/);
+  assert.doesNotMatch(qoderDetails, /<\/code>\s*\/\s*<code>qoder\.com\.cn\/account\/usage<\/code>/);
+  assert.match(qoderDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.qoder\.step2">/);
+  assert.match(qoderDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.qoder\.step3">/);
+  assert.match(qoderDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.qoder\.step4">/);
+  assert.doesNotMatch(qoderDetails, /settings\.qoder\.note/);
+
+  const app = readRendererFile('app.js');
+  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /saveSettings\(\{ zaiApiKey: input\.value, zaiApiRegion: regionInput\?\.value \|\| 'global' \}\)/);
+  assert.match(setupBody, /zaiApiRegionInput\?\.addEventListener\('change', \(\) => void saveSettings\(\{ zaiApiRegion: zaiApiRegionInput\.value \|\| 'global' \}\)\)/);
+  assert.match(setupBody, /const accessKeyValue = String\(accessKeyInput\.value \|\| ''\)\.trim\(\);/);
+  assert.match(setupBody, /\/\^AKLT\/i\.test\(accessKeyValue\) && !secretValue/);
+  assert.match(setupBody, /saveSettings\(\{\s*volcengineAccessKeyId: accessKeyInput\.value,[\s\S]*?volcengineSecretAccessKey: secretInput\.value,[\s\S]*?volcengineRegion: regionInput\.value \|\| 'cn-beijing'/);
+  assert.match(setupBody, /saveSettings\(\{ qoderCookie: input\.value, qoderSite: siteInput\?\.value \|\| 'global' \}\)/);
+  assert.match(setupBody, /qoderSiteInput\?\.addEventListener\('change', \(\) => \{[\s\S]*?updateQoderUsagePageHint\(\);[\s\S]*?void saveSettings\(\{ qoderSite: qoderSiteInput\.value \|\| 'global' \}\);[\s\S]*?\}\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(zaiPlatformUrl\(\)\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(volcenginePlatformUrl\(\)\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(qoderPlatformUrl\(\)\)/);
+
+  const qoderSiteBody = functionBody(app, 'selectedQoderSite', 'qoderUsagePagePath');
+  assert.match(qoderSiteBody, /document\.getElementById\('qoderSiteInput'\)\?\.value/);
+  assert.match(qoderSiteBody, /state\.settings\?\.qoderSite === 'cn' \? 'cn' : 'global'/);
+  const qoderPathBody = functionBody(app, 'qoderUsagePagePath', 'qoderPlatformUrl');
+  assert.match(qoderPathBody, /selectedQoderSite\(\) === 'cn' \? 'qoder\.com\.cn\/account\/usage' : 'qoder\.com\/account\/usage'/);
+  const qoderUrlBody = functionBody(app, 'qoderPlatformUrl', 'updateQoderUsagePageHint');
+  assert.match(qoderUrlBody, /return `https:\/\/\$\{qoderUsagePagePath\(\)\}`;/);
+
+  const zaiUrlBody = functionBody(app, 'zaiPlatformUrl', 'volcenginePlatformUrl');
+  assert.match(zaiUrlBody, /document\.getElementById\('zaiApiRegionInput'\)\?\.value/);
+  assert.match(zaiUrlBody, /return region === 'bigmodel-cn'/);
+  assert.match(zaiUrlBody, /https:\/\/bigmodel\.cn\/coding-plan\/personal\/usage/);
+  assert.match(zaiUrlBody, /https:\/\/z\.ai\/manage-apikey\/coding-plan\/personal\/my-plan/);
+  const volcengineUrlBody = functionBody(app, 'volcenginePlatformUrl', 'qoderPlatformUrl');
+  assert.match(volcengineUrlBody, /console\.volcengine\.com\/ark\/region:ark\+cn-beijing\/openManagement/);
 });
 
 test('DeepSeek account linked state requires a validated API key', () => {
@@ -366,6 +410,13 @@ test('DeepSeek account copy says browser and external URL is allowlisted', () =>
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/platform\.deepseek\.com\/api_keys'\)/);
 });
 
+test('Z.ai global and BigModel CN browser links are allowlisted', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /parsed\.hostname === 'z\.ai' \|\| parsed\.hostname === 'www\.z\.ai'/);
+  assert.match(allowlist, /parsed\.hostname === 'bigmodel\.cn' \|\| parsed\.hostname === 'www\.bigmodel\.cn'/);
+});
+
 test('opencode status env account avoids saved profile names', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const handler = main.slice(
@@ -388,6 +439,21 @@ test('settingsForRenderer strips OpenCode cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+});
+
+test('main settings normalize the Z.ai API region', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
+  assert.match(defaults, /zaiApiRegion: normalizeZaiApiRegion\(process\.env\.TOKEN_MONITOR_ZAI_API_REGION \|\| process\.env\.ZAI_API_REGION \|\| process\.env\.Z_AI_API_HOST \|\| 'global'\)/);
+
+  const handler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('customPricing:list'")
+  );
+  assert.match(handler, /const previousZaiApiRegion = settings\.zaiApiRegion;/);
+  assert.match(handler, /if \(patch\.zaiApiRegion !== undefined\) normalizedPatch\.zaiApiRegion = normalizeZaiApiRegion\(patch\.zaiApiRegion\);/);
+  assert.match(handler, /zaiApiRegion: patch\.zaiApiRegion !== undefined \? normalizeZaiApiRegion\(patch\.zaiApiRegion\) : normalizeZaiApiRegion\(settings\.zaiApiRegion \|\| 'global'\)/);
+  assert.match(handler, /settings\.zaiApiRegion !== previousZaiApiRegion/);
 });
 
 test('collection cadence setting is exposed in the Collection panel', () => {
@@ -442,4 +508,22 @@ test('main settings normalize collection cadence and restart collectors when it 
   assert.match(updateHandler, /collectionIntervalMs: normalizeCollectionIntervalMs/);
   assert.match(updateHandler, /settings\.collectionMode !== previousCollectionMode/);
   assert.match(updateHandler, /settings\.collectionIntervalMs !== previousCollectionIntervalMs/);
+});
+
+test('main collectors pass GUI limit credentials in every widget mode', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const collectors = [
+    functionBodyBeforeMarker(main, 'startSyncCollector', '// Host mode'),
+    functionBody(main, 'startHostCollector', 'stopHostStats'),
+    functionBody(main, 'startLocalCollector', 'scheduleStreamRetry')
+  ];
+  for (const collector of collectors) {
+    assert.match(collector, /zaiApiKey: settings\.zaiApiKey \|\| ''/);
+    assert.match(collector, /zaiApiRegion: settings\.zaiApiRegion \|\| 'global'/);
+    assert.match(collector, /volcengineAccessKeyId: settings\.volcengineAccessKeyId \|\| ''/);
+    assert.match(collector, /volcengineSecretAccessKey: settings\.volcengineSecretAccessKey \|\| ''/);
+    assert.match(collector, /volcengineRegion: settings\.volcengineRegion \|\| ''/);
+    assert.match(collector, /qoderCookie: settings\.qoderCookie \|\| ''/);
+    assert.match(collector, /qoderSite: settings\.qoderSite \|\| 'global'/);
+  }
 });

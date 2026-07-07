@@ -27,12 +27,15 @@ test('clientColors carries the known palette and a default', () => {
   assert.equal(clientColors.claude, '#cc7c5e');
   assert.equal(clientColors.codex, '#49a3b0');
   assert.equal(clientColors.cline, '#323B43');
+  assert.equal(clientColors.volcengine, '#006EFF');
+  assert.equal(clientColors.qoder, '#2ADB5C');
   assert.equal(typeof clientColors.default, 'string');
 });
 
 test('modelVendorFor maps families and modelColor falls back deterministically', () => {
   assert.equal(modelVendorFor('claude-sonnet-4'), 'claude');
   assert.equal(modelVendorFor('gpt-5'), 'codex');
+  assert.equal(modelVendorFor('doubao-seed-1.6'), 'doubao');
   assert.equal(modelColor('claude-opus'), clientColors.claude);
   assert.equal(modelColor('totally-unknown'), modelColor('totally-unknown')); // stable
 });

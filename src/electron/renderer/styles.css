@@ -2084,6 +2084,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-cohere     { -webkit-mask-image: url(../../../assets/icons/cohere.svg);        mask-image: url(../../../assets/icons/cohere.svg); }
 .row-icon-xiaomi     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
+.row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
+.row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
+.row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
@@ -2139,6 +2142,18 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .limit-icon-kiro {
   -webkit-mask-image: url(../../../assets/icons/kiro.svg);
   mask-image: url(../../../assets/icons/kiro.svg);
+}
+.limit-icon-zai {
+  -webkit-mask-image: url(../../../assets/icons/zai.svg);
+  mask-image: url(../../../assets/icons/zai.svg);
+}
+.limit-icon-volcengine {
+  -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
+  mask-image: url(../../../assets/icons/volcengine.svg);
+}
+.limit-icon-qoder {
+  -webkit-mask-image: url(../../../assets/icons/qoder.svg);
+  mask-image: url(../../../assets/icons/qoder.svg);
 }
 .row-label {
   display: grid;
@@ -2883,25 +2898,37 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #opencodeManualPanel.hidden,
 #deepseekManualPanel.hidden,
 #minimaxManualPanel.hidden,
+#zaiManualPanel.hidden,
+#volcengineManualPanel.hidden,
+#qoderManualPanel.hidden,
 #copilotManualPanel.hidden,
 #copilotManualDetails.hidden,
 #cursorErrorMessage.hidden,
 #opencodeErrorMessage.hidden,
 #deepseekErrorMessage.hidden,
 #minimaxErrorMessage.hidden,
+#zaiErrorMessage.hidden,
+#volcengineErrorMessage.hidden,
+#qoderErrorMessage.hidden,
 #copilotErrorMessage.hidden,
 #copilotLoginStatus.hidden { display: none; }
 #cursorManualPanel,
 #opencodeManualPanel,
 #deepseekManualPanel,
 #minimaxManualPanel,
+#zaiManualPanel,
+#volcengineManualPanel,
+#qoderManualPanel,
 #copilotManualPanel {
   min-width: 0;
 }
 #cursorManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
 #deepseekManualPanel > .accordion-animation-inner,
-#minimaxManualPanel > .accordion-animation-inner {
+#minimaxManualPanel > .accordion-animation-inner,
+#zaiManualPanel > .accordion-animation-inner,
+#volcengineManualPanel > .accordion-animation-inner,
+#qoderManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
@@ -2910,10 +2937,24 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #opencodeManualPanel textarea,
 #deepseekManualPanel input,
 #minimaxManualPanel input,
+#zaiManualPanel input,
+#zaiApiRegionInput,
+#volcengineManualPanel input,
+#qoderManualPanel textarea,
+#qoderManualPanel select,
 #copilotManualDetails input {
   width: 100%;
-  font-family: monospace;
   font-size: 12px;
+}
+#cursorManualPanel textarea,
+#opencodeManualPanel textarea,
+#deepseekManualPanel input,
+#minimaxManualPanel input,
+#zaiManualPanel input,
+#volcengineManualPanel input,
+#qoderManualPanel textarea,
+#copilotManualDetails input {
+  font-family: monospace;
 }
 .link-button {
   background: none;

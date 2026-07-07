@@ -19,7 +19,7 @@ const { startCollector, lookupModelPricing, normalizeHistoryIntervalMs } = requi
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken } = require('../shared/limitCollector');
+const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, volcengineCredentials, qoderCookie } = require('../shared/limitCollector');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
 const {
@@ -222,6 +222,13 @@ function defaultSettings() {
     minimaxApiKey: '',
     copilotApiToken: '',
     copilotEnterpriseHost: '',
+    zaiApiKey: '',
+    zaiApiRegion: normalizeZaiApiRegion(process.env.TOKEN_MONITOR_ZAI_API_REGION || process.env.ZAI_API_REGION || process.env.Z_AI_API_HOST || 'global'),
+    volcengineAccessKeyId: '',
+    volcengineSecretAccessKey: '',
+    volcengineRegion: '',
+    qoderCookie: '',
+    qoderSite: 'global',
     codexManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
@@ -282,6 +289,49 @@ function normalizeCopilotApiToken(value) {
 
 function currentCopilotApiToken() {
   return settings?.copilotApiToken || copilotToken(process.env);
+}
+
+function normalizeSecretSetting(value) {
+  let raw = String(value || '').trim();
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  return raw;
+}
+
+function normalizeZaiApiKey(value) {
+  return zaiToken({}, String(value || ''));
+}
+
+function normalizeZaiApiRegion(value) {
+  return zaiRegion({ zaiApiRegion: value }, {});
+}
+
+function currentZaiApiKey() {
+  return settings?.zaiApiKey || zaiToken(process.env);
+}
+
+function normalizeVolcengineRegion(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw || '';
+}
+
+function currentVolcengineCredentials() {
+  return volcengineCredentials(process.env, settings || {});
+}
+
+function normalizeQoderCookie(value) {
+  return qoderCookie({}, { qoderCookie: String(value || '') });
+}
+
+function normalizeQoderSite(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'cn' || raw === 'china' || raw.includes('qoder.com.cn')) return 'cn';
+  return 'global';
+}
+
+function currentQoderCookie() {
+  return settings?.qoderCookie || qoderCookie(process.env);
 }
 
 function normalizeCopilotEnterpriseHost(value) {
@@ -1266,6 +1316,13 @@ function startSyncCollector() {
     minimaxApiKey: settings.minimaxApiKey || '',
     copilotApiToken: settings.copilotApiToken || '',
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
+    zaiApiKey: settings.zaiApiKey || '',
+    zaiApiRegion: settings.zaiApiRegion || 'global',
+    volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
+    volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
+    volcengineRegion: settings.volcengineRegion || '',
+    qoderCookie: settings.qoderCookie || '',
+    qoderSite: settings.qoderSite || 'global',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: async (summary) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -1309,6 +1366,13 @@ function startHostCollector() {
     minimaxApiKey: settings.minimaxApiKey || '',
     copilotApiToken: settings.copilotApiToken || '',
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
+    zaiApiKey: settings.zaiApiKey || '',
+    zaiApiRegion: settings.zaiApiRegion || 'global',
+    volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
+    volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
+    volcengineRegion: settings.volcengineRegion || '',
+    qoderCookie: settings.qoderCookie || '',
+    qoderSite: settings.qoderSite || 'global',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: (summary) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -1485,6 +1549,13 @@ function startLocalCollector() {
     minimaxApiKey: settings.minimaxApiKey || '',
     copilotApiToken: settings.copilotApiToken || '',
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
+    zaiApiKey: settings.zaiApiKey || '',
+    zaiApiRegion: settings.zaiApiRegion || 'global',
+    volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
+    volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
+    volcengineRegion: settings.volcengineRegion || '',
+    qoderCookie: settings.qoderCookie || '',
+    qoderSite: settings.qoderSite || 'global',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: (summary, reason) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -1691,11 +1762,31 @@ function settingsForRenderer() {
     : copilotToken(process.env)
       ? 'env'
       : '';
+  const zaiApiKeySource = settings?.zaiApiKey
+    ? 'settings'
+    : zaiToken(process.env)
+      ? 'env'
+      : '';
+  const volcengineCredentialsSource = volcengineCredentials({}, settings || {})
+    ? 'settings'
+    : volcengineCredentials(process.env)
+      ? 'env'
+      : '';
+  const qoderCookieSource = settings?.qoderCookie
+    ? 'settings'
+    : qoderCookie(process.env)
+      ? 'env'
+      : '';
   return {
     ...settings,
     deepseekApiKey: '',
     minimaxApiKey: '',
     copilotApiToken: '',
+    zaiApiKey: '',
+    zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
+    volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
+    volcengineSecretAccessKey: '',
+    qoderCookie: settings?.qoderCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
     // know whether a cookie is configured, not its value.
     opencodeCookie: settings?.opencodeCookie ? 'set' : '',
@@ -1709,6 +1800,12 @@ function settingsForRenderer() {
     minimaxApiKeySource,
     copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
     copilotApiTokenSource,
+    zaiApiKeyConfigured: Boolean(currentZaiApiKey()),
+    zaiApiKeySource,
+    volcengineCredentialsConfigured: Boolean(currentVolcengineCredentials()),
+    volcengineCredentialsSource,
+    qoderCookieConfigured: Boolean(currentQoderCookie()),
+    qoderCookieSource,
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
@@ -2151,6 +2248,10 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'platform.deepseek.com' && parsed.pathname.startsWith('/api_keys')) return true;
   if (parsed.hostname === 'platform.minimaxi.com') return true;
   if (parsed.hostname === 'platform.minimax.io') return true;
+  if (parsed.hostname === 'z.ai' || parsed.hostname === 'www.z.ai') return true;
+  if (parsed.hostname === 'bigmodel.cn' || parsed.hostname === 'www.bigmodel.cn') return true;
+  if (parsed.hostname === 'www.volcengine.com' || parsed.hostname === 'console.volcengine.com') return true;
+  if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
@@ -2489,6 +2590,13 @@ app.whenReady().then(() => {
     const previousMinimaxApiKey = settings.minimaxApiKey;
     const previousCopilotApiToken = settings.copilotApiToken;
     const previousCopilotEnterpriseHost = settings.copilotEnterpriseHost;
+    const previousZaiApiKey = settings.zaiApiKey;
+    const previousZaiApiRegion = settings.zaiApiRegion;
+    const previousVolcengineAccessKeyId = settings.volcengineAccessKeyId;
+    const previousVolcengineSecretAccessKey = settings.volcengineSecretAccessKey;
+    const previousVolcengineRegion = settings.volcengineRegion;
+    const previousQoderCookie = settings.qoderCookie;
+    const previousQoderSite = settings.qoderSite;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousShowTrayIcon = settings.showTrayIcon;
     const previousTrayMode = settings.trayMode;
@@ -2505,6 +2613,13 @@ app.whenReady().then(() => {
     if (patch.minimaxApiKey !== undefined) normalizedPatch.minimaxApiKey = normalizeMinimaxApiKey(patch.minimaxApiKey);
     if (patch.copilotApiToken !== undefined) normalizedPatch.copilotApiToken = normalizeCopilotApiToken(patch.copilotApiToken);
     if (patch.copilotEnterpriseHost !== undefined) normalizedPatch.copilotEnterpriseHost = normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost);
+    if (patch.zaiApiKey !== undefined) normalizedPatch.zaiApiKey = normalizeZaiApiKey(patch.zaiApiKey);
+    if (patch.zaiApiRegion !== undefined) normalizedPatch.zaiApiRegion = normalizeZaiApiRegion(patch.zaiApiRegion);
+    if (patch.volcengineAccessKeyId !== undefined) normalizedPatch.volcengineAccessKeyId = normalizeSecretSetting(patch.volcengineAccessKeyId);
+    if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
+    if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
+    if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
+    if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     settings = normalizeWindowBehaviorSettings({
@@ -2564,6 +2679,13 @@ app.whenReady().then(() => {
       minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
       copilotApiToken: patch.copilotApiToken !== undefined ? normalizeCopilotApiToken(patch.copilotApiToken) : (settings.copilotApiToken || ''),
       copilotEnterpriseHost: patch.copilotEnterpriseHost !== undefined ? normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost) : (settings.copilotEnterpriseHost || ''),
+      zaiApiKey: patch.zaiApiKey !== undefined ? normalizeZaiApiKey(patch.zaiApiKey) : (settings.zaiApiKey || ''),
+      zaiApiRegion: patch.zaiApiRegion !== undefined ? normalizeZaiApiRegion(patch.zaiApiRegion) : normalizeZaiApiRegion(settings.zaiApiRegion || 'global'),
+      volcengineAccessKeyId: patch.volcengineAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAccessKeyId) : (settings.volcengineAccessKeyId || ''),
+      volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
+      volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
+      qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
+      qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
@@ -2615,7 +2737,14 @@ app.whenReady().then(() => {
       settings.deepseekApiKey !== previousDeepSeekApiKey ||
       settings.minimaxApiKey !== previousMinimaxApiKey ||
       settings.copilotApiToken !== previousCopilotApiToken ||
-      settings.copilotEnterpriseHost !== previousCopilotEnterpriseHost
+      settings.copilotEnterpriseHost !== previousCopilotEnterpriseHost ||
+      settings.zaiApiKey !== previousZaiApiKey ||
+      settings.zaiApiRegion !== previousZaiApiRegion ||
+      settings.volcengineAccessKeyId !== previousVolcengineAccessKeyId ||
+      settings.volcengineSecretAccessKey !== previousVolcengineSecretAccessKey ||
+      settings.volcengineRegion !== previousVolcengineRegion ||
+      settings.qoderCookie !== previousQoderCookie ||
+      settings.qoderSite !== previousQoderSite
     ) {
       startMode();
     }

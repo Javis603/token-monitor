@@ -22,6 +22,12 @@ const copilotLimits = require('./copilotLimits');
 const { copilotToken, fetchCopilotLimits } = copilotLimits;
 const kiroLimits = require('./kiroLimits');
 const { parseKiroUsage, fetchKiroLimits } = kiroLimits;
+const zaiLimits = require('./zaiLimits');
+const { zaiToken, zaiRegion, fetchZaiLimits } = zaiLimits;
+const volcengineLimits = require('./volcengineLimits');
+const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
+const qoderLimits = require('./qoderLimits');
+const { qoderCookie, fetchQoderLimits } = qoderLimits;
 const {
   grokCredential,
   readAuthJson,
@@ -32,7 +38,7 @@ const {
   fetchGrokLimits
 } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro'];
+const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder'];
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -2299,6 +2305,9 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     grok: (providerOptions) => grokLimits.fetchGrokLimits(providerOptions, deps),
     copilot: (providerOptions) => copilotLimits.fetchCopilotLimits(providerOptions, deps),
     kiro: (providerOptions) => kiroLimits.fetchKiroLimits(providerOptions, deps),
+    zai: (providerOptions) => zaiLimits.fetchZaiLimits(providerOptions, deps),
+    volcengine: (providerOptions) => volcengineLimits.fetchVolcengineLimits(providerOptions, deps),
+    qoder: (providerOptions) => qoderLimits.fetchQoderLimits(providerOptions, deps),
     ...(deps.providerFetchers || {})
   };
   const providers = [];
@@ -2538,6 +2547,13 @@ module.exports = {
   fetchCopilotLimits,
   parseKiroUsage,
   fetchKiroLimits,
+  zaiToken,
+  zaiRegion,
+  fetchZaiLimits,
+  volcengineCredentials,
+  fetchVolcengineLimits,
+  qoderCookie,
+  fetchQoderLimits,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   mapCodexRateLimitsToProvider,

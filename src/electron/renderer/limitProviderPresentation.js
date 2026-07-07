@@ -24,7 +24,10 @@
     minimax: { api: 'API' },
     grok: { rpc: 'CLI', web: 'Web' },
     copilot: { api: 'API' },
-    kiro: { cli: 'CLI' }
+    kiro: { cli: 'CLI' },
+    zai: { api: 'API' },
+    volcengine: { api: 'API' },
+    qoder: { web: 'Web' }
   };
 
   const CODEX_RPC_DETAIL_LABELS = {
@@ -44,7 +47,10 @@
     minimax: ['Token Plan', 'API key'],
     grok: ['Auto', 'CLI/Web'],
     copilot: ['Manual login', 'API'],
-    kiro: ['Auto', 'CLI']
+    kiro: ['Auto', 'CLI'],
+    zai: ['Coding Plan', 'API key'],
+    volcengine: ['Coding Plan', 'API key'],
+    qoder: ['Manual login', 'Web']
   };
 
   // Capability hint -> the status label it would duplicate. When that status is
@@ -130,9 +136,11 @@
     if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
     if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };
     if (status === 'unauthorized') {
-      return providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot'
+      return providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'zai' || providerName === 'volcengine'
         ? { label: 'Update API key', tone: 'setup' }
-        : providerName === 'grok'
+        : providerName === 'qoder'
+          ? { label: 'Sign in again', tone: 'setup' }
+          : providerName === 'grok'
           ? { label: 'Re-login', tone: 'setup' }
           : { label: 'Sign in again', tone: 'setup' };
     }
@@ -141,8 +149,8 @@
     if (status === 'unavailable') return { label: 'Unavailable', tone: 'warn' };
     if (status === 'notConfigured') {
       if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot') return { label: 'Sign in', tone: 'setup' };
-      if (providerName === 'deepseek' || providerName === 'minimax') return { label: 'Add API key', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'volcengine') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
       if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
       return { label: 'Not set up', tone: 'setup' };

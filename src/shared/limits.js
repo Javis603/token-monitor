@@ -1,7 +1,7 @@
 'use strict';
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
-const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro']);
+const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder']);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'managed', 'unknown']);

@@ -534,6 +534,108 @@
                 <div id="minimaxErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="zaiAccountGroup" class="settings-group cursor-account-group">
+              <button id="zaiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiSettingsDetails">
+                <span data-i18n="settings.zai.title">Z.ai Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="zaiAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="zaiSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="zaiOpenBrowser" data-i18n="settings.zai.openBrowser">Open GLM Coding Plan</button>
+                  <button id="zaiLogoutButton" class="hidden" data-i18n="settings.zai.clearApiKey">Clear key</button>
+                  <button id="zaiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div class="settings-row">
+                  <label for="zaiApiRegionInput" data-i18n="settings.zai.apiRegion">API region</label>
+                  <select id="zaiApiRegionInput">
+                    <option value="global" data-i18n="settings.zai.regionGlobal">Global (api.z.ai)</option>
+                    <option value="bigmodel-cn" data-i18n="settings.zai.regionBigmodelCn">BigModel CN (open.bigmodel.cn)</option>
+                  </select>
+                </div>
+                <div id="zaiManualPanel">
+                  <p class="settings-note" data-i18n="settings.zai.note">Paste a Z.ai API key for GLM Coding Plan quota lookup.</p>
+                  <input id="zaiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.zai.apiKeyPlaceholder" />
+                  <div class="settings-actions">
+                    <button id="zaiApiKeySubmit" data-i18n="settings.zai.saveApiKey">Save API key</button>
+                  </div>
+                </div>
+                <div id="zaiErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="volcengineAccountGroup" class="settings-group cursor-account-group">
+              <button id="volcengineSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="volcengineSettingsDetails">
+                <span data-i18n="settings.volcengine.title">Volcengine Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="volcengineAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="volcengineSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="volcengineOpenBrowser" data-i18n="settings.volcengine.openBrowser">Open Volcengine Ark console</button>
+                  <button id="volcengineLogoutButton" class="hidden" data-i18n="settings.volcengine.clearCredentials">Clear credentials</button>
+                  <button id="volcengineRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="volcengineManualPanel">
+                  <p class="settings-note" data-i18n="settings.volcengine.note">Paste an Ark API key, or use a Volcengine access key ID with the secret field for Coding Plan usage.</p>
+                  <div class="settings-row">
+                    <label for="volcengineAccessKeyInput" data-i18n="settings.volcengine.accessKeyId">API key / Access key ID</label>
+                    <input id="volcengineAccessKeyInput" type="password" spellcheck="false" placeholder="ark-... or AKLT..." data-i18n-placeholder="settings.volcengine.accessKeyPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="volcengineSecretAccessKeyInput" data-i18n="settings.volcengine.secretAccessKey">Secret access key</label>
+                    <input id="volcengineSecretAccessKeyInput" type="password" spellcheck="false" placeholder="..." data-i18n-placeholder="settings.volcengine.secretKeyPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="volcengineRegionInput" data-i18n="settings.volcengine.region">Region (optional)</label>
+                    <input id="volcengineRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
+                  </div>
+                  <div class="settings-actions">
+                    <button id="volcengineCredentialsSubmit" data-i18n="settings.volcengine.saveCredentials">Save credentials</button>
+                  </div>
+                </div>
+                <div id="volcengineErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="qoderAccountGroup" class="settings-group cursor-account-group">
+              <button id="qoderSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="qoderSettingsDetails">
+                <span data-i18n="settings.qoder.title">Qoder Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="qoderAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="qoderSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="qoderOpenBrowser" data-i18n="settings.qoder.openBrowser">Open Qoder usage</button>
+                  <button id="qoderLogoutButton" class="hidden" data-i18n="settings.qoder.clearCookie">Clear cookie</button>
+                  <button id="qoderRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="qoderManualPanel">
+                  <div class="settings-row">
+                    <label for="qoderSiteInput" data-i18n="settings.qoder.site">Site</label>
+                    <select id="qoderSiteInput">
+                      <option value="global" data-i18n="settings.qoder.siteGlobal">qoder.com</option>
+                      <option value="cn" data-i18n="settings.qoder.siteCn">qoder.com.cn</option>
+                    </select>
+                  </div>
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.qoder.step1Before">Open the selected Qoder usage page</span> <code id="qoderUsagePageHint">qoder.com/account/usage</code> <span data-i18n="settings.qoder.step1After">in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.qoder.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the big_model_credits request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.qoder.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.qoder.step4">Paste it below and click Save cookie.</span>
+                  </p>
+                  <textarea id="qoderCookieInput" rows="3" spellcheck="false" placeholder="session=..." data-i18n-placeholder="settings.qoder.cookiePlaceholder"></textarea>
+                  <div class="settings-actions">
+                    <button id="qoderCookieSubmit" data-i18n="settings.qoder.saveCookie">Save cookie</button>
+                  </div>
+                </div>
+                <div id="qoderErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="copilotAccountGroup" class="settings-group cursor-account-group">
               <button id="copilotSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="copilotSettingsDetails">
                 <span data-i18n="settings.copilot.title">GitHub Copilot Account</span>
