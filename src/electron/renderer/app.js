@@ -2559,6 +2559,8 @@ function homeActivityTooltipEl() {
   const count = document.createElement('span');
   count.className = 'home-activity-tooltip-count';
   count.dataset.homeActivityTooltipCount = 'true';
+  count.setAttribute('aria-live', 'polite');
+  count.setAttribute('aria-atomic', 'true');
 
   const label = document.createElement('span');
   label.className = 'home-activity-tooltip-label';
@@ -2576,6 +2578,58 @@ function homeActivityTooltipEl() {
   return tooltip;
 }
 
+function renderTooltipTextReel(container, valueText, options) {
+  const o = Object.assign({ maxStagger: 4, staggerMs: 16 }, options || {});
+  const text = String(valueText || '');
+  container.setAttribute('aria-label', text);
+  const prevText = container.dataset.renderedValue || '';
+  if (prevText === text && container.childNodes.length) return;
+  container.dataset.renderedValue = text;
+
+  const fragment = document.createDocumentFragment();
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (/\d/.test(ch)) {
+      const digit = document.createElement('span');
+      digit.className = 'home-activity-tooltip-digit';
+      digit.dataset.digit = ch;
+
+      const reel = document.createElement('span');
+      reel.className = 'home-activity-tooltip-digit-reel';
+
+      const prevCh = /\d/.test(prevText[i] || '') ? prevText[i] : ch;
+      const isSame = prevCh === ch;
+      const turns = isSame ? [ch] : [prevCh, ch];
+      for (const turn of turns) {
+        const face = document.createElement('span');
+        face.className = 'home-activity-tooltip-digit-face';
+        face.textContent = turn;
+        reel.append(face);
+      }
+
+      digit.append(reel);
+      fragment.append(digit);
+      requestAnimationFrame(() => {
+        digit.dataset.ready = 'true';
+        if (turns.length > 1) {
+          reel.style.transform = 'translate(0, -1em)';
+          reel.style.transitionDelay = `${Math.min(i, o.maxStagger) * o.staggerMs}ms`;
+        } else {
+          reel.style.transform = 'translate(0, 0)';
+          reel.style.transitionDelay = '0ms';
+        }
+      });
+      continue;
+    }
+    const sep = document.createElement('span');
+    sep.className = ch === '.' ? 'home-activity-tooltip-sep is-dot' : 'home-activity-tooltip-sep';
+    sep.textContent = ch;
+    fragment.append(sep);
+  }
+
+  container.replaceChildren(fragment);
+}
+
 function moveHomeActivityTooltip(tooltip, cell) {
   const cellRect = cell.getBoundingClientRect();
   const tooltipRect = tooltip.getBoundingClientRect();
@@ -2586,7 +2640,8 @@ function moveHomeActivityTooltip(tooltip, cell) {
   const aboveY = cellRect.top - tooltipRect.height - gap;
   const belowY = cellRect.bottom + gap;
   const y = aboveY >= pad ? aboveY : Math.min(window.innerHeight - pad - tooltipRect.height, belowY);
-  tooltip.style.transform = `translate(${x}px, ${y}px) translate(-50%, 0)`;
+  tooltip.style.left = `${x}px`;
+  tooltip.style.top = `${y}px`;
 }
 
 function setupHomeActivityHover(scroller) {
@@ -2615,8 +2670,8 @@ function setupHomeActivityHover(scroller) {
         spotlightCurrent.x = spotlightTarget.x;
         spotlightCurrent.y = spotlightTarget.y;
       } else {
-        spotlightCurrent.x += dx * 0.32;
-        spotlightCurrent.y += dy * 0.32;
+        spotlightCurrent.x += dx * 0.24;
+        spotlightCurrent.y += dy * 0.24;
         scheduleSpotlight();
       }
       setSpotlight(spotlightCurrent);
@@ -2628,6 +2683,7 @@ function setupHomeActivityHover(scroller) {
     spotlightTarget.y = y;
     if (!spotlightVisible) {
       spotlightVisible = true;
+      scroller.dataset.spotlightVisible = 'true';
       spotlightCurrent.x = x;
       spotlightCurrent.y = y;
       setSpotlight(spotlightCurrent);
@@ -2636,13 +2692,20 @@ function setupHomeActivityHover(scroller) {
     scheduleSpotlight();
   };
 
+  const clearActiveCell = () => {
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    if (activeCell) activeCell.removeAttribute('data-active');
+    activeCell = null;
+  };
+
   const hide = () => {
     tooltip.dataset.visible = 'false';
     tooltip.setAttribute('aria-hidden', 'true');
-    tooltip.style.transform = 'translate(-9999px, -9999px)';
     if (spotlightFrame) cancelAnimationFrame(spotlightFrame);
     spotlightFrame = 0;
     spotlightVisible = false;
+    delete scroller.dataset.spotlightVisible;
     spotlightTarget.x = -200;
     spotlightTarget.y = -200;
     spotlightCurrent.x = -200;
@@ -2662,19 +2725,18 @@ function setupHomeActivityHover(scroller) {
     const x = view.x + (event.clientX - rect.left) * view.width / Math.max(1, rect.width);
     const y = view.y + (event.clientY - rect.top) * view.height / Math.max(1, rect.height);
     moveSpotlight(x, y);
-
     const target = event.target instanceof Element ? event.target.closest('.heat[data-d]') : null;
     const cell = target && canvas.contains(target) ? target : null;
     if (!cell) {
-      hide();
+      clearActiveCell();
       return;
     }
     if (activeCell !== cell) {
       activeCell?.removeAttribute('data-active');
       activeCell = cell;
       activeCell.setAttribute('data-active', 'true');
-      tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(Number(cell.dataset.t || 0));
-      tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = cell.dataset.d || '';
+      renderTooltipTextReel(tooltip.querySelector('[data-home-activity-tooltip-count]'), formatCompact(Number(cell.dataset.t || 0)), { maxStagger: 4, staggerMs: 16 });
+      renderTooltipTextReel(tooltip.querySelector('[data-home-activity-tooltip-date]'), cell.dataset.d || '', { maxStagger: 6, staggerMs: 12 });
     }
     tooltip.dataset.visible = 'true';
     tooltip.setAttribute('aria-hidden', 'false');
@@ -2750,9 +2812,8 @@ function renderHomeTrendsModule() {
   activityCanvas.innerHTML = charts.heatmapSvg(activity, {
     monthLabel: (month) => compactMonthLabel(month.label),
     radius: activityLayout.radius,
-    glowFilterId: 'homeActivityHeatGlow',
     spotlightId: 'homeActivitySpotlight',
-    spotlightRadius: 82
+    spotlightRadius: 110
   });
   activityScroll.append(activityCanvas);
   setupHomeActivityScroller(activityScroll);

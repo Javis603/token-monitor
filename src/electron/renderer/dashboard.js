@@ -79,7 +79,6 @@ function formatDurationCompact(ms) {
   if (minutes > 0) return `${minutes}m`;
   return '0m';
 }
-function formatCost(usd) { return currencyApi.formatCurrencyFromUsd(usd, currencyApi.normalizeCurrency(state.currency)); }
 function formatCostCompact(usd) {
   const code = currencyApi.normalizeCurrency(state.currency);
   const sym = (currencyApi.CURRENCY_RATES[code] || {}).symbol || '$';
@@ -88,13 +87,14 @@ function formatCostCompact(usd) {
 function shortDate(key) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key)); return m ? `${Number(m[2])}/${Number(m[3])}` : String(key); }
 function axisEvery(list) { return Math.max(1, Math.ceil(list.length / 9)); }
 function todayKey() { return new Date().toISOString().slice(0, 10); }
+function compactMonthLabel(label) {
+  const match = /^(\d{4})-(\d{2})/.exec(String(label || ''));
+  if (!match) return String(label || '');
+  return new Intl.DateTimeFormat(state.locale, { month: 'short', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)));
+}
 function daysBetween(a, b) {
   return Math.round((Date.parse(`${String(b).slice(0, 10)}T00:00:00Z`) - Date.parse(`${String(a).slice(0, 10)}T00:00:00Z`)) / 86400000);
-}
-function monthLabel(ym) {
-  const mo = Number(String(ym).slice(5));
-  if (state.locale.startsWith('zh')) return `${mo}月`;
-  return new Date(Date.UTC(2000, mo - 1, 1)).toLocaleString('en-US', { month: 'short' });
 }
 function longDate(key) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key));
@@ -288,7 +288,7 @@ function renderActivity() {
     heat = charts.contribHeatmap(daily, { cell, gap, startDate: start, endDate: end });
   }
   els.heatmap.innerHTML = heat.cells.length
-    ? charts.heatmapSvg(heat, { monthLabel: (m) => monthLabel(m.label) })
+    ? charts.heatmapSvg(heat, { monthLabel: (m) => compactMonthLabel(m.label), spotlightId: 'dashboardHeatmapSpotlight', spotlightRadius: 110 })
     : '';
   state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0) }]));
   const cards = charts.statsCards(state.history?.summary || {});
@@ -320,7 +320,19 @@ function render() {
   if (state.tab === 'trends') renderTrends(); else renderActivity();
 }
 
-function hideTooltip() { els.tooltip.classList.add('hidden'); }
+function hideTooltip() {
+  if (els.tooltip.classList.contains('dash-tooltip-heatmap')) {
+    els.tooltip.dataset.visible = 'false';
+    els.tooltip.setAttribute('aria-hidden', 'true');
+  } else {
+    els.tooltip.className = 'dash-tooltip hidden';
+    delete els.tooltip.dataset.visible;
+    els.tooltip.setAttribute('aria-hidden', 'true');
+  }
+  const active = els.heatmap.querySelector('.heat[data-active="true"]');
+  if (active) active.removeAttribute('data-active');
+  delete els.heatmap.dataset.spotlightVisible;
+}
 
 function positionTooltip(ev) {
   els.tooltip.classList.remove('hidden');
@@ -335,6 +347,7 @@ function positionTooltip(ev) {
 }
 
 function showBarTooltip(bar, ev) {
+  els.tooltip.className = 'dash-tooltip';
   const segs = (bar.segments || []).filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
   const rows = segs.map((s) =>
     `<div class="tt-row"><span class="tt-dot" data-c="${colorFor(s.key)}"></span><span class="tt-name">${s.key}</span><span class="tt-val">${formatCompact(s.value)}</span></div>`
@@ -345,6 +358,7 @@ function showBarTooltip(bar, ev) {
 }
 
 function showCandleTooltip(c, ev) {
+  els.tooltip.className = 'dash-tooltip';
   // Each candle spans a bucket of days: O = first day, C = last day, H/L = busiest/quietest.
   const head = c.endKey && c.endKey !== c.key ? `${longDate(c.key)} – ${longDate(c.endKey)}` : longDate(c.key);
   const ohlc = [['O', c.open], ['H', c.high], ['L', c.low], ['C', c.close]];
@@ -353,15 +367,36 @@ function showCandleTooltip(c, ev) {
   positionTooltip(ev);
 }
 
-function showHeatTooltip(date, day, ev) {
-  const tokens = day ? day.tokens : 0;
-  const cost = day ? day.cost : 0;
-  const tokLabel = state.locale.startsWith('zh') ? 'Token' : 'Tokens';
-  const costLabel = state.locale.startsWith('zh') ? '花費' : 'Cost';
-  let html = `<div class="tt-head">${longDate(date)}</div>`;
-  html += `<div class="tt-row"><span class="tt-name">${tokLabel}</span><span class="tt-val">${formatCompact(tokens)}</span></div>`;
-  if (cost > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCost(cost)}</span></div>`;
-  els.tooltip.innerHTML = html;
+function ensureDashboardHeatTooltip() {
+  els.tooltip.className = 'dash-tooltip home-activity-tooltip dash-tooltip-heatmap';
+  if (els.tooltip.querySelector('[data-dashboard-tooltip-count]')
+    && els.tooltip.querySelector('[data-dashboard-tooltip-date]')) {
+    return;
+  }
+  els.tooltip.innerHTML = '';
+  const row = document.createElement('span');
+  row.className = 'home-activity-tooltip-row';
+  const count = document.createElement('span');
+  count.className = 'home-activity-tooltip-count';
+  count.dataset.dashboardTooltipCount = 'true';
+  const label = document.createElement('span');
+  label.className = 'home-activity-tooltip-label';
+  label.textContent = state.locale.startsWith('zh') ? 'Token' : 'tokens';
+  row.append(count, label);
+  const date = document.createElement('span');
+  date.className = 'home-activity-tooltip-date';
+  date.dataset.dashboardTooltipDate = 'true';
+  els.tooltip.append(row, date);
+}
+
+function showDashboardHeatTooltip(hit, ev, forceUpdate) {
+  ensureDashboardHeatTooltip();
+  if (forceUpdate) {
+    els.tooltip.querySelector('[data-dashboard-tooltip-count]').textContent = formatCompact(Number(hit.getAttribute('data-t') || 0));
+    els.tooltip.querySelector('[data-dashboard-tooltip-date]').textContent = hit.getAttribute('data-d') || '';
+  }
+  els.tooltip.dataset.visible = 'true';
+  els.tooltip.setAttribute('aria-hidden', 'false');
   positionTooltip(ev);
 }
 
@@ -429,10 +464,25 @@ els.chart.addEventListener('mousemove', (ev) => {
 els.chart.addEventListener('mouseleave', hideTooltip);
 
 els.heatmap.addEventListener('mousemove', (ev) => {
-  const hit = ev.target.closest('.heat');
+  const hit = ev.target.closest('.heat[data-d]');
   if (!hit) { hideTooltip(); return; }
-  const date = hit.getAttribute('data-d');
-  showHeatTooltip(date, state.dayMap && state.dayMap.get(date), ev);
+  const svg = els.heatmap.querySelector('.dash-heatmap');
+  const gradient = svg?.querySelector('#dashboardHeatmapSpotlightGradient');
+  if (svg && gradient) {
+    const rect = svg.getBoundingClientRect();
+    const view = svg.viewBox.baseVal;
+    const x = view.x + (ev.clientX - rect.left) * view.width / Math.max(1, rect.width);
+    const y = view.y + (ev.clientY - rect.top) * view.height / Math.max(1, rect.height);
+    gradient.setAttribute('cx', String(Math.round(x * 10) / 10));
+    gradient.setAttribute('cy', String(Math.round(y * 10) / 10));
+    els.heatmap.dataset.spotlightVisible = 'true';
+  }
+  const wasActive = hit.getAttribute('data-active') === 'true';
+  if (!wasActive) {
+    els.heatmap.querySelectorAll('.heat[data-active="true"]').forEach((node) => node.removeAttribute('data-active'));
+    hit.setAttribute('data-active', 'true');
+  }
+  showDashboardHeatTooltip(hit, ev, !wasActive);
 });
 els.heatmap.addEventListener('mouseleave', hideTooltip);
 

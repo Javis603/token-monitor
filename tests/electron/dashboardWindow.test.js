@@ -83,6 +83,8 @@ test('dashboard.css declares chart classes and a flat theme override', () => {
   assert.match(css, /\.candle-up/);
   assert.match(css, /\.candle-down/);
   assert.match(css, /\.heat\.lvl-4/);
+  assert.match(css, /\.dash-heatmap-wrap \.heat-ambient-layer/);
+  assert.match(css, /\.dash-tooltip-heatmap/);
   assert.match(css, /body\.flat/);
   // The empty-state overlay spans the whole window (inset: 0); it must let clicks
   // through so the header buttons still work when there is no history.
@@ -95,6 +97,11 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /charts\.barsChartSvg/);
   assert.match(js, /charts\.candleChartSvg/);
   assert.match(js, /charts\.heatmapSvg/);
+  assert.match(js, /spotlightId:\s*'dashboardHeatmapSpotlight'/);
+  assert.match(js, /showDashboardHeatTooltip/);
+  assert.match(js, /closest\('\.heat\[data-d\]'\)/);
+  assert.match(js, /if \(forceUpdate\)/);
+  assert.match(js, /querySelector\('\[data-dashboard-tooltip-count\]'\)\.textContent = formatCompact/);
   assert.match(js, /updateSettings\(\{ dashboardFlat: state\.flat \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
 });

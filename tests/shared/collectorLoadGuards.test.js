@@ -235,9 +235,11 @@ test('watchIgnoreMatcher prunes the Hermes runtime but keeps the state.db family
   const tmp = withTmpHome([path.join('.hermes', 'hermes-agent', 'node_modules')]);
   const originalHomedir = os.homedir;
   const previousHermesHome = process.env.HERMES_HOME;
+  const previousLocalAppData = process.env.LOCALAPPDATA;
   os.homedir = () => tmp;
   try {
     delete process.env.HERMES_HOME;
+    delete process.env.LOCALAPPDATA;
     const { watchIgnoreMatcher } = freshCollector();
     const ignored = watchIgnoreMatcher('claude,hermes');
     const hermes = path.join(tmp, '.hermes');
@@ -257,6 +259,8 @@ test('watchIgnoreMatcher prunes the Hermes runtime but keeps the state.db family
     os.homedir = originalHomedir;
     if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
     else process.env.HERMES_HOME = previousHermesHome;
+    if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = previousLocalAppData;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

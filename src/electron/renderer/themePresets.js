@@ -54,6 +54,34 @@
   const LIGHT_LINE_RGB = '24, 28, 36';
   const LIGHT_PANEL_RGB = '255, 255, 255';
   const LIGHT_SUNKEN_RGB = '188, 196, 206';
+  const LIGHT_HEAT_VARS = {
+    '--heat-base-empty': 'rgba(236, 242, 247, 0.88)',
+    '--heat-base-1': 'rgba(214, 231, 241, 1)',
+    '--heat-base-2': 'rgba(177, 214, 235, 1)',
+    '--heat-base-3': 'rgba(122, 188, 220, 1)',
+    '--heat-base-4': 'rgba(84, 156, 194, 1)',
+    '--heat-ambient-layer-opacity': '0.16',
+    '--heat-ambient-hover-opacity': '0.1',
+    '--heat-ambient-empty': 'rgba(250, 252, 253, 0.42)',
+    '--heat-ambient-1': 'rgba(240, 246, 250, 0.48)',
+    '--heat-ambient-2': 'rgba(224, 238, 247, 0.54)',
+    '--heat-ambient-3': 'rgba(194, 222, 239, 0.62)',
+    '--heat-ambient-4': 'rgba(162, 204, 229, 0.7)',
+    '--heat-focus-hover-opacity': '0.62',
+    '--heat-focus-empty': 'rgba(255, 255, 255, 0.12)',
+    '--heat-focus-1': 'rgba(245, 249, 251, 0.18)',
+    '--heat-focus-2': 'rgba(228, 240, 247, 0.28)',
+    '--heat-focus-3': 'rgba(195, 221, 238, 0.42)',
+    '--heat-focus-4': 'rgba(152, 198, 226, 0.56)',
+    '--heat-bright-empty': 'rgba(255, 255, 255, 0.08)',
+    '--heat-bright-1': 'rgba(248, 250, 252, 0.14)',
+    '--heat-bright-2': 'rgba(233, 242, 248, 0.22)',
+    '--heat-bright-3': 'rgba(206, 228, 242, 0.34)',
+    '--heat-bright-4': 'rgba(164, 207, 230, 0.46)',
+    '--heat-hover-fill': 'rgba(244, 250, 255, 0.98)',
+    '--heat-hover-stroke': 'rgba(120, 176, 214, 0.22)',
+    '--heat-hover-shadow': '0 5px 12px rgba(88, 149, 193, 0.1)'
+  };
 
   // Vendors shown in the vendor-colour list, tracked clients first. Vendors not
   // listed here but present in clientColors are appended after these, then the
@@ -177,6 +205,9 @@
     entries.push({ name: '--line-rgb', value: light ? LIGHT_LINE_RGB : null });
     entries.push({ name: '--panel-rgb', value: light ? LIGHT_PANEL_RGB : null });
     entries.push({ name: '--sunken-rgb', value: light ? LIGHT_SUNKEN_RGB : null });
+    for (const [name, value] of Object.entries(LIGHT_HEAT_VARS)) {
+      entries.push({ name, value: light ? value : null });
+    }
     entries.push({ name: 'color-scheme', value: light ? 'light' : null });
     return entries;
   }

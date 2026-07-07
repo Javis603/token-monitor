@@ -30,27 +30,22 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
 
   const rendererDir = path.join(__dirname, '../../src/electron/renderer');
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
-  const dashboardCss = fs.readFileSync(path.join(rendererDir, 'dashboard.css'), 'utf8');
+  const chartsSource = fs.readFileSync(path.join(rendererDir, 'usageCharts.js'), 'utf8');
   const rule = (source, selector) => {
     const start = source.indexOf(`${selector} {`);
     assert.notEqual(start, -1, `missing CSS rule: ${selector}`);
     return source.slice(start, source.indexOf('}', start) + 1);
   };
-  const fill = (source, selector) => /fill:\s*([^;]+);/.exec(rule(source, selector))?.[1];
-  const levels = [
-    ['.home-activity-canvas .heat', '.heat.lvl-0'],
-    ['.home-activity-canvas .heat.lvl-1', '.heat.lvl-1'],
-    ['.home-activity-canvas .heat.lvl-2', '.heat.lvl-2'],
-    ['.home-activity-canvas .heat.lvl-3', '.heat.lvl-3'],
-    ['.home-activity-canvas .heat.lvl-4', '.heat.lvl-4']
-  ];
-
-  for (const [homeSelector, dashboardSelector] of levels) {
-    assert.equal(fill(css, homeSelector), fill(dashboardCss, dashboardSelector));
-  }
   assert.doesNotMatch(rule(css, '.home-activity-scroll'), /padding-block/);
-  assert.match(rule(css, '.home-activity-canvas .heat-bright-layer'), /pointer-events:\s*none/);
+  assert.match(chartsSource, /class="heat heat-ambient lvl-/);
+  assert.match(chartsSource, /class="heat heat-focus lvl-/);
+  assert.match(rule(css, '.home-activity-canvas .heat-ambient-layer'), /opacity:\s*var\(--heat-ambient-layer-opacity\)/);
+  assert.match(rule(css, '.home-activity-canvas .heat-focus-layer'), /opacity:\s*0/);
+  assert.match(rule(css, '.home-activity-canvas .heat'), /transition:\s*transform 180ms ease/);
+  assert.match(rule(css, '.home-activity-canvas .heat:hover'), /translateY\(-1px\) scale\(1\.35\)/);
+  assert.match(rule(css, '.home-activity-canvas .heat:hover'), /drop-shadow\(var\(--heat-hover-shadow\)\)/);
   assert.match(rule(css, '.home-activity-tooltip'), /position:\s*fixed/);
+  assert.match(rule(css, '.home-activity-tooltip'), /backdrop-filter:\s*blur\(10px\)/);
   assert.match(rule(css, '.home-activity-canvas .heat-month'), /fill:\s*rgba\(var\(--line-rgb\), 0\.5\)/);
 });
 
@@ -64,7 +59,7 @@ test('Home module selection is independent from main view preferences', () => {
   assert.match(rendererSource, /function renderHomeDeviceModule/);
 });
 
-test('Home activity uses a custom spotlight hover instead of native SVG titles', () => {
+test('Home activity uses a custom hover card with spotlight instead of native SVG titles', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const match = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(match, 'renderHomeTrendsModule exists');
@@ -91,6 +86,20 @@ test('Home activity tooltip is dismissed on Home rerender and when the view leav
   const render = rendererSource.match(/function render\(\) \{([\s\S]*?)\n\}\n\nfunction setStatus/);
   assert.ok(render, 'render exists');
   assert.match(render[1], /breakdown !== 'home'[\s\S]*?hideHomeActivityTooltip\(\)/);
+});
+
+test('Home activity tooltip count and date use a reel-style text animation', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/styles.css'), 'utf8');
+  assert.match(rendererSource, /function renderTooltipTextReel\(/);
+  assert.match(rendererSource, /home-activity-tooltip-digit-reel/);
+  assert.match(rendererSource, /const turns = isSame \? \[ch\] : \[prevCh, ch\]/);
+  assert.match(rendererSource, /renderTooltipTextReel\(tooltip\.querySelector\('\[data-home-activity-tooltip-count\]'/);
+  assert.match(rendererSource, /renderTooltipTextReel\(tooltip\.querySelector\('\[data-home-activity-tooltip-date\]'/);
+  assert.match(rendererSource, /reel\.style\.transform = 'translate\(0, -1em\)'/);
+  assert.match(rendererSource, /reel\.style\.transitionDelay = `\$\{Math\.min\(i, o\.maxStagger\) \* o\.staggerMs\}ms`/);
+  assert.match(css, /\.home-activity-tooltip-digit-reel\s*\{/);
+  assert.match(css, /transition:\s*transform 320ms cubic-bezier\(0\.2, 0\.9, 0\.2, 1\)/);
 });
 
 test('Home device rows keep only the local badge and mute stale devices without status text', () => {

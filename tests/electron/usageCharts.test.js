@@ -156,6 +156,8 @@ test('heatmapSvg embeds escaped per-cell titles when supplied', () => {
   }, { titleOf: (cell) => `${cell.date} < ${cell.tokens}` });
 
   assert.match(svg, /<title>2026-06-22 &lt; 1234<\/title>/);
+  assert.doesNotMatch(svg, /heat-ambient-layer/);
+  assert.doesNotMatch(svg, /heat-bright-layer/);
 });
 
 test('heatmapSvg can include a glow filter for hovered cells', () => {
@@ -185,7 +187,8 @@ test('heatmapSvg can include a spotlight layer with cell data attributes', () =>
   assert.match(svg, /id="homeActivitySpotlightGradient"/);
   assert.match(svg, /id="homeActivitySpotlightMask"/);
   assert.match(svg, /class="heat-base-layer"/);
-  assert.match(svg, /class="heat-bright-layer"/);
+  assert.match(svg, /class="heat-ambient-layer" aria-hidden="true" pointer-events="none"/);
+  assert.match(svg, /class="heat-bright-layer" mask="url\(#homeActivitySpotlightMask\)" aria-hidden="true" pointer-events="none"/);
   assert.match(svg, /data-d="2026-06-22"/);
   assert.match(svg, /data-t="1234"/);
 });

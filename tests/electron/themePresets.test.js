@@ -86,10 +86,13 @@ test('themeCssVarEntries flips the overlay/border system for light backgrounds',
   assert.equal(light['--line-rgb'], '24, 28, 36');
   assert.equal(light['--panel-rgb'], '255, 255, 255');
   assert.equal(light['--sunken-rgb'], '188, 196, 206');
+  assert.equal(light['--heat-base-4'], 'rgba(84, 156, 194, 1)');
+  assert.equal(light['--heat-ambient-layer-opacity'], '0.16');
   assert.equal(light['color-scheme'], 'light');
 
   // No bg override resolves to the dark default, so no flip.
   assert.equal(byName(themeCssVarEntries({})) ['color-scheme'], null);
+  assert.equal(byName(themeCssVarEntries({})) ['--heat-base-4'], null);
 });
 
 test('every preset is a full palette of valid hex for all four keys', () => {
