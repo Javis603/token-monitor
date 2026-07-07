@@ -15,9 +15,11 @@ function autostartSupported({ platform = process.platform, env = process.env } =
   return platform === 'linux' && Boolean(env.APPIMAGE);
 }
 
+// posix join on purpose: XDG paths are POSIX paths, and this keeps the module's
+// output identical when the test suite runs on Windows CI.
 function desktopFilePath({ env = process.env } = {}) {
-  const configHome = env.XDG_CONFIG_HOME || path.join(env.HOME || os.homedir(), '.config');
-  return path.join(configHome, 'autostart', DESKTOP_FILE_NAME);
+  const configHome = env.XDG_CONFIG_HOME || path.posix.join(env.HOME || os.homedir(), '.config');
+  return path.posix.join(configHome, 'autostart', DESKTOP_FILE_NAME);
 }
 
 // Desktop Entry spec quoting: the Exec argument is double-quoted with `"`, `` ` ``,
