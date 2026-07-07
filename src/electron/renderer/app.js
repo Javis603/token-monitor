@@ -3643,9 +3643,11 @@ function syncSettingsForm() {
     els.startAtLoginInput.checked = Boolean(state.settings.startAtLogin && state.appInfo?.loginItemSupported);
   }
   if (els.startupNote) {
-    els.startupNote.textContent = state.appInfo?.loginItemSupported
-      ? t('settings.startup.launchAtSignIn')
-      : t('settings.startup.available');
+    els.startupNote.textContent = !state.appInfo?.loginItemSupported
+      ? t('settings.startup.available')
+      : state.appInfo?.platform === 'linux'
+        ? t('settings.startup.appimageNote')
+        : t('settings.startup.launchAtSignIn');
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
   els.blurInput.value = String(state.settings.glassBlur ?? 32);

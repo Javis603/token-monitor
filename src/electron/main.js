@@ -63,6 +63,7 @@ const { syncLimits } = require('../shared/limits');
 const { historyPreview } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
+const linuxAutostart = require('./linuxAutostart');
 const { buildTrayIcon, createTray, formatTrayText, pickUsageTrayIconId, popoverBounds } = require('./tray');
 const {
   macActivationPolicyMode,
@@ -959,17 +960,23 @@ function saveSettings() {
 }
 
 function loginItemEnabledHere() {
-  return app.isPackaged && process.platform !== 'linux';
+  if (!app.isPackaged) return false;
+  // Electron login items only cover macOS/Windows; on Linux we manage an XDG
+  // autostart entry ourselves, which needs the AppImage runtime ($APPIMAGE).
+  if (process.platform === 'linux') return linuxAutostart.autostartSupported();
+  return true;
 }
 
 function currentLoginItemState() {
   if (!loginItemEnabledHere()) return false;
+  if (process.platform === 'linux') return linuxAutostart.isAutostartEnabled();
   try { return Boolean(app.getLoginItemSettings().openAtLogin); }
   catch (_) { return false; }
 }
 
 function applyLoginItem(startAtLogin) {
   if (!loginItemEnabledHere()) return false;
+  if (process.platform === 'linux') return linuxAutostart.setAutostartEnabled(Boolean(startAtLogin));
   app.setLoginItemSettings({ openAtLogin: Boolean(startAtLogin) });
   return currentLoginItemState();
 }
