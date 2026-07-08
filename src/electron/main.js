@@ -19,9 +19,15 @@ const { startCollector, lookupModelPricing, normalizeHistoryIntervalMs } = requi
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie } = require('../shared/limitCollector');
+const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie } = require('../shared/limitCollector');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
+const {
+  codexAccountMatchesIdentity,
+  liveCodexAuthPath,
+  readCodexAuthMaterial,
+  writeCodexAuthFile
+} = require('../shared/codexSystemSwitch');
 const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
@@ -205,7 +211,6 @@ function defaultSettings() {
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
-    showActiveAccount: parseBoolean(process.env.TOKEN_MONITOR_SHOW_ACTIVE_ACCOUNT, false),
     windowBounds: null,
     zoomFactor: 1,
     showTrayIcon: true,
@@ -399,11 +404,18 @@ function codexManagedRoot() {
   return path.join(app.getPath('userData'), 'managed-codex-homes');
 }
 
+function codexEmailDerivedAccountKey(account, identity) {
+  const email = String(identity.email || account.email || '').trim().toLowerCase();
+  return Boolean(email && String(account.accountKey || '').trim() === hashAccountKey(email));
+}
+
 function findExistingCodexAccount(accounts, identity) {
-  return accounts.find((account) => (
-    (identity.accountKey && account.accountKey === identity.accountKey) ||
-    (identity.email && account.email === identity.email)
-  ));
+  return accounts.find((account) => {
+    if (identity.accountKey && account.accountKey && !codexEmailDerivedAccountKey(account, identity)) {
+      return account.accountKey === identity.accountKey;
+    }
+    return Boolean(identity.email && account.email === identity.email);
+  });
 }
 
 function codexAccountId(identity, existing) {
@@ -424,7 +436,7 @@ async function removeManagedHomeIfSafe(homePath) {
 
 // Records a managed account for the auth that already lives in `homePath`, then
 // reloads the collector so the new account's limits show up immediately.
-function commitCodexManagedAccount(identity, homePath, existing) {
+function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
   const now = new Date().toISOString();
   const id = codexAccountId(identity, existing);
   const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
@@ -437,15 +449,39 @@ function commitCodexManagedAccount(identity, homePath, existing) {
     authPath: path.join(homePath, 'auth.json'),
     addedAt: existing?.addedAt || now,
     updatedAt: now,
-    enabled: true
+    enabled: options.enabled ?? true
   };
   settings.codexManagedAccounts = normalizeCodexManagedAccounts([
     ...accounts.filter((account) => account.id !== id),
     record
   ]);
   saveSettings();
-  startMode();
+  if (options.restart !== false) startMode();
   return codexAccountsForRenderer().find((account) => account.id === id);
+}
+
+function hasCodexIdentity(identity) {
+  return Boolean(identity?.accountKey || identity?.email);
+}
+
+async function preserveLiveCodexAuthAsManagedAccount(targetIdentity) {
+  let liveMaterial;
+  try {
+    liveMaterial = await readCodexAuthMaterial(liveCodexAuthPath(process.env));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') console.warn('Could not read live Codex auth before switching accounts:', error?.message || error);
+    return null;
+  }
+  if (!hasCodexIdentity(liveMaterial.identity)) return null;
+  if (codexAccountMatchesIdentity(targetIdentity, liveMaterial.identity)) return null;
+  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+  const existing = findExistingCodexAccount(accounts, liveMaterial.identity);
+  const homePath = existing?.homePath || path.join(codexManagedRoot(), codexAccountId(liveMaterial.identity, existing));
+  await writeCodexAuthFile(path.join(homePath, 'auth.json'), liveMaterial.data);
+  return commitCodexManagedAccount(liveMaterial.identity, homePath, existing, {
+    enabled: existing?.enabled ?? true,
+    restart: false
+  });
 }
 
 function codexLoginErrorMessage(result) {
@@ -520,12 +556,71 @@ function setCodexManagedAccountEnabled(id, enabled) {
   return { ok: true, accounts: codexAccountsForRenderer() };
 }
 
+async function switchCodexSystemAccount(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  if (account.enabled === false) return { ok: false, error: 'Account is disabled' };
+
+  let targetMaterial;
+  try {
+    targetMaterial = await readCodexAuthMaterial(account.authPath || path.join(account.homePath, 'auth.json'));
+  } catch (error) {
+    return { ok: false, error: `Could not read the selected Codex account credentials: ${error?.message || error}` };
+  }
+  if (!hasCodexIdentity(targetMaterial.identity)) {
+    return { ok: false, error: 'Could not identify the selected Codex account credentials.' };
+  }
+
+  try {
+    await preserveLiveCodexAuthAsManagedAccount(targetMaterial.identity);
+    await writeCodexAuthFile(liveCodexAuthPath(process.env), targetMaterial.data);
+    const refreshedAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+    const refreshed = refreshedAccounts.find((entry) => entry.id === account.id) || account;
+    commitCodexManagedAccount(targetMaterial.identity, refreshed.homePath, refreshed, {
+      enabled: refreshed.enabled !== false
+    });
+    const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
+    const accountsForRenderer = codexAccountsForRenderer();
+    return {
+      ok: true,
+      activeAccountId,
+      activeAccount: accountsForRenderer.find((entry) => entry.id === activeAccountId) || null,
+      accounts: accountsForRenderer
+    };
+  } catch (error) {
+    return { ok: false, error: `Could not switch the local Codex account: ${error?.message || error}` };
+  }
+}
+
+async function refreshCodexManagedAccountLimits(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  if (account.enabled === false) return { ok: false, error: 'Account is disabled' };
+  try {
+    const summary = await collectLimitsOnce({
+      ...settings,
+      limitsEnabled: true,
+      limitProviders: 'codex',
+      codexManagedAccounts: [account]
+    }, { env: process.env });
+    return {
+      ok: true,
+      providers: (summary.providers || []).filter((provider) => provider?.provider === 'codex')
+    };
+  } catch (error) {
+    return { ok: false, error: `Could not refresh Codex account limits: ${error?.message || error}` };
+  }
+}
+
 function migrateLimitProviders(value) {
-  const normalized = parseLimitProviders(value).join(',');
-  // Upgrade: users who had the old 2-provider or 4-provider full defaults get the new default (which includes opencode).
-  if (normalized === 'claude,codex') return defaultLimitProviders();
-  if (normalized === 'claude,codex,cursor,antigravity') return defaultLimitProviders();
-  return normalized;
+  // Saved provider selections are user intent. Normalize ids, but do not expand
+  // older defaults into today's full provider list because the saved shape is
+  // indistinguishable from a deliberate "only these providers" choice.
+  return parseLimitProviders(value).join(',');
 }
 
 function migrateLimitProviderOrder(value) {
@@ -2702,7 +2797,6 @@ app.whenReady().then(() => {
       limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
-      showActiveAccount: parseBoolean(patch.showActiveAccount ?? settings.showActiveAccount, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
       ...normalizeTrayModeSettings({
         showTrayIcon: patch.showTrayIcon ?? settings.showTrayIcon,
@@ -3190,6 +3284,8 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
+  ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
+  ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
   ipcMain.handle('copilot:signIn', async (event, request = {}) => {
     if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };
     const controller = new AbortController();

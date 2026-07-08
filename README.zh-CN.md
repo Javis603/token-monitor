@@ -75,7 +75,7 @@ Token Monitor 对「Token 用量」「账户额度」和「session 明细」分�
 - **以你的币别显示成本**：可用 USD、TWD、HKD 或 CNY 显示成本；汇率每日自动更新，也可在设置中手动覆写
 - **使用趋势与仪表板**：主页的活跃热力图与趋势图，加上独立的仪表板窗口，提供连续天数，以及跨所有设备、按工具／按模型堆叠的历史（柱状图与 K 线两种视图）
 - **数据导出**：把使用数据导出成与工具无关的 CSV + JSON，可手动或自动写入文件夹，接电子表格、Obsidian、Grafana 或自写脚本；详见 [docs/export.md](docs/export.md)
-- **AI 工具额度检测**：支持 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、GLM 团队、Volcengine 与 Qoder，涵盖 session、每周、账单与 credits 窗口，以及 DeepSeek 预付余额与今日/本月消费
+- **AI 工具额度检测**：支持 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、GLM 团队、Volcengine 与 Qoder，涵盖 session、每周、账单与 credits 窗口，以及 DeepSeek 预付余额与今日/本月消费。已加入追踪的 Codex 账号可一键设为本机 Codex 使用账号，无需重新登录授权。
 - **可选的状态视图**：追踪 Claude、OpenAI、Cursor 与 DeepSeek status 页，支持手动或定时重新检查
 - **工具列表自定义**：可隐藏、置顶和拖曳排序主列表中的工具，不影响实际追踪
 - **外观控制**：界面主题切换（含浅色模式）、各工具厂商色、玻璃透明度、模糊度、完全透明窗口

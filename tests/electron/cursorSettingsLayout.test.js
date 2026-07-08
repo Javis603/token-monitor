@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -38,6 +39,11 @@ function functionBodyBeforeMarker(source, name, marker) {
   const end = source.indexOf(marker, start);
   assert.notEqual(end, -1, `${marker} marker should follow ${name}`);
   return source.slice(start, end);
+}
+
+function runMainFunction(source, name, nextName, expression, context = {}) {
+  const body = functionBody(source, name, nextName);
+  return vm.runInNewContext(`${body}\n${expression}`, context);
 }
 
 test('Cursor account status stays inline with an email-only summary', () => {
@@ -191,6 +197,148 @@ test('Codex account panel supports per-account enable toggles without showing ti
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   assert.match(main, /ipcMain\.handle\('codex:setAccountEnabled'/);
   assert.match(main, /setCodexManagedAccountEnabled\(id, enabled\)/);
+});
+
+test('Codex system account switching is exposed from limits account rows', () => {
+  const app = readRendererFile('app.js');
+  const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
+  assert.match(renderHead, /if \(activeCodexAccount\)/);
+  assert.doesNotMatch(renderHead, /showActiveAccount/);
+  assert.match(renderHead, /activeZone\.className = 'limit-account-active-zone'/);
+  assert.match(renderHead, /activePopover\.className = 'limit-account-active-popover'/);
+  assert.match(renderHead, /const activeHint = t\('limits\.codex\.activeAccountHint'\)/);
+  assert.match(renderHead, /activePopover\.textContent = activeHint/);
+  assert.match(renderHead, /activeZone\.addEventListener\('pointerenter', markCodexActiveHintOpened\)/);
+  assert.match(renderHead, /activeZone\.addEventListener\('focusin', markCodexActiveHintOpened\)/);
+  assert.match(renderHead, /activeZone\.addEventListener\('pointerleave', releaseCodexActiveHint\)/);
+  assert.match(renderHead, /activeZone\.addEventListener\('focusout', releaseCodexActiveHint\)/);
+  assert.match(renderHead, /activeZone\.matches\(':hover, :focus-within'\)/);
+  assert.match(renderHead, /activeZone\.append\(title, badge, activePopover\)/);
+  assert.match(renderHead, /badge\.textContent = '\\u2713';/);
+  assert.doesNotMatch(renderHead, /badge\.textContent = 'Active'/);
+  assert.match(renderHead, /options\.accountTitle && limitProviderPresentationApi\.isCodexLiveAccount\(provider, provenance\)/);
+  assert.match(renderHead, /codexSwitchAccountForProvider\(provider\)/);
+  assert.match(renderHead, /switchZone\.className = 'limit-account-switch-zone'/);
+  assert.match(renderHead, /switchPopover\.className = 'limit-account-switch-popover'/);
+  assert.match(renderHead, /switchButton\.className = 'limit-account-switch-button'/);
+  assert.match(renderHead, /switchZone\.classList\.toggle\('has-opened', state\.codexSwitchPopoverHasOpened\)/);
+  assert.match(renderHead, /state\.codexSwitchPopoverHasOpened = true;/);
+  assert.match(renderHead, /state\.codexSwitchPopoverActive = true;/);
+  assert.match(renderHead, /switchZone\.addEventListener\('pointerenter', markCodexSwitchPopoverOpened\)/);
+  assert.match(renderHead, /switchZone\.addEventListener\('focusin', markCodexSwitchPopoverOpened\)/);
+  assert.match(renderHead, /switchZone\.addEventListener\('pointerleave', releaseCodexSwitchPopover\)/);
+  assert.match(renderHead, /switchZone\.addEventListener\('focusout', releaseCodexSwitchPopover\)/);
+  assert.match(renderHead, /switchZone\.matches\(':hover, :focus-within'\)/);
+  assert.match(renderHead, /state\.codexSwitchPopoverActive = false;/);
+  assert.match(renderHead, /switchZone\.append\(title, switchPopover\)/);
+  assert.match(renderHead, /window\.tokenMonitor\.codex\.switchSystemAccount\(switchAccount\.id\)/);
+  assert.match(renderHead, /state\.codexActiveAccount = result\.activeAccount/);
+  assert.match(renderHead, /window\.tokenMonitor\.codex\.refreshAccountLimits\(switchAccount\.id\)/);
+  assert.match(renderHead, /applyCodexAccountLimitsRefresh\(refreshResult\.providers \|\| \[\]\)/);
+  assert.doesNotMatch(renderHead, /refreshStats\(\{ force: true \}/);
+  assert.doesNotMatch(renderHead, /titleButton\.className = 'limit-account-title-button'/);
+
+  const group = functionBody(app, 'renderCodexAccountGroup', 'renderOpenCodeAccountGroup');
+  assert.match(group, /allowSystemSwitch: true/);
+
+  const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
+  assert.match(css, /\.limit-account-switch-zone/);
+  assert.match(css, /\.limit-live-badge\s*\{[^}]*display: inline-flex;/s);
+  assert.match(css, /\.limit-live-badge\s*\{[^}]*width: 14px;/s);
+  assert.match(css, /\.limit-live-badge\s*\{[^}]*margin-left: -6px;/s);
+  assert.doesNotMatch(css, /\.limit-live-badge::before/);
+  assert.match(css, /\.limit-account-active-zone/);
+  assert.match(css, /\.limit-account-active-popover/);
+  assert.match(css, /\.limit-account-active-zone:hover \.limit-account-active-popover/);
+  assert.match(css, /\.limit-account-active-zone:focus-visible \.limit-account-active-popover/);
+  assert.match(css, /\.limit-account-active-zone:hover \.limit-name-title/);
+  assert.match(css, /\.limit-account-active-zone:focus-visible \.limit-name-title/);
+  assert.match(css, /\.limit-account-active-popover\s*\{[^}]*left: calc\(100% \+ 2px\)/s);
+  assert.doesNotMatch(css, /\.limit-account-active-popover\s*\{[^}]*cursor: pointer/s);
+  assert.match(css, /\.limit-account-switch-popover/);
+  assert.match(css, /\.limit-account-switch-zone:hover \.limit-account-switch-popover/);
+  assert.match(css, /\.limit-account-switch-zone:focus-within \.limit-account-switch-popover/);
+  assert.match(css, /\.limit-account-switch-zone:hover \.limit-name-title/);
+  assert.match(css, /\.limit-account-switch-zone:focus-within \.limit-name-title/);
+  assert.match(css, /text-shadow: 0 0 10px rgba\(var\(--accent-rgb\), 0\.16\)/);
+  assert.match(css, /top: 50%/);
+  assert.match(cssRule(css, '.limit-account-switch-popover'), /left: calc\(100% \+ 8px\)/);
+  assert.match(css, /\.limit-account-switch-zone::after\s*\{[^}]*width: 10px;/s);
+  assert.doesNotMatch(css, /\.limit-account-switch-zone\.has-opened \.limit-account-switch-popover\s*\{[^}]*transition: none;/s);
+  assert.match(css, /\.limit-account-switch-button\s*\{[^}]*rgba\(var\(--glass-rgb\), 0\.66\)/s);
+  assert.match(css, /\.limit-account-switch-button\s*\{[^}]*border: 1px solid rgba\(var\(--line-rgb\), 0\.22\)/s);
+  assert.match(css, /\.limit-account-switch-button/);
+  assert.doesNotMatch(cssRule(css, '.limit-account-switch-popover'), /left: calc\(100% \+ 6px\)/);
+  assert.doesNotMatch(css, /background: rgba\(24, 28, 32, 0\.9\)/);
+  assert.doesNotMatch(css, /\.limit-account-switch-popover\s*\{[^}]*border:/s);
+  assert.doesNotMatch(css, /\.limit-account-title-button\s*\{/);
+
+  const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
+  assert.match(i18n, /'limits\.codex\.switchAccount': 'Switch'/);
+  assert.match(i18n, /'limits\.codex\.activeAccountHint': 'Local'/);
+  assert.match(i18n, /'limits\.codex\.switchAccount': '切換帳號'/);
+  assert.match(i18n, /'limits\.codex\.activeAccountHint': '本機'/);
+  assert.match(i18n, /'limits\.codex\.switchAccount': '切换账号'/);
+  assert.match(i18n, /'limits\.codex\.activeAccountHint': '本机'/);
+
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  assert.match(preload, /switchSystemAccount: \(id\) => ipcRenderer\.invoke\('codex:switchSystemAccount', id\)/);
+  assert.match(preload, /refreshAccountLimits: \(id\) => ipcRenderer\.invoke\('codex:refreshAccountLimits', id\)/);
+
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount'/);
+  assert.match(main, /switchCodexSystemAccount\(id\)/);
+  assert.match(main, /ipcMain\.handle\('codex:refreshAccountLimits'/);
+  assert.match(main, /refreshCodexManagedAccountLimits\(id\)/);
+  assert.match(app, /codexSwitchPopoverHasOpened: false/);
+  assert.match(app, /codexSwitchPopoverActive: false/);
+  assert.match(app, /codexSwitchPopoverRenderPending: false/);
+  assert.match(app, /const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;/);
+  assert.match(app, /codexPendingActiveAccount: null/);
+  assert.match(app, /codexPendingActiveAccountUntil: 0/);
+  assert.match(app, /codexPendingActiveAccountTimer: null/);
+  assert.match(app, /function codexAccountsShareIdentity\(left, right\)/);
+  assert.match(app, /function clearCodexPendingActiveAccount\(\)/);
+  assert.match(app, /function scheduleCodexPendingActiveAccountExpiry\(\)/);
+  assert.match(app, /function setCodexPendingActiveAccount\(account\)/);
+  assert.match(app, /function applyCodexActiveAccountFromStats\(\)/);
+  const pendingExpiryBody = functionBody(app, 'scheduleCodexPendingActiveAccountExpiry', 'setCodexPendingActiveAccount');
+  assert.match(pendingExpiryBody, /setTimeout\(\(\) =>/);
+  assert.match(pendingExpiryBody, /applyCodexActiveAccountFromStats\(\);/);
+  assert.match(pendingExpiryBody, /renderLimits\(\);/);
+  const pendingSetBody = functionBody(app, 'setCodexPendingActiveAccount', 'applyCodexActiveAccountFromStats');
+  assert.match(pendingSetBody, /state\.codexPendingActiveAccountUntil = Date\.now\(\) \+ CODEX_PENDING_ACTIVE_GRACE_MS;/);
+  assert.match(pendingSetBody, /scheduleCodexPendingActiveAccountExpiry\(\);/);
+  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'applyCodexAccountLimitsRefresh');
+  assert.match(activeStatsBody, /Date\.now\(\) < state\.codexPendingActiveAccountUntil/);
+  assert.match(activeStatsBody, /state\.codexActiveAccount = pendingAccount;/);
+  assert.match(activeStatsBody, /clearCodexPendingActiveAccount\(\);/);
+  assert.match(activeStatsBody, /state\.codexActiveAccount = activeAccount;/);
+  const limitsRefreshBody = functionBody(app, 'applyCodexAccountLimitsRefresh', 'renderLimitProviderHead');
+  assert.match(limitsRefreshBody, /applyCodexActiveAccountFromStats\(\);/);
+  assert.match(renderHead, /setCodexPendingActiveAccount\(result\.activeAccount \|\| null\);/);
+  const switchHold = functionBody(app, 'codexSwitchPopoverShouldHoldRender', 'flushPendingCodexSwitchPopoverRender');
+  const switchFlush = functionBody(app, 'flushPendingCodexSwitchPopoverRender', 'codexResetCreditsNode');
+  assert.match(switchHold, /state\.codexSwitchPopoverActive/);
+  assert.match(switchHold, /\.limit-account-switch-zone:hover, \.limit-account-switch-zone:focus-within, \.limit-account-active-zone:hover, \.limit-account-active-zone:focus-within/);
+  assert.match(switchFlush, /state\.codexSwitchPopoverRenderPending/);
+  assert.match(switchFlush, /state\.breakdown !== 'limits'/);
+  assert.match(switchFlush, /renderLimits\(\)/);
+  const switchBody = functionBody(main, 'switchCodexSystemAccount', 'refreshCodexManagedAccountLimits');
+  assert.doesNotMatch(switchBody, /restart: false/);
+  const findExistingBody = functionBody(main, 'findExistingCodexAccount', 'codexAccountId');
+  assert.match(findExistingBody, /if \(identity\.accountKey && account\.accountKey && !codexEmailDerivedAccountKey\(account, identity\)\)/);
+  assert.match(main, /function codexEmailDerivedAccountKey\(account, identity\)/);
+  const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
+  assert.match(refreshBody, /limitProviders: 'codex'/);
+  assert.match(refreshBody, /codexManagedAccounts: \[account\]/);
+  assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
+  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  assert.match(renderLimits, /id === 'codex' \? \{\s*accountTitle: true,\s*allowSystemSwitch: true\s*\} : undefined/s);
+  assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexSwitchPopoverShouldHoldRender\(\);/);
+  assert.match(renderLimits, /holdResetCreditsTooltipRender \|\| holdCodexSwitchPopoverRender/);
+  assert.match(renderLimits, /if \(holdCodexSwitchPopoverRender\) state\.codexSwitchPopoverRenderPending = true;/);
+  assert.match(renderLimits, /state\.codexSwitchPopoverRenderPending = false;/);
 });
 
 test('DeepSeek account panel provides a first-class API key entry', () => {
@@ -454,6 +602,47 @@ test('main settings normalize the Z.ai API region', () => {
   assert.match(handler, /if \(patch\.zaiApiRegion !== undefined\) normalizedPatch\.zaiApiRegion = normalizeZaiApiRegion\(patch\.zaiApiRegion\);/);
   assert.match(handler, /zaiApiRegion: patch\.zaiApiRegion !== undefined \? normalizeZaiApiRegion\(patch\.zaiApiRegion\) : normalizeZaiApiRegion\(settings\.zaiApiRegion \|\| 'global'\)/);
   assert.match(handler, /settings\.zaiApiRegion !== previousZaiApiRegion/);
+});
+
+test('main settings migration preserves explicit AI limit provider selections', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const context = {
+    parseLimitProviders(value) {
+      const known = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode']);
+      return String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter((item, index, list) => (
+        known.has(item) && list.indexOf(item) === index
+      ));
+    },
+    defaultLimitProviders() {
+      return 'claude,codex,cursor,antigravity,opencode';
+    }
+  };
+
+  assert.equal(
+    runMainFunction(main, 'migrateLimitProviders', 'migrateLimitProviderOrder', "migrateLimitProviders('claude,codex')", context),
+    'claude,codex'
+  );
+  assert.equal(
+    runMainFunction(main, 'migrateLimitProviders', 'migrateLimitProviderOrder', "migrateLimitProviders('claude,codex,cursor,antigravity')", context),
+    'claude,codex,cursor,antigravity'
+  );
+});
+
+test('active Codex account labels are always shown for multi-account limits rows', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const app = readRendererFile('app.js');
+  const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
+  const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
+  const defaultSettingsBody = functionBody(main, 'defaultSettings', 'ensureSettingsLoaded');
+  const readSettingsBody = functionBody(main, 'readSettings', 'saveSettings');
+
+  assert.doesNotMatch(defaultSettingsBody, /showActiveAccount/);
+  assert.doesNotMatch(readSettingsBody, /showActiveAccount/);
+  assert.doesNotMatch(main, /showActiveAccount: parseBoolean/);
+  assert.doesNotMatch(app, /showActiveAccountInput/);
+  assert.doesNotMatch(app, /showActiveAccount/);
+  assert.doesNotMatch(html, /showActiveAccountInput/);
+  assert.doesNotMatch(i18n, /settings\.limits\.showActiveAccount/);
 });
 
 test('collection cadence setting is exposed in the Collection panel', () => {
