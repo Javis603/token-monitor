@@ -75,7 +75,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Cost in your currency** — show costs in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model usage history (bar and K-line views) across all your devices
 - **Data export** — export your usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
-- **AI Tool Limits detection** for Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, and Qoder with session, weekly, billing, and credits windows, plus DeepSeek prepaid balance and today/month spend
+- **AI Tool Limits detection** for Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, and Qoder with session, weekly, billing, and credits windows, plus DeepSeek prepaid balance and today/month spend. Tracked Codex accounts can be made the local Codex account in one click, without re-authenticating.
 - **Optional Status view** for Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
 - **Customizable tool list** to hide, pin, and reorder tools in the main dashboard without changing what gets tracked
 - **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, and transparent window mode

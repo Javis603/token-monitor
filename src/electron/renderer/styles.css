@@ -2514,14 +2514,143 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .limit-live-badge {
   flex: 0 0 auto;
-  color: var(--muted);
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  margin-left: -6px;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
   font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
   white-space: nowrap;
 }
-.limit-live-badge::before {
-  content: "\2713\00a0";
+.limit-account-active-zone {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  outline: none;
+}
+.limit-account-active-zone .limit-name-title {
+  display: block;
+  transition: color 140ms ease, text-shadow 140ms ease;
+}
+.limit-account-active-zone:hover .limit-name-title,
+.limit-account-active-zone:focus-visible .limit-name-title {
+  color: var(--text);
+  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.16);
+}
+.limit-account-active-popover {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  left: calc(100% + 2px);
+  display: block;
+  padding: 0 7px;
+  border-radius: 7px;
+  background: rgba(var(--overlay-rgb), 0.1);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 22px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(-2px);
+  transition: opacity 140ms ease, transform 160ms ease;
+  white-space: nowrap;
+}
+.limit-account-active-zone:hover .limit-account-active-popover,
+.limit-account-active-zone:focus-visible .limit-account-active-popover {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+.limit-account-switch-zone {
+  position: relative;
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+}
+.limit-account-switch-zone::after {
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  width: 10px;
+  height: calc(100% + 10px);
+  content: "";
+}
+.limit-account-switch-zone .limit-name-title {
+  display: block;
+  transition: color 140ms ease, text-shadow 140ms ease;
+}
+.limit-account-switch-zone:hover .limit-name-title,
+.limit-account-switch-zone:focus-within .limit-name-title {
+  color: var(--text);
+  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.16);
+}
+.limit-account-switch-popover {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  left: calc(100% + 8px);
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(-2px);
+  transition: opacity 140ms ease, transform 160ms ease;
+  white-space: nowrap;
+}
+.limit-account-switch-zone:hover .limit-account-switch-popover,
+.limit-account-switch-zone:focus-within .limit-account-switch-popover,
+.limit-account-switch-zone.is-switching .limit-account-switch-popover,
+.limit-account-switch-zone.is-error .limit-account-switch-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
+}
+.limit-account-switch-button {
+  display: block;
+  min-width: 58px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.12), rgba(var(--overlay-rgb), 0.035)),
+    rgba(var(--glass-rgb), 0.66);
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  line-height: 24px;
+  -webkit-backdrop-filter: blur(18px) saturate(112%);
+  backdrop-filter: blur(18px) saturate(112%);
+}
+.limit-account-switch-button:hover,
+.limit-account-switch-button:focus-visible {
+  border-color: rgba(var(--accent-rgb), 0.36);
+  background: rgba(var(--accent-rgb), 0.1);
   color: var(--green);
-  font-weight: 700;
+  outline: 1px solid rgba(var(--accent-rgb), 0.22);
+  outline-offset: 0;
+}
+.limit-account-switch-button:disabled {
+  cursor: default;
+}
+.limit-account-switch-zone.is-error .limit-account-switch-button {
+  background: rgba(244, 119, 136, 0.14);
+  color: var(--red);
+}
+@media (prefers-reduced-motion: reduce) {
+  .limit-account-switch-zone .limit-name-title,
+  .limit-account-active-zone .limit-name-title,
+  .limit-account-active-popover,
+  .limit-account-switch-popover {
+    transition: none;
+  }
 }
 .limit-account-row {
   padding: 0;
