@@ -32,32 +32,32 @@ Claude Code, Codex, Hermes Agent, OpenCode, OpenClaw, Cursor, Antigravity, Cline
 
 Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 각각 지원합니다.
 
-| Logo | 도구 | 데이터 경로 | 토큰 사용량 | AI 도구 한도 | 세션 상세 |
-|:---:|------|-----------|:---:|:---:|:---:|
-| <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`, `~/.claude/transcripts/` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/sessions/` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `$HERMES_HOME/state.db` 또는 `~/.hermes/state.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor | `~/.config/tokscale/cursor-cache/` (Cursor 동기화로 갱신) | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.config/tokscale/antigravity-cache/` (Antigravity 동기화로 갱신) | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code | `~/.kimi/sessions/`, `~/.kimi-code/sessions/` (`KIMI_CODE_HOME`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `$GROK_HOME/sessions/` 또는 `~/.grok/sessions/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot CLI | `~/.copilot/otel/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/`, `~/.omp/agent/sessions/` (Oh My Pi) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux 및 원격/WSL만 | ✅ | — | — |
-| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/projects/`; Z.ai API 키 (Z.ai API로 GLM Coding Plan 할당량 조회) | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage 및 `kiro-cli` DB | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 확장 로그 | ✅ | — | — |
-| <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API 키 (DeepSeek API로 잔액 조회) | — | ✅ | — |
-| <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API 키 (Minimax API로 Token Plan 할당량 조회) | — | ✅ | — |
-| <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 또는 Volcengine AK/SK (Volcengine API로 Ark Coding Plan 할당량 조회) | — | ✅ | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | Qoder dashboard cookie (Qoder usage API로 big-model credits 조회) | — | ✅ | — |
+|                                          Logo                                          | 도구                 | 데이터 경로                                                                                                             | 토큰 사용량 | AI 도구 한도 | 세션 상세 |
+| :------------------------------------------------------------------------------------: | -------------------- | ----------------------------------------------------------------------------------------------------------------------- | :---------: | :----------: | :-------: |
+|    <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" />     | Claude Code          | `~/.claude/projects/`, `~/.claude/transcripts/`                                                                         |     ✅      |      ✅      |    ✅     |
+|        <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" />        | Codex                | `~/.codex/sessions/`                                                                                                    |     ✅      |      ✅      |    ✅     |
+|     <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" />     | OpenCode             | `~/.local/share/opencode/`                                                                                              |     ✅      |      ✅      |    ✅     |
+| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent         | `$HERMES_HOME/state.db` 또는 `~/.hermes/state.db`                                                                       |     ✅      |      —       |     —     |
+|     <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" />     | OpenClaw             | `~/.openclaw/agents/`                                                                                                   |     ✅      |      —       |     —     |
+|       <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" />       | Cursor               | `~/.config/tokscale/cursor-cache/` (Cursor 동기화로 갱신)                                                               |     ✅      |      ✅      |     —     |
+|  <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" />  | Antigravity          | `~/.config/tokscale/antigravity-cache/` (Antigravity 동기화로 갱신)                                                     |     ✅      |      ✅      |     —     |
+|        <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" />        | Cline                | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`)                                                       |     ✅      |      —       |     —     |
+|         <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" />         | Kimi CLI / Kimi Code | `~/.kimi/sessions/`, `~/.kimi-code/sessions/` (`KIMI_CODE_HOME`); Kimi API 키 (Kimi API로 Kimi Coding Plan 할당량 조회) |     ✅      |      ✅      |     —     |
+|         <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" />         | Qwen CLI             | `~/.qwen/projects/`                                                                                                     |     ✅      |      —       |     —     |
+|      <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" />       | Grok Build           | `$GROK_HOME/sessions/` 또는 `~/.grok/sessions/`                                                                         |     ✅      |      ✅      |     —     |
+|  <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" />   | GitHub Copilot CLI   | `~/.copilot/otel/`                                                                                                      |     ✅      |      ✅      |     —     |
+|           <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" />           | Pi                   | `~/.pi/agent/sessions/`, `~/.omp/agent/sessions/` (Oh My Pi)                                                            |     ✅      |      —       |     —     |
+|          <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" />          | Zed                  | `~/.local/share/zed/threads/threads.db`                                                                                 |     ✅      |      —       |     —     |
+|    <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" />     | Kilo Code            | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux 및 원격/WSL만                                     |     ✅      |      —       |     —     |
+|    <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" />    | MiMo Code            | `~/.local/share/mimocode/mimocode.db`                                                                                   |     ✅      |      —       |     —     |
+|        <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" />        | ZCode / GLM          | `~/.zcode/projects/`; Z.ai API 키 (Z.ai API로 GLM Coding Plan 할당량 조회)                                              |     ✅      |      ✅      |     —     |
+|         <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" />         | Kiro                 | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage 및 `kiro-cli` DB                                                        |     ✅      |      ✅      |     —     |
+|    <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" />    | CodeBuddy            | `~/.codebuddy/projects/` + IDE / VS Code 확장 로그                                                                      |     ✅      |      —       |     —     |
+|    <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" />    | WorkBuddy            | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db`                                                                   |     ✅      |      —       |     —     |
+|     <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" />     | DeepSeek             | DeepSeek API 키 (DeepSeek API로 잔액 조회)                                                                              |      —      |      ✅      |     —     |
+|      <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" />      | Minimax              | Minimax API 키 (Minimax API로 Token Plan 할당량 조회)                                                                   |      —      |      ✅      |     —     |
+|   <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" />   | Volcengine           | Ark API key 또는 Volcengine AK/SK (Volcengine API로 Ark Coding Plan 할당량 조회)                                        |      —      |      ✅      |     —     |
+|        <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" />        | Qoder                | Qoder dashboard cookie (Qoder usage API로 big-model credits 조회)                                                       |      —      |      ✅      |     —     |
 
 ## Token Monitor를 쓰는 이유
 
@@ -75,11 +75,11 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 - **원하는 통화로 비용 표시** — USD, TWD, HKD, CNY; 환율은 매일 자동 갱신, 설정에서 수동 덮어쓰기 가능
 - **사용 추세 & 대시보드** — 홈 화면 활동 히트맵·추세 차트, 연속 일수·기기 전체 도구/모델별 누적 사용(막대·K선) 전용 대시보드 창
 - **데이터 내보내기** — 도구 무관 CSV + JSON으로 수동 내보내기 또는 폴더 자동 기록 (스프레드시트, Obsidian, Grafana, 스크립트용); [docs/export.md](docs/export.md) 참고
-- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, Qoder의 session/weekly/billing/credits, DeepSeek 선불 잔액·오늘/이번 달 사용액
+- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, Qoder, Kimi Coding의 session/weekly/billing/credits, DeepSeek 선불 잔액·오늘/이번 달 사용액
 - **상태 보기** (선택) — Claude, OpenAI, Cursor, DeepSeek 상태 페이지 수동/주기 확인
 - **도구 목록 커스터마이즈** — 추적은 유지한 채 숨기기, 고정, 순서 변경
 - **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창
-- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder 한도 % 등
+- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi Coding 한도 % 등
 - **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
 - **전역 단축키** — 어디서든 창 표시/숨김
 - **로컬 우선** — 단일 기기는 서버 불필요
@@ -88,16 +88,16 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 - **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
 - **프라이버시 우선** — 요약 숫자만 기기 밖으로 나감
 
-| 한도 보기 | 기기 보기 | 모델 보기 |
-|:---:|:---:|:---:|
+|                  한도 보기                   |                   기기 보기                   |                  모델 보기                   |
+| :------------------------------------------: | :-------------------------------------------: | :------------------------------------------: |
 | ![한도 보기](.github/assets/limits-view.png) | ![기기 보기](.github/assets/devices-view.png) | ![모델 보기](.github/assets/models-view.png) |
 
-| 세션 보기 | 세션 상세 | 서비스 상태 |
-|:---:|:---:|:---:|
+|                   세션 보기                    |                    세션 상세                     |                  서비스 상태                   |
+| :--------------------------------------------: | :----------------------------------------------: | :--------------------------------------------: |
 | ![세션 보기](.github/assets/sessions-view.png) | ![세션 상세](.github/assets/session-details.png) | ![서비스 상태](.github/assets/status-view.png) |
 
-| 사용 대시보드 — 개요 | 사용 대시보드 — 추세 |
-|:---:|:---:|
+|                     사용 대시보드 — 개요                     |                    사용 대시보드 — 추세                    |
+| :----------------------------------------------------------: | :--------------------------------------------------------: |
 | ![사용 대시보드 개요](.github/assets/dashboard-overview.png) | ![사용 대시보드 추세](.github/assets/dashboard-trends.png) |
 
 ## 설치
@@ -152,11 +152,11 @@ npx wrangler deploy
 
 앱 상태는 OS 사용자 데이터 디렉터리에 저장됩니다. 앱과 함께 해당 폴더를 삭제하면 완전히 제거됩니다.
 
-| 플랫폼 | 경로 |
-|--------|------|
-| macOS | `~/Library/Application Support/Token Monitor/` |
-| Windows | `%APPDATA%/Token Monitor/` |
-| Linux | `~/.config/Token Monitor/` |
+| 플랫폼  | 경로                                           |
+| ------- | ---------------------------------------------- |
+| macOS   | `~/Library/Application Support/Token Monitor/` |
+| Windows | `%APPDATA%/Token Monitor/`                     |
+| Linux   | `~/.config/Token Monitor/`                     |
 
 ## 소스에서 빌드
 
@@ -194,7 +194,7 @@ npm run pack       # 설치 없이 앱 디렉터리만 (로컬 테스트)
 
 - **멀티 디바이스 동기화** — **Local only**, **Connect to a hub**, **Host hub on this device**
 - **추적 도구** — 수집 대상 선택, 목록에서 숨기기·고정·순서 변경
-- **AI 도구 한도** — Claude Code, Codex, Cursor, Antigravity, OpenCode, DeepSeek, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, Qoder 한도 감지 및 갱신 주기
+- **AI 도구 한도** — Claude Code, Codex, Cursor, Antigravity, OpenCode, DeepSeek, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, Qoder, Kimi Coding 한도 감지 및 갱신 주기
 - **추세** — 일별 사용 기록 스캔 간격 선택 또는 끄기; 사용 대시보드(히트맵, 연속 일수, 막대/K선) 열기
 - **창 동작** — 항상 위, 일반 창, 바탕 화면 고정
 - **트레이 모드** — 메뉴 막대/시스템 트레이 팝오버, 아이콘 옆 표시 항목 선택
@@ -216,7 +216,7 @@ TOKEN_MONITOR_DEVICE_ID=             # 선택 — 기본값 호스트명
 TOKEN_MONITOR_CLIENTS=               # 선택 — 기본값 전체 도구; 비우면 추적 안 함
 TOKEN_MONITOR_HISTORY_ENABLED=       # 선택 — 기본 켜짐; 0이면 추세 기록 생략
 TOKEN_MONITOR_LIMITS_ENABLED=        # 선택 — 기본 켜짐; 0이면 CLI 프로브 생략
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # 선택 — claude,codex,cursor,antigravity,opencode,deepseek,minimax,grok,copilot,kiro,zai,volcengine,qoder
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # 선택 — claude,codex,cursor,antigravity,opencode,deepseek,minimax,grok,copilot,kiro,zai,volcengine,qoder,kimicoding
 ```
 
 위젯은 같은 env를 첫 실행 기본값으로 읽은 뒤 GUI 설정으로 덮어씁니다.
@@ -237,7 +237,7 @@ hub와 agent는 요약 필드만 전송합니다.
 - 기간별 총 토큰 (오늘 / 이번 달 / 전체)
 - 비용 합계 (`tokscale`이 비용을 반환할 때)
 - 클라이언트·모델별 분류
-- AI 도구 한도 사용 시 정규화된 Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder 한도 상태
+- AI 도구 한도 사용 시 정규화된 Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi Coding 한도 상태
 
 원본 AI 로그, 프롬프트, 소스 코드, 대화 내용, OAuth·토큰·이메일·제공자 원본 응답은 전송하지 않습니다. `.env`, `data/`, `node_modules/`는 gitignore됩니다.
 

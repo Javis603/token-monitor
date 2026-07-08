@@ -32,32 +32,32 @@
 
 Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分別支援：
 
-| Logo | 工具 | 資料路徑 | Token 用量 | AI 工具額度 | session 明細 |
-|:---:|------|-----------|:---:|:---:|:---:|
-| <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`、`~/.claude/transcripts/` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/sessions/` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `$HERMES_HOME/state.db` 或 `~/.hermes/state.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor | `~/.config/tokscale/cursor-cache/`（由 Cursor 同步保持更新） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.config/tokscale/antigravity-cache/`（由 Antigravity 同步保持更新） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code | `~/.kimi/sessions/`、`~/.kimi-code/sessions/`（`KIMI_CODE_HOME`） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `$GROK_HOME/sessions/` 或 `~/.grok/sessions/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot CLI | `~/.copilot/otel/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/`、`~/.omp/agent/sessions/`（Oh My Pi） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 僅 Linux 與遠端/WSL | ✅ | — | — |
-| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/projects/`；Z.ai API 金鑰（透過 Z.ai API 查詢 GLM Coding Plan 額度） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 與 `kiro-cli` 資料庫 | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 與 IDE / VS Code 擴充套件日誌 | ✅ | — | — |
-| <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API 金鑰（透過 DeepSeek API 查詢餘額） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API 金鑰（透過 Minimax API 查詢 Token Plan 額度） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 或火山引擎 AK/SK（透過火山引擎 API 查詢火山方舟 Coding Plan 額度） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | Qoder dashboard cookie（透過 Qoder usage API 查詢 big-model credits） | — | ✅ | — |
+|                                          Logo                                          | 工具                 | 資料路徑                                                                                                                     | Token 用量 | AI 工具額度 | session 明細 |
+| :------------------------------------------------------------------------------------: | -------------------- | ---------------------------------------------------------------------------------------------------------------------------- | :--------: | :---------: | :----------: |
+|    <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" />     | Claude Code          | `~/.claude/projects/`、`~/.claude/transcripts/`                                                                              |     ✅     |     ✅      |      ✅      |
+|        <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" />        | Codex                | `~/.codex/sessions/`                                                                                                         |     ✅     |     ✅      |      ✅      |
+|     <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" />     | OpenCode             | `~/.local/share/opencode/`                                                                                                   |     ✅     |     ✅      |      ✅      |
+| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent         | `$HERMES_HOME/state.db` 或 `~/.hermes/state.db`                                                                              |     ✅     |      —      |      —       |
+|     <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" />     | OpenClaw             | `~/.openclaw/agents/`                                                                                                        |     ✅     |      —      |      —       |
+|       <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" />       | Cursor               | `~/.config/tokscale/cursor-cache/`（由 Cursor 同步保持更新）                                                                 |     ✅     |     ✅      |      —       |
+|  <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" />  | Antigravity          | `~/.config/tokscale/antigravity-cache/`（由 Antigravity 同步保持更新）                                                       |     ✅     |     ✅      |      —       |
+|        <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" />        | Cline                | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`）                                                           |     ✅     |      —      |      —       |
+|         <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" />         | Kimi CLI / Kimi Code | `~/.kimi/sessions/`、`~/.kimi-code/sessions/`（`KIMI_CODE_HOME`）；Kimi API 金鑰（透過 Kimi API 查詢 Kimi Coding Plan 額度） |     ✅     |     ✅      |      —       |
+|         <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" />         | Qwen CLI             | `~/.qwen/projects/`                                                                                                          |     ✅     |      —      |      —       |
+|      <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" />       | Grok Build           | `$GROK_HOME/sessions/` 或 `~/.grok/sessions/`                                                                                |     ✅     |     ✅      |      —       |
+|  <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" />   | GitHub Copilot CLI   | `~/.copilot/otel/`                                                                                                           |     ✅     |     ✅      |      —       |
+|           <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" />           | Pi                   | `~/.pi/agent/sessions/`、`~/.omp/agent/sessions/`（Oh My Pi）                                                                |     ✅     |      —      |      —       |
+|          <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" />          | Zed                  | `~/.local/share/zed/threads/threads.db`                                                                                      |     ✅     |      —      |      —       |
+|    <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" />     | Kilo Code            | VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 僅 Linux 與遠端/WSL                                         |     ✅     |      —      |      —       |
+|    <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" />    | MiMo Code            | `~/.local/share/mimocode/mimocode.db`                                                                                        |     ✅     |      —      |      —       |
+|        <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" />        | ZCode / GLM          | `~/.zcode/projects/`；Z.ai API 金鑰（透過 Z.ai API 查詢 GLM Coding Plan 額度）                                               |     ✅     |     ✅      |      —       |
+|         <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" />         | Kiro                 | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 與 `kiro-cli` 資料庫                                                         |     ✅     |     ✅      |      —       |
+|    <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" />    | CodeBuddy            | `~/.codebuddy/projects/` 與 IDE / VS Code 擴充套件日誌                                                                       |     ✅     |      —      |      —       |
+|    <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" />    | WorkBuddy            | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db`                                                                        |     ✅     |      —      |      —       |
+|     <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" />     | DeepSeek             | DeepSeek API 金鑰（透過 DeepSeek API 查詢餘額）                                                                              |     —      |     ✅      |      —       |
+|      <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" />      | Minimax              | Minimax API 金鑰（透過 Minimax API 查詢 Token Plan 額度）                                                                    |     —      |     ✅      |      —       |
+|   <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" />   | Volcengine           | Ark API key 或火山引擎 AK/SK（透過火山引擎 API 查詢火山方舟 Coding Plan 額度）                                               |     —      |     ✅      |      —       |
+|        <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" />        | Qoder                | Qoder dashboard cookie（透過 Qoder usage API 查詢 big-model credits）                                                        |     —      |     ✅      |      —       |
 
 ## 為什麼要用 Token Monitor？
 
@@ -75,11 +75,11 @@ Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分�
 - **以你的幣別顯示成本**：可用 USD、TWD、HKD 或 CNY 顯示成本；匯率每日自動更新，也可在設定中手動覆寫
 - **使用趨勢與儀表板**：主頁的活躍熱力圖與趨勢圖，加上獨立的儀表板視窗，提供連續天數，以及跨所有裝置、依工具／依模型堆疊的歷史（柱狀圖與 K 線兩種檢視）
 - **資料匯出**：把使用資料匯出成與工具無關的 CSV + JSON，可手動或自動寫入資料夾，接試算表、Obsidian、Grafana 或自寫腳本；詳見 [docs/export.md](docs/export.md)
-- **AI 工具額度偵測**：支援 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine 與 Qoder，涵蓋 session、每週、帳單與 credits 視窗，以及 DeepSeek 預付餘額與今日/本月消費
+- **AI 工具額度偵測**：支援 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine、Qoder 與 Kimi Coding，涵蓋 session、每週、帳單與 credits 視窗，以及 DeepSeek 預付餘額與今日/本月消費
 - **可選的狀態檢視**：追蹤 Claude、OpenAI、Cursor 與 DeepSeek status 頁，支援手動或定時重新檢查
 - **工具列表自訂**：可隱藏、置頂和拖曳排序主列表中的工具，不影響實際追蹤
 - **外觀控制**：介面主題切換（含淺色模式）、各工具廠商色、玻璃透明度、模糊度、完全透明視窗
-- **選單列（macOS）與系統匣（Windows）彈出視窗**：圖示旁可顯示成本、token 數，或 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder 最接近用完的剩餘額度百分比
+- **選單列（macOS）與系統匣（Windows）彈出視窗**：圖示旁可顯示成本、token 數，或 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder／Kimi Coding 最接近用完的剩餘額度百分比
 - **懸浮小窗模式**：可將小工具收成可拖曳的緊湊小窗，支援點擊或懸停預覽展開，並可顯示托盤同款內容
 - **可錄製全域快捷鍵**：可從任何地方快速顯示或隱藏視窗
 - **本地優先**：單裝置使用完全不需伺服器
@@ -88,16 +88,16 @@ Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分�
 - **Discord Rich Presence**：將今日 Token、花費與主要工具廣播到你的 Discord 個人檔案（需手動開啟）
 - **隱私優先**：只有摘要數字會離開你的機器
 
-| 額度檢視 | 裝置檢視 | 模型檢視 |
-|:---:|:---:|:---:|
+|                  額度檢視                   |                   裝置檢視                   |                  模型檢視                   |
+| :-----------------------------------------: | :------------------------------------------: | :-----------------------------------------: |
 | ![額度檢視](.github/assets/limits-view.png) | ![裝置檢視](.github/assets/devices-view.png) | ![模型檢視](.github/assets/models-view.png) |
 
-| Session 檢視 | Session 明細 | 服務狀態 |
-|:---:|:---:|:---:|
+|                   Session 檢視                    |                    Session 明細                     |                  服務狀態                   |
+| :-----------------------------------------------: | :-------------------------------------------------: | :-----------------------------------------: |
 | ![Session 檢視](.github/assets/sessions-view.png) | ![Session 明細](.github/assets/session-details.png) | ![服務狀態](.github/assets/status-view.png) |
 
-| 使用儀表板 — 總覽 | 使用儀表板 — 趨勢 |
-|:---:|:---:|
+|                     使用儀表板 — 總覽                     |                    使用儀表板 — 趨勢                    |
+| :-------------------------------------------------------: | :-----------------------------------------------------: |
 | ![使用儀表板 總覽](.github/assets/dashboard-overview.png) | ![使用儀表板 趨勢](.github/assets/dashboard-trends.png) |
 
 ## 安裝
@@ -152,11 +152,11 @@ npx wrangler deploy
 
 App 狀態存在 OS 使用者資料目錄——解除安裝時一併刪除該資料夾即可完整移除。
 
-| 平台 | 路徑 |
-|------|------|
-| macOS | `~/Library/Application Support/Token Monitor/` |
-| Windows | `%APPDATA%/Token Monitor/` |
-| Linux | `~/.config/Token Monitor/` |
+| 平台    | 路徑                                           |
+| ------- | ---------------------------------------------- |
+| macOS   | `~/Library/Application Support/Token Monitor/` |
+| Windows | `%APPDATA%/Token Monitor/`                     |
+| Linux   | `~/.config/Token Monitor/`                     |
 
 ## 從原始碼建置
 
@@ -194,10 +194,10 @@ npm run pack       # 未封裝的 app 目錄（無安裝檔），方便本機快
 
 - **多裝置同步**——三種模式：**Local only**（僅本機，無 hub）、**Connect to a hub**（貼入其他機器的 Hub URL + secret）、**Host hub on this device**（在本機開 hub 供其他裝置連入；面板會列出可用的區網 / Tailscale / ZeroTier 位址）。
 - **追蹤的工具**——選擇要收集的 AI 工具，也可以獨立隱藏、置頂或拖曳排序主列表中的工具。
-- **AI 工具額度**——選擇 Claude Code、Codex、Cursor、Antigravity、OpenCode、DeepSeek、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine 與 Qoder 的額度偵測與更新頻率。
+- **AI 工具額度**——選擇 Claude Code、Codex、Cursor、Antigravity、OpenCode、DeepSeek、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine、Qoder 與 Kimi Coding 的額度偵測與更新頻率。
 - **趨勢**——選擇每日使用歷史的掃描間隔，或直接關閉；開啟使用儀表板可看到活躍熱力圖、連續天數，以及依工具／依模型堆疊的柱狀圖與 K 線圖。
 - **視窗行為**——選擇浮在其他 app 上方、一般視窗，或固定在桌面。
-- **托盤模式**——切換為 macOS 選單列或 Windows 系統匣的彈出視窗，並選擇圖示旁顯示的內容：成本、今日 token 數、累計 token 數、成本＋token、最接近用完的 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder 剩餘額度百分比，或只顯示圖示。
+- **托盤模式**——切換為 macOS 選單列或 Windows 系統匣的彈出視窗，並選擇圖示旁顯示的內容：成本、今日 token 數、累計 token 數、成本＋token、最接近用完的 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder／Kimi Coding 剩餘額度百分比，或只顯示圖示。
 - **懸浮小窗**——將小工具收成可拖曳的小窗，可用點擊或懸停預覽展開，並可選擇顯示圖示、token、費用或 AI 工具額度條。
 - **快捷鍵**——錄製全域快捷鍵，用來顯示或隱藏視窗。
 - **外觀**——介面主題切換，可選預設（預設、黑曜、瓷白淺色模式）或自訂色彩（強調色、背景、文字、次要文字）、各工具廠商色、系統玻璃、即時點、工具圖示、Discord Rich Presence、玻璃透明度、玻璃模糊度。
@@ -216,7 +216,7 @@ TOKEN_MONITOR_DEVICE_ID=             # 選填——預設為主機名稱
 TOKEN_MONITOR_CLIENTS=               # 選填——預設為所有支援的工具；設為空表示不追蹤
 TOKEN_MONITOR_HISTORY_ENABLED=       # 選填——預設啟用；設為 0 可跳過收集趨勢歷史
 TOKEN_MONITOR_LIMITS_ENABLED=        # 選填——預設啟用；設為 0 可跳過 CLI 探測
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # 選填——預設為所有支援的供應商（claude、codex、cursor、antigravity、opencode、deepseek、minimax、grok、copilot、kiro、zai、volcengine、qoder）
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # 選填——預設為所有支援的供應商（claude、codex、cursor、antigravity、opencode、deepseek、minimax、grok、copilot、kiro、zai、volcengine、qoder、kimicoding）
 ```
 
 小工具會把同樣的環境變數讀作首次啟動的預設值，之後改由 GUI 設定接手。
@@ -237,7 +237,7 @@ hub 與代理只傳輸摘要欄位：
 - 每個時段的 Token 總數（今日 / 本月 / 全部）
 - 成本總額（若 `tokscale` 回傳成本資料）
 - 依客戶端與模型的分項統計
-- 啟用 AI 工具額度時，正規化後的 Claude Code／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder 額度狀態
+- 啟用 AI 工具額度時，正規化後的 Claude Code／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder／Kimi Coding 額度狀態
 
 完全不會傳輸原始 AI 紀錄、提示詞、原始碼或對話內容。也不會傳輸 OAuth 憑證、存取權杖、刷新權杖、電子郵件或供應商原始回應。`.env`、`data/`、`node_modules/` 已加入 gitignore。
 

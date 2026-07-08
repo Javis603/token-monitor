@@ -540,7 +540,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(statsPush, new RegExp(`${fn}\\(\\);`), `${fn} missing from onStatsPush`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['zai', 'volcengine', 'qoder']) {
+  for (const provider of ['zai', 'volcengine', 'qoder', 'kimicoding']) {
     assert.match(refreshStats, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from refreshStats`);
     assert.match(statsPush, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from onStatsPush`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
@@ -635,13 +635,15 @@ test('Accounts summary counts API-key and cookie account groups', () => {
   assert.match(summaryBody, /const zaiLinked = externalProviderAccountLinked\('zai'\);/);
   assert.match(summaryBody, /const volcengineLinked = externalProviderAccountLinked\('volcengine'\);/);
   assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
+  assert.match(summaryBody, /const kimicodingLinked = externalProviderAccountLinked\('kimicoding'\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(zaiLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(kimicodingLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 9/);
+  assert.match(summaryBody, /total: 10/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
@@ -731,5 +733,14 @@ test('Z.ai, Volcengine, and Qoder source labels and setup statuses', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'qoder', status: 'unauthorized' }),
     { label: 'Sign in again', tone: 'setup' }
+  );
+});
+
+test('Kimi Coding capability tags and source label', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('kimicoding'), ['Coding Plan', 'API key']);
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimicoding', source: 'api' }), 'API');
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'kimicoding', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
   );
 });
