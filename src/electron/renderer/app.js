@@ -187,7 +187,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, settingsInTitlebar: false };
 let preferenceDrag = null;
@@ -1381,13 +1381,43 @@ function codexActiveAccountFromStats() {
   return null;
 }
 
+function clearCodexPendingActiveAccount() {
+  if (state.codexPendingActiveAccountTimer) {
+    clearTimeout(state.codexPendingActiveAccountTimer);
+    state.codexPendingActiveAccountTimer = null;
+  }
+  state.codexPendingActiveAccount = null;
+  state.codexPendingActiveAccountUntil = 0;
+}
+
+function scheduleCodexPendingActiveAccountExpiry() {
+  if (state.codexPendingActiveAccountTimer) clearTimeout(state.codexPendingActiveAccountTimer);
+  const delay = Math.max(0, state.codexPendingActiveAccountUntil - Date.now());
+  state.codexPendingActiveAccountTimer = setTimeout(() => {
+    state.codexPendingActiveAccountTimer = null;
+    applyCodexActiveAccountFromStats();
+    renderLimits();
+    renderCodexAccounts();
+    renderSettingsSummaries();
+  }, delay);
+}
+
+function setCodexPendingActiveAccount(account) {
+  if (!account) {
+    clearCodexPendingActiveAccount();
+    return;
+  }
+  state.codexPendingActiveAccount = account;
+  state.codexPendingActiveAccountUntil = Date.now() + CODEX_PENDING_ACTIVE_GRACE_MS;
+  scheduleCodexPendingActiveAccountExpiry();
+}
+
 function applyCodexActiveAccountFromStats() {
   const activeAccount = codexActiveAccountFromStats();
   if (state.codexPendingActiveAccount) {
     const pendingAccount = state.codexPendingActiveAccount;
     if (activeAccount && codexAccountsShareIdentity(pendingAccount, activeAccount)) {
-      state.codexPendingActiveAccount = null;
-      state.codexPendingActiveAccountUntil = 0;
+      clearCodexPendingActiveAccount();
       state.codexActiveAccount = activeAccount;
       return;
     }
@@ -1395,8 +1425,7 @@ function applyCodexActiveAccountFromStats() {
       state.codexActiveAccount = pendingAccount;
       return;
     }
-    state.codexPendingActiveAccount = null;
-    state.codexPendingActiveAccountUntil = 0;
+    clearCodexPendingActiveAccount();
   }
   state.codexActiveAccount = activeAccount;
 }
@@ -1425,6 +1454,7 @@ function applyCodexAccountLimitsRefresh(providers) {
       providers: nextProviders
     }
   };
+  applyCodexActiveAccountFromStats();
   renderLimits();
   maybeUpdateBarsIcon();
 }
@@ -1504,8 +1534,7 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
         } else {
           state.codexAccountError = '';
           state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
-          state.codexPendingActiveAccount = result.activeAccount || null;
-          state.codexPendingActiveAccountUntil = Date.now() + CODEX_PENDING_ACTIVE_GRACE_MS;
+          setCodexPendingActiveAccount(result.activeAccount || null);
           state.codexActiveAccount = result.activeAccount;
           renderLimits();
           window.tokenMonitor.codex.refreshAccountLimits(switchAccount.id).then((refreshResult) => {
