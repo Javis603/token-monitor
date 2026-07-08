@@ -89,7 +89,7 @@ async function fetchZaiTeamLimits(options = {}, deps = {}) {
     const usage = parseZaiUsage(quota, null);
     return normalizeLimitProvider({
       provider: 'zaiteam',
-      accountKey: hashKey('zaiteam', `${organization}:${project}`),
+      accountKey: hashKey('zaiteam', organization, project),
       accountLabel: usage.plan || 'Team',
       source: 'api',
       status: usage.windows.length ? 'ok' : 'unavailable',

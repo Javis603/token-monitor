@@ -80,7 +80,7 @@ test('fetchZaiTeamLimits sends team headers and derives accountKey from org:proj
   assert.equal(provider.status, 'ok');
   assert.equal(provider.region, 'bigmodel-cn');
   assert.equal(provider.accountLabel, 'Max');
-  assert.equal(provider.accountKey, hashKey('zaiteam', 'org-xxx:proj_xxx'));
+  assert.equal(provider.accountKey, hashKey('zaiteam', 'org-xxx', 'proj_xxx'));
   assert.deepEqual(urls, [ZAI_TEAM_QUOTA_URL]);
   assert.deepEqual(headers, [{
     Authorization: 'Bearer team-key',
@@ -134,6 +134,6 @@ test('fetchZaiTeamLimits falls back to ZAI_TEAM_* env vars', async () => {
     }
   });
   assert.equal(provider.status, 'ok');
-  assert.equal(provider.accountKey, hashKey('zaiteam', 'org-env:proj-env'));
+  assert.equal(provider.accountKey, hashKey('zaiteam', 'org-env', 'proj-env'));
   assert.deepEqual(urls, [ZAI_TEAM_QUOTA_URL]);
 });

@@ -2163,6 +2163,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-qwen       { -webkit-mask-image: url(../../../assets/icons/qwen.svg);          mask-image: url(../../../assets/icons/qwen.svg); }
 .row-icon-moonshot   { -webkit-mask-image: url(../../../assets/icons/moonshot.svg);      mask-image: url(../../../assets/icons/moonshot.svg); }
 .row-icon-zai        { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
+.row-icon-zaiteam    { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-cohere     { -webkit-mask-image: url(../../../assets/icons/cohere.svg);        mask-image: url(../../../assets/icons/cohere.svg); }
 .row-icon-xiaomi     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }

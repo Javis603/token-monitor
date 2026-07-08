@@ -633,11 +633,13 @@ test('Accounts summary counts API-key and cookie account groups', () => {
 
   assert.match(summaryBody, /const minimaxLinked = minimaxAccountLinked\(\);/);
   assert.match(summaryBody, /const zaiLinked = externalProviderAccountLinked\('zai'\);/);
+  assert.match(summaryBody, /const zaiteamLinked = externalProviderAccountLinked\('zaiteam'\);/);
   assert.match(summaryBody, /const volcengineLinked = externalProviderAccountLinked\('volcengine'\);/);
   assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(zaiLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(zaiteamLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
