@@ -390,10 +390,10 @@ function codexManagedRoot() {
 }
 
 function findExistingCodexAccount(accounts, identity) {
-  return accounts.find((account) => (
-    (identity.accountKey && account.accountKey === identity.accountKey) ||
-    (identity.email && account.email === identity.email)
-  ));
+  return accounts.find((account) => {
+    if (identity.accountKey && account.accountKey) return account.accountKey === identity.accountKey;
+    return Boolean(identity.email && account.email === identity.email);
+  });
 }
 
 function codexAccountId(identity, existing) {
@@ -557,8 +557,7 @@ async function switchCodexSystemAccount(id) {
     const refreshedAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
     const refreshed = refreshedAccounts.find((entry) => entry.id === account.id) || account;
     commitCodexManagedAccount(targetMaterial.identity, refreshed.homePath, refreshed, {
-      enabled: refreshed.enabled !== false,
-      restart: false
+      enabled: refreshed.enabled !== false
     });
     const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
     const accountsForRenderer = codexAccountsForRenderer();

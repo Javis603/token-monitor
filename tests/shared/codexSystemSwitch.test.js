@@ -34,6 +34,7 @@ test('managed Codex accounts match identities by stable key or lower-cased email
   assert.equal(codexAccountMatchesIdentity(accounts[0], { accountKey: 'sha256:first' }), true);
   assert.equal(codexAccountMatchesIdentity(accounts[0], { email: 'FIRST@example.com' }), true);
   assert.equal(codexAccountMatchesIdentity(accounts[0], { accountKey: 'sha256:second' }), false);
+  assert.equal(codexAccountMatchesIdentity(accounts[0], { accountKey: 'sha256:other', email: 'first@example.com' }), false);
   assert.equal(findMatchingCodexAccount(accounts, { email: 'SECOND@example.com' })?.id, 'second');
 });
 

@@ -301,12 +301,15 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(switchFlush, /state\.breakdown !== 'limits'/);
   assert.match(switchFlush, /renderLimits\(\)/);
   const switchBody = functionBody(main, 'switchCodexSystemAccount', 'refreshCodexManagedAccountLimits');
-  assert.doesNotMatch(switchBody, /startMode\(\)/);
+  assert.doesNotMatch(switchBody, /restart: false/);
+  const findExistingBody = functionBody(main, 'findExistingCodexAccount', 'codexAccountId');
+  assert.match(findExistingBody, /if \(identity\.accountKey && account\.accountKey\) return account\.accountKey === identity\.accountKey;/);
   const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
   assert.match(refreshBody, /limitProviders: 'codex'/);
   assert.match(refreshBody, /codexManagedAccounts: \[account\]/);
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  assert.match(renderLimits, /id === 'codex' \? \{\s*accountTitle: true,\s*allowSystemSwitch: true\s*\} : undefined/s);
   assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexSwitchPopoverShouldHoldRender\(\);/);
   assert.match(renderLimits, /holdResetCreditsTooltipRender \|\| holdCodexSwitchPopoverRender/);
   assert.match(renderLimits, /if \(holdCodexSwitchPopoverRender\) state\.codexSwitchPopoverRenderPending = true;/);

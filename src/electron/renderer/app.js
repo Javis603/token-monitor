@@ -1848,7 +1848,10 @@ function renderLimits() {
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
-    nodes.push(renderLimitProviderRow(id, label, provider, color));
+    nodes.push(renderLimitProviderRow(id, label, provider, color, id === 'codex' ? {
+      accountTitle: true,
+      allowSystemSwitch: true
+    } : undefined));
   }
   els.limitsPanel.replaceChildren(...nodes);
 }
@@ -5629,6 +5632,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     state.streamFailure = null;
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.stats = payload.data.stats;
+    state.codexActiveAccount = codexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
     // "just turned trends on" loading state without a flash back to empty.

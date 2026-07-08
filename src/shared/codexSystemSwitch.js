@@ -19,7 +19,7 @@ function codexAccountMatchesIdentity(account, identity) {
   if (!account || !identity) return false;
   const accountKey = String(account.accountKey || '').trim();
   const identityKey = String(identity.accountKey || '').trim();
-  if (accountKey && identityKey && accountKey === identityKey) return true;
+  if (accountKey && identityKey) return accountKey === identityKey;
   const accountEmail = normalizeEmail(account.email);
   const identityEmail = normalizeEmail(identity.email);
   return Boolean(accountEmail && identityEmail && accountEmail === identityEmail);
