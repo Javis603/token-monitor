@@ -296,6 +296,10 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(app, /codexPendingActiveAccount: null/);
   assert.match(app, /function codexAccountsShareIdentity\(left, right\)/);
   assert.match(app, /function applyCodexActiveAccountFromStats\(\)/);
+  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'applyCodexAccountLimitsRefresh');
+  assert.match(activeStatsBody, /state\.codexPendingActiveAccount = null;/);
+  assert.match(activeStatsBody, /state\.codexActiveAccount = activeAccount;/);
+  assert.doesNotMatch(activeStatsBody, /state\.codexActiveAccount = state\.codexPendingActiveAccount;/);
   const switchHold = functionBody(app, 'codexSwitchPopoverShouldHoldRender', 'flushPendingCodexSwitchPopoverRender');
   const switchFlush = functionBody(app, 'flushPendingCodexSwitchPopoverRender', 'codexResetCreditsNode');
   assert.match(switchHold, /state\.codexSwitchPopoverActive/);

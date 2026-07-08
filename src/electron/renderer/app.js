@@ -1383,12 +1383,13 @@ function codexActiveAccountFromStats() {
 function applyCodexActiveAccountFromStats() {
   const activeAccount = codexActiveAccountFromStats();
   if (state.codexPendingActiveAccount) {
-    if (activeAccount && codexAccountsShareIdentity(state.codexPendingActiveAccount, activeAccount)) {
-      state.codexPendingActiveAccount = null;
+    const pendingAccount = state.codexPendingActiveAccount;
+    state.codexPendingActiveAccount = null;
+    if (activeAccount && codexAccountsShareIdentity(pendingAccount, activeAccount)) {
       state.codexActiveAccount = activeAccount;
       return;
     }
-    state.codexActiveAccount = state.codexPendingActiveAccount;
+    state.codexActiveAccount = activeAccount || pendingAccount;
     return;
   }
   state.codexActiveAccount = activeAccount;
@@ -3258,7 +3259,7 @@ async function refreshStats(options = {}) {
   }
   try {
     state.stats = await window.tokenMonitor.getStats(options);
-    state.codexActiveAccount = codexActiveAccountFromStats();
+    applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
     render();
     renderLimitProviderCheckboxes();

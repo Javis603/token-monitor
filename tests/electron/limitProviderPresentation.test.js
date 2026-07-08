@@ -529,6 +529,8 @@ test('settings provider status waits for stats and refreshes when stats arrive',
 
   assert.doesNotMatch(renderSettings, /state\.stats \? missingLimitProviderStatus\(\) : 'unavailable'/);
   assert.match(refreshStats, /renderLimitProviderCheckboxes\(\);/);
+  assert.match(refreshStats, /applyCodexActiveAccountFromStats\(\);/);
+  assert.doesNotMatch(refreshStats, /state\.codexActiveAccount = codexActiveAccountFromStats\(\);/);
   assert.match(statsPush, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(statsPush, /renderLimitProviderCheckboxes\(\);/);
   // Account cards read state.stats, so every path that refreshes stats must
