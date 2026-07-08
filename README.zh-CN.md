@@ -50,7 +50,7 @@ Token Monitor 对「Token 用量」「账户额度」和「session 明细」分�
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 仅 Linux 与远程/WSL | ✅ | — | — |
 | <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/projects/`；Z.ai API 密钥（通过 Z.ai API 查询 GLM Coding Plan 额度） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/projects/`；Z.ai API 密钥（通过 Z.ai API 查询 GLM 个人/团队 Coding Plan 额度） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | — | — |
@@ -75,11 +75,11 @@ Token Monitor 对「Token 用量」「账户额度」和「session 明细」分�
 - **以你的币别显示成本**：可用 USD、TWD、HKD 或 CNY 显示成本；汇率每日自动更新，也可在设置中手动覆写
 - **使用趋势与仪表板**：主页的活跃热力图与趋势图，加上独立的仪表板窗口，提供连续天数，以及跨所有设备、按工具／按模型堆叠的历史（柱状图与 K 线两种视图）
 - **数据导出**：把使用数据导出成与工具无关的 CSV + JSON，可手动或自动写入文件夹，接电子表格、Obsidian、Grafana 或自写脚本；详见 [docs/export.md](docs/export.md)
-- **AI 工具额度检测**：支持 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、GLM 团队、Volcengine 与 Qoder，涵盖 session、每周、账单与 credits 窗口，以及 DeepSeek 预付余额与今日/本月消费。已加入追踪的 Codex 账号可一键设为本机 Codex 使用账号，无需重新登录授权。
+- **AI 工具额度检测**：支持 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine 与 Qoder，涵盖 session、每周、账单与 credits 窗口，以及 DeepSeek 预付余额与今日/本月消费。已加入追踪的 Codex 账号可一键设为本机 Codex 使用账号，无需重新登录授权。
 - **可选的状态视图**：追踪 Claude、OpenAI、Cursor 与 DeepSeek status 页，支持手动或定时重新检查
 - **工具列表自定义**：可隐藏、置顶和拖曳排序主列表中的工具，不影响实际追踪
 - **外观控制**：界面主题切换（含浅色模式）、各工具厂商色、玻璃透明度、模糊度、完全透明窗口
-- **菜单栏（macOS）与系统托盘（Windows）弹出窗口**：图标旁可显示成本、token 数，或 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／GLM 团队／Volcengine／Qoder 最接近用完的剩余额度百分比
+- **菜单栏（macOS）与系统托盘（Windows）弹出窗口**：图标旁可显示成本、token 数，或 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder 最接近用完的剩余额度百分比
 - **悬浮小窗模式**：可将组件收成可拖动的紧凑小窗，支持点击或悬停预览展开，并可显示托盘同款内容
 - **可录制全局快捷键**：可从任何地方快速显示或隐藏窗口
 - **本地优先**：单设备使用完全无需服务器
@@ -194,10 +194,10 @@ npm run pack       # 未打包的 app 目录（无安装包），方便本机快
 
 - **多设备同步**——三种模式：**Local only**（仅本机，无 hub）、**Connect to a hub**（贴入其他机器的 Hub URL + secret）、**Host hub on this device**（在本机开 hub 供其他设备连入；面板会列出可用的局域网 / Tailscale / ZeroTier 地址）。
 - **追踪的工具**——选择要采集的 AI 工具，也可以独立隐藏、置顶或拖曳排序主列表中的工具。
-- **AI 工具额度**——选择 Claude Code、Codex、Cursor、Antigravity、OpenCode、DeepSeek、Grok、Minimax、GitHub Copilot、Kiro、GLM、GLM 团队、Volcengine 与 Qoder 的额度检测与刷新频率。
+- **AI 工具额度**——选择 Claude Code、Codex、Cursor、Antigravity、OpenCode、DeepSeek、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine 与 Qoder 的额度检测与刷新频率。
 - **趋势**——选择每日使用历史的扫描间隔，或直接关闭；打开使用仪表板可看到活跃热力图、连续天数，以及按工具／按模型堆叠的柱状图与 K 线图。
 - **窗口行为**——选择浮在其他 app 上方、普通窗口，或固定在桌面。
-- **托盘模式**——切换为 macOS 菜单栏或 Windows 系统托盘的弹出窗口，并选择图标旁显示的内容：成本、今日 token 数、累计 token 数、成本＋token、最接近用完的 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／GLM 团队／Volcengine／Qoder 剩余额度百分比，或仅显示图标。
+- **托盘模式**——切换为 macOS 菜单栏或 Windows 系统托盘的弹出窗口，并选择图标旁显示的内容：成本、今日 token 数、累计 token 数、成本＋token、最接近用完的 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder 剩余额度百分比，或仅显示图标。
 - **悬浮小窗**——将组件收成可拖动的小窗，可用点击或悬停预览展开，并可选择显示图标、token、费用或 AI 工具额度条。
 - **快捷键**——录制全局快捷键，用来显示或隐藏窗口。
 - **外观**——界面主题切换，可选预设（默认、黑曜、瓷白浅色模式）或自定义色彩（强调色、背景、文字、次要文字）、各工具厂商色、系统玻璃、实时指示点、工具图标、Discord Rich Presence、玻璃透明度、玻璃模糊度。
@@ -216,7 +216,7 @@ TOKEN_MONITOR_DEVICE_ID=             # 可选——默认为主机名
 TOKEN_MONITOR_CLIENTS=               # 可选——默认为所有支持的工具；设为空表示不追踪
 TOKEN_MONITOR_HISTORY_ENABLED=       # 可选——默认启用；设为 0 可跳过收集趋势历史
 TOKEN_MONITOR_LIMITS_ENABLED=        # 可选——默认启用；设为 0 可跳过 CLI 探测
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # 可选——默认为所有支持的提供方（claude、codex、cursor、antigravity、opencode、deepseek、minimax、grok、copilot、kiro、zai、volcengine、qoder）
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # 可选——默认为所有支持的提供方（claude、codex、cursor、antigravity、opencode、deepseek、minimax、grok、copilot、kiro、zai、zaiteam、volcengine、qoder）
 ```
 
 小部件会把同样的环境变量读作首次启动的默认值，之后改由 GUI 设置接管。
@@ -237,7 +237,7 @@ hub 与代理只传输汇总字段:
 - 每个时段的 Token 总数（今日 / 本月 / 全部）
 - 成本总额（当 `tokscale` 返回成本数据时）
 - 按客户端与模型的分项统计
-- 启用 AI 工具额度时，归一化后的 Claude Code／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／GLM 团队／Volcengine／Qoder 额度状态
+- 启用 AI 工具额度时，归一化后的 Claude Code／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／GitHub Copilot／Kiro／GLM／Volcengine／Qoder 额度状态
 
 完全不会传输原始 AI 日志、提示词、源代码或对话内容。也不会传输 OAuth 凭据、访问令牌、刷新令牌、邮箱或提供方原始响应。`.env`、`data/`、`node_modules/` 已加入 gitignore。
 
