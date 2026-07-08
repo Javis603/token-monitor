@@ -53,6 +53,12 @@ test('desktopFileContents escapes reserved characters inside the quoted Exec arg
   assert.equal(execLine, 'Exec="/home/a\\\\"b/\\\\$HOME/\\\\`x\\\\`/App\\\\\\\\Image.AppImage"');
 });
 
+test('desktopFileContents escapes literal percent signs in Exec arguments', () => {
+  const contents = desktopFileContents('/opt/apps/Token Monitor 100%.AppImage');
+  const execLine = contents.split('\n').find((line) => line.startsWith('Exec='));
+  assert.equal(execLine, 'Exec="/opt/apps/Token Monitor 100%%.AppImage"');
+});
+
 test('setAutostartEnabled(true) writes the desktop file, creating the autostart dir', () => {
   const configHome = tmpConfigHome();
   const env = { XDG_CONFIG_HOME: configHome, APPIMAGE: '/opt/Token Monitor.AppImage' };
@@ -61,6 +67,16 @@ test('setAutostartEnabled(true) writes the desktop file, creating the autostart 
   assert.equal(isAutostartEnabled({ env }), true);
   const written = fs.readFileSync(path.join(configHome, 'autostart', 'token-monitor.desktop'), 'utf8');
   assert.match(written, /Exec="\/opt\/Token Monitor\.AppImage"/);
+});
+
+test('isAutostartEnabled requires the desktop file to target the current AppImage', () => {
+  const configHome = tmpConfigHome();
+  const env = { XDG_CONFIG_HOME: configHome, APPIMAGE: '/opt/Token Monitor.AppImage' };
+  const staleEnv = { XDG_CONFIG_HOME: configHome, APPIMAGE: '/old/Token Monitor.AppImage' };
+  setAutostartEnabled(true, { env: staleEnv });
+  assert.equal(isAutostartEnabled({ env }), false);
+  assert.equal(setAutostartEnabled(true, { env }), true);
+  assert.equal(isAutostartEnabled({ env }), true);
 });
 
 test('setAutostartEnabled(false) removes the desktop file and is idempotent', () => {

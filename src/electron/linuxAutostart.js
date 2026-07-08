@@ -23,9 +23,10 @@ function desktopFilePath({ env = process.env } = {}) {
 }
 
 // Desktop Entry spec quoting: the Exec argument is double-quoted with `"`, `` ` ``,
-// `$` and `\` backslash-escaped, then the string-value layer doubles every backslash.
+// `$` and `\` backslash-escaped, literal `%` doubled for field-code expansion,
+// then the string-value layer doubles every backslash.
 function quoteExecArgument(value) {
-  const quoted = String(value).replace(/[\\"`$]/g, (char) => `\\${char}`);
+  const quoted = String(value).replace(/%/g, '%%').replace(/[\\"`$]/g, (char) => `\\${char}`);
   return `"${quoted.replace(/\\/g, '\\\\')}"`;
 }
 
@@ -41,7 +42,13 @@ function desktopFileContents(appImagePath) {
 }
 
 function isAutostartEnabled(options) {
-  try { return fs.existsSync(desktopFilePath(options)); }
+  const env = options?.env || process.env;
+  if (!env.APPIMAGE) return false;
+  try {
+    const contents = fs.readFileSync(desktopFilePath({ env }), 'utf8');
+    const execLine = contents.split(/\r?\n/).find((line) => line.startsWith('Exec='));
+    return execLine === `Exec=${quoteExecArgument(env.APPIMAGE)}`;
+  }
   catch (_) { return false; }
 }
 
