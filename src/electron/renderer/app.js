@@ -186,7 +186,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexActiveAccount: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, settingsInTitlebar: false };
 let preferenceDrag = null;
@@ -1354,6 +1354,16 @@ function codexActiveAccountMatchesProvider(provider) {
   return codexAccountMatchesProvider(state.codexActiveAccount, provider);
 }
 
+function codexAccountsShareIdentity(left, right) {
+  if (!left || !right) return false;
+  const leftKey = String(left.accountKey || '').trim();
+  const rightKey = String(right.accountKey || '').trim();
+  if (leftKey && rightKey) return leftKey === rightKey;
+  const leftEmail = String(left.email || left.accountEmail || '').trim().toLowerCase();
+  const rightEmail = String(right.email || right.accountEmail || '').trim().toLowerCase();
+  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
+}
+
 function codexActiveAccountFromStats() {
   const providers = state.stats?.limits?.providers || [];
   for (const provider of providers) {
@@ -1368,6 +1378,20 @@ function codexActiveAccountFromStats() {
     };
   }
   return null;
+}
+
+function applyCodexActiveAccountFromStats() {
+  const activeAccount = codexActiveAccountFromStats();
+  if (state.codexPendingActiveAccount) {
+    if (activeAccount && codexAccountsShareIdentity(state.codexPendingActiveAccount, activeAccount)) {
+      state.codexPendingActiveAccount = null;
+      state.codexActiveAccount = activeAccount;
+      return;
+    }
+    state.codexActiveAccount = state.codexPendingActiveAccount;
+    return;
+  }
+  state.codexActiveAccount = activeAccount;
 }
 
 function applyCodexAccountLimitsRefresh(providers) {
@@ -1473,6 +1497,7 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
         } else {
           state.codexAccountError = '';
           state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
+          state.codexPendingActiveAccount = result.activeAccount || null;
           state.codexActiveAccount = result.activeAccount;
           renderLimits();
           window.tokenMonitor.codex.refreshAccountLimits(switchAccount.id).then((refreshResult) => {
@@ -5632,7 +5657,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     state.streamFailure = null;
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.stats = payload.data.stats;
-    state.codexActiveAccount = codexActiveAccountFromStats();
+    applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
     // "just turned trends on" loading state without a flash back to empty.

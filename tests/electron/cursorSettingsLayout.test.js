@@ -293,6 +293,9 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(app, /codexSwitchPopoverHasOpened: false/);
   assert.match(app, /codexSwitchPopoverActive: false/);
   assert.match(app, /codexSwitchPopoverRenderPending: false/);
+  assert.match(app, /codexPendingActiveAccount: null/);
+  assert.match(app, /function codexAccountsShareIdentity\(left, right\)/);
+  assert.match(app, /function applyCodexActiveAccountFromStats\(\)/);
   const switchHold = functionBody(app, 'codexSwitchPopoverShouldHoldRender', 'flushPendingCodexSwitchPopoverRender');
   const switchFlush = functionBody(app, 'flushPendingCodexSwitchPopoverRender', 'codexResetCreditsNode');
   assert.match(switchHold, /state\.codexSwitchPopoverActive/);
@@ -303,7 +306,8 @@ test('Codex system account switching is exposed from limits account rows', () =>
   const switchBody = functionBody(main, 'switchCodexSystemAccount', 'refreshCodexManagedAccountLimits');
   assert.doesNotMatch(switchBody, /restart: false/);
   const findExistingBody = functionBody(main, 'findExistingCodexAccount', 'codexAccountId');
-  assert.match(findExistingBody, /if \(identity\.accountKey && account\.accountKey\) return account\.accountKey === identity\.accountKey;/);
+  assert.match(findExistingBody, /if \(identity\.accountKey && account\.accountKey && !codexEmailDerivedAccountKey\(account, identity\)\)/);
+  assert.match(main, /function codexEmailDerivedAccountKey\(account, identity\)/);
   const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
   assert.match(refreshBody, /limitProviders: 'codex'/);
   assert.match(refreshBody, /codexManagedAccounts: \[account\]/);

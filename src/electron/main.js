@@ -389,9 +389,16 @@ function codexManagedRoot() {
   return path.join(app.getPath('userData'), 'managed-codex-homes');
 }
 
+function codexEmailDerivedAccountKey(account, identity) {
+  const email = String(identity.email || account.email || '').trim().toLowerCase();
+  return Boolean(email && String(account.accountKey || '').trim() === hashAccountKey(email));
+}
+
 function findExistingCodexAccount(accounts, identity) {
   return accounts.find((account) => {
-    if (identity.accountKey && account.accountKey) return account.accountKey === identity.accountKey;
+    if (identity.accountKey && account.accountKey && !codexEmailDerivedAccountKey(account, identity)) {
+      return account.accountKey === identity.accountKey;
+    }
     return Boolean(identity.email && account.email === identity.email);
   });
 }
