@@ -1,0 +1,16 @@
+# Secrets for the Token Monitor hub Worker.
+#
+# This file exists so the "Deploy to Cloudflare" button prompts for these
+# values during setup (Cloudflare reads secret names from .dev.vars.example).
+# For local dev, copy it to `.dev.vars` (git-ignored) and fill in real values.
+# To set them on an already-deployed Worker, use `wrangler secret put <NAME>`
+# or the dashboard: Settings → Variables and Secrets → Add → Secret.
+
+# Required. Shared secret every agent, widget, and API request must present.
+# Generate a long random string, e.g. `openssl rand -hex 32`.
+# While unset, all data endpoints return 503 secret_required.
+TOKEN_MONITOR_SECRET=
+
+# Optional. Set to 1 to expose the unauthenticated GET /api/public/stats
+# endpoint (device records and account identifiers are stripped). Blank = off.
+PUBLIC_STATS_ENABLED=

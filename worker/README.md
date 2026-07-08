@@ -25,6 +25,11 @@ Why use this instead of the Node hub:
 
 ## Deploy
 
+Deploy Button note: if a one-click deploy leaves the Worker responding with
+plain `Hello world`, Cloudflare hit a known intermittent import failure and
+created a repo without the Worker source. Use the manual deploy steps below, or
+reconnect Workers Builds to a repo that contains the full `worker/` directory.
+
 ```bash
 cd worker
 npm install

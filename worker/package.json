@@ -10,6 +10,16 @@
     "tail": "wrangler tail",
     "secret:put": "wrangler secret put TOKEN_MONITOR_SECRET"
   },
+  "cloudflare": {
+    "bindings": {
+      "TOKEN_MONITOR_SECRET": {
+        "description": "Required. Shared secret every agent, widget, and API request must present. Generate a long random string, e.g. `openssl rand -hex 32`."
+      },
+      "PUBLIC_STATS_ENABLED": {
+        "description": "Optional. Set to 1 to expose the unauthenticated GET /api/public/stats endpoint. Leave blank to keep it off."
+      }
+    }
+  },
   "author": "Javis",
   "license": "MIT",
   "repository": {

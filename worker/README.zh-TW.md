@@ -21,6 +21,10 @@
 
 ## 部署
 
+Deploy Button 提醒：如果一鍵部署後的 Worker 只回傳純文字 `Hello world`，
+代表踩中了 Cloudflare 的已知間歇性匯入故障，產生的倉庫沒有 Worker 原始碼。
+可以改用下面的手動部署，或把 Workers Builds 重新連到包含完整 `worker/` 目錄的倉庫。
+
 ```bash
 cd worker
 npm install
