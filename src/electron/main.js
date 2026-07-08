@@ -19,7 +19,7 @@ const { startCollector, lookupModelPricing, normalizeHistoryIntervalMs } = requi
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, volcengineCredentials, qoderCookie } = require('../shared/limitCollector');
+const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie } = require('../shared/limitCollector');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
 const {
@@ -224,6 +224,9 @@ function defaultSettings() {
     copilotEnterpriseHost: '',
     zaiApiKey: '',
     zaiApiRegion: normalizeZaiApiRegion(process.env.TOKEN_MONITOR_ZAI_API_REGION || process.env.ZAI_API_REGION || process.env.Z_AI_API_HOST || 'global'),
+    zaiTeamApiKey: '',
+    zaiTeamOrganizationId: '',
+    zaiTeamProjectId: '',
     volcengineAccessKeyId: '',
     volcengineSecretAccessKey: '',
     volcengineRegion: '',
@@ -309,6 +312,18 @@ function normalizeZaiApiRegion(value) {
 
 function currentZaiApiKey() {
   return settings?.zaiApiKey || zaiToken(process.env);
+}
+
+function normalizeZaiTeamApiKey(value) {
+  return zaiTeamToken({}, String(value || ''));
+}
+
+function normalizeZaiTeamId(value) {
+  return String(value || '').trim();
+}
+
+function currentZaiTeamApiKey() {
+  return settings?.zaiTeamApiKey || zaiTeamToken(process.env);
 }
 
 function normalizeVolcengineRegion(value) {
@@ -1318,6 +1333,9 @@ function startSyncCollector() {
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
     zaiApiKey: settings.zaiApiKey || '',
     zaiApiRegion: settings.zaiApiRegion || 'global',
+    zaiTeamApiKey: settings.zaiTeamApiKey || '',
+    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
+    zaiTeamProjectId: settings.zaiTeamProjectId || '',
     volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
     volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
     volcengineRegion: settings.volcengineRegion || '',
@@ -1368,6 +1386,9 @@ function startHostCollector() {
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
     zaiApiKey: settings.zaiApiKey || '',
     zaiApiRegion: settings.zaiApiRegion || 'global',
+    zaiTeamApiKey: settings.zaiTeamApiKey || '',
+    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
+    zaiTeamProjectId: settings.zaiTeamProjectId || '',
     volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
     volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
     volcengineRegion: settings.volcengineRegion || '',
@@ -1551,6 +1572,9 @@ function startLocalCollector() {
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
     zaiApiKey: settings.zaiApiKey || '',
     zaiApiRegion: settings.zaiApiRegion || 'global',
+    zaiTeamApiKey: settings.zaiTeamApiKey || '',
+    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
+    zaiTeamProjectId: settings.zaiTeamProjectId || '',
     volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
     volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
     volcengineRegion: settings.volcengineRegion || '',
@@ -1767,6 +1791,11 @@ function settingsForRenderer() {
     : zaiToken(process.env)
       ? 'env'
       : '';
+  const zaiTeamApiKeySource = settings?.zaiTeamApiKey
+    ? 'settings'
+    : zaiTeamToken(process.env)
+      ? 'env'
+      : '';
   const volcengineCredentialsSource = volcengineCredentials({}, settings || {})
     ? 'settings'
     : volcengineCredentials(process.env)
@@ -1784,6 +1813,9 @@ function settingsForRenderer() {
     copilotApiToken: '',
     zaiApiKey: '',
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
+    zaiTeamApiKey: '',
+    zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
+    zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
     volcengineSecretAccessKey: '',
     qoderCookie: settings?.qoderCookie ? 'set' : '',
@@ -1802,6 +1834,8 @@ function settingsForRenderer() {
     copilotApiTokenSource,
     zaiApiKeyConfigured: Boolean(currentZaiApiKey()),
     zaiApiKeySource,
+    zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
+    zaiTeamApiKeySource,
     volcengineCredentialsConfigured: Boolean(currentVolcengineCredentials()),
     volcengineCredentialsSource,
     qoderCookieConfigured: Boolean(currentQoderCookie()),
@@ -2592,6 +2626,9 @@ app.whenReady().then(() => {
     const previousCopilotEnterpriseHost = settings.copilotEnterpriseHost;
     const previousZaiApiKey = settings.zaiApiKey;
     const previousZaiApiRegion = settings.zaiApiRegion;
+    const previousZaiTeamApiKey = settings.zaiTeamApiKey;
+    const previousZaiTeamOrganizationId = settings.zaiTeamOrganizationId;
+    const previousZaiTeamProjectId = settings.zaiTeamProjectId;
     const previousVolcengineAccessKeyId = settings.volcengineAccessKeyId;
     const previousVolcengineSecretAccessKey = settings.volcengineSecretAccessKey;
     const previousVolcengineRegion = settings.volcengineRegion;
@@ -2615,6 +2652,9 @@ app.whenReady().then(() => {
     if (patch.copilotEnterpriseHost !== undefined) normalizedPatch.copilotEnterpriseHost = normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost);
     if (patch.zaiApiKey !== undefined) normalizedPatch.zaiApiKey = normalizeZaiApiKey(patch.zaiApiKey);
     if (patch.zaiApiRegion !== undefined) normalizedPatch.zaiApiRegion = normalizeZaiApiRegion(patch.zaiApiRegion);
+    if (patch.zaiTeamApiKey !== undefined) normalizedPatch.zaiTeamApiKey = normalizeZaiTeamApiKey(patch.zaiTeamApiKey);
+    if (patch.zaiTeamOrganizationId !== undefined) normalizedPatch.zaiTeamOrganizationId = normalizeZaiTeamId(patch.zaiTeamOrganizationId);
+    if (patch.zaiTeamProjectId !== undefined) normalizedPatch.zaiTeamProjectId = normalizeZaiTeamId(patch.zaiTeamProjectId);
     if (patch.volcengineAccessKeyId !== undefined) normalizedPatch.volcengineAccessKeyId = normalizeSecretSetting(patch.volcengineAccessKeyId);
     if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
     if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
@@ -2681,6 +2721,9 @@ app.whenReady().then(() => {
       copilotEnterpriseHost: patch.copilotEnterpriseHost !== undefined ? normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost) : (settings.copilotEnterpriseHost || ''),
       zaiApiKey: patch.zaiApiKey !== undefined ? normalizeZaiApiKey(patch.zaiApiKey) : (settings.zaiApiKey || ''),
       zaiApiRegion: patch.zaiApiRegion !== undefined ? normalizeZaiApiRegion(patch.zaiApiRegion) : normalizeZaiApiRegion(settings.zaiApiRegion || 'global'),
+      zaiTeamApiKey: patch.zaiTeamApiKey !== undefined ? normalizeZaiTeamApiKey(patch.zaiTeamApiKey) : (settings.zaiTeamApiKey || ''),
+      zaiTeamOrganizationId: patch.zaiTeamOrganizationId !== undefined ? normalizeZaiTeamId(patch.zaiTeamOrganizationId) : (settings.zaiTeamOrganizationId || ''),
+      zaiTeamProjectId: patch.zaiTeamProjectId !== undefined ? normalizeZaiTeamId(patch.zaiTeamProjectId) : (settings.zaiTeamProjectId || ''),
       volcengineAccessKeyId: patch.volcengineAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAccessKeyId) : (settings.volcengineAccessKeyId || ''),
       volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
       volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
@@ -2740,6 +2783,9 @@ app.whenReady().then(() => {
       settings.copilotEnterpriseHost !== previousCopilotEnterpriseHost ||
       settings.zaiApiKey !== previousZaiApiKey ||
       settings.zaiApiRegion !== previousZaiApiRegion ||
+      settings.zaiTeamApiKey !== previousZaiTeamApiKey ||
+      settings.zaiTeamOrganizationId !== previousZaiTeamOrganizationId ||
+      settings.zaiTeamProjectId !== previousZaiTeamProjectId ||
       settings.volcengineAccessKeyId !== previousVolcengineAccessKeyId ||
       settings.volcengineSecretAccessKey !== previousVolcengineSecretAccessKey ||
       settings.volcengineRegion !== previousVolcengineRegion ||

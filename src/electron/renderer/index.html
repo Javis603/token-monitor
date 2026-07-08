@@ -565,6 +565,48 @@
                 <div id="zaiErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="zaiteamAccountGroup" class="settings-group cursor-account-group">
+              <button id="zaiteamSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiteamSettingsDetails">
+                <span data-i18n="settings.zaiteam.title">Z.ai Team Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="zaiteamAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="zaiteamSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="zaiteamOpenBrowser" data-i18n="settings.zaiteam.openBrowser">Open GLM Team Plan</button>
+                  <button id="zaiteamLogoutButton" class="hidden" data-i18n="settings.zaiteam.clearApiKey">Clear key</button>
+                  <button id="zaiteamRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <p class="settings-note" data-i18n="settings.zaiteam.regionNote">Team plan is available only on BigModel CN (open.bigmodel.cn).</p>
+                <div id="zaiteamManualPanel">
+                  <p class="settings-note" data-i18n="settings.zaiteam.note">Paste a Z.ai API key for GLM Team Coding Plan quota lookup.</p>
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.zaiteam.step1">Open BigModel in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.zaiteam.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Local Storage -> bigmodel.cn.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.zaiteam.step3">Copy the Bigmodel-Organization and Bigmodel-Project values.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.zaiteam.step4">Paste them below with your API key and click Save credentials.</span>
+                  </p>
+                  <div class="settings-row">
+                    <label for="zaiteamApiKeyInput" data-i18n="settings.zaiteam.apiKey">API key</label>
+                    <input id="zaiteamApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.zaiteam.apiKeyPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="zaiteamOrganizationIdInput" data-i18n="settings.zaiteam.organizationId">Organization ID</label>
+                    <input id="zaiteamOrganizationIdInput" type="text" spellcheck="false" placeholder="org-xxx" data-i18n-placeholder="settings.zaiteam.organizationIdPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="zaiteamProjectIdInput" data-i18n="settings.zaiteam.projectId">Project ID</label>
+                    <input id="zaiteamProjectIdInput" type="text" spellcheck="false" placeholder="proj_xxx" data-i18n-placeholder="settings.zaiteam.projectIdPlaceholder" />
+                  </div>
+                  <div class="settings-actions">
+                    <button id="zaiteamApiKeySubmit" data-i18n="settings.zaiteam.saveCredentials">Save credentials</button>
+                  </div>
+                </div>
+                <div id="zaiteamErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="volcengineAccountGroup" class="settings-group cursor-account-group">
               <button id="volcengineSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="volcengineSettingsDetails">
                 <span data-i18n="settings.volcengine.title">Volcengine Account</span>

@@ -75,11 +75,11 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Cost in your currency** — show costs in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model usage history (bar and K-line views) across all your devices
 - **Data export** — export your usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
-- **AI Tool Limits detection** for Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, and Qoder with session, weekly, billing, and credits windows, plus DeepSeek prepaid balance and today/month spend
+- **AI Tool Limits detection** for Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, GitHub Copilot, Kiro, GLM, GLM Team, Volcengine, and Qoder with session, weekly, billing, and credits windows, plus DeepSeek prepaid balance and today/month spend
 - **Optional Status view** for Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
 - **Customizable tool list** to hide, pin, and reorder tools in the main dashboard without changing what gets tracked
 - **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, and transparent window mode
-- **Menu bar (macOS) and system tray (Windows) popover** with live cost, tokens, or closest Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder limit % next to the icon
+- **Menu bar (macOS) and system tray (Windows) popover** with live cost, tokens, or closest Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/GLM Team/Volcengine/Qoder limit % next to the icon
 - **Floating Bubble mode** that collapses the widget into a draggable mini-window with click or hover preview and tray-style content
 - **Recordable global shortcut** to show or hide the window from anywhere
 - **Local-first:** no servers needed for single-device use
@@ -194,10 +194,10 @@ Click the `⚙` button in the widget header to open the Settings panel.
 
 - **Multi-device Sync** — three modes: **Local only** (this device, no hub), **Connect to a hub** (paste another machine's Hub URL + secret), or **Host hub on this device** (open a hub here so other devices can connect; LAN/Tailscale/ZeroTier addresses are listed for you).
 - **Tracked Tools** — choose which AI tools are collected, and independently hide, pin, or reorder tools in the main list.
-- **AI Tool Limits** — choose Claude Code, Codex, Cursor, Antigravity, OpenCode, DeepSeek, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, and Qoder limit detection and refresh frequency.
+- **AI Tool Limits** — choose Claude Code, Codex, Cursor, Antigravity, OpenCode, DeepSeek, Grok, Minimax, GitHub Copilot, Kiro, GLM, GLM Team, Volcengine, and Qoder limit detection and refresh frequency.
 - **Trends** — choose the scan interval for daily usage history, or turn it off; open the Usage Dashboard for the activity heatmap, streaks, and stacked per-tool/per-model bar and K-line charts.
 - **Window behavior** — choose floating above apps, a normal window, or desktop pinned mode.
-- **Tray Mode** — switch to a menu bar (macOS) or system tray (Windows) popover and choose what shows next to the icon: cost, today's tokens, total tokens, cost + tokens, the closest Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder limit % left, or icon-only.
+- **Tray Mode** — switch to a menu bar (macOS) or system tray (Windows) popover and choose what shows next to the icon: cost, today's tokens, total tokens, cost + tokens, the closest Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/GLM Team/Volcengine/Qoder limit % left, or icon-only.
 - **Floating Bubble** — collapse the widget into a draggable mini-window, reopen it by click or hover preview, and choose bubble content from icon, tokens, cost, or AI Tool Limit bars.
 - **Shortcut** — record a global shortcut to show or hide the window.
 - **Appearance** — switch the interface theme between presets (Default, Obsidian, and a Porcelain light mode) or your own custom colours (accent, background, text, muted), set per-tool vendor colours, system glass, live dot, tool icons, Discord Rich Presence, glass opacity, and glass blur.
@@ -237,7 +237,7 @@ The hub and agent only transmit summary fields:
 - total tokens per period (today / month / all-time)
 - cost totals (when `tokscale` returns cost data)
 - per-client and per-model breakdowns
-- normalized Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder limit status when AI Tool Limits is enabled
+- normalized Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/GLM Team/Volcengine/Qoder limit status when AI Tool Limits is enabled
 
 They do not transmit raw AI logs, prompts, source code, or conversation
 content. They also do not transmit OAuth credentials, access tokens, refresh

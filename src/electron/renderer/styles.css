@@ -2229,6 +2229,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   -webkit-mask-image: url(../../../assets/icons/zai.svg);
   mask-image: url(../../../assets/icons/zai.svg);
 }
+.limit-icon-zaiteam {
+  -webkit-mask-image: url(../../../assets/icons/zai.svg);
+  mask-image: url(../../../assets/icons/zai.svg);
+}
 .limit-icon-volcengine {
   -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
   mask-image: url(../../../assets/icons/volcengine.svg);
@@ -2981,6 +2985,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel.hidden,
 #minimaxManualPanel.hidden,
 #zaiManualPanel.hidden,
+#zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
 #copilotManualPanel.hidden,
@@ -2990,6 +2995,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekErrorMessage.hidden,
 #minimaxErrorMessage.hidden,
 #zaiErrorMessage.hidden,
+#zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
 #qoderErrorMessage.hidden,
 #copilotErrorMessage.hidden,
@@ -2999,6 +3005,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel,
 #minimaxManualPanel,
 #zaiManualPanel,
+#zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
 #copilotManualPanel {
@@ -3009,6 +3016,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel > .accordion-animation-inner,
 #minimaxManualPanel > .accordion-animation-inner,
 #zaiManualPanel > .accordion-animation-inner,
+#zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner {
   display: grid;
@@ -3020,6 +3028,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,
+#zaiteamManualPanel input,
 #zaiApiRegionInput,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
@@ -3033,6 +3042,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,
+#zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #copilotManualDetails input {

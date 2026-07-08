@@ -29,6 +29,8 @@ const kiroLimits = require('./kiroLimits');
 const { parseKiroUsage, fetchKiroLimits } = kiroLimits;
 const zaiLimits = require('./zaiLimits');
 const { zaiToken, zaiRegion, fetchZaiLimits } = zaiLimits;
+const zaiTeamLimits = require('./zaiTeamLimits');
+const { fetchZaiTeamLimits, zaiTeamToken } = zaiTeamLimits;
 const volcengineLimits = require('./volcengineLimits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('./qoderLimits');
@@ -43,7 +45,7 @@ const {
   fetchGrokLimits
 } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder'];
+const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam'];
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -2311,6 +2313,7 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     copilot: (providerOptions) => copilotLimits.fetchCopilotLimits(providerOptions, deps),
     kiro: (providerOptions) => kiroLimits.fetchKiroLimits(providerOptions, deps),
     zai: (providerOptions) => zaiLimits.fetchZaiLimits(providerOptions, deps),
+    zaiteam: (providerOptions) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, deps),
     volcengine: (providerOptions) => volcengineLimits.fetchVolcengineLimits(providerOptions, deps),
     qoder: (providerOptions) => qoderLimits.fetchQoderLimits(providerOptions, deps),
     ...(deps.providerFetchers || {})
@@ -2555,6 +2558,8 @@ module.exports = {
   zaiToken,
   zaiRegion,
   fetchZaiLimits,
+  zaiTeamToken,
+  fetchZaiTeamLimits,
   volcengineCredentials,
   fetchVolcengineLimits,
   qoderCookie,

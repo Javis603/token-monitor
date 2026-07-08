@@ -641,7 +641,7 @@ test('Accounts summary counts API-key and cookie account groups', () => {
   assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 9/);
+  assert.match(summaryBody, /total: 10/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
