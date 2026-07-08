@@ -293,13 +293,17 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(app, /codexSwitchPopoverHasOpened: false/);
   assert.match(app, /codexSwitchPopoverActive: false/);
   assert.match(app, /codexSwitchPopoverRenderPending: false/);
+  assert.match(app, /const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;/);
   assert.match(app, /codexPendingActiveAccount: null/);
+  assert.match(app, /codexPendingActiveAccountUntil: 0/);
   assert.match(app, /function codexAccountsShareIdentity\(left, right\)/);
   assert.match(app, /function applyCodexActiveAccountFromStats\(\)/);
   const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'applyCodexAccountLimitsRefresh');
+  assert.match(activeStatsBody, /Date\.now\(\) < state\.codexPendingActiveAccountUntil/);
+  assert.match(activeStatsBody, /state\.codexActiveAccount = pendingAccount;/);
   assert.match(activeStatsBody, /state\.codexPendingActiveAccount = null;/);
   assert.match(activeStatsBody, /state\.codexActiveAccount = activeAccount;/);
-  assert.doesNotMatch(activeStatsBody, /state\.codexActiveAccount = state\.codexPendingActiveAccount;/);
+  assert.match(renderHead, /state\.codexPendingActiveAccountUntil = Date\.now\(\) \+ CODEX_PENDING_ACTIVE_GRACE_MS;/);
   const switchHold = functionBody(app, 'codexSwitchPopoverShouldHoldRender', 'flushPendingCodexSwitchPopoverRender');
   const switchFlush = functionBody(app, 'flushPendingCodexSwitchPopoverRender', 'codexResetCreditsNode');
   assert.match(switchHold, /state\.codexSwitchPopoverActive/);
