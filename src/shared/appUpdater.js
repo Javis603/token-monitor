@@ -67,6 +67,17 @@ function shouldSkipAppUpdateCheck({
   return nowMs - last < cooldownMs;
 }
 
+function downloadedAppUpdateMatchesLatest({
+  phase,
+  downloadedVersion,
+  latest
+} = {}) {
+  if (phase !== 'downloaded') return false;
+  const version = semver.valid(downloadedVersion);
+  const latestVersion = semver.valid(latest?.version);
+  return Boolean(version && latestVersion && version === latestVersion);
+}
+
 async function withTimeout(ms, task) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -109,6 +120,7 @@ module.exports = {
   parseTag,
   parseLatestReleasePayload,
   shouldSkipAppUpdateCheck,
+  downloadedAppUpdateMatchesLatest,
   checkLatestRelease,
   RELEASES_LATEST_URL,
   GITHUB_REPO,

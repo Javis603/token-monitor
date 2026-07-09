@@ -170,7 +170,7 @@ npm run dist:linux # Linux x64 AppImage        → dist/
 npm run pack       # unpacked app dir (no installer), for quick local testing
 ```
 
-Output lands in `dist/`. Local builds use whatever signing credentials are available on your machine. Other platforms have no packaging target — run directly with `npm start`.
+Output lands in `dist/`. Packaging the macOS release build requires a local Developer ID Application signing identity; use `npm start` for local development if you do not have one. Other platforms have no packaging target — run directly with `npm start`.
 
 ## How it works
 

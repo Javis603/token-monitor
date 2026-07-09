@@ -1,6 +1,6 @@
 # English
 
-**Open-source build, not paid-signed.** macOS and Windows may ask you to confirm on first launch. Linux AppImage downloads may need executable permission — instructions below.
+**Open-source build.** macOS builds are signed and notarized. Windows signing is still being prepared, so Windows may show SmartScreen on first launch. Linux AppImage downloads may need executable permission — instructions below.
 
 ## What's changed
 
@@ -20,13 +20,9 @@
 
 Other platforms are not pre-built — run from source per the [README](https://github.com/Javis603/token-monitor#readme). The macOS `.zip` is the same app repackaged; ignore it unless you specifically need it.
 
-## First-launch unlock
+## First launch
 
-**macOS:** right-click `Token Monitor.app` → Open (once). If you see "Token Monitor" can't be opened or is damaged:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Token Monitor.app"
-```
+**macOS:** open the `.dmg`, drag Token Monitor to Applications, then launch normally.
 
 **Windows:** SmartScreen → More info → Run anyway.
 
@@ -47,7 +43,7 @@ open-source: https://github.com/junhoyeo/tokscale
 
 # 中文
 
-**这是开源构建，不是付费签名版本。** macOS 和 Windows 首次启动时可能会要求你手动确认；Linux AppImage 下载后可能需要先赋予执行权限，操作说明见下方。
+**这是开源构建。** macOS 构建已签名并 notarize。Windows 签名还在准备中，所以 Windows 首次启动时可能会显示 SmartScreen；Linux AppImage 下载后可能需要先赋予执行权限，操作说明见下方。
 
 ## 更新内容
 
@@ -67,13 +63,9 @@ open-source: https://github.com/junhoyeo/tokscale
 
 其他平台暂不提供预构建版本，请参考 [README](https://github.com/Javis603/token-monitor#readme) 从源码运行。macOS 的 `.zip` 只是同一个 app 的重新打包版本，除非你明确需要，否则可以忽略。
 
-## 首次启动放行
+## 首次启动
 
-**macOS：** 右键 `Token Monitor.app` → 打开（只需要一次）。如果看到「Token Monitor」未开启 或 已损坏：
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Token Monitor.app"
-```
+**macOS：** 打开 `.dmg`，把 Token Monitor 拖到 Applications，然后正常启动即可。
 
 **Windows：** SmartScreen → 更多信息 → 仍要运行。
 

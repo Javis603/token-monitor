@@ -531,8 +531,9 @@ function versionText(value) {
   return value ? `v${value}` : 'unknown';
 }
 function appUpdateActionMode(s) {
-  if (!s || !s.hasUpdate) return '';
-  if (s.downloaded || s.installPhase === 'downloaded') return 'install';
+  if (!s) return '';
+  if (s.downloaded) return 'install';
+  if (!s.hasUpdate) return '';
   if (s.installSupported) return 'download';
   return s.latest?.htmlUrl ? 'release' : '';
 }
@@ -540,19 +541,20 @@ function renderAppUpdatePill() {
   const s = state.appUpdate;
   const pill = els.appUpdatePill;
   if (!pill) return;
-  if (!s || !s.hasUpdate || !s.latest) {
+  const mode = appUpdateActionMode(s);
+  const version = s?.latest?.version || s?.installVersion || '';
+  if (!s || !mode || !version) {
     pill.classList.add('hidden');
     pill.setAttribute('title', '');
     els.appUpdatePillLabel.textContent = '';
     return;
   }
   pill.classList.remove('hidden');
-  const mode = appUpdateActionMode(s);
-  pill.setAttribute('title', mode === 'install' ? t('settings.appUpdate.ready') : (s.latest.name || `v${s.latest.version}`));
+  pill.setAttribute('title', mode === 'install' ? t('settings.appUpdate.ready') : (s.latest?.name || `v${version}`));
   if (s.installPhase === 'downloading' && Number.isFinite(s.installProgress)) {
     els.appUpdatePillLabel.textContent = `${Math.round(s.installProgress)}%`;
   } else {
-    els.appUpdatePillLabel.textContent = `${mode === 'install' ? '↻' : '↑'} v${s.latest.version}`;
+    els.appUpdatePillLabel.textContent = `${mode === 'install' ? '↻' : '↑'} v${version}`;
   }
 }
 function renderSettingsAppUpdateRow() {
@@ -568,10 +570,11 @@ function renderSettingsAppUpdateRow() {
     return;
   }
   els.appUpdateInstalled.textContent = `v${s.currentVersion}`;
-  if (s.latest) {
-    els.appUpdateLatest.textContent = !s.hasUpdate && semverLikeEqual(s.latest.version, s.currentVersion)
-      ? t('settings.appUpdate.latestWithStatus', { version: s.latest.version, status: t('settings.appUpdate.upToDateShort') })
-      : `v${s.latest.version}`;
+  const displayVersion = s.latest?.version || s.installVersion || '';
+  if (displayVersion) {
+    els.appUpdateLatest.textContent = !s.hasUpdate && semverLikeEqual(displayVersion, s.currentVersion)
+      ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status: t('settings.appUpdate.upToDateShort') })
+      : `v${displayVersion}`;
     const actionMode = appUpdateActionMode(s);
     els.appUpdateViewReleaseButton.classList.toggle('hidden', !actionMode);
     els.appUpdateViewReleaseButton.disabled = Boolean(s.installBusy);
@@ -590,7 +593,7 @@ function renderSettingsAppUpdateRow() {
     const percent = Number.isFinite(s.installProgress) ? Math.round(s.installProgress) : 0;
     els.appUpdateMessage.textContent = t('settings.appUpdate.downloading', { percent });
     els.appUpdateMessage.classList.remove('error');
-  } else if (s.downloaded || s.installPhase === 'downloaded') {
+  } else if (s.downloaded) {
     els.appUpdateMessage.textContent = t('settings.appUpdate.ready');
     els.appUpdateMessage.classList.remove('error');
   } else if (s.installError) {
@@ -5659,19 +5662,25 @@ els.floatingBubbleTab.addEventListener('keydown', (event) => {
   window.tokenMonitor.expandFloatingBubble?.();
 });
 
-els.appUpdatePillAction.addEventListener('click', async () => {
+async function runAppUpdateAction() {
   const mode = appUpdateActionMode(state.appUpdate);
   if (mode === 'install') {
     state.appUpdate = await window.tokenMonitor.installAppUpdate();
   } else if (mode === 'download') {
     state.appUpdate = await window.tokenMonitor.downloadAppUpdate();
-  } else {
+  } else if (mode === 'release') {
     const latest = state.appUpdate?.latest;
     if (!latest?.htmlUrl) return;
     await window.tokenMonitor.openExternal(latest.htmlUrl);
+  } else {
+    return;
   }
   renderAppUpdatePill();
   renderSettingsAppUpdateRow();
+}
+
+els.appUpdatePillAction.addEventListener('click', async () => {
+  await runAppUpdateAction();
 });
 
 els.appUpdatePillDismiss.addEventListener('click', async () => {
@@ -5688,18 +5697,7 @@ els.appUpdateCheckButton.addEventListener('click', async () => {
 });
 
 els.appUpdateViewReleaseButton.addEventListener('click', async () => {
-  const mode = appUpdateActionMode(state.appUpdate);
-  if (mode === 'install') {
-    state.appUpdate = await window.tokenMonitor.installAppUpdate();
-  } else if (mode === 'download') {
-    state.appUpdate = await window.tokenMonitor.downloadAppUpdate();
-  } else {
-    const url = state.appUpdate?.latest?.htmlUrl;
-    if (!url) return;
-    await window.tokenMonitor.openExternal(url);
-  }
-  renderAppUpdatePill();
-  renderSettingsAppUpdateRow();
+  await runAppUpdateAction();
 });
 
 window.tokenMonitor.onSettingsPush?.((next) => {

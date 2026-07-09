@@ -63,9 +63,15 @@ jobs:
             echo "no .app bundle found under dist/" >&2
             exit 1
           fi
+          dmg_path=$(find dist -maxdepth 1 -name '*.dmg' -print -quit)
+          if [ -z "$dmg_path" ]; then
+            echo "no .dmg installer found under dist/" >&2
+            exit 1
+          fi
           codesign --verify --deep --strict --verbose=2 "$app_path"
           spctl -a -vvv --type execute "$app_path"
           xcrun stapler validate "$app_path"
+          xcrun stapler validate "$dmg_path"
       - uses: actions/upload-artifact@v4
         with:
           name: token-monitor-${{ matrix.target }}

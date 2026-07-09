@@ -52,7 +52,13 @@ const {
   getTokscaleStatus,
   resetToBundled
 } = require('../shared/tokscaleUpdater');
-const { appUpdateInstallSupport, checkLatestRelease, GITHUB_REPO, shouldSkipAppUpdateCheck } = require('../shared/appUpdater');
+const {
+  appUpdateInstallSupport,
+  checkLatestRelease,
+  downloadedAppUpdateMatchesLatest,
+  GITHUB_REPO,
+  shouldSkipAppUpdateCheck
+} = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
@@ -2387,7 +2393,11 @@ function deriveAppUpdateState() {
     installProgress: appUpdateNativeState.progress,
     installVersion: appUpdateNativeState.version,
     installError: appUpdateNativeState.error,
-    downloaded: appUpdateNativeState.phase === 'downloaded',
+    downloaded: downloadedAppUpdateMatchesLatest({
+      phase: appUpdateNativeState.phase,
+      downloadedVersion: appUpdateNativeState.version,
+      latest
+    }),
     installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
   };
 }
@@ -2464,7 +2474,12 @@ async function downloadAndPrepareAppUpdate() {
     return deriveAppUpdateState();
   }
   if (appUpdateNativeBusy) return deriveAppUpdateState();
-  if (appUpdateNativeState.phase === 'downloaded') return deriveAppUpdateState();
+  const latest = settings?.appUpdate?.lastKnownLatest || null;
+  if (downloadedAppUpdateMatchesLatest({
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version,
+    latest
+  })) return deriveAppUpdateState();
   configureNativeAppUpdater();
   appUpdateNativeBusy = true;
   setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
@@ -2487,7 +2502,12 @@ async function downloadAndPrepareAppUpdate() {
 }
 
 function installDownloadedAppUpdate() {
-  if (appUpdateNativeState.phase !== 'downloaded') return deriveAppUpdateState();
+  const latest = settings?.appUpdate?.lastKnownLatest || null;
+  if (!downloadedAppUpdateMatchesLatest({
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version,
+    latest
+  })) return deriveAppUpdateState();
   quitRequested = true;
   autoUpdater.quitAndInstall(false, true);
   return deriveAppUpdateState();

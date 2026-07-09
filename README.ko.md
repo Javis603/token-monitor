@@ -170,7 +170,7 @@ npm run dist:linux # Linux x64 AppImage        → dist/
 npm run pack       # 설치 없이 앱 디렉터리만 (로컬 테스트)
 ```
 
-결과물은 `dist/`에 생성됩니다. 로컬 빌드는 해당 머신에서 사용할 수 있는 서명 자격 증명을 사용합니다. 그 외 플랫폼은 패키징 대상이 없어 `npm start`로 실행하세요.
+결과물은 `dist/`에 생성됩니다. macOS 릴리스 빌드를 패키징하려면 이 Mac에 Developer ID Application 서명 ID가 있어야 합니다. 서명 ID가 없을 때는 로컬 개발에 `npm start`를 사용하세요. 그 외 플랫폼은 패키징 대상이 없어 `npm start`로 실행하세요.
 
 ## 동작 방식
 

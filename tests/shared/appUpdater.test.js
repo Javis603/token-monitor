@@ -3,7 +3,12 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { appUpdateInstallSupport, parseTag, shouldSkipAppUpdateCheck } = require('../../src/shared/appUpdater');
+const {
+  appUpdateInstallSupport,
+  downloadedAppUpdateMatchesLatest,
+  parseTag,
+  shouldSkipAppUpdateCheck
+} = require('../../src/shared/appUpdater');
 
 test('parseTag strips a leading v from valid semver tags', () => {
   assert.equal(parseTag('v1.2.3'), '1.2.3');
@@ -63,6 +68,32 @@ test('shouldSkipAppUpdateCheck uses normal cooldown for dismissed cached updates
     lastCheckedAt: twoHoursAgo,
     nowMs
   }), true);
+});
+
+test('downloadedAppUpdateMatchesLatest only trusts the downloaded latest version', () => {
+  assert.equal(downloadedAppUpdateMatchesLatest({
+    phase: 'downloaded',
+    downloadedVersion: '0.19.0',
+    latest: { version: '0.19.0' }
+  }), true);
+
+  assert.equal(downloadedAppUpdateMatchesLatest({
+    phase: 'downloaded',
+    downloadedVersion: '0.18.0',
+    latest: { version: '0.19.0' }
+  }), false);
+
+  assert.equal(downloadedAppUpdateMatchesLatest({
+    phase: 'downloading',
+    downloadedVersion: '0.19.0',
+    latest: { version: '0.19.0' }
+  }), false);
+
+  assert.equal(downloadedAppUpdateMatchesLatest({
+    phase: 'downloaded',
+    downloadedVersion: '0.19.0',
+    latest: null
+  }), false);
 });
 
 const { parseLatestReleasePayload } = require('../../src/shared/appUpdater');
