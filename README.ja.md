@@ -170,7 +170,7 @@ npm run dist:linux # Linux x64 AppImage        → dist/
 npm run pack       # インストーラーなしのアプリディレクトリ（ローカルテスト用）
 ```
 
-出力は `dist/` に生成されます。macOS リリース版をパッケージングするには、この Mac に Developer ID Application の署名 ID が必要です。署名 ID がない場合のローカル開発では `npm start` を使ってください。その他のプラットフォームにはパッケージング対象がないため、`npm start` で実行してください。
+出力は `dist/` に生成されます。Windows と Linux は対象 OS 上で上記の対応する `dist:*` スクリプトを使います。macOS リリース版をパッケージングするには、この Mac に Developer ID Application の署名 ID が必要です。ローカル開発または未対応プラットフォームでは `npm start` を使ってください。
 
 ## 動作の仕組み
 

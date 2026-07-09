@@ -170,7 +170,7 @@ npm run dist:linux # Linux x64 AppImage → dist/
 npm run pack       # 未打包的 app 目录（无安装包），方便本机快速测试
 ```
 
-产物会放在 `dist/`。如果要打包 macOS 发布版，需要本机有 Developer ID Application 签名身份；没有该签名身份时，请用 `npm start` 做本地开发。其他平台没有打包目标——直接用 `npm start` 运行。
+产物会放在 `dist/`。Windows 和 Linux 请在对应系统上使用上面的 `dist:*` 脚本。如果要打包 macOS 发布版，需要本机有 Developer ID Application 签名身份；本地开发或未列出的平台请用 `npm start` 运行。
 
 ## 工作原理
 
