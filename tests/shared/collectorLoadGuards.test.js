@@ -374,6 +374,31 @@ test('antigravity sync runs at most once per throttle window across ticks', asyn
   }
 });
 
+test('collectUsageOnce syncs antigravity when only the CLI data root exists', async () => {
+  const tmp = withTmpHome([path.join('.gemini', 'antigravity-cli')]);
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+  try {
+    const { collectUsageOnce } = freshCollector();
+    await collectUsageOnce({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      homeDir: tmp
+    });
+    assert.equal(calls.filter((args) => args.includes('sync')).length, 1);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('cursor sync runs at most once per throttle window across ticks', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;

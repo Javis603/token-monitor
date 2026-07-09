@@ -315,9 +315,9 @@ async function maybeSyncCursor(clientsCsv, logger) {
   }
 }
 
-// tokscale's antigravity sync reads the IDE's native session roots under
-// ~/.gemini/; when none exist there is nothing to sync, so don't spawn at all.
-const ANTIGRAVITY_DATA_ROOTS = ['antigravity', 'antigravity-ide', 'antigravity-backup'];
+// tokscale's antigravity sync reads both the IDE and CLI native data roots
+// under ~/.gemini/; when none exist there is nothing to sync, so don't spawn.
+const ANTIGRAVITY_DATA_ROOTS = ['antigravity', 'antigravity-cli', 'antigravity-ide', 'antigravity-backup'];
 
 function antigravityDataPresent(home) {
   return ANTIGRAVITY_DATA_ROOTS.some((name) => dirExists(path.join(home, '.gemini', name)));
