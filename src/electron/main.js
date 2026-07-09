@@ -74,6 +74,13 @@ const {
   normalizeArchivedClientUsage,
   pruneArchivedClientUsage
 } = require('../shared/clientUsageArchive');
+const {
+  applySessionUsageArchive,
+  captureSessionUsageArchive,
+  normalizeSessionUsageArchive,
+  readSessionUsageArchive,
+  writeSessionUsageArchive
+} = require('../shared/sessionUsageArchive');
 const { aggregateDevices, aggregateHistory, carryDeviceHistory } = require('../shared/usage');
 const { syncPayload } = require('../shared/syncPayload');
 const {
@@ -156,6 +163,7 @@ let mainWindow = null;
 let dashboardWindow = null;
 let settingsPath = null;
 let settings = null;
+let sessionUsageArchive = null;
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
@@ -1435,11 +1443,38 @@ function updateArchivedClientUsage(previousClients, nextClients) {
   settings.archivedClientUsage = archive;
 }
 
+function ensureSessionUsageArchiveLoaded() {
+  if (sessionUsageArchive) return sessionUsageArchive;
+  try {
+    sessionUsageArchive = readSessionUsageArchive();
+  } catch (error) {
+    console.log(`[session-archive] read failed: ${error.message}`);
+    sessionUsageArchive = normalizeSessionUsageArchive({});
+  }
+  return sessionUsageArchive;
+}
+
+function updateSessionUsageArchive(summary, now) {
+  const previous = ensureSessionUsageArchiveLoaded();
+  const next = captureSessionUsageArchive(previous, summary, now);
+  if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
+  sessionUsageArchive = next;
+  try {
+    writeSessionUsageArchive(next);
+  } catch (error) {
+    console.log(`[session-archive] write failed: ${error.message}`);
+  }
+  return sessionUsageArchive;
+}
+
 function summaryWithArchivedClientUsage(summary) {
-  return applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
+  const now = new Date();
+  const sessionArchive = updateSessionUsageArchive(summary, now);
+  const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
     activeClients: settings?.clients,
-    now: new Date()
+    now
   });
+  return applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
 }
 
 function applyMacActivationPolicy(state = {}) {

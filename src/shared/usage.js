@@ -313,6 +313,7 @@ function mergeSession(target, source) {
     const key = normalizeProviderName(provider);
     if (key) target.providers[key] = (target.providers[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
   }
+  if (source.archived === true || source.deleted === true || source.sourceDeleted === true) target.archived = true;
   return target;
 }
 
@@ -375,6 +376,7 @@ function normalizeSession(input, fallbackKey) {
       if (key) session.providers[key] = (session.providers[key] || 0) + Math.max(0, Math.round(asNumber(value)));
     }
   }
+  if (input.archived === true || input.deleted === true || input.sourceDeleted === true) session.archived = true;
   return session;
 }
 

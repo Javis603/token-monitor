@@ -95,7 +95,9 @@
         const modelLabel = sessionModelLabel(session);
         const titleParts = [clientLabel, modelLabel].filter(Boolean);
         const sessionId = session?.sessionId || key;
+        const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
         const subtitleParts = [
+          archived ? 'Deleted' : '',
           sessionActivityLabel(session, now),
           messageLabel(session)
         ].filter(Boolean);
@@ -109,9 +111,10 @@
           cost: finiteNumber(session?.costUsd),
           color: colors[client] || (modelLabel && colorForModel ? colorForModel(modelLabel) : stable(key, palette)),
           stale: false,
+          archived: archived || undefined,
           client,
           sortTime: sessionTimestampValue(session),
-          title: `${clientLabel} session ${sessionId}`
+          title: `${clientLabel} ${archived ? 'deleted session' : 'session'} ${sessionId}`
         };
       })
       .filter(Boolean);

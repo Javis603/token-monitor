@@ -85,6 +85,29 @@ test('session rows fall back to month and day for older activity', () => {
   assert.equal(rows[0].detail, '214c24d5-aaaa-bbbb-cccc-f87e');
 });
 
+test('session rows label archived sessions as deleted summaries', () => {
+  const rows = sessionRowsForPeriod({
+    sessions: {
+      'opencode:deleted': {
+        client: 'opencode',
+        sessionId: 'deleted',
+        totalTokens: 1200,
+        models: { 'gpt-5': 1200 },
+        messageCount: 3,
+        lastUsedAt: localIso(2026, 5, 30, 12, 7),
+        archived: true
+      }
+    }
+  }, {
+    clientLabels: { opencode: 'OpenCode' },
+    now: new Date(2026, 4, 30, 12, 30)
+  });
+
+  assert.equal(rows[0].archived, true);
+  assert.equal(rows[0].subtitle, 'Deleted · 12:07 · 3 msgs');
+  assert.equal(rows[0].title, 'OpenCode deleted session deleted');
+});
+
 test('session layout keeps page chrome consistent and lets details wrap', () => {
   const styles = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'styles.css'), 'utf8');
 
