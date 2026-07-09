@@ -148,7 +148,7 @@ npx wrangler deploy
 
 ## 데스크톱 설치 파일
 
-[releases 페이지](https://github.com/Javis603/token-monitor/releases)에서 다운로드할 수 있습니다. 릴리스는 서명되지 않았으며, macOS(arm64), Windows(x64), Linux x64 AppImage 최초 실행 안내가 릴리스 노트에 있습니다. 그 외 플랫폼은 `npm start`로 소스 실행하세요.
+[releases 페이지](https://github.com/Javis603/token-monitor/releases)에서 다운로드할 수 있습니다. macOS 빌드는 서명 및 notarize가 완료되어 있습니다. Windows 서명은 준비 중이며, Linux는 AppImage로 배포됩니다. 앱은 GitHub Releases를 확인하고, 지원되는 앱 내 업데이트는 설정 → 앱 업데이트에서 설치할 수 있습니다. 그 외 플랫폼은 `npm start`로 소스 실행하세요.
 
 앱 상태는 OS 사용자 데이터 디렉터리에 저장됩니다. 앱과 함께 해당 폴더를 삭제하면 완전히 제거됩니다.
 
@@ -160,7 +160,7 @@ npx wrangler deploy
 
 ## 소스에서 빌드
 
-릴리스가 서명되지 않았으므로 직접 빌드할 수 있습니다. Node.js 22.13+와 **대상 OS**가 필요합니다(electron-builder는 macOS `.dmg`와 Windows `.exe` 교차 빌드 불가).
+직접 설치 파일을 빌드하려면 **대상 OS**에서 Node.js 22.13+를 사용하세요(electron-builder는 macOS `.dmg`와 Windows `.exe` 교차 빌드 불가).
 
 ```bash
 npm install
@@ -170,7 +170,7 @@ npm run dist:linux # Linux x64 AppImage        → dist/
 npm run pack       # 설치 없이 앱 디렉터리만 (로컬 테스트)
 ```
 
-결과물은 `dist/`에 생성됩니다. 그 외 플랫폼은 패키징 대상이 없어 `npm start`로 실행하세요.
+결과물은 `dist/`에 생성됩니다. 로컬 빌드는 해당 머신에서 사용할 수 있는 서명 자격 증명을 사용합니다. 그 외 플랫폼은 패키징 대상이 없어 `npm start`로 실행하세요.
 
 ## 동작 방식
 

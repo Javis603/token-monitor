@@ -148,7 +148,7 @@ Paste the deployed URL into each device's widget at Settings → Multi-device Sy
 
 ## Desktop installer
 
-You can download the app from the [releases page](https://github.com/Javis603/token-monitor/releases). All releases are unsigned; release notes include first-launch steps for macOS (arm64), Windows (x64), and Linux x64 AppImage. Other platforms run from source via `npm start`.
+You can download the app from the [releases page](https://github.com/Javis603/token-monitor/releases). macOS builds are signed and notarized; Windows signing is being prepared, and Linux ships as an AppImage. The app checks GitHub Releases and can install supported in-app updates from Settings → App Updates. Other platforms run from source via `npm start`.
 
 App state lives in the OS user-data dir — delete it along with the app to fully uninstall.
 
@@ -160,7 +160,7 @@ App state lives in the OS user-data dir — delete it along with the app to full
 
 ## Build from source
 
-Releases are unsigned, so you may prefer to build your own installer — same code, your machine. Needs Node.js 22.13+ and the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
+To build your own installer, use Node.js 22.13+ on the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
 
 ```bash
 npm install
@@ -170,7 +170,7 @@ npm run dist:linux # Linux x64 AppImage        → dist/
 npm run pack       # unpacked app dir (no installer), for quick local testing
 ```
 
-Output lands in `dist/`. Builds are unsigned, so the same first-launch steps apply. Other platforms have no packaging target — run directly with `npm start`.
+Output lands in `dist/`. Local builds use whatever signing credentials are available on your machine. Other platforms have no packaging target — run directly with `npm start`.
 
 ## How it works
 

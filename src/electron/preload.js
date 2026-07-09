@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   resetTokscaleToBundled: () => ipcRenderer.invoke('tokscale:resetToBundled'),
   getAppUpdateState: () => ipcRenderer.invoke('appUpdate:getState'),
   checkAppUpdateNow: () => ipcRenderer.invoke('appUpdate:checkNow'),
+  downloadAppUpdate: () => ipcRenderer.invoke('appUpdate:download'),
+  installAppUpdate: () => ipcRenderer.invoke('appUpdate:install'),
   dismissAppUpdate: (version) => ipcRenderer.invoke('appUpdate:dismiss', version),
   expandFloatingBubble: () => ipcRenderer.invoke('floatingBubble:expand'),
   moveFloatingBubble: (delta) => ipcRenderer.invoke('floatingBubble:move', delta),

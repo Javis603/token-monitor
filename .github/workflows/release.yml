@@ -15,12 +15,20 @@ jobs:
             artifact_path: |
               dist/*.dmg
               dist/*.zip
+              dist/*.yml
+              dist/*.blockmap
           - os: windows-latest
             target: win
-            artifact_path: dist/*.exe
+            artifact_path: |
+              dist/*.exe
+              dist/*.yml
+              dist/*.blockmap
           - os: ubuntu-latest
             target: linux
-            artifact_path: dist/*.AppImage
+            artifact_path: |
+              dist/*.AppImage
+              dist/*.yml
+              dist/*.blockmap
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -82,4 +90,6 @@ jobs:
             artifacts/*.zip
             artifacts/*.exe
             artifacts/*.AppImage
+            artifacts/*.yml
+            artifacts/*.blockmap
           body_path: .github/RELEASE_TEMPLATE.md

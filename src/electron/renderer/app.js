@@ -530,6 +530,12 @@ function formatUpdatedAge(value) {
 function versionText(value) {
   return value ? `v${value}` : 'unknown';
 }
+function appUpdateActionMode(s) {
+  if (!s || !s.hasUpdate) return '';
+  if (s.downloaded || s.installPhase === 'downloaded') return 'install';
+  if (s.installSupported) return 'download';
+  return s.latest?.htmlUrl ? 'release' : '';
+}
 function renderAppUpdatePill() {
   const s = state.appUpdate;
   const pill = els.appUpdatePill;
@@ -541,8 +547,13 @@ function renderAppUpdatePill() {
     return;
   }
   pill.classList.remove('hidden');
-  pill.setAttribute('title', s.latest.name || `v${s.latest.version}`);
-  els.appUpdatePillLabel.textContent = `↑ v${s.latest.version}`;
+  const mode = appUpdateActionMode(s);
+  pill.setAttribute('title', mode === 'install' ? t('settings.appUpdate.ready') : (s.latest.name || `v${s.latest.version}`));
+  if (s.installPhase === 'downloading' && Number.isFinite(s.installProgress)) {
+    els.appUpdatePillLabel.textContent = `${Math.round(s.installProgress)}%`;
+  } else {
+    els.appUpdatePillLabel.textContent = `${mode === 'install' ? '↻' : '↑'} v${s.latest.version}`;
+  }
 }
 function renderSettingsAppUpdateRow() {
   const s = state.appUpdate;
@@ -561,14 +572,31 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateLatest.textContent = !s.hasUpdate && semverLikeEqual(s.latest.version, s.currentVersion)
       ? t('settings.appUpdate.latestWithStatus', { version: s.latest.version, status: t('settings.appUpdate.upToDateShort') })
       : `v${s.latest.version}`;
-    els.appUpdateViewReleaseButton.classList.toggle('hidden', !s.hasUpdate);
+    const actionMode = appUpdateActionMode(s);
+    els.appUpdateViewReleaseButton.classList.toggle('hidden', !actionMode);
+    els.appUpdateViewReleaseButton.disabled = Boolean(s.installBusy);
+    els.appUpdateViewReleaseButton.textContent = actionMode === 'install'
+      ? t('settings.appUpdate.restart')
+      : actionMode === 'download'
+        ? t('settings.appUpdate.download')
+        : t('settings.appUpdate.viewRelease');
   } else {
     els.appUpdateLatest.textContent = s.lastCheckedAt ? t('settings.appUpdate.upToDate') : t('settings.common.notChecked');
     els.appUpdateViewReleaseButton.classList.add('hidden');
   }
-  els.appUpdateCheckButton.disabled = Boolean(s.checking);
+  els.appUpdateCheckButton.disabled = Boolean(s.checking || s.installBusy);
   els.appUpdateCheckButton.textContent = s.checking ? t('settings.appUpdate.checking') : t('settings.appUpdate.check');
-  if (s.lastError) {
+  if (s.installPhase === 'downloading') {
+    const percent = Number.isFinite(s.installProgress) ? Math.round(s.installProgress) : 0;
+    els.appUpdateMessage.textContent = t('settings.appUpdate.downloading', { percent });
+    els.appUpdateMessage.classList.remove('error');
+  } else if (s.downloaded || s.installPhase === 'downloaded') {
+    els.appUpdateMessage.textContent = t('settings.appUpdate.ready');
+    els.appUpdateMessage.classList.remove('error');
+  } else if (s.installError) {
+    els.appUpdateMessage.textContent = t('settings.appUpdate.installError');
+    els.appUpdateMessage.classList.add('error');
+  } else if (s.lastError) {
     els.appUpdateMessage.textContent = t('settings.appUpdate.githubError');
     els.appUpdateMessage.classList.add('error');
   } else {
@@ -5632,9 +5660,18 @@ els.floatingBubbleTab.addEventListener('keydown', (event) => {
 });
 
 els.appUpdatePillAction.addEventListener('click', async () => {
-  const latest = state.appUpdate?.latest;
-  if (!latest?.htmlUrl) return;
-  await window.tokenMonitor.openExternal(latest.htmlUrl);
+  const mode = appUpdateActionMode(state.appUpdate);
+  if (mode === 'install') {
+    state.appUpdate = await window.tokenMonitor.installAppUpdate();
+  } else if (mode === 'download') {
+    state.appUpdate = await window.tokenMonitor.downloadAppUpdate();
+  } else {
+    const latest = state.appUpdate?.latest;
+    if (!latest?.htmlUrl) return;
+    await window.tokenMonitor.openExternal(latest.htmlUrl);
+  }
+  renderAppUpdatePill();
+  renderSettingsAppUpdateRow();
 });
 
 els.appUpdatePillDismiss.addEventListener('click', async () => {
@@ -5651,9 +5688,18 @@ els.appUpdateCheckButton.addEventListener('click', async () => {
 });
 
 els.appUpdateViewReleaseButton.addEventListener('click', async () => {
-  const url = state.appUpdate?.latest?.htmlUrl;
-  if (!url) return;
-  await window.tokenMonitor.openExternal(url);
+  const mode = appUpdateActionMode(state.appUpdate);
+  if (mode === 'install') {
+    state.appUpdate = await window.tokenMonitor.installAppUpdate();
+  } else if (mode === 'download') {
+    state.appUpdate = await window.tokenMonitor.downloadAppUpdate();
+  } else {
+    const url = state.appUpdate?.latest?.htmlUrl;
+    if (!url) return;
+    await window.tokenMonitor.openExternal(url);
+  }
+  renderAppUpdatePill();
+  renderSettingsAppUpdateRow();
 });
 
 window.tokenMonitor.onSettingsPush?.((next) => {

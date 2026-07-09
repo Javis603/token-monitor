@@ -148,7 +148,7 @@ npx wrangler deploy
 
 ## 桌面安裝檔
 
-你可以從 [release 頁面](https://github.com/Javis603/token-monitor/releases) 下載 App。所有 release 都未簽章，發布說明含 macOS（arm64）、Windows（x64）與 Linux x64 AppImage 的首次啟動說明。其他平台請從原始碼 `npm start` 啟動。
+你可以從 [release 頁面](https://github.com/Javis603/token-monitor/releases) 下載 App。macOS 建置已簽章並 notarize；Windows 簽章還在準備中，Linux 以 AppImage 發布。App 會檢查 GitHub Releases，並可在 設定 → 應用程式更新 中安裝支援的內置更新。其他平台請從原始碼 `npm start` 啟動。
 
 App 狀態存在 OS 使用者資料目錄——解除安裝時一併刪除該資料夾即可完整移除。
 
@@ -160,7 +160,7 @@ App 狀態存在 OS 使用者資料目錄——解除安裝時一併刪除該資
 
 ## 從原始碼建置
 
-Release 都未簽章，你可能會想自己從原始碼打包安裝檔——同一份程式碼、在你自己的機器上建置。需要 Node.js 22.13+ 與**對應的**作業系統（electron-builder 無法在 Windows 上交叉建置 macOS 的 `.dmg`，反之亦然）。
+如需自己從原始碼打包安裝檔，請在**對應的**作業系統上使用 Node.js 22.13+（electron-builder 無法在 Windows 上交叉建置 macOS 的 `.dmg`，反之亦然）。
 
 ```bash
 npm install
@@ -170,7 +170,7 @@ npm run dist:linux # Linux x64 AppImage → dist/
 npm run pack       # 未封裝的 app 目錄（無安裝檔），方便本機快速測試
 ```
 
-產物會放在 `dist/`。建置出來一樣未簽章，所以首次啟動說明照舊。其他平台沒有打包目標——直接用 `npm start` 啟動。
+產物會放在 `dist/`。本機建置會使用你機器上可用的簽章憑證。其他平台沒有打包目標——直接用 `npm start` 啟動。
 
 ## 運作原理
 

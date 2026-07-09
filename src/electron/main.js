@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
@@ -51,7 +52,7 @@ const {
   getTokscaleStatus,
   resetToBundled
 } = require('../shared/tokscaleUpdater');
-const { checkLatestRelease, shouldSkipAppUpdateCheck } = require('../shared/appUpdater');
+const { appUpdateInstallSupport, checkLatestRelease, GITHUB_REPO, shouldSkipAppUpdateCheck } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
@@ -2283,12 +2284,91 @@ async function downloadTokscaleFromNpm() {
 let appUpdateCheckInFlight = false;
 let appUpdateLastError = null;
 let appUpdateBackgroundTimer = null;
+let appUpdateNativeBusy = false;
+let appUpdateNativeConfigured = false;
+let appUpdateNativeState = {
+  phase: 'idle',
+  version: null,
+  progress: null,
+  error: null
+};
+
+function latestFromUpdaterInfo(info) {
+  if (!info || typeof info !== 'object') return null;
+  const version = semver.valid(info.version);
+  if (!version) return null;
+  return {
+    version,
+    tag: `v${version}`,
+    name: (typeof info.releaseName === 'string' && info.releaseName.trim()) ? info.releaseName : `v${version}`,
+    htmlUrl: `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`,
+    publishedAt: typeof info.releaseDate === 'string' ? info.releaseDate : ''
+  };
+}
+
+function setNativeAppUpdateState(patch = {}) {
+  appUpdateNativeState = { ...appUpdateNativeState, ...patch };
+  sendAppUpdatePush();
+}
+
+function configureNativeAppUpdater() {
+  if (appUpdateNativeConfigured) return;
+  appUpdateNativeConfigured = true;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.logger = console;
+  autoUpdater.on('checking-for-update', () => {
+    setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
+  });
+  autoUpdater.on('update-available', (info) => {
+    const latest = latestFromUpdaterInfo(info);
+    if (latest) {
+      settings.appUpdate = {
+        ...(settings.appUpdate || {}),
+        lastCheckedAt: new Date().toISOString(),
+        lastKnownLatest: latest
+      };
+      saveSettings();
+    }
+    setNativeAppUpdateState({ phase: 'available', version: latest?.version || info?.version || null, progress: null, error: null });
+  });
+  autoUpdater.on('update-not-available', (info) => {
+    appUpdateNativeBusy = false;
+    const latest = latestFromUpdaterInfo(info);
+    if (latest) {
+      settings.appUpdate = {
+        ...(settings.appUpdate || {}),
+        lastCheckedAt: new Date().toISOString(),
+        lastKnownLatest: latest
+      };
+      saveSettings();
+    }
+    setNativeAppUpdateState({ phase: 'idle', version: latest?.version || null, progress: null, error: null });
+  });
+  autoUpdater.on('download-progress', (progress) => {
+    setNativeAppUpdateState({
+      phase: 'downloading',
+      progress: Number.isFinite(progress?.percent) ? Math.max(0, Math.min(100, progress.percent)) : null,
+      error: null
+    });
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    appUpdateNativeBusy = false;
+    const latest = latestFromUpdaterInfo(info);
+    setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
+  });
+  autoUpdater.on('error', (error) => {
+    appUpdateNativeBusy = false;
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
+  });
+}
 
 function deriveAppUpdateState() {
   const block = settings?.appUpdate || {};
   const currentVersion = app.getVersion();
   const latest = block.lastKnownLatest || null;
   const dismissedVersion = block.dismissedVersion || null;
+  const installSupport = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
   let hasUpdate = false;
   if (latest && semver.valid(latest.version) && semver.valid(currentVersion)) {
     hasUpdate = semver.gt(latest.version, currentVersion) && latest.version !== dismissedVersion;
@@ -2300,7 +2380,15 @@ function deriveAppUpdateState() {
     dismissedVersion,
     lastCheckedAt: block.lastCheckedAt || null,
     checking: appUpdateCheckInFlight,
-    lastError: appUpdateLastError
+    lastError: appUpdateLastError,
+    installSupported: installSupport.supported,
+    installSupportReason: installSupport.reason,
+    installPhase: appUpdateNativeState.phase,
+    installProgress: appUpdateNativeState.progress,
+    installVersion: appUpdateNativeState.version,
+    installError: appUpdateNativeState.error,
+    downloaded: appUpdateNativeState.phase === 'downloaded',
+    installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
   };
 }
 
@@ -2366,6 +2454,42 @@ function dismissAppUpdateVersion(version) {
   };
   saveSettings();
   sendAppUpdatePush();
+  return deriveAppUpdateState();
+}
+
+async function downloadAndPrepareAppUpdate() {
+  const support = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
+  if (!support.supported) {
+    setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
+    return deriveAppUpdateState();
+  }
+  if (appUpdateNativeBusy) return deriveAppUpdateState();
+  if (appUpdateNativeState.phase === 'downloaded') return deriveAppUpdateState();
+  configureNativeAppUpdater();
+  appUpdateNativeBusy = true;
+  setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const info = result?.updateInfo || null;
+    const version = semver.valid(info?.version) || null;
+    if (!version || !semver.gt(version, app.getVersion())) {
+      appUpdateNativeBusy = false;
+      setNativeAppUpdateState({ phase: 'idle', version, progress: null, error: null });
+      return deriveAppUpdateState();
+    }
+    setNativeAppUpdateState({ phase: 'downloading', version, progress: 0, error: null });
+    await autoUpdater.downloadUpdate();
+  } catch (error) {
+    appUpdateNativeBusy = false;
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error) });
+  }
+  return deriveAppUpdateState();
+}
+
+function installDownloadedAppUpdate() {
+  if (appUpdateNativeState.phase !== 'downloaded') return deriveAppUpdateState();
+  quitRequested = true;
+  autoUpdater.quitAndInstall(false, true);
   return deriveAppUpdateState();
 }
 
@@ -3080,6 +3204,8 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('appUpdate:getState', () => deriveAppUpdateState());
   ipcMain.handle('appUpdate:checkNow', () => runAppUpdateCheck({ force: true }));
+  ipcMain.handle('appUpdate:download', () => downloadAndPrepareAppUpdate());
+  ipcMain.handle('appUpdate:install', () => installDownloadedAppUpdate());
   ipcMain.handle('appUpdate:dismiss', (_event, version) => dismissAppUpdateVersion(version));
   ipcMain.handle('cursor:loginManual', async (_event, raw) => {
     const token = normalizeManualCookie(raw);

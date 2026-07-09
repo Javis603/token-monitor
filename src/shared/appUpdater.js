@@ -8,6 +8,20 @@ const REQUEST_TIMEOUT_MS = 10 * 1000;
 const APP_UPDATE_BACKGROUND_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const APP_UPDATE_OUTDATED_COOLDOWN_MS = 60 * 60 * 1000;
 
+function appUpdateInstallSupport({
+  isPackaged = false,
+  platform = process.platform,
+  env = process.env
+} = {}) {
+  if (!isPackaged) return { supported: false, reason: 'unpackaged' };
+  if (platform === 'darwin') return { supported: true, reason: '' };
+  if (platform === 'win32') return { supported: false, reason: 'windows-signing-pending' };
+  if (platform === 'linux') {
+    return env?.APPIMAGE ? { supported: true, reason: '' } : { supported: false, reason: 'linux-not-appimage' };
+  }
+  return { supported: false, reason: 'unsupported-platform' };
+}
+
 function parseTag(tag) {
   if (typeof tag !== 'string') return null;
   const trimmed = tag.trim();
@@ -91,6 +105,7 @@ async function checkLatestRelease(currentVersion) {
 }
 
 module.exports = {
+  appUpdateInstallSupport,
   parseTag,
   parseLatestReleasePayload,
   shouldSkipAppUpdateCheck,
