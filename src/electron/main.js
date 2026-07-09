@@ -613,6 +613,7 @@ async function refreshCodexManagedAccountLimits(id) {
       ...settings,
       limitsEnabled: true,
       limitProviders: 'codex',
+      includeLiveCodexAccount: false,
       codexManagedAccounts: [account]
     }, { env: process.env });
     return {

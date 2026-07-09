@@ -256,6 +256,31 @@ test('fetchCodexLimits returns one provider per managed Codex account', async ()
   assert.deepEqual(providers.map((provider) => provider.sourceDetail), ['managed', 'managed']);
 });
 
+test('fetchCodexLimits can refresh only the requested managed Codex account', async () => {
+  const seenHomes = [];
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [
+      { id: 'target', email: 'target@example.com', homePath: '/tmp/token-monitor-codex/target' }
+    ]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readCodexRpc: async (deps) => {
+      const home = deps.env.CODEX_HOME || '<live>';
+      seenHomes.push(home);
+      return home === '<live>'
+        ? codexPayload('live@example.com', 'app')
+        : codexPayload('target@example.com');
+    }
+  });
+
+  assert.deepEqual(seenHomes, ['/tmp/token-monitor-codex/target']);
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].accountEmail, 'target@example.com');
+  assert.equal(providers[0].sourceDetail, 'managed');
+});
+
 test('createLimitsCollector retains recent Codex quota windows across one empty refresh', async () => {
   let now = Date.parse('2026-06-01T00:00:00Z');
   let calls = 0;

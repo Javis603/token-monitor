@@ -331,6 +331,7 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(main, /function codexEmailDerivedAccountKey\(account, identity\)/);
   const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
   assert.match(refreshBody, /limitProviders: 'codex'/);
+  assert.match(refreshBody, /includeLiveCodexAccount: false/);
   assert.match(refreshBody, /codexManagedAccounts: \[account\]/);
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');

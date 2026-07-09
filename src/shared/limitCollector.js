@@ -1957,6 +1957,7 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const managedAccounts = normalizeCodexManagedAccounts(options.codexManagedAccounts || deps.codexManagedAccounts)
     .filter((account) => account.enabled !== false);
+  const includeLiveAccount = options.includeLiveCodexAccount !== false;
   // Single live account: keep the original single-provider shape (and error
   // propagation) so a signed-out/not-configured state surfaces as before.
   if (managedAccounts.length === 0) return fetchLiveCodexAccount(deps, nowMs);
@@ -1977,11 +1978,13 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   // stays visible alongside managed accounts — adding a managed account never
   // hides the login you are actually using. Best-effort: a signed-out/Keychain-
   // only live account just drops out, leaving the managed accounts.
-  try {
-    const live = await fetchLiveCodexAccount(deps, nowMs);
-    providers.push(live);
-    markSeen(live);
-  } catch (_) {}
+  if (includeLiveAccount) {
+    try {
+      const live = await fetchLiveCodexAccount(deps, nowMs);
+      providers.push(live);
+      markSeen(live);
+    } catch (_) {}
+  }
   for (const account of managedAccounts) {
     const provider = await fetchManagedCodexAccountLimits(account, options, deps);
     if (alreadySeen(provider)) continue;
