@@ -2205,6 +2205,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
+.row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
@@ -2276,6 +2277,11 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .limit-icon-qoder {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);
   mask-image: url(../../../assets/icons/qoder.svg);
+}
+
+.limit-icon-ollama {
+  -webkit-mask-image: url(../../../assets/icons/ollama.svg);
+  mask-image: url(../../../assets/icons/ollama.svg);
 }
 .limit-icon-kimi {
   -webkit-mask-image: url(../../../assets/icons/moonshot.svg);
@@ -3235,6 +3241,19 @@ html.is-windows .limit-live-badge {
 #mimoManualPanel textarea,
 #kimiManualPanel input,
 #copilotManualDetails input {
+  font-family: monospace;
+}
+#ollamaManualPanel.hidden,
+#ollamaErrorMessage.hidden { display: none; }
+#ollamaManualPanel { min-width: 0; }
+#ollamaManualPanel > .accordion-animation-inner {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+#ollamaManualPanel textarea {
+  width: 100%;
+  font-size: 12px;
   font-family: monospace;
 }
 .link-button {
