@@ -202,6 +202,7 @@ test('main section holds views; appearance is its own section; window holds beha
   assert.match(presenceGroup, /id="floatingBubbleInput"/);
   assert.match(presenceGroup, /id="showTrayIconInput"/);
   assert.match(presenceGroup, /id="trayModeInput"/);
+  assert.equal((presenceGroup.match(/value="limitsAllSessions"/g) || []).length, 2);
 
   const showTrayIconIndex = presenceGroup.indexOf('id="showTrayIconInput"');
   const trayIconOptionsIndex = presenceGroup.indexOf('id="trayIconOptions"');

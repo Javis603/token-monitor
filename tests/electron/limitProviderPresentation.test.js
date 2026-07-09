@@ -333,6 +333,28 @@ test('tray all-sessions mode can consider multiple providers for one configured 
   assert.doesNotMatch(pickConfigured, /new Map\(providers\.map\(\(p\) => \[String\(p\.provider\)\.toLowerCase\(\), p\]\)\)/);
 });
 
+test('limit percent tray mode renders provider icons into a generated tray image', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const renderLimitSessionsIcon = functionBody(app, 'renderLimitSessionsIcon', 'barsDataUrlForMode');
+  const maybeUpdateBarsIcon = functionBody(app, 'maybeUpdateBarsIcon', 'loadImage');
+  const updateTrayDisplay = functionBody(main, 'updateTrayDisplay', 'sendStatus');
+
+  assert.match(renderLimitSessionsIcon, /pickConfiguredSessionProviders\(stats, configOrder\)/);
+  assert.match(renderLimitSessionsIcon, /trayBarsLayout\(height/);
+  assert.match(renderLimitSessionsIcon, /layout\.iconSize/);
+  assert.match(renderLimitSessionsIcon, /picks\.length === 1/);
+  assert.match(renderLimitSessionsIcon, /kind === 'weekly'/);
+  assert.match(renderLimitSessionsIcon, /trayProviderImages\[pick\.provider\.provider\]/);
+  assert.match(renderLimitSessionsIcon, /`500 \$\{fontSize\}px/);
+  assert.match(renderLimitSessionsIcon, /formatPercent\(limitFillPercent/);
+  assert.match(renderLimitSessionsIcon, /·/);
+  assert.match(maybeUpdateBarsIcon, /limitsAllSessions/);
+  assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44\)/);
+  assert.match(updateTrayDisplay, /mode === 'limitsAllSessions'/);
+  assert.match(updateTrayDisplay, /trayImageMode[\s\S]*?\? '' : formatTrayText/);
+});
+
 test('Grok renders its single Monthly billing window full-width instead of an empty session/weekly pair', () => {
   // Grok only exposes a billing window. The default render branch draws
   // session+weekly, which would leave Grok with no visible bar. A dedicated

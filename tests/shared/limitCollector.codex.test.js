@@ -454,6 +454,57 @@ test('fetchCodexLimits retries empty Codex quota reads on the same RPC session',
   assert.equal(providers.windows[0].remainingPercent, 96);
 });
 
+test('fetchCodexLimits gives Codex RPC a generous default timeout', async () => {
+  const { EventEmitter } = require('node:events');
+  const originalSetTimeout = global.setTimeout;
+  const delays = [];
+  global.setTimeout = (fn, delay, ...args) => {
+    delays.push(delay);
+    return originalSetTimeout(fn, delay, ...args);
+  };
+  try {
+    const provider = await fetchCodexLimits({}, {
+      now: () => Date.parse('2026-06-01T00:00:00Z'),
+      env: { PATH: '/usr/bin' },
+      codexCommand: 'codex',
+      ...noLiveAuth,
+      spawn: () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.stdin = {
+          write(line) {
+            const message = JSON.parse(String(line));
+            const respond = (result) => {
+              queueMicrotask(() => child.stdout.emit('data', `${JSON.stringify({ id: message.id, result })}\n`));
+            };
+            if (message.method === 'initialize') respond({});
+            if (message.method === 'account/rateLimits/read') {
+              respond({
+                rateLimits: {
+                  primary: {
+                    usedPercent: 4,
+                    resetsAt: '2026-06-01T05:00:00Z',
+                    windowDurationMins: 300
+                  }
+                }
+              });
+            }
+            if (message.method === 'account/read') respond({ account: { email: 'live@example.com', planType: 'plus' } });
+          }
+        };
+        child.kill = () => {};
+        return child;
+      }
+    });
+
+    assert.equal(provider.status, 'ok');
+    assert.ok(delays.some((delay) => delay >= 20_000), `expected a Codex RPC timeout >= 20000ms, got ${delays.join(', ')}`);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+  }
+});
+
 test('fetchCodexLimits does not retry usage-based Codex plans without quota windows', async () => {
   const { EventEmitter } = require('node:events');
   const cases = [

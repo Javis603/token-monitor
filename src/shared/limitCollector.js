@@ -56,6 +56,7 @@ const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 const CODEX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api';
 const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
+const CODEX_RPC_TIMEOUT_MS = 20_000;
 const TOKEN_MONITOR_USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
 
 function nowIso(nowMs) {
@@ -1809,7 +1810,7 @@ function codexRpcPayload(rateLimitResult, account, command, deps = {}) {
 }
 
 async function readCodexRpcWithCommand(command, deps = {}) {
-  const timeoutMs = Number(deps.codexRpcTimeoutMs || 12000);
+  const timeoutMs = Number(deps.codexRpcTimeoutMs || CODEX_RPC_TIMEOUT_MS);
   const child = spawnCodexAppServer({ ...deps, codexCommand: command });
   const rpc = createJsonRpcClient(child, timeoutMs);
   try {

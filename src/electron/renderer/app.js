@@ -3774,7 +3774,7 @@ function applyFloatingBubbleState(payload = {}) {
   renderFloatingBubbleContent();
 }
 
-const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions'];
+const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions'];
 function normalizeTrayContentValue(value) {
   return BUBBLE_CONTENT_VALUES.includes(value) ? value : 'icon';
 }
@@ -3793,13 +3793,17 @@ function isBarsMode(mode) {
   return mode === 'bars' || mode === 'barsSession' || mode === 'barsWeekly' || mode === 'barsAllSessions';
 }
 
+function isTrayImageMode(mode) {
+  return isBarsMode(mode) || mode === 'limitsAllSessions';
+}
+
 function renderFloatingBubbleContent() {
   const el = els.floatingBubbleContent;
   if (!el || !state.floatingBubble.collapsed) return;
   const mode = state.settings?.floatingBubbleContent || 'icon';
-  if (isBarsMode(mode)) {
+  if (isTrayImageMode(mode)) {
     const dataUrl = state.stats
-      ? barsDataUrlForMode(mode, 44, BUBBLE_BARS_COLORS, { contentOnly: mode === 'barsAllSessions' })
+      ? trayDataUrlForMode(mode, 44, BUBBLE_BARS_COLORS, { contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions' })
       : null;
     if (dataUrl) {
       el.classList.add('bars');
@@ -3812,13 +3816,13 @@ function renderFloatingBubbleContent() {
       return;
     }
     el.classList.remove('bars');
-    el.textContent = (state.stats && window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency())) || 'Σ';
+    el.textContent = (state.stats && window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), state.settings)) || 'Σ';
   } else if (mode === 'icon') {
     el.classList.remove('bars');
     el.textContent = 'Σ';
   } else {
     el.classList.remove('bars');
-    el.textContent = state.stats ? (window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency()) || '0') : '0';
+    el.textContent = state.stats ? (window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), state.settings) || '0') : '0';
   }
   reportFloatingBubbleSize();
 }
@@ -3830,7 +3834,7 @@ function reportFloatingBubbleSize() {
   // Height is constant; only the width tracks the content.
   let width = BUBBLE_CONTENT_MIN_W;
   if (mode !== 'icon' && el) {
-    const pad = isBarsMode(mode) ? 8 : BUBBLE_CONTENT_PAD_X * 2;
+    const pad = isTrayImageMode(mode) ? 8 : BUBBLE_CONTENT_PAD_X * 2;
     width = Math.max(BUBBLE_CONTENT_MIN_W, Math.ceil(el.scrollWidth) + pad);
   }
   window.tokenMonitor.setFloatingBubbleCollapsedSize?.({ width, height: BUBBLE_CONTENT_HEIGHT });
@@ -4162,7 +4166,7 @@ function syncSettingsForm() {
   if (els.showTrayIconInput) els.showTrayIconInput.checked = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
   els.trayModeInput.checked = showTrayIcon && Boolean(state.settings.trayMode);
-  els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
+  els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
   els.trayContentInput.disabled = !showTrayIcon;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !state.settings.trayMode);
@@ -5919,17 +5923,96 @@ function renderAllSessionsIcon(stats, height = 44, configOrder, colors = {}, opt
   return canvas.toDataURL('image/png');
 }
 
+function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, options = {}) {
+  const picks = pickConfiguredSessionProviders(stats, configOrder);
+  if (picks.length === 0) return null;
+
+  const textColor = colors.text || colors.fill || 'rgba(0, 0, 0, 1)';
+  const { trayBarsLayout } = window.TokenMonitorTrayBars;
+  const layout = trayBarsLayout(height);
+  const iconSize = layout.iconSize;
+  const gap = Math.max(3, Math.round(height * 0.1));
+  const separator = ' · ';
+  const padX = options.contentOnly === true ? 0 : layout.padX;
+  const fontSize = Math.round(height * 0.68);
+  const font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif`;
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+
+  const measureCanvas = document.createElement('canvas');
+  const measureCtx = measureCanvas.getContext('2d');
+  measureCtx.font = font;
+  const visiblePicks = picks.length === 1
+    ? (() => {
+        const weekly = (picks[0].provider.windows || []).find((w) => w.kind === 'weekly');
+        return [{
+          ...picks[0],
+          text: [
+            formatPercent(limitFillPercent(picks[0].session.remainingPercent, picks[0].session.usedPercent, showUsed)),
+            formatPercent(limitFillPercent(weekly?.remainingPercent, weekly?.usedPercent, showUsed))
+          ].filter(Boolean).join(separator)
+        }];
+      })()
+    : picks.map((pick) => ({
+        ...pick,
+        text: formatPercent(limitFillPercent(pick.session.remainingPercent, pick.session.usedPercent, showUsed))
+      }));
+  const entries = visiblePicks.map((pick) => {
+    const text = pick.text;
+    const image = trayProviderImages[pick.provider.provider];
+    const textWidth = Math.ceil(measureCtx.measureText(text).width);
+    const iconWidth = image ? iconSize + gap : 0;
+    return { pick, text, image, width: iconWidth + textWidth };
+  }).filter((entry) => entry.text);
+  if (entries.length === 0) return null;
+
+  const separatorWidth = Math.ceil(measureCtx.measureText(separator).width);
+  const width = Math.ceil(
+    padX * 2 +
+    entries.reduce((sum, entry) => sum + entry.width, 0) +
+    separatorWidth * Math.max(0, entries.length - 1)
+  );
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, width);
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = font;
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = textColor;
+
+  let x = padX;
+  const centerY = height / 2;
+  entries.forEach((entry, index) => {
+    if (entry.image) {
+      ctx.drawImage(entry.image, x, layout.iconY, iconSize, iconSize);
+      x += iconSize + gap;
+    }
+    ctx.fillText(entry.text, x, centerY + 1);
+    x += Math.ceil(ctx.measureText(entry.text).width);
+    if (index < entries.length - 1) {
+      ctx.fillText(separator, x, centerY + 1);
+      x += separatorWidth;
+    }
+  });
+  return canvas.toDataURL('image/png');
+}
+
 function barsDataUrlForMode(mode, size = 44, colors, options = {}) {
   if (mode === 'barsAllSessions') return renderAllSessionsIcon(state.stats, size, configuredLimitProviderOrder(), colors, options);
   const pickers = { barsSession: pickWorstSessionProvider, barsWeekly: pickWorstWeeklyProvider };
   return renderBarsIcon(state.stats, size, pickers[mode] || pickWorstProvider, colors);
 }
 
+function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
+  if (mode === 'limitsAllSessions') return renderLimitSessionsIcon(state.stats, size, configuredLimitProviderOrder(), colors, options);
+  return barsDataUrlForMode(mode, size, colors, options);
+}
+
 async function maybeUpdateBarsIcon() {
   const mode = state.settings?.trayContent;
-  if (mode !== 'bars' && mode !== 'barsSession' && mode !== 'barsWeekly' && mode !== 'barsAllSessions') return;
+  if (mode !== 'bars' && mode !== 'barsSession' && mode !== 'barsWeekly' && mode !== 'barsAllSessions' && mode !== 'limitsAllSessions') return;
   if (!window.tokenMonitor.setTrayIcons) return;
-  const dataUrl = barsDataUrlForMode(mode, 44);
+  const dataUrl = trayDataUrlForMode(mode, 44);
   if (!dataUrl) return;
   try { await window.tokenMonitor.setTrayIcons({ [mode]: dataUrl }); } catch (_) {}
 }

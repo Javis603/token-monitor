@@ -71,6 +71,7 @@ test('every language option has a dictionary, normalizes to itself, and is reach
 test('tray limit labels describe remaining quota instead of ambiguous worst windows', () => {
   assert.equal(translate('zh-TW', 'settings.tray.barsSession'), '額度條：單次剩餘最少');
   assert.equal(translate('zh-TW', 'settings.tray.barsAllSessions'), '額度條：前兩個工具的單次額度');
+  assert.equal(translate('zh-CN', 'settings.tray.limitsAllSessions'), '额度：前两个工具的单次额度（12% · 34%）');
   assert.equal(translate('zh-CN', 'settings.tray.barsWindow'), '额度条：任一额度剩余最少');
 });
 
