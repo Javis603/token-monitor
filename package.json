@@ -59,6 +59,7 @@
           ]
         }
       ],
+      "forceCodeSigning": true,
       "category": "public.app-category.developer-tools",
       "icon": "build/icons/icon.icns",
       "extendInfo": {
