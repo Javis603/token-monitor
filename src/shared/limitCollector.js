@@ -1960,7 +1960,9 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   const includeLiveAccount = options.includeLiveCodexAccount !== false;
   // Single live account: keep the original single-provider shape (and error
   // propagation) so a signed-out/not-configured state surfaces as before.
-  if (managedAccounts.length === 0) return fetchLiveCodexAccount(deps, nowMs);
+  if (managedAccounts.length === 0) {
+    return includeLiveAccount ? fetchLiveCodexAccount(deps, nowMs) : [];
+  }
 
   const providers = [];
   // Dedupe by account id (accountKey) first, then email — so signing in the

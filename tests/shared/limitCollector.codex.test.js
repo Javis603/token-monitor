@@ -281,6 +281,26 @@ test('fetchCodexLimits can refresh only the requested managed Codex account', as
   assert.equal(providers[0].sourceDetail, 'managed');
 });
 
+test('fetchCodexLimits does not fall back to live account when scoped accounts normalize away', async () => {
+  const seenHomes = [];
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [
+      { id: 'target', email: 'target@example.com', homePath: '' }
+    ]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readCodexRpc: async (deps) => {
+      seenHomes.push(deps.env.CODEX_HOME || '<live>');
+      return codexPayload('live@example.com', 'app');
+    }
+  });
+
+  assert.deepEqual(seenHomes, []);
+  assert.deepEqual(providers, []);
+});
+
 test('createLimitsCollector retains recent Codex quota windows across one empty refresh', async () => {
   let now = Date.parse('2026-06-01T00:00:00Z');
   let calls = 0;
