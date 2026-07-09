@@ -61,6 +61,13 @@ test('parseProcessLine matches agy.exe on win32 cmdlines', () => {
   assert.equal(info.kind, 'cli');
 });
 
+test('parseProcessLine matches a quoted agy.exe path with regular CLI args on win32', () => {
+  const info = probe._parseProcessLine('35144 "C:\\Users\\Cx\\AppData\\Local\\agy\\bin\\agy.exe" --print hello --print-timeout 30s');
+  assert.equal(info.pid, 35144);
+  assert.equal(info.kind, 'cli');
+  assert.equal(info.csrfToken, '');
+});
+
 test('parseProcessLine does not match agy embedded in an unrelated path', () => {
   assert.equal(probe._parseProcessLine('700 /opt/imagytool/bin/run --serve'), null);
   assert.equal(probe._parseProcessLine('701 /usr/local/bin/legacy-agent start'), null);
@@ -128,6 +135,14 @@ test('detectProcessInfo (win32) finds the agy.exe CLI when no IDE LS is running'
   const stdout = '9001 C:\\Users\\j\\.antigravity\\agy.exe language-server\n';
   const info = await probe.detectProcessInfo({ platform: 'win32', spawn: fakeSpawn(stdout) });
   assert.equal(info.pid, 9001);
+  assert.equal(info.kind, 'cli');
+  assert.equal(info.csrfToken, '');
+});
+
+test('detectProcessInfo (win32) finds a quoted agy.exe CLI command line', async () => {
+  const stdout = '35144 "C:\\Users\\Cx\\AppData\\Local\\agy\\bin\\agy.exe" --print hello --print-timeout 30s\n';
+  const info = await probe.detectProcessInfo({ platform: 'win32', spawn: fakeSpawn(stdout) });
+  assert.equal(info.pid, 35144);
   assert.equal(info.kind, 'cli');
   assert.equal(info.csrfToken, '');
 });

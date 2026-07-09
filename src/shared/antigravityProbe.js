@@ -45,8 +45,8 @@ function isAntigravityCommand(lowerCommand) {
 // different process name. Path-anchor the match so unrelated binaries/arguments
 // (e.g. `/opt/imagytool/...`, `legacy-agent`) do not match.
 function isAntigravityCliCommand(lowerCommand) {
-  if (/(^|[/\\])(antigravity-cli|antigravity_cli)([\s/\\]|$)/.test(lowerCommand)) return true;
-  if (/(^|[/\\])agy(\.exe)?(\s|$)/.test(lowerCommand)) return true;
+  if (/(^|[/\\])(antigravity-cli|antigravity_cli)(\.exe)?(["'\s/\\]|$)/.test(lowerCommand)) return true;
+  if (/(^|[/\\])agy(\.exe)?(["'\s]|$)/.test(lowerCommand)) return true;
   return false;
 }
 
