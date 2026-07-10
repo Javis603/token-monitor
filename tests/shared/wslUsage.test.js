@@ -308,16 +308,25 @@ test('collectWslUsage does not report detected clients the user is not tracking'
   assert.deepEqual(detected, ['codex']); // openclaw marker present but untracked -> excluded
 });
 
-test('collectWslUsage detects Proma without passing it to tokscale', async () => {
+test('collectWslUsage parses Proma-only WSL homes without calling tokscale', async () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
-  let tokscaleCalls = 0;
-  const { detected } = await collectWslUsage(
+  const now = new Date('2026-07-10T08:00:00.000Z');
+  let promaOptions = null;
+  const { bundle, detected } = await collectWslUsage(
     {
       clients: '',
       trackedClients: 'proma',
       allTimeSince: '2025-01-01',
       commandTimeoutMs: 1000,
-      runTokscale: async () => { tokscaleCalls += 1; return { entries: [] }; }
+      now,
+      buildPromaPeriods: (options) => {
+        promaOptions = options;
+        return {
+          today: { entries: [{ client: 'proma', model: 'm', input: 9, output: 1 }] },
+          month: { entries: [{ client: 'proma', model: 'm', input: 20 }] },
+          allTime: { entries: [{ client: 'proma', model: 'm', input: 30 }] }
+        };
+      }
     },
     {
       platform: 'win32',
@@ -327,7 +336,14 @@ test('collectWslUsage detects Proma without passing it to tokscale', async () =>
     }
   );
   assert.deepEqual(detected, ['proma']);
-  assert.equal(tokscaleCalls, 0);
+  assert.deepEqual(promaOptions, {
+    now,
+    allTimeSince: '2025-01-01',
+    roots: [`${home}\\.proma\\agent-sessions`]
+  });
+  assert.equal(bundle.today.clients.proma, 10);
+  assert.equal(bundle.month.clients.proma, 20);
+  assert.equal(bundle.allTime.clients.proma, 30);
 });
 
 test('collectWslUsage returns empty bundle when no homes', async () => {

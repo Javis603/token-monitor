@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
+const { buildPromaPeriods } = require('./promaUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -149,10 +150,14 @@ function listRunningWslDistros(deps = {}) {
 
 // Returns the tracked-client ids whose marker is present in this home (deduped).
 // Empty array = no tracked client stores data here.
+function wslHomePath(home, relativePath) {
+  return `${home}\\${relativePath.replace(/\//g, '\\')}`;
+}
+
 function homeHasData(home, existsSync) {
   const ids = new Set();
   for (const rel of WSL_DATA_MARKERS) {
-    if (existsSync(`${home}\\${rel.replace(/\//g, '\\')}`)) {
+    if (existsSync(wslHomePath(home, rel))) {
       const client = MARKER_CLIENTS[rel];
       if (client) ids.add(client);
     }
@@ -169,7 +174,7 @@ function clientsForHomeScan(clientsCsv, home, existsSync) {
   const kept = requested.filter((client) => {
     const gate = WSL_HOST_FALLBACK_GATES[client];
     if (!gate) return true; // not host-fallback-prone — always pass through
-    return existsSync(`${home}\\${gate.replace(/\//g, '\\')}`);
+    return existsSync(wslHomePath(home, gate));
   });
   return kept.join(',');
 }
@@ -203,11 +208,12 @@ function probeWslState(deps = {}) {
 }
 
 async function collectWslUsage(options = {}, deps = {}) {
-  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, runTokscale, logger } = options;
+  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger } = options;
+  const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const existsSync = deps.existsSync || fs.existsSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
-  if (!trackedClients || typeof runTokscale !== 'function') return { bundle, detected: [] };
+  if (!trackedClients) return { bundle, detected: [] };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
@@ -215,8 +221,27 @@ async function collectWslUsage(options = {}, deps = {}) {
     // Attribution: every marker hit in this home counts as "detected", even if
     // clientsForHomeScan drops it from the scan (e.g. a zed-only home with no
     // threads.db) — detection is marker-based, independent of whether we scan.
-    for (const id of homeHasData(home, existsSync)) {
+    const homeDataClients = homeHasData(home, existsSync);
+    for (const id of homeDataClients) {
       if (tracked.has(id)) detected.add(id);
+    }
+    // Proma is locally parsed rather than tokscale-backed. Scan its WSL JSONL
+    // root directly so a Proma-only home contributes actual usage, not merely
+    // marker detection. The root is isolated per home to avoid double-counting
+    // another distro or the host's local Proma sessions.
+    if (tracked.has('proma') && homeDataClients.includes('proma')) {
+      try {
+        const proma = buildProma({
+          now,
+          allTimeSince,
+          roots: [wslHomePath(home, '.proma/agent-sessions')]
+        });
+        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(proma.today));
+        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(proma.month));
+        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
+      } catch (error) {
+        if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
+      }
     }
     // Pass the requested clients through, dropping only a host-fallback-gated
     // client (zed) whose gate file is missing here — otherwise tokscale's
@@ -226,7 +251,7 @@ async function collectWslUsage(options = {}, deps = {}) {
     // there's nothing to scan — skip rather than pass an empty --client
     // (tokscale would expand that to ALL clients).
     const homeClientsCsv = clientsForHomeScan(clients, home, existsSync);
-    if (homeClientsCsv.length === 0) continue;
+    if (homeClientsCsv.length === 0 || typeof runTokscale !== 'function') continue;
     try {
       // Serial on purpose (issue #15): never run these concurrently.
       const todayJson = await runTokscale({ clients: homeClientsCsv, flags: ['--today', '--home', home], commandTimeoutMs });

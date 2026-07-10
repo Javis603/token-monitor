@@ -40,9 +40,11 @@ test('full tick merges WSL bundle and marks WSL-only client active', async () =>
 
 test('WSL scans exclude locally parsed Proma while retaining it for marker detection', async () => {
   let wslOptions = null;
+  const collectedAt = '2026-07-10T08:00:00.000Z';
   await collectUsageOnce({
     clients: 'claude,proma',
     allTimeSince: '2025-01-01',
+    now: collectedAt,
     commandTimeoutMs: 1000,
     deviceId: 'dev1',
     limitsEnabled: false,
@@ -54,6 +56,7 @@ test('WSL scans exclude locally parsed Proma while retaining it for marker detec
   });
   assert.equal(wslOptions.clients, 'claude');
   assert.equal(wslOptions.trackedClients, 'claude,proma');
+  assert.equal(wslOptions.now.toISOString(), collectedAt);
 });
 
 test('watch tick reuses wslAnchor and does not rescan WSL', async () => {

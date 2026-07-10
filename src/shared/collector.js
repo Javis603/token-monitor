@@ -472,6 +472,7 @@ async function collectUsageOnce(options) {
         clients: tokscaleClients,
         trackedClients: normalizedClients,
         allTimeSince,
+        now: collectedAt,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
         logger: options.logger
@@ -485,6 +486,7 @@ async function collectUsageOnce(options) {
         clients: tokscaleClients,
         trackedClients: normalizedClients,
         allTimeSince,
+        now: collectedAt,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
         logger: options.logger
@@ -498,8 +500,8 @@ async function collectUsageOnce(options) {
   allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
 
   // WSL attribution (Windows only; null elsewhere). detected = markers found,
-  // withData = tools tokscale actually returned tokens for. The gap is the
-  // diagnostic (e.g. Hermes detected but unreadable over 9P).
+  // withData = clients whose WSL scan or local parser returned tokens. The gap
+  // is the diagnostic (e.g. Hermes detected but unreadable over 9P).
   //
   // Like wslBundle, this is FROZEN between full scans: anchored watch ticks
   // (which skip the WSL scan) reuse the snapshot via options.wslStatus instead
