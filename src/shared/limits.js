@@ -339,16 +339,22 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
   const byKey = new Map();
   const providersWithConfiguredAccounts = new Set();
+  const providersWithFreshConfiguredAccounts = new Set();
+  const providersWithFreshObservations = new Set();
 
   for (const device of devices || []) {
     const summary = normalizeLimitsSummary(device?.limits);
     for (const provider of summary.providers) {
-      if (isConfiguredProvider(provider)) providersWithConfiguredAccounts.add(provider.provider);
       const candidate = {
         ...provider,
         sourceDeviceId: String(device?.deviceId || ''),
         stale: isProviderStale(provider, summary, device, staleAfterMs, nowMs)
       };
+      if (isConfiguredProvider(provider)) providersWithConfiguredAccounts.add(provider.provider);
+      if (!candidate.stale) {
+        providersWithFreshObservations.add(provider.provider);
+        if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(provider.provider);
+      }
       const key = providerAggregateKey(provider);
       byKey.set(key, pickBetterProvider(byKey.get(key), candidate));
     }
@@ -360,7 +366,12 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   // Map.set() would arbitrarily overwrite the fresh one with the stale one.
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
-    if (!isConfiguredProvider(candidate) && providersWithConfiguredAccounts.has(candidate.provider)) continue;
+    const hasFreshObservation = providersWithFreshObservations.has(candidate.provider);
+    if (candidate.stale && hasFreshObservation) continue;
+    const configuredProviders = hasFreshObservation
+      ? providersWithFreshConfiguredAccounts
+      : providersWithConfiguredAccounts;
+    if (!isConfiguredProvider(candidate) && configuredProviders.has(candidate.provider)) continue;
     const collapseKey = providerCollapseKey(candidate);
     byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate));
   }
