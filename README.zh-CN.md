@@ -114,8 +114,6 @@ Token Monitor 对「Token 用量」「账户额度」和「session 明细」分�
 
 本地模式是默认模式：启动 App 后会开始追踪这台设备。无需 hub、代理或配置。
 
-在 macOS 上，Codex 账户登录也支持内置 Codex 的新版 ChatGPT app。Token Monitor 会自动识别，无需安装全局 CLI 或配置 PATH。
-
 ## 多设备同步
 
 挑一个所有设备（与任何无头代理）都能连上的 hub 后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。
