@@ -1675,7 +1675,10 @@ function codexCommandCandidates(env = process.env, platform = process.platform, 
   const pathApi = pathApiForPlatform(platform);
   const candidates = [];
   if (platform === 'darwin') {
-    candidates.push('/Applications/Codex.app/Contents/Resources/codex');
+    candidates.push(
+      '/Applications/Codex.app/Contents/Resources/codex',
+      '/Applications/ChatGPT.app/Contents/Resources/codex'
+    );
   } else if (platform === 'win32') {
     const localAppData = envValue(env, 'LOCALAPPDATA');
     const programFiles = envValue(env, 'PROGRAMFILES');
@@ -1698,7 +1701,7 @@ function codexCommandSourceDetail(command, platform = process.platform) {
   if (!raw) return 'unknown';
   const normalized = raw.replace(/\\/g, '/').toLowerCase();
 
-  if (normalized.includes('/codex.app/')) return 'app';
+  if (normalized.includes('/codex.app/') || normalized.includes('/chatgpt.app/')) return 'app';
   if (platform === 'win32') {
     if (
       normalized.includes('/programs/codex/') ||

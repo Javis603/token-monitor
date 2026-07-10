@@ -14,6 +14,24 @@ function dirent(name, directory = true) {
   };
 }
 
+test('Codex command candidates include legacy and ChatGPT-bundled macOS apps', () => {
+  const legacy = '/Applications/Codex.app/Contents/Resources/codex';
+  const chatgpt = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  const candidates = codexCommandCandidates({}, 'darwin');
+
+  assert.deepEqual(candidates.slice(0, 2), [legacy, chatgpt]);
+  assert.equal(candidates.at(-1), 'codex');
+  assert.equal(codexCommandSourceDetail(legacy, 'darwin'), 'app');
+  assert.equal(codexCommandSourceDetail(chatgpt, 'darwin'), 'app');
+});
+
+test('Codex command candidates preserve an explicit command override on macOS', () => {
+  assert.deepEqual(
+    codexCommandCandidates({ TOKEN_MONITOR_CODEX_COMMAND: '/custom/codex' }, 'darwin'),
+    ['/custom/codex']
+  );
+});
+
 test('Codex command candidates include Microsoft Store app installs on Windows', () => {
   const programFiles = 'C:\\Program Files';
   const appxDir = path.win32.join(programFiles, 'WindowsApps');

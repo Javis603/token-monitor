@@ -114,6 +114,8 @@ Packaged builds check GitHub Releases automatically. When an update is available
 
 Local mode is the default: launch the app and it starts tracking this device. No hub, agent, or config required.
 
+On macOS, Codex account sign-in also works with current ChatGPT app installations that bundle Codex. Token Monitor detects it automatically, so no global CLI installation or PATH setup is required.
+
 ## Multi-device sync
 
 Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.

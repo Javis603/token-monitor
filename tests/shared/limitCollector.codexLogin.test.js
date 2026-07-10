@@ -49,6 +49,33 @@ test('runCodexLogin spawns codex login with the scoped CODEX_HOME and streams ou
   assert.deepEqual(streamed, ['Visit https://auth.openai.com/device\n']);
 });
 
+test('runCodexLogin selects the ChatGPT-bundled Codex binary when the legacy app is absent', async () => {
+  const chatgptCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  let spawnArgs = null;
+  const child = fakeChild();
+  const promise = runCodexLogin(
+    { homePath: '/tmp/managed/chatgpt-home' },
+    {
+      ...noopTimers,
+      platform: 'darwin',
+      env: {},
+      existsSync: (candidate) => candidate === chatgptCodex,
+      spawn: (command, args, opts) => {
+        spawnArgs = { command, args, opts };
+        return child;
+      }
+    }
+  );
+
+  child.emit('close', 0);
+  const result = await promise;
+
+  assert.equal(spawnArgs.command, chatgptCodex);
+  assert.deepEqual(spawnArgs.args, ['login']);
+  assert.equal(spawnArgs.opts.env.CODEX_HOME, '/tmp/managed/chatgpt-home');
+  assert.equal(result.outcome, 'success');
+});
+
 test('runCodexLogin reports a failed outcome for a non-zero exit', async () => {
   const child = fakeChild();
   const promise = runCodexLogin(
