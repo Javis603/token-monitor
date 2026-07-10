@@ -7161,7 +7161,8 @@ function setupCursorAccountUI() {
     codexCancelButton.addEventListener('click', async () => {
       const flowId = state.codexSignInFlowId;
       if (!isCurrentCodexSignInFlow(flowId)) return;
-      const cancelRequest = window.tokenMonitor.codex.cancelLogin({ flowId });
+      const result = await window.tokenMonitor.codex.cancelLogin({ flowId });
+      if (!result?.cancelled || !isCurrentCodexSignInFlow(flowId)) return;
       state.codexSignInBusy = false;
       state.codexSignInFlowId = '';
       state.codexLoginUrl = '';
@@ -7171,7 +7172,6 @@ function setupCursorAccountUI() {
       if (codexLoginDetails) codexLoginDetails.open = false;
       renderCodexLoginStatus();
       renderCodexAccounts();
-      await cancelRequest;
     });
 
     codexOpenUrlButton.addEventListener('click', async () => {

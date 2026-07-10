@@ -370,6 +370,7 @@ function normalizeCopilotEnterpriseHost(value) {
 
 let codexLoginController = null;
 let codexLoginFlowId = '';
+let codexLoginCanCancel = false;
 let copilotLoginController = null;
 let copilotLoginFlowId = '';
 
@@ -413,6 +414,14 @@ function codexManagedAccountsForCollector() {
 
 function codexManagedRoot() {
   return path.join(app.getPath('userData'), 'managed-codex-homes');
+}
+
+function codexManagedHomePath(accountId) {
+  const resolvedRoot = path.resolve(codexManagedRoot());
+  const resolvedHome = path.resolve(resolvedRoot, String(accountId || ''));
+  if (resolvedHome === resolvedRoot) return '';
+  if (!resolvedHome.startsWith(`${resolvedRoot}${path.sep}`)) return '';
+  return resolvedHome;
 }
 
 function codexEmailDerivedAccountKey(account, identity) {
@@ -487,7 +496,8 @@ async function preserveLiveCodexAuthAsManagedAccount(targetIdentity) {
   if (codexAccountMatchesIdentity(targetIdentity, liveMaterial.identity)) return null;
   const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
   const existing = findExistingCodexAccount(accounts, liveMaterial.identity);
-  const homePath = existing?.homePath || path.join(codexManagedRoot(), codexAccountId(liveMaterial.identity, existing));
+  const homePath = codexManagedHomePath(codexAccountId(liveMaterial.identity, existing));
+  if (!homePath) return null;
   await writeCodexAuthFile(path.join(homePath, 'auth.json'), liveMaterial.data);
   return commitCodexManagedAccount(liveMaterial.identity, homePath, existing, {
     enabled: existing?.enabled ?? true,
@@ -552,7 +562,8 @@ async function addCodexManagedAccount(onOutput, options = {}) {
     }
     if (options.signal?.aborted) return cancelledCodexLoginResult();
     const existing = findExistingCodexAccount(normalizeCodexManagedAccounts(settings.codexManagedAccounts), identity);
-    const homePath = path.join(codexManagedRoot(), codexAccountId(identity, existing));
+    const homePath = codexManagedHomePath(codexAccountId(identity, existing));
+    if (!homePath) return { ok: false, error: 'The saved Codex account path is invalid.' };
     if (path.resolve(homePath) !== path.resolve(tempHome)) {
       if (options.signal?.aborted) return cancelledCodexLoginResult();
       const candidateBackupPath = `${homePath}.backup-${crypto.randomUUID()}`;
@@ -588,13 +599,29 @@ async function addCodexManagedAccount(onOutput, options = {}) {
       movedToFinal = false;
       return cancelledCodexLoginResult();
     }
-    const account = commitCodexManagedAccount(identity, homePath, existing);
-    accountCommitted = true;
-    if (backupHomePath) {
-      void removeManagedHomeIfSafe(backupHomePath).catch((error) => {
-        console.warn('Could not remove replaced Codex account credentials:', error?.message || error);
-      });
+    const previousAccounts = settings.codexManagedAccounts;
+    options.onCommit?.();
+    let account;
+    try {
+      account = commitCodexManagedAccount(identity, homePath, existing, { restart: false });
+      if (backupHomePath) {
+        await removeManagedHomeIfSafe(backupHomePath);
+        backupHomePath = '';
+      }
+      accountCommitted = true;
+    } catch (error) {
+      settings.codexManagedAccounts = previousAccounts;
+      try {
+        saveSettings();
+      } catch (rollbackError) {
+        console.warn('Could not restore Codex account settings:', rollbackError?.message || rollbackError);
+      }
+      await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+      backupHomePath = '';
+      movedToFinal = false;
+      throw error;
     }
+    startMode();
     return { ok: true, account };
   } finally {
     if (!accountCommitted) await removeManagedHomeIfSafe(tempHome).catch(() => {});
@@ -3505,6 +3532,7 @@ app.whenReady().then(() => {
     const controller = new AbortController();
     codexLoginController = controller;
     codexLoginFlowId = flowId;
+    codexLoginCanCancel = true;
     let streamed = '';
     const sendStatus = (payload) => {
       if (codexLoginController !== controller) return;
@@ -3523,7 +3551,12 @@ app.whenReady().then(() => {
           text: String(text || ''),
           loginUrl: codexLoginUrlFromOutput(streamed)
         });
-      }, { signal: controller.signal });
+      }, {
+        signal: controller.signal,
+        onCommit: () => {
+          if (codexLoginController === controller) codexLoginCanCancel = false;
+        }
+      });
       if (codexLoginController !== controller) {
         return { ok: false, error: codexLoginErrorMessage({ outcome: 'cancelled' }), outcome: 'cancelled', flowId };
       }
@@ -3532,19 +3565,18 @@ app.whenReady().then(() => {
       if (codexLoginController === controller) {
         codexLoginController = null;
         codexLoginFlowId = '';
+        codexLoginCanCancel = false;
       }
     }
   });
   ipcMain.handle('codex:cancelLogin', (_event, request = {}) => {
     const flowId = String(request?.flowId || '').trim();
-    if (flowId && codexLoginFlowId && flowId !== codexLoginFlowId) return { ok: true };
+    if (flowId && codexLoginFlowId && flowId !== codexLoginFlowId) return { ok: true, cancelled: false };
     const controller = codexLoginController;
+    if (!controller) return { ok: true, cancelled: false };
+    if (!codexLoginCanCancel) return { ok: false, cancelled: false, tooLate: true };
     controller?.abort();
-    if (codexLoginController === controller) {
-      codexLoginController = null;
-      codexLoginFlowId = '';
-    }
-    return { ok: true };
+    return { ok: true, cancelled: true };
   });
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
   ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
