@@ -10,6 +10,7 @@ const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'managed', 'unknown']);
 const WINDOW_ORDER = ['session', 'weekly', 'billing'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
+const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -354,36 +355,80 @@ function hasProviderWindows(provider) {
   return Array.isArray(provider?.windows) && provider.windows.length > 0;
 }
 
+function cloneLimitWindows(windows) {
+  return (windows || []).map((window) => ({ ...window }));
+}
+
+function retainedCodexProvider(previousProvider, currentProvider, windows) {
+  return {
+    ...previousProvider,
+    ...currentProvider,
+    accountKey: currentProvider.accountKey || previousProvider.accountKey,
+    accountLabel: currentProvider.accountLabel || previousProvider.accountLabel,
+    accountName: currentProvider.accountName || previousProvider.accountName,
+    accountEmail: currentProvider.accountEmail || previousProvider.accountEmail,
+    source: currentProvider.source || previousProvider.source,
+    sourceDetail: currentProvider.sourceDetail || previousProvider.sourceDetail,
+    status: 'ok',
+    updatedAt: previousProvider.updatedAt || currentProvider.updatedAt,
+    windows: cloneLimitWindows(windows),
+    resetCredits: currentProvider.resetCredits || previousProvider.resetCredits
+  };
+}
+
+function mergeCodexProviderSnapshot(previousProvider, currentProvider) {
+  if (CODEX_TRANSIENT_PROVIDER_STATUSES.has(currentProvider.status)) {
+    return retainedCodexProvider(previousProvider, currentProvider, previousProvider.windows);
+  }
+  if (currentProvider.status !== 'ok') return currentProvider;
+  if (!hasProviderWindows(currentProvider)) {
+    return retainedCodexProvider(previousProvider, currentProvider, previousProvider.windows);
+  }
+  // A successful non-empty snapshot is authoritative. Codex can legitimately
+  // change percentages and reset targets after a global reset or reset-credit
+  // action, so quota values are not monotonic client-side invariants.
+  return currentProvider;
+}
+
 function mergeCodexTransientWindows(previousInput, currentInput, nowMs = Date.now(), retentionMs = CODEX_TRANSIENT_WINDOW_RETENTION_MS) {
   const current = normalizeLimitsSummary(currentInput);
   if (!previousInput || !Number.isFinite(Number(retentionMs)) || Number(retentionMs) <= 0) return current;
   const previous = normalizeLimitsSummary(previousInput);
   const currentMs = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
   const previousByIdentity = new Map();
+  const eligiblePreviousCodexProviders = [];
 
   for (const provider of previous.providers) {
     if (provider.provider !== 'codex' || provider.status !== 'ok' || !hasProviderWindows(provider)) continue;
     const providerUpdatedAt = timestampMs(provider.updatedAt || previous.updatedAt);
     if (!providerUpdatedAt || currentMs - providerUpdatedAt < 0 || currentMs - providerUpdatedAt > Number(retentionMs)) continue;
+    eligiblePreviousCodexProviders.push(provider);
     for (const key of codexProviderIdentityKeys(provider)) {
       const existing = previousByIdentity.get(key);
       if (!existing || timestampMs(provider.updatedAt) >= timestampMs(existing.updatedAt)) previousByIdentity.set(key, provider);
     }
   }
 
+  const currentCodexProviders = current.providers.filter((provider) => provider.provider === 'codex');
+  const singletonFallback = currentCodexProviders.length === 1 && eligiblePreviousCodexProviders.length === 1
+    ? eligiblePreviousCodexProviders[0]
+    : null;
+
   return {
     ...current,
     providers: current.providers.map((provider) => {
-      if (provider.provider !== 'codex' || provider.status !== 'ok' || hasProviderWindows(provider)) return provider;
-      const previousProvider = codexProviderIdentityKeys(provider)
+      if (provider.provider !== 'codex') return provider;
+      const identityKeys = codexProviderIdentityKeys(provider);
+      const identityMatch = identityKeys
         .map((key) => previousByIdentity.get(key))
         .find(Boolean);
+      const previousProvider = identityMatch || (
+        CODEX_TRANSIENT_PROVIDER_STATUSES.has(provider.status) && identityKeys.length === 0
+          ? singletonFallback
+          : null
+      );
       if (!previousProvider) return provider;
-      return {
-        ...provider,
-        updatedAt: previousProvider.updatedAt || provider.updatedAt,
-        windows: previousProvider.windows.map((window) => ({ ...window }))
-      };
+      return mergeCodexProviderSnapshot(previousProvider, provider);
     })
   };
 }

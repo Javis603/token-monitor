@@ -1175,15 +1175,37 @@ function codexDirectRateLimits(payload = {}) {
   return payload.rateLimits || payload.rate_limits || {};
 }
 
+function codexRateLimitWindowSignature(snapshot) {
+  return JSON.stringify(['primary', 'secondary'].map((key) => {
+    const window = snapshot?.[key];
+    if (!window) return null;
+    return [
+      key,
+      window.usedPercent ?? window.used_percent ?? null,
+      window.resetsAt ?? window.resets_at ?? null,
+      window.windowDurationMins ?? window.window_duration_mins ?? null
+    ];
+  }));
+}
+
+function unambiguousAlternateCodexRateLimits(rateLimitsById) {
+  // Object key order is not a quota-selection contract. Only use an alternate
+  // id when every windowed alternate describes the same quota snapshot.
+  const candidates = Object.entries(rateLimitsById)
+    .filter(([id, snapshot]) => id !== 'codex' && hasCodexRateLimitWindows(snapshot))
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (candidates.length === 0) return null;
+  const signatures = new Set(candidates.map(([, snapshot]) => codexRateLimitWindowSignature(snapshot)));
+  return signatures.size === 1 ? candidates[0][1] : null;
+}
+
 function codexRateLimitSnapshot(payload = {}) {
   const rateLimitsById = codexRateLimitsById(payload);
   const direct = codexDirectRateLimits(payload);
   if (hasCodexRateLimitWindows(rateLimitsById.codex)) return rateLimitsById.codex;
   if (hasCodexRateLimitWindows(direct)) return direct;
-  for (const [id, snapshot] of Object.entries(rateLimitsById)) {
-    if (id === 'codex') continue;
-    if (hasCodexRateLimitWindows(snapshot)) return snapshot;
-  }
+  const alternate = unambiguousAlternateCodexRateLimits(rateLimitsById);
+  if (alternate) return alternate;
   return rateLimitsById.codex || direct || {};
 }
 

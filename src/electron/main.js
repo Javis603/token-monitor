@@ -21,6 +21,7 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken } = require('../shared/limitCollector');
+const { mergeCodexTransientWindows } = require('../shared/limits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
 const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
@@ -855,9 +856,10 @@ async function refreshCodexManagedAccountLimits(id) {
       includeLiveCodexAccount: false,
       codexManagedAccounts: [account]
     }, { env: process.env });
+    const stableSummary = mergeCodexTransientWindows(latestStats?.limits, summary);
     return {
       ok: true,
-      providers: (summary.providers || []).filter((provider) => provider?.provider === 'codex')
+      providers: (stableSummary.providers || []).filter((provider) => provider?.provider === 'codex')
     };
   } catch (error) {
     return { ok: false, error: `Could not refresh Codex account limits: ${error?.message || error}` };
