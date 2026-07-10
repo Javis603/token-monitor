@@ -188,7 +188,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, settingsInTitlebar: false };
 let preferenceDrag = null;
@@ -6112,11 +6112,28 @@ function setCursorStatusText(el, text) {
   el.title = text;
 }
 
-function setCodexAccountButtonsDisabled(disabled) {
-  for (const id of ['codexAddAccountButton', 'codexRefreshAccountsButton']) {
-    const el = document.getElementById(id);
-    if (el) el.disabled = disabled;
-  }
+function renderCodexLoginStatus() {
+  const addButton = document.getElementById('codexAddAccountButton');
+  const cancelButton = document.getElementById('codexCancelLoginButton');
+  const refreshButton = document.getElementById('codexRefreshAccountsButton');
+  const openButton = document.getElementById('codexOpenLoginUrlButton');
+  const copyButton = document.getElementById('codexCopyLoginUrlButton');
+  const statusEl = document.getElementById('codexLoginStatus');
+  const urlActions = document.getElementById('codexLoginUrlActions');
+  const details = document.getElementById('codexLoginDetails');
+  const output = document.getElementById('codexLoginOutput');
+  if (!addButton || !cancelButton || !refreshButton || !openButton || !copyButton || !statusEl || !urlActions || !details || !output) return;
+
+  addButton.classList.toggle('hidden', state.codexSignInBusy);
+  cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
+  refreshButton.classList.toggle('hidden', state.codexSignInBusy);
+  statusEl.textContent = state.codexLoginStatus;
+  statusEl.classList.toggle('hidden', !state.codexLoginStatus);
+  urlActions.classList.toggle('hidden', !state.codexSignInBusy);
+  openButton.classList.toggle('hidden', !state.codexLoginUrl);
+  copyButton.classList.toggle('hidden', !state.codexLoginUrl);
+  output.textContent = state.codexLoginOutput;
+  details.classList.toggle('hidden', !state.codexLoginOutput);
 }
 
 function renderCodexAccounts() {
@@ -6408,6 +6425,16 @@ function clearExternalProviderPendingStatus(providerName) {
 
 function nextCopilotSignInFlowId() {
   return `copilot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function nextCodexSignInFlowId() {
+  return `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isCurrentCodexSignInFlow(flowId) {
+  const current = String(state.codexSignInFlowId || '');
+  const incoming = String(flowId || '');
+  return current && incoming === current;
 }
 
 function isCurrentCopilotSignInFlow(flowId) {
@@ -7073,54 +7100,94 @@ function setupCursorAccountUI() {
     setCodexAccountExpanded(false);
     renderCodexAccounts();
 
-    let codexLoginBusy = false;
-    let codexLoginUnsubscribe = null;
-    const codexLoginOutput = document.getElementById('codexLoginOutput');
     const codexAddButton = document.getElementById('codexAddAccountButton');
-    const showLoginStatus = (statusKey, streamed = '') => {
-      if (!codexLoginOutput) return;
-      codexLoginOutput.textContent = streamed ? `${t(statusKey)}\n\n${streamed}` : t(statusKey);
-      codexLoginOutput.classList.remove('hidden');
-      codexLoginOutput.scrollTop = codexLoginOutput.scrollHeight;
-    };
+    const codexCancelButton = document.getElementById('codexCancelLoginButton');
+    const codexOpenUrlButton = document.getElementById('codexOpenLoginUrlButton');
+    const codexCopyUrlButton = document.getElementById('codexCopyLoginUrlButton');
+    const codexLoginDetails = document.getElementById('codexLoginDetails');
+    window.tokenMonitor.codex.onLoginStatus((status) => {
+      if (!status || !isCurrentCodexSignInFlow(status.flowId) || status.phase !== 'output') return;
+      state.codexLoginOutput = (state.codexLoginOutput + String(status.text || '')).slice(-3000);
+      if (status.loginUrl) state.codexLoginUrl = status.loginUrl;
+      state.codexLoginStatus = t(state.codexLoginUrl ? 'settings.codex.loginWaiting' : 'settings.codex.loginStarting');
+      renderCodexLoginStatus();
+    });
     codexAddButton.addEventListener('click', async () => {
-      if (codexLoginBusy) return;
-      codexLoginBusy = true;
+      if (state.codexSignInBusy) return;
+      const flowId = nextCodexSignInFlowId();
+      state.codexSignInFlowId = flowId;
+      state.codexSignInBusy = true;
+      state.codexLoginUrl = '';
+      state.codexLoginOutput = '';
+      state.codexLoginStatus = t('settings.codex.loginStarting');
       state.codexAccountError = '';
-      let streamed = '';
-      showLoginStatus('settings.codex.loginStarting');
-      setCodexAccountButtonsDisabled(true);
-      codexAddButton.textContent = t('settings.codex.signingIn');
+      if (codexLoginDetails) codexLoginDetails.open = false;
+      renderCodexLoginStatus();
       renderCodexAccounts();
-      codexLoginUnsubscribe?.();
-      codexLoginUnsubscribe = window.tokenMonitor.codex.onLoginOutput((text) => {
-        streamed = (streamed + text).slice(-3000);
-        showLoginStatus('settings.codex.loginStarting', streamed);
-      });
       try {
-        const result = await window.tokenMonitor.codex.addAccount();
+        const result = await window.tokenMonitor.codex.addAccount({ flowId });
+        if (!isCurrentCodexSignInFlow(result?.flowId || flowId)) return;
         if (!result?.ok) {
+          if (result?.outcome === 'cancelled') return;
           state.codexAccountError = result?.error || t('settings.codex.loginFailed');
-          showLoginStatus('settings.codex.loginFailed', streamed);
+          state.codexLoginStatus = t('settings.codex.loginFailed');
+          if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
           setCodexAccountExpanded(true);
         } else {
           state.codexAccountError = '';
-          showLoginStatus('settings.codex.loginSuccess');
+          state.codexLoginStatus = t('settings.codex.loginSuccess');
+          renderCodexLoginStatus();
           state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
-          if (codexLoginOutput) codexLoginOutput.classList.add('hidden');
           await refreshStats({ force: true });
+          state.codexLoginStatus = '';
+          state.codexLoginOutput = '';
         }
       } catch (err) {
+        if (!isCurrentCodexSignInFlow(flowId)) return;
         state.codexAccountError = err.message;
+        state.codexLoginStatus = t('settings.codex.loginFailed');
+        if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
       } finally {
-        codexLoginUnsubscribe?.();
-        codexLoginUnsubscribe = null;
-        codexLoginBusy = false;
-        setCodexAccountButtonsDisabled(false);
-        codexAddButton.textContent = t('settings.codex.addAccount');
+        if (isCurrentCodexSignInFlow(flowId)) {
+          state.codexSignInBusy = false;
+          state.codexSignInFlowId = '';
+          state.codexLoginUrl = '';
+          renderCodexLoginStatus();
+          renderCodexAccounts();
+        }
+      }
+    });
+
+    codexCancelButton.addEventListener('click', async () => {
+      const flowId = state.codexSignInFlowId;
+      if (!isCurrentCodexSignInFlow(flowId)) return;
+      const cancelRequest = window.tokenMonitor.codex.cancelLogin({ flowId });
+      state.codexSignInBusy = false;
+      state.codexSignInFlowId = '';
+      state.codexLoginUrl = '';
+      state.codexLoginStatus = '';
+      state.codexLoginOutput = '';
+      state.codexAccountError = '';
+      if (codexLoginDetails) codexLoginDetails.open = false;
+      renderCodexLoginStatus();
+      renderCodexAccounts();
+      await cancelRequest;
+    });
+
+    codexOpenUrlButton.addEventListener('click', async () => {
+      if (!state.codexLoginUrl) return;
+      const result = await window.tokenMonitor.openExternal(state.codexLoginUrl);
+      if (!result?.ok) {
+        state.codexAccountError = result?.error || t('settings.codex.openLoginUrlFailed');
         renderCodexAccounts();
       }
     });
+
+    codexCopyUrlButton.addEventListener('click', () => {
+      if (state.codexLoginUrl) copyToClipboard(state.codexLoginUrl, codexCopyUrlButton);
+    });
+
+    renderCodexLoginStatus();
 
     document.getElementById('codexRefreshAccountsButton').addEventListener('click', () => {
       refreshCodexAccounts();

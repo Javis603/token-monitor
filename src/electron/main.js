@@ -23,6 +23,7 @@ const { createHub } = require('../hub/server');
 const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie } = require('../shared/limitCollector');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
+const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
 const {
   codexAccountMatchesIdentity,
   liveCodexAuthPath,
@@ -367,7 +368,8 @@ function normalizeCopilotEnterpriseHost(value) {
   return String(value || '').trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase();
 }
 
-let codexLoginInFlight = false;
+let codexLoginController = null;
+let codexLoginFlowId = '';
 let copilotLoginController = null;
 let copilotLoginFlowId = '';
 
@@ -502,6 +504,8 @@ function codexLoginErrorMessage(result) {
       return `Could not start codex login.${detail}`;
     case 'timedOut':
       return `Sign-in timed out. Finish the browser login, then try again.${detail}`;
+    case 'cancelled':
+      return 'Sign-in cancelled.';
     default:
       return `codex login failed.${detail}`;
   }
@@ -510,12 +514,12 @@ function codexLoginErrorMessage(result) {
 // Best practice: each account gets its own OAuth grant via an isolated
 // `codex login` (CodexBar/tokscale model), so it never shares a refresh-token
 // lineage with the user's live Codex CLI login.
-async function addCodexManagedAccount(onOutput) {
+async function addCodexManagedAccount(onOutput, options = {}) {
   await fs.promises.mkdir(codexManagedRoot(), { recursive: true });
   const tempHome = path.join(codexManagedRoot(), `pending-${crypto.randomUUID()}`);
   await fs.promises.mkdir(tempHome, { recursive: true });
   try {
-    const result = await runCodexLogin({ homePath: tempHome, onOutput }, { env: process.env });
+    const result = await runCodexLogin({ homePath: tempHome, onOutput, signal: options.signal }, { env: process.env });
     if (result.outcome !== 'success') {
       return { ok: false, error: codexLoginErrorMessage(result), outcome: result.outcome };
     }
@@ -2532,6 +2536,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.protocol !== 'https:') return false;
   const enterpriseHost = settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
   if (isAllowedVerificationUrl(value, enterpriseHost)) return true;
+  if (isAllowedCodexLoginUrl(value)) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
   if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/token-monitor')) return true;
@@ -3438,16 +3443,52 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('codex:accounts', () => codexAccountsForRenderer());
   ipcMain.handle('codex:setAccountEnabled', (_event, id, enabled) => setCodexManagedAccountEnabled(id, enabled));
-  ipcMain.handle('codex:addAccount', async (event) => {
-    if (codexLoginInFlight) return { ok: false, error: 'A Codex sign-in is already in progress.' };
-    codexLoginInFlight = true;
+  ipcMain.handle('codex:addAccount', async (event, request = {}) => {
+    if (codexLoginController) return { ok: false, error: 'A Codex sign-in is already in progress.', flowId: codexLoginFlowId };
+    const controller = new AbortController();
+    const flowId = String(request?.flowId || '').trim();
+    codexLoginController = controller;
+    codexLoginFlowId = flowId;
+    let streamed = '';
+    const sendStatus = (payload) => {
+      if (codexLoginController !== controller) return;
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('codex:loginStatus', {
+          ...payload,
+          flowId
+        });
+      }
+    };
     try {
-      return await addCodexManagedAccount((text) => {
-        if (!event.sender.isDestroyed()) event.sender.send('codex:loginOutput', text);
-      });
+      const result = await addCodexManagedAccount((text) => {
+        streamed = (streamed + String(text || '')).slice(-8000);
+        sendStatus({
+          phase: 'output',
+          text: String(text || ''),
+          loginUrl: codexLoginUrlFromOutput(streamed)
+        });
+      }, { signal: controller.signal });
+      if (codexLoginController !== controller) {
+        return { ok: false, error: codexLoginErrorMessage({ outcome: 'cancelled' }), outcome: 'cancelled', flowId };
+      }
+      return { ...result, flowId };
     } finally {
-      codexLoginInFlight = false;
+      if (codexLoginController === controller) {
+        codexLoginController = null;
+        codexLoginFlowId = '';
+      }
     }
+  });
+  ipcMain.handle('codex:cancelLogin', (_event, request = {}) => {
+    const flowId = String(request?.flowId || '').trim();
+    if (flowId && codexLoginFlowId && flowId !== codexLoginFlowId) return { ok: true };
+    const controller = codexLoginController;
+    controller?.abort();
+    if (codexLoginController === controller) {
+      codexLoginController = null;
+      codexLoginFlowId = '';
+    }
+    return { ok: true };
   });
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
   ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));

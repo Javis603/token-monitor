@@ -88,15 +88,16 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   codex: {
     accounts: () => ipcRenderer.invoke('codex:accounts'),
-    addAccount: () => ipcRenderer.invoke('codex:addAccount'),
+    addAccount: (options = {}) => ipcRenderer.invoke('codex:addAccount', options),
+    cancelLogin: (options = {}) => ipcRenderer.invoke('codex:cancelLogin', options),
     removeAccount: (id) => ipcRenderer.invoke('codex:removeAccount', id),
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('codex:setAccountEnabled', id, enabled),
     switchSystemAccount: (id) => ipcRenderer.invoke('codex:switchSystemAccount', id),
     refreshAccountLimits: (id) => ipcRenderer.invoke('codex:refreshAccountLimits', id),
-    onLoginOutput: (callback) => {
-      const handler = (_event, text) => callback(text);
-      ipcRenderer.on('codex:loginOutput', handler);
-      return () => ipcRenderer.removeListener('codex:loginOutput', handler);
+    onLoginStatus: (callback) => {
+      const handler = (_event, status) => callback(status);
+      ipcRenderer.on('codex:loginStatus', handler);
+      return () => ipcRenderer.removeListener('codex:loginStatus', handler);
     }
   },
   copilot: {

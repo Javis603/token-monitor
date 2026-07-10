@@ -247,3 +247,51 @@ test('runCodexLogin does not retry a normal login failure', async () => {
   assert.equal(result.outcome, 'failed');
   assert.match(result.output, /account not found/);
 });
+
+test('runCodexLogin aborts the active process without trying another candidate', async () => {
+  const legacyCodex = '/Applications/Codex.app/Contents/Resources/codex';
+  const chatgptCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  const controller = new AbortController();
+  const child = fakeChild();
+  const spawnCalls = [];
+  const promise = runCodexLogin(
+    { homePath: '/tmp/managed/cancel-home', signal: controller.signal },
+    {
+      ...noopTimers,
+      platform: 'darwin',
+      env: {},
+      existsSync: (candidate) => candidate === legacyCodex || candidate === chatgptCodex,
+      spawn: (command) => {
+        spawnCalls.push(command);
+        return child;
+      }
+    }
+  );
+
+  controller.abort();
+  const result = await promise;
+
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(child.killed, true);
+  assert.deepEqual(spawnCalls, [legacyCodex]);
+});
+
+test('runCodexLogin does not spawn when already cancelled', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let spawned = false;
+
+  const result = await runCodexLogin(
+    { homePath: '/tmp/managed/cancelled-home', signal: controller.signal },
+    {
+      ...noopTimers,
+      platform: 'darwin',
+      codexCommand: 'codex',
+      env: {},
+      spawn: () => { spawned = true; return fakeChild(); }
+    }
+  );
+
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(spawned, false);
+});

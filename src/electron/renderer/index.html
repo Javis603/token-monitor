@@ -409,7 +409,16 @@
                   <button id="codexAddAccountButton" data-i18n="settings.codex.addAccount">Add account</button>
                   <button id="codexRefreshAccountsButton" data-i18n="settings.codex.refresh">Refresh</button>
                 </div>
-                <pre id="codexLoginOutput" class="codex-login-output hidden"></pre>
+                <div id="codexLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
+                <div id="codexLoginUrlActions" class="settings-actions hidden">
+                  <button id="codexOpenLoginUrlButton" type="button" data-i18n="settings.codex.openLoginUrl">Open browser</button>
+                  <button id="codexCopyLoginUrlButton" type="button" data-i18n="settings.codex.copyLoginUrl">Copy link</button>
+                  <button id="codexCancelLoginButton" type="button" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                </div>
+                <details id="codexLoginDetails" class="codex-login-details hidden">
+                  <summary data-i18n="settings.codex.loginDetails">Details</summary>
+                  <pre id="codexLoginOutput" class="codex-login-output"></pre>
+                </details>
                 <div id="codexAccountErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
