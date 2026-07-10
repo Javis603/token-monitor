@@ -56,6 +56,7 @@
   }
 
   function formatPercent(value) {
+    if (value === null || value === undefined || value === '') return '';
     const number = Number(value);
     return Number.isFinite(number) ? `${Math.round(Math.max(0, Math.min(100, number)))}%` : '';
   }

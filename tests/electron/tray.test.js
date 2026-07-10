@@ -128,6 +128,25 @@ test('tray session quota text falls back to one provider session and weekly wind
   );
 });
 
+test('tray session quota text omits an unavailable weekly window', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 6 }] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex',
+      limitProviders: 'codex',
+      showLimitUsed: false
+    }),
+    '6%'
+  );
+});
+
 test('tray session quota text keeps lowest-remaining account selection when showing used percent', () => {
   const limitStats = {
     limits: {

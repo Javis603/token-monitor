@@ -5944,11 +5944,12 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
   const visiblePicks = picks.length === 1
     ? (() => {
         const weekly = (picks[0].provider.windows || []).find((w) => w.kind === 'weekly');
+        const weeklyPercent = limitFillPercent(weekly?.remainingPercent, weekly?.usedPercent, showUsed);
         return [{
           ...picks[0],
           text: [
             formatPercent(limitFillPercent(picks[0].session.remainingPercent, picks[0].session.usedPercent, showUsed)),
-            formatPercent(limitFillPercent(weekly?.remainingPercent, weekly?.usedPercent, showUsed))
+            weeklyPercent === null ? '' : formatPercent(weeklyPercent)
           ].filter(Boolean).join(separator)
         }];
       })()
