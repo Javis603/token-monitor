@@ -1577,7 +1577,15 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   backdrop-filter: none;
 }
 .label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.total-number-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
 .total-number {
+  flex: 0 1 auto;
+  min-width: 0;
   margin-top: 8px;
   color: var(--number);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
@@ -1588,6 +1596,14 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.total-compact {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.total-compact.hidden { display: none; }
 .cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
 .breakdown {
   position: relative;
@@ -3103,6 +3119,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   .total-panel { padding: 2px 2px; }
   .label-row { font-size: clamp(11px, 2.6vw, 16px); }
   .total-number { margin-top: clamp(2px, 1.2vh, 8px); font-size: clamp(22px, 13vw, 60px); }
+  .total-compact { font-size: clamp(11px, 3vw, 16px); }
   .cost { margin-top: clamp(2px, 1vh, 6px); font-size: clamp(12px, 2.8vw, 18px); }
   .breakdown,
   .home-panel,
