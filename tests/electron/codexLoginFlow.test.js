@@ -38,6 +38,12 @@ test('Codex login IPC owns cancellation per flow and sends an allowlisted URL', 
 
   assert.match(main, /let codexLoginController = null;/);
   assert.match(main, /let codexLoginFlowId = '';/);
+  assert.ok(
+    addHandler.indexOf("const flowId = String(request?.flowId || '').trim();")
+      < addHandler.indexOf('if (codexLoginController)'),
+    'the request flow id should be captured before rejecting a duplicate request'
+  );
+  assert.match(addHandler, /if \(codexLoginController\) return \{ ok: false, error: '[^']+', flowId \};/);
   assert.match(addHandler, /const controller = new AbortController\(\);/);
   assert.match(addHandler, /codexLoginController = controller;/);
   assert.match(addHandler, /codexLoginFlowId = flowId;/);
@@ -48,6 +54,24 @@ test('Codex login IPC owns cancellation per flow and sends an allowlisted URL', 
   assert.match(preload, /addAccount: \(options = \{\}\) => ipcRenderer\.invoke\('codex:addAccount', options\)/);
   assert.match(preload, /cancelLogin: \(options = \{\}\) => ipcRenderer\.invoke\('codex:cancelLogin', options\)/);
   assert.match(preload, /ipcRenderer\.on\('codex:loginStatus', handler\)/);
+});
+
+test('Codex account persistence remains cancellable until settings commit', () => {
+  const main = read(path.join(electronDir, 'main.js'));
+  const addAccount = main.slice(
+    main.indexOf('async function addCodexManagedAccount'),
+    main.indexOf('async function removeCodexManagedAccount')
+  );
+  const abortChecks = addAccount.match(/options\.signal\?\.aborted/g) || [];
+
+  assert.ok(abortChecks.length >= 3, 'expected cancellation checks across post-login persistence');
+  assert.match(addAccount, /backupHomePath/);
+  assert.match(addAccount, /rollbackCodexManagedHome/);
+  assert.match(addAccount, /accountCommitted = true;[\s\S]*if \(!accountCommitted\) await removeManagedHomeIfSafe\(tempHome\)/);
+  assert.ok(
+    addAccount.lastIndexOf('options.signal?.aborted') < addAccount.indexOf('commitCodexManagedAccount'),
+    'the final cancellation check should happen before committing settings'
+  );
 });
 
 test('Codex login renderer ignores stale flows and exposes explicit URL actions', () => {

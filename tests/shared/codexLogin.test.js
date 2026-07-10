@@ -10,9 +10,12 @@ const {
 
 test('isAllowedCodexLoginUrl accepts only OpenAI OAuth login URLs', () => {
   assert.equal(isAllowedCodexLoginUrl('https://auth.openai.com/oauth/authorize?client_id=app'), true);
+  assert.equal(isAllowedCodexLoginUrl('https://auth.openai.com/oauth/authorize/callback?client_id=app'), true);
   assert.equal(isAllowedCodexLoginUrl('https://auth.openai.com/device'), true);
+  assert.equal(isAllowedCodexLoginUrl('https://auth.openai.com/device/session'), true);
   assert.equal(isAllowedCodexLoginUrl('http://auth.openai.com/oauth/authorize'), false);
   assert.equal(isAllowedCodexLoginUrl('https://auth.openai.com.evil.example/oauth/authorize'), false);
+  assert.equal(isAllowedCodexLoginUrl('https://auth.openai.com/device-claim'), false);
   assert.equal(isAllowedCodexLoginUrl('https://auth.openai.com/account'), false);
 });
 
@@ -35,4 +38,11 @@ test('codexLoginUrlFromOutput rejects unrelated URLs and trailing prose', () => 
     codexLoginUrlFromOutput('Open https://auth.openai.com/device.'),
     'https://auth.openai.com/device'
   );
+});
+
+test('codexLoginUrlFromOutput stops before terminal control sequences', () => {
+  const url = 'https://auth.openai.com/oauth/authorize?response_type=code&client_id=app';
+
+  assert.equal(codexLoginUrlFromOutput(`Open ${url}\x1b[0m`), url);
+  assert.equal(codexLoginUrlFromOutput(`\x1b]8;;${url}\x07Open sign-in\x1b]8;;\x07`), url);
 });

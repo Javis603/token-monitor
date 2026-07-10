@@ -511,6 +511,19 @@ function codexLoginErrorMessage(result) {
   }
 }
 
+function cancelledCodexLoginResult() {
+  return {
+    ok: false,
+    error: codexLoginErrorMessage({ outcome: 'cancelled' }),
+    outcome: 'cancelled'
+  };
+}
+
+async function rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal) {
+  if (movedToFinal) await removeManagedHomeIfSafe(homePath);
+  if (backupHomePath) await fs.promises.rename(backupHomePath, homePath);
+}
+
 // Best practice: each account gets its own OAuth grant via an isolated
 // `codex login` (CodexBar/tokscale model), so it never shares a refresh-token
 // lineage with the user's live Codex CLI login.
@@ -518,11 +531,15 @@ async function addCodexManagedAccount(onOutput, options = {}) {
   await fs.promises.mkdir(codexManagedRoot(), { recursive: true });
   const tempHome = path.join(codexManagedRoot(), `pending-${crypto.randomUUID()}`);
   await fs.promises.mkdir(tempHome, { recursive: true });
+  let backupHomePath = '';
+  let movedToFinal = false;
+  let accountCommitted = false;
   try {
     const result = await runCodexLogin({ homePath: tempHome, onOutput, signal: options.signal }, { env: process.env });
     if (result.outcome !== 'success') {
       return { ok: false, error: codexLoginErrorMessage(result), outcome: result.outcome };
     }
+    if (options.signal?.aborted) return cancelledCodexLoginResult();
     let auth;
     try {
       auth = JSON.parse(await fs.promises.readFile(path.join(tempHome, 'auth.json'), 'utf8'));
@@ -533,15 +550,54 @@ async function addCodexManagedAccount(onOutput, options = {}) {
     if (!identity.accountKey && !identity.email) {
       return { ok: false, error: 'Could not identify the Codex account after sign-in.' };
     }
+    if (options.signal?.aborted) return cancelledCodexLoginResult();
     const existing = findExistingCodexAccount(normalizeCodexManagedAccounts(settings.codexManagedAccounts), identity);
     const homePath = path.join(codexManagedRoot(), codexAccountId(identity, existing));
     if (path.resolve(homePath) !== path.resolve(tempHome)) {
-      await removeManagedHomeIfSafe(homePath);
-      await fs.promises.rename(tempHome, homePath);
+      if (options.signal?.aborted) return cancelledCodexLoginResult();
+      const candidateBackupPath = `${homePath}.backup-${crypto.randomUUID()}`;
+      try {
+        await fs.promises.rename(homePath, candidateBackupPath);
+        backupHomePath = candidateBackupPath;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+      if (options.signal?.aborted) {
+        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+        backupHomePath = '';
+        return cancelledCodexLoginResult();
+      }
+      try {
+        await fs.promises.rename(tempHome, homePath);
+        movedToFinal = true;
+      } catch (error) {
+        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+        backupHomePath = '';
+        throw error;
+      }
+      if (options.signal?.aborted) {
+        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+        backupHomePath = '';
+        movedToFinal = false;
+        return cancelledCodexLoginResult();
+      }
     }
-    return { ok: true, account: commitCodexManagedAccount(identity, homePath, existing) };
+    if (options.signal?.aborted) {
+      await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+      backupHomePath = '';
+      movedToFinal = false;
+      return cancelledCodexLoginResult();
+    }
+    const account = commitCodexManagedAccount(identity, homePath, existing);
+    accountCommitted = true;
+    if (backupHomePath) {
+      void removeManagedHomeIfSafe(backupHomePath).catch((error) => {
+        console.warn('Could not remove replaced Codex account credentials:', error?.message || error);
+      });
+    }
+    return { ok: true, account };
   } finally {
-    await removeManagedHomeIfSafe(tempHome).catch(() => {});
+    if (!accountCommitted) await removeManagedHomeIfSafe(tempHome).catch(() => {});
   }
 }
 
@@ -3444,9 +3500,9 @@ app.whenReady().then(() => {
   ipcMain.handle('codex:accounts', () => codexAccountsForRenderer());
   ipcMain.handle('codex:setAccountEnabled', (_event, id, enabled) => setCodexManagedAccountEnabled(id, enabled));
   ipcMain.handle('codex:addAccount', async (event, request = {}) => {
-    if (codexLoginController) return { ok: false, error: 'A Codex sign-in is already in progress.', flowId: codexLoginFlowId };
-    const controller = new AbortController();
     const flowId = String(request?.flowId || '').trim();
+    if (codexLoginController) return { ok: false, error: 'A Codex sign-in is already in progress.', flowId };
+    const controller = new AbortController();
     codexLoginController = controller;
     codexLoginFlowId = flowId;
     let streamed = '';
