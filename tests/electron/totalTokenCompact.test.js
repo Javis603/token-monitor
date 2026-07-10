@@ -9,6 +9,7 @@ const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'rendere
 const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
+const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
 function rendererFunction(name, nextName) {
   const start = app.indexOf(`function ${name}(`);
@@ -33,10 +34,21 @@ test('compact token formatter promotes values that round across unit boundaries'
   assert.equal(formatCompact(999_950_000), '1B');
 });
 
-test('total token panel includes and styles the compact value', () => {
+test('compact total is an opt-in appearance preference', () => {
   assert.match(html, /id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"/);
+  assert.match(html, /id="showCompactTotalTokensInput" type="checkbox"/);
+  assert.match(html, /data-i18n="settings\.appearance\.compactTotalTokens"/);
   assert.match(css, /\.total-number-row\s*\{[^}]*display:\s*flex/s);
   assert.match(css, /\.total-compact\s*\{[^}]*white-space:\s*nowrap/s);
+  assert.match(css, /\.total-compact\s*\{[^}]*font-weight:\s*500/s);
+  assert.match(main, /showCompactTotalTokens:\s*false/);
+  assert.match(main, /showCompactTotalTokens:\s*parseBoolean\(patch\.showCompactTotalTokens \?\? settings\.showCompactTotalTokens, false\)/);
+  assert.match(app, /showCompactTotalTokensInput: document\.getElementById\('showCompactTotalTokensInput'\)/);
+  assert.match(app, /showCompactTotalTokens: false/);
+  assert.match(app, /showCompactTotalTokens: Boolean\(els\.showCompactTotalTokensInput\.checked\)/);
+  assert.match(app, /els\.showCompactTotalTokensInput\.checked = state\.settings\.showCompactTotalTokens === true/);
+  assert.match(app, /els\.showCompactTotalTokensInput\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
+  assert.match(app, /state\.settings\?\.showCompactTotalTokens !== true[\s\S]*?hideTotalCompact\(\)/);
 });
 
 test('compact total appears after the exact total finishes animating', () => {

@@ -1600,7 +1600,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 .total-compact.hidden { display: none; }
