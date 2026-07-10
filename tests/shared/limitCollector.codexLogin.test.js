@@ -156,3 +156,94 @@ test('runCodexLogin reports launchFailed when spawning throws', async () => {
   assert.equal(result.outcome, 'launchFailed');
   assert.match(result.output, /ENOENT/);
 });
+
+test('runCodexLogin tries the next discovered command after spawn ENOENT', async () => {
+  const legacyCodex = '/Applications/Codex.app/Contents/Resources/codex';
+  const chatgptCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  const child = fakeChild();
+  const spawnCalls = [];
+  const promise = runCodexLogin(
+    { homePath: '/tmp/managed/fallback-home' },
+    {
+      ...noopTimers,
+      platform: 'darwin',
+      env: {},
+      existsSync: (candidate) => candidate === legacyCodex || candidate === chatgptCodex,
+      spawn: (command, args) => {
+        spawnCalls.push({ command, args });
+        if (command === legacyCodex) throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
+        return child;
+      }
+    }
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(spawnCalls.map((call) => call.command), [legacyCodex, chatgptCodex]);
+  child.emit('close', 0);
+
+  const result = await promise;
+  assert.equal(result.outcome, 'success');
+});
+
+test('runCodexLogin tries the next Windows command after cmd reports it missing', async () => {
+  const firstChild = fakeChild();
+  const secondChild = fakeChild();
+  const spawnCalls = [];
+  const promise = runCodexLogin(
+    { homePath: 'C:/managed/fallback-home' },
+    {
+      ...noopTimers,
+      platform: 'win32',
+      env: {},
+      existsSync: () => false,
+      spawn: (command, args) => {
+        spawnCalls.push({ command, args });
+        return spawnCalls.length === 1 ? firstChild : secondChild;
+      }
+    }
+  );
+
+  firstChild.stderr.emit('data', "'codex.cmd' is not recognized as an internal or external command.\n");
+  firstChild.emit('close', 1);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(spawnCalls.length, 2);
+  assert.equal(spawnCalls[0].command, 'cmd.exe');
+  assert.match(spawnCalls[0].args.at(-1), /codex\.cmd login/);
+  assert.equal(spawnCalls[1].command, 'codex.exe');
+  secondChild.emit('close', 0);
+
+  const result = await promise;
+  assert.equal(result.outcome, 'success');
+});
+
+test('runCodexLogin does not retry a normal login failure', async () => {
+  const legacyCodex = '/Applications/Codex.app/Contents/Resources/codex';
+  const chatgptCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  const firstChild = fakeChild();
+  const secondChild = fakeChild();
+  const spawnCalls = [];
+  const promise = runCodexLogin(
+    { homePath: '/tmp/managed/login-failure-home' },
+    {
+      ...noopTimers,
+      platform: 'darwin',
+      env: {},
+      existsSync: (candidate) => candidate === legacyCodex || candidate === chatgptCodex,
+      spawn: (command) => {
+        spawnCalls.push(command);
+        return spawnCalls.length === 1 ? firstChild : secondChild;
+      }
+    }
+  );
+
+  firstChild.stderr.emit('data', 'Codex account not found.');
+  firstChild.emit('close', 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  if (spawnCalls.length > 1) secondChild.emit('close', 0);
+
+  const result = await promise;
+  assert.deepEqual(spawnCalls, [legacyCodex]);
+  assert.equal(result.outcome, 'failed');
+  assert.match(result.output, /account not found/);
+});

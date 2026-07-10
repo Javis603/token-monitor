@@ -1513,7 +1513,7 @@ function killCodexLoginProcess(child, platform = process.platform, deps = {}) {
 // account gets its own OAuth grant, fully decoupled from the user's live Codex
 // CLI login. Returns { outcome, exitCode, output }; output is streamed to
 // options.onOutput as it arrives (so the renderer can surface the login URL).
-function runCodexLogin(options = {}, deps = {}) {
+function runCodexLoginWithCommand(command, options = {}, deps = {}) {
   const spawnFn = deps.spawn || spawn;
   const env = deps.env || process.env;
   const platform = deps.platform || process.platform;
@@ -1521,9 +1521,6 @@ function runCodexLogin(options = {}, deps = {}) {
   const clearTimer = deps.clearTimeout || clearTimeout;
   const onOutput = typeof options.onOutput === 'function' ? options.onOutput : () => {};
   const timeoutMs = Number(options.timeoutMs || deps.codexLoginTimeoutMs || 180000);
-  const command = codexRpcCommandCandidates({ ...deps, env, platform })[0];
-  if (!command) return Promise.resolve({ outcome: 'missingBinary', exitCode: null, output: '' });
-
   const spec = codexLoginSpawnSpec(command, platform);
   let child;
   try {
@@ -1562,6 +1559,45 @@ function runCodexLogin(options = {}, deps = {}) {
       finish('timedOut', null);
     }, timeoutMs);
   });
+}
+
+function shouldTryNextCodexLoginCommand(result) {
+  if (result?.outcome === 'launchFailed') return true;
+  if (result?.outcome !== 'failed') return false;
+  const output = String(result.output || '').toLowerCase();
+  return (
+    output.includes('enoent') ||
+    output.includes('not recognized as an internal or external command') ||
+    output.includes('command not found') ||
+    output.includes('no such file or directory') ||
+    output.includes('the system cannot find the file specified') ||
+    output.includes('the system cannot find the path specified')
+  );
+}
+
+function codexLoginAttemptsOutput(attempts) {
+  if (attempts.length <= 1) return attempts[0]?.result.output || '';
+  return attempts.map(({ command, result }) => {
+    const detail = String(result.output || '').trim();
+    return detail ? `${command}: ${detail}` : `${command}: ${result.outcome}`;
+  }).join('\n\n');
+}
+
+async function runCodexLogin(options = {}, deps = {}) {
+  const env = deps.env || process.env;
+  const platform = deps.platform || process.platform;
+  const commands = codexRpcCommandCandidates({ ...deps, env, platform });
+  if (commands.length === 0) return { outcome: 'missingBinary', exitCode: null, output: '' };
+
+  const attempts = [];
+  for (const command of commands) {
+    const result = await runCodexLoginWithCommand(command, options, { ...deps, env, platform });
+    attempts.push({ command, result });
+    if (!shouldTryNextCodexLoginCommand(result)) return result;
+  }
+
+  const result = attempts.at(-1).result;
+  return { ...result, output: codexLoginAttemptsOutput(attempts) };
 }
 
 function spawnCodexAppServer(deps = {}) {
