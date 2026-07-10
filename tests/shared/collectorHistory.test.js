@@ -46,6 +46,35 @@ test('collectHistoryOnce returns null when there are no clients', async () => {
   assert.equal(called, false);
 });
 
+test('collectHistoryOnce merges Proma history with tokscale graph history', async () => {
+  const promaGraph = {
+    contributions: [{ date: '2026-06-07', clients: [
+      { client: 'proma', modelId: 'gpt-5', tokens: { input: 5, output: 5 }, cost: 0, messages: 1 }
+    ] }]
+  };
+  const history = await collectHistoryOnce({
+    clients: 'claude', promaGraph, todayKey: '2026-06-07', runGraph: async () => SAMPLE_GRAPH
+  });
+  assert.equal(history.daily[0].tokens, 40);
+  assert.equal(history.daily[0].perClient.proma.tokens, 10);
+  assert.equal(history.daily[0].perModel['gpt-5'].tokens, 10);
+});
+
+test('collectHistoryOnce builds Proma-only history without starting tokscale graph', async () => {
+  let graphCalled = false;
+  const history = await collectHistoryOnce({
+    clients: '',
+    promaGraph: { contributions: [{ date: '2026-06-07', clients: [
+      { client: 'proma', modelId: 'gpt-5', tokens: { input: 8 }, cost: 0, messages: 1 }
+    ] }] },
+    todayKey: '2026-06-07',
+    runGraph: async () => { graphCalled = true; return SAMPLE_GRAPH; }
+  });
+  assert.equal(graphCalled, false);
+  assert.equal(history.summary.totalTokens, 8);
+  assert.equal(history.daily[0].perClient.proma.messages, 1);
+});
+
 test('collectHistoryOnce skips graph collection when history is disabled', async () => {
   let graphCalled = false;
   const history = await collectHistoryOnce({
@@ -65,6 +94,37 @@ test('collectUsageOnce sends explicit null history when history collection is di
     limitsEnabled: false
   });
   assert.equal(summary.history, null);
+});
+
+test('collectUsageOnce includes Proma history without starting tokscale graph', async () => {
+  const promaPath = require.resolve('../../src/shared/promaUsage');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const promaUsage = require(promaPath);
+  const originalRows = promaUsage.collectPromaRows;
+  const originalPeriods = promaUsage.buildPromaPeriods;
+  const originalHistory = promaUsage.buildPromaHistoryGraph;
+  promaUsage.collectPromaRows = () => [{ model: 'gpt-5', input: 8, output: 0, cacheRead: 0, cacheWrite: 0, createdAt: Date.parse('2026-06-07T12:00:00.000Z') }];
+  promaUsage.buildPromaPeriods = () => ({ today: { entries: [] }, month: { entries: [] }, allTime: { entries: [] } });
+  promaUsage.buildPromaHistoryGraph = () => ({ contributions: [{ date: '2026-06-07', clients: [
+    { client: 'proma', modelId: 'gpt-5', tokens: { input: 8 }, cost: 0, messages: 1 }
+  ] }] });
+  delete require.cache[collectorPath];
+  try {
+    const { collectUsageOnce: collectPromaUsageOnce } = require(collectorPath);
+    const summary = await collectPromaUsageOnce({
+      clients: 'proma', allTimeSince: '2026-01-01', deviceId: 'proma-only',
+      includeHistory: true, limitsEnabled: false,
+      lookupModelPricing: async () => null,
+      runGraph: async () => { throw new Error('tokscale graph must not run for Proma-only tracking'); }
+    });
+    assert.equal(summary.history.summary.totalTokens, 8);
+    assert.equal(summary.history.daily[0].perClient.proma.messages, 1);
+  } finally {
+    promaUsage.collectPromaRows = originalRows;
+    promaUsage.buildPromaPeriods = originalPeriods;
+    promaUsage.buildPromaHistoryGraph = originalHistory;
+    delete require.cache[collectorPath];
+  }
 });
 
 test('shouldIncludeHistory: first call, throttle window, and force', () => {

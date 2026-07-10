@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { buildTokscaleJson, buildPromaPeriods, PROMA_ROOT } = require('../../src/shared/promaUsage');
+const { buildPromaHistoryGraph, buildTokscaleJson, buildPromaPeriods, PROMA_ROOT } = require('../../src/shared/promaUsage');
 const { extractUsageFromTokscale } = require('../../src/shared/usage');
 
 function writeJsonl(filePath, rows) {
@@ -96,4 +96,67 @@ test('Proma all-time window honors the configured cutoff', () => {
   });
   const allTimeUsage = extractUsageFromTokscale(periods.allTime);
   assert.equal(allTimeUsage.clients.proma, 42);
+});
+
+test('Proma periods read each session file once before deriving all windows', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
+  const filePath = path.join(root, 'session.jsonl');
+  writeJsonl(filePath, [assistantRow({ id: 'message', createdAt: '2026-07-09T12:00:00.000Z', input: 10 })]);
+  const originalReadFileSync = fs.readFileSync;
+  let reads = 0;
+  fs.readFileSync = (...args) => {
+    if (args[0] === filePath) reads += 1;
+    return originalReadFileSync(...args);
+  };
+  try {
+    const periods = buildPromaPeriods({ now: '2026-07-09T13:00:00.000Z', allTimeSince: '2026-01-01', roots: [root] });
+    assert.equal(reads, 1);
+    assert.equal(extractUsageFromTokscale(periods.today).totalTokens, 10);
+    assert.equal(extractUsageFromTokscale(periods.month).totalTokens, 10);
+    assert.equal(extractUsageFromTokscale(periods.allTime).totalTokens, 10);
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+  }
+});
+
+test('Proma history keeps per-day and per-model token attribution', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
+  writeJsonl(path.join(root, 'session.jsonl'), [
+    assistantRow({ id: 'first', model: 'Claude-Sonnet', createdAt: '2026-07-08T12:00:00.000Z', input: 10, output: 2 }),
+    assistantRow({ id: 'second', model: 'gpt-5', createdAt: '2026-07-09T12:00:00.000Z', input: 20 })
+  ]);
+  const graph = buildPromaHistoryGraph({ roots: [root] });
+  assert.deepEqual(graph.contributions, [
+    { date: '2026-07-08', clients: [{ client: 'proma', modelId: 'claude-sonnet', tokens: { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 0, messages: 1 }] },
+    { date: '2026-07-09', clients: [{ client: 'proma', modelId: 'gpt-5', tokens: { input: 20, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 0, messages: 1 }] }
+  ]);
+});
+
+test('Proma cost estimates use every populated token category', () => {
+  const rows = [{
+    model: 'Claude-Sonnet', input: 10, output: 2, cacheRead: 4, cacheWrite: 3,
+    messages: 1, createdAt: Date.parse('2026-07-09T12:00:00.000Z')
+  }];
+  const pricingByModel = {
+    'claude-sonnet': {
+      inputCostPerToken: 0.000003,
+      outputCostPerToken: 0.000015,
+      cacheReadInputTokenCost: 0.0000003,
+      cacheCreationInputTokenCost: 0.00000375
+    }
+  };
+  const json = buildTokscaleJson({}, { rows, pricingByModel });
+  assert.ok(Math.abs(json.entries[0].cost - 0.00007245) < 1e-12);
+  assert.ok(Math.abs(json.totalCost - 0.00007245) < 1e-12);
+  const graph = buildPromaHistoryGraph({ rows, pricingByModel });
+  assert.ok(Math.abs(graph.contributions[0].clients[0].cost - 0.00007245) < 1e-12);
+});
+
+test('Proma leaves an incomplete price out instead of partially estimating it', () => {
+  const rows = [{ model: 'custom-model', input: 10, output: 2, cacheRead: 0, cacheWrite: 1, messages: 1 }];
+  const json = buildTokscaleJson({}, {
+    rows,
+    pricingByModel: { 'custom-model': { inputCostPerToken: 0.000001, outputCostPerToken: 0.000002 } }
+  });
+  assert.equal(json.entries[0].cost, 0);
 });

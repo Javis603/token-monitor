@@ -346,6 +346,33 @@ test('collectWslUsage parses Proma-only WSL homes without calling tokscale', asy
   assert.equal(bundle.allTime.clients.proma, 30);
 });
 
+test('collectWslUsage applies the cached Proma price to WSL rows', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  let pricingRows = null;
+  let buildOptions = null;
+  await collectWslUsage(
+    {
+      clients: '', trackedClients: 'proma', allTimeSince: '2025-01-01', now: new Date('2026-07-10T08:00:00.000Z'),
+      collectPromaRows: () => [{ model: 'gpt-5', input: 10 }],
+      resolvePromaPricing: async (rows) => {
+        pricingRows = rows;
+        return { 'gpt-5': { inputCostPerToken: 0.000001 } };
+      },
+      buildPromaPeriods: (options) => {
+        buildOptions = options;
+        return { today: { entries: [] }, month: { entries: [] }, allTime: { entries: [] } };
+      }
+    },
+    {
+      platform: 'win32', exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'), readdirSync: () => ['u'],
+      existsSync: (p) => p === `${home}\\.proma\\agent-sessions`
+    }
+  );
+  assert.deepEqual(pricingRows, [{ model: 'gpt-5', input: 10 }]);
+  assert.deepEqual(buildOptions.rows, pricingRows);
+  assert.deepEqual(buildOptions.pricingByModel, { 'gpt-5': { inputCostPerToken: 0.000001 } });
+});
+
 test('collectWslUsage returns empty bundle when no homes', async () => {
   const { bundle } = await collectWslUsage(
     { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: async () => ({}) },

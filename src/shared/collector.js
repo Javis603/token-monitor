@@ -10,15 +10,16 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
+const { customPricingPath } = require('./tokscaleConfig');
 const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome, tokscaleEnvFromSpawnArgs } = require('./hermesProfiles');
-const { parseGraphResult, normalizeHistory } = require('./history');
+const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
-const { buildPromaPeriods } = require('./promaUsage');
+const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...
@@ -145,6 +146,63 @@ function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
   const id = String(modelId || '').trim();
   if (!id) return Promise.reject(new Error('lookupModelPricing: modelId is required'));
   return spawnTokscaleJson(['pricing', id, '--json', '--no-spinner'], commandTimeoutMs);
+}
+
+const PROMA_PRICING_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const PROMA_PRICING_LOOKUP_TIMEOUT_MS = 3000;
+const promaPricingCache = new Map();
+
+function promaPricingRevision() {
+  try { return fs.statSync(customPricingPath()).mtimeMs; } catch (_) { return 0; }
+}
+
+function normalizePromaPricing(result) {
+  const source = result?.pricing;
+  if (!source || typeof source !== 'object') return null;
+  const pick = (key) => {
+    const value = Number(source[key]);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  const pricing = {
+    inputCostPerToken: pick('inputCostPerToken'),
+    outputCostPerToken: pick('outputCostPerToken'),
+    cacheReadInputTokenCost: pick('cacheReadInputTokenCost'),
+    cacheCreationInputTokenCost: pick('cacheCreationInputTokenCost')
+  };
+  return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
+}
+
+async function resolvePromaPricing(rows, options = {}) {
+  const lookup = options.lookupModelPricing || lookupModelPricing;
+  const revision = options.pricingRevision ?? promaPricingRevision();
+  const nowMs = options.nowMs ?? Date.now();
+  // Pricing is supplementary: never let a missing catalog entry hold up the
+  // live usage refresh for the normal tokscale command timeout.
+  const commandTimeoutMs = options.commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS;
+  const pricingByModel = {};
+  const modelIds = [...new Set((Array.isArray(rows) ? rows : [])
+    .map((row) => String(row?.model || '').trim().toLowerCase()).filter(Boolean))];
+  for (const modelId of modelIds) {
+    const cached = promaPricingCache.get(modelId);
+    if (cached && cached.revision === revision && nowMs - cached.at < PROMA_PRICING_CACHE_TTL_MS) {
+      if (cached.pricing) pricingByModel[modelId] = cached.pricing;
+      continue;
+    }
+    let pricing = null;
+    try {
+      pricing = normalizePromaPricing(await lookup(modelId, commandTimeoutMs));
+    } catch (_) {
+      // An unknown model, offline lookup, or custom channel must remain
+      // cost-unavailable instead of inheriting an unrelated catalog price.
+    }
+    promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
+    if (pricing) pricingByModel[modelId] = pricing;
+  }
+  return pricingByModel;
+}
+
+function resetPromaPricingCache() {
+  promaPricingCache.clear();
 }
 
 function localTodayKey(date = new Date()) {
@@ -358,18 +416,22 @@ function normalizeHistoryIntervalMs(value) {
 async function collectHistoryOnce(options) {
   const clients = normalizeClientsCsv(options.clients);
   if (options.historyEnabled === false) return null;
-  if (!clients) return null;
+  const histories = [];
   const runGraph = options.runGraph || runTokscaleGraph;
   const capDays = Number.isFinite(options.capDays) ? options.capDays : HISTORY_CAP_DAYS;
   const todayKey = options.todayKey || localTodayKey();
-  try {
-    const graphJson = await runGraph({ clients, commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS });
-    const history = normalizeHistory(parseGraphResult(graphJson), { capDays, todayKey });
-    return history.daily.length || history.monthly.length ? history : null;
-  } catch (error) {
-    if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
-    return null;
+  if (clients) {
+    try {
+      const graphJson = await runGraph({ clients, commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS });
+      histories.push(normalizeHistory(parseGraphResult(graphJson), { capDays, todayKey }));
+    } catch (error) {
+      if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
+    }
   }
+  if (options.promaGraph) histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
+  if (histories.length === 0) return null;
+  const history = histories.length === 1 ? histories[0] : mergeHistories(histories, { todayKey });
+  return history.daily.length || history.monthly.length ? history : null;
 }
 
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
@@ -403,12 +465,20 @@ async function collectUsageOnce(options) {
   const anchor = options.todayOnlyAnchor;
   const anchorUsed = Boolean(anchor && anchor.dateKey === localTodayKey(collectedAt));
   let promaPeriods = null;
+  let promaRows = null;
+  let promaPricing = null;
   if (normalizedClients) {
     await maybeSyncCursor(tokscaleClients, options.logger);
     await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
     if (includesProma) {
       try {
-        const promaJson = buildPromaPeriods({ now: collectedAt, allTimeSince });
+        promaRows = collectPromaRows();
+        promaPricing = await resolvePromaPricing(promaRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const promaJson = buildPromaPeriods({ now: collectedAt, allTimeSince, rows: promaRows, pricingByModel: promaPricing });
         promaPeriods = {
           today: extractUsageFromTokscale(promaJson.today),
           month: extractUsageFromTokscale(promaJson.month),
@@ -475,6 +545,11 @@ async function collectUsageOnce(options) {
         now: collectedAt,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
+        resolvePromaPricing: (rows) => resolvePromaPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        }),
         logger: options.logger
       });
       wslBundle = wslResult.bundle;
@@ -489,6 +564,11 @@ async function collectUsageOnce(options) {
         now: collectedAt,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
+        resolvePromaPricing: (rows) => resolvePromaPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        }),
         logger: options.logger
       });
       wslBundle = wslResult.bundle;
@@ -550,6 +630,7 @@ async function collectUsageOnce(options) {
   } else if (options.includeHistory) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
+      promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1046,8 +1127,11 @@ module.exports = {
   sessionTimestampMap,
   locateBundledBinary,
   lookupModelPricing,
+  normalizePromaPricing,
   readDownloadedPointer,
   resolvePlatformBinary,
+  resolvePromaPricing,
+  resetPromaPricingCache,
   shouldIncludeHistory,
   startCollector,
   tokscaleCommand,

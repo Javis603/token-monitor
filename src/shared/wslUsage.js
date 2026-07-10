@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
-const { buildPromaPeriods } = require('./promaUsage');
+const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -210,6 +210,7 @@ function probeWslState(deps = {}) {
 async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger } = options;
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
+  const collectProma = options.collectPromaRows || collectPromaRows;
   const existsSync = deps.existsSync || fs.existsSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
@@ -231,11 +232,19 @@ async function collectWslUsage(options = {}, deps = {}) {
     // another distro or the host's local Proma sessions.
     if (tracked.has('proma') && homeDataClients.includes('proma')) {
       try {
-        const proma = buildProma({
+        const promaOptions = {
           now,
           allTimeSince,
           roots: [wslHomePath(home, '.proma/agent-sessions')]
-        });
+        };
+        if (typeof options.resolvePromaPricing === 'function') {
+          const rows = collectProma(promaOptions);
+          promaOptions.rows = rows;
+          promaOptions.pricingByModel = await options.resolvePromaPricing(rows);
+        } else if (options.promaPricingByModel) {
+          promaOptions.pricingByModel = options.promaPricingByModel;
+        }
+        const proma = buildProma(promaOptions);
         bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(proma.today));
         bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(proma.month));
         bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
