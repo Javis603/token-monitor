@@ -30,6 +30,13 @@ test('homeHasData maps an alternate-root marker to its client id', () => {
   assert.deepEqual([...ids], ['kimi']);
 });
 
+test('homeHasData maps Proma agent sessions to proma', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.proma\\agent-sessions`]);
+  const ids = homeHasData(home, (p) => present.has(p));
+  assert.deepEqual(ids, ['proma']);
+});
+
 test('homeHasData returns empty array when no markers present', () => {
   const ids = homeHasData('\\\\wsl$\\Ubuntu\\home\\u', () => false);
   assert.deepEqual(ids, []);
@@ -299,6 +306,28 @@ test('collectWslUsage does not report detected clients the user is not tracking'
     deps
   );
   assert.deepEqual(detected, ['codex']); // openclaw marker present but untracked -> excluded
+});
+
+test('collectWslUsage detects Proma without passing it to tokscale', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  let tokscaleCalls = 0;
+  const { detected } = await collectWslUsage(
+    {
+      clients: '',
+      trackedClients: 'proma',
+      allTimeSince: '2025-01-01',
+      commandTimeoutMs: 1000,
+      runTokscale: async () => { tokscaleCalls += 1; return { entries: [] }; }
+    },
+    {
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: () => ['u'],
+      existsSync: (p) => p === `${home}\\.proma\\agent-sessions`
+    }
+  );
+  assert.deepEqual(detected, ['proma']);
+  assert.equal(tokscaleCalls, 0);
 });
 
 test('collectWslUsage returns empty bundle when no homes', async () => {

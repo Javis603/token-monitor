@@ -134,7 +134,10 @@ function windowStartMs(windows) {
  * @returns {{ entries: Array, totalInput: number, totalOutput: number, totalCacheRead: number, totalCacheWrite: number, totalMessages: number, totalCost: number }}
  */
 function buildTokscaleJson(windows = {}, options = {}) {
-  const roots = Array.isArray(options.roots) ? options.roots : [PROMA_ROOT, PROMA_CONVERSATIONS_ROOT];
+  // Conversation transcripts can contain assistant-shaped messages that
+  // overlap agent-session records. Keep parsing limited to the verified
+  // agent-session format until conversation attribution is implemented.
+  const roots = Array.isArray(options.roots) ? options.roots : [PROMA_ROOT];
   const sinceMs = windowStartMs(windows);
   const entries = [];
   let allInput = 0, allOutput = 0, allCacheRead = 0, allCacheWrite = 0, allMessages = 0, allCost = 0;
@@ -206,6 +209,8 @@ function buildTokscaleJson(windows = {}, options = {}) {
 /**
  * Compute local midnight for today and month start, then build
  * tokscale-compatible JSON.
+ *
+ * @param {{ now?: Date | number | string, allTimeSince?: number | string, roots?: string[] }} options
  */
 function buildPromaPeriods(options = {}) {
   const now = options.now ? new Date(options.now) : new Date();
@@ -216,7 +221,7 @@ function buildPromaPeriods(options = {}) {
   return {
     today: buildTokscaleJson({ todayStart }, buildOptions),
     month: buildTokscaleJson({ monthStart }, buildOptions),
-    allTime: buildTokscaleJson({ allTimeSince: 0 }, buildOptions)
+    allTime: buildTokscaleJson({ allTimeSince: options.allTimeSince }, buildOptions)
   };
 }
 

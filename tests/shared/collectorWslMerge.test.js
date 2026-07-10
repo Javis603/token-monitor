@@ -38,6 +38,24 @@ test('full tick merges WSL bundle and marks WSL-only client active', async () =>
   assert.equal(anchorCaptured.wslBundle.today.totalTokens, 9);
 });
 
+test('WSL scans exclude locally parsed Proma while retaining it for marker detection', async () => {
+  let wslOptions = null;
+  await collectUsageOnce({
+    clients: 'claude,proma',
+    allTimeSince: '2025-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    limitsEnabled: false,
+    runTokscale: windowsTokscale,
+    collectWslUsage: async (options) => {
+      wslOptions = options;
+      return { bundle: { today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() }, detected: [] };
+    }
+  });
+  assert.equal(wslOptions.clients, 'claude');
+  assert.equal(wslOptions.trackedClients, 'claude,proma');
+});
+
 test('watch tick reuses wslAnchor and does not rescan WSL', async () => {
   let wslCalls = 0;
   const anchor = { dateKey: localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };

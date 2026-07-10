@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { buildTokscaleJson } = require('../../src/shared/promaUsage');
+const { buildTokscaleJson, buildPromaPeriods, PROMA_ROOT } = require('../../src/shared/promaUsage');
 const { extractUsageFromTokscale } = require('../../src/shared/usage');
 
 function writeJsonl(filePath, rows) {
@@ -64,4 +64,36 @@ test('Proma collapses streamed chunks by max usage but keeps the latest message 
 
   const usage = extractUsageFromTokscale(buildTokscaleJson({ todayStart }, { roots: [root] }));
   assert.equal(usage.clients.proma, 100);
+});
+
+test('Proma default parsing excludes unverified conversation transcripts', () => {
+  const observedRoots = [];
+  const originalReaddirSync = fs.readdirSync;
+  fs.readdirSync = (root) => {
+    observedRoots.push(root);
+    return [];
+  };
+
+  try {
+    buildTokscaleJson();
+    assert.deepEqual(observedRoots, [PROMA_ROOT]);
+  } finally {
+    fs.readdirSync = originalReaddirSync;
+  }
+});
+
+test('Proma all-time window honors the configured cutoff', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
+  writeJsonl(path.join(root, 'session.jsonl'), [
+    assistantRow({ id: 'before-cutoff', createdAt: '2025-01-01T00:00:00.000Z', input: 100 }),
+    assistantRow({ id: 'after-cutoff', createdAt: '2026-02-01T00:00:00.000Z', input: 40, output: 2 })
+  ]);
+
+  const periods = buildPromaPeriods({
+    now: '2026-07-09T12:00:00.000Z',
+    allTimeSince: '2026-01-01',
+    roots: [root]
+  });
+  const allTimeUsage = extractUsageFromTokscale(periods.allTime);
+  assert.equal(allTimeUsage.clients.proma, 42);
 });

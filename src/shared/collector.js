@@ -402,15 +402,34 @@ async function collectUsageOnce(options) {
   let allTime = emptyPeriod();
   const anchor = options.todayOnlyAnchor;
   const anchorUsed = Boolean(anchor && anchor.dateKey === localTodayKey(collectedAt));
+  let promaPeriods = null;
   if (normalizedClients) {
     await maybeSyncCursor(tokscaleClients, options.logger);
     await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
-    if (tokscaleClients && anchorUsed) {
+    if (includesProma) {
+      try {
+        const promaJson = buildPromaPeriods({ now: collectedAt, allTimeSince });
+        promaPeriods = {
+          today: extractUsageFromTokscale(promaJson.today),
+          month: extractUsageFromTokscale(promaJson.month),
+          allTime: extractUsageFromTokscale(promaJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
+      }
+    }
+    if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
       // windows exactly via applyPeriodDelta — one spawn instead of three.
-      const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
-      today = extractUsageFromTokscale(todayJson);
+      if (tokscaleClients) {
+        const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
+        today = extractUsageFromTokscale(todayJson);
+      }
+      // The persisted anchor contains every Windows-side client, including
+      // locally parsed Proma. Include its fresh today usage before deriving
+      // broader windows so base + (fresh today - anchor today) stays exact.
+      if (promaPeriods) today = mergePeriods(today, promaPeriods.today);
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
     } else if (tokscaleClients) {
@@ -426,18 +445,10 @@ async function collectUsageOnce(options) {
       allTime = extractUsageFromTokscale(allTimeJson);
     }
     applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
-    if (includesProma) {
-      try {
-        const promaJson = buildPromaPeriods({ now: collectedAt });
-        const promaToday = extractUsageFromTokscale(promaJson.today);
-        const promaMonth = extractUsageFromTokscale(promaJson.month);
-        const promaAllTime = extractUsageFromTokscale(promaJson.allTime);
-        today = mergePeriods(today, promaToday);
-        month = mergePeriods(month, promaMonth);
-        allTime = mergePeriods(allTime, promaAllTime);
-      } catch (err) {
-        if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
-      }
+    if (promaPeriods && !anchorUsed) {
+      today = mergePeriods(today, promaPeriods.today);
+      month = mergePeriods(month, promaPeriods.month);
+      allTime = mergePeriods(allTime, promaPeriods.allTime);
     }
   }
 
@@ -458,7 +469,8 @@ async function collectUsageOnce(options) {
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
-        clients: normalizedClients,
+        clients: tokscaleClients,
+        trackedClients: normalizedClients,
         allTimeSince,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
@@ -470,7 +482,8 @@ async function collectUsageOnce(options) {
       wslBundle = options.wslAnchor;
     } else if (!anchorUsed) {
       const wslResult = await collectWsl({
-        clients: normalizedClients,
+        clients: tokscaleClients,
+        trackedClients: normalizedClients,
         allTimeSince,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,

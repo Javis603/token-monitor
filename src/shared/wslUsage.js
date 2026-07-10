@@ -41,7 +41,8 @@ const WSL_DATA_MARKERS = [
   '.config/Kiro/User/globalStorage/kiro.kiroagent',
   '.config/kiro/User/globalStorage/kiro.kiroagent',
   '.codebuddy/projects',
-  '.workbuddy'
+  '.workbuddy',
+  '.proma/agent-sessions'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -77,7 +78,8 @@ const MARKER_CLIENTS = {
   '.config/Kiro/User/globalStorage/kiro.kiroagent': 'kiro',
   '.config/kiro/User/globalStorage/kiro.kiroagent': 'kiro',
   '.codebuddy/projects': 'codebuddy',
-  '.workbuddy': 'workbuddy'
+  '.workbuddy': 'workbuddy',
+  '.proma/agent-sessions': 'proma'
 };
 
 // Clients whose tokscale `--home` scan can fall back to a HOST-native database
@@ -201,14 +203,14 @@ function probeWslState(deps = {}) {
 }
 
 async function collectWslUsage(options = {}, deps = {}) {
-  const { clients, allTimeSince, commandTimeoutMs, runTokscale, logger } = options;
+  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, runTokscale, logger } = options;
   const existsSync = deps.existsSync || fs.existsSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
-  if (!clients || typeof runTokscale !== 'function') return { bundle, detected: [] };
+  if (!trackedClients || typeof runTokscale !== 'function') return { bundle, detected: [] };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
-  const tracked = new Set(String(clients).split(',').map((c) => c.trim()).filter(Boolean));
+  const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   for (const home of wslUsageHomes(deps)) {
     // Attribution: every marker hit in this home counts as "detected", even if
     // clientsForHomeScan drops it from the scan (e.g. a zed-only home with no
