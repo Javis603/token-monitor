@@ -26,8 +26,15 @@ test('compact token formatter uses K, M, and B units', () => {
   assert.equal(formatCompact(3_400_000_000), '3.4B');
 });
 
+test('compact token formatter promotes values that round across unit boundaries', () => {
+  const formatCompact = rendererFunction('formatCompact', 'updateTotalCompact');
+  assert.equal(formatCompact(999_949), '999.9K');
+  assert.equal(formatCompact(999_950), '1M');
+  assert.equal(formatCompact(999_950_000), '1B');
+});
+
 test('total token panel includes and styles the compact value', () => {
-  assert.match(html, /id="totalTokensCompact" class="total-compact hidden"/);
+  assert.match(html, /id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"/);
   assert.match(css, /\.total-number-row\s*\{[^}]*display:\s*flex/s);
   assert.match(css, /\.total-compact\s*\{[^}]*white-space:\s*nowrap/s);
 });

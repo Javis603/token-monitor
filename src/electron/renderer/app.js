@@ -432,10 +432,21 @@ function formatNumber(value) { return Math.round(Number(value || 0)).toLocaleStr
 function formatCompact(value) {
   const num = Math.round(Number(value || 0));
   const abs = Math.abs(num);
-  if (abs >= 1e9) return `${(num / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
-  if (abs >= 1e6) return `${(num / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
-  if (abs >= 1e3) return `${(num / 1e3).toFixed(1).replace(/\.0$/, '')}K`;
-  return String(num);
+  const units = [
+    { divisor: 1e3, suffix: 'K' },
+    { divisor: 1e6, suffix: 'M' },
+    { divisor: 1e9, suffix: 'B' }
+  ];
+  let unitIndex = abs >= 1e9 ? 2 : abs >= 1e6 ? 1 : abs >= 1e3 ? 0 : -1;
+  if (unitIndex < 0) return String(num);
+
+  let unit = units[unitIndex];
+  let display = (num / unit.divisor).toFixed(1);
+  if (Math.abs(Number(display)) >= 1000 && unitIndex < units.length - 1) {
+    unit = units[unitIndex + 1];
+    display = (num / unit.divisor).toFixed(1);
+  }
+  return `${display.replace(/\.0$/, '')}${unit.suffix}`;
 }
 function updateTotalCompact(value) {
   if (!els.totalTokensCompact) return;
