@@ -130,6 +130,46 @@ test('collectUsageOnce returns empty usage without spawning tokscale when client
   }
 });
 
+test('collectUsageOnce handles proma-only tracking without spawning tokscale', async () => {
+  const promaPath = require.resolve('../../src/shared/promaUsage');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const promaUsage = require(promaPath);
+  const originalBuildPromaPeriods = promaUsage.buildPromaPeriods;
+  let tokscaleCalls = 0;
+
+  promaUsage.buildPromaPeriods = () => ({
+    today: { entries: [{ client: 'proma', model: 'm', input: 12, output: 3 }] },
+    month: { entries: [{ client: 'proma', model: 'm', input: 20 }] },
+    allTime: { entries: [{ client: 'proma', model: 'm', input: 30 }] }
+  });
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    const summary = await collectUsageOnce({
+      clients: 'proma',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      runTokscale: async () => {
+        tokscaleCalls += 1;
+        throw new Error('tokscale should not run for proma-only tracking');
+      }
+    });
+
+    assert.equal(tokscaleCalls, 0);
+    assert.deepEqual(summary.trackedClients, ['proma']);
+    assert.equal(summary.today.clients.proma, 15);
+    assert.equal(summary.month.clients.proma, 20);
+    assert.equal(summary.allTime.clients.proma, 30);
+  } finally {
+    promaUsage.buildPromaPeriods = originalBuildPromaPeriods;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('collectUsageOnce includes the normalized tracked client list in summaries', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;

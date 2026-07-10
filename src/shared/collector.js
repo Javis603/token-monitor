@@ -18,6 +18,7 @@ const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector')
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
+const { buildPromaPeriods } = require('./promaUsage');
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...
@@ -391,35 +392,53 @@ async function collectUsageOnce(options) {
   // tokscale binary resolution, which is genuinely platform-bound).
   const platformValue = options.platform || process.platform;
   const normalizedClients = normalizeClientsCsv(clients);
+  // tokscale doesn't know about Proma yet — filter it out of the subprocess
+  // calls so --client doesn't reject an unknown value. Proma is parsed
+  // separately below and merged back in.
+  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',') : normalizedClients;
+  const includesProma = normalizedClients.split(',').includes('proma');
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
   const anchor = options.todayOnlyAnchor;
   const anchorUsed = Boolean(anchor && anchor.dateKey === localTodayKey(collectedAt));
   if (normalizedClients) {
-    await maybeSyncCursor(normalizedClients, options.logger);
-    await maybeSyncAntigravity(normalizedClients, options.logger, options.homeDir || os.homedir());
-    if (anchorUsed) {
+    await maybeSyncCursor(tokscaleClients, options.logger);
+    await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
+    if (tokscaleClients && anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
       // windows exactly via applyPeriodDelta — one spawn instead of three.
-      const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
+      const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
       today = extractUsageFromTokscale(todayJson);
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
-    } else {
+    } else if (tokscaleClients) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
-      const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
+      const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
       today = extractUsageFromTokscale(todayJson);
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
-      const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs });
+      const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
       month = extractUsageFromTokscale(monthJson);
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
-      const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
+      const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
     applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
+    if (includesProma) {
+      try {
+        const promaJson = buildPromaPeriods({ now: collectedAt });
+        const promaToday = extractUsageFromTokscale(promaJson.today);
+        const promaMonth = extractUsageFromTokscale(promaJson.month);
+        const promaAllTime = extractUsageFromTokscale(promaJson.allTime);
+        today = mergePeriods(today, promaToday);
+        month = mergePeriods(month, promaMonth);
+        allTime = mergePeriods(allTime, promaAllTime);
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
+      }
+    }
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -515,7 +534,7 @@ async function collectUsageOnce(options) {
     summary.history = null;
   } else if (options.includeHistory) {
     const history = await collectHistoryOnce({
-      clients: normalizedClients,
+      clients: tokscaleClients,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -598,6 +617,8 @@ function clientWatchCandidates(clientsCsv) {
   // refreshes via the periodic full tick; the WSL marker stays the broader
   // `.workbuddy` so a db-only WSL home is still scanned.
   add('workbuddy', path.join(home, '.workbuddy', 'projects'));
+  // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
+  add('proma', path.join(home, '.proma', 'agent-sessions'), path.join(home, '.proma', 'conversations'));
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute

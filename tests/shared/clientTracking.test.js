@@ -42,13 +42,14 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
 });
 
 test('default tracked clients are accepted by bundled tokscale', () => {
+  const locallyParsedClients = new Set(['proma']);
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
   const possibleValues = help.match(/\[possible values: ([^\]]+)\]/);
   assert.ok(possibleValues, 'tokscale --help should list --client possible values');
   const supported = new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
-  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => !supported.has(client));
+  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => !supported.has(client) && !locallyParsedClients.has(client));
   assert.deepEqual(unsupported, []);
 });
 
