@@ -2018,9 +2018,13 @@ function renderCodexAccountGroup(label, providers, color) {
 }
 
 function mimoAccountTitle(provider, index) {
-  const name = String(provider?.accountName || '').trim();
-  if (name && !/^MiMo [0-9a-f]{8}$/i.test(name)) return name;
+  const email = String(provider?.accountEmail || '').trim();
+  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddressForDisplay(email) : email;
   return `Account ${index + 1}`;
+}
+
+function mimoSettingsAccountTitle(account, index) {
+  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
 function renderMimoAccountGroup(label, providers, color) {
@@ -2028,7 +2032,7 @@ function renderMimoAccountGroup(label, providers, color) {
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
   const groupProvider = { provider: 'mimo', status: 'ok', windows: [] };
   const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
-    planText: t('settings.mimo.nAccounts', { count: providers.length }),
+    planText: `${providers.length} accounts`,
     hideMeta: true
   });
   const accountList = document.createElement('div');
@@ -6504,7 +6508,7 @@ function renderMimoStatus() {
   if (accounts.length > 0) {
     for (const [index, account] of accounts.entries()) {
       const enabled = account.enabled !== false;
-      const accountName = mimoAccountTitle(account, index);
+      const accountName = mimoSettingsAccountTitle(account, index);
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.classList.toggle('disabled', !enabled);
@@ -6531,60 +6535,10 @@ function renderMimoStatus() {
 
       const main = document.createElement('div');
       main.className = 'managed-account-main';
-      const nameBox = document.createElement('span');
-      nameBox.className = 'managed-account-name-box';
       const label = document.createElement('div');
       label.className = 'managed-account-email';
       label.textContent = accountName;
-      const nameInput = document.createElement('input');
-      nameInput.className = 'managed-account-name-input hidden';
-      nameInput.type = 'text';
-      nameInput.maxLength = 64;
-      nameInput.value = accountName;
-      const rename = document.createElement('button');
-      rename.type = 'button';
-      rename.className = 'managed-account-rename';
-      rename.textContent = '✎';
-      rename.title = t('settings.mimo.rename');
-      let editingName = false;
-      function beginRename() {
-        if (editingName) return;
-        editingName = true;
-        label.classList.add('hidden');
-        nameInput.classList.remove('hidden');
-        nameInput.focus();
-        nameInput.select();
-      }
-      async function endRename(save) {
-        if (!editingName) return;
-        editingName = false;
-        nameInput.classList.add('hidden');
-        label.classList.remove('hidden');
-        const nextName = nameInput.value.trim();
-        if (!save || !nextName || nextName === accountName) {
-          nameInput.value = accountName;
-          return;
-        }
-        const result = await window.tokenMonitor.mimo.renameAccount(account.id, nextName);
-        if (!result?.ok) {
-          state.mimoAccountError = result?.errorCode === 'duplicateAccountName'
-            ? t('settings.mimo.duplicateAccountName')
-            : result?.error || t('settings.mimo.renameFailed');
-          nameInput.value = accountName;
-        } else {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-        }
-        renderMimoStatus();
-      }
-      rename.addEventListener('click', beginRename);
-      nameInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') endRename(true);
-        if (event.key === 'Escape') endRename(false);
-      });
-      nameInput.addEventListener('blur', () => endRename(true));
-      nameBox.append(label, nameInput, rename);
-      main.append(nameBox);
+      main.append(label);
 
       const right = document.createElement('span');
       right.className = 'managed-account-right';
@@ -8013,13 +7967,12 @@ function setupCursorAccountUI() {
 
     document.getElementById('mimoSaveAccountButton').addEventListener('click', async () => {
       const input = document.getElementById('mimoCookieInput');
-      const nameInput = document.getElementById('mimoAccountNameInput');
       const saveButton = document.getElementById('mimoSaveAccountButton');
       saveButton.disabled = true;
       saveButton.textContent = t('settings.mimo.checking');
       let result;
       try {
-        result = await window.tokenMonitor.mimo.addAccount(nameInput.value.trim(), input.value);
+        result = await window.tokenMonitor.mimo.addAccount(input.value);
       } catch (_) {
         result = { ok: false, errorCode: 'validationUnavailable' };
       } finally {
@@ -8027,9 +7980,7 @@ function setupCursorAccountUI() {
         saveButton.textContent = t('settings.mimo.saveAccount');
       }
       if (!result?.ok) {
-        if (result?.errorCode === 'duplicateAccountName') {
-          state.mimoAccountError = t('settings.mimo.duplicateAccountName');
-        } else if (result?.errorCode === 'missingRequiredCookies') {
+        if (result?.errorCode === 'missingRequiredCookies') {
           state.mimoAccountError = t('settings.mimo.missingCookies', { cookies: (result.missingCookies || []).join(', ') });
         } else if (result?.errorCode === 'invalidCookie') {
           state.mimoAccountError = t('settings.mimo.invalidCookie');
@@ -8037,6 +7988,8 @@ function setupCursorAccountUI() {
           state.mimoAccountError = t('settings.mimo.validationRateLimited');
         } else if (result?.errorCode === 'validationUnavailable') {
           state.mimoAccountError = t('settings.mimo.validationUnavailable');
+        } else if (result?.errorCode === 'credentialStorageUnavailable') {
+          state.mimoAccountError = t('settings.mimo.credentialStorageUnavailable');
         } else {
           state.mimoAccountError = result?.error || t('settings.mimo.addFailed');
         }
@@ -8044,7 +7997,6 @@ function setupCursorAccountUI() {
         return;
       }
       input.value = '';
-      nameInput.value = '';
       state.mimoAccountError = '';
       state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
       renderMimoStatus();

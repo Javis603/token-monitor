@@ -44,9 +44,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
   mimo: {
     accounts: () => ipcRenderer.invoke('mimo:accounts'),
-    addAccount: (accountName, cookieHeader) => ipcRenderer.invoke('mimo:addAccount', accountName, cookieHeader),
+    addAccount: (cookieHeader) => ipcRenderer.invoke('mimo:addAccount', cookieHeader),
     openConsole: () => ipcRenderer.invoke('mimo:openConsole'),
-    renameAccount: (id, accountName) => ipcRenderer.invoke('mimo:renameAccount', id, accountName),
     removeAccount: (id) => ipcRenderer.invoke('mimo:removeAccount', id),
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('mimo:setAccountEnabled', id, enabled),
     onAccounts: (callback) => {

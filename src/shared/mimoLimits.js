@@ -84,6 +84,13 @@ function parseMimoBalance(body) {
   };
 }
 
+function parseMimoProfile(body) {
+  const data = unwrapApiBody(body);
+  return {
+    email: cleanText(data.email ?? data.platformEmail).slice(0, 254)
+  };
+}
+
 function parseMimoPlanDetail(body, now = Date.now()) {
   const data = unwrapApiBody(body);
   const rawEnd = data.currentPeriodEnd ?? data.current_period_end;
@@ -122,6 +129,7 @@ async function requestMimo(pathname, cookieHeader, deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
   const response = await fetchFn(`${MIMO_API_BASE_URL}${pathname}`, {
     headers: requestHeaders(cookieHeader),
+    redirect: 'manual',
     signal: deps.signal
   });
   if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
@@ -136,7 +144,8 @@ async function requestMimo(pathname, cookieHeader, deps = {}) {
   }
   if (!response.ok) throw new Error(`MiMo request failed: HTTP ${response.status}`);
   const body = await response.json();
-  if (body?.code === 401 || body?.code === 403) {
+  const bodyCode = Number(body?.code);
+  if (bodyCode === 401 || bodyCode === 403) {
     const error = new Error('MiMo browser session expired');
     error.code = 'MIMO_UNAUTHORIZED';
     throw error;
@@ -156,6 +165,7 @@ function statusProvider(status, updatedAt, account = {}) {
     updatedAt,
     accountKey: account.accountKey,
     accountName: account.accountName,
+    accountEmail: account.accountEmail,
     windows: []
   });
 }
@@ -165,13 +175,16 @@ async function fetchMimoAccount(account, deps = {}) {
   const cookieHeader = normalizeMimoCookieHeader(account.cookieHeader);
   if (!cookieHeader) return statusProvider('notConfigured', updatedAt, account);
   try {
-    const [balanceBody, detailBody, usageBody] = await Promise.all([
+    const [balanceBody, profileBody, detailBody, usageBody] = await Promise.all([
       requestMimo('/balance', cookieHeader, deps),
+      requestMimo('/userProfile', cookieHeader, deps).catch(() => null),
       requestMimo('/tokenPlan/detail', cookieHeader, deps).catch(() => null),
       requestMimo('/tokenPlan/usage', cookieHeader, deps).catch(() => null)
     ]);
     const balance = parseMimoBalance(balanceBody);
     if (balance.amount === null) throw new Error('MiMo balance response is missing a balance');
+    const profile = parseMimoProfile(profileBody);
+    const accountEmail = profile.email || cleanText(account.accountEmail);
     const detail = parseMimoPlanDetail(detailBody, (deps.now || Date.now)());
     const usage = parseMimoPlanUsage(usageBody);
     const windows = [];
@@ -195,7 +208,8 @@ async function fetchMimoAccount(account, deps = {}) {
       status: 'ok',
       updatedAt,
       accountKey: cleanText(account.accountKey) || mimoAccountKey(cookieHeader),
-      accountName: cleanText(account.accountName),
+      accountName: '',
+      accountEmail,
       accountLabel: detail.label || (windows.length ? 'Token Plan' : ''),
       windows,
       balance: {
@@ -263,7 +277,7 @@ async function fetchMimoLimits(options = {}, deps = {}) {
   return Promise.all(accounts.map((account) => fetchMimoAccountWithTimeout(account, deps)));
 }
 
-function createMimoManagedAccount(cookieValue, existing = [], accountNameValue = '') {
+function createMimoManagedAccount(cookieValue, existing = []) {
   const presentCookieNames = new Set(cookiePairs(cookieValue).map(([name]) => name));
   const missingCookies = [...MIMO_REQUIRED_COOKIE_NAMES]
     .filter((name) => !presentCookieNames.has(name));
@@ -273,21 +287,12 @@ function createMimoManagedAccount(cookieValue, existing = [], accountNameValue =
   const cookieHeader = normalizeMimoCookieHeader(cookieValue);
   const accountKey = mimoAccountKey(cookieHeader);
   const duplicate = existing.find((account) => cleanText(account?.accountKey) === accountKey);
-  const usedNames = new Set(existing.map((account) => cleanText(account?.accountName).toLowerCase()).filter(Boolean));
-  let generatedIndex = 1;
-  while (usedNames.has(`account ${generatedIndex}`.toLowerCase())) generatedIndex += 1;
-  const accountName = cleanText(accountNameValue).slice(0, 64)
-    || cleanText(duplicate?.accountName)
-    || `Account ${generatedIndex}`;
-  const duplicateName = existing.find((account) => cleanText(account?.accountName).toLowerCase() === accountName.toLowerCase()
-    && cleanText(account?.accountKey) !== accountKey);
-  if (duplicateName) return { ok: false, errorCode: 'duplicateAccountName' };
   return {
     ok: true,
     account: {
       id: duplicate?.id || `mimo-${crypto.randomUUID()}`,
       accountKey,
-      accountName,
+      accountEmail: cleanText(duplicate?.accountEmail),
       accountLabel: duplicate?.accountLabel || '',
       cookieHeader,
       addedAt: duplicate?.addedAt || new Date().toISOString(),
@@ -307,6 +312,7 @@ module.exports = {
   mimoAccountKey,
   normalizeMimoCookieHeader,
   parseMimoBalance,
+  parseMimoProfile,
   parseMimoPlanDetail,
   parseMimoPlanUsage
 };

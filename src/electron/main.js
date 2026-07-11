@@ -437,16 +437,15 @@ function normalizeMimoManagedAccounts(value) {
     if (!account || typeof account !== 'object') continue;
     const id = String(account.id || '').trim();
     const accountKey = String(account.accountKey || '').trim();
-    const cookieHeader = normalizeMimoCookieHeader(account.cookieHeader);
-    if (!id || !accountKey || !cookieHeader) continue;
+    if (!id || !accountKey) continue;
+    if (account.cookieHeader) writeMimoCredential(id, account.cookieHeader);
     if (seen.has(accountKey)) continue;
     seen.add(accountKey);
     accounts.push({
       id,
       accountKey,
-      accountName: String(account.accountName || '').trim(),
+      accountEmail: String(account.accountEmail || '').trim().slice(0, 254),
       accountLabel: String(account.accountLabel || '').trim(),
-      cookieHeader,
       addedAt: account.addedAt || new Date().toISOString(),
       updatedAt: account.updatedAt || account.addedAt || new Date().toISOString(),
       enabled: account.enabled !== false
@@ -457,17 +456,56 @@ function normalizeMimoManagedAccounts(value) {
 
 function mimoAccountsForRenderer() {
   return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
-    id, accountKey, accountName, accountLabel, addedAt, updatedAt, enabled
-  }) => ({ id, accountKey, accountName, accountLabel, addedAt, updatedAt, enabled }));
+    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
+  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
 }
 
 function mimoManagedAccountsForCollector() {
-  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
+  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map((account) => ({
+    ...account,
+    cookieHeader: readMimoCredential(account.id)
+  })).filter((account) => account.cookieHeader);
 }
 
-async function addMimoManagedAccount(accountName, cookieValue) {
+function mimoCredentialPath(id) {
+  const digest = crypto.createHash('sha256').update(String(id || '')).digest('hex');
+  return path.join(app.getPath('userData'), 'mimo-credentials', `${digest}.cookie`);
+}
+
+function writeMimoCredential(id, value) {
+  const cookieHeader = normalizeMimoCookieHeader(value);
+  if (!cookieHeader) return false;
+  const destination = mimoCredentialPath(id);
+  const temporary = `${destination}.${process.pid}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+    fs.chmodSync(path.dirname(destination), 0o700);
+    fs.writeFileSync(temporary, `${cookieHeader}\n`, { encoding: 'utf8', mode: 0o600 });
+    fs.chmodSync(temporary, 0o600);
+    fs.renameSync(temporary, destination);
+    fs.chmodSync(destination, 0o600);
+    return true;
+  } catch (_) {
+    try { fs.rmSync(temporary, { force: true }); } catch (_) {}
+    return false;
+  }
+}
+
+function readMimoCredential(id) {
+  try {
+    return normalizeMimoCookieHeader(fs.readFileSync(mimoCredentialPath(id), 'utf8'));
+  } catch (_) {
+    return '';
+  }
+}
+
+function removeMimoCredential(id) {
+  try { fs.rmSync(mimoCredentialPath(id), { force: true }); } catch (_) {}
+}
+
+async function addMimoManagedAccount(cookieValue) {
   const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
-  const result = createMimoManagedAccount(cookieValue, accounts, accountName);
+  const result = createMimoManagedAccount(cookieValue, accounts);
   if (!result.ok) return result;
   const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] });
   if (validation?.status !== 'ok') {
@@ -476,6 +514,10 @@ async function addMimoManagedAccount(accountName, cookieValue) {
       : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
     return { ok: false, errorCode };
   }
+  result.account.accountEmail = String(validation.accountEmail || '').trim().slice(0, 254);
+  const credentialStored = writeMimoCredential(result.account.id, result.account.cookieHeader);
+  delete result.account.cookieHeader;
+  if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
   settings.mimoManagedAccounts = normalizeMimoManagedAccounts([
     ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
     result.account
@@ -492,27 +534,8 @@ async function removeMimoManagedAccount(id) {
   const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
   const account = accounts.find((entry) => entry.id === accountId);
   if (!account) return { ok: false, error: 'Account not found' };
+  removeMimoCredential(accountId);
   settings.mimoManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  saveSettings();
-  pushSettingsToRenderer();
-  sendMimoAccountsPush();
-  startMode();
-  return { ok: true, accounts: mimoAccountsForRenderer() };
-}
-
-function renameMimoManagedAccount(id, accountNameValue) {
-  const accountId = String(id || '').trim();
-  const accountName = String(accountNameValue || '').trim().slice(0, 64);
-  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  if (!accountName) return { ok: false, errorCode: 'missingAccountName' };
-  const duplicateName = accounts.some((entry) => entry.id !== accountId
-    && String(entry.accountName || '').trim().toLowerCase() === accountName.toLowerCase());
-  if (duplicateName) return { ok: false, errorCode: 'duplicateAccountName' };
-  account.accountName = accountName;
-  account.updatedAt = new Date().toISOString();
-  settings.mimoManagedAccounts = accounts;
   saveSettings();
   pushSettingsToRenderer();
   sendMimoAccountsPush();
@@ -1246,6 +1269,8 @@ function readSettings() {
     const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved };
+    const hadPlaintextMimoCookie = Array.isArray(saved.mimoManagedAccounts)
+      && saved.mimoManagedAccounts.some((account) => Boolean(account?.cookieHeader));
     // Migrate older configs that predate hubMode: infer from hubUrl.
     if (saved.hubMode === undefined) {
       merged.hubMode = (saved.hubUrl && String(saved.hubUrl).trim()) ? 'client' : 'local';
@@ -1325,7 +1350,11 @@ function readSettings() {
       merged.opencodeProfiles = { default: { cookie: merged.opencodeCookie, enabled: true } };
     }
     Object.assign(merged, normalizeTrayModeSettings(merged));
-    return normalizeWindowBehaviorSettings(merged);
+    const normalized = normalizeWindowBehaviorSettings(merged);
+    if (hadPlaintextMimoCookie) {
+      fs.writeFileSync(settingsPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+    }
+    return normalized;
   }
   catch (_error) {
     const defaults = defaultSettings();
@@ -3465,12 +3494,11 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
   ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
-  ipcMain.handle('mimo:addAccount', (_event, accountName, cookieHeader) => addMimoManagedAccount(accountName, cookieHeader));
+  ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
     .then(() => ({ ok: true }))
     .catch((error) => ({ ok: false, error: error.message })));
   ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
-  ipcMain.handle('mimo:renameAccount', (_event, id, accountName) => renameMimoManagedAccount(id, accountName));
   ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());

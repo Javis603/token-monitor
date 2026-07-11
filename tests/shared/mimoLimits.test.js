@@ -8,7 +8,8 @@ const {
   normalizeMimoCookieHeader,
   parseMimoBalance,
   parseMimoPlanDetail,
-  parseMimoPlanUsage
+  parseMimoPlanUsage,
+  parseMimoProfile
 } = require('../../src/shared/mimoLimits');
 
 const COOKIE = 'unrelated=drop; userId=123; api-platform_serviceToken=secret; api-platform_ph=optional';
@@ -21,7 +22,6 @@ function managed(cookieHeader = COOKIE, overrides = {}) {
   return {
     id: 'mimo-1',
     accountKey: 'sha256:mimo-1',
-    accountName: 'MiMo account',
     cookieHeader,
     enabled: true,
     ...overrides
@@ -40,47 +40,31 @@ test('normalizeMimoCookieHeader keeps only the required MiMo allowlist', () => {
 test('createMimoManagedAccount rejects incomplete cookies and never preserves unrelated cookies', () => {
   const unnamed = createMimoManagedAccount(COOKIE);
   assert.equal(unnamed.ok, true);
-  assert.equal(unnamed.account.accountName, 'Account 1');
-  assert.deepEqual(createMimoManagedAccount('userId=123', [], 'work'), {
+  assert.deepEqual(createMimoManagedAccount('userId=123'), {
     ok: false,
     errorCode: 'missingRequiredCookies',
     missingCookies: ['api-platform_serviceToken']
   });
-  assert.deepEqual(createMimoManagedAccount('api-platform_serviceToken=secret', [], 'work'), {
+  assert.deepEqual(createMimoManagedAccount('api-platform_serviceToken=secret'), {
     ok: false,
     errorCode: 'missingRequiredCookies',
     missingCookies: ['userId']
   });
-  const result = createMimoManagedAccount(COOKIE, [], 'work');
+  const result = createMimoManagedAccount(COOKIE);
   assert.equal(result.ok, true);
-  assert.equal(result.account.accountName, 'work');
   assert.doesNotMatch(result.account.cookieHeader, /unrelated/);
   assert.match(result.account.accountKey, /^sha256:/);
 });
 
-test('createMimoManagedAccount assigns the next available name when omitted', () => {
+test('createMimoManagedAccount preserves identity when reimported', () => {
   const first = createMimoManagedAccount(COOKIE).account;
   const second = createMimoManagedAccount(
     'api-platform_serviceToken=other; userId=456', [first]
   );
   assert.equal(second.ok, true);
-  assert.equal(second.account.accountName, 'Account 2');
-
   const reimported = createMimoManagedAccount(COOKIE, [first]);
   assert.equal(reimported.ok, true);
-  assert.equal(reimported.account.accountName, 'Account 1');
-});
-
-test('createMimoManagedAccount keeps names unique and lets the same account be renamed', () => {
-  const existing = [createMimoManagedAccount(COOKIE, [], 'work').account];
-  assert.deepEqual(createMimoManagedAccount(
-    'api-platform_serviceToken=other; userId=456', existing, 'WORK'
-  ), { ok: false, errorCode: 'duplicateAccountName' });
-
-  const renamed = createMimoManagedAccount(COOKIE, existing, 'personal');
-  assert.equal(renamed.ok, true);
-  assert.equal(renamed.account.id, existing[0].id);
-  assert.equal(renamed.account.accountName, 'personal');
+  assert.equal(reimported.account.id, first.id);
 });
 
 test('MiMo parsers match the official balance and Token Plan shapes', () => {
@@ -96,6 +80,9 @@ test('MiMo parsers match the official balance and Token Plan shapes', () => {
   assert.equal(detail.label, 'standard');
   assert.equal(detail.expired, false);
   assert.match(detail.resetsAt, /^2099-01-01T00:00:00/);
+  assert.deepEqual(parseMimoProfile({ data: { email: 'user@example.com' } }), {
+    email: 'user@example.com'
+  });
 });
 
 test('fetchMimoLimits requests fixed official endpoints concurrently with minimized cookies', async () => {
@@ -104,7 +91,9 @@ test('fetchMimoLimits requests fixed official endpoints concurrently with minimi
     now: () => Date.parse('2026-07-11T00:00:00Z'),
     fetch: async (url, init) => {
       calls.push({ url, cookie: init.headers.Cookie });
+      assert.equal(init.redirect, 'manual');
       if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '25.51', currency: 'USD' } });
+      if (url.endsWith('/userProfile')) return response({ code: 0, data: { email: 'user@example.com' } });
       if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: { planCode: 'standard', expired: false } });
       return response({ code: 0, data: { monthUsage: { items: [{ used: 10, limit: 100, percent: 0.1 }] } } });
     }
@@ -113,8 +102,10 @@ test('fetchMimoLimits requests fixed official endpoints concurrently with minimi
   assert.equal(result[0].status, 'ok');
   assert.equal(result[0].windows[0].usedPercent, 10);
   assert.deepEqual(calls.map(({ url }) => new URL(url).pathname).sort(), [
-    '/api/v1/balance', '/api/v1/tokenPlan/detail', '/api/v1/tokenPlan/usage'
+    '/api/v1/balance', '/api/v1/tokenPlan/detail', '/api/v1/tokenPlan/usage', '/api/v1/userProfile'
   ]);
+  assert.equal(result[0].accountEmail, 'user@example.com');
+  assert.equal(result[0].accountName, '');
   for (const call of calls) {
     assert.equal(call.cookie, 'api-platform_ph=optional; api-platform_serviceToken=secret; userId=123');
   }
@@ -161,6 +152,13 @@ test('fetchMimoLimits maps an expired browser session to unauthorized', async ()
   });
   assert.equal(provider.status, 'unauthorized');
   assert.equal(provider.accountLabel, '');
+});
+
+test('fetchMimoLimits maps string auth codes to unauthorized', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    fetch: async () => response({ code: '401', message: 'expired' })
+  });
+  assert.equal(provider.status, 'unauthorized');
 });
 
 test('fetchMimoLimits returns one row per enabled account and skips disabled accounts', async () => {

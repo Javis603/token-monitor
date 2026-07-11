@@ -657,7 +657,7 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   const details = html.match(/<div id="mimoSettingsDetails"[\s\S]*?<div id="mimoAccountErrorMessage"/)?.[0] || '';
 
   assert.match(details, /id="mimoCookieInput"/);
-  assert.match(details, /id="mimoAccountNameInput"/);
+  assert.doesNotMatch(details, /id="mimoAccountNameInput"/);
   assert.match(details, /id="mimoOpenConsoleButton"/);
   assert.match(details, /id="mimoAddToggle"[\s\S]*aria-controls="mimoAddDetails"/);
   assert.match(details, /id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden"/);
@@ -665,10 +665,10 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(details, /id="mimoManualPanel"/);
   assert.match(details, /<strong>1\.<\/strong>[\s\S]*<strong>4\.<\/strong>/);
   assert.match(details, /data-i18n="settings\.mimo\.step3Before">In Network, select<\/span> <code>balance<\/code>/);
-  assert.match(details, /data-i18n="settings\.mimo\.accountName">Account name<\/label>/);
   assert.match(details, /data-i18n="settings\.mimo\.step4">Paste it below, then click Save account\.<\/span>/);
   assert.doesNotMatch(details, /Only the cookies required for balance/);
   assert.match(details, /placeholder="Cookie: \.\.\."/);
+  assert.match(details, /data-i18n-aria-label="settings\.mimo\.cookieLabel" aria-label="Cookie header"/);
   assert.ok(details.indexOf('mimoAddToggle') < details.indexOf('mimoOpenConsoleButton'));
   assert.ok(details.indexOf('mimoOpenConsoleButton') < details.indexOf('mimoCookieInput'));
   assert.ok(details.indexOf('mimoCookieInput') < details.indexOf('mimoSaveAccountButton'));
@@ -679,21 +679,22 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(app, /getElementById\('mimoManualPanel'\)\?\.classList\.toggle\('expanded', next\)/);
   assert.doesNotMatch(app, /settings\.mimo\.empty/);
   assert.match(app, /window\.tokenMonitor\.mimo\.openConsole\(\)/);
-  assert.match(app, /window\.tokenMonitor\.mimo\.addAccount\(nameInput\.value\.trim\(\), input\.value\)/);
+  assert.match(app, /window\.tokenMonitor\.mimo\.addAccount\(input\.value\)/);
   assert.match(app, /saveButton\.textContent = t\('settings\.mimo\.checking'\)/);
   assert.match(app, /result\?\.errorCode === 'invalidCookie'/);
   assert.match(app, /function setMimoAddExpanded\(expanded\)/);
   assert.match(app, /setMimoAddExpanded\(false\)/);
-  assert.match(preload, /addAccount: \(accountName, cookieHeader\) => ipcRenderer\.invoke\('mimo:addAccount', accountName, cookieHeader\)/);
-  assert.match(preload, /renameAccount: \(id, accountName\) => ipcRenderer\.invoke\('mimo:renameAccount', id, accountName\)/);
+  assert.match(preload, /addAccount: \(cookieHeader\) => ipcRenderer\.invoke\('mimo:addAccount', cookieHeader\)/);
   assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
   assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
-  assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, accountName, cookieHeader\) => addMimoManagedAccount\(accountName, cookieHeader\)\)/);
-  assert.match(main, /ipcMain\.handle\('mimo:renameAccount'/);
-  assert.match(app, /window\.tokenMonitor\.mimo\.renameAccount\(account\.id, nextName\)/);
+  assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
+  assert.match(app, /maskEmailAddressForDisplay\(email\)/);
+  assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
+  assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
   assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}\)/);
   assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
+  assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
   assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);
   assert.doesNotMatch(main, /MIMO_SESSION_PARTITION|mimoLoginWindow|configureMimoLoginWindow/);
 });
@@ -750,8 +751,16 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
     main.indexOf('function mimoAccountsForRenderer'),
     main.indexOf('function mimoManagedAccountsForCollector')
   );
-  assert.match(mimoRendererShape, /id, accountKey, accountName, accountLabel, addedAt, updatedAt, enabled/);
+  assert.match(mimoRendererShape, /id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled/);
   assert.doesNotMatch(mimoRendererShape, /cookieHeader/);
+  assert.doesNotMatch(main, /safeStorage/);
+  assert.match(main, /fs\.writeFileSync\(temporary, `\$\{cookieHeader\}\\n`, \{ encoding: 'utf8', mode: 0o600 \}\)/);
+  assert.match(main, /fs\.chmodSync\(destination, 0o600\)/);
+  assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
+  assert.match(main, /removeMimoCredential\(accountId\)/);
+  assert.match(main, /delete result\.account\.cookieHeader/);
+  assert.match(main, /const hadPlaintextMimoCookie = Array\.isArray\(saved\.mimoManagedAccounts\)/);
+  assert.match(main, /if \(hadPlaintextMimoCookie\) \{[\s\S]*fs\.writeFileSync\(settingsPath/);
 });
 
 test('main settings normalize the Z.ai API region', () => {
@@ -894,7 +903,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   const groupBody = functionBody(app, 'renderMimoAccountGroup', 'renderOpenCodeAccountGroup');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(groupBody, /const groupProvider = \{ provider: 'mimo', status: 'ok', windows: \[\] \};/);
-  assert.match(groupBody, /planText: t\('settings\.mimo\.nAccounts', \{ count: providers\.length \}\)/);
+  assert.match(groupBody, /planText: `\$\{providers\.length\} accounts`/);
   assert.match(groupBody, /renderLimitProviderRow\('mimo', mimoAccountTitle\(provider, index\), provider, color/);
   assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);

@@ -77,6 +77,14 @@ test('renderer wires the Doubao vendor icon for Doubao model rows', () => {
   assert.match(styles, /\.row-icon-doubao\s*\{[^}]*assets\/icons\/doubao\.svg/s);
 });
 
+test('renderer maps MiMo provider rows to the Xiaomi brand icon', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+
+  assert.match(source, /clientsWithIcon = new Set\(\[[\s\S]*'xiaomi', 'mimo'/);
+  assert.match(styles, /\.row-icon-xiaomi,\s*\.row-icon-mimo\s*\{[^}]*assets\/icons\/xiaomi\.svg/s);
+});
+
 test('renderer uses the CodeBuddy and WorkBuddy brand icons for their tool rows', () => {
   const styles = rendererStyles();
   assert.match(styles, /\.row-icon-codebuddy\s*\{[^}]*assets\/icons\/codebuddy\.svg/s);
