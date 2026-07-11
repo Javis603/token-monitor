@@ -20,7 +20,7 @@ const { parseLimitProviders } = require('../../src/shared/limitCollector');
 test('parseLimitProviders includes Copilot in the default provider set', () => {
   assert.deepEqual(
     parseLimitProviders(),
-    ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi']
+    ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi']
   );
 });
 

@@ -22,6 +22,7 @@
     opencode: { local: 'Local', web: 'Web' },
     deepseek: { api: 'API' },
     minimax: { api: 'API' },
+    mimo: { web: 'Web' },
     grok: { rpc: 'CLI', web: 'Web' },
     copilot: { api: 'API' },
     kiro: { cli: 'CLI' },
@@ -47,6 +48,7 @@
     opencode: ['Local/Web', 'Manual login'],
     deepseek: ['Pay-as-you-go', 'API key'],
     minimax: ['Token Plan', 'API key'],
+    mimo: ['Token Plan', 'Web'],
     grok: ['Auto', 'CLI/Web'],
     copilot: ['Manual login', 'API'],
     kiro: ['Auto', 'CLI'],
@@ -134,7 +136,9 @@
   function isLinkedStatus(provider) {
     const providerName = providerId(provider);
     const source = sourceId(provider);
-    return providerName === 'cursor' || (providerName === 'opencode' && source === 'web');
+    return providerName === 'cursor'
+      || (providerName === 'opencode' && source === 'web')
+      || (providerName === 'mimo' && source === 'web');
   }
 
   function limitProviderStatusLabel(provider = {}) {
@@ -157,6 +161,7 @@
     if (status === 'rateLimited') return { label: 'Limited', tone: 'warn' };
     if (status === 'sourceRateLimited') return { label: 'Usage API limited', tone: 'warn' };
     if (status === 'unavailable') return { label: 'Unavailable', tone: 'warn' };
+    if (providerName === 'mimo' && status === 'error') return { label: 'Unavailable', tone: 'warn' };
     if (status === 'notConfigured') {
       if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
       if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder') return { label: 'Sign in', tone: 'setup' };

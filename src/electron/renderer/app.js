@@ -4,7 +4,7 @@ const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', 
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy',
-  'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'volcengine', 'qoder'
+  'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder'
 ]);
 
 function osIconFor(platform) {
@@ -67,6 +67,7 @@ const LIMIT_PROVIDERS = [
   { id: 'opencode', label: 'OpenCode' },
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'minimax', label: 'Minimax' },
+  { id: 'mimo', label: 'MiMo' },
   { id: 'grok', label: 'Grok' },
   { id: 'copilot', label: 'GitHub Copilot' },
   { id: 'kiro', label: 'Kiro' },
@@ -189,7 +190,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
 let preferenceDrag = null;
@@ -390,11 +391,12 @@ function settingsSectionSummary(section) {
     const volcengineLinked = externalProviderAccountLinked('volcengine');
     const qoderLinked = externalProviderAccountLinked('qoder');
     const kimiLinked = externalProviderAccountLinked('kimi');
+    const mimoLinked = mimoAccountLinked();
     const copilotLinked = copilotAccountLinked();
     const codexLinked = (state.settings?.codexManagedAccounts || []).length > 0;
     return t('settings.summary.accounts', {
-      linked: (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (zaiLinked ? 1 : 0) + (zaiteamLinked ? 1 : 0) + (volcengineLinked ? 1 : 0) + (qoderLinked ? 1 : 0) + (kimiLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
-      total: 11
+      linked: (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (zaiLinked ? 1 : 0) + (zaiteamLinked ? 1 : 0) + (volcengineLinked ? 1 : 0) + (qoderLinked ? 1 : 0) + (kimiLinked ? 1 : 0) + (mimoLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
+      total: 12
     });
   }
   if (section === 'limits') {
@@ -1108,6 +1110,7 @@ function limitProviderMeta(provider, provenance = null) {
 }
 
 function limitProviderPlan(provider) {
+  if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
   const label = String(provider?.accountLabel || '').trim();
   if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(label);
   return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
@@ -1300,6 +1303,12 @@ function formatMoney(value, currency) {
   return `${symbol}${number.toFixed(2)}`;
 }
 
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
   if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
   if (!window) return '--';
@@ -1313,6 +1322,7 @@ function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
 }
 
 function formatHomeLimitWindowValue(window, showUsed) {
+  if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
   if (window?.kind === 'balance') {
     return `${formatMoney(window.amount, window.currency)} left`;
   }
@@ -1326,6 +1336,31 @@ function balanceRemainingWindow(balance) {
   const total = amount + spend;
   const remainingPercent = total > 0 ? (amount / total) * 100 : 100;
   return { remainingPercent };
+}
+
+function mimoTokenPlanWindowFromBalance(balance) {
+  if (!balance) return null;
+  if (balance.planStatus === 'expired') return null;
+  const used = optionalFiniteNumber(balance.planUsed);
+  const limit = optionalFiniteNumber(balance.planLimit);
+  const percent = optionalFiniteNumber(balance.planPercent);
+  const hasUsed = used !== null;
+  const hasLimit = limit !== null;
+  const hasPercent = percent !== null;
+  if (!hasUsed && !hasLimit && !hasPercent) return null;
+  const resolvedPercent = hasPercent
+    ? Math.max(0, Math.min(100, percent))
+    : (hasUsed && hasLimit && limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : null);
+  return {
+    kind: 'billing',
+    label: 'Token Plan',
+    used: hasUsed ? used : null,
+    limit: hasLimit ? limit : null,
+    remaining: hasUsed && hasLimit ? Math.max(0, limit - used) : null,
+    usedPercent: resolvedPercent,
+    remainingPercent: resolvedPercent == null ? null : Math.max(0, Math.min(100, 100 - resolvedPercent)),
+    showMeter: true
+  };
 }
 
 function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
@@ -1778,6 +1813,38 @@ function renderProviderWindows(provider, color) {
         windows.append(spendNode);
       }
     }
+  } else if (provider.provider === 'mimo') {
+    windows.classList.add('limit-windows-mimo');
+    const balance = provider.balance || null;
+    const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
+    if (tokenPlan) {
+      const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
+      node.classList.add('limit-window-wide');
+      windows.append(node);
+    } else if (balance?.planStatus === 'expired') {
+      const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
+      node.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(node);
+    }
+    const amount = optionalFiniteNumber(balance?.amount);
+    const giftBalance = optionalFiniteNumber(balance?.giftBalance);
+    const cashBalance = optionalFiniteNumber(balance?.cashBalance);
+    if (amount !== null || giftBalance !== null || cashBalance !== null) {
+      const detailParts = [];
+      if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
+      if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
+      const balanceText = formatMoney(amount, balance.currency) || '—';
+      const balanceNode = limitWindowNode(
+        'Balance',
+        { showMeter: false },
+        color,
+        0.68,
+        balanceText,
+        detailParts.join(' · ')
+      );
+      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(balanceNode);
+    }
   } else if (provider.provider === 'grok') {
     // Grok exposes a single Monthly billing window (no session/weekly). Render it
     // full-width so it doesn't share a row with an empty placeholder. This mirrors
@@ -1950,6 +2017,37 @@ function renderCodexAccountGroup(label, providers, color) {
   return row;
 }
 
+function mimoAccountTitle(provider, index) {
+  const email = String(provider?.accountEmail || '').trim();
+  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddressForDisplay(email) : email;
+  return `Account ${index + 1}`;
+}
+
+function mimoSettingsAccountTitle(account, index) {
+  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
+}
+
+function renderMimoAccountGroup(label, providers, color) {
+  const row = document.createElement('div');
+  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+  const groupProvider = { provider: 'mimo', status: 'ok', windows: [] };
+  const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
+    planText: `${providers.length} accounts`,
+    hideMeta: true
+  });
+  const accountList = document.createElement('div');
+  accountList.className = 'limit-account-list';
+  providers.forEach((provider, index) => {
+    accountList.append(renderLimitProviderRow('mimo', mimoAccountTitle(provider, index), provider, color, {
+      accountRow: true,
+      accountTitle: true,
+      showIcon: false
+    }));
+  });
+  row.append(head, accountList);
+  return row;
+}
+
 function renderOpenCodeAccountGroup(label, providers, color) {
   const row = document.createElement('div');
   row.className = 'limit-row limit-row-group';
@@ -2000,13 +2098,17 @@ function renderLimits() {
     const visibleProviders = providerEntries.length > 0
       ? providerEntries
       : { provider: id, status: 'disabled', windows: [] };
-    const color = clientColors[id] || clientColors.default;
+    const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
     if (id === 'codex' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderCodexAccountGroup(label, visibleProviders, color));
       continue;
     }
     if (id === 'opencode' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderOpenCodeAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
@@ -3417,6 +3519,7 @@ async function refreshStats(options = {}) {
     renderExternalProviderStatus('volcengine');
     renderExternalProviderStatus('qoder');
     renderExternalProviderStatus('kimi');
+    renderMimoStatus();
     renderCopilotStatus();
     maybeUpdateBarsIcon();
     if (feedback) settleRefreshButtonState('refreshed');
@@ -4272,6 +4375,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('kimi');
+  renderMimoStatus();
   renderCopilotStatus();
   renderViewPreferences();
   renderToolPreferences();
@@ -5464,6 +5568,7 @@ async function init() {
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
   state.settings = await window.tokenMonitor.getSettings();
   applyEffectiveCurrencyRates();
+
   state.appUpdate = await window.tokenMonitor.getAppUpdateState();
   renderAppUpdatePill();
   renderSettingsAppUpdateRow();
@@ -6170,6 +6275,10 @@ function setDeepseekAccountExpanded(expanded) {
   setAccountGroupExpanded('deepseek', expanded, 'deepseekAccountExpanded');
 }
 
+function setMimoAccountExpanded(expanded) {
+  setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
+}
+
 function setCopilotAccountExpanded(expanded) {
   setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
 }
@@ -6373,6 +6482,106 @@ function clearDeepseekPendingCheck() {
 function clearDeepseekProviderStatus() {
   if (!Array.isArray(state.stats?.limits?.providers)) return;
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
+}
+
+function mimoAccountLinked() {
+  return (state.settings?.mimoManagedAccounts || []).length > 0;
+}
+
+function renderMimoStatus() {
+  const statusEl = document.getElementById('mimoAccountStatus');
+  const listEl = document.getElementById('mimoAccountList');
+  const emptyEl = document.getElementById('mimoAccountEmpty');
+  const errorEl = document.getElementById('mimoAccountErrorMessage');
+  if (!statusEl || !listEl || !emptyEl || !errorEl) return;
+  const accounts = state.settings?.mimoManagedAccounts || [];
+  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
+  const statusText = accounts.length === 0
+    ? t('settings.mimo.notConfigured')
+    : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
+  setCursorStatusText(statusEl, statusText);
+  errorEl.textContent = state.mimoAccountError || '';
+  errorEl.classList.toggle('hidden', !state.mimoAccountError);
+  emptyEl.classList.toggle('hidden', accounts.length > 0);
+
+  listEl.replaceChildren();
+  if (accounts.length > 0) {
+    for (const [index, account] of accounts.entries()) {
+      const enabled = account.enabled !== false;
+      const accountName = mimoSettingsAccountTitle(account, index);
+      const row = document.createElement('div');
+      row.className = 'managed-account-row';
+      row.classList.toggle('disabled', !enabled);
+
+      const input = document.createElement('input');
+      input.className = 'managed-account-checkbox';
+      input.type = 'checkbox';
+      input.checked = enabled;
+      input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
+        account: accountName
+      }));
+      input.addEventListener('change', async () => {
+        input.disabled = true;
+        const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
+        if (!result?.ok) {
+          state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
+        } else {
+          state.mimoAccountError = '';
+          state.settings.mimoManagedAccounts = result.accounts || [];
+        }
+        renderMimoStatus();
+        renderSettingsSummaries();
+      });
+
+      const main = document.createElement('div');
+      main.className = 'managed-account-main';
+      const label = document.createElement('div');
+      label.className = 'managed-account-email';
+      label.textContent = accountName;
+      main.append(label);
+
+      const right = document.createElement('span');
+      right.className = 'managed-account-right';
+      const info = document.createElement('span');
+      info.className = 'managed-account-info';
+      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'managed-account-remove';
+      remove.textContent = '✕';
+      remove.title = t('settings.mimo.remove');
+      let confirmingRemove = false;
+      remove.addEventListener('click', async () => {
+        if (!confirmingRemove) {
+          confirmingRemove = true;
+          remove.classList.add('confirming');
+          remove.textContent = '✓';
+          remove.title = t('settings.mimo.removeConfirm', {
+            account: accountName
+          });
+          return;
+        }
+        const result = await window.tokenMonitor.mimo.removeAccount(account.id);
+        if (result?.ok) {
+          state.mimoAccountError = '';
+          state.settings.mimoManagedAccounts = result.accounts || [];
+          renderMimoStatus();
+          renderSettingsSummaries();
+          refreshStats({ force: true }).catch(() => {});
+          return;
+        }
+        state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
+        renderMimoStatus();
+        renderSettingsSummaries();
+      });
+
+      right.append(info, remove);
+      row.append(input, main, right);
+      listEl.append(row);
+    }
+  }
+  renderSettingsSummaries();
 }
 
 function minimaxProviderStatus() {
@@ -7719,6 +7928,82 @@ function setupCursorAccountUI() {
     });
   }
 
+  const mimoToggle = document.getElementById('mimoSettingsToggle');
+  if (mimoToggle) {
+    mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
+
+    const addToggle = document.getElementById('mimoAddToggle');
+    const addDetails = document.getElementById('mimoAddDetails');
+    function setMimoAddExpanded(expanded) {
+      const next = Boolean(expanded);
+      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
+      addDetails?.classList.toggle('hidden', !next);
+      document.getElementById('mimoManualPanel')?.classList.toggle('expanded', next);
+    }
+    addToggle?.addEventListener('click', () => setMimoAddExpanded(addDetails?.classList.contains('hidden')));
+    setMimoAccountExpanded(false);
+    renderMimoStatus();
+
+    window.tokenMonitor.mimo.onAccounts((accounts) => {
+      state.settings.mimoManagedAccounts = accounts || [];
+      renderMimoStatus();
+    });
+
+    window.tokenMonitor.mimo.accounts().then((accounts) => {
+      state.settings.mimoManagedAccounts = accounts || [];
+      renderMimoStatus();
+    }).catch(() => {});
+
+    document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
+      const result = await window.tokenMonitor.mimo.openConsole();
+      if (!result?.ok) {
+        state.mimoAccountError = result?.error || t('settings.mimo.openFailed');
+        renderMimoStatus();
+        return;
+      }
+      state.mimoAccountError = '';
+      renderMimoStatus();
+    });
+
+    document.getElementById('mimoSaveAccountButton').addEventListener('click', async () => {
+      const input = document.getElementById('mimoCookieInput');
+      const saveButton = document.getElementById('mimoSaveAccountButton');
+      saveButton.disabled = true;
+      saveButton.textContent = t('settings.mimo.checking');
+      let result;
+      try {
+        result = await window.tokenMonitor.mimo.addAccount(input.value);
+      } catch (_) {
+        result = { ok: false, errorCode: 'validationUnavailable' };
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = t('settings.mimo.saveAccount');
+      }
+      if (!result?.ok) {
+        if (result?.errorCode === 'missingRequiredCookies') {
+          state.mimoAccountError = t('settings.mimo.missingCookies', { cookies: (result.missingCookies || []).join(', ') });
+        } else if (result?.errorCode === 'invalidCookie') {
+          state.mimoAccountError = t('settings.mimo.invalidCookie');
+        } else if (result?.errorCode === 'validationRateLimited') {
+          state.mimoAccountError = t('settings.mimo.validationRateLimited');
+        } else if (result?.errorCode === 'validationUnavailable') {
+          state.mimoAccountError = t('settings.mimo.validationUnavailable');
+        } else if (result?.errorCode === 'credentialStorageUnavailable') {
+          state.mimoAccountError = t('settings.mimo.credentialStorageUnavailable');
+        } else {
+          state.mimoAccountError = result?.error || t('settings.mimo.addFailed');
+        }
+        renderMimoStatus();
+        return;
+      }
+      input.value = '';
+      state.mimoAccountError = '';
+      state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
+      renderMimoStatus();
+      setMimoAddExpanded(false);
+      await refreshStats({ force: true });
+    });
+  }
   const copilotToggle = document.getElementById('copilotSettingsToggle');
   if (copilotToggle) {
     copilotToggle.addEventListener('click', () => setCopilotAccountExpanded(!state.copilotAccountExpanded));

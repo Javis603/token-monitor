@@ -547,6 +547,63 @@ test('DeepSeek main Limits row uses a balance meter without since-tracking copy'
   assert.match(styles, /\.limit-window-no-reset \.limit-reset\s*\{/);
 });
 
+test('MiMo main Limits row falls back to balance plan fields for Token Plan', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+
+  assert.match(renderProviderWindows, /const balance = provider\.balance \|\| null;/);
+  assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(provider, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(balance\);/);
+  assert.match(renderProviderWindows, /limitWindowNode\(tokenPlan\.label \|\| 'Token Plan', tokenPlan, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /const giftBalance = optionalFiniteNumber\(balance\?\.giftBalance\);/);
+  assert.match(renderProviderWindows, /const cashBalance = optionalFiniteNumber\(balance\?\.cashBalance\);/);
+  assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\(\s*'Balance',\s*\{ showMeter: false \},\s*color,\s*0\.68,\s*balanceText,\s*detailParts\.join\(' · '\)\s*\);/);
+  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
+  assert.match(tokenPlanFallback, /const used = optionalFiniteNumber\(balance\.planUsed\);/);
+  assert.match(tokenPlanFallback, /const limit = optionalFiniteNumber\(balance\.planLimit\);/);
+  assert.match(tokenPlanFallback, /const percent = optionalFiniteNumber\(balance\.planPercent\);/);
+  assert.match(tokenPlanFallback, /if \(!hasUsed && !hasLimit && !hasPercent\) return null;/);
+  assert.match(tokenPlanFallback, /usedPercent: resolvedPercent/);
+  assert.match(tokenPlanFallback, /remainingPercent: resolvedPercent == null \? null : Math\.max\(0, Math\.min\(100, 100 - resolvedPercent\)\)/);
+});
+
+test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
+  const app = readRendererFile('app.js');
+  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatLimitWindowValue');
+  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+  const context = {};
+  vm.runInNewContext(`${optionalNumber}\n${tokenPlanFallback}\nresult = mimoTokenPlanWindowFromBalance({
+    planUsed: null,
+    planLimit: null,
+    planPercent: null,
+    planStatus: null
+  });`, context);
+  assert.equal(context.result, null);
+});
+
+test('MiMo expired Token Plan renders a localized status without a meter', () => {
+  const app = readRendererFile('app.js');
+  const i18n = readRendererFile('i18n.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+
+  assert.match(renderProviderWindows, /balance\?\.planStatus === 'expired'/);
+  assert.match(renderProviderWindows, /\{ showMeter: false \}, color, 0\.68, t\('limits\.mimo\.planExpired'\)/);
+  assert.match(tokenPlanFallback, /if \(balance\.planStatus === 'expired'\) return null;/);
+  assert.match(i18n, /'limits\.mimo\.planExpired': 'Expired'/);
+  assert.match(i18n, /'limits\.mimo\.planExpired': '已过期'/);
+  assert.match(i18n, /'limits\.mimo\.planExpired': '만료됨'/);
+  assert.match(i18n, /'limits\.mimo\.planExpired': '期限切れ'/);
+});
+
+test('main Limits plan text shows failure status before account labels', () => {
+  const app = readRendererFile('app.js');
+  const planBody = functionBody(app, 'limitProviderPlan', 'configuredLimitProviderOrder');
+
+  assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return limitStatusLabel\(provider\.status, false\);/);
+  assert.match(planBody, /const label = String\(provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
+});
+
 test('settings provider status waits for stats and refreshes when stats arrive', () => {
   const app = readRendererFile('app.js');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
@@ -659,16 +716,19 @@ test('Copilot env token is documented in env example, not the README overview', 
   assert.doesNotMatch(readmeTw, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
 });
 
-test('Accounts summary counts API-key and cookie account groups', () => {
+test('Accounts summary counts all managed account groups including MiMo', () => {
   const app = readRendererFile('app.js');
+  const mimoLinkedBody = functionBody(app, 'mimoAccountLinked', 'renderMimoStatus');
   const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
 
+  assert.match(mimoLinkedBody, /return \(state\.settings\?\.mimoManagedAccounts \|\| \[\]\)\.length > 0;/);
   assert.match(summaryBody, /const minimaxLinked = minimaxAccountLinked\(\);/);
   assert.match(summaryBody, /const zaiLinked = externalProviderAccountLinked\('zai'\);/);
   assert.match(summaryBody, /const zaiteamLinked = externalProviderAccountLinked\('zaiteam'\);/);
   assert.match(summaryBody, /const volcengineLinked = externalProviderAccountLinked\('volcengine'\);/);
   assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
   assert.match(summaryBody, /const kimiLinked = externalProviderAccountLinked\('kimi'\);/);
+  assert.match(summaryBody, /const mimoLinked = mimoAccountLinked\(\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(zaiLinked \? 1 : 0\)/);
@@ -676,8 +736,9 @@ test('Accounts summary counts API-key and cookie account groups', () => {
   assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(kimiLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(mimoLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 11/);
+  assert.match(summaryBody, /total: 12/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
@@ -738,6 +799,21 @@ test('minimax status copy uses the same API key wording as CodexBar', () => {
   );
 });
 
+test('mimo setup status uses the generic not configured and sign-in-again copy', () => {
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'notConfigured' }),
+    { label: 'Not set up', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized' }),
+    { label: 'Sign in again', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'error' }),
+    { label: 'Unavailable', tone: 'warn' }
+  );
+});
+
 test('copilot setup status asks for sign-in instead of an API key', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'copilot', status: 'notConfigured' }),
@@ -782,5 +858,5 @@ test('Kimi capability tags and source label', () => {
 test('Kimi usage and limits share the canonical provider id and vendor color', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
-  assert.match(app, /const color = clientColors\[id\] \|\| clientColors\.default/);
+  assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
 });

@@ -191,6 +191,35 @@ test('homeLimitAccountsForProviders includes Grok billing and DeepSeek balance r
   ]);
 });
 
+test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance', () => {
+  const rows = homeLimitAccountsForProviders({
+    providers: [
+      {
+        provider: 'mimo',
+        windows: [],
+        balance: { amount: 7.51, currency: 'CNY', planStatus: 'active', planUsed: 250, planLimit: 1000 }
+      },
+      {
+        provider: 'mimo',
+        windows: [{ kind: 'billing', label: 'Token Plan', remainingPercent: 100 }],
+        balance: { amount: 7.51, currency: 'CNY', planStatus: 'expired' }
+      }
+    ],
+    providerOptions: [{ id: 'mimo', label: 'MiMo' }],
+    enabledProviderIds: ['mimo'],
+    colors: { mimo: '#5daeea' },
+    limit: 5
+  });
+
+  assert.deepEqual(rows[0].windows.map((window) => window.kind), ['billing', 'balance']);
+  assert.equal(rows[0].windows[0].remainingPercent, 75);
+  assert.equal(rows[0].windows[1].amount, 7.51);
+  assert.deepEqual(rows[1].windows.map((window) => [window.kind, window.planStatus]), [
+    ['billing', 'expired'],
+    ['balance', '']
+  ]);
+});
+
 test('homeModelRows returns one-line token shares without cost fields', () => {
   const rows = homeModelRows([
     { name: 'claude-opus-4-8', value: 34_000_000, cost: 21.96, color: '#cc7c5e' },

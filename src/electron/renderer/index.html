@@ -714,6 +714,45 @@
                 <div id="kimiErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="mimoAccountGroup" class="settings-group cursor-account-group">
+              <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
+                <span data-i18n="settings.mimo.title">MiMo Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="mimoAccountStatus" class="cursor-status-pill" data-i18n="settings.mimo.notConfigured">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="mimoSettingsDetails" class="cursor-settings-details hidden">
+                <div id="mimoAccountList" class="managed-account-list"></div>
+                <div id="mimoAccountEmpty" class="opencode-empty" data-i18n="settings.mimo.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
+                <div id="mimoManualPanel" class="opencode-add-form">
+                  <button id="mimoAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="mimoAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.mimo.addAccount">Add account</span>
+                  </button>
+                  <div id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="mimoOpenConsoleButton" type="button" data-i18n="settings.mimo.openConsole">Open MiMo console in browser</button>
+                      </div>
+                      <p class="settings-note">
+                        <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the MiMo console in your browser (button above) and sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.mimo.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, then reload the page.</span><br>
+                        <strong>3.</strong> <span data-i18n="settings.mimo.step3Before">In Network, select</span> <code>balance</code><span data-i18n="settings.mimo.step3After">, then copy the full Cookie value from Headers -> Request Headers.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.mimo.step4">Paste it below, then click Save account.</span>
+                      </p>
+                      <textarea id="mimoCookieInput" rows="3" autocomplete="off" spellcheck="false" data-i18n-aria-label="settings.mimo.cookieLabel" aria-label="Cookie header" data-i18n-placeholder="settings.mimo.cookiePlaceholder" placeholder="Cookie: ..."></textarea>
+                      <div class="settings-actions">
+                        <button id="mimoSaveAccountButton" type="button" data-i18n="settings.mimo.saveAccount">Save account</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="mimoAccountErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="copilotAccountGroup" class="settings-group cursor-account-group">
               <button id="copilotSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="copilotSettingsDetails">
                 <span data-i18n="settings.copilot.title">GitHub Copilot Account</span>

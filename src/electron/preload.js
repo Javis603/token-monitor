@@ -42,6 +42,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
+  mimo: {
+    accounts: () => ipcRenderer.invoke('mimo:accounts'),
+    addAccount: (cookieHeader) => ipcRenderer.invoke('mimo:addAccount', cookieHeader),
+    openConsole: () => ipcRenderer.invoke('mimo:openConsole'),
+    removeAccount: (id) => ipcRenderer.invoke('mimo:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('mimo:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('mimo:accounts', handler);
+      return () => ipcRenderer.removeListener('mimo:accounts', handler);
+    }
+  },
   exportNow: () => ipcRenderer.invoke('export:now'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),

@@ -173,6 +173,112 @@ test('Codex provider reads quota windows from alternate rate limit ids', () => {
   assert.equal(provider.windows[1].remainingPercent, 75);
 });
 
+test('Codex provider does not guess between conflicting alternate rate limit ids', () => {
+  const snapshots = {
+    'gpt-5.4': {
+      primary: {
+        usedPercent: 1,
+        resetsAt: '2026-06-01T05:00:00Z',
+        windowDurationMins: 300
+      },
+      secondary: {
+        usedPercent: 0,
+        resetsAt: '2026-06-08T00:00:00Z',
+        windowDurationMins: 10080
+      }
+    },
+    'gpt-5.4-mini': {
+      primary: {
+        usedPercent: 100,
+        resetsAt: '2026-06-01T02:00:00Z',
+        windowDurationMins: 300
+      },
+      secondary: {
+        usedPercent: 100,
+        resetsAt: '2026-06-03T00:00:00Z',
+        windowDurationMins: 10080
+      }
+    }
+  };
+
+  for (const entries of [Object.entries(snapshots), Object.entries(snapshots).reverse()]) {
+    const provider = mapCodexRateLimitsToProvider({
+      account: { email: 'user@example.com', planType: 'plus' },
+      rateLimits: { planType: 'plus' },
+      rateLimitsByLimitId: Object.fromEntries(entries)
+    }, {
+      source: 'rpc',
+      sourceDetail: 'app',
+      updatedAt: '2026-06-01T00:00:00Z'
+    });
+
+    assert.equal(provider.status, 'ok');
+    assert.deepEqual(provider.windows, []);
+  }
+});
+
+test('Codex provider keeps agreed alternate windows without inheriting conflicting metadata', () => {
+  const window = {
+    usedPercent: 10,
+    resetsAt: '2026-06-01T05:00:00Z',
+    windowDurationMins: 300
+  };
+  const provider = mapCodexRateLimitsToProvider({
+    account: { email: 'user@example.com' },
+    rateLimitsByLimitId: {
+      'gpt-5.4': {
+        planType: 'plus',
+        primary: window,
+        rateLimitResetCredits: { availableCount: 2 }
+      },
+      'gpt-5.4-mini': {
+        planType: 'team',
+        primary: { ...window },
+        rateLimitResetCredits: { availableCount: 3 }
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'app',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows[0].remainingPercent, 90);
+  assert.equal(provider.accountLabel, '');
+  assert.equal(provider.resetCredits, null);
+});
+
+test('Codex provider preserves alternate metadata when every bucket agrees', () => {
+  const window = {
+    usedPercent: 10,
+    resetsAt: '2026-06-01T05:00:00Z',
+    windowDurationMins: 300
+  };
+  const provider = mapCodexRateLimitsToProvider({
+    account: { email: 'user@example.com' },
+    rateLimitsByLimitId: {
+      'gpt-5.4': {
+        planType: 'Plus',
+        primary: window,
+        rateLimitResetCredits: { availableCount: 2 }
+      },
+      'gpt-5.4-mini': {
+        plan_type: 'plus',
+        primary: { ...window },
+        rate_limit_reset_credits: { available_count: 2 }
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'app',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.equal(provider.accountLabel, 'Plus');
+  assert.equal(provider.resetCredits.availableCount, 2);
+});
+
 test('Codex provider keeps successful empty quota reads as ok', () => {
   const provider = mapCodexRateLimitsToProvider({
     account: { email: 'user@example.com', planType: 'plus' },
@@ -342,6 +448,38 @@ test('createLimitsCollector retains recent Codex quota windows across one empty 
 
   assert.equal(first.providers[0].windows.length, 1);
   assert.equal(second.providers[0].windows.length, 1);
+  assert.equal(second.providers[0].windows[0].remainingPercent, 80);
+  assert.equal(second.providers[0].updatedAt, '2026-06-01T00:00:00.000Z');
+});
+
+test('createLimitsCollector retains the only live Codex account across a transient fetch error', async () => {
+  let now = Date.parse('2026-06-01T00:00:00Z');
+  let calls = 0;
+  const collector = createLimitsCollector({
+    limitProviders: 'codex',
+    limitsRefreshMs: 60_000
+  }, {
+    now: () => now,
+    providerFetchers: {
+      codex: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return codexProvider('sha256:codex-live', 'live@example.com', 80, new Date(now).toISOString());
+        }
+        throw Object.assign(new Error('temporary Codex RPC failure'), { status: 'unavailable' });
+      }
+    }
+  });
+
+  const first = await collector.snapshot(true);
+  now = Date.parse('2026-06-01T00:05:00Z');
+  const second = await collector.snapshot(true);
+
+  assert.equal(first.providers[0].windows[0].remainingPercent, 80);
+  assert.equal(second.providers[0].status, 'ok');
+  assert.equal(second.providers[0].accountKey, 'sha256:codex-live');
+  assert.equal(second.providers[0].accountEmail, 'live@example.com');
+  assert.equal(second.providers[0].source, 'rpc');
   assert.equal(second.providers[0].windows[0].remainingPercent, 80);
   assert.equal(second.providers[0].updatedAt, '2026-06-01T00:00:00.000Z');
 });

@@ -35,7 +35,7 @@ test('minimaxToken reads the CodexBar-compatible Token Plan key and ignores unre
 test('parseLimitProviders includes minimax and grok in the default provider set', () => {
   assert.deepEqual(
     parseLimitProviders(),
-    ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi']
+    ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi']
   );
 });
 

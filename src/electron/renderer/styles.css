@@ -699,6 +699,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   display: grid;
   gap: 6px;
 }
+.managed-account-list:empty { display: none; }
 .managed-account-row {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
@@ -2198,7 +2199,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-zai        { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-zaiteam    { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-cohere     { -webkit-mask-image: url(../../../assets/icons/cohere.svg);        mask-image: url(../../../assets/icons/cohere.svg); }
-.row-icon-xiaomi     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
+.row-icon-xiaomi,
+.row-icon-mimo       { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
@@ -2278,6 +2280,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .limit-icon-kimi {
   -webkit-mask-image: url(../../../assets/icons/moonshot.svg);
   mask-image: url(../../../assets/icons/moonshot.svg);
+}
+.limit-icon-mimo {
+  -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
+  mask-image: url(../../../assets/icons/xiaomi.svg);
 }
 .row-label {
   display: grid;
@@ -3155,6 +3161,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
+#mimoManualPanel.hidden,
 #kimiManualPanel.hidden,
 #copilotManualPanel.hidden,
 #copilotManualDetails.hidden,
@@ -3177,6 +3184,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
+#mimoManualPanel,
 #kimiManualPanel,
 #copilotManualPanel {
   min-width: 0;
@@ -3189,6 +3197,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
+#mimoManualPanel > .accordion-animation-inner,
 #kimiManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
@@ -3204,6 +3213,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
 #kimiManualPanel input,
 #copilotManualDetails input {
   width: 100%;
@@ -3217,6 +3228,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
 #kimiManualPanel input,
 #copilotManualDetails input {
   font-family: monospace;
@@ -3486,6 +3499,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-size: 11px;
   text-align: center;
 }
+.opencode-empty.hidden { display: none; }
 .opencode-profile-item {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;

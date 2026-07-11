@@ -21,6 +21,7 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken } = require('../shared/limitCollector');
+const { mergeCodexTransientWindows } = require('../shared/limits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
 const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
@@ -74,6 +75,12 @@ const {
 } = require('../shared/clientUsageArchive');
 const { aggregateDevices, aggregateHistory, carryDeviceHistory } = require('../shared/usage');
 const { syncPayload } = require('../shared/syncPayload');
+const {
+  MIMO_PLATFORM_CONSOLE_URL,
+  createMimoManagedAccount,
+  fetchMimoLimits,
+  normalizeMimoCookieHeader
+} = require('../shared/mimoLimits');
 const { historyPreview } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
@@ -250,6 +257,7 @@ function defaultSettings() {
     qoderSite: 'global',
     kimiApiKey: '',
     codexManagedAccounts: [],
+    mimoManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -420,6 +428,140 @@ function codexAccountsForRenderer() {
 
 function codexManagedAccountsForCollector() {
   return normalizeCodexManagedAccounts(settings?.codexManagedAccounts);
+}
+
+function normalizeMimoManagedAccounts(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const accounts = [];
+  for (const account of value) {
+    if (!account || typeof account !== 'object') continue;
+    const id = String(account.id || '').trim();
+    const accountKey = String(account.accountKey || '').trim();
+    if (!id || !accountKey) continue;
+    if (seen.has(accountKey)) continue;
+    seen.add(accountKey);
+    accounts.push({
+      id,
+      accountKey,
+      accountEmail: String(account.accountEmail || '').trim().slice(0, 254),
+      accountLabel: String(account.accountLabel || '').trim(),
+      addedAt: account.addedAt || new Date().toISOString(),
+      updatedAt: account.updatedAt || account.addedAt || new Date().toISOString(),
+      enabled: account.enabled !== false
+    });
+  }
+  return accounts;
+}
+
+function mimoAccountsForRenderer() {
+  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
+    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
+  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
+}
+
+function mimoManagedAccountsForCollector() {
+  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map((account) => ({
+    ...account,
+    cookieHeader: readMimoCredential(account.id)
+  })).filter((account) => account.cookieHeader);
+}
+
+function mimoCredentialPath(id) {
+  const digest = crypto.createHash('sha256').update(String(id || '')).digest('hex');
+  return path.join(app.getPath('userData'), 'mimo-credentials', `${digest}.cookie`);
+}
+
+function writeMimoCredential(id, value) {
+  const cookieHeader = normalizeMimoCookieHeader(value);
+  if (!cookieHeader) return false;
+  const destination = mimoCredentialPath(id);
+  const temporary = `${destination}.${process.pid}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+    fs.chmodSync(path.dirname(destination), 0o700);
+    fs.writeFileSync(temporary, `${cookieHeader}\n`, { encoding: 'utf8', mode: 0o600 });
+    fs.chmodSync(temporary, 0o600);
+    fs.renameSync(temporary, destination);
+    fs.chmodSync(destination, 0o600);
+    return true;
+  } catch (_) {
+    try { fs.rmSync(temporary, { force: true }); } catch (_) {}
+    return false;
+  }
+}
+
+function readMimoCredential(id) {
+  try {
+    return normalizeMimoCookieHeader(fs.readFileSync(mimoCredentialPath(id), 'utf8'));
+  } catch (_) {
+    return '';
+  }
+}
+
+function removeMimoCredential(id) {
+  const target = mimoCredentialPath(id);
+  try {
+    fs.rmSync(target, { force: true });
+    return !fs.existsSync(target);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function addMimoManagedAccount(cookieValue) {
+  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
+  const result = createMimoManagedAccount(cookieValue, accounts);
+  if (!result.ok) return result;
+  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] });
+  if (validation?.status !== 'ok') {
+    const errorCode = validation?.status === 'unauthorized'
+      ? 'invalidCookie'
+      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
+    return { ok: false, errorCode };
+  }
+  result.account.accountEmail = String(validation.accountEmail || '').trim().slice(0, 254);
+  const credentialStored = writeMimoCredential(result.account.id, result.account.cookieHeader);
+  delete result.account.cookieHeader;
+  if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  settings.mimoManagedAccounts = normalizeMimoManagedAccounts([
+    ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
+    result.account
+  ]);
+  saveSettings();
+  pushSettingsToRenderer();
+  sendMimoAccountsPush();
+  startMode();
+  return { ok: true, accounts: mimoAccountsForRenderer() };
+}
+
+async function removeMimoManagedAccount(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  if (!removeMimoCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
+  settings.mimoManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
+  saveSettings();
+  pushSettingsToRenderer();
+  sendMimoAccountsPush();
+  startMode();
+  return { ok: true, accounts: mimoAccountsForRenderer() };
+}
+
+function setMimoManagedAccountEnabled(id, enabled) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  account.enabled = Boolean(enabled);
+  account.updatedAt = new Date().toISOString();
+  settings.mimoManagedAccounts = accounts;
+  saveSettings();
+  pushSettingsToRenderer();
+  sendMimoAccountsPush();
+  startMode();
+  return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
 function codexManagedRoot() {
@@ -714,9 +856,10 @@ async function refreshCodexManagedAccountLimits(id) {
       includeLiveCodexAccount: false,
       codexManagedAccounts: [account]
     }, { env: process.env });
+    const stableSummary = mergeCodexTransientWindows(latestStats?.limits, summary);
     return {
       ok: true,
-      providers: (summary.providers || []).filter((provider) => provider?.provider === 'codex')
+      providers: (stableSummary.providers || []).filter((provider) => provider?.provider === 'codex')
     };
   } catch (error) {
     return { ok: false, error: `Could not refresh Codex account limits: ${error?.message || error}` };
@@ -1188,6 +1331,7 @@ function readSettings() {
       merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
+    merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -1551,6 +1695,7 @@ function startSyncCollector() {
     qoderSite: settings.qoderSite || 'global',
     kimiApiKey: settings.kimiApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
+    mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: async (summary) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
@@ -1605,6 +1750,7 @@ function startHostCollector() {
     qoderSite: settings.qoderSite || 'global',
     kimiApiKey: settings.kimiApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
+    mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: (summary) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
@@ -1802,6 +1948,7 @@ function startLocalCollector() {
     qoderSite: settings.qoderSite || 'global',
     kimiApiKey: settings.kimiApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
+    mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: (summary, reason) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
       // History only rides along on gated ticks; carry the last known history
@@ -2053,6 +2200,7 @@ function settingsForRenderer() {
       ? { opencodeProfiles: redactOpencodeProfilesForRenderer(settings.opencodeProfiles) }
       : {}),
     codexManagedAccounts: codexAccountsForRenderer(),
+    mimoManagedAccounts: mimoAccountsForRenderer(),
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
     deepseekApiKeySource,
     minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()),
@@ -2087,6 +2235,11 @@ function pushSettingsToRenderer() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     try { dashboardWindow.webContents.send('settings:push', payload); } catch (_) {}
   }
+}
+
+function sendMimoAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -3013,6 +3166,7 @@ app.whenReady().then(() => {
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.codexManagedAccounts;
+    delete normalizedPatch.mimoManagedAccounts;
     delete normalizedPatch.customModelPricing;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
@@ -3340,6 +3494,13 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
+  ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
+  ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
+  ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
+    .then(() => ({ ok: true }))
+    .catch((error) => ({ ok: false, error: error.message })));
+  ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
+  ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());

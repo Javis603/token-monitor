@@ -22,6 +22,8 @@ const { recordConsumption } = require('./deepseekBalanceHistory');
 const { codexAuthIdentity } = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
+const mimoLimits = require('./mimoLimits');
+const { fetchMimoLimits } = mimoLimits;
 const grokLimits = require('./grokLimits');
 const copilotLimits = require('./copilotLimits');
 const { copilotToken, fetchCopilotLimits } = copilotLimits;
@@ -47,7 +49,7 @@ const {
   fetchGrokLimits
 } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi'];
+const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi'];
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -1173,15 +1175,65 @@ function codexDirectRateLimits(payload = {}) {
   return payload.rateLimits || payload.rate_limits || {};
 }
 
+function codexRateLimitWindowSignature(snapshot) {
+  return JSON.stringify(['primary', 'secondary'].map((key) => {
+    const window = snapshot?.[key];
+    if (!window) return null;
+    return [
+      key,
+      window.usedPercent ?? window.used_percent ?? null,
+      window.resetsAt ?? window.resets_at ?? null,
+      window.windowDurationMins ?? window.window_duration_mins ?? null
+    ];
+  }));
+}
+
+function codexAlternatePlanType(snapshot) {
+  const value = snapshot?.planType ?? snapshot?.plan_type;
+  const normalized = String(value ?? '').trim();
+  return normalized || null;
+}
+
+function codexAlternateResetCredits(snapshot) {
+  const resetCredits = snapshot?.rateLimitResetCredits ?? snapshot?.rate_limit_reset_credits;
+  return normalizeLimitProvider({ provider: 'codex', resetCredits }).resetCredits;
+}
+
+function unambiguousAlternateCodexRateLimits(rateLimitsById) {
+  // Object key order is not a quota-selection contract. Keep agreed window
+  // data, but only carry optional metadata when every alternate agrees too.
+  const candidates = Object.entries(rateLimitsById)
+    .filter(([id, snapshot]) => id !== 'codex' && hasCodexRateLimitWindows(snapshot))
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (candidates.length === 0) return null;
+  const signatures = new Set(candidates.map(([, snapshot]) => codexRateLimitWindowSignature(snapshot)));
+  if (signatures.size !== 1) return null;
+
+  const snapshots = candidates.map(([, snapshot]) => snapshot);
+  const first = snapshots[0];
+  const consensus = {
+    ...(first.primary ? { primary: first.primary } : {}),
+    ...(first.secondary ? { secondary: first.secondary } : {})
+  };
+  const planTypes = snapshots.map(codexAlternatePlanType);
+  const normalizedPlanTypes = new Set(planTypes.map((value) => value?.toLowerCase() || null));
+  if (normalizedPlanTypes.size === 1 && planTypes[0]) consensus.planType = planTypes[0];
+
+  const resetCredits = snapshots.map(codexAlternateResetCredits);
+  const resetCreditSignatures = new Set(resetCredits.map((value) => JSON.stringify(value)));
+  if (resetCreditSignatures.size === 1 && resetCredits[0]) {
+    consensus.rateLimitResetCredits = resetCredits[0];
+  }
+  return consensus;
+}
+
 function codexRateLimitSnapshot(payload = {}) {
   const rateLimitsById = codexRateLimitsById(payload);
   const direct = codexDirectRateLimits(payload);
   if (hasCodexRateLimitWindows(rateLimitsById.codex)) return rateLimitsById.codex;
   if (hasCodexRateLimitWindows(direct)) return direct;
-  for (const [id, snapshot] of Object.entries(rateLimitsById)) {
-    if (id === 'codex') continue;
-    if (hasCodexRateLimitWindows(snapshot)) return snapshot;
-  }
+  const alternate = unambiguousAlternateCodexRateLimits(rateLimitsById);
+  if (alternate) return alternate;
   return rateLimitsById.codex || direct || {};
 }
 
@@ -2370,6 +2422,7 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     opencode: (providerOptions) => fetchOpenCodeLimits(providerOptions, deps),
     deepseek: (providerOptions) => fetchDeepSeekLimits(providerOptions, deps),
     minimax: (providerOptions) => minimaxLimits.fetchMinimaxLimits(providerOptions, deps),
+    mimo: (providerOptions) => fetchMimoLimits(providerOptions, deps),
     grok: (providerOptions) => grokLimits.fetchGrokLimits(providerOptions, deps),
     copilot: (providerOptions) => copilotLimits.fetchCopilotLimits(providerOptions, deps),
     kiro: (providerOptions) => kiroLimits.fetchKiroLimits(providerOptions, deps),
@@ -2599,6 +2652,7 @@ module.exports = {
   fetchCodexLimits,
   fetchCursorLimits,
   fetchDeepSeekLimits,
+  fetchMimoLimits,
   runCodexLogin,
   deepseekToken,
   selectFundedRow,
