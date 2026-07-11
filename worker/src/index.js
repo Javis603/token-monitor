@@ -77,7 +77,7 @@ export class HubDO {
   async getStats() {
     const devices = await this.listDevices();
     const stats = aggregateDevices(devices, this.staleAfterMs);
-    stats.historyPreview = historyPreview(aggregateHistory(devices, this.staleAfterMs));
+    stats.historyPreview = historyPreview(aggregateHistory(devices));
     return stats;
   }
 
@@ -163,7 +163,7 @@ export class HubDO {
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/history') {
       const devices = await this.listDevices();
-      return jsonResponse(200, aggregateHistory(devices, this.staleAfterMs));
+      return jsonResponse(200, aggregateHistory(devices));
     }
 
     if (request.method === 'GET' && url.pathname === '/api/stats/stream') {

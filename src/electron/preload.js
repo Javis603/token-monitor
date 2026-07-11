@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   getDashboardHistory: () => ipcRenderer.invoke('dashboard:getHistory'),
+  onDashboardHistoryChanged: (callback) => {
+    const listener = () => { try { callback(); } catch (_) {} };
+    ipcRenderer.on('dashboard:historyChanged', listener);
+    return () => ipcRenderer.removeListener('dashboard:historyChanged', listener);
+  },
   dashboard: {
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')

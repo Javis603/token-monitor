@@ -40,12 +40,12 @@ function createHub({
 
   function getStats() {
     const stats = aggregateDevices(Object.values(store.devices), staleAfterMs);
-    stats.historyPreview = historyPreview(aggregateHistory(Object.values(store.devices), staleAfterMs));
+    stats.historyPreview = historyPreview(aggregateHistory(Object.values(store.devices)));
     return stats;
   }
 
   function getHistory() {
-    return aggregateHistory(Object.values(store.devices), staleAfterMs);
+    return aggregateHistory(Object.values(store.devices));
   }
 
   const sseClients = new Set();

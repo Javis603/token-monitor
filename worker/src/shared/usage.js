@@ -671,14 +671,15 @@ function carryDeviceHistory(previous, incoming) {
   return incoming;
 }
 
-function aggregateHistory(devices, staleAfterMs, nowMs = Date.now()) {
+// History is durable device data, not live presence. Keep a stored device's
+// contributions in the aggregate while it is offline; explicit device deletion
+// is the boundary that removes them. Staleness still applies independently to
+// live limits and expired today/month period snapshots.
+function aggregateHistory(devices) {
   const histories = [];
   for (const record of devices) {
     const normalized = normalizeDeviceRecord(record);
     if (!hasOwn(normalized, 'history')) continue;
-    const ageMs = nowMs - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
-    const stale = Number.isFinite(ageMs) && staleAfterMs > 0 ? ageMs > staleAfterMs : false;
-    if (stale) continue;
     histories.push(normalized.history);
   }
   return mergeHistories(histories);
