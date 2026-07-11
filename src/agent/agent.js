@@ -7,7 +7,7 @@ const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { collectUsageOnce, normalizeHistoryIntervalMs, startCollector } = require('../shared/collector');
 const { normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limitCollector');
-const { syncLimits } = require('../shared/limits');
+const { syncPayload } = require('../shared/syncPayload');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -32,11 +32,10 @@ const dryRun = Boolean(args['dry-run'] || args.dryRun);
 const collectorOptions = { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent', historyEnabled, historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS), limitsEnabled, limitProviders, limitsRefreshMs, wslScanEnabled, opencodeCookie };
 
 async function postUsage(summary) {
-  const payload = { ...summary, limits: syncLimits(summary.limits) };
   const response = await fetch(`${hubUrl}/api/ingest`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(syncPayload(summary))
   });
   if (!response.ok) throw new Error(`Hub responded ${response.status}: ${(await response.text()).slice(0, 300)}`);
   return response.json();

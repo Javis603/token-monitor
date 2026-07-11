@@ -138,6 +138,7 @@ function createHub({
         return sendJson(res, 200, { ok: true, deviceId: record.deviceId, stats: getStats() });
       } catch (error) {
         if (error.message === 'deviceId_required') return sendJson(res, 400, { error: 'deviceId_required' });
+        if (error.code === 'payload_too_large') return sendJson(res, 413, { error: 'payload_too_large', message: error.message });
         return sendJson(res, 400, { error: 'bad_request', message: error.message });
       }
     }

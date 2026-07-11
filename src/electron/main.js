@@ -73,7 +73,7 @@ const {
   pruneArchivedClientUsage
 } = require('../shared/clientUsageArchive');
 const { aggregateDevices, aggregateHistory, carryDeviceHistory } = require('../shared/usage');
-const { syncLimits } = require('../shared/limits');
+const { syncPayload } = require('../shared/syncPayload');
 const { historyPreview } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
@@ -1499,7 +1499,7 @@ async function postToHub(summary) {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
-    body: JSON.stringify({ ...summary, limits: syncLimits(summary.limits) })
+    body: JSON.stringify(syncPayload(summary))
   });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   if (settings.lastPostedDeviceId !== summary.deviceId) {
@@ -1615,7 +1615,7 @@ function startHostCollector() {
         if (stale && stale !== visibleSummary.deviceId) {
           embeddedHub.hub.deleteDevice(stale);
         }
-        embeddedHub.hub.ingest({ ...visibleSummary, limits: syncLimits(visibleSummary.limits) });
+        embeddedHub.hub.ingest(syncPayload(visibleSummary));
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
