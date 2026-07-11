@@ -98,6 +98,7 @@ test('oversized ingest returns 413 without storing the device', async () => {
     });
 
     assert.equal(response.status, 413);
+    assert.equal(response.headers.get('connection'), 'close');
     assert.deepEqual(await response.json(), {
       error: 'payload_too_large',
       message: 'Request body too large'
