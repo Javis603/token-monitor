@@ -328,9 +328,37 @@ test('Codex limits render as one provider group with account subrows', () => {
 test('tray all-sessions mode can consider multiple providers for one configured id', () => {
   const app = readRendererFile('app.js');
   const pickConfigured = functionBody(app, 'pickConfiguredSessionProviders', 'renderAllSessionsIcon');
+  const renderAllSessions = functionBody(app, 'renderAllSessionsIcon', 'renderLimitSessionsIcon');
 
   assert.match(pickConfigured, /providersByLimitProviderId\(providers\)/);
   assert.doesNotMatch(pickConfigured, /new Map\(providers\.map\(\(p\) => \[String\(p\.provider\)\.toLowerCase\(\), p\]\)\)/);
+  assert.match(renderAllSessions, /trayBarsLayout\(height, \{ contentOnly: true \}\)/);
+});
+
+test('limit percent tray mode renders provider icons into a generated tray image', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const renderLimitSessionsIcon = functionBody(app, 'renderLimitSessionsIcon', 'barsDataUrlForMode');
+  const maybeUpdateBarsIcon = functionBody(app, 'maybeUpdateBarsIcon', 'loadImage');
+  const updateTrayDisplay = functionBody(main, 'updateTrayDisplay', 'sendStatus');
+
+  assert.match(renderLimitSessionsIcon, /pickConfiguredSessionProviders\(stats, configOrder\)/);
+  assert.match(renderLimitSessionsIcon, /trayBarsLayout\(height/);
+  assert.match(renderLimitSessionsIcon, /layout\.iconSize/);
+  assert.match(renderLimitSessionsIcon, /picks\.length === 1/);
+  assert.match(renderLimitSessionsIcon, /kind === 'weekly'/);
+  assert.match(renderLimitSessionsIcon, /weeklyPercent === null \? '' : formatPercent\(weeklyPercent\)/);
+  assert.match(renderLimitSessionsIcon, /trayProviderImages\[pick\.provider\.provider\]/);
+  assert.match(renderLimitSessionsIcon, /`500 \$\{fontSize\}px/);
+  assert.match(renderLimitSessionsIcon, /formatPercent\(limitFillPercent/);
+  assert.match(renderLimitSessionsIcon, /·/);
+  assert.match(maybeUpdateBarsIcon, /limitsAllSessions/);
+  assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44\)/);
+  assert.match(updateTrayDisplay, /mode === 'limitsAllSessions'/);
+  assert.match(updateTrayDisplay, /const barsImageMode = .*?!limitText && providerTrayIcons\[mode\]/);
+  assert.match(updateTrayDisplay, /Boolean\(limitText\)/);
+  assert.match(updateTrayDisplay, /const limitText = formatTrayText/);
+  assert.match(updateTrayDisplay, /trayImageMode[\s\S]*?\? '' : limitText/);
 });
 
 test('Grok renders its single Monthly billing window full-width instead of an empty session/weekly pair', () => {
@@ -451,8 +479,9 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   assert.match(flushPendingResetCreditsTooltipRender, /state\.resetCreditsTooltipRenderPending/);
   assert.match(flushPendingResetCreditsTooltipRender, /state\.breakdown !== 'limits'/);
   assert.match(flushPendingResetCreditsTooltipRender, /renderLimits\(\)/);
-  assert.match(renderLimits, /if \(resetCreditsTooltipShouldHoldRender\(\)\) \{/);
-  assert.match(renderLimits, /state\.resetCreditsTooltipRenderPending = true;/);
+  assert.match(renderLimits, /const holdResetCreditsTooltipRender = resetCreditsTooltipShouldHoldRender\(\);/);
+  assert.match(renderLimits, /if \(holdResetCreditsTooltipRender \|\| holdCodexSwitchPopoverRender\) \{/);
+  assert.match(renderLimits, /if \(holdResetCreditsTooltipRender\) state\.resetCreditsTooltipRenderPending = true;/);
   assert.match(renderLimits, /return;/);
   assert.match(styles, /\.limit-reset-credits\s*\{[^}]*font-size: 9px;/s);
   assert.match(styles, /\.limit-reset-credits-line\s*\{[^}]*justify-content: space-between;/s);
@@ -528,6 +557,9 @@ test('settings provider status waits for stats and refreshes when stats arrive',
 
   assert.doesNotMatch(renderSettings, /state\.stats \? missingLimitProviderStatus\(\) : 'unavailable'/);
   assert.match(refreshStats, /renderLimitProviderCheckboxes\(\);/);
+  assert.match(refreshStats, /applyCodexActiveAccountFromStats\(\);/);
+  assert.doesNotMatch(refreshStats, /state\.codexActiveAccount = codexActiveAccountFromStats\(\);/);
+  assert.match(statsPush, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(statsPush, /renderLimitProviderCheckboxes\(\);/);
   // Account cards read state.stats, so every path that refreshes stats must
   // re-render them. Grok is automatic and belongs only to the generic provider
@@ -633,17 +665,19 @@ test('Accounts summary counts API-key and cookie account groups', () => {
 
   assert.match(summaryBody, /const minimaxLinked = minimaxAccountLinked\(\);/);
   assert.match(summaryBody, /const zaiLinked = externalProviderAccountLinked\('zai'\);/);
+  assert.match(summaryBody, /const zaiteamLinked = externalProviderAccountLinked\('zaiteam'\);/);
   assert.match(summaryBody, /const volcengineLinked = externalProviderAccountLinked\('volcengine'\);/);
   assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
   assert.match(summaryBody, /const kimicodingLinked = externalProviderAccountLinked\('kimicoding'\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(zaiLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(zaiteamLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(kimicodingLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 10/);
+  assert.match(summaryBody, /total: 11/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {

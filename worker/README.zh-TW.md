@@ -37,6 +37,22 @@ https://token-monitor-hub.<your-subdomain>.workers.dev
 
 把每個 agent 和小工具都指向這個 URL。
 
+### 一鍵部署故障排除
+
+Cloudflare 的 **Deploy to Cloudflare** 按鈕很方便，但一直有兩種間歇性故障：
+
+- **部署頁報「無法解析 Wrangler 配置文件」**——從 `worker/` 子目錄讀取設定時出的
+  岔子。
+- **部署後的 Worker 只回傳純文字 `Hello world`**——踩中了 Cloudflare 的已知匯入
+  故障，產生的倉庫*沒有* Worker 原始碼（只有 `README.md` + `wrangler.toml`）。它會
+  顯示成功，但背後根本沒有程式碼。把 Workers Builds 重新連到包含完整 `worker/` 目錄
+  的倉庫，或直接改用手動部署。
+
+兩者都是 CF 側的問題。故障在同一個瀏覽器工作階段裡往往有「黏性」，所以先用無痕/
+隱私視窗（或換個瀏覽器）重開部署連結再試。若仍失敗，就跳過按鈕——上面的手動
+`cd worker && npx wrangler deploy` 一定會成：同一份程式碼，只是少了 CF 那個不穩定的
+匯入步驟。
+
 ## 本機開發
 
 ```bash

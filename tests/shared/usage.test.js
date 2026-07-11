@@ -65,6 +65,58 @@ test('mergeDeviceRecord allows explicit empty limits to clear stale provider sta
   assert.deepEqual(merged.limits.providers, []);
 });
 
+test('aggregateDevices does not let an orphaned stale device id override the current limits state', () => {
+  const oldDevice = recordWithLimits({
+    deviceId: 'old-device-id',
+    updatedAt: '2026-07-08T13:08:54.000Z',
+    receivedAt: '2026-07-08T13:08:54.000Z',
+    limits: {
+      updatedAt: '2026-07-08T13:04:49.000Z',
+      refreshMs: 300000,
+      providers: [{
+        provider: 'codex',
+        accountKey: 'sha256:old-codex',
+        status: 'ok',
+        source: 'rpc',
+        updatedAt: '2026-07-08T13:04:49.000Z',
+        windows: [
+          { kind: 'session', usedPercent: 59, resetsAt: '2026-07-08T15:37:24.000Z', windowMinutes: 300 },
+          { kind: 'weekly', usedPercent: 54, resetsAt: '2026-07-14T04:16:57.000Z', windowMinutes: 10080 }
+        ]
+      }]
+    }
+  });
+  const currentDevice = recordWithLimits({
+    deviceId: 'current-device-id',
+    updatedAt: '2026-07-10T02:58:40.000Z',
+    receivedAt: '2026-07-10T02:58:41.000Z',
+    limits: {
+      updatedAt: '2026-07-10T02:55:17.000Z',
+      refreshMs: 300000,
+      providers: [{
+        provider: 'codex',
+        status: 'notConfigured',
+        updatedAt: '2026-07-10T02:55:17.000Z',
+        windows: []
+      }]
+    }
+  });
+
+  const aggregate = aggregateDevices(
+    [oldDevice, currentDevice],
+    10 * 60 * 1000,
+    Date.parse('2026-07-10T03:00:00.000Z')
+  );
+
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'old-device-id').stale, true);
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'current-device-id').stale, false);
+  assert.equal(aggregate.limits.providers.length, 1);
+  assert.equal(aggregate.limits.providers[0].provider, 'codex');
+  assert.equal(aggregate.limits.providers[0].status, 'notConfigured');
+  assert.equal(aggregate.limits.providers[0].sourceDeviceId, 'current-device-id');
+  assert.deepEqual(aggregate.limits.providers[0].windows, []);
+});
+
 test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods', () => {
   const existing = recordWithLimits();
   const incoming = {

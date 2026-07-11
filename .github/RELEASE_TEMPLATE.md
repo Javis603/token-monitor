@@ -1,15 +1,22 @@
 # English
 
-**Open-source build, not paid-signed.** macOS and Windows may ask you to confirm on first launch. Linux AppImage downloads may need executable permission — instructions below.
+**Open-source build.** macOS builds are signed and notarized. Windows signing is still being prepared, so Windows may show SmartScreen on first launch. Linux AppImage downloads may need executable permission — instructions below.
 
 ## What's changed
 
+### Added
+- **Compact total tokens:** Appearance now offers **Show compact total tokens** for an abbreviated total-token display. (#114)
+- **Tray quota percentages:** Choose **Limits: session limits for the first two tools** as the tray content to see their session-limit percentages at a glance. (#102)
+- **Codex email masking:** AI Tool Limits can now mask Codex account email addresses.
+
 ### Improved
-- **Account labels:** AI Tool Limits account labels now render with consistent capitalization in provider cards and the Codex account list.
-- **Bundled tokscale 4.2.0:** Detects Kiro IDE sessions (the usage watcher now covers them for live refresh), keeps OpenCode's own recorded costs instead of re-pricing them from tokens, and counts Claude Code deep-nested subagent transcripts.
+- **Codex account sign-in:** The browser sign-in flow now exposes an openable/copyable login link, tries available Codex installations, and supports the Codex CLI bundled with the ChatGPT macOS app. (#110, #113)
 
 ### Fixed
-- **GLM / Z.ai legacy quota:** Old GLM Coding Plans with a single 5-hour token quota no longer show it as a "Weekly" window — it renders as the 5-hour session window, and the monthly MCP bucket now shows a Monthly reset instead of a bogus 1-minute window. (#85)
+- **Codex account badge:** The local-account checkmark no longer appears for a single Codex account; it is shown only to distinguish accounts in a multi-account group.
+- **Synced limits:** Fresh provider data now takes precedence over stale device records in multi-device sync. (#111)
+- **Antigravity CLI usage:** Antigravity CLI usage is now counted under Antigravity, including CLI-only WSL homes. (#107)
+- **Tray limit indicators:** Stale quota-bar icons and empty icon spacing no longer linger in the system tray. (#89)
 
 ## Which file should I download?
 
@@ -20,13 +27,9 @@
 
 Other platforms are not pre-built — run from source per the [README](https://github.com/Javis603/token-monitor#readme). The macOS `.zip` is the same app repackaged; ignore it unless you specifically need it.
 
-## First-launch unlock
+## First launch
 
-**macOS:** right-click `Token Monitor.app` → Open (once). If you see "Token Monitor" can't be opened or is damaged:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Token Monitor.app"
-```
+**macOS:** open the `.dmg`, drag Token Monitor to Applications, then launch normally.
 
 **Windows:** SmartScreen → More info → Run anyway.
 
@@ -47,16 +50,23 @@ open-source: https://github.com/junhoyeo/tokscale
 
 # 中文
 
-**这是开源构建，不是付费签名版本。** macOS 和 Windows 首次启动时可能会要求你手动确认；Linux AppImage 下载后可能需要先赋予执行权限，操作说明见下方。
+**这是开源构建。** macOS 构建已签名并 notarize。Windows 签名还在准备中，所以 Windows 首次启动时可能会显示 SmartScreen；Linux AppImage 下载后可能需要先赋予执行权限，操作说明见下方。
 
 ## 更新内容
 
+### 新增
+- **简写总 Token：** 外观设置新增「显示简写总 Token」，可将总 Token 显示为简写形式。（#114）
+- **托盘额度百分比：** 托盘内容可选择「额度：前两个工具的单次额度」，一眼查看前两个工具的单次额度百分比。（#102）
+- **Codex 邮箱遮罩：** AI 工具额度现在可以遮罩 Codex 账号邮箱地址。
+
 ### 改进
-- **账号标签：** AI 工具额度的账号标签现在在额度卡片和 Codex 账号列表中统一首字母大写显示。
-- **内置 tokscale 4.2.0：** 新增 Kiro IDE 会话识别（用量监看现在也覆盖该目录，实现秒级刷新），保留 OpenCode 自身记录的费用、不再按 token 重新计价，并计入 Claude Code 深层子代理会话。
+- **Codex 账号登录：** 浏览器登录流程现在会显示可打开或复制的登录链接、尝试可用的 Codex 安装，并支持 macOS ChatGPT app 内置的 Codex CLI。（#110、#113）
 
 ### 修复
-- **GLM / Z.ai 旧版额度：** 旧版 GLM Coding Plan 的单一 5 小时 token 额度不再误显示为「Weekly」窗口，而是正确显示为 5 小时会话窗口；按月的 MCP 桶现在显示按月重置，不再出现错误的 1 分钟窗口。（#85）
+- **Codex 账号标记：** 只有一个 Codex 账号时，本机账号的 ✓ 不再错误显示；仅在多账号列表中用于区分账号。
+- **同步额度：** 多设备同步时，最新的 provider 数据现在会优先于过期设备记录。（#111）
+- **Antigravity CLI 用量：** Antigravity CLI 用量现在会计入 Antigravity，且支持仅有 CLI 数据的 WSL 主目录。（#107）
+- **托盘额度指示器：** 系统托盘不再残留过期的额度条图标或空白图标间距。（#89）
 
 ## 应该下载哪个文件？
 
@@ -67,13 +77,9 @@ open-source: https://github.com/junhoyeo/tokscale
 
 其他平台暂不提供预构建版本，请参考 [README](https://github.com/Javis603/token-monitor#readme) 从源码运行。macOS 的 `.zip` 只是同一个 app 的重新打包版本，除非你明确需要，否则可以忽略。
 
-## 首次启动放行
+## 首次启动
 
-**macOS：** 右键 `Token Monitor.app` → 打开（只需要一次）。如果看到「Token Monitor」未开启 或 已损坏：
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Token Monitor.app"
-```
+**macOS：** 打开 `.dmg`，把 Token Monitor 拖到 Applications，然后正常启动即可。
 
 **Windows：** SmartScreen → 更多信息 → 仍要运行。
 

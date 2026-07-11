@@ -32,32 +32,32 @@ A desktop widget that shows live token usage and AI Tool Limits across various A
 
 Token Monitor supports token usage, account-limit checks, and session details separately:
 
-|                                          Logo                                          | Tool                 | Data path                                                                                                            | Token Usage | AI Tool Limits | Session Details |
-| :------------------------------------------------------------------------------------: | -------------------- | -------------------------------------------------------------------------------------------------------------------- | :---------: | :------------: | :-------------: |
-|    <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" />     | Claude Code          | `~/.claude/projects/`, `~/.claude/transcripts/`                                                                      |     ✅      |       ✅       |       ✅        |
-|        <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" />        | Codex                | `~/.codex/sessions/`                                                                                                 |     ✅      |       ✅       |       ✅        |
-|     <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" />     | OpenCode             | `~/.local/share/opencode/`                                                                                           |     ✅      |       ✅       |       ✅        |
-| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent         | `$HERMES_HOME/state.db` or `~/.hermes/state.db`                                                                      |     ✅      |       —        |        —        |
-|     <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" />     | OpenClaw             | `~/.openclaw/agents/`                                                                                                |     ✅      |       —        |        —        |
-|       <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" />       | Cursor               | `~/.config/tokscale/cursor-cache/` (kept fresh by Cursor sync)                                                       |     ✅      |       ✅       |        —        |
-|  <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" />  | Antigravity          | `~/.config/tokscale/antigravity-cache/` (kept fresh by Antigravity sync)                                             |     ✅      |       ✅       |        —        |
-|        <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" />        | Cline                | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`)                                                    |     ✅      |       —        |        —        |
-|         <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" />         | Kimi CLI / Kimi Code | `~/.kimi/sessions/`, `~/.kimi-code/sessions/` (`KIMI_CODE_HOME`); Kimi API key (Kimi Coding Plan quota via Kimi API) |     ✅      |       ✅       |        —        |
-|         <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" />         | Qwen CLI             | `~/.qwen/projects/`                                                                                                  |     ✅      |       —        |        —        |
-|      <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" />       | Grok Build           | `$GROK_HOME/sessions/` or `~/.grok/sessions/`                                                                        |     ✅      |       ✅       |        —        |
-|  <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" />   | GitHub Copilot CLI   | `~/.copilot/otel/`                                                                                                   |     ✅      |       ✅       |        —        |
-|           <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" />           | Pi                   | `~/.pi/agent/sessions/`, `~/.omp/agent/sessions/` (Oh My Pi)                                                         |     ✅      |       —        |        —        |
-|          <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" />          | Zed                  | `~/.local/share/zed/threads/threads.db`                                                                              |     ✅      |       —        |        —        |
-|    <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" />     | Kilo Code            | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux & remote/WSL only                              |     ✅      |       —        |        —        |
-|    <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" />    | MiMo Code            | `~/.local/share/mimocode/mimocode.db`                                                                                |     ✅      |       —        |        —        |
-|        <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" />        | ZCode / GLM          | `~/.zcode/projects/`; Z.ai API key (GLM Coding Plan quota via Z.ai API)                                              |     ✅      |       ✅       |        —        |
-|         <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" />         | Kiro                 | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage & `kiro-cli` DB                                                      |     ✅      |       ✅       |        —        |
-|    <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" />    | CodeBuddy            | `~/.codebuddy/projects/` + IDE / VS Code extension logs                                                              |     ✅      |       —        |        —        |
-|    <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" />    | WorkBuddy            | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db`                                                                |     ✅      |       —        |        —        |
-|     <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" />     | DeepSeek             | DeepSeek API key (balance via DeepSeek API)                                                                          |      —      |       ✅       |        —        |
-|      <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" />      | Minimax              | Minimax API key (Token Plan quota via Minimax API)                                                                   |      —      |       ✅       |        —        |
-|   <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" />   | Volcengine           | Ark API key or Volcengine AK/SK (Ark Coding Plan quota via Volcengine API)                                           |      —      |       ✅       |        —        |
-|        <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" />        | Qoder                | Qoder dashboard cookie (big-model credits via Qoder usage API)                                                       |      —      |       ✅       |        —        |
+| Logo | Tool | Data path | Token Usage | AI Tool Limits | Session Details |
+|:---:|------|-----------|:---:|:---:|:---:|
+| <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`, `~/.claude/transcripts/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/sessions/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `$HERMES_HOME/state.db` or `~/.hermes/state.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor | `~/.config/tokscale/cursor-cache/` (kept fresh by Cursor sync) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.config/tokscale/antigravity-cache/` (kept fresh by Antigravity sync) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code | `~/.kimi/sessions/`, `~/.kimi-code/sessions/` (`KIMI_CODE_HOME`); Kimi API key (Kimi Coding Plan quota via Kimi API) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `$GROK_HOME/sessions/` or `~/.grok/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | `~/.copilot/otel/` ([Set up](docs/github-copilot-otel.md)) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/`, `~/.omp/agent/sessions/` (Oh My Pi) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux & remote/WSL only | ✅ | — | — |
+| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/projects/`; Z.ai API key (GLM personal/team Coding Plan quota via Z.ai API) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage & `kiro-cli` DB | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | — |
+| <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API key (balance via DeepSeek API) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API key (Token Plan quota via Minimax API) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key or Volcengine AK/SK (Ark Coding Plan quota via Volcengine API) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | Qoder dashboard cookie (big-model credits via Qoder usage API) | — | ✅ | — |
 
 ## Why Token Monitor?
 
@@ -65,7 +65,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ## Features
 
-- **Live token tracking** for Claude Code, Codex, Hermes Agent, OpenCode, OpenClaw, Cursor, Antigravity, Cline, Kimi, Qwen, Grok Build, GitHub Copilot CLI, Pi, Zed, Kilo Code, MiMo Code, ZCode, Kiro, CodeBuddy, and WorkBuddy (UI updates within seconds of each turn)
+- **Live token tracking** for Claude Code, Codex, Hermes Agent, OpenCode, OpenClaw, Cursor, Antigravity, Cline, Kimi, Qwen, Grok Build, GitHub Copilot, Pi, Zed, Kilo Code, MiMo Code, ZCode, Kiro, CodeBuddy, and WorkBuddy (UI updates within seconds of each turn)
 - **WSL usage (Windows)** — usage from AI tools running inside a running WSL distro is detected automatically and merged into your totals (refreshed on the periodic scan, about every 5 minutes)
 - **Real-time multi-device sync** over Server-Sent Events
 - **Breakdown views** grouped by tool, device, model, session, or account limits
@@ -75,7 +75,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Cost in your currency** — show costs in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model usage history (bar and K-line views) across all your devices
 - **Data export** — export your usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
-- **AI Tool Limits detection** for Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, Qoder, and Kimi Coding with session, weekly, billing, and credits windows, plus DeepSeek prepaid balance and today/month spend
+- **AI Tool Limits detection** for Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, GitHub Copilot, Kiro, GLM, Volcengine, Qoder, and Kimi Coding with session, weekly, billing, and credits windows, plus DeepSeek prepaid balance and today/month spend. Tracked Codex accounts can be made the local Codex account in one click, without re-authenticating.
 - **Optional Status view** for Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
 - **Customizable tool list** to hide, pin, and reorder tools in the main dashboard without changing what gets tracked
 - **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, and transparent window mode
@@ -88,30 +88,33 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Discord Rich Presence** to broadcast today's tokens, cost, and top client (opt-in)
 - **Privacy-first:** only summary numbers ever leave your machine
 
-|                  Limits View                   |                   Devices View                   |                  Models View                   |
-| :--------------------------------------------: | :----------------------------------------------: | :--------------------------------------------: |
+| Limits View | Devices View | Models View |
+|:---:|:---:|:---:|
 | ![Limits View](.github/assets/limits-view.png) | ![Devices View](.github/assets/devices-view.png) | ![Models View](.github/assets/models-view.png) |
 
-|                   Session View                    |                    Session Details                     |                  Service Status                   |
-| :-----------------------------------------------: | :----------------------------------------------------: | :-----------------------------------------------: |
+| Session View | Session Details | Service Status |
+|:---:|:---:|:---:|
 | ![Session View](.github/assets/sessions-view.png) | ![Session Details](.github/assets/session-details.png) | ![Service Status](.github/assets/status-view.png) |
 
-|                     Usage Dashboard — Overview                     |                    Usage Dashboard — Trends                    |
-| :----------------------------------------------------------------: | :------------------------------------------------------------: |
+| Usage Dashboard — Overview | Usage Dashboard — Trends |
+|:---:|:---:|
 | ![Usage Dashboard Overview](.github/assets/dashboard-overview.png) | ![Usage Dashboard Trends](.github/assets/dashboard-trends.png) |
 
 ## Installation
 
-### Local mode — single device
+Download from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
 
-The default. No hub, no agent, no config.
+- **macOS (Apple Silicon)** — `.dmg`, signed and notarized
+- **Windows 10/11** — setup `.exe`; signing is being prepared, so SmartScreen may appear
+- **Linux x64** — `.AppImage`
 
-```bash
-npm install
-npm start
-```
+Packaged builds check GitHub Releases automatically. When an update is available, the app shows an update indicator; supported platforms can also install from Settings → General.
 
-### Multi-device sync
+### First run
+
+Local mode is the default: launch the app and it starts tracking this device. No hub, agent, or config required.
+
+## Multi-device sync
 
 Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
 
@@ -146,21 +149,19 @@ npx wrangler deploy
 
 Paste the deployed URL into each device's widget at Settings → Multi-device Sync. See [worker/README.md](worker/README.md) for the iOS widget recipe and endpoint reference, or [docs/API.md](docs/API.md) for the hub HTTP API.
 
-## Desktop installer
-
-You can download the app from the [releases page](https://github.com/Javis603/token-monitor/releases). All releases are unsigned; release notes include first-launch steps for macOS (arm64), Windows (x64), and Linux x64 AppImage. Other platforms run from source via `npm start`.
+## App data
 
 App state lives in the OS user-data dir — delete it along with the app to fully uninstall.
 
-| Platform | Path                                           |
-| -------- | ---------------------------------------------- |
-| macOS    | `~/Library/Application Support/Token Monitor/` |
-| Windows  | `%APPDATA%/Token Monitor/`                     |
-| Linux    | `~/.config/Token Monitor/`                     |
+| Platform | Path |
+|----------|------|
+| macOS | `~/Library/Application Support/Token Monitor/` |
+| Windows | `%APPDATA%/Token Monitor/` |
+| Linux | `~/.config/Token Monitor/` |
 
 ## Build from source
 
-Releases are unsigned, so you may prefer to build your own installer — same code, your machine. Needs Node.js 22.13+ and the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
+To build your own installer, use Node.js 22.13+ on the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
 
 ```bash
 npm install
@@ -170,7 +171,7 @@ npm run dist:linux # Linux x64 AppImage        → dist/
 npm run pack       # unpacked app dir (no installer), for quick local testing
 ```
 
-Output lands in `dist/`. Builds are unsigned, so the same first-launch steps apply. Other platforms have no packaging target — run directly with `npm start`.
+Output lands in `dist/`. Windows and Linux use the matching `dist:*` script above on the target OS. Packaging the macOS release build requires a local Developer ID Application signing identity; use `npm start` for local development or unsupported platforms.
 
 ## How it works
 
@@ -216,7 +217,7 @@ TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; set empty to disable tracking
 TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults to enabled; set to 0 to skip collecting Trends history
 TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults to enabled; set to 0 to skip CLI probing
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported (claude, codex, cursor, antigravity, opencode, deepseek, minimax, grok, copilot, kiro, zai, volcengine, qoder, kimicoding)
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported (claude, codex, cursor, antigravity, opencode, deepseek, minimax, grok, copilot, kiro, zai, zaiteam, volcengine, qoder, kimicoding)
 ```
 
 The widget reads the same env vars as first-run defaults, then takes over with its own GUI-managed settings.

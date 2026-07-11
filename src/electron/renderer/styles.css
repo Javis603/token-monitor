@@ -795,6 +795,20 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   word-break: break-word;
 }
 .codex-login-output.hidden { display: none; }
+.codex-login-details {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.codex-login-details summary {
+  width: max-content;
+  cursor: pointer;
+  user-select: none;
+}
+.codex-login-details .codex-login-output { margin-top: 6px; }
+.codex-login-details.hidden,
+#codexLoginUrlActions.hidden,
+#codexLoginStatus.hidden { display: none; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
 .inline-link {
@@ -1577,17 +1591,36 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   backdrop-filter: none;
 }
 .label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.total-number-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
 .total-number {
+  flex: 0 1 auto;
+  min-width: 0;
   margin-top: 8px;
   color: var(--number);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   font-weight: 500;
   font-size: clamp(30px, 11vw, 46px);
   line-height: 1.05;
+  /* Equal-width digits so the counting animation does not wobble the number's
+     width (and shove the compact chip) frame to frame. */
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.total-compact {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.total-compact.hidden { display: none; }
 .cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
 .breakdown {
   position: relative;
@@ -2163,6 +2196,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-qwen       { -webkit-mask-image: url(../../../assets/icons/qwen.svg);          mask-image: url(../../../assets/icons/qwen.svg); }
 .row-icon-moonshot   { -webkit-mask-image: url(../../../assets/icons/moonshot.svg);      mask-image: url(../../../assets/icons/moonshot.svg); }
 .row-icon-zai        { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
+.row-icon-zaiteam    { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-cohere     { -webkit-mask-image: url(../../../assets/icons/cohere.svg);        mask-image: url(../../../assets/icons/cohere.svg); }
 .row-icon-xiaomi     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
@@ -2227,6 +2261,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   mask-image: url(../../../assets/icons/kiro.svg);
 }
 .limit-icon-zai {
+  -webkit-mask-image: url(../../../assets/icons/zai.svg);
+  mask-image: url(../../../assets/icons/zai.svg);
+}
+.limit-icon-zaiteam {
   -webkit-mask-image: url(../../../assets/icons/zai.svg);
   mask-image: url(../../../assets/icons/zai.svg);
 }
@@ -2519,14 +2557,142 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .limit-live-badge {
   flex: 0 0 auto;
-  color: var(--muted);
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  margin-left: -6px;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
   font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
   white-space: nowrap;
 }
-.limit-live-badge::before {
-  content: "\2713\00a0";
+.limit-account-active-zone {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  outline: none;
+}
+.limit-account-active-zone .limit-name-title {
+  display: block;
+  transition: color 140ms ease, text-shadow 140ms ease;
+}
+.limit-account-active-zone:hover .limit-name-title,
+.limit-account-active-zone:focus-visible .limit-name-title {
+  color: var(--text);
+  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.16);
+}
+.limit-account-active-popover {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  left: calc(100% + 2px);
+  display: block;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), 0.075);
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 22px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(-2px);
+  transition: opacity 140ms ease, transform 160ms ease;
+  white-space: nowrap;
+}
+.limit-account-active-zone:hover .limit-account-active-popover,
+.limit-account-active-zone:focus-visible .limit-account-active-popover {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+.limit-account-switch-zone {
+  position: relative;
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+}
+.limit-account-switch-zone::after {
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  width: 10px;
+  height: calc(100% + 10px);
+  content: "";
+}
+.limit-account-switch-zone .limit-name-title {
+  display: block;
+  transition: color 140ms ease, text-shadow 140ms ease;
+}
+.limit-account-switch-zone:hover .limit-name-title,
+.limit-account-switch-zone:focus-within .limit-name-title {
+  color: var(--text);
+  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.16);
+}
+.limit-account-switch-popover {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  left: calc(100% + 8px);
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(-2px);
+  transition: opacity 140ms ease, transform 160ms ease;
+  white-space: nowrap;
+}
+.limit-account-switch-zone:hover .limit-account-switch-popover,
+.limit-account-switch-zone:focus-within .limit-account-switch-popover,
+.limit-account-switch-zone.is-switching .limit-account-switch-popover,
+.limit-account-switch-zone.is-error .limit-account-switch-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
+}
+.limit-account-switch-button {
+  display: inline-grid;
+  place-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid rgba(var(--line-rgb), 0.18);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.08), rgba(var(--overlay-rgb), 0.025)),
+    rgba(var(--glass-rgb), 0.52);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+  backdrop-filter: blur(14px) saturate(108%);
+}
+.limit-account-switch-button:hover,
+.limit-account-switch-button:focus-visible {
+  border-color: rgba(var(--accent-rgb), 0.32);
+  background: rgba(var(--accent-rgb), 0.075);
   color: var(--green);
-  font-weight: 700;
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.16), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
+}
+.limit-account-switch-button:disabled {
+  cursor: default;
+}
+.limit-account-switch-zone.is-error .limit-account-switch-button {
+  background: rgba(244, 119, 136, 0.14);
+  color: var(--red);
+}
+@media (prefers-reduced-motion: reduce) {
+  .limit-account-switch-zone .limit-name-title,
+  .limit-account-active-zone .limit-name-title,
+  .limit-account-active-popover,
+  .limit-account-switch-popover {
+    transition: none;
+  }
 }
 .limit-account-row {
   padding: 0;
@@ -2975,6 +3141,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   .total-panel { padding: 2px 2px; }
   .label-row { font-size: clamp(11px, 2.6vw, 16px); }
   .total-number { margin-top: clamp(2px, 1.2vh, 8px); font-size: clamp(22px, 13vw, 60px); }
+  .total-compact { font-size: clamp(11px, 3vw, 16px); }
   .cost { margin-top: clamp(2px, 1vh, 6px); font-size: clamp(12px, 2.8vw, 18px); }
   .breakdown,
   .home-panel,
@@ -2986,6 +3153,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel.hidden,
 #minimaxManualPanel.hidden,
 #zaiManualPanel.hidden,
+#zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
 #copilotManualPanel.hidden,
@@ -2995,6 +3163,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekErrorMessage.hidden,
 #minimaxErrorMessage.hidden,
 #zaiErrorMessage.hidden,
+#zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
 #qoderErrorMessage.hidden,
 #copilotErrorMessage.hidden,
@@ -3004,6 +3173,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel,
 #minimaxManualPanel,
 #zaiManualPanel,
+#zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
 #copilotManualPanel {
@@ -3014,6 +3184,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel > .accordion-animation-inner,
 #minimaxManualPanel > .accordion-animation-inner,
 #zaiManualPanel > .accordion-animation-inner,
+#zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner {
   display: grid;
@@ -3025,6 +3196,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,
+#zaiteamManualPanel input,
 #zaiApiRegionInput,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
@@ -3038,6 +3210,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,
+#zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #copilotManualDetails input {

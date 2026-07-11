@@ -15,12 +15,20 @@ jobs:
             artifact_path: |
               dist/*.dmg
               dist/*.zip
+              dist/latest-mac.yml
+              dist/*.blockmap
           - os: windows-latest
             target: win
-            artifact_path: dist/*.exe
+            artifact_path: |
+              dist/*.exe
+              dist/latest.yml
+              dist/*.blockmap
           - os: ubuntu-latest
             target: linux
-            artifact_path: dist/*.AppImage
+            artifact_path: |
+              dist/*.AppImage
+              dist/latest-linux.yml
+              dist/*.blockmap
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -31,11 +39,50 @@ jobs:
       - name: Platform evidence
         run: node -p "process.platform + '-' + process.arch"
       - run: npm ci
+      # electron-builder needs the notarization key as a file, not the base64 secret directly.
+      - name: Decode Apple API key
+        if: matrix.target == 'mac'
+        run: |
+          echo "${{ secrets.APPLE_API_KEY_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/apple_api_key.p8"
+          echo "APPLE_API_KEY=$RUNNER_TEMP/apple_api_key.p8" >> "$GITHUB_ENV"
       # APPIMAGE_EXTRACT_AND_RUN lets electron-builder's bundled appimagetool
       # run without libfuse2 (absent on the runners); a no-op on mac/win.
       - run: npm run dist:${{ matrix.target }}
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+      - name: Verify mac code signing and notarization
+        if: matrix.target == 'mac'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          app_path=$(find dist -maxdepth 2 -name '*.app' -print -quit)
+          if [ -z "$app_path" ]; then
+            echo "no .app bundle found under dist/" >&2
+            exit 1
+          fi
+          dmg_path=$(find dist -maxdepth 1 -name '*.dmg' -print -quit)
+          if [ -z "$dmg_path" ]; then
+            echo "no .dmg installer found under dist/" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          spctl -a -vvv --type execute "$app_path"
+          xcrun stapler validate "$app_path"
+          xcrun notarytool submit "$dmg_path" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$dmg_path"
+          xcrun stapler validate "$dmg_path"
+      - name: Verify updater artifact names
+        run: npm run verify:release-artifact-names
       - uses: actions/upload-artifact@v4
         with:
           name: token-monitor-${{ matrix.target }}
@@ -60,4 +107,8 @@ jobs:
             artifacts/*.zip
             artifacts/*.exe
             artifacts/*.AppImage
+            artifacts/latest.yml
+            artifacts/latest-mac.yml
+            artifacts/latest-linux.yml
+            artifacts/*.blockmap
           body_path: .github/RELEASE_TEMPLATE.md

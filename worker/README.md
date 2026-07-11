@@ -41,6 +41,24 @@ https://token-monitor-hub.<your-subdomain>.workers.dev
 
 Point each agent and widget at that URL.
 
+### Troubleshooting the one-click deploy
+
+Cloudflare's **Deploy to Cloudflare** button is convenient but has been
+intermittently unreliable, in two ways:
+
+- **The deploy page errors that it "can't parse the Wrangler configuration
+  file"** — a hiccup reading the config from the `worker/` subdirectory.
+- **The deployed Worker only responds with plain `Hello world`** — Cloudflare
+  hit a known import failure and created a repo *without* the Worker source
+  (only `README.md` + `wrangler.toml`). It reports success, but there's no code
+  behind it. Reconnect Workers Builds to a repo that contains the full `worker/`
+  directory, or just deploy manually.
+
+Both are CF-side. The failure tends to be sticky within a browser session, so
+first retry the deploy link in a private/incognito window (or a fresh browser).
+If it persists, skip the button — the manual `cd worker && npx wrangler deploy`
+above always works: same code, without CF's flaky import step.
+
 ## Local development
 
 ```bash

@@ -27,6 +27,7 @@ const WSL_DATA_MARKERS = [
   '.qwen/projects',
   '.grok/sessions',
   '.copilot/otel',
+  '.gemini/antigravity-cli/conversations',
   '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
   '.pi/agent/sessions',
@@ -63,6 +64,9 @@ const MARKER_CLIENTS = {
   '.qwen/projects': 'qwen',
   '.grok/sessions': 'grok',
   '.copilot/otel': 'copilot',
+  // Antigravity CLI's own parse-local root, mapped to the umbrella `antigravity`
+  // id we track; tokscaleClientFilter widens the scan to the antigravity-cli id.
+  '.gemini/antigravity-cli/conversations': 'antigravity',
   '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
   '.pi/agent/sessions': 'pi',

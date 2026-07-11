@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
@@ -19,9 +20,16 @@ const { startCollector, lookupModelPricing, normalizeHistoryIntervalMs } = requi
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, volcengineCredentials, qoderCookie, kimicodingToken } = require('../shared/limitCollector');
+const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimicodingToken } = require('../shared/limitCollector');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
+const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
+const {
+  codexAccountMatchesIdentity,
+  liveCodexAuthPath,
+  readCodexAuthMaterial,
+  writeCodexAuthFile
+} = require('../shared/codexSystemSwitch');
 const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
@@ -45,7 +53,13 @@ const {
   getTokscaleStatus,
   resetToBundled
 } = require('../shared/tokscaleUpdater');
-const { checkLatestRelease, shouldSkipAppUpdateCheck } = require('../shared/appUpdater');
+const {
+  appUpdateInstallSupport,
+  checkLatestRelease,
+  downloadedAppUpdateMatchesLatest,
+  GITHUB_REPO,
+  shouldSkipAppUpdateCheck
+} = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
@@ -63,6 +77,7 @@ const { syncLimits } = require('../shared/limits');
 const { historyPreview } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
+const linuxAutostart = require('./linuxAutostart');
 const { buildTrayIcon, createTray, formatTrayText, pickUsageTrayIconId, popoverBounds } = require('./tray');
 const {
   macActivationPolicyMode,
@@ -118,7 +133,7 @@ const CSP_HEADER = [
   "form-action 'none'",
   "frame-ancestors 'none'"
 ].join('; ');
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon']);
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'interval']);
@@ -165,6 +180,7 @@ function defaultSettings() {
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
+    showCompactTotalTokens: false,
     themeColors: {},
     vendorColors: {},
     floatingBubbleEnabled: false,
@@ -204,8 +220,8 @@ function defaultSettings() {
     hiddenHomeLimitProviders: '',
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
+    maskLimitAccountEmails: false,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
-    showActiveAccount: parseBoolean(process.env.TOKEN_MONITOR_SHOW_ACTIVE_ACCOUNT, false),
     windowBounds: null,
     zoomFactor: 1,
     showTrayIcon: true,
@@ -224,6 +240,9 @@ function defaultSettings() {
     copilotEnterpriseHost: '',
     zaiApiKey: '',
     zaiApiRegion: normalizeZaiApiRegion(process.env.TOKEN_MONITOR_ZAI_API_REGION || process.env.ZAI_API_REGION || process.env.Z_AI_API_HOST || 'global'),
+    zaiTeamApiKey: '',
+    zaiTeamOrganizationId: '',
+    zaiTeamProjectId: '',
     volcengineAccessKeyId: '',
     volcengineSecretAccessKey: '',
     volcengineRegion: '',
@@ -312,6 +331,18 @@ function currentZaiApiKey() {
   return settings?.zaiApiKey || zaiToken(process.env);
 }
 
+function normalizeZaiTeamApiKey(value) {
+  return zaiTeamToken({}, String(value || ''));
+}
+
+function normalizeZaiTeamId(value) {
+  return String(value || '').trim();
+}
+
+function currentZaiTeamApiKey() {
+  return settings?.zaiTeamApiKey || zaiTeamToken(process.env);
+}
+
 function normalizeVolcengineRegion(value) {
   const raw = String(value || '').trim().toLowerCase();
   return raw || '';
@@ -347,7 +378,9 @@ function normalizeCopilotEnterpriseHost(value) {
   return String(value || '').trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase();
 }
 
-let codexLoginInFlight = false;
+let codexLoginController = null;
+let codexLoginFlowId = '';
+let codexLoginCanCancel = false;
 let copilotLoginController = null;
 let copilotLoginFlowId = '';
 
@@ -393,11 +426,26 @@ function codexManagedRoot() {
   return path.join(app.getPath('userData'), 'managed-codex-homes');
 }
 
+function codexManagedHomePath(accountId) {
+  const resolvedRoot = path.resolve(codexManagedRoot());
+  const resolvedHome = path.resolve(resolvedRoot, String(accountId || ''));
+  if (resolvedHome === resolvedRoot) return '';
+  if (!resolvedHome.startsWith(`${resolvedRoot}${path.sep}`)) return '';
+  return resolvedHome;
+}
+
+function codexEmailDerivedAccountKey(account, identity) {
+  const email = String(identity.email || account.email || '').trim().toLowerCase();
+  return Boolean(email && String(account.accountKey || '').trim() === hashAccountKey(email));
+}
+
 function findExistingCodexAccount(accounts, identity) {
-  return accounts.find((account) => (
-    (identity.accountKey && account.accountKey === identity.accountKey) ||
-    (identity.email && account.email === identity.email)
-  ));
+  return accounts.find((account) => {
+    if (identity.accountKey && account.accountKey && !codexEmailDerivedAccountKey(account, identity)) {
+      return account.accountKey === identity.accountKey;
+    }
+    return Boolean(identity.email && account.email === identity.email);
+  });
 }
 
 function codexAccountId(identity, existing) {
@@ -418,7 +466,7 @@ async function removeManagedHomeIfSafe(homePath) {
 
 // Records a managed account for the auth that already lives in `homePath`, then
 // reloads the collector so the new account's limits show up immediately.
-function commitCodexManagedAccount(identity, homePath, existing) {
+function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
   const now = new Date().toISOString();
   const id = codexAccountId(identity, existing);
   const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
@@ -431,15 +479,40 @@ function commitCodexManagedAccount(identity, homePath, existing) {
     authPath: path.join(homePath, 'auth.json'),
     addedAt: existing?.addedAt || now,
     updatedAt: now,
-    enabled: true
+    enabled: options.enabled ?? true
   };
   settings.codexManagedAccounts = normalizeCodexManagedAccounts([
     ...accounts.filter((account) => account.id !== id),
     record
   ]);
   saveSettings();
-  startMode();
+  if (options.restart !== false) startMode();
   return codexAccountsForRenderer().find((account) => account.id === id);
+}
+
+function hasCodexIdentity(identity) {
+  return Boolean(identity?.accountKey || identity?.email);
+}
+
+async function preserveLiveCodexAuthAsManagedAccount(targetIdentity) {
+  let liveMaterial;
+  try {
+    liveMaterial = await readCodexAuthMaterial(liveCodexAuthPath(process.env));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') console.warn('Could not read live Codex auth before switching accounts:', error?.message || error);
+    return null;
+  }
+  if (!hasCodexIdentity(liveMaterial.identity)) return null;
+  if (codexAccountMatchesIdentity(targetIdentity, liveMaterial.identity)) return null;
+  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+  const existing = findExistingCodexAccount(accounts, liveMaterial.identity);
+  const homePath = codexManagedHomePath(codexAccountId(liveMaterial.identity, existing));
+  if (!homePath) return null;
+  await writeCodexAuthFile(path.join(homePath, 'auth.json'), liveMaterial.data);
+  return commitCodexManagedAccount(liveMaterial.identity, homePath, existing, {
+    enabled: existing?.enabled ?? true,
+    restart: false
+  });
 }
 
 function codexLoginErrorMessage(result) {
@@ -451,23 +524,42 @@ function codexLoginErrorMessage(result) {
       return `Could not start codex login.${detail}`;
     case 'timedOut':
       return `Sign-in timed out. Finish the browser login, then try again.${detail}`;
+    case 'cancelled':
+      return 'Sign-in cancelled.';
     default:
       return `codex login failed.${detail}`;
   }
 }
 
+function cancelledCodexLoginResult() {
+  return {
+    ok: false,
+    error: codexLoginErrorMessage({ outcome: 'cancelled' }),
+    outcome: 'cancelled'
+  };
+}
+
+async function rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal) {
+  if (movedToFinal) await removeManagedHomeIfSafe(homePath);
+  if (backupHomePath) await fs.promises.rename(backupHomePath, homePath);
+}
+
 // Best practice: each account gets its own OAuth grant via an isolated
 // `codex login` (CodexBar/tokscale model), so it never shares a refresh-token
 // lineage with the user's live Codex CLI login.
-async function addCodexManagedAccount(onOutput) {
+async function addCodexManagedAccount(onOutput, options = {}) {
   await fs.promises.mkdir(codexManagedRoot(), { recursive: true });
   const tempHome = path.join(codexManagedRoot(), `pending-${crypto.randomUUID()}`);
   await fs.promises.mkdir(tempHome, { recursive: true });
+  let backupHomePath = '';
+  let movedToFinal = false;
+  let accountCommitted = false;
   try {
-    const result = await runCodexLogin({ homePath: tempHome, onOutput }, { env: process.env });
+    const result = await runCodexLogin({ homePath: tempHome, onOutput, signal: options.signal }, { env: process.env });
     if (result.outcome !== 'success') {
       return { ok: false, error: codexLoginErrorMessage(result), outcome: result.outcome };
     }
+    if (options.signal?.aborted) return cancelledCodexLoginResult();
     let auth;
     try {
       auth = JSON.parse(await fs.promises.readFile(path.join(tempHome, 'auth.json'), 'utf8'));
@@ -478,15 +570,71 @@ async function addCodexManagedAccount(onOutput) {
     if (!identity.accountKey && !identity.email) {
       return { ok: false, error: 'Could not identify the Codex account after sign-in.' };
     }
+    if (options.signal?.aborted) return cancelledCodexLoginResult();
     const existing = findExistingCodexAccount(normalizeCodexManagedAccounts(settings.codexManagedAccounts), identity);
-    const homePath = path.join(codexManagedRoot(), codexAccountId(identity, existing));
+    const homePath = codexManagedHomePath(codexAccountId(identity, existing));
+    if (!homePath) return { ok: false, error: 'The saved Codex account path is invalid.' };
     if (path.resolve(homePath) !== path.resolve(tempHome)) {
-      await removeManagedHomeIfSafe(homePath);
-      await fs.promises.rename(tempHome, homePath);
+      if (options.signal?.aborted) return cancelledCodexLoginResult();
+      const candidateBackupPath = `${homePath}.backup-${crypto.randomUUID()}`;
+      try {
+        await fs.promises.rename(homePath, candidateBackupPath);
+        backupHomePath = candidateBackupPath;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+      if (options.signal?.aborted) {
+        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+        backupHomePath = '';
+        return cancelledCodexLoginResult();
+      }
+      try {
+        await fs.promises.rename(tempHome, homePath);
+        movedToFinal = true;
+      } catch (error) {
+        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+        backupHomePath = '';
+        throw error;
+      }
+      if (options.signal?.aborted) {
+        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+        backupHomePath = '';
+        movedToFinal = false;
+        return cancelledCodexLoginResult();
+      }
     }
-    return { ok: true, account: commitCodexManagedAccount(identity, homePath, existing) };
+    if (options.signal?.aborted) {
+      await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+      backupHomePath = '';
+      movedToFinal = false;
+      return cancelledCodexLoginResult();
+    }
+    const previousAccounts = settings.codexManagedAccounts;
+    options.onCommit?.();
+    let account;
+    try {
+      account = commitCodexManagedAccount(identity, homePath, existing, { restart: false });
+      if (backupHomePath) {
+        await removeManagedHomeIfSafe(backupHomePath);
+        backupHomePath = '';
+      }
+      accountCommitted = true;
+    } catch (error) {
+      settings.codexManagedAccounts = previousAccounts;
+      try {
+        saveSettings();
+      } catch (rollbackError) {
+        console.warn('Could not restore Codex account settings:', rollbackError?.message || rollbackError);
+      }
+      await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
+      backupHomePath = '';
+      movedToFinal = false;
+      throw error;
+    }
+    startMode();
+    return { ok: true, account };
   } finally {
-    await removeManagedHomeIfSafe(tempHome).catch(() => {});
+    if (!accountCommitted) await removeManagedHomeIfSafe(tempHome).catch(() => {});
   }
 }
 
@@ -514,12 +662,72 @@ function setCodexManagedAccountEnabled(id, enabled) {
   return { ok: true, accounts: codexAccountsForRenderer() };
 }
 
+async function switchCodexSystemAccount(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  if (account.enabled === false) return { ok: false, error: 'Account is disabled' };
+
+  let targetMaterial;
+  try {
+    targetMaterial = await readCodexAuthMaterial(account.authPath || path.join(account.homePath, 'auth.json'));
+  } catch (error) {
+    return { ok: false, error: `Could not read the selected Codex account credentials: ${error?.message || error}` };
+  }
+  if (!hasCodexIdentity(targetMaterial.identity)) {
+    return { ok: false, error: 'Could not identify the selected Codex account credentials.' };
+  }
+
+  try {
+    await preserveLiveCodexAuthAsManagedAccount(targetMaterial.identity);
+    await writeCodexAuthFile(liveCodexAuthPath(process.env), targetMaterial.data);
+    const refreshedAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+    const refreshed = refreshedAccounts.find((entry) => entry.id === account.id) || account;
+    commitCodexManagedAccount(targetMaterial.identity, refreshed.homePath, refreshed, {
+      enabled: refreshed.enabled !== false
+    });
+    const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
+    const accountsForRenderer = codexAccountsForRenderer();
+    return {
+      ok: true,
+      activeAccountId,
+      activeAccount: accountsForRenderer.find((entry) => entry.id === activeAccountId) || null,
+      accounts: accountsForRenderer
+    };
+  } catch (error) {
+    return { ok: false, error: `Could not switch the local Codex account: ${error?.message || error}` };
+  }
+}
+
+async function refreshCodexManagedAccountLimits(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  if (account.enabled === false) return { ok: false, error: 'Account is disabled' };
+  try {
+    const summary = await collectLimitsOnce({
+      ...settings,
+      limitsEnabled: true,
+      limitProviders: 'codex',
+      includeLiveCodexAccount: false,
+      codexManagedAccounts: [account]
+    }, { env: process.env });
+    return {
+      ok: true,
+      providers: (summary.providers || []).filter((provider) => provider?.provider === 'codex')
+    };
+  } catch (error) {
+    return { ok: false, error: `Could not refresh Codex account limits: ${error?.message || error}` };
+  }
+}
+
 function migrateLimitProviders(value) {
-  const normalized = parseLimitProviders(value).join(',');
-  // Upgrade: users who had the old 2-provider or 4-provider full defaults get the new default (which includes opencode).
-  if (normalized === 'claude,codex') return defaultLimitProviders();
-  if (normalized === 'claude,codex,cursor,antigravity') return defaultLimitProviders();
-  return normalized;
+  // Saved provider selections are user intent. Normalize ids, but do not expand
+  // older defaults into today's full provider list because the saved shape is
+  // indistinguishable from a deliberate "only these providers" choice.
+  return parseLimitProviders(value).join(',');
 }
 
 function migrateLimitProviderOrder(value) {
@@ -1018,17 +1226,23 @@ function saveSettings() {
 }
 
 function loginItemEnabledHere() {
-  return app.isPackaged && process.platform !== 'linux';
+  if (!app.isPackaged) return false;
+  // Electron login items only cover macOS/Windows; on Linux we manage an XDG
+  // autostart entry ourselves, which needs the AppImage runtime ($APPIMAGE).
+  if (process.platform === 'linux') return linuxAutostart.autostartSupported();
+  return true;
 }
 
 function currentLoginItemState() {
   if (!loginItemEnabledHere()) return false;
+  if (process.platform === 'linux') return linuxAutostart.isAutostartEnabled();
   try { return Boolean(app.getLoginItemSettings().openAtLogin); }
   catch (_) { return false; }
 }
 
 function applyLoginItem(startAtLogin) {
   if (!loginItemEnabledHere()) return false;
+  if (process.platform === 'linux') return linuxAutostart.setAutostartEnabled(Boolean(startAtLogin));
   app.setLoginItemSettings({ openAtLogin: Boolean(startAtLogin) });
   return currentLoginItemState();
 }
@@ -1327,6 +1541,9 @@ function startSyncCollector() {
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
     zaiApiKey: settings.zaiApiKey || '',
     zaiApiRegion: settings.zaiApiRegion || 'global',
+    zaiTeamApiKey: settings.zaiTeamApiKey || '',
+    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
+    zaiTeamProjectId: settings.zaiTeamProjectId || '',
     volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
     volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
     volcengineRegion: settings.volcengineRegion || '',
@@ -1378,6 +1595,9 @@ function startHostCollector() {
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
     zaiApiKey: settings.zaiApiKey || '',
     zaiApiRegion: settings.zaiApiRegion || 'global',
+    zaiTeamApiKey: settings.zaiTeamApiKey || '',
+    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
+    zaiTeamProjectId: settings.zaiTeamProjectId || '',
     volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
     volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
     volcengineRegion: settings.volcengineRegion || '',
@@ -1505,14 +1725,24 @@ function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);
-  const text = formatTrayText(latestStats, mode, currency);
+  const limitText = formatTrayText(latestStats, mode, currency, {
+    limitProviderOrder: settings?.limitProviderOrder,
+    limitProviders: settings?.limitProviders,
+    showLimitUsed: settings?.showLimitUsed
+  });
+  const barsImageMode = (mode === 'bars' || mode === 'barsSession' || mode === 'barsWeekly' || mode === 'barsAllSessions') && !limitText && providerTrayIcons[mode];
+  // A renderer-generated icon is cached in the main process. Only reuse it
+  // while the current stats still have quota text; otherwise it can outlive
+  // the provider data that generated it.
+  const trayImageMode = mode === 'limitsAllSessions' && Boolean(limitText) && providerTrayIcons[mode];
+  const text = trayImageMode ? '' : limitText;
   if (process.platform === 'darwin') tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
   const tip = formatTrayText(latestStats, 'both', currency);
   tray.setToolTip(`Token Monitor - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
-  if ((mode === 'bars' || mode === 'barsSession' || mode === 'barsWeekly' || mode === 'barsAllSessions') && providerTrayIcons[mode]) {
+  if (barsImageMode || trayImageMode) {
     icon = providerTrayIcons[mode];
   } else {
     const usageIconId = pickUsageTrayIconId(latestStats, mode, Object.keys(providerTrayIcons));
@@ -1562,6 +1792,9 @@ function startLocalCollector() {
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
     zaiApiKey: settings.zaiApiKey || '',
     zaiApiRegion: settings.zaiApiRegion || 'global',
+    zaiTeamApiKey: settings.zaiTeamApiKey || '',
+    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
+    zaiTeamProjectId: settings.zaiTeamProjectId || '',
     volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
     volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
     volcengineRegion: settings.volcengineRegion || '',
@@ -1779,6 +2012,11 @@ function settingsForRenderer() {
     : zaiToken(process.env)
       ? 'env'
       : '';
+  const zaiTeamApiKeySource = settings?.zaiTeamApiKey
+    ? 'settings'
+    : zaiTeamToken(process.env)
+      ? 'env'
+      : '';
   const volcengineCredentialsSource = volcengineCredentials({}, settings || {})
     ? 'settings'
     : volcengineCredentials(process.env)
@@ -1801,6 +2039,9 @@ function settingsForRenderer() {
     copilotApiToken: '',
     zaiApiKey: '',
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
+    zaiTeamApiKey: '',
+    zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
+    zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
     volcengineSecretAccessKey: '',
     qoderCookie: settings?.qoderCookie ? 'set' : '',
@@ -1820,6 +2061,8 @@ function settingsForRenderer() {
     copilotApiTokenSource,
     zaiApiKeyConfigured: Boolean(currentZaiApiKey()),
     zaiApiKeySource,
+    zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
+    zaiTeamApiKeySource,
     volcengineCredentialsConfigured: Boolean(currentVolcengineCredentials()),
     volcengineCredentialsSource,
     qoderCookieConfigured: Boolean(currentQoderCookie()),
@@ -2167,12 +2410,91 @@ async function downloadTokscaleFromNpm() {
 let appUpdateCheckInFlight = false;
 let appUpdateLastError = null;
 let appUpdateBackgroundTimer = null;
+let appUpdateNativeBusy = false;
+let appUpdateNativeConfigured = false;
+let appUpdateNativeState = {
+  phase: 'idle',
+  version: null,
+  progress: null,
+  error: null
+};
+
+function latestFromUpdaterInfo(info) {
+  if (!info || typeof info !== 'object') return null;
+  const version = semver.valid(info.version);
+  if (!version) return null;
+  return {
+    version,
+    tag: `v${version}`,
+    name: (typeof info.releaseName === 'string' && info.releaseName.trim()) ? info.releaseName : `v${version}`,
+    htmlUrl: `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`,
+    publishedAt: typeof info.releaseDate === 'string' ? info.releaseDate : ''
+  };
+}
+
+function setNativeAppUpdateState(patch = {}) {
+  appUpdateNativeState = { ...appUpdateNativeState, ...patch };
+  sendAppUpdatePush();
+}
+
+function configureNativeAppUpdater() {
+  if (appUpdateNativeConfigured) return;
+  appUpdateNativeConfigured = true;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.logger = console;
+  autoUpdater.on('checking-for-update', () => {
+    setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
+  });
+  autoUpdater.on('update-available', (info) => {
+    const latest = latestFromUpdaterInfo(info);
+    if (latest) {
+      settings.appUpdate = {
+        ...(settings.appUpdate || {}),
+        lastCheckedAt: new Date().toISOString(),
+        lastKnownLatest: latest
+      };
+      saveSettings();
+    }
+    setNativeAppUpdateState({ phase: 'available', version: latest?.version || info?.version || null, progress: null, error: null });
+  });
+  autoUpdater.on('update-not-available', (info) => {
+    appUpdateNativeBusy = false;
+    const latest = latestFromUpdaterInfo(info);
+    if (latest) {
+      settings.appUpdate = {
+        ...(settings.appUpdate || {}),
+        lastCheckedAt: new Date().toISOString(),
+        lastKnownLatest: latest
+      };
+      saveSettings();
+    }
+    setNativeAppUpdateState({ phase: 'idle', version: latest?.version || null, progress: null, error: null });
+  });
+  autoUpdater.on('download-progress', (progress) => {
+    setNativeAppUpdateState({
+      phase: 'downloading',
+      progress: Number.isFinite(progress?.percent) ? Math.max(0, Math.min(100, progress.percent)) : null,
+      error: null
+    });
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    appUpdateNativeBusy = false;
+    const latest = latestFromUpdaterInfo(info);
+    setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
+  });
+  autoUpdater.on('error', (error) => {
+    appUpdateNativeBusy = false;
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
+  });
+}
 
 function deriveAppUpdateState() {
   const block = settings?.appUpdate || {};
   const currentVersion = app.getVersion();
   const latest = block.lastKnownLatest || null;
   const dismissedVersion = block.dismissedVersion || null;
+  const installSupport = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
   let hasUpdate = false;
   if (latest && semver.valid(latest.version) && semver.valid(currentVersion)) {
     hasUpdate = semver.gt(latest.version, currentVersion) && latest.version !== dismissedVersion;
@@ -2184,7 +2506,19 @@ function deriveAppUpdateState() {
     dismissedVersion,
     lastCheckedAt: block.lastCheckedAt || null,
     checking: appUpdateCheckInFlight,
-    lastError: appUpdateLastError
+    lastError: appUpdateLastError,
+    installSupported: installSupport.supported,
+    installSupportReason: installSupport.reason,
+    installPhase: appUpdateNativeState.phase,
+    installProgress: appUpdateNativeState.progress,
+    installVersion: appUpdateNativeState.version,
+    installError: appUpdateNativeState.error,
+    downloaded: downloadedAppUpdateMatchesLatest({
+      phase: appUpdateNativeState.phase,
+      downloadedVersion: appUpdateNativeState.version,
+      latest
+    }),
+    installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
   };
 }
 
@@ -2253,6 +2587,52 @@ function dismissAppUpdateVersion(version) {
   return deriveAppUpdateState();
 }
 
+async function downloadAndPrepareAppUpdate() {
+  const support = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
+  if (!support.supported) {
+    setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
+    return deriveAppUpdateState();
+  }
+  if (appUpdateNativeBusy) return deriveAppUpdateState();
+  const latest = settings?.appUpdate?.lastKnownLatest || null;
+  if (downloadedAppUpdateMatchesLatest({
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version,
+    latest
+  })) return deriveAppUpdateState();
+  configureNativeAppUpdater();
+  appUpdateNativeBusy = true;
+  setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const info = result?.updateInfo || null;
+    const version = semver.valid(info?.version) || null;
+    if (!version || !semver.gt(version, app.getVersion())) {
+      appUpdateNativeBusy = false;
+      setNativeAppUpdateState({ phase: 'idle', version, progress: null, error: null });
+      return deriveAppUpdateState();
+    }
+    setNativeAppUpdateState({ phase: 'downloading', version, progress: 0, error: null });
+    await autoUpdater.downloadUpdate();
+  } catch (error) {
+    appUpdateNativeBusy = false;
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error) });
+  }
+  return deriveAppUpdateState();
+}
+
+function installDownloadedAppUpdate() {
+  const latest = settings?.appUpdate?.lastKnownLatest || null;
+  if (!downloadedAppUpdateMatchesLatest({
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version,
+    latest
+  })) return deriveAppUpdateState();
+  quitRequested = true;
+  autoUpdater.quitAndInstall(false, true);
+  return deriveAppUpdateState();
+}
+
 function isAllowedExternalUrl(value) {
   let parsed;
   try { parsed = new URL(String(value || '')); }
@@ -2260,6 +2640,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.protocol !== 'https:') return false;
   const enterpriseHost = settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
   if (isAllowedVerificationUrl(value, enterpriseHost)) return true;
+  if (isAllowedCodexLoginUrl(value)) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
   if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/token-monitor')) return true;
@@ -2612,6 +2993,9 @@ app.whenReady().then(() => {
     const previousCopilotEnterpriseHost = settings.copilotEnterpriseHost;
     const previousZaiApiKey = settings.zaiApiKey;
     const previousZaiApiRegion = settings.zaiApiRegion;
+    const previousZaiTeamApiKey = settings.zaiTeamApiKey;
+    const previousZaiTeamOrganizationId = settings.zaiTeamOrganizationId;
+    const previousZaiTeamProjectId = settings.zaiTeamProjectId;
     const previousVolcengineAccessKeyId = settings.volcengineAccessKeyId;
     const previousVolcengineSecretAccessKey = settings.volcengineSecretAccessKey;
     const previousVolcengineRegion = settings.volcengineRegion;
@@ -2636,6 +3020,9 @@ app.whenReady().then(() => {
     if (patch.copilotEnterpriseHost !== undefined) normalizedPatch.copilotEnterpriseHost = normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost);
     if (patch.zaiApiKey !== undefined) normalizedPatch.zaiApiKey = normalizeZaiApiKey(patch.zaiApiKey);
     if (patch.zaiApiRegion !== undefined) normalizedPatch.zaiApiRegion = normalizeZaiApiRegion(patch.zaiApiRegion);
+    if (patch.zaiTeamApiKey !== undefined) normalizedPatch.zaiTeamApiKey = normalizeZaiTeamApiKey(patch.zaiTeamApiKey);
+    if (patch.zaiTeamOrganizationId !== undefined) normalizedPatch.zaiTeamOrganizationId = normalizeZaiTeamId(patch.zaiTeamOrganizationId);
+    if (patch.zaiTeamProjectId !== undefined) normalizedPatch.zaiTeamProjectId = normalizeZaiTeamId(patch.zaiTeamProjectId);
     if (patch.volcengineAccessKeyId !== undefined) normalizedPatch.volcengineAccessKeyId = normalizeSecretSetting(patch.volcengineAccessKeyId);
     if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
     if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
@@ -2659,6 +3046,7 @@ app.whenReady().then(() => {
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
+      showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),
@@ -2683,8 +3071,8 @@ app.whenReady().then(() => {
       serviceStatusRefreshMs: normalizeServiceStatusRefreshMs(patch.serviceStatusRefreshMs ?? settings.serviceStatusRefreshMs),
       limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
+      maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
-      showActiveAccount: parseBoolean(patch.showActiveAccount ?? settings.showActiveAccount, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
       ...normalizeTrayModeSettings({
         showTrayIcon: patch.showTrayIcon ?? settings.showTrayIcon,
@@ -2703,6 +3091,9 @@ app.whenReady().then(() => {
       copilotEnterpriseHost: patch.copilotEnterpriseHost !== undefined ? normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost) : (settings.copilotEnterpriseHost || ''),
       zaiApiKey: patch.zaiApiKey !== undefined ? normalizeZaiApiKey(patch.zaiApiKey) : (settings.zaiApiKey || ''),
       zaiApiRegion: patch.zaiApiRegion !== undefined ? normalizeZaiApiRegion(patch.zaiApiRegion) : normalizeZaiApiRegion(settings.zaiApiRegion || 'global'),
+      zaiTeamApiKey: patch.zaiTeamApiKey !== undefined ? normalizeZaiTeamApiKey(patch.zaiTeamApiKey) : (settings.zaiTeamApiKey || ''),
+      zaiTeamOrganizationId: patch.zaiTeamOrganizationId !== undefined ? normalizeZaiTeamId(patch.zaiTeamOrganizationId) : (settings.zaiTeamOrganizationId || ''),
+      zaiTeamProjectId: patch.zaiTeamProjectId !== undefined ? normalizeZaiTeamId(patch.zaiTeamProjectId) : (settings.zaiTeamProjectId || ''),
       volcengineAccessKeyId: patch.volcengineAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAccessKeyId) : (settings.volcengineAccessKeyId || ''),
       volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
       volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
@@ -2762,6 +3153,9 @@ app.whenReady().then(() => {
       settings.copilotEnterpriseHost !== previousCopilotEnterpriseHost ||
       settings.zaiApiKey !== previousZaiApiKey ||
       settings.zaiApiRegion !== previousZaiApiRegion ||
+      settings.zaiTeamApiKey !== previousZaiTeamApiKey ||
+      settings.zaiTeamOrganizationId !== previousZaiTeamOrganizationId ||
+      settings.zaiTeamProjectId !== previousZaiTeamProjectId ||
       settings.volcengineAccessKeyId !== previousVolcengineAccessKeyId ||
       settings.volcengineSecretAccessKey !== previousVolcengineSecretAccessKey ||
       settings.volcengineRegion !== previousVolcengineRegion ||
@@ -2956,6 +3350,8 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('appUpdate:getState', () => deriveAppUpdateState());
   ipcMain.handle('appUpdate:checkNow', () => runAppUpdateCheck({ force: true }));
+  ipcMain.handle('appUpdate:download', () => downloadAndPrepareAppUpdate());
+  ipcMain.handle('appUpdate:install', () => installDownloadedAppUpdate());
   ipcMain.handle('appUpdate:dismiss', (_event, version) => dismissAppUpdateVersion(version));
   ipcMain.handle('cursor:loginManual', async (_event, raw) => {
     const token = normalizeManualCookie(raw);
@@ -3155,18 +3551,61 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('codex:accounts', () => codexAccountsForRenderer());
   ipcMain.handle('codex:setAccountEnabled', (_event, id, enabled) => setCodexManagedAccountEnabled(id, enabled));
-  ipcMain.handle('codex:addAccount', async (event) => {
-    if (codexLoginInFlight) return { ok: false, error: 'A Codex sign-in is already in progress.' };
-    codexLoginInFlight = true;
+  ipcMain.handle('codex:addAccount', async (event, request = {}) => {
+    const flowId = String(request?.flowId || '').trim();
+    if (codexLoginController) return { ok: false, error: 'A Codex sign-in is already in progress.', flowId };
+    const controller = new AbortController();
+    codexLoginController = controller;
+    codexLoginFlowId = flowId;
+    codexLoginCanCancel = true;
+    let streamed = '';
+    const sendStatus = (payload) => {
+      if (codexLoginController !== controller) return;
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('codex:loginStatus', {
+          ...payload,
+          flowId
+        });
+      }
+    };
     try {
-      return await addCodexManagedAccount((text) => {
-        if (!event.sender.isDestroyed()) event.sender.send('codex:loginOutput', text);
+      const result = await addCodexManagedAccount((text) => {
+        streamed = (streamed + String(text || '')).slice(-8000);
+        sendStatus({
+          phase: 'output',
+          text: String(text || ''),
+          loginUrl: codexLoginUrlFromOutput(streamed)
+        });
+      }, {
+        signal: controller.signal,
+        onCommit: () => {
+          if (codexLoginController === controller) codexLoginCanCancel = false;
+        }
       });
+      if (codexLoginController !== controller) {
+        return { ok: false, error: codexLoginErrorMessage({ outcome: 'cancelled' }), outcome: 'cancelled', flowId };
+      }
+      return { ...result, flowId };
     } finally {
-      codexLoginInFlight = false;
+      if (codexLoginController === controller) {
+        codexLoginController = null;
+        codexLoginFlowId = '';
+        codexLoginCanCancel = false;
+      }
     }
   });
+  ipcMain.handle('codex:cancelLogin', (_event, request = {}) => {
+    const flowId = String(request?.flowId || '').trim();
+    if (flowId && codexLoginFlowId && flowId !== codexLoginFlowId) return { ok: true, cancelled: false };
+    const controller = codexLoginController;
+    if (!controller) return { ok: true, cancelled: false };
+    if (!codexLoginCanCancel) return { ok: false, cancelled: false, tooLate: true };
+    controller?.abort();
+    return { ok: true, cancelled: true };
+  });
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
+  ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
+  ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
   ipcMain.handle('copilot:signIn', async (event, request = {}) => {
     if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };
     const controller = new AbortController();

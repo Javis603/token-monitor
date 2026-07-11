@@ -14,6 +14,24 @@ function dirent(name, directory = true) {
   };
 }
 
+test('Codex command candidates include legacy and ChatGPT-bundled macOS apps', () => {
+  const legacy = '/Applications/Codex.app/Contents/Resources/codex';
+  const chatgpt = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  const candidates = codexCommandCandidates({}, 'darwin');
+
+  assert.deepEqual(candidates.slice(0, 2), [legacy, chatgpt]);
+  assert.equal(candidates.at(-1), 'codex');
+  assert.equal(codexCommandSourceDetail(legacy, 'darwin'), 'app');
+  assert.equal(codexCommandSourceDetail(chatgpt, 'darwin'), 'app');
+});
+
+test('Codex command candidates preserve an explicit command override on macOS', () => {
+  assert.deepEqual(
+    codexCommandCandidates({ TOKEN_MONITOR_CODEX_COMMAND: '/custom/codex' }, 'darwin'),
+    ['/custom/codex']
+  );
+});
+
 test('Codex command candidates include Microsoft Store app installs on Windows', () => {
   const programFiles = 'C:\\Program Files';
   const appxDir = path.win32.join(programFiles, 'WindowsApps');
@@ -256,6 +274,51 @@ test('fetchCodexLimits returns one provider per managed Codex account', async ()
   assert.deepEqual(providers.map((provider) => provider.sourceDetail), ['managed', 'managed']);
 });
 
+test('fetchCodexLimits can refresh only the requested managed Codex account', async () => {
+  const seenHomes = [];
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [
+      { id: 'target', email: 'target@example.com', homePath: '/tmp/token-monitor-codex/target' }
+    ]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readCodexRpc: async (deps) => {
+      const home = deps.env.CODEX_HOME || '<live>';
+      seenHomes.push(home);
+      return home === '<live>'
+        ? codexPayload('live@example.com', 'app')
+        : codexPayload('target@example.com');
+    }
+  });
+
+  assert.deepEqual(seenHomes, ['/tmp/token-monitor-codex/target']);
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].accountEmail, 'target@example.com');
+  assert.equal(providers[0].sourceDetail, 'managed');
+});
+
+test('fetchCodexLimits does not fall back to live account when scoped accounts normalize away', async () => {
+  const seenHomes = [];
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [
+      { id: 'target', email: 'target@example.com', homePath: '' }
+    ]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readCodexRpc: async (deps) => {
+      seenHomes.push(deps.env.CODEX_HOME || '<live>');
+      return codexPayload('live@example.com', 'app');
+    }
+  });
+
+  assert.deepEqual(seenHomes, []);
+  assert.deepEqual(providers, []);
+});
+
 test('createLimitsCollector retains recent Codex quota windows across one empty refresh', async () => {
   let now = Date.parse('2026-06-01T00:00:00Z');
   let calls = 0;
@@ -452,6 +515,57 @@ test('fetchCodexLimits retries empty Codex quota reads on the same RPC session',
   assert.equal(providers.status, 'ok');
   assert.equal(providers.accountLabel, 'Plus');
   assert.equal(providers.windows[0].remainingPercent, 96);
+});
+
+test('fetchCodexLimits gives Codex RPC a generous default timeout', async () => {
+  const { EventEmitter } = require('node:events');
+  const originalSetTimeout = global.setTimeout;
+  const delays = [];
+  global.setTimeout = (fn, delay, ...args) => {
+    delays.push(delay);
+    return originalSetTimeout(fn, delay, ...args);
+  };
+  try {
+    const provider = await fetchCodexLimits({}, {
+      now: () => Date.parse('2026-06-01T00:00:00Z'),
+      env: { PATH: '/usr/bin' },
+      codexCommand: 'codex',
+      ...noLiveAuth,
+      spawn: () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.stdin = {
+          write(line) {
+            const message = JSON.parse(String(line));
+            const respond = (result) => {
+              queueMicrotask(() => child.stdout.emit('data', `${JSON.stringify({ id: message.id, result })}\n`));
+            };
+            if (message.method === 'initialize') respond({});
+            if (message.method === 'account/rateLimits/read') {
+              respond({
+                rateLimits: {
+                  primary: {
+                    usedPercent: 4,
+                    resetsAt: '2026-06-01T05:00:00Z',
+                    windowDurationMins: 300
+                  }
+                }
+              });
+            }
+            if (message.method === 'account/read') respond({ account: { email: 'live@example.com', planType: 'plus' } });
+          }
+        };
+        child.kill = () => {};
+        return child;
+      }
+    });
+
+    assert.equal(provider.status, 'ok');
+    assert.ok(delays.some((delay) => delay >= 20_000), `expected a Codex RPC timeout >= 20000ms, got ${delays.join(', ')}`);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+  }
 });
 
 test('fetchCodexLimits does not retry usage-based Codex plans without quota windows', async () => {

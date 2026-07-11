@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { formatTrayText, pickUsageTrayIconId } = require('../../src/electron/tray');
+const { pickConfiguredSessionLimits } = require('../../src/shared/trayText');
 
 const stats = {
   periods: {
@@ -47,6 +48,123 @@ test('usage tray icon returns null when the top client has no available icon', (
   assert.equal(
     pickUsageTrayIconId({ periods: { today: { clients: { unknown: 20, codex: 10 } } } }, 'tokens', ['codex']),
     null
+  );
+});
+
+test('tray can show the first two configured session quotas as percentages', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 57 }] },
+        { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 24 }] },
+        { provider: 'cursor', status: 'ok', windows: [{ kind: 'session', remainingPercent: 91 }] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'claude,codex,cursor',
+      limitProviders: 'claude,codex,cursor',
+      showLimitUsed: false
+    }),
+    '24% · 57%'
+  );
+});
+
+test('configured session quota picks keep provider ids for icon rendering', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 57 }] },
+        { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 24 }] },
+        { provider: 'cursor', status: 'ok', windows: [{ kind: 'session', remainingPercent: 91 }] }
+      ]
+    }
+  };
+
+  assert.deepEqual(
+    pickConfiguredSessionLimits(limitStats, {
+      limitProviderOrder: 'claude,codex,cursor',
+      limitProviders: 'claude,codex,cursor',
+      showLimitUsed: false
+    }).map((pick) => [pick.provider, pick.percent]),
+    [['claude', 24], ['codex', 57]]
+  );
+});
+
+test('tray session quota text falls back to one provider session and weekly windows', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        {
+          provider: 'codex',
+          status: 'ok',
+          windows: [
+            { kind: 'session', remainingPercent: 6, usedPercent: 94 },
+            { kind: 'weekly', remainingPercent: 1, usedPercent: 99 }
+          ]
+        },
+        { provider: 'claude', status: 'notConfigured', windows: [] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex,claude',
+      limitProviders: 'codex,claude',
+      showLimitUsed: false
+    }),
+    '6% · 1%'
+  );
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex,claude',
+      limitProviders: 'codex,claude',
+      showLimitUsed: true
+    }),
+    '94% · 99%'
+  );
+});
+
+test('tray session quota text omits an unavailable weekly window', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 6 }] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex',
+      limitProviders: 'codex',
+      showLimitUsed: false
+    }),
+    '6%'
+  );
+});
+
+test('tray session quota text keeps lowest-remaining account selection when showing used percent', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', accountLabel: 'main', windows: [{ kind: 'session', remainingPercent: 80 }] },
+        { provider: 'codex', status: 'ok', accountLabel: 'work', windows: [{ kind: 'session', remainingPercent: 30 }] },
+        { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 40 }] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex,claude',
+      limitProviders: 'codex,claude',
+      showLimitUsed: true
+    }),
+    '70% · 60%'
   );
 });
 

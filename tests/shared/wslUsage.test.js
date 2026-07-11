@@ -148,6 +148,16 @@ test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, kilo
   assert.deepEqual(homesFor('.workbuddy'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
 });
 
+// Antigravity CLI (`agy`) stores conversations as SQLite under
+// ~/.gemini/antigravity-cli/conversations. A WSL home holding only that must
+// still be kept and attributed to the umbrella `antigravity` client, otherwise a
+// CLI-only WSL user is dropped before the scan can request the antigravity-cli id.
+test('homeHasData attributes a CLI-only Antigravity home to antigravity', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const existsSync = (p) => p === `${home}\\.gemini\\antigravity-cli\\conversations`;
+  assert.deepEqual(homeHasData(home, existsSync), ['antigravity']);
+});
+
 // A home holding only an alternate-root client (Claude transcripts, Kimi Code,
 // legacy OpenClaw bot dirs) tokscale 3.1.3 still supports must be discovered too.
 test('wslUsageHomes keeps a home whose only data is an alternate root', () => {

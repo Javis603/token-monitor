@@ -119,6 +119,68 @@ test('aggregateLimits keeps Codex quota windows over a newer empty transient sna
   assert.equal(accountA.windows[0].remainingPercent, 50);
 });
 
+test('aggregateLimits prefers a fresh notConfigured state over stale configured Codex quota', () => {
+  const staleProvider = codexProvider(
+    'sha256:codex-a',
+    'a@example.com',
+    41,
+    '2026-07-08T13:04:49.000Z'
+  );
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'old-device-id',
+      stale: true,
+      limits: {
+        updatedAt: '2026-07-08T13:04:49.000Z',
+        providers: [staleProvider]
+      }
+    },
+    {
+      deviceId: 'current-device-id',
+      stale: false,
+      limits: {
+        updatedAt: '2026-07-10T02:55:17.000Z',
+        providers: [{
+          provider: 'codex',
+          status: 'notConfigured',
+          updatedAt: '2026-07-10T02:55:17.000Z',
+          windows: []
+        }]
+      }
+    }
+  ], 10 * 60 * 1000, Date.parse('2026-07-10T03:00:00.000Z'));
+
+  const codexProviders = aggregate.providers.filter((provider) => provider.provider === 'codex');
+  assert.equal(codexProviders.length, 1);
+  assert.equal(codexProviders[0].status, 'notConfigured');
+  assert.equal(codexProviders[0].sourceDeviceId, 'current-device-id');
+  assert.equal(codexProviders[0].stale, false);
+  assert.deepEqual(codexProviders[0].windows, []);
+});
+
+test('aggregateLimits still exposes stale configured Codex quota when no fresh observation exists', () => {
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'offline-device',
+      stale: true,
+      limits: {
+        updatedAt: '2026-07-08T13:04:49.000Z',
+        providers: [codexProvider(
+          'sha256:codex-a',
+          'a@example.com',
+          41,
+          '2026-07-08T13:04:49.000Z'
+        )]
+      }
+    }
+  ], 10 * 60 * 1000, Date.parse('2026-07-10T03:00:00.000Z'));
+
+  assert.equal(aggregate.providers.length, 1);
+  assert.equal(aggregate.providers[0].status, 'ok');
+  assert.equal(aggregate.providers[0].stale, true);
+  assert.equal(aggregate.providers[0].windows[0].remainingPercent, 41);
+});
+
 test('mergeCodexTransientWindows keeps recent Codex windows when the same account reads empty', () => {
   const previous = {
     updatedAt: '2026-06-14T10:00:00.000Z',

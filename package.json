@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.22.1",
+  "version": "0.24.0",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -19,9 +19,10 @@
     "predist:win": "npm run icons",
     "predist:linux": "npm run icons",
     "pack": "electron-builder --dir",
-    "dist:mac": "electron-builder --mac --arm64",
-    "dist:win": "electron-builder --win --x64",
-    "dist:linux": "electron-builder --linux --x64",
+    "dist:mac": "electron-builder --mac --arm64 --publish never",
+    "dist:win": "electron-builder --win --x64 --publish never",
+    "dist:linux": "electron-builder --linux --x64 --publish never",
+    "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "lint": "eslint .",
     "verify": "npm run lint && npm test"
   },
@@ -45,6 +46,7 @@
       "node_modules/koffi/**/*"
     ],
     "mac": {
+      "artifactName": "Token-Monitor-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "dmg",
@@ -59,6 +61,7 @@
           ]
         }
       ],
+      "forceCodeSigning": true,
       "category": "public.app-category.developer-tools",
       "icon": "build/icons/icon.icns",
       "extendInfo": {
@@ -83,6 +86,7 @@
       "icon": "build/icons/icon.ico"
     },
     "linux": {
+      "artifactName": "Token-Monitor-${version}.${ext}",
       "target": [
         {
           "target": "AppImage",
@@ -96,7 +100,19 @@
       "synopsis": "Live token & cost widget for AI coding tools",
       "description": "Real-time token, cost, and AI limits widget with multi-device sync for Claude Code, Codex, OpenCode and more."
     },
-    "publish": null
+    "nsis": {
+      "artifactName": "Token-Monitor-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Token-Monitor-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Javis603",
+        "repo": "token-monitor"
+      }
+    ]
   },
   "keywords": [
     "tokscale",
@@ -127,6 +143,7 @@
     "@xhayper/discord-rpc": "^1.3.4",
     "chokidar": "^3.6.0",
     "dotenv": "^17.4.2",
+    "electron-updater": "6.8.9",
     "koffi": "^3.0.2",
     "semver": "^7.8.1",
     "tar": "^7.5.15",
@@ -135,8 +152,8 @@
   "devDependencies": {
     "@eslint/compat": "^2.1.0",
     "@eslint/js": "^10.0.1",
-    "electron": "42.2.0",
-    "electron-builder": "^26.8.1",
+    "electron": "43.1.0",
+    "electron-builder": "26.15.3",
     "electron-icon-builder": "^2.0.1",
     "eslint": "^10.5.0",
     "globals": "^17.6.0"

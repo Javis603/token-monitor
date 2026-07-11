@@ -32,32 +32,32 @@
 
 Token Monitor 对「Token 用量」「账户额度」和「session 明细」分别支持：
 
-|                                          Logo                                          | 工具                 | 数据路径                                                                                                                     | Token 用量 | AI 工具额度 | session 明细 |
-| :------------------------------------------------------------------------------------: | -------------------- | ---------------------------------------------------------------------------------------------------------------------------- | :--------: | :---------: | :----------: |
-|    <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" />     | Claude Code          | `~/.claude/projects/`、`~/.claude/transcripts/`                                                                              |     ✅     |     ✅      |      ✅      |
-|        <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" />        | Codex                | `~/.codex/sessions/`                                                                                                         |     ✅     |     ✅      |      ✅      |
-|     <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" />     | OpenCode             | `~/.local/share/opencode/`                                                                                                   |     ✅     |     ✅      |      ✅      |
-| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent         | `$HERMES_HOME/state.db` 或 `~/.hermes/state.db`                                                                              |     ✅     |      —      |      —       |
-|     <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" />     | OpenClaw             | `~/.openclaw/agents/`                                                                                                        |     ✅     |      —      |      —       |
-|       <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" />       | Cursor               | `~/.config/tokscale/cursor-cache/`（由 Cursor 同步保持更新）                                                                 |     ✅     |     ✅      |      —       |
-|  <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" />  | Antigravity          | `~/.config/tokscale/antigravity-cache/`（由 Antigravity 同步保持更新）                                                       |     ✅     |     ✅      |      —       |
-|        <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" />        | Cline                | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`）                                                           |     ✅     |      —      |      —       |
-|         <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" />         | Kimi CLI / Kimi Code | `~/.kimi/sessions/`、`~/.kimi-code/sessions/`（`KIMI_CODE_HOME`）；Kimi API 密钥（通过 Kimi API 查询 Kimi Coding Plan 额度） |     ✅     |     ✅      |      —       |
-|         <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" />         | Qwen CLI             | `~/.qwen/projects/`                                                                                                          |     ✅     |      —      |      —       |
-|      <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" />       | Grok Build           | `$GROK_HOME/sessions/` 或 `~/.grok/sessions/`                                                                                |     ✅     |     ✅      |      —       |
-|  <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" />   | GitHub Copilot CLI   | `~/.copilot/otel/`                                                                                                           |     ✅     |     ✅      |      —       |
-|           <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" />           | Pi                   | `~/.pi/agent/sessions/`、`~/.omp/agent/sessions/`（Oh My Pi）                                                                |     ✅     |      —      |      —       |
-|          <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" />          | Zed                  | `~/.local/share/zed/threads/threads.db`                                                                                      |     ✅     |      —      |      —       |
-|    <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" />     | Kilo Code            | VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 仅 Linux 与远程/WSL                                         |     ✅     |      —      |      —       |
-|    <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" />    | MiMo Code            | `~/.local/share/mimocode/mimocode.db`                                                                                        |     ✅     |      —      |      —       |
-|        <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" />        | ZCode / GLM          | `~/.zcode/projects/`；Z.ai API 密钥（通过 Z.ai API 查询 GLM Coding Plan 额度）                                               |     ✅     |     ✅      |      —       |
-|         <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" />         | Kiro                 | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库                                                         |     ✅     |     ✅      |      —       |
-|    <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" />    | CodeBuddy            | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志                                                                           |     ✅     |      —      |      —       |
-|    <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" />    | WorkBuddy            | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db`                                                                        |     ✅     |      —      |      —       |
-|     <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" />     | DeepSeek             | DeepSeek API 密钥（通过 DeepSeek API 查询余额）                                                                              |     —      |     ✅      |      —       |
-|      <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" />      | Minimax              | Minimax API 密钥（通过 Minimax API 查询 Token Plan 额度）                                                                    |     —      |     ✅      |      —       |
-|   <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" />   | Volcengine           | Ark API key 或火山引擎 AK/SK（通过火山引擎 API 查询火山方舟 Coding Plan 额度）                                               |     —      |     ✅      |      —       |
-|        <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" />        | Qoder                | Qoder dashboard cookie（通过 Qoder usage API 查询 big-model credits）                                                        |     —      |     ✅      |      —       |
+| Logo | 工具 | 数据路径 | Token 用量 | AI 工具额度 | session 明细 |
+|:---:|------|-----------|:---:|:---:|:---:|
+| <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`、`~/.claude/transcripts/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/sessions/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `$HERMES_HOME/state.db` 或 `~/.hermes/state.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor | `~/.config/tokscale/cursor-cache/`（由 Cursor 同步保持更新） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.config/tokscale/antigravity-cache/`（由 Antigravity 同步保持更新） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`） | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code | `~/.kimi/sessions/`、`~/.kimi-code/sessions/`（`KIMI_CODE_HOME`）；Kimi API 密钥（通过 Kimi API 查询 Kimi Coding Plan 额度） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `$GROK_HOME/sessions/` 或 `~/.grok/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | `~/.copilot/otel/` ([Set up](docs/github-copilot-otel.md)) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/`、`~/.omp/agent/sessions/`（Oh My Pi） | ✅ | — | — |
+| <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 仅 Linux 与远程/WSL | ✅ | — | — |
+| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/projects/`；Z.ai API 密钥（通过 Z.ai API 查询 GLM 个人/团队 Coding Plan 额度） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库 | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | — |
+| <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API 密钥（通过 DeepSeek API 查询余额） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API 密钥（通过 Minimax API 查询 Token Plan 额度） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 或火山引擎 AK/SK（通过火山引擎 API 查询火山方舟 Coding Plan 额度） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | Qoder dashboard cookie（通过 Qoder usage API 查询 big-model credits） | — | ✅ | — |
 
 ## 为什么用 Token Monitor？
 
@@ -75,7 +75,7 @@ Token Monitor 对「Token 用量」「账户额度」和「session 明细」分�
 - **以你的币别显示成本**：可用 USD、TWD、HKD 或 CNY 显示成本；汇率每日自动更新，也可在设置中手动覆写
 - **使用趋势与仪表板**：主页的活跃热力图与趋势图，加上独立的仪表板窗口，提供连续天数，以及跨所有设备、按工具／按模型堆叠的历史（柱状图与 K 线两种视图）
 - **数据导出**：把使用数据导出成与工具无关的 CSV + JSON，可手动或自动写入文件夹，接电子表格、Obsidian、Grafana 或自写脚本；详见 [docs/export.md](docs/export.md)
-- **AI 工具额度检测**：支持 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine、Qoder 与 Kimi Coding，涵盖 session、每周、账单与 credits 窗口，以及 DeepSeek 预付余额与今日/本月消费
+- **AI 工具额度检测**：支持 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine、Qoder 与 Kimi Coding，涵盖 session、每周、账单与 credits 窗口，以及 DeepSeek 预付余额与今日/本月消费。已加入追踪的 Codex 账号可一键设为本机 Codex 使用账号，无需重新登录授权。
 - **可选的状态视图**：追踪 Claude、OpenAI、Cursor 与 DeepSeek status 页，支持手动或定时重新检查
 - **工具列表自定义**：可隐藏、置顶和拖曳排序主列表中的工具，不影响实际追踪
 - **外观控制**：界面主题切换（含浅色模式）、各工具厂商色、玻璃透明度、模糊度、完全透明窗口
@@ -88,30 +88,33 @@ Token Monitor 对「Token 用量」「账户额度」和「session 明细」分�
 - **Discord Rich Presence**：将今日 Token、花费与主要工具广播到你的 Discord 个人资料（需手动开启）
 - **隐私优先**：只有汇总数字会离开你的机器
 
-|                  额度视图                   |                   设备视图                   |                  模型视图                   |
-| :-----------------------------------------: | :------------------------------------------: | :-----------------------------------------: |
+| 额度视图 | 设备视图 | 模型视图 |
+|:---:|:---:|:---:|
 | ![额度视图](.github/assets/limits-view.png) | ![设备视图](.github/assets/devices-view.png) | ![模型视图](.github/assets/models-view.png) |
 
-|                   Session 视图                    |                    Session 明细                     |                  服务状态                   |
-| :-----------------------------------------------: | :-------------------------------------------------: | :-----------------------------------------: |
+| Session 视图 | Session 明细 | 服务状态 |
+|:---:|:---:|:---:|
 | ![Session 视图](.github/assets/sessions-view.png) | ![Session 明细](.github/assets/session-details.png) | ![服务状态](.github/assets/status-view.png) |
 
-|                     使用仪表板 — 总览                     |                    使用仪表板 — 趋势                    |
-| :-------------------------------------------------------: | :-----------------------------------------------------: |
+| 使用仪表板 — 总览 | 使用仪表板 — 趋势 |
+|:---:|:---:|
 | ![使用仪表板 总览](.github/assets/dashboard-overview.png) | ![使用仪表板 趋势](.github/assets/dashboard-trends.png) |
 
 ## 安装
 
-### 本地模式——单设备
+从 [GitHub Releases](https://github.com/Javis603/token-monitor/releases) 下载。
 
-默认模式。无需 hub、无需代理、无需任何配置。
+- **macOS（Apple Silicon）** — `.dmg`，已签名并 notarize
+- **Windows 10/11** — 安装版 `.exe`；签名还在准备中，可能会出现 SmartScreen
+- **Linux x64** — `.AppImage`
 
-```bash
-npm install
-npm start
-```
+打包版会自动检查 GitHub Releases。有新版本时，界面会显示更新提示；受支持的平台也可在 设置 → 一般 中安装更新。
 
-### 多设备同步
+### 首次启动
+
+本地模式是默认模式：启动 App 后会开始追踪这台设备。无需 hub、代理或配置。
+
+## 多设备同步
 
 挑一个所有设备（与任何无头代理）都能连上的 hub 后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。
 
@@ -146,21 +149,19 @@ npx wrangler deploy
 
 把部署 URL 贴到每台设备的小部件 设置 → 多设备同步。iOS 小部件配方与端点参考见 [worker/README.md](worker/README.md)，hub HTTP API 见 [docs/API.md](docs/API.md)。
 
-## 桌面安装包
-
-你可以从 [releases 页面](https://github.com/Javis603/token-monitor/releases) 下载 App。所有 release 都未签名，发布说明含 macOS（arm64）、Windows（x64）与 Linux x64 AppImage 的首次启动说明。其他平台请从源码 `npm start` 运行。
+## App 数据
 
 App 状态保存在系统的用户数据目录——卸载时一并删除该目录即可完整移除。
 
-| 平台    | 路径                                           |
-| ------- | ---------------------------------------------- |
-| macOS   | `~/Library/Application Support/Token Monitor/` |
-| Windows | `%APPDATA%/Token Monitor/`                     |
-| Linux   | `~/.config/Token Monitor/`                     |
+| 平台 | 路径 |
+|------|------|
+| macOS | `~/Library/Application Support/Token Monitor/` |
+| Windows | `%APPDATA%/Token Monitor/` |
+| Linux | `~/.config/Token Monitor/` |
 
 ## 从源码构建
 
-Release 都未签名，你可能想自己从源码打包安装包——同一份代码、在你自己的机器上构建。需要 Node.js 22.13+ 与**对应的**操作系统（electron-builder 无法在 Windows 上交叉构建 macOS 的 `.dmg`，反之亦然）。
+如需自己从源码打包安装包，请在**对应的**操作系统上使用 Node.js 22.13+（electron-builder 无法在 Windows 上交叉构建 macOS 的 `.dmg`，反之亦然）。
 
 ```bash
 npm install
@@ -170,7 +171,7 @@ npm run dist:linux # Linux x64 AppImage → dist/
 npm run pack       # 未打包的 app 目录（无安装包），方便本机快速测试
 ```
 
-产物会放在 `dist/`。构建出来一样未签名，所以首次启动说明照旧。其他平台没有打包目标——直接用 `npm start` 运行。
+产物会放在 `dist/`。Windows 和 Linux 请在对应系统上使用上面的 `dist:*` 脚本。如果要打包 macOS 发布版，需要本机有 Developer ID Application 签名身份；本地开发或未列出的平台请用 `npm start` 运行。
 
 ## 工作原理
 
@@ -216,7 +217,7 @@ TOKEN_MONITOR_DEVICE_ID=             # 可选——默认为主机名
 TOKEN_MONITOR_CLIENTS=               # 可选——默认为所有支持的工具；设为空表示不追踪
 TOKEN_MONITOR_HISTORY_ENABLED=       # 可选——默认启用；设为 0 可跳过收集趋势历史
 TOKEN_MONITOR_LIMITS_ENABLED=        # 可选——默认启用；设为 0 可跳过 CLI 探测
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # 可选——默认为所有支持的提供方（claude、codex、cursor、antigravity、opencode、deepseek、minimax、grok、copilot、kiro、zai、volcengine、qoder、kimicoding）
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # 可选——默认为所有支持的提供方（claude、codex、cursor、antigravity、opencode、deepseek、minimax、grok、copilot、kiro、zai、zaiteam、volcengine、qoder、kimicoding）
 ```
 
 小部件会把同样的环境变量读作首次启动的默认值，之后改由 GUI 设置接管。
