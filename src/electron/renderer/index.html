@@ -546,6 +546,30 @@
                 <div id="minimaxErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="mimoAccountGroup" class="settings-group cursor-account-group">
+              <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
+                <span data-i18n="settings.mimo.title">Xiaomi MiMo Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="mimoCookieStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="mimoSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="mimoOpenBrowser" data-i18n="settings.mimo.openBrowser">Open MiMo Console</button>
+                  <button id="mimoLogoutButton" class="hidden" data-i18n="settings.mimo.clearCookie">Clear cookie</button>
+                  <button id="mimoRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="mimoManualPanel">
+                  <p class="settings-note" data-i18n="settings.mimo.note">Paste your Cookie header from the MiMo Console balance page. Required cookies: api-platform_serviceToken, userId. It stays on this device and is used only for the Token Plan quota API.</p>
+                  <input id="mimoCookieInput" type="password" spellcheck="false" placeholder="api-platform_serviceToken=...; userId=..." data-i18n-placeholder="settings.mimo.cookiePlaceholder" />
+                  <div class="settings-actions">
+                    <button id="mimoCookieSubmit" data-i18n="settings.mimo.saveCookie">Save cookie</button>
+                  </div>
+                </div>
+                <div id="mimoErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="zaiAccountGroup" class="settings-group cursor-account-group">
               <button id="zaiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiSettingsDetails">
                 <span data-i18n="settings.zai.title">Z.ai Account</span>

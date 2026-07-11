@@ -6650,6 +6650,41 @@ function renderExternalProviderStatus(providerName) {
   renderSettingsSummaries();
 }
 
+function setMimoAccountExpanded(expanded) {
+  const details = document.getElementById('mimoSettingsDetails');
+  const toggle = document.getElementById('mimoSettingsToggle');
+  if (!details || !toggle) return;
+  state.mimoAccountExpanded = expanded;
+  details.classList.toggle('hidden', !expanded);
+  toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
+function mimoAccountLinked() {
+  return Boolean(state.settings?.mimoCookie);
+}
+
+function renderMimoStatus() {
+  const statusEl = document.getElementById('mimoCookieStatus');
+  const openBtn = document.getElementById('mimoOpenBrowser');
+  const logoutBtn = document.getElementById('mimoLogoutButton');
+  const refreshBtn = document.getElementById('mimoRefreshButton');
+  const manualPanel = document.getElementById('mimoManualPanel');
+  const errorEl = document.getElementById('mimoErrorMessage');
+  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
+
+  errorEl.classList.add('hidden');
+  errorEl.textContent = '';
+
+  const configured = mimoAccountLinked();
+  statusEl.textContent = configured ? t('settings.mimo.statusSet') : t('settings.mimo.statusNotSet');
+  statusEl.className = 'cursor-status-pill' + (configured ? ' configured' : '');
+  manualPanel.classList.toggle('hidden', configured);
+  openBtn.classList.toggle('hidden', configured);
+  logoutBtn.classList.toggle('hidden', !configured);
+  refreshBtn.classList.toggle('hidden', !configured);
+  renderSettingsSummaries();
+}
+
 function setMinimaxAccountExpanded(expanded) {
   const details = document.getElementById('minimaxSettingsDetails');
   const toggle = document.getElementById('minimaxSettingsToggle');
@@ -7450,6 +7485,50 @@ function setupCursorAccountUI() {
       } catch (err) {
         clearMinimaxPendingCheck();
         errorEl.textContent = t('settings.minimax.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const mimoToggle = document.getElementById('mimoSettingsToggle');
+  if (mimoToggle) {
+    mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
+    setMimoAccountExpanded(false);
+    renderMimoStatus();
+
+    document.getElementById('mimoOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal('https://platform.xiaomimimo.com/#/console/balance');
+    });
+
+    document.getElementById('mimoLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ mimoCookie: '' });
+      renderMimoStatus();
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('mimoRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('mimoCookieSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('mimoCookieInput');
+      const errorEl = document.getElementById('mimoErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.mimo.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        await saveSettings({ mimoCookie: input.value.trim() });
+        input.value = '';
+        renderMimoStatus();
+        await refreshStats({ force: true });
+        if (mimoAccountLinked()) setMimoAccountExpanded(false);
+        else setMimoAccountExpanded(true);
+        renderMimoStatus();
+      } catch (err) {
+        errorEl.textContent = t('settings.mimo.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }
     });
