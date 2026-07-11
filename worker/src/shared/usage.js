@@ -283,7 +283,8 @@ function emptySession(client, id) {
     reasoningTokens: 0,
     startedAt: '',
     lastUsedAt: '',
-    projectPath: '',
+    projectId: '',
+    projectLabel: '',
     models: {},
     modelCosts: {},
     providers: {}
@@ -305,7 +306,8 @@ function mergeSession(target, source) {
   const sourceLastUsed = timestampMs(source.lastUsedAt);
   const targetLastUsed = timestampMs(target.lastUsedAt);
   if (sourceLastUsed && sourceLastUsed > targetLastUsed) target.lastUsedAt = new Date(sourceLastUsed).toISOString();
-  if (!target.projectPath && source.projectPath) target.projectPath = String(source.projectPath);
+  if (!target.projectId && source.projectId) target.projectId = String(source.projectId);
+  if (!target.projectLabel && source.projectLabel) target.projectLabel = String(source.projectLabel);
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelName(model);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
@@ -339,7 +341,8 @@ function sessionFromRow(row) {
   Object.assign(session, sessionTokenComponents(row));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
-  session.projectPath = String(row.projectPath || row.project_path || row.cwd || row.workingDirectory || row.working_directory || '').trim();
+  session.projectId = String(row.projectId || row.project_id || '').trim();
+  session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   let model = detectModel(row);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
@@ -363,7 +366,8 @@ function normalizeSession(input, fallbackKey) {
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
-  session.projectPath = String(input.projectPath || input.project_path || input.cwd || input.workingDirectory || input.working_directory || '').trim();
+  session.projectId = String(input.projectId || input.project_id || '').trim();
+  session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelName(model);

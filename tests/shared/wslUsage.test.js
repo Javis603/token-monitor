@@ -275,6 +275,26 @@ test('collectWslUsage sums two homes per period', async () => {
   assert.deepEqual(bundle.today.clients, { claude: 15 });
 });
 
+test('collectWslUsage decorates each home before merging periods', async () => {
+  const homes = ['\\\\wsl$\\Ubuntu\\home\\alice'];
+  const decorated = [];
+  const { bundle } = await collectWslUsage({
+    clients: 'claude', allTimeSince: '2026-01-01', runTokscale: async () => ({ rows: [{ client: 'claude', session: 's1', totalTokens: 1 }] }),
+    decoratePeriods(periods, home) {
+      decorated.push(home);
+      for (const period of Object.values(periods)) {
+        period.sessions['claude:s1'].projectId = 'sha256:wsl';
+        period.sessions['claude:s1'].projectLabel = 'repo';
+      }
+    }
+  }, {
+    platform: 'win32', exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: () => ['alice'], existsSync: (value) => value.startsWith(homes[0]) && value.endsWith('\\.claude\\projects')
+  });
+  assert.deepEqual(decorated, homes);
+  assert.equal(bundle.today.sessions['claude:s1'].projectId, 'sha256:wsl');
+});
+
 test('collectWslUsage reports detected clients separate from those with data', async () => {
   // One running distro, one home with BOTH .codex and .hermes markers, but
   // tokscale only returns tokens for codex (hermes SQLite reads empty over 9P).

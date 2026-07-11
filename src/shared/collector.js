@@ -18,6 +18,7 @@ const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector')
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
+const { hashKey } = require('./hashKey');
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...
@@ -230,9 +231,16 @@ function timestampFromJsonLine(line) {
   }
 }
 
+const projectPathCache = new Map();
+
 function projectPathFromJsonl(filePath) {
   let text;
+  let cacheKey;
   try {
+    const stat = fs.statSync(filePath);
+    cacheKey = `${stat.size}:${stat.mtimeMs}`;
+    const cached = projectPathCache.get(filePath);
+    if (cached?.key === cacheKey) return cached.value;
     const fd = fs.openSync(filePath, 'r');
     try {
       const size = Math.min(256 * 1024, fs.fstatSync(fd).size);
@@ -247,10 +255,32 @@ function projectPathFromJsonl(filePath) {
       const obj = JSON.parse(line);
       const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
       const value = payload.cwd || payload.project_path || payload.projectPath || payload.workingDirectory || payload.working_directory;
-      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (typeof value === 'string' && value.trim()) {
+        const result = value.trim();
+        projectPathCache.set(filePath, { key: cacheKey, value: result });
+        return result;
+      }
     } catch (_) { /* skip partial or non-JSON lines */ }
   }
+  projectPathCache.set(filePath, { key: cacheKey, value: '' });
   return '';
+}
+
+function normalizeProjectPath(value) {
+  let normalized = String(value || '').trim().replace(/\\/g, '/');
+  if (!normalized) return '';
+  const windows = /^[a-z]:\//i.test(normalized) || normalized.startsWith('//');
+  const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
+  if (!root) normalized = normalized.replace(/\/+$/, '');
+  return windows ? normalized.toLowerCase() : normalized;
+}
+
+function projectIdentity(value) {
+  const normalized = normalizeProjectPath(value);
+  if (!normalized) return {};
+  const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
+  const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : normalized.split('/').pop();
+  return { projectId: hashKey('project', normalized), projectLabel: label };
 }
 
 function lastJsonlTimestamp(filePath) {
@@ -286,17 +316,20 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const applyFile = (client, sessionId, filePath) => {
     const startedAt = timestampFromSessionId(sessionId);
     const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
-    metadata.set(`${client}:${sessionId}`, { startedAt, lastUsedAt, projectPath: projectPathFromJsonl(filePath) });
+    metadata.set(`${client}:${sessionId}`, { startedAt, lastUsedAt, ...projectIdentity(projectPathFromJsonl(filePath)) });
   };
 
   // OpenCode has no transcript file — its timestamps come from the opencode.db `session` table.
   const opencodeIds = byClient.get('opencode') || new Set();
   if (opencodeIds.size > 0) {
-    const readOpencodeMeta = deps.readOpencodeMeta || ((ids) => opencodeSession.readSessionMeta(ids));
+    const readOpencodeMeta = deps.readOpencodeMeta || ((ids) => {
+      const dbPath = path.join(home, '.local', 'share', 'opencode', 'opencode.db');
+      return opencodeSession.readSessionMeta(ids, { dbPaths: [dbPath] });
+    });
     for (const [sessionId, meta] of readOpencodeMeta(opencodeIds)) {
       const startedAt = meta.startedAt || '';
       const lastUsedAt = meta.lastUsedAt || startedAt;
-      if (startedAt || lastUsedAt || meta.projectPath) metadata.set(`opencode:${sessionId}`, { startedAt, lastUsedAt, projectPath: meta.projectPath || '' });
+      if (startedAt || lastUsedAt || meta.projectPath) metadata.set(`opencode:${sessionId}`, { startedAt, lastUsedAt, ...projectIdentity(meta.projectPath) });
     }
   }
 
@@ -331,7 +364,8 @@ function applySessionTimestamps(periods, home, deps = {}) {
       if (!meta) continue;
       if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
-      if (meta.projectPath) session.projectPath = meta.projectPath;
+      if (meta.projectId) session.projectId = meta.projectId;
+      if (meta.projectLabel) session.projectLabel = meta.projectLabel;
     }
   }
 }
@@ -450,6 +484,7 @@ async function collectUsageOnce(options) {
       // windows exactly via applyPeriodDelta — one spawn instead of three.
       const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
       today = extractUsageFromTokscale(todayJson);
+      applySessionTimestamps({ today }, options.homeDir || os.homedir());
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
     } else {
@@ -457,9 +492,11 @@ async function collectUsageOnce(options) {
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
       today = extractUsageFromTokscale(todayJson);
+      applySessionTimestamps({ today }, options.homeDir || os.homedir());
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
       const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs });
       month = extractUsageFromTokscale(monthJson);
+      applySessionTimestamps({ today, month }, options.homeDir || os.homedir());
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
       const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
@@ -488,7 +525,8 @@ async function collectUsageOnce(options) {
         allTimeSince,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
-        logger: options.logger
+        logger: options.logger,
+        decoratePeriods: (periods, home) => applySessionTimestamps(periods, home)
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -500,7 +538,8 @@ async function collectUsageOnce(options) {
         allTimeSince,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
-        logger: options.logger
+        logger: options.logger,
+        decoratePeriods: (periods, home) => applySessionTimestamps(periods, home)
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -1060,6 +1099,7 @@ function startCollector(options) {
 
 module.exports = {
   applySessionTimestamps,
+  projectIdentity,
   projectPathFromJsonl,
   collectHistoryOnce,
   collectUsageOnce,

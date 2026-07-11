@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const { collectUsageOnce } = require('../../src/shared/collector');
@@ -60,6 +63,27 @@ test('progressive loading fires onProgress after each period scan', async () => 
   assert.equal(summary.today.totalTokens, 105, 'final today');
   assert.equal(summary.month.totalTokens, 730, 'final month');
   assert.equal(summary.allTime.totalTokens, 2930, 'final allTime');
+});
+
+test('progressive previews include opaque project attribution', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-progress-project-'));
+  try {
+    const transcriptDir = path.join(home, '.claude', 'projects', 'repo');
+    fs.mkdirSync(transcriptDir, { recursive: true });
+    fs.writeFileSync(path.join(transcriptDir, 's1.jsonl'), `${JSON.stringify({ cwd: '/work/private-repo', timestamp: '2026-01-01T00:00:00Z' })}\n`);
+    const partials = [];
+    await collectUsageOnce({
+      clients: 'claude', allTimeSince: '2025-01-01', deviceId: 'dev1', homeDir: home,
+      limitsEnabled: false, historyEnabled: false,
+      runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 's1', model: 'm', input: 1 }] }),
+      collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [] }),
+      onProgress: (value) => partials.push(value)
+    });
+    assert.match(partials[0].today.sessions['claude:s1'].projectId, /^sha256:/);
+    assert.equal(partials[0].today.sessions['claude:s1'].projectLabel, 'private-repo');
+    assert.equal(Object.hasOwn(partials[0].today.sessions['claude:s1'], 'projectPath'), false);
+    assert.equal(partials[1].month.sessions['claude:s1'].projectLabel, 'private-repo');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 
 test('progressive loading skips onProgress on anchored ticks', async () => {

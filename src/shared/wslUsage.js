@@ -205,7 +205,7 @@ function probeWslState(deps = {}) {
 }
 
 async function collectWslUsage(options = {}, deps = {}) {
-  const { clients, allTimeSince, commandTimeoutMs, runTokscale, logger } = options;
+  const { clients, allTimeSince, commandTimeoutMs, runTokscale, logger, decoratePeriods } = options;
   const existsSync = deps.existsSync || fs.existsSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
@@ -234,9 +234,15 @@ async function collectWslUsage(options = {}, deps = {}) {
       const todayJson = await runTokscale({ clients: homeClientsCsv, flags: ['--today', '--home', home], commandTimeoutMs });
       const monthJson = await runTokscale({ clients: homeClientsCsv, flags: ['--month', '--home', home], commandTimeoutMs });
       const allTimeJson = await runTokscale({ clients: homeClientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs });
-      bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(todayJson));
-      bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(monthJson));
-      bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(allTimeJson));
+      const periods = {
+        today: extractUsageFromTokscale(todayJson),
+        month: extractUsageFromTokscale(monthJson),
+        allTime: extractUsageFromTokscale(allTimeJson)
+      };
+      if (typeof decoratePeriods === 'function') decoratePeriods(periods, home);
+      bundle.today = mergePeriods(bundle.today, periods.today);
+      bundle.month = mergePeriods(bundle.month, periods.month);
+      bundle.allTime = mergePeriods(bundle.allTime, periods.allTime);
     } catch (error) {
       if (typeof logger === 'function') logger(`wsl usage scan failed for ${home}: ${error.message}`);
     }

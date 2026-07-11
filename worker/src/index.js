@@ -134,12 +134,13 @@ export class HubDO {
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/public/stats') {
       if (!this.publicStatsEnabled) return jsonResponse(404, { error: 'not_found' });
       const stats = await this.getStats();
-      const { devices, limits, ...rest } = stats;
+      const { devices, limits, periods, ...rest } = stats;
       return jsonResponse(200, {
         ok: true,
         source: 'cloudflare-worker',
         deviceCount: devices.length,
         limits: publicLimits(limits),
+        periods: publicPeriods(periods),
         ...rest
       }, { 'cache-control': 'public, max-age=15, s-maxage=15' });
     }
@@ -211,3 +212,15 @@ export class HubDO {
     return jsonResponse(404, { error: 'not_found' });
   }
 }
+
+function publicPeriods(periods) {
+  return Object.fromEntries(Object.entries(periods || {}).map(([name, period]) => [name, {
+    ...period,
+    sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, session]) => {
+      const { projectId, projectLabel, projectPath, ...safe } = session;
+      return [key, safe];
+    }))
+  }]));
+}
+
+export { publicPeriods };

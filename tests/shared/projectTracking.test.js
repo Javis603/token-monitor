@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { projectPathFromJsonl } = require('../../src/shared/collector');
+const { projectIdentity, projectPathFromJsonl } = require('../../src/shared/collector');
 const { aggregateDevices, normalizePeriod } = require('../../src/shared/usage');
 
 test('projectPathFromJsonl reads direct and nested session cwd metadata', () => {
@@ -20,9 +20,30 @@ test('projectPathFromJsonl reads direct and nested session cwd metadata', () => 
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('projectPath survives period normalization and device aggregation', () => {
-  const period = normalizePeriod({ sessions: { 'claude:s1': { client: 'claude', sessionId: 's1', totalTokens: 120, costUsd: 1.25, projectPath: '/work/app' } } });
-  assert.equal(period.sessions['claude:s1'].projectPath, '/work/app');
+test('projectPathFromJsonl caches unchanged transcript metadata', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-project-cache-'));
+  try {
+    const file = path.join(root, 'session.jsonl');
+    fs.writeFileSync(file, `${JSON.stringify({ cwd: '/work/cached' })}\n`);
+    assert.equal(projectPathFromJsonl(file), '/work/cached');
+    const originalOpen = fs.openSync;
+    fs.openSync = () => { throw new Error('unchanged file was reread'); };
+    try { assert.equal(projectPathFromJsonl(file), '/work/cached'); } finally { fs.openSync = originalOpen; }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('opaque project identity survives normalization while raw paths are discarded', () => {
+  const identity = projectIdentity('/work/app');
+  const period = normalizePeriod({ sessions: { 'claude:s1': { client: 'claude', sessionId: 's1', totalTokens: 120, costUsd: 1.25, projectPath: '/private/alice/app', ...identity } } });
+  assert.deepEqual({ projectId: period.sessions['claude:s1'].projectId, projectLabel: period.sessions['claude:s1'].projectLabel }, identity);
+  assert.equal(Object.hasOwn(period.sessions['claude:s1'], 'projectPath'), false);
   const aggregate = aggregateDevices([{ deviceId: 'dev', updatedAt: new Date().toISOString(), today: period }], 60000);
-  assert.equal(aggregate.periods.today.sessions['claude:s1'].projectPath, '/work/app');
+  assert.equal(aggregate.periods.today.sessions['claude:s1'].projectId, identity.projectId);
+  assert.equal(Object.hasOwn(aggregate.periods.today.sessions['claude:s1'], 'projectPath'), false);
+});
+
+test('projectIdentity canonicalizes Windows paths and preserves root labels', () => {
+  assert.deepEqual(projectIdentity('C:\\Code\\App\\'), projectIdentity('c:/code/app'));
+  assert.equal(projectIdentity('C:\\').projectLabel, 'C:\\');
+  assert.equal(projectIdentity('/').projectLabel, '/');
 });
