@@ -451,22 +451,36 @@ function formatCompact(value) {
 }
 function updateTotalCompact(value) {
   if (!els.totalTokensCompact) return;
-  if (state.settings?.showCompactTotalTokens !== true) {
-    hideTotalCompact();
-    return;
-  }
   const num = Math.round(Number(value || 0));
-  if (Math.abs(num) < 1000) {
+  if (state.settings?.showCompactTotalTokens !== true || Math.abs(num) < 1000) {
     hideTotalCompact();
-    return;
+  } else {
+    els.totalTokensCompact.textContent = `≈ ${formatCompact(num)}`;
+    els.totalTokensCompact.classList.remove('hidden');
   }
-  els.totalTokensCompact.textContent = `≈ ${formatCompact(num)}`;
-  els.totalTokensCompact.classList.remove('hidden');
+  fitTotalNumber();
 }
 function hideTotalCompact() {
   if (!els.totalTokensCompact) return;
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
+}
+// Scale the exact total to fit the width it is actually given instead of clipping
+// it to an ellipsis. The compact chip (when shown) is flex:0 0 auto and claims its
+// width first, so the number's clientWidth is its allotted box while scrollWidth is
+// its natural width; the ratio is how far the font must shrink to stay whole.
+function totalNumberFontScale(availableWidth, naturalWidth, minScale = 0.5) {
+  if (!(naturalWidth > 0) || !(availableWidth > 0)) return 1;
+  return Math.min(1, Math.max(minScale, availableWidth / naturalWidth));
+}
+function fitTotalNumber() {
+  const el = els.totalTokens;
+  if (!el) return;
+  el.style.fontSize = '';
+  const base = parseFloat(getComputedStyle(el).fontSize);
+  if (!(base > 0)) return;
+  const scale = totalNumberFontScale(el.clientWidth, el.scrollWidth);
+  if (scale < 1) el.style.fontSize = `${Math.floor(base * scale)}px`;
 }
 function trendShortLabel(label, labelKey) {
   const value = String(label || '');
@@ -3197,8 +3211,11 @@ function render() {
     updateTotalCompact(nextTotal);
     state.suppressInitialNumberAnimation = false;
   } else if (totalChanged) {
-    hideTotalCompact();
-    animateNumber(els.totalTokens, state.currentTotal, nextTotal, 2200, () => updateTotalCompact(nextTotal));
+    // Keep the compact chip visible through the count-up and lock the font to the
+    // settled width first, so the number neither vanishes nor resizes mid-roll.
+    els.totalTokens.textContent = formatNumber(nextTotal);
+    updateTotalCompact(nextTotal);
+    animateNumber(els.totalTokens, state.currentTotal, nextTotal, 2200);
     pulseLiveDot();
   } else {
     cancelNumberAnimation();
@@ -5661,6 +5678,7 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
   if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
 });
+window.addEventListener('resize', () => { if (!numberAnimHandle) fitTotalNumber(); });
 els.settingsInTitlebarInput.addEventListener('change', saveAppearanceFromControls);
 els.discordRpcInput.addEventListener('change', saveAppearanceFromControls);
 els.windowBehaviorInput.addEventListener('change', () => saveSettings({ windowBehavior: els.windowBehaviorInput.value }));

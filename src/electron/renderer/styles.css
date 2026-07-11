@@ -1606,6 +1606,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-weight: 500;
   font-size: clamp(30px, 11vw, 46px);
   line-height: 1.05;
+  /* Equal-width digits so the counting animation does not wobble the number's
+     width (and shove the compact chip) frame to frame. */
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
