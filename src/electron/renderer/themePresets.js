@@ -97,7 +97,7 @@
     zai: 'GLM',
     zaiteam: 'GLM Team',
     cohere: 'Cohere',
-    xiaomi: 'Xiaomi',
+    xiaomi: 'Xiaomi', mimo: 'MiMo',
     minimax: 'MiniMax',
     doubao: 'Doubao',
     volcengine: 'Volcengine',
