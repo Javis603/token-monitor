@@ -3212,10 +3212,13 @@ function render() {
     state.suppressInitialNumberAnimation = false;
   } else if (totalChanged) {
     // Keep the compact chip visible through the count-up and lock the font to the
-    // settled width first, so the number neither vanishes nor resizes mid-roll.
-    els.totalTokens.textContent = formatNumber(nextTotal);
+    // widest endpoint first (a downward roll starts wider than it settles), so the
+    // number never vanishes, clips, or resizes mid-roll. Re-fit on completion so a
+    // window resize during the animation, or a downward settle, still ends correct.
+    const widest = formatNumber(nextTotal).length >= formatNumber(state.currentTotal).length ? nextTotal : state.currentTotal;
+    els.totalTokens.textContent = formatNumber(widest);
     updateTotalCompact(nextTotal);
-    animateNumber(els.totalTokens, state.currentTotal, nextTotal, 2200);
+    animateNumber(els.totalTokens, state.currentTotal, nextTotal, 2200, fitTotalNumber);
     pulseLiveDot();
   } else {
     cancelNumberAnimation();
