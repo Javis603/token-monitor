@@ -322,10 +322,7 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   // OpenCode has no transcript file — its timestamps come from the opencode.db `session` table.
   const opencodeIds = byClient.get('opencode') || new Set();
   if (opencodeIds.size > 0) {
-    const readOpencodeMeta = deps.readOpencodeMeta || ((ids) => {
-      const dbPath = path.join(home, '.local', 'share', 'opencode', 'opencode.db');
-      return opencodeSession.readSessionMeta(ids, { dbPaths: [dbPath] });
-    });
+    const readOpencodeMeta = deps.readOpencodeMeta || ((ids) => opencodeSession.readSessionMetaForHome(ids, home));
     for (const [sessionId, meta] of readOpencodeMeta(opencodeIds)) {
       const startedAt = meta.startedAt || '';
       const lastUsedAt = meta.lastUsedAt || startedAt;

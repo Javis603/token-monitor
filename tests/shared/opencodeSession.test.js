@@ -99,6 +99,24 @@ maybe('readSessionMeta returns an empty map when sqlite is unavailable', () => {
   assert.strictEqual(meta.size, 0);
 });
 
+maybe('readSessionMetaForHome discovers stable and channel databases inside that home', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ocsess-home-'));
+  tmpDirs.push(home);
+  const dataDir = path.join(home, '.local', 'share', 'opencode');
+  fs.mkdirSync(dataDir, { recursive: true });
+  for (const [filename, id] of [['opencode.db', 'stable'], ['opencode-beta.db', 'beta']]) {
+    const db = new sqlite.DatabaseSync(path.join(dataDir, filename));
+    db.exec('CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER, time_updated INTEGER)');
+    db.prepare('INSERT INTO session VALUES (?, ?, ?, ?)').run(id, id, T0, T1);
+    db.close();
+  }
+  const meta = ocs.readSessionMetaForHome(['stable', 'beta'], home, {
+    sqlite,
+    env: { OPENCODE_DB: 'C:\\host\\opencode.db', XDG_DATA_HOME: 'C:\\host\\data' }
+  });
+  assert.deepEqual([...meta.keys()].sort(), ['beta', 'stable']);
+});
+
 maybe('readSessionEvents builds prompt/turn events in time order', () => {
   const file = fixture();
   const out = ocs.readSessionEvents('s1', { dbPaths: [file], sqlite });

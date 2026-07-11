@@ -303,8 +303,13 @@ function mergeSession(target, source) {
   const sourceLastUsed = timestampMs(source.lastUsedAt);
   const targetLastUsed = timestampMs(target.lastUsedAt);
   if (sourceLastUsed && sourceLastUsed > targetLastUsed) target.lastUsedAt = new Date(sourceLastUsed).toISOString();
-  if (!target.projectId && source.projectId) target.projectId = String(source.projectId);
-  if (!target.projectLabel && source.projectLabel) target.projectLabel = String(source.projectLabel);
+  const sourceProjectId = String(source.projectId || '');
+  if (!target.projectId && sourceProjectId) {
+    target.projectId = sourceProjectId;
+    target.projectLabel = String(source.projectLabel || '');
+  } else if (target.projectId === sourceProjectId && !target.projectLabel && source.projectLabel) {
+    target.projectLabel = String(source.projectLabel);
+  }
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelName(model);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));

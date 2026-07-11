@@ -6,6 +6,7 @@
 // OpenCode has no jsonl transcript like Claude/Codex — everything lives in the DB.
 
 const { discoverDbPaths } = require('./opencodeLimits');
+const path = require('node:path');
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
@@ -71,6 +72,18 @@ function readSessionMeta(sessionIds, deps = {}) {
     }
   }
   return out;
+}
+
+function readSessionMetaForHome(sessionIds, home, deps = {}) {
+  const env = deps.env || process.env;
+  const scopedEnv = {
+    ...env,
+    OPENCODE_DB: '',
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    HOME: home,
+    USERPROFILE: home
+  };
+  return readSessionMeta(sessionIds, { ...deps, dbPaths: discoverDbPaths(scopedEnv) });
 }
 
 // ---------------------------------------------------------------------------
@@ -166,4 +179,4 @@ function readSessionEvents(sessionId, deps = {}) {
   return empty;
 }
 
-module.exports = { readSessionMeta, readSessionEvents };
+module.exports = { readSessionMeta, readSessionMetaForHome, readSessionEvents };

@@ -47,3 +47,12 @@ test('projectIdentity canonicalizes Windows paths and preserves root labels', ()
   assert.equal(projectIdentity('C:\\').projectLabel, 'C:\\');
   assert.equal(projectIdentity('/').projectLabel, '/');
 });
+
+test('session aggregation keeps project id and label as one identity pair', () => {
+  const aggregate = aggregateDevices([
+    { deviceId: 'a', today: { sessions: { s: { client: 'claude', sessionId: 's', totalTokens: 1, projectId: 'sha256:a', projectLabel: 'project-a' } } } },
+    { deviceId: 'b', today: { sessions: { s: { client: 'claude', sessionId: 's', totalTokens: 1, projectId: 'sha256:b', projectLabel: 'project-b' } } } }
+  ], 60000);
+  assert.equal(aggregate.periods.today.sessions['claude:s'].projectId, 'sha256:a');
+  assert.equal(aggregate.periods.today.sessions['claude:s'].projectLabel, 'project-a');
+});
