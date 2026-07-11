@@ -3,14 +3,15 @@
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 
-const KIMICODING_BASE_URL = 'https://api.kimi.com/coding/v1';
-const KIMICODING_USAGES_URL = `${KIMICODING_BASE_URL}/usages`;
-const KIMICODING_KEY_NAMES = ['KIMI_CODING_API_KEY', 'KIMI_FOR_CODING_API_KEY'];
+const KIMI_CODE_BASE_URL = 'https://api.kimi.com/coding/v1';
+const KIMI_CODE_USAGES_URL = `${KIMI_CODE_BASE_URL}/usages`;
+const KIMI_KEY_NAMES = ['KIMI_CODE_API_KEY'];
 
-// Kimi Coding Plan only ever reports two rate-limit windows: a 5-hour session
-// window and a weekly window (no monthly/billing window exists). Session
-// windows top out around six hours; anything longer is treated as weekly.
-const KIMICODING_SESSION_MAX_MINUTES = 6 * 60;
+// The Kimi Code usage API reports the weekly quota in top-level `usage` and
+// the rolling 5-hour rate limit in `limits[]`. Compatible proxies may expose
+// more than one limits[] entry, so duration-based classification remains
+// defensive. Kimi Code itself has no monthly/billing window here.
+const KIMI_SESSION_MAX_MINUTES = 6 * 60;
 
 function cleanSecret(value) {
   let raw = value;
@@ -22,10 +23,10 @@ function cleanSecret(value) {
   return raw;
 }
 
-function kimicodingToken(env = process.env, explicitKey = '') {
+function kimiToken(env = process.env, explicitKey = '') {
   const explicit = cleanSecret(explicitKey);
   if (explicit) return explicit;
-  for (const name of KIMICODING_KEY_NAMES) {
+  for (const name of KIMI_KEY_NAMES) {
     const raw = cleanSecret(env[name]);
     if (raw) return raw;
   }
@@ -51,13 +52,13 @@ function toIso(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-// Best-effort duration+timeUnit -> minutes conversion. The upstream shape is
-// reverse-engineered (see plan-usage's kimi-code.ts), so this stays defensive
-// about unit spelling/casing. The real API uses protobuf-style enum values
+// Best-effort duration+timeUnit -> minutes conversion. Stay defensive about
+// unit spelling/casing because compatible proxies may normalize field values.
+// The Kimi Code API uses protobuf-style enum values
 // like "TIME_UNIT_MINUTE" / "TIME_UNIT_DAY" (the 5-hour session window is
 // reported as duration=300, timeUnit="TIME_UNIT_MINUTE"), so this matches by
 // substring rather than prefix.
-function kimicodingWindowMinutes(duration, timeUnit) {
+function kimiWindowMinutes(duration, timeUnit) {
   const amount = numberOrNull(duration);
   if (amount === null || amount <= 0) return null;
   const unit = String(timeUnit || '').trim().toUpperCase();
@@ -69,23 +70,20 @@ function kimicodingWindowMinutes(duration, timeUnit) {
   return null;
 }
 
-function classifyKimicodingWindow(minutes) {
-  if (minutes !== null && minutes <= KIMICODING_SESSION_MAX_MINUTES) return 'session';
+function classifyKimiWindow(minutes) {
+  if (minutes !== null && minutes <= KIMI_SESSION_MAX_MINUTES) return 'session';
   return 'weekly';
 }
 
-function classifyKimicodingUsageName(name) {
+function classifyKimiUsageName(name) {
   const raw = String(name || '').toLowerCase();
   if (/(hour|小时|時間|시간)/.test(raw)) return 'session';
   return 'weekly';
 }
 
 // Picks the first numeric value found under any of the given key names. The
-// upstream API is reverse-engineered with no confirmed sample response, and
-// this codebase has repeatedly hit both camelCase and snake_case variants
-// across vendors (Qoder's usedValue/limitValue, z.ai's currentValue, etc.),
-// so every numeric field is looked up under several plausible aliases instead
-// of a single assumed name.
+// canonical Kimi fields come first; aliases keep compatible proxies and older
+// shapes from failing just because they use snake_case or generic quota names.
 function pickNumber(obj, keys) {
   if (!obj || typeof obj !== 'object') return null;
   for (const key of keys) {
@@ -117,6 +115,7 @@ const DETAIL_USED_KEYS = ['used', 'usedValue', 'used_value', 'usedAmount', 'used
 const DETAIL_LIMIT_KEYS = ['limit', 'limitValue', 'limit_value', 'total', 'totalValue', 'total_value', 'quota', 'quotaValue', 'quota_value', 'max', 'maxValue', 'max_value'];
 const DETAIL_REMAINING_KEYS = ['remaining', 'remainingValue', 'remaining_value'];
 const DETAIL_PERCENT_KEYS = ['percent', 'percentage', 'usedPercent', 'used_percent', 'usagePercentage', 'usage_percentage'];
+const DETAIL_RESET_KEYS = ['resetTime', 'reset_time', 'resetAt', 'reset_at'];
 const WINDOW_DURATION_KEYS = ['duration', 'windowDuration', 'window_duration', 'size', 'value', 'length'];
 const WINDOW_UNIT_KEYS = ['timeUnit', 'time_unit', 'unit', 'windowUnit', 'window_unit'];
 const LIMITS_ARRAY_KEYS = ['limits', 'limitInfos', 'limit_infos', 'rateLimits', 'rate_limits', 'windows'];
@@ -170,28 +169,28 @@ function limitEntries(body) {
       const window = firstObject(entry, ENTRY_WINDOW_KEYS);
       const duration = pickNumber(window, WINDOW_DURATION_KEYS);
       const timeUnit = pickString(window, WINDOW_UNIT_KEYS);
+      const resetAt = pickRaw(detail, DETAIL_RESET_KEYS) ?? pickRaw(window, DETAIL_RESET_KEYS);
       return {
         usedPercent,
-        windowMinutes: kimicodingWindowMinutes(duration, timeUnit)
+        windowMinutes: kimiWindowMinutes(duration, timeUnit),
+        resetsAt: toIso(resetAt)
       };
     })
     .filter(Boolean);
 }
 
-// Kimi Coding Plan always reports exactly two rate-limit windows here: a
-// 5-hour session window and a weekly window. window.duration/timeUnit is
-// reverse-engineered and not officially documented, so when it fails to parse
-// (or both entries land on the same kind) this falls back to ordering the two
-// entries by window size — smaller is the session window, larger is weekly —
-// instead of silently losing one of the two windows to a kind collision.
-function classifyKimicodingPair(entries) {
+// If a compatible response flattens exactly two quota windows into limits[],
+// keep both even when their unit spelling cannot be parsed. The canonical Kimi
+// response does not need this fallback: it has one limits[] session entry and
+// carries the weekly quota in top-level `usage`.
+function classifyKimiPair(entries) {
   const [a, b] = entries;
   const aMinutes = a.windowMinutes;
   const bMinutes = b.windowMinutes;
-  if (aMinutes !== null && bMinutes !== null && classifyKimicodingWindow(aMinutes) !== classifyKimicodingWindow(bMinutes)) {
+  if (aMinutes !== null && bMinutes !== null && classifyKimiWindow(aMinutes) !== classifyKimiWindow(bMinutes)) {
     return [
-      { ...a, kind: classifyKimicodingWindow(aMinutes) },
-      { ...b, kind: classifyKimicodingWindow(bMinutes) }
+      { ...a, kind: classifyKimiWindow(aMinutes) },
+      { ...b, kind: classifyKimiWindow(bMinutes) }
     ];
   }
   const [session, weekly] = aMinutes !== null || bMinutes !== null
@@ -203,16 +202,16 @@ function classifyKimicodingPair(entries) {
   ];
 }
 
-function parseKimicodingUsage(rawBody) {
+function parseKimiUsage(rawBody) {
   // Several other vendors integrated in this codebase (e.g. Qoder) wrap their
   // payload in a `data` envelope; be defensive in case Kimi does too.
   const body = rawBody?.data && typeof rawBody.data === 'object' ? rawBody.data : rawBody;
   const windows = [];
   const seenKinds = new Set();
   const entries = limitEntries(body);
-  const classified = entries.length === 2 ? classifyKimicodingPair(entries) : entries.map((entry) => ({
+  const classified = entries.length === 2 ? classifyKimiPair(entries) : entries.map((entry) => ({
     ...entry,
-    kind: classifyKimicodingWindow(entry.windowMinutes)
+    kind: classifyKimiWindow(entry.windowMinutes)
   }));
 
   for (const entry of classified) {
@@ -223,6 +222,7 @@ function parseKimicodingUsage(rawBody) {
       usedPercent: entry.usedPercent,
       remainingPercent: Math.max(0, Math.min(100, 100 - entry.usedPercent)),
       windowMinutes: entry.windowMinutes || undefined,
+      resetsAt: entry.resetsAt || undefined,
       showMeter: true
     });
   }
@@ -232,7 +232,7 @@ function parseKimicodingUsage(rawBody) {
     const usedPercent = usedPercentFromDetail(usage);
     if (usedPercent !== null) {
       const name = pickString(usage, ['name', 'label', 'title']);
-      const kind = classifyKimicodingUsageName(name);
+      const kind = classifyKimiUsageName(name);
       if (!seenKinds.has(kind)) {
         const resetAt = pickRaw(usage, ['reset_at', 'resetAt', 'resetTime', 'reset_time']);
         windows.push({
@@ -250,14 +250,14 @@ function parseKimicodingUsage(rawBody) {
   return { windows };
 }
 
-async function fetchKimicodingLimits(options = {}, deps = {}) {
+async function fetchKimiLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
-  const key = kimicodingToken(env, options.kimicodingApiKey);
+  const key = kimiToken(env, options.kimiApiKey);
   if (!key) {
     return normalizeLimitProvider({
-      provider: 'kimicoding',
+      provider: 'kimi',
       source: 'api',
       status: 'notConfigured',
       updatedAt,
@@ -266,23 +266,23 @@ async function fetchKimicodingLimits(options = {}, deps = {}) {
   }
 
   try {
-    const response = await (deps.fetch || fetch)(KIMICODING_USAGES_URL, {
+    const response = await (deps.fetch || fetch)(KIMI_CODE_USAGES_URL, {
       headers: {
         Authorization: `Bearer ${key}`,
         Accept: 'application/json'
       }
     });
     if (!response.ok) {
-      const error = new Error(`Kimi Coding usage returned ${response.status}`);
+      const error = new Error(`Kimi usage returned ${response.status}`);
       error.status = response.status === 401 || response.status === 403
         ? 'unauthorized'
         : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
       throw error;
     }
-    const usage = parseKimicodingUsage(await response.json());
+    const usage = parseKimiUsage(await response.json());
     return normalizeLimitProvider({
-      provider: 'kimicoding',
-      accountKey: hashKey('kimicoding', key),
+      provider: 'kimi',
+      accountKey: hashKey('kimi', key),
       source: 'api',
       status: usage.windows.length ? 'ok' : 'unavailable',
       updatedAt,
@@ -290,7 +290,7 @@ async function fetchKimicodingLimits(options = {}, deps = {}) {
     });
   } catch (error) {
     return normalizeLimitProvider({
-      provider: 'kimicoding',
+      provider: 'kimi',
       source: 'api',
       status: error?.status || 'unavailable',
       updatedAt,
@@ -300,9 +300,9 @@ async function fetchKimicodingLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
-  KIMICODING_BASE_URL,
-  KIMICODING_USAGES_URL,
-  kimicodingToken,
-  parseKimicodingUsage,
-  fetchKimicodingLimits
+  KIMI_CODE_BASE_URL,
+  KIMI_CODE_USAGES_URL,
+  kimiToken,
+  parseKimiUsage,
+  fetchKimiLimits
 };

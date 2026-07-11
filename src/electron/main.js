@@ -20,7 +20,7 @@ const { startCollector, lookupModelPricing, normalizeHistoryIntervalMs } = requi
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimicodingToken } = require('../shared/limitCollector');
+const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken } = require('../shared/limitCollector');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
 const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
@@ -248,7 +248,7 @@ function defaultSettings() {
     volcengineRegion: '',
     qoderCookie: '',
     qoderSite: 'global',
-    kimicodingApiKey: '',
+    kimiApiKey: '',
     codexManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
@@ -366,12 +366,12 @@ function currentQoderCookie() {
   return settings?.qoderCookie || qoderCookie(process.env);
 }
 
-function normalizeKimicodingApiKey(value) {
-  return kimicodingToken({}, String(value || ''));
+function normalizeKimiApiKey(value) {
+  return kimiToken({}, String(value || ''));
 }
 
-function currentKimicodingApiKey() {
-  return settings?.kimicodingApiKey || kimicodingToken(process.env);
+function currentKimiApiKey() {
+  return settings?.kimiApiKey || kimiToken(process.env);
 }
 
 function normalizeCopilotEnterpriseHost(value) {
@@ -1549,7 +1549,7 @@ function startSyncCollector() {
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
-    kimicodingApiKey: settings.kimicodingApiKey || '',
+    kimiApiKey: settings.kimiApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: async (summary) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -1603,7 +1603,7 @@ function startHostCollector() {
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
-    kimicodingApiKey: settings.kimicodingApiKey || '',
+    kimiApiKey: settings.kimiApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: (summary) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -1800,7 +1800,7 @@ function startLocalCollector() {
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
-    kimicodingApiKey: settings.kimicodingApiKey || '',
+    kimiApiKey: settings.kimiApiKey || '',
     codexManagedAccounts: codexManagedAccountsForCollector(),
     onUpdate: (summary, reason) => {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
@@ -2027,9 +2027,9 @@ function settingsForRenderer() {
     : qoderCookie(process.env)
       ? 'env'
       : '';
-  const kimicodingApiKeySource = settings?.kimicodingApiKey
+  const kimiApiKeySource = settings?.kimiApiKey
     ? 'settings'
-    : kimicodingToken(process.env)
+    : kimiToken(process.env)
       ? 'env'
       : '';
   return {
@@ -2045,7 +2045,7 @@ function settingsForRenderer() {
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
     volcengineSecretAccessKey: '',
     qoderCookie: settings?.qoderCookie ? 'set' : '',
-    kimicodingApiKey: '',
+    kimiApiKey: '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
     // know whether a cookie is configured, not its value.
     opencodeCookie: settings?.opencodeCookie ? 'set' : '',
@@ -2067,8 +2067,8 @@ function settingsForRenderer() {
     volcengineCredentialsSource,
     qoderCookieConfigured: Boolean(currentQoderCookie()),
     qoderCookieSource,
-    kimicodingApiKeyConfigured: Boolean(currentKimicodingApiKey()),
-    kimicodingApiKeySource,
+    kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
+    kimiApiKeySource,
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
@@ -2653,6 +2653,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'bigmodel.cn' || parsed.hostname === 'www.bigmodel.cn') return true;
   if (parsed.hostname === 'www.volcengine.com' || parsed.hostname === 'console.volcengine.com') return true;
   if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
+  if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
@@ -3001,7 +3002,7 @@ app.whenReady().then(() => {
     const previousVolcengineRegion = settings.volcengineRegion;
     const previousQoderCookie = settings.qoderCookie;
     const previousQoderSite = settings.qoderSite;
-    const previousKimicodingApiKey = settings.kimicodingApiKey;
+    const previousKimiApiKey = settings.kimiApiKey;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousShowTrayIcon = settings.showTrayIcon;
     const previousTrayMode = settings.trayMode;
@@ -3028,7 +3029,7 @@ app.whenReady().then(() => {
     if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
-    if (patch.kimicodingApiKey !== undefined) normalizedPatch.kimicodingApiKey = normalizeKimicodingApiKey(patch.kimicodingApiKey);
+    if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     settings = normalizeWindowBehaviorSettings({
@@ -3161,7 +3162,7 @@ app.whenReady().then(() => {
       settings.volcengineRegion !== previousVolcengineRegion ||
       settings.qoderCookie !== previousQoderCookie ||
       settings.qoderSite !== previousQoderSite ||
-      settings.kimicodingApiKey !== previousKimicodingApiKey
+      settings.kimiApiKey !== previousKimiApiKey
     ) {
       startMode();
     }

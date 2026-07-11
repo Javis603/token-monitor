@@ -2203,7 +2203,6 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
-.row-icon-kimicoding { -webkit-mask-image: url(../../../assets/icons/moonshot.svg);      mask-image: url(../../../assets/icons/moonshot.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
@@ -2276,7 +2275,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);
   mask-image: url(../../../assets/icons/qoder.svg);
 }
-.limit-icon-kimicoding {
+.limit-icon-kimi {
   -webkit-mask-image: url(../../../assets/icons/moonshot.svg);
   mask-image: url(../../../assets/icons/moonshot.svg);
 }
@@ -3156,6 +3155,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
+#kimiManualPanel.hidden,
 #copilotManualPanel.hidden,
 #copilotManualDetails.hidden,
 #cursorErrorMessage.hidden,
@@ -3166,6 +3166,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
 #qoderErrorMessage.hidden,
+#kimiErrorMessage.hidden,
 #copilotErrorMessage.hidden,
 #copilotLoginStatus.hidden { display: none; }
 #cursorManualPanel,
@@ -3176,6 +3177,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
+#kimiManualPanel,
 #copilotManualPanel {
   min-width: 0;
 }
@@ -3186,7 +3188,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiManualPanel > .accordion-animation-inner,
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner {
+#qoderManualPanel > .accordion-animation-inner,
+#kimiManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
@@ -3201,6 +3204,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#kimiManualPanel input,
 #copilotManualDetails input {
   width: 100%;
   font-size: 12px;
@@ -3213,6 +3217,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
+#kimiManualPanel input,
 #copilotManualDetails input {
   font-family: monospace;
 }

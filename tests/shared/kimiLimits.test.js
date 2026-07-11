@@ -4,28 +4,27 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  KIMICODING_USAGES_URL,
-  kimicodingToken,
-  parseKimicodingUsage,
-  fetchKimicodingLimits
-} = require('../../src/shared/kimicodingLimits');
+  KIMI_CODE_USAGES_URL,
+  kimiToken,
+  parseKimiUsage,
+  fetchKimiLimits
+} = require('../../src/shared/kimiLimits');
 
-test('kimicodingToken reads explicit key before env, and supports both env aliases', () => {
+test('kimiToken reads explicit key before the CodexBar-compatible environment key', () => {
   assert.equal(
-    kimicodingToken({ KIMI_CODING_API_KEY: 'env-key' }, '  "explicit-key"  '),
+    kimiToken({ KIMI_CODE_API_KEY: 'env-key' }, '  "explicit-key"  '),
     'explicit-key'
   );
-  assert.equal(kimicodingToken({ KIMI_CODING_API_KEY: '  "env-key"  ' }), 'env-key');
-  assert.equal(kimicodingToken({ KIMI_FOR_CODING_API_KEY: 'alias-key' }), 'alias-key');
-  assert.equal(kimicodingToken({}), '');
+  assert.equal(kimiToken({ KIMI_CODE_API_KEY: 'codexbar-key' }), 'codexbar-key');
+  assert.equal(kimiToken({}), '');
 });
 
-test('parseKimicodingUsage accepts snake_case / *Value detail and window field aliases', () => {
+test('parseKimiUsage accepts snake_case / *Value detail and window field aliases', () => {
   // Real-world APIs in this codebase frequently mix camelCase and snake_case
-  // (Qoder's usedValue/limitValue, z.ai's currentValue, etc). Kimi Coding's
+  // (Qoder's usedValue/limitValue, z.ai's currentValue, etc). Kimi's
   // detail/window field names are unconfirmed, so both entries here use
   // plausible alternate spellings instead of the exact kimi-code.ts names.
-  const usage = parseKimicodingUsage({
+  const usage = parseKimiUsage({
     limits: [
       { detail: { used_value: 30, limit_value: 100 }, window: { window_duration: 300, time_unit: 'TIME_UNIT_MINUTE' } },
       { detail: { usedAmount: 40, totalValue: 200 }, window: { duration: 7, unit: 'TIME_UNIT_DAY' } }
@@ -42,8 +41,8 @@ test('parseKimicodingUsage accepts snake_case / *Value detail and window field a
   assert.equal(weekly.usedPercent, 20);
 });
 
-test('parseKimicodingUsage derives used% from limit+remaining when used is absent', () => {
-  const usage = parseKimicodingUsage({
+test('parseKimiUsage derives used% from limit+remaining when used is absent', () => {
+  const usage = parseKimiUsage({
     limits: [
       { detail: { limit: 100, remaining: 70 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } },
       { detail: { limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'TIME_UNIT_DAY' } }
@@ -57,8 +56,8 @@ test('parseKimicodingUsage derives used% from limit+remaining when used is absen
   assert.equal(weekly.usedPercent, 20);
 });
 
-test('parseKimicodingUsage reads the limits array under alternate top-level keys', () => {
-  const usage = parseKimicodingUsage({
+test('parseKimiUsage reads the limits array under alternate top-level keys', () => {
+  const usage = parseKimiUsage({
     rate_limits: [
       { detail: { used: 30, limit: 100 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } },
       { detail: { used: 40, limit: 200 }, window: { duration: 7, timeUnit: 'TIME_UNIT_DAY' } }
@@ -68,8 +67,8 @@ test('parseKimicodingUsage reads the limits array under alternate top-level keys
   assert.equal(usage.windows.length, 2);
 });
 
-test('parseKimicodingUsage unwraps a data envelope like Qoder/other vendors use', () => {
-  const usage = parseKimicodingUsage({
+test('parseKimiUsage unwraps a data envelope like Qoder/other vendors use', () => {
+  const usage = parseKimiUsage({
     data: {
       limits: [
         { detail: { used: 30, limit: 100 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } },
@@ -81,8 +80,8 @@ test('parseKimicodingUsage unwraps a data envelope like Qoder/other vendors use'
   assert.equal(usage.windows.length, 2);
 });
 
-test('parseKimicodingUsage classifies limits[] windows by duration/timeUnit', () => {
-  const usage = parseKimicodingUsage({
+test('parseKimiUsage classifies limits[] windows by duration/timeUnit', () => {
+  const usage = parseKimiUsage({
     limits: [
       { detail: { used: 10, limit: 100, remaining: 90 }, window: { duration: 5, timeUnit: 'HOUR' } },
       { detail: { used: 40, limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'DAY' } }
@@ -98,12 +97,12 @@ test('parseKimicodingUsage classifies limits[] windows by duration/timeUnit', ()
   assert.equal(weekly.usedPercent, 20);
 });
 
-test('parseKimicodingUsage recognizes the real protobuf-style TIME_UNIT_* enum values', () => {
-  // The real Kimi Coding Plan API reports the 5-hour rolling window as
+test('parseKimiUsage recognizes the real protobuf-style TIME_UNIT_* enum values', () => {
+  // The real Kimi Code API reports the 5-hour rolling window as
   // duration=300, timeUnit="TIME_UNIT_MINUTE" (not "HOUR"), and the weekly
   // window as timeUnit="TIME_UNIT_DAY". These must classify correctly instead
   // of falling through to the unparseable-pair fallback.
-  const usage = parseKimicodingUsage({
+  const usage = parseKimiUsage({
     limits: [
       { detail: { used: 30, limit: 100, remaining: 70 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } },
       { detail: { used: 40, limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'TIME_UNIT_DAY' } }
@@ -120,11 +119,38 @@ test('parseKimicodingUsage recognizes the real protobuf-style TIME_UNIT_* enum v
   assert.equal(weekly.usedPercent, 20);
 });
 
-test('parseKimicodingUsage always emits a distinct session and weekly window from exactly two limits[] entries, even when duration/timeUnit is unparseable', () => {
-  // Kimi Coding Plan always reports exactly these two windows. If window shape
-  // parsing fails and both entries would otherwise collide on the same kind,
-  // the smaller window (by used%-independent size) must still win "session".
-  const usage = parseKimicodingUsage({
+test('parseKimiUsage maps the canonical weekly usage plus 5-hour limit response', () => {
+  const usage = parseKimiUsage({
+    usage: {
+      limit: '2048',
+      used: '214',
+      remaining: '1834',
+      resetTime: '2026-07-14T00:00:00Z'
+    },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: {
+          limit: '200',
+          used: '139',
+          remaining: '61',
+          resetTime: '2026-07-08T05:00:00Z'
+        }
+      }
+    ]
+  });
+
+  assert.equal(usage.windows.length, 2);
+  const session = usage.windows.find((w) => w.kind === 'session');
+  const weekly = usage.windows.find((w) => w.kind === 'weekly');
+  assert.equal(session.usedPercent, 69.5);
+  assert.equal(session.resetsAt, '2026-07-08T05:00:00.000Z');
+  assert.equal(weekly.usedPercent, (214 / 2048) * 100);
+  assert.equal(weekly.resetsAt, '2026-07-14T00:00:00.000Z');
+});
+
+test('parseKimiUsage preserves two compatible-proxy limits when units are unparseable', () => {
+  const usage = parseKimiUsage({
     limits: [
       { detail: { used: 10, limit: 100, remaining: 90 }, window: { duration: 5, timeUnit: 'UNKNOWN_UNIT' } },
       { detail: { used: 40, limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'UNKNOWN_UNIT' } }
@@ -138,8 +164,8 @@ test('parseKimicodingUsage always emits a distinct session and weekly window fro
   assert.equal(usage.windows[1].usedPercent, 20);
 });
 
-test('parseKimicodingUsage orders a colliding pair by window size when both entries parse to the same kind', () => {
-  const usage = parseKimicodingUsage({
+test('parseKimiUsage orders a colliding pair by window size when both entries parse to the same kind', () => {
+  const usage = parseKimiUsage({
     limits: [
       // Both would classify as "session" under the raw per-entry rule (durations
       // well under the 6-hour cutoff), but as a pair they must still resolve to
@@ -156,8 +182,8 @@ test('parseKimicodingUsage orders a colliding pair by window size when both entr
   assert.equal(usage.windows[1].usedPercent, 20);
 });
 
-test('parseKimicodingUsage falls back to the top-level usage block when no matching kind was seen', () => {
-  const usage = parseKimicodingUsage({
+test('parseKimiUsage falls back to the top-level usage block when no matching kind was seen', () => {
+  const usage = parseKimiUsage({
     usage: { used: 50, limit: 100, remaining: 50, name: 'Weekly quota', reset_at: '2026-08-01T00:00:00Z' }
   });
 
@@ -168,8 +194,8 @@ test('parseKimicodingUsage falls back to the top-level usage block when no match
   assert.equal(usage.windows[0].resetsAt, '2026-08-01T00:00:00.000Z');
 });
 
-test('parseKimicodingUsage skips the top-level usage block once limits[] already covers its kind', () => {
-  const usage = parseKimicodingUsage({
+test('parseKimiUsage skips the top-level usage block once limits[] already covers its kind', () => {
+  const usage = parseKimiUsage({
     limits: [
       { detail: { used: 40, limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'DAY' } }
     ],
@@ -181,17 +207,17 @@ test('parseKimicodingUsage skips the top-level usage block once limits[] already
   assert.equal(usage.windows[0].usedPercent, 20);
 });
 
-test('fetchKimicodingLimits returns notConfigured without an API key', async () => {
-  const provider = await fetchKimicodingLimits({}, { env: {}, now: () => Date.parse('2026-07-08T00:00:00Z') });
-  assert.equal(provider.provider, 'kimicoding');
+test('fetchKimiLimits returns notConfigured without an API key', async () => {
+  const provider = await fetchKimiLimits({}, { env: {}, now: () => Date.parse('2026-07-08T00:00:00Z') });
+  assert.equal(provider.provider, 'kimi');
   assert.equal(provider.source, 'api');
   assert.equal(provider.status, 'notConfigured');
 });
 
-test('fetchKimicodingLimits requests usages with a bearer token and normalizes windows', async () => {
+test('fetchKimiLimits requests usages with a bearer token and normalizes windows', async () => {
   const requests = [];
-  const provider = await fetchKimicodingLimits(
-    { kimicodingApiKey: 'kimi-key' },
+  const provider = await fetchKimiLimits(
+    { kimiApiKey: 'kimi-key' },
     {
       env: {},
       now: () => Date.parse('2026-07-08T00:00:00Z'),
@@ -211,9 +237,9 @@ test('fetchKimicodingLimits requests usages with a bearer token and normalizes w
   );
 
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, KIMICODING_USAGES_URL);
+  assert.equal(requests[0].url, KIMI_CODE_USAGES_URL);
   assert.equal(requests[0].init.headers.Authorization, 'Bearer kimi-key');
-  assert.equal(provider.provider, 'kimicoding');
+  assert.equal(provider.provider, 'kimi');
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'api');
   assert.ok(provider.accountKey.startsWith('sha256:'));
@@ -221,21 +247,21 @@ test('fetchKimicodingLimits requests usages with a bearer token and normalizes w
   assert.equal(provider.windows[0].kind, 'session');
 });
 
-test('fetchKimicodingLimits maps 401/403 to unauthorized and 429 to sourceRateLimited', async () => {
-  const unauthorized = await fetchKimicodingLimits(
-    { kimicodingApiKey: 'bad-key' },
+test('fetchKimiLimits maps 401/403 to unauthorized and 429 to sourceRateLimited', async () => {
+  const unauthorized = await fetchKimiLimits(
+    { kimiApiKey: 'bad-key' },
     { env: {}, now: () => Date.parse('2026-07-08T00:00:00Z'), fetch: async () => ({ ok: false, status: 401 }) }
   );
   assert.equal(unauthorized.status, 'unauthorized');
 
-  const rateLimited = await fetchKimicodingLimits(
-    { kimicodingApiKey: 'rate-limited-key' },
+  const rateLimited = await fetchKimiLimits(
+    { kimiApiKey: 'rate-limited-key' },
     { env: {}, now: () => Date.parse('2026-07-08T00:00:00Z'), fetch: async () => ({ ok: false, status: 429 }) }
   );
   assert.equal(rateLimited.status, 'sourceRateLimited');
 
-  const unavailable = await fetchKimicodingLimits(
-    { kimicodingApiKey: 'server-error-key' },
+  const unavailable = await fetchKimiLimits(
+    { kimiApiKey: 'server-error-key' },
     { env: {}, now: () => Date.parse('2026-07-08T00:00:00Z'), fetch: async () => ({ ok: false, status: 500 }) }
   );
   assert.equal(unavailable.status, 'unavailable');

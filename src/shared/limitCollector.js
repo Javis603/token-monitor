@@ -35,8 +35,8 @@ const volcengineLimits = require('./volcengineLimits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('./qoderLimits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
-const kimicodingLimits = require('./kimicodingLimits');
-const { kimicodingToken, fetchKimicodingLimits } = kimicodingLimits;
+const kimiLimits = require('./kimiLimits');
+const { kimiToken, fetchKimiLimits } = kimiLimits;
 const {
   grokCredential,
   readAuthJson,
@@ -47,7 +47,7 @@ const {
   fetchGrokLimits
 } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimicoding'];
+const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi'];
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -2377,7 +2377,7 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     zaiteam: (providerOptions) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, deps),
     volcengine: (providerOptions) => volcengineLimits.fetchVolcengineLimits(providerOptions, deps),
     qoder: (providerOptions) => qoderLimits.fetchQoderLimits(providerOptions, deps),
-    kimicoding: (providerOptions) => kimicodingLimits.fetchKimicodingLimits(providerOptions, deps),
+    kimi: (providerOptions) => kimiLimits.fetchKimiLimits(providerOptions, deps),
     ...(deps.providerFetchers || {})
   };
   const providers = [];
@@ -2626,8 +2626,8 @@ module.exports = {
   fetchVolcengineLimits,
   qoderCookie,
   fetchQoderLimits,
-  kimicodingToken,
-  fetchKimicodingLimits,
+  kimiToken,
+  fetchKimiLimits,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   mapCodexRateLimitsToProvider,

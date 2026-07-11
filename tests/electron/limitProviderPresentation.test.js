@@ -572,7 +572,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(statsPush, new RegExp(`${fn}\\(\\);`), `${fn} missing from onStatsPush`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['zai', 'volcengine', 'qoder', 'kimicoding']) {
+  for (const provider of ['zai', 'volcengine', 'qoder', 'kimi']) {
     assert.match(refreshStats, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from refreshStats`);
     assert.match(statsPush, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from onStatsPush`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
@@ -668,14 +668,14 @@ test('Accounts summary counts API-key and cookie account groups', () => {
   assert.match(summaryBody, /const zaiteamLinked = externalProviderAccountLinked\('zaiteam'\);/);
   assert.match(summaryBody, /const volcengineLinked = externalProviderAccountLinked\('volcengine'\);/);
   assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
-  assert.match(summaryBody, /const kimicodingLinked = externalProviderAccountLinked\('kimicoding'\);/);
+  assert.match(summaryBody, /const kimiLinked = externalProviderAccountLinked\('kimi'\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(zaiLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(zaiteamLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(kimicodingLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(kimiLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
   assert.match(summaryBody, /total: 11/);
 });
@@ -770,11 +770,17 @@ test('Z.ai, Volcengine, and Qoder source labels and setup statuses', () => {
   );
 });
 
-test('Kimi Coding capability tags and source label', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('kimicoding'), ['Coding Plan', 'API key']);
-  assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimicoding', source: 'api' }), 'API');
+test('Kimi capability tags and source label', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('kimi'), ['Coding Plan', 'API key']);
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimi', source: 'api' }), 'API');
   assert.deepEqual(
-    presentation.limitProviderStatusLabel({ provider: 'kimicoding', status: 'notConfigured' }),
+    presentation.limitProviderStatusLabel({ provider: 'kimi', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
   );
+});
+
+test('Kimi usage and limits share the canonical provider id and vendor color', () => {
+  const app = readRendererFile('app.js');
+  assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
+  assert.match(app, /const color = clientColors\[id\] \|\| clientColors\.default/);
 });

@@ -42,7 +42,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor | `~/.config/tokscale/cursor-cache/`（Cursor 同期で更新） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.config/tokscale/antigravity-cache/`（Antigravity 同期で更新） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code | `~/.kimi/sessions/`, `~/.kimi-code/sessions/` (`KIMI_CODE_HOME`); Kimi API キー（Kimi API で Kimi Coding Plan クォータ取得） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code | `~/.kimi/sessions/`, `~/.kimi-code/sessions/` (`KIMI_CODE_HOME`); Kimi Code API キー（Kimi API で Kimi Code クォータ取得） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `$GROK_HOME/sessions/` または `~/.grok/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | `~/.copilot/otel/` ([Set up](docs/github-copilot-otel.md)) | ✅ | ✅ | — |
@@ -75,11 +75,11 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 - **希望の通貨でコスト表示** — USD、TWD、HKD、CNY；為替レートは毎日自動更新、設定で手動上書き可能
 - **使用トレンド & ダッシュボード** — ホーム画面のアクティビティヒートマップ・トレンドチャート、連続日数・全デバイス横断のツール/モデル別累積使用（棒・K 線）専用ダッシュボードウィンドウ
 - **データエクスポート** — ツール非依存の CSV + JSON で手動エクスポートまたはフォルダへの自動書き込み（スプレッドシート、Obsidian、Grafana、スクリプト用）；[docs/export.md](docs/export.md) を参照
-- **AI ツール制限検出** — Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine、Qoder、Kimi Coding の session/weekly/billing/credits、DeepSeek プリペイド残高・本日/今月の使用額。追跡済みの Codex アカウントは、再認証なしでローカル Codex アカウントに切り替えできます
+- **AI ツール制限検出** — Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine、Qoder、Kimi のプロバイダー固有の session/weekly/billing/credits、DeepSeek プリペイド残高・本日/今月の使用額。追跡済みの Codex アカウントは、再認証なしでローカル Codex アカウントに切り替えできます
 - **ステータスビュー**（任意） — Claude、OpenAI、Cursor、DeepSeek のステータスページを手動/定期確認
 - **ツールリストのカスタマイズ** — 追跡は維持したまま非表示、ピン留め、順序変更
 - **外観** — テーマ（ライトモード含む）、ツール別カラー、ガラス透明度・ぼかし、透明ウィンドウ
-- **メニューバー (macOS) / システムトレイ (Windows)** — コスト、トークン、Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi Coding 制限 % など
+- **メニューバー (macOS) / システムトレイ (Windows)** — コスト、トークン、Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi 制限 % など
 - **フローティングバブル** — ドラッグ可能なミニウィンドウ、クリック/ホバープレビュー
 - **グローバルショートカット** — どこからでもウィンドウの表示/非表示
 - **ローカルファースト** — 単一デバイスではサーバー不要
@@ -195,7 +195,7 @@ npm run pack       # インストーラーなしのアプリディレクトリ�
 
 - **マルチデバイス同期** — **Local only**、**Connect to a hub**、**Host hub on this device**
 - **追跡ツール** — 収集対象の選択、リストでの非表示・ピン留め・順序変更
-- **AI ツール制限** — Claude Code、Codex、Cursor、Antigravity、OpenCode、DeepSeek、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine、Qoder、Kimi Coding の制限検出と更新頻度
+- **AI ツール制限** — Claude Code、Codex、Cursor、Antigravity、OpenCode、DeepSeek、Grok、Minimax、GitHub Copilot、Kiro、GLM、Volcengine、Qoder、Kimi の制限検出と更新頻度
 - **トレンド** — 日次使用履歴のスキャン間隔を選択またはオフ；使用ダッシュボード（ヒートマップ、連続日数、棒/K 線）を開く
 - **ウィンドウ動作** — 常に前面、通常ウィンドウ、デスクトップ固定
 - **トレイモード** — メニューバー/システムトレイポップオーバー、アイコン横の表示項目を選択
@@ -217,7 +217,7 @@ TOKEN_MONITOR_DEVICE_ID=             # 任意 — デフォルトはホスト名
 TOKEN_MONITOR_CLIENTS=               # 任意 — デフォルトは全ツール；空にすると追跡無効
 TOKEN_MONITOR_HISTORY_ENABLED=       # 任意 — デフォルトは有効；0 でトレンド履歴をスキップ
 TOKEN_MONITOR_LIMITS_ENABLED=        # 任意 — デフォルトは有効；0 で CLI プローブをスキップ
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # 任意 — claude,codex,cursor,antigravity,opencode,deepseek,minimax,grok,copilot,kiro,zai,zaiteam,volcengine,qoder,kimicoding
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # 任意 — claude,codex,cursor,antigravity,opencode,deepseek,minimax,grok,copilot,kiro,zai,zaiteam,volcengine,qoder,kimi
 ```
 
 ウィジェットは同じ env を初回実行のデフォルトとして読み込み、その後 GUI 設定で上書きします。
@@ -238,7 +238,7 @@ hub と agent はサマリーフィールドのみを送信します。
 - 期間別の総トークン（本日 / 今月 / 全期間）
 - コスト合計（`tokscale` がコストを返す場合）
 - クライアント・モデル別の内訳
-- AI ツール制限有効時の正規化された Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi Coding 制限ステータス
+- AI ツール制限有効時の正規化された Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi 制限ステータス
 
 生の AI ログ、プロンプト、ソースコード、会話内容、OAuth・トークン・メール・プロバイダー生レスポンスは送信しません。`.env`、`data/`、`node_modules/` は gitignore されます。
 
