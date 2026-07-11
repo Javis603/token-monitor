@@ -1014,7 +1014,8 @@ function sessionRowsForPeriod(period) {
     clientColors,
     modelColor,
     stableColor,
-    fallbackColors: fallbackModelColors
+    fallbackColors: fallbackModelColors,
+    archivedLabel: t('session.archived')
   });
   if (rows.length > 0) return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
   if (Number(period?.totalTokens || 0) === 0) return [];

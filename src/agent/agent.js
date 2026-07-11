@@ -8,6 +8,12 @@ const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { collectUsageOnce, normalizeHistoryIntervalMs, startCollector } = require('../shared/collector');
 const { normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limitCollector');
 const { syncPayload } = require('../shared/syncPayload');
+const {
+  applySessionUsageArchive,
+  captureSessionUsageArchive,
+  readSessionUsageArchive,
+  writeSessionUsageArchive
+} = require('../shared/sessionUsageArchive');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -30,6 +36,16 @@ const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
 
 const collectorOptions = { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent', historyEnabled, historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS), limitsEnabled, limitProviders, limitsRefreshMs, wslScanEnabled, opencodeCookie };
+let sessionUsageArchive;
+
+function summaryWithSessionUsageArchive(summary, now = new Date()) {
+  if (!historyEnabled || dryRun) return summary;
+  const previous = sessionUsageArchive || readSessionUsageArchive();
+  const next = captureSessionUsageArchive(previous, summary, now);
+  if (JSON.stringify(next) !== JSON.stringify(previous)) writeSessionUsageArchive(next);
+  sessionUsageArchive = next;
+  return applySessionUsageArchive(summary, next, { now });
+}
 
 async function postUsage(summary) {
   const response = await fetch(`${hubUrl}/api/ingest`, {
@@ -42,9 +58,10 @@ async function postUsage(summary) {
 }
 
 async function deliver(summary) {
-  if (dryRun) { console.log(JSON.stringify(summary, null, 2)); return; }
-  await postUsage(summary);
-  console.log(`[${new Date().toISOString()}] posted ${summary.deviceId}: today=${summary.today.totalTokens} month=${summary.month.totalTokens} allTime=${summary.allTime.totalTokens}`);
+  const visibleSummary = summaryWithSessionUsageArchive(summary);
+  if (dryRun) { console.log(JSON.stringify(visibleSummary, null, 2)); return; }
+  await postUsage(visibleSummary);
+  console.log(`[${new Date().toISOString()}] posted ${visibleSummary.deviceId}: today=${visibleSummary.today.totalTokens} month=${visibleSummary.month.totalTokens} allTime=${visibleSummary.allTime.totalTokens}`);
 }
 
 function registerPidFile() {

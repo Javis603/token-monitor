@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('node:fs');
 const path = require('node:path');
 const { PERIODS, normalizePeriod } = require('./usage');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
@@ -252,9 +253,21 @@ function writeSessionUsageArchive(archive, options = {}) {
   write(sessionUsageArchivePath(options), normalizeSessionUsageArchive(archive));
 }
 
+function clearSessionUsageArchive(options = {}) {
+  const unlink = options.unlinkSync || fs.unlinkSync;
+  try {
+    unlink(sessionUsageArchivePath(options));
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 module.exports = {
   applySessionUsageArchive,
   captureSessionUsageArchive,
+  clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
   sessionUsageArchivePath,

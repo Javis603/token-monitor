@@ -77,6 +77,7 @@ const {
 const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
+  clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
   writeSessionUsageArchive
@@ -1469,11 +1470,12 @@ function updateSessionUsageArchive(summary, now) {
 
 function summaryWithArchivedClientUsage(summary) {
   const now = new Date();
-  const sessionArchive = updateSessionUsageArchive(summary, now);
   const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
     activeClients: settings?.clients,
     now
   });
+  if (settings?.historyEnabled === false) return withArchivedClients;
+  const sessionArchive = updateSessionUsageArchive(summary, now);
   return applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
 }
 
@@ -1744,9 +1746,9 @@ function startSyncCollector() {
     codexManagedAccounts: codexManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: async (summary) => {
+      if (isExternalAgentActive()) return;
       const visibleSummary = summaryWithArchivedClientUsage(summary);
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
-      if (isExternalAgentActive()) return;
       try {
         await postToHub(visibleSummary);
       } catch (error) {
@@ -1800,9 +1802,9 @@ function startHostCollector() {
     codexManagedAccounts: codexManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: (summary) => {
+      if (isExternalAgentActive()) return;
       const visibleSummary = summaryWithArchivedClientUsage(summary);
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
-      if (isExternalAgentActive()) return;
       if (!embeddedHub) return;
       try {
         const stale = settings.lastPostedDeviceId;
@@ -3335,6 +3337,14 @@ app.whenReady().then(() => {
     }, normalizedPatch);
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
+    if (previousHistoryEnabled !== false && settings.historyEnabled === false) {
+      sessionUsageArchive = normalizeSessionUsageArchive({});
+      try {
+        clearSessionUsageArchive();
+      } catch (error) {
+        console.log(`[session-archive] clear failed: ${error.message}`);
+      }
+    }
     delete settings.edgeDrawerEnabled;
     saveSettings();
     if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {

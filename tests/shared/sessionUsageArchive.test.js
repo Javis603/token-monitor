@@ -11,6 +11,7 @@ try {
 const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
+  clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
   sessionUsageArchivePath,
@@ -326,4 +327,14 @@ test('persists archive data outside settings via injectable storage helpers', ()
     }
   });
   assert.equal(readBack.sessions['opencode:o1'].periods.allTime.totalTokens, 100);
+});
+
+test('clears persisted archive data and treats a missing file as already clear', () => {
+  const calls = [];
+  assert.equal(clearSessionUsageArchive({ path: '/tmp/archive.json', unlinkSync: (filePath) => calls.push(filePath) }), true);
+  assert.deepEqual(calls, ['/tmp/archive.json']);
+  assert.equal(clearSessionUsageArchive({
+    path: '/tmp/archive.json',
+    unlinkSync: () => { const error = new Error('missing'); error.code = 'ENOENT'; throw error; }
+  }), false);
 });

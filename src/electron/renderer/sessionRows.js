@@ -85,6 +85,7 @@
     const colorForModel = typeof options.modelColor === 'function' ? options.modelColor : null;
     const stable = typeof options.stableColor === 'function' ? options.stableColor : stableColor;
     const palette = options.fallbackColors || fallbackColors;
+    const archivedLabel = options.archivedLabel || 'Archived';
     const now = options.now || new Date();
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
@@ -97,7 +98,7 @@
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
         const subtitleParts = [
-          archived ? 'Deleted' : '',
+          archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
           messageLabel(session)
         ].filter(Boolean);
@@ -114,7 +115,7 @@
           archived: archived || undefined,
           client,
           sortTime: sessionTimestampValue(session),
-          title: `${clientLabel} ${archived ? 'deleted session' : 'session'} ${sessionId}`
+          title: `${clientLabel} session ${sessionId}`
         };
       })
       .filter(Boolean);

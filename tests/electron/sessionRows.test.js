@@ -85,7 +85,7 @@ test('session rows fall back to month and day for older activity', () => {
   assert.equal(rows[0].detail, '214c24d5-aaaa-bbbb-cccc-f87e');
 });
 
-test('session rows label archived sessions as deleted summaries', () => {
+test('session rows label archived sessions without claiming the source was deleted', () => {
   const rows = sessionRowsForPeriod({
     sessions: {
       'opencode:deleted': {
@@ -100,12 +100,13 @@ test('session rows label archived sessions as deleted summaries', () => {
     }
   }, {
     clientLabels: { opencode: 'OpenCode' },
-    now: new Date(2026, 4, 30, 12, 30)
+    now: new Date(2026, 4, 30, 12, 30),
+    archivedLabel: 'Archived'
   });
 
   assert.equal(rows[0].archived, true);
-  assert.equal(rows[0].subtitle, 'Deleted · 12:07 · 3 msgs');
-  assert.equal(rows[0].title, 'OpenCode deleted session deleted');
+  assert.equal(rows[0].subtitle, 'Archived · 12:07 · 3 msgs');
+  assert.equal(rows[0].title, 'OpenCode session deleted');
 });
 
 test('session layout keeps page chrome consistent and lets details wrap', () => {
