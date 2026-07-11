@@ -757,10 +757,10 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(main, /fs\.writeFileSync\(temporary, `\$\{cookieHeader\}\\n`, \{ encoding: 'utf8', mode: 0o600 \}\)/);
   assert.match(main, /fs\.chmodSync\(destination, 0o600\)/);
   assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
-  assert.match(main, /removeMimoCredential\(accountId\)/);
+  assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
+  assert.doesNotMatch(main, /legacyCookieHeader|keepLegacyCookie|hadPlaintextMimoCookie/);
+  assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
   assert.match(main, /delete result\.account\.cookieHeader/);
-  assert.match(main, /const hadPlaintextMimoCookie = Array\.isArray\(saved\.mimoManagedAccounts\)/);
-  assert.match(main, /if \(hadPlaintextMimoCookie\) \{[\s\S]*fs\.writeFileSync\(settingsPath/);
 });
 
 test('main settings normalize the Z.ai API region', () => {

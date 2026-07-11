@@ -438,7 +438,6 @@ function normalizeMimoManagedAccounts(value) {
     const id = String(account.id || '').trim();
     const accountKey = String(account.accountKey || '').trim();
     if (!id || !accountKey) continue;
-    if (account.cookieHeader) writeMimoCredential(id, account.cookieHeader);
     if (seen.has(accountKey)) continue;
     seen.add(accountKey);
     accounts.push({
@@ -500,7 +499,13 @@ function readMimoCredential(id) {
 }
 
 function removeMimoCredential(id) {
-  try { fs.rmSync(mimoCredentialPath(id), { force: true }); } catch (_) {}
+  const target = mimoCredentialPath(id);
+  try {
+    fs.rmSync(target, { force: true });
+    return !fs.existsSync(target);
+  } catch (_) {
+    return false;
+  }
 }
 
 async function addMimoManagedAccount(cookieValue) {
@@ -534,7 +539,7 @@ async function removeMimoManagedAccount(id) {
   const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
   const account = accounts.find((entry) => entry.id === accountId);
   if (!account) return { ok: false, error: 'Account not found' };
-  removeMimoCredential(accountId);
+  if (!removeMimoCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
   settings.mimoManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
   saveSettings();
   pushSettingsToRenderer();
@@ -1269,8 +1274,6 @@ function readSettings() {
     const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved };
-    const hadPlaintextMimoCookie = Array.isArray(saved.mimoManagedAccounts)
-      && saved.mimoManagedAccounts.some((account) => Boolean(account?.cookieHeader));
     // Migrate older configs that predate hubMode: infer from hubUrl.
     if (saved.hubMode === undefined) {
       merged.hubMode = (saved.hubUrl && String(saved.hubUrl).trim()) ? 'client' : 'local';
@@ -1350,11 +1353,7 @@ function readSettings() {
       merged.opencodeProfiles = { default: { cookie: merged.opencodeCookie, enabled: true } };
     }
     Object.assign(merged, normalizeTrayModeSettings(merged));
-    const normalized = normalizeWindowBehaviorSettings(merged);
-    if (hadPlaintextMimoCookie) {
-      fs.writeFileSync(settingsPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
-    }
-    return normalized;
+    return normalizeWindowBehaviorSettings(merged);
   }
   catch (_error) {
     const defaults = defaultSettings();
