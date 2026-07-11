@@ -7,19 +7,18 @@
 //   - Optional: api-platform_ph, api-platform_slh
 //
 // Balance endpoint: https://platform.xiaomimimo.com/api/v1/balance
-// Token Plan detail: https://platform.xiaomimimo.com/api/v1/token-plan/detail
-// Token Plan usage:  https://platform.xiaomimimo.com/api/v1/token-plan/usage
+// Token Plan detail: https://platform.xiaomimimo.com/api/v1/tokenPlan/detail
+// Token Plan usage:  https://platform.xiaomimimo.com/api/v1/tokenPlan/usage
 
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 
 const MIMO_BALANCE_URL = 'https://platform.xiaomimimo.com/api/v1/balance';
-const MIMO_TOKEN_PLAN_DETAIL_URL = 'https://platform.xiaomimimo.com/api/v1/token-plan/detail';
-const MIMO_TOKEN_PLAN_USAGE_URL = 'https://platform.xiaomimimo.com/api/v1/token-plan/usage';
+const MIMO_TOKEN_PLAN_DETAIL_URL = 'https://platform.xiaomimimo.com/api/v1/tokenPlan/detail';
+const MIMO_TOKEN_PLAN_USAGE_URL = 'https://platform.xiaomimimo.com/api/v1/tokenPlan/usage';
 const MIMO_LOGIN_URL = 'https://platform.xiaomimimo.com/#/console/balance';
 
-const MIMO_WINDOW_MINUTES_5H = 5 * 60;
-const MIMO_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
+const MIMO_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 
 function cleanSecret(value) {
   let raw = value;
@@ -50,14 +49,6 @@ function parseNumberOrNull(value) {
   return null;
 }
 
-function millisToIso8601(value) {
-  const ms = parseNumberOrNull(value);
-  if (ms === null) return null;
-  const normalized = ms < 1_000_000_000_000 ? ms * 1000 : ms;
-  const date = new Date(normalized);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
 // Parse cookie header string into key-value pairs
 function parseCookies(cookieStr) {
   const cookies = {};
@@ -81,15 +72,19 @@ function validateMimoCookies(cookieStr) {
 }
 
 async function fetchJson(url, cookies, deps = {}) {
-  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
+  const timeoutMs = Number(deps.fetchTimeoutMs || 15000);
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
     const response = await (deps.fetch || fetch)(url, {
       headers: {
         Cookie: cookies,
-        Accept: 'application/json',
-        'Content-Type': 'application/json'
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'x-timeZone': 'UTC+08:00',
+        Origin: 'https://platform.xiaomimimo.com',
+        Referer: 'https://platform.xiaomimimo.com/#/console/balance',
+        'User-Agent': MIMO_USER_AGENT
       },
       ...(controller ? { signal: controller.signal } : {})
     });
@@ -106,62 +101,54 @@ async function fetchJson(url, cookies, deps = {}) {
   }
 }
 
-// Parse balance response
+// Parse balance response: { code: 0, data: { balance: "string", currency: "string", cashBalance?: "string", giftBalance?: "string" } }
 function parseBalance(body) {
   if (!body || typeof body !== 'object') return null;
-  // Try nested data shape first
-  const data = body.data || body;
-  if (typeof data !== 'object') return null;
+  if (body.code !== 0) return null;
+  const data = body.data;
+  if (!data || typeof data !== 'object') return null;
 
-  const result = {
-    balance: parseNumberOrNull(data.balance) || parseNumberOrNull(data.totalBalance) || 0,
-    currency: data.currency || 'CNY',
-    todaySpend: parseNumberOrNull(data.todaySpend) || 0,
-    monthSpend: parseNumberOrNull(data.monthSpend) || 0
+  const balance = parseFloat(data.balance);
+  if (!Number.isFinite(balance)) return null;
+
+  return {
+    balance,
+    currency: (data.currency || 'CNY').trim(),
+    cashBalance: data.cashBalance ? parseFloat(data.cashBalance) : null,
+    giftBalance: data.giftBalance ? parseFloat(data.giftBalance) : null
   };
-
-  return result.balance > 0 || result.todaySpend > 0 ? result : null;
 }
 
-// Parse token plan detail response
+// Parse token plan detail: { code: 0, data: { planCode?: "string", currentPeriodEnd?: "string", expired: bool } }
 function parseTokenPlanDetail(body) {
   if (!body || typeof body !== 'object') return null;
-  const data = body.data || body;
-  if (typeof data !== 'object') return null;
+  if (body.code !== 0) return null;
+  const data = body.data;
+  if (!data || typeof data !== 'object') return null;
 
-  const windows = [];
+  return {
+    planCode: data.planCode || null,
+    periodEnd: data.currentPeriodEnd || null,
+    expired: Boolean(data.expired)
+  };
+}
 
-  // 5-hour window
-  const intervalRemaining = parseNumberOrNull(data.intervalRemainingPercent ?? data.interval_remaining_percent);
-  if (intervalRemaining !== null) {
-    const used = Math.max(0, Math.min(100, 100 - intervalRemaining));
-    windows.push({
-      kind: 'session',
-      label: '5h',
-      usedPercent: used,
-      remainingPercent: Math.max(0, Math.min(100, intervalRemaining)),
-      resetsAt: millisToIso8601(data.intervalEndTime ?? data.interval_end_time),
-      windowMinutes: MIMO_WINDOW_MINUTES_5H,
-      showMeter: true
-    });
-  }
+// Parse token plan usage: { code: 0, data: { monthUsage: { percent: double, items: [{ name, used, limit, percent }] } } }
+function parseTokenPlanUsage(body) {
+  if (!body || typeof body !== 'object') return null;
+  if (body.code !== 0) return null;
+  const data = body.data;
+  if (!data || typeof data !== 'object') return null;
+  const monthUsage = data.monthUsage;
+  if (!monthUsage || typeof monthUsage !== 'object') return null;
+  if (!Array.isArray(monthUsage.items) || monthUsage.items.length === 0) return null;
 
-  // Weekly window
-  const weeklyRemaining = parseNumberOrNull(data.weeklyRemainingPercent ?? data.weekly_remaining_percent);
-  if (weeklyRemaining !== null) {
-    const used = Math.max(0, Math.min(100, 100 - weeklyRemaining));
-    windows.push({
-      kind: 'weekly',
-      label: 'Weekly',
-      usedPercent: used,
-      remainingPercent: Math.max(0, Math.min(100, weeklyRemaining)),
-      resetsAt: millisToIso8601(data.weeklyEndTime ?? data.weekly_end_time),
-      windowMinutes: MIMO_WINDOW_MINUTES_WEEKLY,
-      showMeter: true
-    });
-  }
+  const item = monthUsage.items[0];
+  const used = parseNumberOrNull(item.used) || 0;
+  const limit = parseNumberOrNull(item.limit) || 0;
+  const percent = parseNumberOrNull(monthUsage.percent) || parseNumberOrNull(item.percent) || 0;
 
-  return windows;
+  return { used, limit, percent };
 }
 
 async function fetchMimoLimits(options = {}, deps = {}) {
@@ -191,32 +178,45 @@ async function fetchMimoLimits(options = {}, deps = {}) {
   }
 
   try {
-    // Fetch balance and token plan in parallel
-    const [balanceData, tokenPlanData] = await Promise.allSettled([
+    // Fetch balance, token plan detail, and token plan usage in parallel
+    const [balanceData, tokenPlanData, tokenUsageData] = await Promise.allSettled([
       fetchJson(MIMO_BALANCE_URL, cookie, deps),
-      fetchJson(MIMO_TOKEN_PLAN_DETAIL_URL, cookie, deps)
+      fetchJson(MIMO_TOKEN_PLAN_DETAIL_URL, cookie, deps),
+      fetchJson(MIMO_TOKEN_PLAN_USAGE_URL, cookie, deps)
     ]);
 
     const balance = balanceData.status === 'fulfilled' ? parseBalance(balanceData.value) : null;
-    const tokenPlanWindows = tokenPlanData.status === 'fulfilled' ? parseTokenPlanDetail(tokenPlanData.value) : [];
+    const tokenPlanDetail = tokenPlanData.status === 'fulfilled' ? parseTokenPlanDetail(tokenPlanData.value) : null;
+    const tokenUsage = tokenUsageData.status === 'fulfilled' ? parseTokenPlanUsage(tokenUsageData.value) : null;
 
     const accountKey = hashKey('mimo', cookie);
-    const windows = tokenPlanWindows.length > 0 ? tokenPlanWindows : [];
+
+    // Build windows from usage data
+    const windows = [];
+    if (tokenUsage && tokenUsage.limit > 0) {
+      windows.push({
+        kind: 'monthly',
+        label: 'Monthly',
+        usedPercent: Math.max(0, Math.min(100, tokenUsage.percent)),
+        remainingPercent: Math.max(0, Math.min(100, 100 - tokenUsage.percent)),
+        resetsAt: tokenPlanDetail?.periodEnd || null,
+        windowMinutes: 30 * 24 * 60, // monthly
+        showMeter: true
+      });
+    }
 
     return normalizeLimitProvider({
       provider: 'mimo',
       accountKey,
-      accountLabel: 'Token Plan',
+      accountLabel: tokenPlanDetail?.planCode || 'Token Plan',
       source: 'api',
-      status: (balance || windows.length) ? 'ok' : 'unavailable',
+      status: (balance || tokenUsage) ? 'ok' : 'unavailable',
       updatedAt,
       windows,
       ...(balance ? {
         balance: {
           amount: balance.balance,
-          currency: balance.currency,
-          todaySpend: balance.todaySpend,
-          monthSpend: balance.monthSpend
+          currency: balance.currency
         }
       } : {})
     });
@@ -234,9 +234,11 @@ module.exports = {
   MIMO_TOKEN_PLAN_DETAIL_URL,
   MIMO_TOKEN_PLAN_USAGE_URL,
   MIMO_LOGIN_URL,
+  MIMO_USER_AGENT,
   mimoCookie,
   validateMimoCookies,
   parseBalance,
   parseTokenPlanDetail,
+  parseTokenPlanUsage,
   fetchMimoLimits
 };
