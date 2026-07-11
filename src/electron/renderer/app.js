@@ -1485,20 +1485,30 @@ function codexAccountsShareIdentity(left, right) {
   return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
 }
 
+// The account THIS device's Codex app/CLI is signed into is a purely local fact:
+// the local device's own record for it carries a live (non-managed) sourceDetail.
+// Read it from the local device's RAW limits, not the cross-device aggregate:
+// aggregateLimits() keeps one record per account by freshness, so after sync the
+// selected codex row can belong to a remote device signed into a *different*
+// account. Reading the aggregate would move the active marker onto that remote
+// login, or drop it entirely when every selected row is 'managed'. Legacy stats
+// without per-device rows fall back to the aggregate (localDeviceLimitsProviders
+// returns null there), mirroring localProviderStatus().
+function localLiveCodexProvider() {
+  const localProviders = localDeviceLimitsProviders();
+  const providers = localProviders !== null ? localProviders : (state.stats?.limits?.providers || []);
+  return providers.find((provider) => limitProviderPresentationApi.isCodexLiveAccount(provider)) || null;
+}
+
 function codexActiveAccountFromStats() {
-  const providers = state.stats?.limits?.providers || [];
-  for (const provider of providers) {
-    if (provider?.provider !== 'codex') continue;
-    const provenance = limitProviderProvenance(provider);
-    if (!limitProviderPresentationApi.isCodexLiveAccount(provider, provenance)) continue;
-    return {
-      id: codexSwitchAccountForProvider(provider)?.id || '',
-      email: provider.accountEmail || '',
-      accountKey: provider.accountKey || '',
-      accountLabel: provider.accountLabel || ''
-    };
-  }
-  return null;
+  const provider = localLiveCodexProvider();
+  if (!provider) return null;
+  return {
+    id: codexSwitchAccountForProvider(provider)?.id || '',
+    email: provider.accountEmail || '',
+    accountKey: provider.accountKey || '',
+    accountLabel: provider.accountLabel || ''
+  };
 }
 
 function clearCodexPendingActiveAccount() {
@@ -1591,14 +1601,13 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   title.className = 'limit-name-title';
   title.textContent = options.title || label;
   const provenance = limitProviderProvenance(provider);
-  const liveCodexAccount = options.accountTitle && limitProviderPresentationApi.isCodexLiveAccount(provider, provenance);
-  // The local marker only disambiguates rows when the Codex provider is
-  // rendered as a multi-account group. A single visible account is necessarily
-  // the only choice, so a checkmark there adds noise and can look selected.
-  const activeCodexAccount = options.showActiveBadge && (
-    codexActiveAccountMatchesProvider(provider) ||
-    (!state.codexActiveAccount && liveCodexAccount)
-  );
+  // The ✓ marks the account THIS device's Codex is signed into
+  // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
+  // It only disambiguates rows in the multi-account group, so it's gated on
+  // showActiveBadge. Never re-derive "live" from the row being rendered — in
+  // sync mode that row can be a remote device's record for a different account,
+  // which would move the ✓ onto the wrong one.
+  const activeCodexAccount = options.showActiveBadge && codexActiveAccountMatchesProvider(provider);
   const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexSwitchAccountForProvider(provider) : null;
   if (switchAccount && window.tokenMonitor?.codex?.switchSystemAccount) {
     const switchZone = document.createElement('span');

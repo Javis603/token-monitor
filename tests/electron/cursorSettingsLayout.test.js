@@ -298,7 +298,12 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(renderHead, /activeZone\.append\(title, badge, activePopover\)/);
   assert.match(renderHead, /badge\.textContent = '\\u2713';/);
   assert.doesNotMatch(renderHead, /badge\.textContent = 'Active'/);
-  assert.match(renderHead, /options\.showActiveBadge && \(/);
+  // The ✓ tracks state.codexActiveAccount only (the account THIS device's Codex
+  // is signed into). It must NOT re-derive "live" from the row being rendered:
+  // in sync mode that row can be a remote device's record for a different account.
+  assert.match(renderHead, /options\.showActiveBadge && codexActiveAccountMatchesProvider\(provider\)/);
+  assert.doesNotMatch(renderHead, /!state\.codexActiveAccount && liveCodexAccount/);
+  assert.doesNotMatch(renderHead, /const liveCodexAccount =/);
   assert.match(renderHead, /codexSwitchAccountForProvider\(provider\)/);
   assert.match(renderHead, /switchZone\.className = 'limit-account-switch-zone'/);
   assert.match(renderHead, /switchPopover\.className = 'limit-account-switch-popover'/);

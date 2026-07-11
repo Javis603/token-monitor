@@ -71,6 +71,15 @@ function runLocalProviderStatus(source, state, providerName) {
   );
 }
 
+function runLocalLiveCodexProvider(source, state) {
+  const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
+  const liveHelper = functionBody(source, 'localLiveCodexProvider', 'codexActiveAccountFromStats');
+  return vm.runInNewContext(
+    `${localDeviceHelper}\n${liveHelper}\nlocalLiveCodexProvider();`,
+    { state, limitProviderPresentationApi: { isCodexLiveAccount } }
+  );
+}
+
 test('capability tags explain how each provider is collected in settings', () => {
   assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'App/CLI RPC']);
@@ -756,6 +765,61 @@ test('account validation does not use a remote aggregate when the local device l
   }, 'minimax');
 
   assert.equal(provider, null);
+});
+
+test('active Codex account follows the local login, not a remote device signed into a different account', () => {
+  // Local machine is signed into `quality` (App) and only manages the other two.
+  // A synced device (9950x3d) is signed into `javis`, so aggregateLimits() picks
+  // its live App record for the `javis` row — which sorts first. Reading the
+  // aggregate would move the ✓ onto `javis`; the marker must instead track this
+  // device's own live login (`quality`).
+  const app = readRendererFile('app.js');
+  const localProviders = [
+    { provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:javis', accountEmail: 'javis603@gmail.com' },
+    { provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:linus', accountEmail: 'linus@gmail.com' },
+    { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:quality', accountEmail: 'quality@icloud.com' }
+  ];
+  const remoteJavisLive = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:javis', accountEmail: 'javis603@gmail.com', sourceDeviceId: '9950x3d' };
+  const provider = runLocalLiveCodexProvider(app, {
+    settings: { deviceId: 'this-mac' },
+    stats: {
+      devices: [
+        { deviceId: 'this-mac', limits: { providers: localProviders } },
+        { deviceId: '9950x3d', limits: { providers: [remoteJavisLive] } }
+      ],
+      limits: { providers: [remoteJavisLive, localProviders[1], localProviders[2]] }
+    }
+  });
+
+  assert.equal(provider.accountKey, 'sha256:quality');
+});
+
+test('no active Codex account when this device is signed out, even if a synced device is live', () => {
+  const app = readRendererFile('app.js');
+  const remoteLive = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:javis', sourceDeviceId: '9950x3d' };
+  const provider = runLocalLiveCodexProvider(app, {
+    settings: { deviceId: 'this-mac' },
+    stats: {
+      devices: [
+        { deviceId: 'this-mac', limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:javis' }] } },
+        { deviceId: '9950x3d', limits: { providers: [remoteLive] } }
+      ],
+      limits: { providers: [remoteLive] }
+    }
+  });
+
+  assert.equal(provider, null);
+});
+
+test('active Codex account falls back to the aggregate for legacy stats without device rows', () => {
+  const app = readRendererFile('app.js');
+  const live = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:solo' };
+  const provider = runLocalLiveCodexProvider(app, {
+    settings: { deviceId: 'this-mac' },
+    stats: { limits: { providers: [live] } }
+  });
+
+  assert.equal(provider.accountKey, 'sha256:solo');
 });
 
 test('account validation keeps aggregate fallback for legacy stats without device rows', () => {
