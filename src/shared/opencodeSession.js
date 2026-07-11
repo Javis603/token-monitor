@@ -50,17 +50,21 @@ function readSessionMeta(sessionIds, deps = {}) {
   if (!sqliteMod) return out;
 
   const placeholders = ids.map(() => '?').join(',');
-  const sql = `SELECT id, COALESCE(title,'') AS title, time_created AS created, time_updated AS updated
-               FROM session WHERE id IN (${placeholders})`;
   for (const dbPath of resolvePaths(deps)) {
     let db;
     try {
       db = openDb(dbPath, sqliteMod);
+      const columns = new Set(db.prepare('PRAGMA table_info(session)').all().map((column) => String(column.name)));
+      const directory = columns.has('directory') ? "COALESCE(directory,'')" : "''";
+      const sql = `SELECT id, COALESCE(title,'') AS title, ${directory} AS directory, time_created AS created, time_updated AS updated
+                   FROM session WHERE id IN (${placeholders})`;
       for (const r of db.prepare(sql).all(...ids)) {
         const id = String(r.id);
         if (out.has(id)) continue;
         const startedAt = isoFromMs(r.created);
-        out.set(id, { startedAt, lastUsedAt: isoFromMs(r.updated) || startedAt, title: String(r.title || '') });
+        const meta = { startedAt, lastUsedAt: isoFromMs(r.updated) || startedAt, title: String(r.title || '') };
+        if (r.directory) meta.projectPath = String(r.directory);
+        out.set(id, meta);
       }
     } catch (_) { /* skip unreadable db */ } finally {
       if (db) { try { db.close(); } catch (_) {} }

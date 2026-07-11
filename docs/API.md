@@ -110,6 +110,7 @@ Example payload:
         "reasoningTokens": 0,
         "startedAt": "2026-05-30T03:44:50.000Z",
         "lastUsedAt": "2026-05-30T04:07:32.679Z",
+        "projectPath": "/home/alice/src/token-monitor",
         "models": {
           "gpt-5": 1234
         },
@@ -192,7 +193,7 @@ Response includes:
 - `periods.month`
 - `periods.allTime`
 - `periods.*.clientModels` and `periods.*.clientModelCosts` for preserving model breakdowns when a tracked tool is disabled
-- `periods.*.sessions` keyed by `client:sessionId` for session-level usage when tokscale exposes session groups; widgets may use `lastUsedAt` for recent-first sorting when present
+- `periods.*.sessions` keyed by `client:sessionId` for session-level usage when tokscale exposes session groups; widgets may use `lastUsedAt` for recent-first sorting and optional `projectPath` for workspace-level aggregation
 - `historyPreview.daily[].activeTimeMs`, `historyPreview.monthly[].activeTimeMs`, and `historyPreview.summary.activeTimeMs` when tokscale graph exposes session active-time metrics
 - `limits.providers` aggregated by provider account
 - `devices`

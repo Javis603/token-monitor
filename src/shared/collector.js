@@ -230,6 +230,29 @@ function timestampFromJsonLine(line) {
   }
 }
 
+function projectPathFromJsonl(filePath) {
+  let text;
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const size = Math.min(256 * 1024, fs.fstatSync(fd).size);
+      const buffer = Buffer.alloc(size);
+      fs.readSync(fd, buffer, 0, size, 0);
+      text = buffer.toString('utf8');
+    } finally { fs.closeSync(fd); }
+  } catch (_) { return ''; }
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line);
+      const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
+      const value = payload.cwd || payload.project_path || payload.projectPath || payload.workingDirectory || payload.working_directory;
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    } catch (_) { /* skip partial or non-JSON lines */ }
+  }
+  return '';
+}
+
 function lastJsonlTimestamp(filePath) {
   const tail = readFileTail(filePath);
   const lines = tail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -263,7 +286,7 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const applyFile = (client, sessionId, filePath) => {
     const startedAt = timestampFromSessionId(sessionId);
     const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
-    metadata.set(`${client}:${sessionId}`, { startedAt, lastUsedAt });
+    metadata.set(`${client}:${sessionId}`, { startedAt, lastUsedAt, projectPath: projectPathFromJsonl(filePath) });
   };
 
   // OpenCode has no transcript file — its timestamps come from the opencode.db `session` table.
@@ -273,7 +296,7 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     for (const [sessionId, meta] of readOpencodeMeta(opencodeIds)) {
       const startedAt = meta.startedAt || '';
       const lastUsedAt = meta.lastUsedAt || startedAt;
-      if (startedAt || lastUsedAt) metadata.set(`opencode:${sessionId}`, { startedAt, lastUsedAt });
+      if (startedAt || lastUsedAt || meta.projectPath) metadata.set(`opencode:${sessionId}`, { startedAt, lastUsedAt, projectPath: meta.projectPath || '' });
     }
   }
 
@@ -308,6 +331,7 @@ function applySessionTimestamps(periods, home, deps = {}) {
       if (!meta) continue;
       if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
+      if (meta.projectPath) session.projectPath = meta.projectPath;
     }
   }
 }
@@ -1036,6 +1060,7 @@ function startCollector(options) {
 
 module.exports = {
   applySessionTimestamps,
+  projectPathFromJsonl,
   collectHistoryOnce,
   collectUsageOnce,
   clientDataDirPresence,

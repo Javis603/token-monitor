@@ -32,6 +32,7 @@ function iconKindFor(rowData, breakdown) {
       ? { kind: 'icon', iconClass: `row-icon-${rowData.client}` }
       : { kind: 'dot' };
   }
+  if (breakdown === 'project') return { kind: 'icon', iconClass: 'row-icon-project' };
   return clientsWithIcon.has(rowData.key)
     ? { kind: 'icon', iconClass: `row-icon-${rowData.key}` }
     : { kind: 'dot' };
@@ -90,6 +91,7 @@ const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMod
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const projectRowsApi = window.TokenMonitorProjectRows;
 const sessionDetailApi = window.TokenMonitorSessionDetail;
 const windowShortcutApi = window.TokenMonitorWindowShortcut;
 const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
@@ -136,13 +138,14 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
 };
 const deviceAccent = '#73bdf5';
 const deviceStaleColor = '#8c97a7';
-const baseBreakdownOrder = ['tool', 'device', 'model', 'session'];
+const baseBreakdownOrder = ['tool', 'device', 'model', 'project', 'session'];
 const VIEW_DISPLAY_OPTIONS = [
   { id: 'home', labelKey: 'views.home' },
   { id: 'tool', labelKey: 'views.tool' },
   { id: 'status', labelKey: 'views.status' },
   { id: 'device', labelKey: 'views.device' },
   { id: 'model', labelKey: 'views.model' },
+  { id: 'project', labelKey: 'views.project' },
   { id: 'session', labelKey: 'views.session' },
   { id: 'limits', labelKey: 'views.limits' },
   { id: 'trends', labelKey: 'views.trends' }
@@ -164,6 +167,7 @@ const VIEW_ICON_CLASSES = {
   status: 'view-icon-status',
   device: 'view-icon-device',
   model: 'view-icon-model',
+  project: 'view-icon-project',
   session: 'view-icon-session',
   limits: 'view-icon-limits',
   trends: 'view-icon-trends'
@@ -1001,10 +1005,15 @@ function sessionRowsForPeriod(period) {
   return modelRowsForPeriod(period);
 }
 
+function projectRowsForPeriod(period) {
+  return projectRowsApi.projectRowsForPeriod(period, { clientLabels, stableColor, fallbackColors: fallbackModelColors });
+}
+
 function rowsForPeriod(period) {
   if (state.breakdown === 'device') return deviceRowsForPeriod();
   if (state.breakdown === 'model') return modelRowsForPeriod(period);
   if (state.breakdown === 'session') return sessionRowsForPeriod(period);
+  if (state.breakdown === 'project') return projectRowsForPeriod(period);
   return toolRowsForPeriod(period);
 }
 
