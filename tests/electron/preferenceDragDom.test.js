@@ -240,6 +240,22 @@ test('Trends has a master toggle separate from main-screen visibility', () => {
   assert.match(css, /\.trend-settings-list/);
 });
 
+test('session archive retention has its own setting separate from Trends', () => {
+  const app = readRendererFile('app.js');
+  const main = readRendererFile('../main.js');
+  const agent = readRendererFile('../../agent/agent.js');
+  const preload = readRendererFile('../preload.js');
+  assert.match(app, /id === 'session'/);
+  assert.match(app, /function renderSessionSettingsList/);
+  assert.match(app, /sessionUsageArchiveEnabled:\s*input\.checked/);
+  assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
+  assert.match(main, /settings\?\.sessionUsageArchiveEnabled === false/);
+  assert.match(main, /ipcMain\.handle\('sessionUsageArchive:clear'/);
+  assert.match(agent, /TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
+  assert.match(preload, /clearSessionUsageArchive/);
+  assert.doesNotMatch(app, /historyEnabled[\s\S]{0,120}sessionUsageArchiveEnabled|sessionUsageArchiveEnabled[\s\S]{0,120}historyEnabled/);
+});
+
 test('view visibility changes do not toggle trend history collection', () => {
   const app = readRendererFile('app.js');
   const body = functionBody(app, 'onViewVisibilityToggle', 'onTrendVisibilityToggle');

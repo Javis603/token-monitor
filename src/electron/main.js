@@ -218,6 +218,7 @@ function defaultSettings() {
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
+    sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
     wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, true),
     exportAutoEnabled: false,
     exportDir: '',
@@ -1335,6 +1336,9 @@ function readSettings() {
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
+    if (saved.sessionUsageArchiveEnabled !== undefined) {
+      merged.sessionUsageArchiveEnabled = parseBoolean(saved.sessionUsageArchiveEnabled, true);
+    }
     if (saved.wslScanEnabled !== undefined) {
       merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, true);
     }
@@ -1474,7 +1478,7 @@ function summaryWithArchivedClientUsage(summary) {
     activeClients: settings?.clients,
     now
   });
-  if (settings?.historyEnabled === false) return withArchivedClients;
+  if (settings?.sessionUsageArchiveEnabled === false) return withArchivedClients;
   const sessionArchive = updateSessionUsageArchive(summary, now);
   return applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
 }
@@ -3191,6 +3195,12 @@ app.whenReady().then(() => {
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
+  ipcMain.handle('sessionUsageArchive:clear', () => {
+    sessionUsageArchive = normalizeSessionUsageArchive({});
+    clearSessionUsageArchive();
+    startMode();
+    return { ok: true };
+  });
   ipcMain.handle('pricing:lookup', async (_event, modelId) => {
     try {
       return { ok: true, result: await lookupModelPricing(modelId) };
@@ -3211,6 +3221,7 @@ app.whenReady().then(() => {
     const previousLimitProviders = settings.limitProviders;
     const previousLimitsRefreshMs = settings.limitsRefreshMs;
     const previousHistoryEnabled = settings.historyEnabled;
+    const previousSessionUsageArchiveEnabled = settings.sessionUsageArchiveEnabled;
     const previousHistoryIntervalMs = settings.historyIntervalMs;
     const previousWslScanEnabled = settings.wslScanEnabled;
     const previousCollectionMode = settings.collectionMode;
@@ -3294,6 +3305,7 @@ app.whenReady().then(() => {
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
+      sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
@@ -3337,14 +3349,6 @@ app.whenReady().then(() => {
     }, normalizedPatch);
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
-    if (previousHistoryEnabled !== false && settings.historyEnabled === false) {
-      sessionUsageArchive = normalizeSessionUsageArchive({});
-      try {
-        clearSessionUsageArchive();
-      } catch (error) {
-        console.log(`[session-archive] clear failed: ${error.message}`);
-      }
-    }
     delete settings.edgeDrawerEnabled;
     saveSettings();
     if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {
@@ -3383,6 +3387,7 @@ app.whenReady().then(() => {
       settings.limitProviders !== previousLimitProviders ||
       settings.limitsRefreshMs !== previousLimitsRefreshMs ||
       settings.historyEnabled !== previousHistoryEnabled ||
+      settings.sessionUsageArchiveEnabled !== previousSessionUsageArchiveEnabled ||
       settings.historyIntervalMs !== previousHistoryIntervalMs ||
       settings.wslScanEnabled !== previousWslScanEnabled ||
       settings.collectionMode !== previousCollectionMode ||
