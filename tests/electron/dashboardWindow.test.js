@@ -103,6 +103,7 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
 
 test('main invalidates an open dashboard when a stats update arrives', () => {
   const main = read('src', 'electron', 'main.js');
+  assert.match(main, /nextHistoryRevision !== previousHistoryRevision/);
   assert.match(main, /dashboardWindow\.webContents\.send\('dashboard:historyChanged'\)/);
 });
 

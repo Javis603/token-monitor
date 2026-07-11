@@ -81,7 +81,7 @@ const {
   fetchMimoLimits,
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
-const { historyPreview } = require('../shared/history');
+const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const linuxAutostart = require('./linuxAutostart');
@@ -1495,6 +1495,7 @@ function applyNativeMaterial(source = settings) {
 function withHistoryPreview(stats, devices) {
   const history = settings?.historyEnabled === false ? aggregateHistory([]) : aggregateHistory(devices);
   stats.historyPreview = historyPreview(history);
+  stats.historyRevision = historyRevision(history);
   return stats;
 }
 
@@ -1813,6 +1814,7 @@ function injectLocalDeviceStatus(stats) {
 }
 
 function sendPush(payload) {
+  const previousHistoryRevision = statsHistoryRevision(latestStats);
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
@@ -1826,9 +1828,17 @@ function sendPush(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
   }
-  if (payload?.data?.stats && dashboardWindow && !dashboardWindow.isDestroyed()) {
+  const nextHistoryRevision = statsHistoryRevision(payload?.data?.stats);
+  if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
     try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
   }
+}
+
+function statsHistoryRevision(stats) {
+  const revision = String(stats?.historyRevision || '').trim();
+  if (revision) return revision;
+  // Compatibility with an older remote hub that has not shipped revisions yet.
+  return JSON.stringify(stats?.historyPreview || null);
 }
 
 let rateCache = null;            // { rates, date, source, fetchedAt }
