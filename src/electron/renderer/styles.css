@@ -699,6 +699,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   display: grid;
   gap: 6px;
 }
+.managed-account-list:empty { display: none; }
 .managed-account-row {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
@@ -727,6 +728,12 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .managed-account-main {
   min-width: 0;
 }
+.managed-account-name-box {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
 .managed-account-email {
   min-width: 0;
   overflow: hidden;
@@ -735,6 +742,43 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.managed-account-email.hidden,
+.managed-account-name-input.hidden {
+  display: none;
+}
+.managed-account-name-input {
+  min-width: 60px;
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  outline: none;
+}
+.managed-account-rename {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.managed-account-row:hover .managed-account-rename {
+  opacity: 0.6;
+}
+.managed-account-rename:hover,
+.managed-account-rename:focus-visible {
+  color: var(--text);
+  opacity: 1;
 }
 .managed-account-right {
   display: flex;
@@ -2279,6 +2323,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   -webkit-mask-image: url(../../../assets/icons/moonshot.svg);
   mask-image: url(../../../assets/icons/moonshot.svg);
 }
+.limit-icon-mimo {
+  -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
+  mask-image: url(../../../assets/icons/xiaomi.svg);
+}
 .row-label {
   display: grid;
   min-width: 0;
@@ -3155,6 +3203,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
+#mimoManualPanel.hidden,
 #kimiManualPanel.hidden,
 #copilotManualPanel.hidden,
 #copilotManualDetails.hidden,
@@ -3177,6 +3226,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
+#mimoManualPanel,
 #kimiManualPanel,
 #copilotManualPanel {
   min-width: 0;
@@ -3189,6 +3239,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
+#mimoManualPanel > .accordion-animation-inner,
 #kimiManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
@@ -3204,6 +3255,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
 #kimiManualPanel input,
 #copilotManualDetails input {
   width: 100%;
@@ -3217,6 +3270,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
 #kimiManualPanel input,
 #copilotManualDetails input {
   font-family: monospace;
@@ -3486,6 +3541,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-size: 11px;
   text-align: center;
 }
+.opencode-empty.hidden { display: none; }
 .opencode-profile-item {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;

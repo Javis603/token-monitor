@@ -43,18 +43,12 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
   mimo: {
-    getStatus: () => ipcRenderer.invoke('mimo:getStatus'),
     accounts: () => ipcRenderer.invoke('mimo:accounts'),
-    addAccount: () => ipcRenderer.invoke('mimo:addAccount'),
-    refreshStatus: () => ipcRenderer.invoke('mimo:refreshStatus'),
-    openDataDir: () => ipcRenderer.invoke('mimo:openDataDir'),
+    addAccount: (accountName, cookieHeader) => ipcRenderer.invoke('mimo:addAccount', accountName, cookieHeader),
+    openConsole: () => ipcRenderer.invoke('mimo:openConsole'),
+    renameAccount: (id, accountName) => ipcRenderer.invoke('mimo:renameAccount', id, accountName),
     removeAccount: (id) => ipcRenderer.invoke('mimo:removeAccount', id),
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('mimo:setAccountEnabled', id, enabled),
-    onStatus: (callback) => {
-      const handler = (_event, status) => callback(status);
-      ipcRenderer.on('mimo:status', handler);
-      return () => ipcRenderer.removeListener('mimo:status', handler);
-    },
     onAccounts: (callback) => {
       const handler = (_event, accounts) => callback(accounts);
       ipcRenderer.on('mimo:accounts', handler);

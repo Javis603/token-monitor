@@ -4,7 +4,7 @@ const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', 
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy',
-  'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'volcengine', 'qoder'
+  'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder'
 ]);
 
 function osIconFor(platform) {
@@ -1303,6 +1303,12 @@ function formatMoney(value, currency) {
   return `${symbol}${number.toFixed(2)}`;
 }
 
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
   if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
   if (!window) return '--';
@@ -1335,12 +1341,12 @@ function balanceRemainingWindow(balance) {
 function mimoTokenPlanWindowFromBalance(balance) {
   if (!balance) return null;
   if (balance.planStatus === 'expired') return null;
-  const used = Number(balance.planUsed);
-  const limit = Number(balance.planLimit);
-  const percent = Number(balance.planPercent);
-  const hasUsed = Number.isFinite(used);
-  const hasLimit = Number.isFinite(limit);
-  const hasPercent = Number.isFinite(percent);
+  const used = optionalFiniteNumber(balance.planUsed);
+  const limit = optionalFiniteNumber(balance.planLimit);
+  const percent = optionalFiniteNumber(balance.planPercent);
+  const hasUsed = used !== null;
+  const hasLimit = limit !== null;
+  const hasPercent = percent !== null;
   if (!hasUsed && !hasLimit && !hasPercent) return null;
   const resolvedPercent = hasPercent
     ? Math.max(0, Math.min(100, percent))
@@ -1820,13 +1826,13 @@ function renderProviderWindows(provider, color) {
       node.classList.add('limit-window-wide', 'limit-window-no-reset');
       windows.append(node);
     }
-    const amount = Number(balance?.amount);
-    const giftBalance = Number(balance?.giftBalance);
-    const cashBalance = Number(balance?.cashBalance);
-    if (Number.isFinite(amount) || Number.isFinite(giftBalance) || Number.isFinite(cashBalance)) {
+    const amount = optionalFiniteNumber(balance?.amount);
+    const giftBalance = optionalFiniteNumber(balance?.giftBalance);
+    const cashBalance = optionalFiniteNumber(balance?.cashBalance);
+    if (amount !== null || giftBalance !== null || cashBalance !== null) {
       const detailParts = [];
-      if (Number.isFinite(giftBalance)) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
-      if (Number.isFinite(cashBalance)) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
+      if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
+      if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
       const balanceText = formatMoney(amount, balance.currency) || '—';
       const balanceNode = limitWindowNode(
         'Balance',
@@ -2013,7 +2019,7 @@ function renderCodexAccountGroup(label, providers, color) {
 
 function mimoAccountTitle(provider, index) {
   const name = String(provider?.accountName || '').trim();
-  if (name) return name;
+  if (name && !/^MiMo [0-9a-f]{8}$/i.test(name)) return name;
   return `Account ${index + 1}`;
 }
 
@@ -2022,7 +2028,7 @@ function renderMimoAccountGroup(label, providers, color) {
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
   const groupProvider = { provider: 'mimo', status: 'ok', windows: [] };
   const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
-    planText: `${providers.length} accounts`,
+    planText: t('settings.mimo.nAccounts', { count: providers.length }),
     hideMeta: true
   });
   const accountList = document.createElement('div');
@@ -2088,7 +2094,7 @@ function renderLimits() {
     const visibleProviders = providerEntries.length > 0
       ? providerEntries
       : { provider: id, status: 'disabled', windows: [] };
-    const color = clientColors[id] || clientColors.default;
+    const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
     if (id === 'codex' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderCodexAccountGroup(label, visibleProviders, color));
       continue;
@@ -5962,13 +5968,6 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   restartTimer();
 });
 
-window.tokenMonitor.mimo?.onStatus?.((status) => {
-
-  renderMimoStatus();
-  if (!status || status.status === 'checking') return;
-  refreshStats({ force: true }).catch(() => {});
-});
-
 function pickWorstProvider(stats, windowFilter) {
   const providers = stats?.limits?.providers || [];
   let worstProvider = null;
@@ -6488,8 +6487,9 @@ function mimoAccountLinked() {
 function renderMimoStatus() {
   const statusEl = document.getElementById('mimoAccountStatus');
   const listEl = document.getElementById('mimoAccountList');
+  const emptyEl = document.getElementById('mimoAccountEmpty');
   const errorEl = document.getElementById('mimoAccountErrorMessage');
-  if (!statusEl || !listEl || !errorEl) return;
+  if (!statusEl || !listEl || !emptyEl || !errorEl) return;
   const accounts = state.settings?.mimoManagedAccounts || [];
   const enabledCount = accounts.filter((account) => account.enabled !== false).length;
   const statusText = accounts.length === 0
@@ -6498,16 +6498,13 @@ function renderMimoStatus() {
   setCursorStatusText(statusEl, statusText);
   errorEl.textContent = state.mimoAccountError || '';
   errorEl.classList.toggle('hidden', !state.mimoAccountError);
+  emptyEl.classList.toggle('hidden', accounts.length > 0);
 
   listEl.replaceChildren();
-  if (accounts.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.mimo.empty');
-    listEl.append(empty);
-  } else {
-    for (const account of accounts) {
+  if (accounts.length > 0) {
+    for (const [index, account] of accounts.entries()) {
       const enabled = account.enabled !== false;
+      const accountName = mimoAccountTitle(account, index);
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.classList.toggle('disabled', !enabled);
@@ -6517,7 +6514,7 @@ function renderMimoStatus() {
       input.type = 'checkbox';
       input.checked = enabled;
       input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-        account: account.accountName || t('settings.mimo.unnamedAccount')
+        account: accountName
       }));
       input.addEventListener('change', async () => {
         input.disabled = true;
@@ -6534,10 +6531,60 @@ function renderMimoStatus() {
 
       const main = document.createElement('div');
       main.className = 'managed-account-main';
+      const nameBox = document.createElement('span');
+      nameBox.className = 'managed-account-name-box';
       const label = document.createElement('div');
       label.className = 'managed-account-email';
-      label.textContent = String(account.accountName || '').trim() || t('settings.mimo.unnamedAccount');
-      main.append(label);
+      label.textContent = accountName;
+      const nameInput = document.createElement('input');
+      nameInput.className = 'managed-account-name-input hidden';
+      nameInput.type = 'text';
+      nameInput.maxLength = 64;
+      nameInput.value = accountName;
+      const rename = document.createElement('button');
+      rename.type = 'button';
+      rename.className = 'managed-account-rename';
+      rename.textContent = '✎';
+      rename.title = t('settings.mimo.rename');
+      let editingName = false;
+      function beginRename() {
+        if (editingName) return;
+        editingName = true;
+        label.classList.add('hidden');
+        nameInput.classList.remove('hidden');
+        nameInput.focus();
+        nameInput.select();
+      }
+      async function endRename(save) {
+        if (!editingName) return;
+        editingName = false;
+        nameInput.classList.add('hidden');
+        label.classList.remove('hidden');
+        const nextName = nameInput.value.trim();
+        if (!save || !nextName || nextName === accountName) {
+          nameInput.value = accountName;
+          return;
+        }
+        const result = await window.tokenMonitor.mimo.renameAccount(account.id, nextName);
+        if (!result?.ok) {
+          state.mimoAccountError = result?.errorCode === 'duplicateAccountName'
+            ? t('settings.mimo.duplicateAccountName')
+            : result?.error || t('settings.mimo.renameFailed');
+          nameInput.value = accountName;
+        } else {
+          state.mimoAccountError = '';
+          state.settings.mimoManagedAccounts = result.accounts || [];
+        }
+        renderMimoStatus();
+      }
+      rename.addEventListener('click', beginRename);
+      nameInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') endRename(true);
+        if (event.key === 'Escape') endRename(false);
+      });
+      nameInput.addEventListener('blur', () => endRename(true));
+      nameBox.append(label, nameInput, rename);
+      main.append(nameBox);
 
       const right = document.createElement('span');
       right.className = 'managed-account-right';
@@ -6557,7 +6604,7 @@ function renderMimoStatus() {
           remove.classList.add('confirming');
           remove.textContent = '✓';
           remove.title = t('settings.mimo.removeConfirm', {
-            account: account.accountName || t('settings.mimo.unnamedAccount')
+            account: accountName
           });
           return;
         }
@@ -7930,6 +7977,16 @@ function setupCursorAccountUI() {
   const mimoToggle = document.getElementById('mimoSettingsToggle');
   if (mimoToggle) {
     mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
+
+    const addToggle = document.getElementById('mimoAddToggle');
+    const addDetails = document.getElementById('mimoAddDetails');
+    function setMimoAddExpanded(expanded) {
+      const next = Boolean(expanded);
+      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
+      addDetails?.classList.toggle('hidden', !next);
+      document.getElementById('mimoManualPanel')?.classList.toggle('expanded', next);
+    }
+    addToggle?.addEventListener('click', () => setMimoAddExpanded(addDetails?.classList.contains('hidden')));
     setMimoAccountExpanded(false);
     renderMimoStatus();
 
@@ -7943,27 +8000,55 @@ function setupCursorAccountUI() {
       renderMimoStatus();
     }).catch(() => {});
 
-    document.getElementById('mimoSignInButton').addEventListener('click', async () => {
-      const result = await window.tokenMonitor.mimo.addAccount();
+    document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
+      const result = await window.tokenMonitor.mimo.openConsole();
       if (!result?.ok) {
-        state.mimoAccountError = result?.error || t('settings.mimo.signInFailed');
+        state.mimoAccountError = result?.error || t('settings.mimo.openFailed');
         renderMimoStatus();
         return;
       }
       state.mimoAccountError = '';
-      state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
       renderMimoStatus();
     });
 
-    document.getElementById('mimoRefreshButton').addEventListener('click', async () => {
-      const result = await window.tokenMonitor.mimo.refreshStatus();
-      if (result?.ok) {
-        state.mimoAccountError = '';
-      } else {
-        state.mimoAccountError = result?.error || '';
+    document.getElementById('mimoSaveAccountButton').addEventListener('click', async () => {
+      const input = document.getElementById('mimoCookieInput');
+      const nameInput = document.getElementById('mimoAccountNameInput');
+      const saveButton = document.getElementById('mimoSaveAccountButton');
+      saveButton.disabled = true;
+      saveButton.textContent = t('settings.mimo.checking');
+      let result;
+      try {
+        result = await window.tokenMonitor.mimo.addAccount(nameInput.value.trim(), input.value);
+      } catch (_) {
+        result = { ok: false, errorCode: 'validationUnavailable' };
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = t('settings.mimo.saveAccount');
       }
+      if (!result?.ok) {
+        if (result?.errorCode === 'duplicateAccountName') {
+          state.mimoAccountError = t('settings.mimo.duplicateAccountName');
+        } else if (result?.errorCode === 'missingRequiredCookies') {
+          state.mimoAccountError = t('settings.mimo.missingCookies', { cookies: (result.missingCookies || []).join(', ') });
+        } else if (result?.errorCode === 'invalidCookie') {
+          state.mimoAccountError = t('settings.mimo.invalidCookie');
+        } else if (result?.errorCode === 'validationRateLimited') {
+          state.mimoAccountError = t('settings.mimo.validationRateLimited');
+        } else if (result?.errorCode === 'validationUnavailable') {
+          state.mimoAccountError = t('settings.mimo.validationUnavailable');
+        } else {
+          state.mimoAccountError = result?.error || t('settings.mimo.addFailed');
+        }
+        renderMimoStatus();
+        return;
+      }
+      input.value = '';
+      nameInput.value = '';
+      state.mimoAccountError = '';
       state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
       renderMimoStatus();
+      setMimoAddExpanded(false);
       await refreshStats({ force: true });
     });
   }

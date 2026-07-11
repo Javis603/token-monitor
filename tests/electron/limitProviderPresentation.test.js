@@ -555,15 +555,30 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
   assert.match(renderProviderWindows, /const balance = provider\.balance \|\| null;/);
   assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(provider, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(balance\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(tokenPlan\.label \|\| 'Token Plan', tokenPlan, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /const giftBalance = Number\(balance\?\.giftBalance\);/);
-  assert.match(renderProviderWindows, /const cashBalance = Number\(balance\?\.cashBalance\);/);
+  assert.match(renderProviderWindows, /const giftBalance = optionalFiniteNumber\(balance\?\.giftBalance\);/);
+  assert.match(renderProviderWindows, /const cashBalance = optionalFiniteNumber\(balance\?\.cashBalance\);/);
   assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\(\s*'Balance',\s*\{ showMeter: false \},\s*color,\s*0\.68,\s*balanceText,\s*detailParts\.join\(' · '\)\s*\);/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
-  assert.match(tokenPlanFallback, /const used = Number\(balance\.planUsed\);/);
-  assert.match(tokenPlanFallback, /const limit = Number\(balance\.planLimit\);/);
-  assert.match(tokenPlanFallback, /const percent = Number\(balance\.planPercent\);/);
+  assert.match(tokenPlanFallback, /const used = optionalFiniteNumber\(balance\.planUsed\);/);
+  assert.match(tokenPlanFallback, /const limit = optionalFiniteNumber\(balance\.planLimit\);/);
+  assert.match(tokenPlanFallback, /const percent = optionalFiniteNumber\(balance\.planPercent\);/);
+  assert.match(tokenPlanFallback, /if \(!hasUsed && !hasLimit && !hasPercent\) return null;/);
   assert.match(tokenPlanFallback, /usedPercent: resolvedPercent/);
   assert.match(tokenPlanFallback, /remainingPercent: resolvedPercent == null \? null : Math\.max\(0, Math\.min\(100, 100 - resolvedPercent\)\)/);
+});
+
+test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
+  const app = readRendererFile('app.js');
+  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatLimitWindowValue');
+  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+  const context = {};
+  vm.runInNewContext(`${optionalNumber}\n${tokenPlanFallback}\nresult = mimoTokenPlanWindowFromBalance({
+    planUsed: null,
+    planLimit: null,
+    planPercent: null,
+    planStatus: null
+  });`, context);
+  assert.equal(context.result, null);
 });
 
 test('MiMo expired Token Plan renders a localized status without a meter', () => {
@@ -843,5 +858,5 @@ test('Kimi capability tags and source label', () => {
 test('Kimi usage and limits share the canonical provider id and vendor color', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
-  assert.match(app, /const color = clientColors\[id\] \|\| clientColors\.default/);
+  assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
 });

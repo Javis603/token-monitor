@@ -76,14 +76,9 @@ const { aggregateDevices, aggregateHistory, carryDeviceHistory } = require('../s
 const { syncLimits } = require('../shared/limits');
 const {
   MIMO_PLATFORM_CONSOLE_URL,
-  accountKeyFor,
-  classifyMimoLoginUrl,
-  filterMimoSessionCookies,
-  formatMimoLoginUrlForLog,
-  probeMimoSession,
-  resolveMimoDataDir,
-  shouldCaptureMimoSessionForUrl,
-  writeMimoSessionArtifacts
+  createMimoManagedAccount,
+  fetchMimoLimits,
+  normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
 const { historyPreview } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
@@ -157,9 +152,6 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends']
 
 let mainWindow = null;
 let dashboardWindow = null;
-let mimoLoginWindow = null;
-const mimoLoginWindows = new Set();
-let mimoPendingAccount = null;
 let settingsPath = null;
 let settings = null;
 let rendererViewState = normalizeInitialRendererViewState();
@@ -445,9 +437,8 @@ function normalizeMimoManagedAccounts(value) {
     if (!account || typeof account !== 'object') continue;
     const id = String(account.id || '').trim();
     const accountKey = String(account.accountKey || '').trim();
-    const dataDir = String(account.dataDir || '').trim();
-    const partition = String(account.partition || '').trim();
-    if (!id || !accountKey || !dataDir || !partition) continue;
+    const cookieHeader = normalizeMimoCookieHeader(account.cookieHeader);
+    if (!id || !accountKey || !cookieHeader) continue;
     if (seen.has(accountKey)) continue;
     seen.add(accountKey);
     accounts.push({
@@ -455,8 +446,7 @@ function normalizeMimoManagedAccounts(value) {
       accountKey,
       accountName: String(account.accountName || '').trim(),
       accountLabel: String(account.accountLabel || '').trim(),
-      dataDir,
-      partition,
+      cookieHeader,
       addedAt: account.addedAt || new Date().toISOString(),
       updatedAt: account.updatedAt || account.addedAt || new Date().toISOString(),
       enabled: account.enabled !== false
@@ -475,186 +465,26 @@ function mimoManagedAccountsForCollector() {
   return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
 }
 
-function mimoManagedRoot() {
-  return path.join(sharedDataDir(), 'managed-mimo-accounts');
-}
-
-function legacyMimoDataDirPath() {
-  return resolveMimoDataDir({}, { env: process.env, platform: process.platform, homeDir: os.homedir() });
-}
-
-function mimoAccountId(accountKey) {
-  return `mimo-${String(accountKey || '').replace(/^sha256:/, '').slice(0, 12)}`;
-}
-
-function mimoPartitionForAccount(id) {
-  return `${MIMO_SESSION_PARTITION}:${id}`;
-}
-
-function mimoManagedDataDir(id) {
-  return path.join(mimoManagedRoot(), id);
-}
-
-function findExistingMimoAccount(accounts, identity) {
-  return accounts.find((account) => account.accountKey === identity.accountKey);
-}
-
-function commitMimoManagedAccount(identity, existing = null, overrides = {}) {
-  const now = new Date().toISOString();
-  const id = overrides.id || existing?.id || mimoAccountId(identity.accountKey);
-  const dataDir = overrides.dataDir || mimoManagedDataDir(id);
-  const partition = overrides.partition || mimoPartitionForAccount(id);
-  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
-  const record = {
-    id,
-    accountKey: identity.accountKey,
-    accountName: identity.accountName,
-    accountLabel: identity.accountLabel,
-    dataDir,
-    partition,
-    addedAt: existing?.addedAt || overrides.addedAt || now,
-    updatedAt: now,
-    enabled: overrides.enabled ?? existing?.enabled !== false
-  };
+async function addMimoManagedAccount(accountName, cookieValue) {
+  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
+  const result = createMimoManagedAccount(cookieValue, accounts, accountName);
+  if (!result.ok) return result;
+  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] });
+  if (validation?.status !== 'ok') {
+    const errorCode = validation?.status === 'unauthorized'
+      ? 'invalidCookie'
+      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
+    return { ok: false, errorCode };
+  }
   settings.mimoManagedAccounts = normalizeMimoManagedAccounts([
-    ...accounts.filter((account) => account.id !== id),
-    record
+    ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
+    result.account
   ]);
   saveSettings();
   pushSettingsToRenderer();
-  startMode();
-  sendMimoAccountsPush();
-  return mimoAccountsForRenderer().find((account) => account.id === id);
-}
-
-function mimoIdentityFromProbe(probe) {
-  const account = probe?.account && typeof probe.account === 'object' ? probe.account : {};
-  const accountKey = String(
-    probe?.provider?.accountKey
-    || accountKeyFor(account, Array.isArray(probe?.cookies) ? probe.cookies : [])
-    || ''
-  ).trim();
-  const accountName = String(
-    probe?.statusSummary?.accountName
-    || account.email
-    || account.nick_name
-    || account.real_name
-    || account.display_name
-    || ''
-  ).trim();
-  const accountLabel = String(
-    probe?.provider?.accountLabel
-    || probe?.statusSummary?.accountLabel
-    || 'Token Plan'
-  ).trim();
-  return { accountKey, accountName, accountLabel };
-}
-
-async function mimoHasSessionArtifacts(dataDir) {
-  for (const filename of ['cookies.json', 'accounts.json', 'endpoints.json', 'balance_snapshot.json']) {
-    try {
-      await fs.promises.access(path.join(dataDir, filename), fs.constants.F_OK);
-      return true;
-    } catch (_) {}
-  }
-  return false;
-}
-
-async function cleanupOrphanedMimoManagedAccounts() {
-  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
-  if (accounts.length === 0) return accounts;
-  const kept = [];
-  let changed = false;
-  for (const account of accounts) {
-    const summary = await readMimoStatusSummaryForDataDir(account.dataDir);
-    const hasArtifacts = await mimoHasSessionArtifacts(account.dataDir);
-    if (summary.status === 'notConfigured' && !hasArtifacts) {
-      changed = true;
-      continue;
-    }
-    kept.push(account);
-  }
-  if (!changed) return accounts;
-  settings.mimoManagedAccounts = kept;
-  saveSettings();
-  pushSettingsToRenderer();
   sendMimoAccountsPush();
   startMode();
-  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
-}
-
-async function removeMimoManagedAccountDataIfSafe(account) {
-  if (!account) return;
-  const partition = String(account.partition || '').trim();
-  if (partition) {
-    try {
-      await session.fromPartition(partition).clearStorageData({});
-    } catch (_) {}
-  }
-  if (partition !== MIMO_SESSION_PARTITION) {
-    try {
-      await session.fromPartition(MIMO_SESSION_PARTITION).clearStorageData({});
-    } catch (_) {}
-  }
-  await removeMimoManagedDataDirIfSafe(account.dataDir);
-}
-
-async function removeMimoManagedDataDirIfSafe(dataDirValue) {
-  const dataDir = String(dataDirValue || '').trim();
-  if (!dataDir) return;
-  const resolvedDir = path.resolve(dataDir);
-  const resolvedRoot = path.resolve(mimoManagedRoot());
-  if (resolvedDir === resolvedRoot) return;
-  if (!resolvedDir.startsWith(`${resolvedRoot}${path.sep}`)) return;
-  await fs.promises.rm(resolvedDir, { recursive: true, force: true });
-}
-
-async function mimoManagedDataDirExists(dataDir) {
-  try {
-    await fs.promises.access(dataDir);
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-async function finalizeMimoManagedAccountLogin(activeAccount, probe) {
-  const identity = mimoIdentityFromProbe(probe);
-  if (!identity.accountKey) return null;
-  const existing = findExistingMimoAccount(normalizeMimoManagedAccounts(settings.mimoManagedAccounts), identity);
-  const id = existing?.id || mimoAccountId(identity.accountKey);
-  const finalDataDir = mimoManagedDataDir(id);
-  const finalPartition = mimoPartitionForAccount(id);
-  const pendingDataDir = String(activeAccount?.dataDir || '').trim();
-  const isLoginFlow = String(activeAccount?.id || '').startsWith('pending-');
-
-  if (pendingDataDir && path.resolve(pendingDataDir) !== path.resolve(finalDataDir)) {
-    await fs.promises.mkdir(mimoManagedRoot(), { recursive: true });
-    const backupDataDir = await mimoManagedDataDirExists(finalDataDir)
-      ? `${finalDataDir}.replace-${Date.now()}-${crypto.randomUUID()}`
-      : '';
-    if (backupDataDir) await fs.promises.rename(finalDataDir, backupDataDir);
-    try {
-      await fs.promises.rename(pendingDataDir, finalDataDir);
-    } catch (error) {
-      if (backupDataDir) await fs.promises.rename(backupDataDir, finalDataDir).catch(() => {});
-      throw error;
-    }
-    if (backupDataDir) await removeMimoManagedDataDirIfSafe(backupDataDir);
-  }
-
-  const pendingPartition = String(activeAccount?.partition || '').trim();
-  const result = commitMimoManagedAccount(identity, existing, {
-    id,
-    dataDir: finalDataDir,
-    partition: finalPartition,
-    enabled: isLoginFlow ? true : undefined,
-    addedAt: activeAccount?.addedAt
-  });
-  if (isLoginFlow && pendingPartition && pendingPartition !== finalPartition) {
-    try { await session.fromPartition(pendingPartition).clearStorageData({}); } catch (_) {}
-  }
-  return result;
+  return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
 async function removeMimoManagedAccount(id) {
@@ -666,7 +496,26 @@ async function removeMimoManagedAccount(id) {
   saveSettings();
   pushSettingsToRenderer();
   sendMimoAccountsPush();
-  await removeMimoManagedAccountDataIfSafe(account);
+  startMode();
+  return { ok: true, accounts: mimoAccountsForRenderer() };
+}
+
+function renameMimoManagedAccount(id, accountNameValue) {
+  const accountId = String(id || '').trim();
+  const accountName = String(accountNameValue || '').trim().slice(0, 64);
+  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  if (!accountName) return { ok: false, errorCode: 'missingAccountName' };
+  const duplicateName = accounts.some((entry) => entry.id !== accountId
+    && String(entry.accountName || '').trim().toLowerCase() === accountName.toLowerCase());
+  if (duplicateName) return { ok: false, errorCode: 'duplicateAccountName' };
+  account.accountName = accountName;
+  account.updatedAt = new Date().toISOString();
+  settings.mimoManagedAccounts = accounts;
+  saveSettings();
+  pushSettingsToRenderer();
+  sendMimoAccountsPush();
   startMode();
   return { ok: true, accounts: mimoAccountsForRenderer() };
 }
@@ -3174,10 +3023,7 @@ async function getDashboardHistory() {
 
 let cursorStatusCache = { value: null, at: 0 };
 let opencodeStatusCache = { value: null, at: 0 };
-let mimoStatusCache = { value: null, at: 0 };
-let mimoRefreshQueue = Promise.resolve();
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
-const MIMO_SESSION_PARTITION = 'persist:token-monitor-mimo';
 
 function normalizeManualCookie(input) {
   let s = String(input || '').trim();
@@ -3214,406 +3060,6 @@ function rebuildWindow() {
   });
 }
 
-function mimoDataDirPath() {
-  return legacyMimoDataDirPath();
-}
-
-function mimoStatusPath(dataDir = mimoDataDirPath()) {
-  return path.join(dataDir, 'status.json');
-}
-
-async function readMimoStoredAccountName(dataDir = mimoDataDirPath()) {
-  try {
-    const text = await fs.promises.readFile(path.join(dataDir, 'accounts.json'), 'utf8');
-    const parsed = JSON.parse(text);
-    const accounts = Array.isArray(parsed?.accounts) ? parsed.accounts : [];
-    const currentId = String(parsed?.current_account_id || '').trim();
-    const account = (currentId
-      ? accounts.find((entry) => String(entry?.account_id || entry?.user_id || '').trim() === currentId)
-      : null) || accounts[0] || null;
-    return String(
-      account?.email
-      || account?.nick_name
-      || account?.real_name
-      || account?.display_name
-      || ''
-    ).trim();
-  } catch (_) {
-    return '';
-  }
-}
-
-async function readMimoStatusSummaryForDataDir(dataDir) {
-  const nowIso = new Date().toISOString();
-  try {
-    const text = await fs.promises.readFile(mimoStatusPath(dataDir), 'utf8');
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === 'object' && typeof parsed.status === 'string') {
-      const summary = {
-        ...parsed,
-        accountName: String(parsed.accountName || '').trim() || await readMimoStoredAccountName(dataDir)
-      };
-      return summary;
-    }
-  } catch (_) {}
-
-  try {
-    const cookiesText = await fs.promises.readFile(path.join(dataDir, 'cookies.json'), 'utf8');
-    const cookies = JSON.parse(cookiesText);
-    if (Array.isArray(cookies) && cookies.length > 0) {
-      const accountName = await readMimoStoredAccountName(dataDir);
-      return {
-        version: 1,
-        status: 'checking',
-        issue: 'session_unchecked',
-        updatedAt: nowIso,
-        accountLabel: 'MiMo account',
-        accountName,
-        endpointCount: 0,
-        hasCookies: true,
-        hasSnapshot: false,
-        balanceDate: ''
-      };
-    }
-  } catch (_) {}
-
-  return {
-    version: 1,
-    status: 'notConfigured',
-    issue: 'missing_session_files',
-    updatedAt: nowIso,
-    accountLabel: 'MiMo account',
-    accountName: '',
-    endpointCount: 0,
-    hasCookies: false,
-    hasSnapshot: false,
-    balanceDate: ''
-  };
-}
-
-async function readMimoStatusSummary() {
-  if (mimoStatusCache.value && Date.now() - mimoStatusCache.at < 5000) return mimoStatusCache.value;
-  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
-  if (accounts.length > 0) {
-    const summaries = await Promise.all(accounts.map((account) => readMimoStatusSummaryForDataDir(account.dataDir)));
-    const ok = summaries.find((summary) => summary.status === 'ok');
-    const checking = summaries.find((summary) => summary.status === 'checking');
-    const summary = ok || checking || summaries[0] || await readMimoStatusSummaryForDataDir(mimoDataDirPath());
-    mimoStatusCache = { value: summary, at: Date.now() };
-    return summary;
-  }
-  const summary = await readMimoStatusSummaryForDataDir(mimoDataDirPath());
-  mimoStatusCache = { value: summary, at: Date.now() };
-  return summary;
-}
-
-function sendMimoStatusPush(summary) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('mimo:status', summary); } catch (_) {}
-}
-
-function logMimoLoginDecision(action, url, source, extra = '') {
-  const displayUrl = formatMimoLoginUrlForLog(url);
-  const suffix = extra ? ` ${extra}` : '';
-  console.log(`[mimo] ${source} ${action} ${displayUrl}${suffix}`);
-}
-
-function queueMimoSessionRefresh(reason = 'manual', options = {}) {
-  const next = mimoRefreshQueue.catch(() => {}).then(() => refreshMimoSessions(reason, options));
-  mimoRefreshQueue = next.catch(() => {});
-  return next;
-}
-
-function currentMimoLoginWindows() {
-  return Array.from(mimoLoginWindows).filter((win) => win && !win.isDestroyed());
-}
-
-function hideMimoLoginWindowsAfterSuccess() {
-  for (const win of currentMimoLoginWindows()) {
-    win.__tokenMonitorMimoLoginComplete = true;
-    try { win.hide(); } catch (_) {}
-  }
-}
-
-function showMimoLoginWindowsAfterFailedPersist() {
-  for (const win of currentMimoLoginWindows()) {
-    win.__tokenMonitorMimoLoginComplete = false;
-    try { win.show(); } catch (_) {}
-  }
-}
-
-function closeMimoLoginWindowsAfterSuccess() {
-  for (const win of currentMimoLoginWindows()) {
-    win.__tokenMonitorMimoAutoClosing = true;
-    try { win.close(); } catch (_) {}
-  }
-  mimoPendingAccount = null;
-}
-
-function captureMimoSessionForWindow(win, source, trigger, options = {}) {
-  if (!win || win.isDestroyed()) return Promise.resolve(null);
-  const force = options.force === true;
-  const currentUrl = String(options.url || win.webContents.getURL() || '').trim();
-  if (!force && !shouldCaptureMimoSessionForUrl(currentUrl)) return Promise.resolve(null);
-  const displayUrl = formatMimoLoginUrlForLog(currentUrl || 'about:blank');
-  const stamp = `${trigger}:${displayUrl}`;
-  if (!force && win.__tokenMonitorMimoCaptureStamp === stamp) return Promise.resolve(null);
-  win.__tokenMonitorMimoCaptureStamp = stamp;
-  return queueMimoSessionRefresh(`${source}:${trigger}`, {
-    loginWindow: win,
-    account: win.__tokenMonitorMimoAccount || null
-  }).catch((error) => {
-    console.log(`[mimo] ${source} ${trigger} capture failed: ${error.message} url=${displayUrl}`);
-    return null;
-  });
-}
-
-function configureMimoLoginWindow(win, { source, closeReason, account } = {}) {
-  if (!win || win.isDestroyed()) return win;
-  mimoLoginWindows.add(win);
-  win.setMenuBarVisibility(false);
-  win.__tokenMonitorMimoCaptureStamp = '';
-  win.__tokenMonitorMimoLoginComplete = false;
-  win.__tokenMonitorMimoAutoClosing = false;
-  win.__tokenMonitorMimoAccount = account || null;
-  win.webContents.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36');
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    const decision = classifyMimoLoginUrl(url);
-    logMimoLoginDecision(`window.open -> ${decision.action}`, url, source);
-    if (decision.action === 'child') {
-      openMimoLoginTarget(url, { source: `${source}:window.open`, parent: win, account });
-    } else if (decision.action === 'external') {
-      shell.openExternal(url).catch((error) => console.log(`[mimo] ${source} external open failed: ${error.message}`));
-    }
-    return { action: 'deny' };
-  });
-  win.webContents.on('will-navigate', (event, url) => {
-    const decision = classifyMimoLoginUrl(url);
-    logMimoLoginDecision(`will-navigate -> ${decision.action}`, url, source);
-    if (decision.action === 'child') {
-      return;
-    }
-    if (decision.action === 'external') {
-      event.preventDefault();
-      shell.openExternal(url).catch((error) => console.log(`[mimo] ${source} external open failed: ${error.message}`));
-      return;
-    }
-    if (decision.action === 'block') {
-      event.preventDefault();
-    }
-  });
-  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-    const decision = classifyMimoLoginUrl(validatedURL || '');
-    console.log(`[mimo] ${source} did-fail-load code=${errorCode} description=${errorDescription} url=${decision.displayUrl}`);
-  });
-  win.webContents.on('did-navigate', (_event, url) => {
-    captureMimoSessionForWindow(win, source, 'did-navigate', { url });
-  });
-  win.webContents.on('did-navigate-in-page', (_event, url) => {
-    captureMimoSessionForWindow(win, source, 'did-navigate-in-page', { url });
-  });
-  win.on('close', () => {
-    if (!closeReason) return;
-    if (win.__tokenMonitorMimoAutoClosing) return;
-    captureMimoSessionForWindow(win, source, closeReason, { force: true });
-  });
-  win.on('closed', () => {
-    mimoLoginWindows.delete(win);
-    if (win === mimoLoginWindow) mimoLoginWindow = null;
-    if (mimoPendingAccount && win.__tokenMonitorMimoAccount?.id === mimoPendingAccount.id) {
-      mimoPendingAccount = null;
-    }
-  });
-  win.webContents.on('did-finish-load', () => {
-    if (!win.isDestroyed() && !win.__tokenMonitorMimoLoginComplete) win.show();
-    captureMimoSessionForWindow(win, source, 'did-finish-load');
-  });
-  return win;
-}
-
-function openMimoLoginTarget(url, { source = 'mimo', parent = null } = {}) {
-  const decision = classifyMimoLoginUrl(url);
-  const displayUrl = decision.displayUrl || formatMimoLoginUrlForLog(url);
-  const account = parent && !parent.isDestroyed() ? parent.__tokenMonitorMimoAccount || null : null;
-  if (decision.action === 'child') {
-    const child = new BrowserWindow({
-      width: 1320,
-      height: 900,
-      minWidth: 1024,
-      minHeight: 720,
-      parent: parent && !parent.isDestroyed() ? parent : null,
-      show: false,
-      title: 'Sign in to MiMo',
-      icon: APP_ICON_PATH,
-      webPreferences: {
-        partition: account?.partition || MIMO_SESSION_PARTITION,
-        contextIsolation: true,
-        nodeIntegration: false
-      }
-    });
-    configureMimoLoginWindow(child, { source, closeReason: 'login-child-window-closed', account });
-    child.loadURL(url).catch((error) => {
-      console.log(`[mimo] ${source} child load failed: ${error.message} url=${displayUrl}`);
-    });
-    return child;
-  }
-  if (decision.action === 'external') {
-    shell.openExternal(url).catch((error) => console.log(`[mimo] ${source} external open failed: ${error.message}`));
-    return null;
-  }
-  console.log(`[mimo] ${source} blocked url=${displayUrl} reason=${decision.reason}`);
-  return null;
-}
-
-async function mimoSessionCookiesFromElectronSession(partition = MIMO_SESSION_PARTITION) {
-  const partitionSession = session.fromPartition(partition);
-  const cookies = await partitionSession.cookies.get({});
-  if (typeof partitionSession.cookies.flushStore === 'function') {
-    await partitionSession.cookies.flushStore().catch(() => {});
-  }
-  return filterMimoSessionCookies(cookies);
-}
-
-async function refreshSingleMimoSession(account, reason = 'manual', options = {}) {
-  const activeAccount = account || null;
-  const dataDir = activeAccount?.dataDir || mimoDataDirPath();
-  const autoCloseLoginWindow = Boolean(options?.loginWindow && !options.loginWindow.isDestroyed());
-  const cookies = await mimoSessionCookiesFromElectronSession(activeAccount?.partition || MIMO_SESSION_PARTITION).catch(() => []);
-  const probeOptions = { mimoDataDir: dataDir };
-  if (cookies.length > 0) probeOptions.cookies = cookies;
-  const probe = await probeMimoSession(probeOptions, { fetch });
-  if (probe.status === 'ok' && autoCloseLoginWindow) hideMimoLoginWindowsAfterSuccess();
-  const writeResult = await writeMimoSessionArtifacts(dataDir, probe);
-  if (!writeResult.ok) {
-    if (probe.status === 'ok' && autoCloseLoginWindow) showMimoLoginWindowsAfterFailedPersist();
-    const summary = {
-      version: 1,
-      status: 'unavailable',
-      issue: 'session_write_failed',
-      updatedAt: new Date().toISOString(),
-      accountLabel: 'MiMo account',
-      endpointCount: 0,
-      hasCookies: cookies.length > 0,
-      hasSnapshot: false,
-      balanceDate: ''
-    };
-    mimoStatusCache = { value: summary, at: Date.now() };
-    sendMimoStatusPush(summary);
-    if (activeAccount?.id && activeAccount.id.startsWith('pending-')) mimoPendingAccount = null;
-    return { ok: false, status: 'unavailable', reason, error: writeResult.error?.message || 'failed to persist MiMo session' };
-  }
-  if (activeAccount && probe.status === 'ok') {
-    try {
-      await finalizeMimoManagedAccountLogin(activeAccount, probe);
-    } catch (error) {
-      if (autoCloseLoginWindow) showMimoLoginWindowsAfterFailedPersist();
-      const summary = {
-        version: 1,
-        status: 'unavailable',
-        issue: 'session_finalize_failed',
-        updatedAt: new Date().toISOString(),
-        accountLabel: 'MiMo account',
-        endpointCount: 0,
-        hasCookies: cookies.length > 0,
-        hasSnapshot: false,
-        balanceDate: ''
-      };
-      mimoStatusCache = { value: summary, at: Date.now() };
-      sendMimoStatusPush(summary);
-      if (activeAccount.id?.startsWith('pending-')) mimoPendingAccount = null;
-      return { ok: false, status: 'unavailable', reason, error: error.message || 'failed to finalize MiMo session' };
-    }
-  }
-  mimoStatusCache = { value: probe.statusSummary, at: Date.now() };
-  sendMimoStatusPush(probe.statusSummary);
-  if (probe.status === 'ok' && autoCloseLoginWindow) closeMimoLoginWindowsAfterSuccess();
-  return { ok: true, status: probe.status, reason, summary: probe.statusSummary };
-}
-
-async function refreshMimoSessions(reason = 'manual', options = {}) {
-  if (options?.account) return refreshSingleMimoSession(options.account, reason, options);
-  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
-  if (accounts.length === 0) return refreshSingleMimoSession(null, reason, options);
-  let lastResult = { ok: true, status: 'notConfigured', reason, summary: null };
-  for (const account of accounts) {
-    lastResult = await refreshSingleMimoSession(account, reason, options);
-  }
-  return lastResult;
-}
-
-async function migrateLegacyMimoAccountIfNeeded() {
-  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
-  if (accounts.length > 0) return accounts;
-  const legacyDir = legacyMimoDataDirPath();
-  const probe = await probeMimoSession({ mimoDataDir: legacyDir }, { fetch }).catch(() => null);
-  if (!probe || probe.status !== 'ok') return [];
-  const identity = mimoIdentityFromProbe(probe);
-  if (!identity.accountKey) return [];
-  const id = mimoAccountId(identity.accountKey);
-  const targetDir = mimoManagedDataDir(id);
-  await fs.promises.mkdir(mimoManagedRoot(), { recursive: true });
-  await fs.promises.cp(legacyDir, targetDir, { recursive: true, force: true }).catch(() => {});
-  commitMimoManagedAccount(identity, null, {
-    id,
-    dataDir: targetDir,
-    partition: mimoPartitionForAccount(id),
-    enabled: true
-  });
-  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
-}
-
-function openMimoLoginWindow(account = null) {
-  if (mimoLoginWindow && !mimoLoginWindow.isDestroyed()) {
-    mimoLoginWindow.focus();
-    return mimoLoginWindow;
-  }
-  const activeAccount = account || mimoPendingAccount;
-  const win = new BrowserWindow({
-    width: 1320,
-    height: 900,
-    minWidth: 1024,
-    minHeight: 720,
-    show: false,
-    title: 'Sign in to MiMo',
-    icon: APP_ICON_PATH,
-    webPreferences: {
-      partition: activeAccount?.partition || MIMO_SESSION_PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  mimoLoginWindow = win;
-  configureMimoLoginWindow(win, { source: 'login-window', closeReason: 'login-window-closed', account: activeAccount });
-  win.once('ready-to-show', () => win.show());
-  win.loadURL(MIMO_PLATFORM_CONSOLE_URL).catch((error) => {
-    console.log(`[mimo] login window load failed: ${error.message}`);
-  });
-  return win;
-}
-
-async function beginMimoManagedAccountLogin() {
-  await fs.promises.mkdir(mimoManagedRoot(), { recursive: true });
-  const pendingId = `pending-${crypto.randomUUID()}`;
-  mimoPendingAccount = {
-    id: pendingId,
-    accountKey: '',
-    accountName: '',
-    accountLabel: 'Token Plan',
-    dataDir: mimoManagedDataDir(pendingId),
-    partition: mimoPartitionForAccount(pendingId),
-    addedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    enabled: true
-  };
-  try {
-    openMimoLoginWindow(mimoPendingAccount);
-    return { ok: true };
-  } catch (error) {
-    mimoPendingAccount = null;
-    return { ok: false, error: error.message };
-  }
-}
-
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
@@ -3627,9 +3073,6 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
-  migrateLegacyMimoAccountIfNeeded()
-    .then(() => queueMimoSessionRefresh('startup'))
-    .catch((error) => console.log(`[mimo] startup refresh failed: ${error.message}`));
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
@@ -4021,26 +3464,13 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
-  ipcMain.handle('mimo:getStatus', () => readMimoStatusSummary());
-  ipcMain.handle('mimo:accounts', async () => {
-    await migrateLegacyMimoAccountIfNeeded();
-    await cleanupOrphanedMimoManagedAccounts();
-    return mimoAccountsForRenderer();
-  });
-  ipcMain.handle('mimo:addAccount', () => beginMimoManagedAccountLogin());
-  ipcMain.handle('mimo:refreshStatus', async () => queueMimoSessionRefresh('manual'));
-  ipcMain.handle('mimo:openDataDir', async () => {
-    const dataDir = mimoManagedRoot();
-    try {
-      fs.mkdirSync(dataDir, { recursive: true });
-    } catch (error) {
-      return { ok: false, error: error.message };
-    }
-    const openError = await shell.openPath(dataDir);
-    if (openError) return { ok: false, error: openError };
-    return { ok: true, path: dataDir };
-  });
+  ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
+  ipcMain.handle('mimo:addAccount', (_event, accountName, cookieHeader) => addMimoManagedAccount(accountName, cookieHeader));
+  ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
+    .then(() => ({ ok: true }))
+    .catch((error) => ({ ok: false, error: error.message })));
   ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
+  ipcMain.handle('mimo:renameAccount', (_event, id, accountName) => renameMimoManagedAccount(id, accountName));
   ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());

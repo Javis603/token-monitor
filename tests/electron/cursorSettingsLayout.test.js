@@ -458,17 +458,18 @@ test('API key account entries share styling and Copilot uses the folded token en
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
   assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   assert.match(css, /#deepseekManualPanel\.hidden,\n#minimaxManualPanel\.hidden,/);
-  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
+  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
   assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -647,179 +648,54 @@ test('MiniMax key changes invalidate stale provider status before re-checking', 
   assert.match(clearBody, /provider\.provider !== 'minimax'/);
 });
 
-test('MiMo account panel exposes add account and refresh actions', () => {
+test('MiMo account panel matches the manual Cookie provider layout', () => {
   const html = readRendererFile('index.html');
-  assert.match(
-    html,
-    /<div id="qoderAccountGroup"[\s\S]*?<\/div>\s*<\/div>\s*<div id="mimoAccountGroup"[\s\S]*?<\/div>\s*<\/div>\s*<div id="copilotAccountGroup"/,
-    'MiMo should be a top-level sibling between Qoder and Copilot'
-  );
-  const details = html.match(/<div id="mimoSettingsDetails"[\s\S]*?<\/div>\s*<\/div>/)?.[0] || '';
-  assert.match(html, /<span data-i18n="settings\.mimo\.title">MiMo Account<\/span>/);
-  assert.match(html, /<span id="mimoAccountStatus" class="cursor-status-pill" data-i18n="settings\.mimo\.notConfigured">Not configured<\/span>/);
-  assert.match(details, /<p class="settings-note" data-i18n="settings\.mimo\.description">/);
-  assert.match(details, /<div id="mimoAccountList" class="managed-account-list"><\/div>/);
-  assert.match(details, /<button id="mimoSignInButton" data-i18n="settings\.mimo\.signIn">Add account<\/button>/);
-  assert.match(details, /<button id="mimoRefreshButton" data-i18n="settings\.mimo\.refresh">Refresh<\/button>/);
-  assert.match(details, /<div id="mimoAccountErrorMessage" class="settings-note error hidden"><\/div>/);
-  assert.doesNotMatch(details, /mimoOpenDataDir|mimoApiTokenInput|mimoLogoutButton|mimoManual/);
-
   const app = readRendererFile('app.js');
-  const linkedBody = functionBody(app, 'mimoAccountLinked', 'renderMimoStatus');
-  assert.match(linkedBody, /return \(state\.settings\?\.mimoManagedAccounts \|\| \[\]\)\.length > 0;/);
-  const renderBody = functionBody(app, 'renderMimoStatus', 'minimaxProviderStatus');
-  assert.match(renderBody, /document\.getElementById\('mimoAccountList'\)/);
-  assert.match(renderBody, /document\.getElementById\('mimoAccountErrorMessage'\)/);
-  assert.match(renderBody, /state\.settings\?\.mimoManagedAccounts \|\| \[\]/);
-  assert.match(renderBody, /t\('settings\.mimo\.connected', \{ linked: enabledCount, total: accounts\.length \}\)/);
-  assert.match(renderBody, /t\('settings\.mimo\.notConfigured'\)/);
-  assert.match(renderBody, /t\('settings\.mimo\.empty'\)/);
-  assert.match(renderBody, /row\.className = 'managed-account-row'/);
-  assert.match(renderBody, /window\.tokenMonitor\.mimo\.setAccountEnabled\(account\.id, input\.checked\)/);
-  assert.match(renderBody, /window\.tokenMonitor\.mimo\.removeAccount\(account\.id\)/);
-  assert.match(renderBody, /info\.textContent = enabled \? limitProviderPresentationApi\.limitProviderDisplayLabel\(account\.accountLabel\) : t\('settings\.mimo\.disabled'\);/);
-  assert.match(renderBody, /state\.mimoAccountError = result\?\.error \|\| t\('settings\.mimo\.toggleFailed'\);/);
-  assert.match(renderBody, /state\.mimoAccountError = result\?\.error \|\| t\('settings\.mimo\.removeFailed'\);/);
-  assert.match(renderBody, /refreshStats\(\{ force: true \}\)\.catch\(\(\) => \{\}\);/);
-  assert.doesNotMatch(
-    renderBody,
-    /setAccountEnabled\(account\.id, input\.checked\)[\s\S]*?await refreshStats\(\{ force: true \}\)[\s\S]*?const main/,
-    'MiMo enable toggles should update the account row like Codex, not force-refresh all stats'
-  );
-  assert.doesNotMatch(renderBody, /mimoAccountStatusText|mimoAccountDetailText|localProviderStatuses\('mimo'\)|settings\.limits\.status\.notSetUp|settings\.common\.checking/);
-
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /document\.getElementById\('mimoSettingsToggle'\)/);
-  assert.match(setupBody, /setMimoAccountExpanded\(false\)/);
-  assert.match(setupBody, /renderMimoStatus\(\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.mimo\.onAccounts\(/);
-  assert.match(setupBody, /window\.tokenMonitor\.mimo\.accounts\(\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.mimo\.addAccount\(\)/);
-  assert.match(setupBody, /state\.mimoAccountError = result\?\.error \|\| t\('settings\.mimo\.signInFailed'\);/);
-  assert.doesNotMatch(setupBody, /window\.tokenMonitor\.mimo\.openDataDir\(\)/);
-  assert.match(setupBody, /document\.getElementById\('mimoRefreshButton'\)\.addEventListener\('click'/);
-  assert.match(setupBody, /window\.tokenMonitor\.mimo\.refreshStatus\(\)/);
-  assert.match(setupBody, /refreshStats\(\{ force: true \}\)/);
-
+  const css = readRendererFile('styles.css');
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
-  assert.match(preload, /mimo:\s*\{/);
-  assert.match(preload, /getStatus: \(\) => ipcRenderer\.invoke\('mimo:getStatus'\)/);
-  assert.match(preload, /accounts: \(\) => ipcRenderer\.invoke\('mimo:accounts'\)/);
-  assert.match(preload, /addAccount: \(\) => ipcRenderer\.invoke\('mimo:addAccount'\)/);
-  assert.match(preload, /refreshStatus: \(\) => ipcRenderer\.invoke\('mimo:refreshStatus'\)/);
-  assert.match(preload, /openDataDir: \(\) => ipcRenderer\.invoke\('mimo:openDataDir'\)/);
-  assert.match(preload, /removeAccount: \(id\) => ipcRenderer\.invoke\('mimo:removeAccount', id\)/);
-  assert.match(preload, /setAccountEnabled: \(id, enabled\) => ipcRenderer\.invoke\('mimo:setAccountEnabled', id, enabled\)/);
-  assert.match(preload, /ipcRenderer\.on\('mimo:accounts', handler\)/);
-
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const addAccountHandler = main.slice(
-    main.indexOf("ipcMain.handle('mimo:addAccount'"),
-    main.indexOf("ipcMain.handle('mimo:refreshStatus'")
-  );
-  const refreshHandler = main.slice(
-    main.indexOf("ipcMain.handle('mimo:refreshStatus'"),
-    main.indexOf("ipcMain.handle('mimo:openDataDir'")
-  );
-  const finalizeBody = main.slice(
-    main.indexOf('async function finalizeMimoManagedAccountLogin('),
-    main.indexOf('async function removeMimoManagedAccount(')
-  );
-  const mimoLoginHelperBody = main.slice(
-    main.indexOf('function configureMimoLoginWindow('),
-    main.indexOf('function openMimoLoginTarget(')
-  );
-  const mimoLoginTargetBody = main.slice(
-    main.indexOf('function openMimoLoginTarget('),
-    main.indexOf('function mimoSessionCookiesFromElectronSession(')
-  );
-  const cookieBody = main.slice(
-    main.indexOf('async function mimoSessionCookiesFromElectronSession('),
-    main.indexOf('async function refreshSingleMimoSession(')
-  );
-  const refreshBody = main.slice(
-    main.indexOf('async function refreshSingleMimoSession('),
-    main.indexOf('async function refreshMimoSessions(')
-  );
-  const refreshAllBody = main.slice(
-    main.indexOf('async function refreshMimoSessions('),
-    main.indexOf('async function migrateLegacyMimoAccountIfNeeded(')
-  );
-  const captureBody = main.slice(
-    main.indexOf('function captureMimoSessionForWindow('),
-    main.indexOf('function configureMimoLoginWindow(')
-  );
-  const loginWindowBody = main.slice(
-    main.indexOf('function openMimoLoginWindow(account = null)'),
-    main.indexOf('app.whenReady().then(() => {')
-  );
-  assert.match(main, /ipcMain\.handle\('mimo:getStatus'/);
-  assert.match(main, /ipcMain\.handle\('mimo:accounts'/);
-  assert.match(main, /ipcMain\.handle\('mimo:addAccount'/);
-  assert.match(main, /ipcMain\.handle\('mimo:refreshStatus'/);
-  assert.match(main, /ipcMain\.handle\('mimo:openDataDir'/);
-  assert.match(main, /ipcMain\.handle\('mimo:setAccountEnabled'/);
-  assert.match(main, /ipcMain\.handle\('mimo:removeAccount'/);
-  assert.doesNotMatch(main, /ipcMain\.handle\('mimo:openLoginPage'/);
-  assert.doesNotMatch(main, /shell\.openExternal\(MIMO_PLATFORM_CONSOLE_URL\)/);
-  assert.doesNotMatch(addAccountHandler, /cookie|header/i);
-  assert.match(addAccountHandler, /ipcMain\.handle\('mimo:addAccount', \(\) => beginMimoManagedAccountLogin\(\)\);/);
-  assert.match(refreshHandler, /queueMimoSessionRefresh\('manual'\)/);
-  assert.match(main, /fs\.mkdirSync\(dataDir, \{ recursive: true \}\)/);
-  assert.match(main, /shell\.openPath\(dataDir\)/);
-  assert.match(main, /const MIMO_SESSION_PARTITION = 'persist:token-monitor-mimo';/);
-  assert.match(main, /const mimoLoginWindows = new Set\(\);/);
-  assert.match(main, /async function mimoHasSessionArtifacts\(dataDir\)/);
-  assert.match(main, /async function finalizeMimoManagedAccountLogin\(activeAccount, probe\)/);
-  assert.match(finalizeBody, /const id = existing\?\.id \|\| mimoAccountId\(identity\.accountKey\);/);
-  assert.match(finalizeBody, /const finalDataDir = mimoManagedDataDir\(id\);/);
-  assert.match(finalizeBody, /await fs\.promises\.rename\(finalDataDir, backupDataDir\);/);
-  assert.match(finalizeBody, /await fs\.promises\.rename\(pendingDataDir, finalDataDir\);/);
-  assert.match(finalizeBody, /await fs\.promises\.rename\(backupDataDir, finalDataDir\)\.catch\(\(\) => \{\}\);/);
-  assert.match(finalizeBody, /await removeMimoManagedDataDirIfSafe\(backupDataDir\);/);
-  assert.match(finalizeBody, /enabled: isLoginFlow \? true : undefined/);
-  assert.match(main, /async function cleanupOrphanedMimoManagedAccounts\(\)/);
-  assert.match(main, /if \(summary\.status === 'notConfigured' && !hasArtifacts\) \{/);
-  assert.match(main, /await cleanupOrphanedMimoManagedAccounts\(\);/);
-  assert.match(main, /function currentMimoLoginWindows\(\)/);
-  assert.match(main, /function hideMimoLoginWindowsAfterSuccess\(\)/);
-  assert.match(main, /function closeMimoLoginWindowsAfterSuccess\(\)/);
-  assert.match(loginWindowBody, /partition:\s*activeAccount\?\.partition \|\| MIMO_SESSION_PARTITION/);
-  assert.match(loginWindowBody, /configureMimoLoginWindow\(win, \{ source: 'login-window', closeReason: 'login-window-closed', account: activeAccount \}\)/);
-  assert.match(main, /function captureMimoSessionForWindow\(/);
-  assert.match(main, /function queueMimoSessionRefresh\(reason = 'manual', options = \{\}\)/);
-  assert.match(main, /filterMimoSessionCookies/);
-  assert.match(captureBody, /account: win\.__tokenMonitorMimoAccount \|\| null/);
-  assert.match(cookieBody, /const partitionSession = session\.fromPartition\(partition\);/);
-  assert.match(cookieBody, /const cookies = await partitionSession\.cookies\.get\(\{\}\);/);
-  assert.match(cookieBody, /partitionSession\.cookies\.flushStore\(\)/);
-  assert.match(mimoLoginHelperBody, /setWindowOpenHandler\(/);
-  assert.match(mimoLoginHelperBody, /mimoLoginWindows\.add\(win\)/);
-  assert.match(mimoLoginHelperBody, /will-navigate/);
-  assert.match(mimoLoginHelperBody, /did-navigate/);
-  assert.match(mimoLoginHelperBody, /did-navigate-in-page/);
-  assert.match(mimoLoginHelperBody, /did-fail-load/);
-  assert.match(mimoLoginHelperBody, /did-finish-load/);
-  assert.match(mimoLoginHelperBody, /classifyMimoLoginUrl\(/);
-  assert.match(mimoLoginHelperBody, /openMimoLoginTarget\(/);
-  assert.match(mimoLoginHelperBody, /shell\.openExternal\(url\)\.catch/);
-  assert.match(mimoLoginHelperBody, /if \(win\.__tokenMonitorMimoAutoClosing\) return;/);
-  assert.match(mimoLoginHelperBody, /mimoLoginWindows\.delete\(win\)/);
-  assert.match(mimoLoginHelperBody, /!win\.__tokenMonitorMimoLoginComplete/);
-  assert.match(mimoLoginHelperBody, /captureMimoSessionForWindow\(win, source, 'did-navigate'/);
-  assert.match(mimoLoginHelperBody, /captureMimoSessionForWindow\(win, source, 'did-navigate-in-page'/);
-  assert.match(mimoLoginHelperBody, /captureMimoSessionForWindow\(win, source, 'did-finish-load'\)/);
-  assert.match(mimoLoginHelperBody, /captureMimoSessionForWindow\(win, source, closeReason, \{ force: true \}\)/);
-  assert.match(mimoLoginTargetBody, /partition:\s*account\?\.partition \|\| MIMO_SESSION_PARTITION/);
-  assert.match(mimoLoginTargetBody, /configureMimoLoginWindow\(child, \{ source, closeReason: 'login-child-window-closed', account \}\)/);
-  assert.match(refreshBody, /const autoCloseLoginWindow = Boolean\(options\?\.loginWindow && !options\.loginWindow\.isDestroyed\(\)\);/);
-  assert.match(refreshBody, /if \(probe\.status === 'ok' && autoCloseLoginWindow\) hideMimoLoginWindowsAfterSuccess\(\);[\s\S]*const writeResult = await writeMimoSessionArtifacts\(dataDir, probe\);/);
-  assert.match(refreshBody, /if \(probe\.status === 'ok' && autoCloseLoginWindow\) showMimoLoginWindowsAfterFailedPersist\(\);/);
-  assert.match(refreshBody, /if \(activeAccount && probe\.status === 'ok'\) \{/);
-  assert.match(refreshBody, /await finalizeMimoManagedAccountLogin\(activeAccount, probe\);/);
-  assert.match(refreshBody, /sendMimoStatusPush\(probe\.statusSummary\);[\s\S]*if \(probe\.status === 'ok' && autoCloseLoginWindow\) closeMimoLoginWindowsAfterSuccess\(\);/);
-  assert.match(refreshAllBody, /if \(options\?\.account\) return refreshSingleMimoSession\(options\.account, reason, options\);/);
-  assert.match(main, /return filterMimoSessionCookies\(cookies\);/);
+  const details = html.match(/<div id="mimoSettingsDetails"[\s\S]*?<div id="mimoAccountErrorMessage"/)?.[0] || '';
+
+  assert.match(details, /id="mimoCookieInput"/);
+  assert.match(details, /id="mimoAccountNameInput"/);
+  assert.match(details, /id="mimoOpenConsoleButton"/);
+  assert.match(details, /id="mimoAddToggle"[\s\S]*aria-controls="mimoAddDetails"/);
+  assert.match(details, /id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden"/);
+  assert.match(details, /id="mimoSaveAccountButton"/);
+  assert.match(details, /id="mimoManualPanel"/);
+  assert.match(details, /<strong>1\.<\/strong>[\s\S]*<strong>4\.<\/strong>/);
+  assert.match(details, /data-i18n="settings\.mimo\.step3Before">In Network, select<\/span> <code>balance<\/code>/);
+  assert.match(details, /data-i18n="settings\.mimo\.accountName">Account name<\/label>/);
+  assert.match(details, /data-i18n="settings\.mimo\.step4">Paste it below, then click Save account\.<\/span>/);
+  assert.doesNotMatch(details, /Only the cookies required for balance/);
+  assert.match(details, /placeholder="Cookie: \.\.\."/);
+  assert.ok(details.indexOf('mimoAddToggle') < details.indexOf('mimoOpenConsoleButton'));
+  assert.ok(details.indexOf('mimoOpenConsoleButton') < details.indexOf('mimoCookieInput'));
+  assert.ok(details.indexOf('mimoCookieInput') < details.indexOf('mimoSaveAccountButton'));
+  assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 12px/);
+  assert.match(css, /#qoderManualPanel textarea,[\s\S]*#mimoManualPanel textarea,[\s\S]*font-family: monospace/);
+  assert.match(css, /\.managed-account-list:empty \{ display: none; \}/);
+  assert.match(css, /\.opencode-empty\.hidden \{ display: none; \}/);
+  assert.match(app, /getElementById\('mimoManualPanel'\)\?\.classList\.toggle\('expanded', next\)/);
+  assert.doesNotMatch(app, /settings\.mimo\.empty/);
+  assert.match(app, /window\.tokenMonitor\.mimo\.openConsole\(\)/);
+  assert.match(app, /window\.tokenMonitor\.mimo\.addAccount\(nameInput\.value\.trim\(\), input\.value\)/);
+  assert.match(app, /saveButton\.textContent = t\('settings\.mimo\.checking'\)/);
+  assert.match(app, /result\?\.errorCode === 'invalidCookie'/);
+  assert.match(app, /function setMimoAddExpanded\(expanded\)/);
+  assert.match(app, /setMimoAddExpanded\(false\)/);
+  assert.match(preload, /addAccount: \(accountName, cookieHeader\) => ipcRenderer\.invoke\('mimo:addAccount', accountName, cookieHeader\)/);
+  assert.match(preload, /renameAccount: \(id, accountName\) => ipcRenderer\.invoke\('mimo:renameAccount', id, accountName\)/);
+  assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
+  assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
+  assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, accountName, cookieHeader\) => addMimoManagedAccount\(accountName, cookieHeader\)\)/);
+  assert.match(main, /ipcMain\.handle\('mimo:renameAccount'/);
+  assert.match(app, /window\.tokenMonitor\.mimo\.renameAccount\(account\.id, nextName\)/);
+  const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
+  assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}\)/);
+  assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
+  assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);
+  assert.doesNotMatch(main, /MIMO_SESSION_PARTITION|mimoLoginWindow|configureMimoLoginWindow/);
 });
 
 test('DeepSeek account copy says browser and external URL is allowlisted', () => {
@@ -859,7 +735,7 @@ test('opencode status env account avoids saved profile names', () => {
   assert.doesNotMatch(handler, /hasOwnProperty\.call\(result, envKey\)/);
 });
 
-test('settingsForRenderer strips OpenCode cookies before they reach the renderer', () => {
+test('settingsForRenderer strips provider cookies before they reach the renderer', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const body = main.slice(
     main.indexOf('function settingsForRenderer'),
@@ -870,6 +746,12 @@ test('settingsForRenderer strips OpenCode cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  const mimoRendererShape = main.slice(
+    main.indexOf('function mimoAccountsForRenderer'),
+    main.indexOf('function mimoManagedAccountsForCollector')
+  );
+  assert.match(mimoRendererShape, /id, accountKey, accountName, accountLabel, addedAt, updatedAt, enabled/);
+  assert.doesNotMatch(mimoRendererShape, /cookieHeader/);
 });
 
 test('main settings normalize the Z.ai API region', () => {
@@ -1012,7 +894,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   const groupBody = functionBody(app, 'renderMimoAccountGroup', 'renderOpenCodeAccountGroup');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(groupBody, /const groupProvider = \{ provider: 'mimo', status: 'ok', windows: \[\] \};/);
-  assert.match(groupBody, /planText: `\$\{providers\.length\} accounts`/);
+  assert.match(groupBody, /planText: t\('settings\.mimo\.nAccounts', \{ count: providers\.length \}\)/);
   assert.match(groupBody, /renderLimitProviderRow\('mimo', mimoAccountTitle\(provider, index\), provider, color/);
   assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
