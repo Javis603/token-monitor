@@ -372,6 +372,63 @@ test('mergeCodexTransientWindows does not guess an identity when multiple previo
   assert.deepEqual(merged.providers[0].windows, []);
 });
 
+test('mergeCodexTransientWindows rejects conflicting account key and email matches', () => {
+  const previous = {
+    updatedAt: '2026-06-14T10:00:00.000Z',
+    providers: [
+      codexProvider('sha256:codex-a', 'a@example.com', 50, '2026-06-14T10:00:00.000Z'),
+      codexProvider('sha256:codex-b', 'b@example.com', 75, '2026-06-14T10:00:00.000Z')
+    ]
+  };
+  const current = {
+    updatedAt: '2026-06-14T10:05:00.000Z',
+    providers: [{
+      ...codexProvider('sha256:codex-a', 'b@example.com', 0, '2026-06-14T10:05:00.000Z'),
+      status: 'unavailable',
+      windows: []
+    }]
+  };
+
+  const merged = mergeCodexTransientWindows(previous, current, Date.parse('2026-06-14T10:05:00.000Z'));
+
+  assert.equal(merged.providers[0].status, 'unavailable');
+  assert.deepEqual(merged.providers[0].windows, []);
+});
+
+test('mergeCodexTransientWindows keeps the effective successful summary timestamp during retention', () => {
+  const previousProvider = codexProvider('sha256:codex-a', 'a@example.com', 50, '');
+  const first = mergeCodexTransientWindows(
+    { updatedAt: '2026-06-14T10:00:00.000Z', providers: [previousProvider] },
+    {
+      updatedAt: '2026-06-14T10:05:00.000Z',
+      providers: [{
+        ...codexProvider('sha256:codex-a', 'a@example.com', 0, '2026-06-14T10:05:00.000Z'),
+        status: 'unavailable',
+        windows: []
+      }]
+    },
+    Date.parse('2026-06-14T10:05:00.000Z')
+  );
+
+  assert.equal(first.providers[0].updatedAt, '2026-06-14T10:00:00.000Z');
+
+  const expired = mergeCodexTransientWindows(
+    first,
+    {
+      updatedAt: '2026-06-14T10:11:00.000Z',
+      providers: [{
+        ...codexProvider('sha256:codex-a', 'a@example.com', 0, '2026-06-14T10:11:00.000Z'),
+        status: 'unavailable',
+        windows: []
+      }]
+    },
+    Date.parse('2026-06-14T10:11:00.000Z')
+  );
+
+  assert.equal(expired.providers[0].status, 'unavailable');
+  assert.deepEqual(expired.providers[0].windows, []);
+});
+
 test('mergeCodexTransientWindows stops keeping old Codex windows after retention expires', () => {
   const previous = {
     updatedAt: '2026-06-14T10:00:00.000Z',

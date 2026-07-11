@@ -1188,15 +1188,43 @@ function codexRateLimitWindowSignature(snapshot) {
   }));
 }
 
+function codexAlternatePlanType(snapshot) {
+  const value = snapshot?.planType ?? snapshot?.plan_type;
+  const normalized = String(value ?? '').trim();
+  return normalized || null;
+}
+
+function codexAlternateResetCredits(snapshot) {
+  const resetCredits = snapshot?.rateLimitResetCredits ?? snapshot?.rate_limit_reset_credits;
+  return normalizeLimitProvider({ provider: 'codex', resetCredits }).resetCredits;
+}
+
 function unambiguousAlternateCodexRateLimits(rateLimitsById) {
-  // Object key order is not a quota-selection contract. Only use an alternate
-  // id when every windowed alternate describes the same quota snapshot.
+  // Object key order is not a quota-selection contract. Keep agreed window
+  // data, but only carry optional metadata when every alternate agrees too.
   const candidates = Object.entries(rateLimitsById)
     .filter(([id, snapshot]) => id !== 'codex' && hasCodexRateLimitWindows(snapshot))
     .sort(([left], [right]) => left.localeCompare(right));
   if (candidates.length === 0) return null;
   const signatures = new Set(candidates.map(([, snapshot]) => codexRateLimitWindowSignature(snapshot)));
-  return signatures.size === 1 ? candidates[0][1] : null;
+  if (signatures.size !== 1) return null;
+
+  const snapshots = candidates.map(([, snapshot]) => snapshot);
+  const first = snapshots[0];
+  const consensus = {
+    ...(first.primary ? { primary: first.primary } : {}),
+    ...(first.secondary ? { secondary: first.secondary } : {})
+  };
+  const planTypes = snapshots.map(codexAlternatePlanType);
+  const normalizedPlanTypes = new Set(planTypes.map((value) => value?.toLowerCase() || null));
+  if (normalizedPlanTypes.size === 1 && planTypes[0]) consensus.planType = planTypes[0];
+
+  const resetCredits = snapshots.map(codexAlternateResetCredits);
+  const resetCreditSignatures = new Set(resetCredits.map((value) => JSON.stringify(value)));
+  if (resetCreditSignatures.size === 1 && resetCredits[0]) {
+    consensus.rateLimitResetCredits = resetCredits[0];
+  }
+  return consensus;
 }
 
 function codexRateLimitSnapshot(payload = {}) {

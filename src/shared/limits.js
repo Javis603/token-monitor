@@ -397,12 +397,14 @@ function mergeCodexTransientWindows(previousInput, currentInput, nowMs = Date.no
 
   for (const provider of previous.providers) {
     if (provider.provider !== 'codex' || provider.status !== 'ok' || !hasProviderWindows(provider)) continue;
-    const providerUpdatedAt = timestampMs(provider.updatedAt || previous.updatedAt);
+    const effectiveUpdatedAt = provider.updatedAt || previous.updatedAt;
+    const providerUpdatedAt = timestampMs(effectiveUpdatedAt);
     if (!providerUpdatedAt || currentMs - providerUpdatedAt < 0 || currentMs - providerUpdatedAt > Number(retentionMs)) continue;
-    eligiblePreviousCodexProviders.push(provider);
-    for (const key of codexProviderIdentityKeys(provider)) {
+    const eligibleProvider = provider.updatedAt ? provider : { ...provider, updatedAt: effectiveUpdatedAt };
+    eligiblePreviousCodexProviders.push(eligibleProvider);
+    for (const key of codexProviderIdentityKeys(eligibleProvider)) {
       const existing = previousByIdentity.get(key);
-      if (!existing || timestampMs(provider.updatedAt) >= timestampMs(existing.updatedAt)) previousByIdentity.set(key, provider);
+      if (!existing || providerUpdatedAt >= timestampMs(existing.updatedAt)) previousByIdentity.set(key, eligibleProvider);
     }
   }
 
@@ -416,9 +418,8 @@ function mergeCodexTransientWindows(previousInput, currentInput, nowMs = Date.no
     providers: current.providers.map((provider) => {
       if (provider.provider !== 'codex') return provider;
       const identityKeys = codexProviderIdentityKeys(provider);
-      const identityMatch = identityKeys
-        .map((key) => previousByIdentity.get(key))
-        .find(Boolean);
+      const identityMatches = new Set(identityKeys.map((key) => previousByIdentity.get(key)).filter(Boolean));
+      const identityMatch = identityMatches.size === 1 ? identityMatches.values().next().value : null;
       const previousProvider = identityMatch || (
         CODEX_TRANSIENT_PROVIDER_STATUSES.has(provider.status) && identityKeys.length === 0
           ? singletonFallback

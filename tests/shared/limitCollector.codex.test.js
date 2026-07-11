@@ -217,6 +217,68 @@ test('Codex provider does not guess between conflicting alternate rate limit ids
   }
 });
 
+test('Codex provider keeps agreed alternate windows without inheriting conflicting metadata', () => {
+  const window = {
+    usedPercent: 10,
+    resetsAt: '2026-06-01T05:00:00Z',
+    windowDurationMins: 300
+  };
+  const provider = mapCodexRateLimitsToProvider({
+    account: { email: 'user@example.com' },
+    rateLimitsByLimitId: {
+      'gpt-5.4': {
+        planType: 'plus',
+        primary: window,
+        rateLimitResetCredits: { availableCount: 2 }
+      },
+      'gpt-5.4-mini': {
+        planType: 'team',
+        primary: { ...window },
+        rateLimitResetCredits: { availableCount: 3 }
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'app',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows[0].remainingPercent, 90);
+  assert.equal(provider.accountLabel, '');
+  assert.equal(provider.resetCredits, null);
+});
+
+test('Codex provider preserves alternate metadata when every bucket agrees', () => {
+  const window = {
+    usedPercent: 10,
+    resetsAt: '2026-06-01T05:00:00Z',
+    windowDurationMins: 300
+  };
+  const provider = mapCodexRateLimitsToProvider({
+    account: { email: 'user@example.com' },
+    rateLimitsByLimitId: {
+      'gpt-5.4': {
+        planType: 'Plus',
+        primary: window,
+        rateLimitResetCredits: { availableCount: 2 }
+      },
+      'gpt-5.4-mini': {
+        plan_type: 'plus',
+        primary: { ...window },
+        rate_limit_reset_credits: { available_count: 2 }
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'app',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.equal(provider.accountLabel, 'Plus');
+  assert.equal(provider.resetCredits.availableCount, 2);
+});
+
 test('Codex provider keeps successful empty quota reads as ok', () => {
   const provider = mapCodexRateLimitsToProvider({
     account: { email: 'user@example.com', planType: 'plus' },
