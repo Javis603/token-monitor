@@ -101,10 +101,11 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /onDashboardHistoryChanged\?\.\(\(\) => \{ void refresh\(\); \}\)/);
 });
 
-test('main invalidates an open dashboard when a stats update arrives', () => {
+test('main invalidates an open dashboard only when stats history changes', () => {
   const main = read('src', 'electron', 'main.js');
-  assert.match(main, /nextHistoryRevision !== previousHistoryRevision/);
-  assert.match(main, /dashboardWindow\.webContents\.send\('dashboard:historyChanged'\)/);
+  const sendPush = /function sendPush\(payload\)\s*\{([\s\S]*?)\n\}\n\nfunction statsHistoryRevision/.exec(main);
+  assert.ok(sendPush, 'sendPush should be defined before statsHistoryRevision');
+  assert.match(sendPush[1], /if \(payload\?\.data\?\.stats\) \{[\s\S]*?nextHistoryRevision !== previousHistoryRevision[\s\S]*?dashboardWindow\.webContents\.send\('dashboard:historyChanged'\)/);
 });
 
 test('dashboard repains on a rate-only settings push, not just a currency-code change', () => {

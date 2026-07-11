@@ -1828,9 +1828,11 @@ function sendPush(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
   }
-  const nextHistoryRevision = statsHistoryRevision(payload?.data?.stats);
-  if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
-    try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+  if (payload?.data?.stats) {
+    const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
+    if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
+      try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+    }
   }
 }
 
