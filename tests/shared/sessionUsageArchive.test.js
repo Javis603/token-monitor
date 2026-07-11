@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 let archiveApi = {};
@@ -306,7 +307,7 @@ test('persists archive data outside settings via injectable storage helpers', ()
   const archivePath = sessionUsageArchivePath({
     env: { TOKEN_MONITOR_SHARED_DIR: '/tmp/token-monitor-test' }
   });
-  assert.equal(archivePath, '/tmp/token-monitor-test/session-usage-archive.json');
+  assert.equal(archivePath, path.join('/tmp/token-monitor-test', 'session-usage-archive.json'));
 
   const writes = [];
   const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
