@@ -6,7 +6,7 @@ const test = require('node:test');
 const {
   normalizeOllamaCookieHeader,
   ollamaSessionCookie,
-  extractSessionCookie,
+  rememberOllamaValidation,
   parseOllamaUsageHtml,
   fetchOllamaLimits
 } = require('../../src/shared/ollamaLimits');
@@ -32,13 +32,13 @@ function response(status, { location, html = '' } = {}) {
   };
 }
 
-test('normalizes current, legacy, raw, and complete Ollama cookie headers', () => {
+test('normalizes recognized named Ollama cookies and rejects bare values', () => {
   assert.equal(normalizeOllamaCookieHeader('wos-session=current'), 'wos-session=current');
   assert.equal(normalizeOllamaCookieHeader('Cookie: aid=1; wos-session=current; cf_clearance=ok'), 'aid=1; wos-session=current; cf_clearance=ok');
   assert.equal(normalizeOllamaCookieHeader('__Secure-session=legacy'), '__Secure-session=legacy');
   const rawToken = `${'a'.repeat(80)}==`;
-  assert.equal(normalizeOllamaCookieHeader(rawToken), `__Secure-session=${rawToken}`);
-  assert.equal(extractSessionCookie('wos-session=current'), 'current');
+  assert.equal(normalizeOllamaCookieHeader(rawToken), '');
+  assert.equal(normalizeOllamaCookieHeader('raw-token-without-name'), '');
 });
 
 test('requires an exact recognized cookie-pair boundary', () => {
@@ -47,12 +47,11 @@ test('requires an exact recognized cookie-pair boundary', () => {
     normalizeOllamaCookieHeader('foo__Secure-session=wrong; __Secure-session=right'),
     'foo__Secure-session=wrong; __Secure-session=right'
   );
-  assert.equal(extractSessionCookie('foo__Secure-session=wrong; __Secure-session=right'), 'right');
 });
 
 test('ollamaSessionCookie prefers settings and supports env aliases', () => {
   assert.equal(ollamaSessionCookie({ OLLAMA_COOKIE: 'wos-session=env' }, { ollamaCookie: 'wos-session=settings' }), 'wos-session=settings');
-  assert.equal(ollamaSessionCookie({ TOKEN_MONITOR_OLLAMA_COOKIE: 'raw' }), '__Secure-session=raw');
+  assert.equal(ollamaSessionCookie({ TOKEN_MONITOR_OLLAMA_COOKIE: '__Secure-session=legacy' }), '__Secure-session=legacy');
   assert.equal(ollamaSessionCookie({}), '');
 });
 
@@ -76,6 +75,34 @@ test('parses reversed blocks plus Hourly and CSS-width fallbacks', () => {
     ['session', 25],
     ['weekly', 80]
   ]);
+  assert.equal(parsed.session.windowMinutes, 60);
+});
+
+test('reuses a successful validation once without polling settings again', async () => {
+  const cookie = 'wos-session=one-shot-cache';
+  const validated = await fetchOllamaLimits({ ollamaCookie: cookie }, {
+    env: {},
+    bypassValidationCache: true,
+    fetch: async () => response(200, { html: SETTINGS_HTML })
+  });
+  rememberOllamaValidation(cookie, validated, 1_000);
+
+  let requests = 0;
+  const cached = await fetchOllamaLimits({ ollamaCookie: cookie }, {
+    env: {},
+    now: () => 1_001,
+    fetch: async () => { requests += 1; return response(500); }
+  });
+  assert.equal(cached.status, 'ok');
+  assert.equal(requests, 0);
+
+  const consumed = await fetchOllamaLimits({ ollamaCookie: cookie }, {
+    env: {},
+    now: () => 1_002,
+    fetch: async () => { requests += 1; return response(500); }
+  });
+  assert.equal(consumed.status, 'unavailable');
+  assert.equal(requests, 1);
 });
 
 test('parses formatted closing tags and ignores repeated aria usage labels', () => {

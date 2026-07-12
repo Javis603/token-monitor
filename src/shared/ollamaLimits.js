@@ -4,8 +4,9 @@ const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 
 const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
-const OLLAMA_DASHBOARD_URL = 'https://ollama.com/settings';
 const OLLAMA_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
+const VALIDATION_CACHE_MS = 30 * 1000;
+let validationCache = null;
 const OLLAMA_SESSION_COOKIE_NAMES = new Set([
   'session',
   '__Secure-session',
@@ -53,21 +54,7 @@ function normalizeOllamaCookieHeader(rawCookie) {
   if (pairs.some((pair) => isRecognizedSessionCookieName(pair.name))) {
     return pairs.map((pair) => `${pair.name}=${pair.value}`).join('; ');
   }
-  // A value without a cookie-name prefix is the legacy __Secure-session value.
-  // Base64 padding is allowed, so only classify a short leading identifier as
-  // an unrecognized cookie name.
-  const firstEq = cookie.indexOf('=');
-  if (firstEq === -1) return `__Secure-session=${cookie}`;
-  const possibleName = cookie.slice(0, firstEq).trim();
-  const looksLikeCookieName = /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(possibleName)
-    && possibleName.length <= 64;
-  return looksLikeCookieName ? '' : `__Secure-session=${cookie}`;
-}
-
-function extractSessionCookie(rawCookie) {
-  const header = normalizeOllamaCookieHeader(rawCookie);
-  const pair = cookiePairs(header).find((candidate) => isRecognizedSessionCookieName(candidate.name));
-  return pair?.value || '';
+  return '';
 }
 
 function ollamaSessionCookie(env = process.env, options = {}) {
@@ -94,6 +81,26 @@ function clampPercent(value) {
 
 function firstCapture(text, pattern) {
   return String(text || '').match(pattern)?.[1] || '';
+}
+
+function validationCacheKey(cookieHeader) {
+  return hashKey('ollama-validation', cookieHeader);
+}
+
+function rememberOllamaValidation(cookieHeader, provider, nowMs = Date.now()) {
+  if (!cookieHeader || provider?.status !== 'ok') return;
+  validationCache = {
+    key: validationCacheKey(cookieHeader),
+    expiresAt: nowMs + VALIDATION_CACHE_MS,
+    provider: normalizeLimitProvider(provider)
+  };
+}
+
+function consumeOllamaValidation(cookieHeader, nowMs = Date.now()) {
+  const key = validationCacheKey(cookieHeader);
+  const cached = validationCache;
+  validationCache = null;
+  return cached?.key === key && cached.expiresAt >= nowMs ? cached.provider : null;
 }
 
 function parseOllamaUsageHtml(html) {
@@ -125,7 +132,7 @@ function parseOllamaUsageHtml(html) {
       kind,
       usedPercent,
       resetsAt: toIso(firstCapture(block, /data-time=["']([^"']+)["']/i)),
-      windowMinutes: kind === 'weekly' ? 7 * 24 * 60 : 5 * 60,
+      windowMinutes: kind === 'weekly' ? 7 * 24 * 60 : /^hourly/i.test(current.label) ? 60 : 5 * 60,
       showMeter: true
     });
     seenKinds.add(kind);
@@ -212,6 +219,11 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({ provider: 'ollama', source: 'web', status: 'notConfigured', updatedAt, windows: [] });
   }
 
+  if (!deps.bypassValidationCache) {
+    const cached = consumeOllamaValidation(cookieHeader, now);
+    if (cached) return cached;
+  }
+
   const fetchFn = deps.fetch || fetch;
   const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -262,11 +274,10 @@ function errorWithStatus(status, message) {
 
 module.exports = {
   OLLAMA_SETTINGS_URL,
-  OLLAMA_DASHBOARD_URL,
   OLLAMA_SESSION_COOKIE_NAMES,
   normalizeOllamaCookieHeader,
   ollamaSessionCookie,
-  extractSessionCookie,
+  rememberOllamaValidation,
   parseOllamaUsageHtml,
   fetchOllamaLimits
 };

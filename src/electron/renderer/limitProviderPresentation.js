@@ -154,7 +154,7 @@
     if (status === 'unauthorized') {
       return providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
-        : providerName === 'qoder' || providerName === 'ollama'
+        : providerName === 'qoder'
           ? { label: 'Sign in again', tone: 'setup' }
           : providerName === 'grok'
           ? { label: 'Re-login', tone: 'setup' }

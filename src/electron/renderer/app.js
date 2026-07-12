@@ -6890,6 +6890,7 @@ function renderExternalProviderStatus(providerName) {
   const source = state.settings?.[config.sourceKey] || '';
   const provider = externalProviderForAccount(providerName);
   const configured = Boolean(state.settings?.[config.configuredKey]);
+  const pending = Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
   if (providerName === 'zai') {
     const regionInput = document.getElementById('zaiApiRegionInput');
@@ -6900,7 +6901,10 @@ function renderExternalProviderStatus(providerName) {
     if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
     updateQoderUsagePageHint();
   }
-  setCursorStatusText(statusEl, apiKeyAccountStatusText(providerName, provider, configured, source));
+  setCursorStatusText(
+    statusEl,
+    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source)
+  );
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
   logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
@@ -7983,12 +7987,10 @@ function setupCursorAccountUI() {
         }
         input.value = '';
         renderExternalProviderStatus('ollama');
-        await refreshStats({ force: true });
-        clearExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
         setExternalAccountExpanded('ollama', false);
       } catch (err) {
         clearExternalProviderCheckPending('ollama');
+        renderExternalProviderStatus('ollama');
         errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }

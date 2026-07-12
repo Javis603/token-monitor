@@ -3170,6 +3170,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
+#ollamaManualPanel.hidden,
 #mimoManualPanel.hidden,
 #kimiManualPanel.hidden,
 #copilotManualPanel.hidden,
@@ -3182,6 +3183,7 @@ html.is-windows .limit-live-badge {
 #zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
 #qoderErrorMessage.hidden,
+#ollamaErrorMessage.hidden,
 #kimiErrorMessage.hidden,
 #copilotErrorMessage.hidden,
 #copilotLoginStatus.hidden { display: none; }
@@ -3193,6 +3195,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
+#ollamaManualPanel,
 #mimoManualPanel,
 #kimiManualPanel,
 #copilotManualPanel {
@@ -3206,6 +3209,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
+#ollamaManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
 #kimiManualPanel > .accordion-animation-inner {
   display: grid;
@@ -3222,6 +3226,7 @@ html.is-windows .limit-live-badge {
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#ollamaManualPanel textarea,
 #mimoManualPanel input,
 #mimoManualPanel textarea,
 #kimiManualPanel input,
@@ -3237,23 +3242,11 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
+#ollamaManualPanel textarea,
 #mimoManualPanel input,
 #mimoManualPanel textarea,
 #kimiManualPanel input,
 #copilotManualDetails input {
-  font-family: monospace;
-}
-#ollamaManualPanel.hidden,
-#ollamaErrorMessage.hidden { display: none; }
-#ollamaManualPanel { min-width: 0; }
-#ollamaManualPanel > .accordion-animation-inner {
-  display: grid;
-  min-width: 0;
-  gap: 8px;
-}
-#ollamaManualPanel textarea {
-  width: 100%;
-  font-size: 12px;
   font-family: monospace;
 }
 .link-button {
