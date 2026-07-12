@@ -13,6 +13,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { createHash } = require('node:crypto');
 
 const PROMA_ROOT = path.join(os.homedir(), '.proma', 'agent-sessions');
 
@@ -63,8 +64,13 @@ function estimatedRowCost(row, pricingByModel) {
   return cost;
 }
 
-function collectSessionRows(filePath) {
-  const sessionId = path.basename(filePath, path.extname(filePath));
+function sourceNamespace(root) {
+  return createHash('sha256').update(path.normalize(String(root || ''))).digest('hex').slice(0, 12);
+}
+
+function collectSessionRows(filePath, options = {}) {
+  const sourceId = options.sourceId || sourceNamespace(path.dirname(filePath));
+  const sessionId = `${path.basename(filePath, path.extname(filePath))}@${sourceId}`;
   const content = String(fs.readFileSync(filePath, 'utf8') || '');
   const lines = content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const msgGroups = new Map(); // message.id -> [{ usage, model, createdAt }]
@@ -116,7 +122,7 @@ function collectSessionRows(filePath) {
  */
 function parseSessionFile(filePath, options = {}) {
   const sinceMs = Math.max(0, Number(options.sinceMs || 0));
-  const collapsed = collectSessionRows(filePath)
+  const collapsed = collectSessionRows(filePath, options)
     .filter((row) => !sinceMs || (row.createdAt ? row.createdAt >= sinceMs : options.includeUndated === true));
 
   // Aggregate by model
@@ -154,11 +160,14 @@ function jsonlFiles(root) {
 function collectPromaRows(options = {}) {
   const roots = Array.isArray(options.roots) ? options.roots : [PROMA_ROOT];
   const rows = [];
-  for (const filePath of roots.flatMap(jsonlFiles)) {
-    try {
-      rows.push(...collectSessionRows(filePath));
-    } catch (_) {
-      // skip unreadable files
+  for (const root of roots) {
+    const sourceId = sourceNamespace(root);
+    for (const filePath of jsonlFiles(root)) {
+      try {
+        rows.push(...collectSessionRows(filePath, { sourceId }));
+      } catch (_) {
+        // skip unreadable files
+      }
     }
   }
   return rows;

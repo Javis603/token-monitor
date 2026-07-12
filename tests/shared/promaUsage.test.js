@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { buildPromaHistoryGraph, buildTokscaleJson, buildPromaPeriods, PROMA_ROOT } = require('../../src/shared/promaUsage');
-const { extractUsageFromTokscale } = require('../../src/shared/usage');
+const { extractUsageFromTokscale, mergePeriods } = require('../../src/shared/usage');
 
 function writeJsonl(filePath, rows) {
   fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
@@ -131,15 +131,41 @@ test('Proma periods preserve JSONL session attribution across models', () => {
 
   const periods = buildPromaPeriods({ now: '2026-07-09T13:00:00.000Z', allTimeSince: '2026-01-01', roots: [root] });
   assert.equal(periods.today.groupBy, 'client,session,model');
-  assert.deepEqual(periods.today.entries.map((entry) => entry.sessionId).sort(), ['session-alpha', 'session-alpha', 'session-beta']);
+  const alphaId = periods.today.entries.find((entry) => entry.sessionId.startsWith('session-alpha@')).sessionId;
+  const betaId = periods.today.entries.find((entry) => entry.sessionId.startsWith('session-beta@')).sessionId;
+  assert.deepEqual(periods.today.entries.map((entry) => entry.sessionId).sort(), [alphaId, alphaId, betaId].sort());
 
   const usage = extractUsageFromTokscale(periods.today);
-  assert.equal(usage.sessions['proma:session-alpha'].totalTokens, 14);
-  assert.equal(usage.sessions['proma:session-alpha'].messageCount, 2);
-  assert.deepEqual(usage.sessions['proma:session-alpha'].models, { 'claude-sonnet': 10, 'gpt-5': 4 });
-  assert.equal(usage.sessions['proma:session-alpha'].startedAt, '2026-07-09T10:00:00.000Z');
-  assert.equal(usage.sessions['proma:session-alpha'].lastUsedAt, '2026-07-09T11:00:00.000Z');
-  assert.equal(usage.sessions['proma:session-beta'].totalTokens, 20);
+  assert.equal(usage.sessions[`proma:${alphaId}`].totalTokens, 14);
+  assert.equal(usage.sessions[`proma:${alphaId}`].messageCount, 2);
+  assert.deepEqual(usage.sessions[`proma:${alphaId}`].models, { 'claude-sonnet': 10, 'gpt-5': 4 });
+  assert.equal(usage.sessions[`proma:${alphaId}`].startedAt, '2026-07-09T10:00:00.000Z');
+  assert.equal(usage.sessions[`proma:${alphaId}`].lastUsedAt, '2026-07-09T11:00:00.000Z');
+  assert.equal(usage.sessions[`proma:${betaId}`].totalTokens, 20);
+});
+
+test('Proma namespaces equal filenames from separate homes without exposing paths', () => {
+  const firstRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-home-a-'));
+  const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-home-b-'));
+  writeJsonl(path.join(firstRoot, 'session.jsonl'), [
+    assistantRow({ id: 'first', createdAt: '2026-07-09T10:00:00.000Z', input: 10 })
+  ]);
+  writeJsonl(path.join(secondRoot, 'session.jsonl'), [
+    assistantRow({ id: 'second', createdAt: '2026-07-09T11:00:00.000Z', input: 20 })
+  ]);
+
+  const options = { now: '2026-07-09T13:00:00.000Z', allTimeSince: '2026-01-01' };
+  const host = extractUsageFromTokscale(buildPromaPeriods({ ...options, roots: [firstRoot] }).today);
+  const wsl = extractUsageFromTokscale(buildPromaPeriods({ ...options, roots: [secondRoot] }).today);
+  const usage = mergePeriods(host, wsl);
+  const sessions = Object.values(usage.sessions);
+  assert.equal(sessions.length, 2);
+  assert.deepEqual(sessions.map((session) => session.totalTokens).sort((a, b) => a - b), [10, 20]);
+  for (const session of sessions) {
+    assert.match(session.sessionId, /^session@[a-f0-9]{12}$/);
+    assert.ok(!session.sessionId.includes(firstRoot));
+    assert.ok(!session.sessionId.includes(secondRoot));
+  }
 });
 
 test('Proma keeps undated usage out of bounded periods and Trends', () => {
