@@ -161,12 +161,12 @@ function targetPeriod(summary, periodName) {
 function allocateIntegerTotal(total, weightedEntries) {
   if (total <= 0 || weightedEntries.length === 0) return new Map();
   const weightTotal = weightedEntries.reduce((sum, [, weight]) => sum + weight, 0);
-  const allocations = weightedEntries.map(([key, weight], index) => {
+  const allocations = weightedEntries.map(([key, weight]) => {
     const exact = total * weight / weightTotal;
-    return { key, index, value: Math.floor(exact), remainder: exact - Math.floor(exact) };
+    return { key, value: Math.floor(exact), remainder: exact - Math.floor(exact) };
   });
   let remaining = total - allocations.reduce((sum, item) => sum + item.value, 0);
-  allocations.sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  allocations.sort((a, b) => b.remainder - a.remainder || a.key.localeCompare(b.key));
   for (let index = 0; index < remaining; index += 1) allocations[index].value += 1;
   return new Map(allocations.map(({ key, value }) => [key, value]));
 }

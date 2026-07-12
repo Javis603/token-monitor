@@ -354,3 +354,23 @@ test('allocates archived token components across models without rounding drift',
   assert.equal(Object.values(visible.allTime.modelCacheWrites).reduce((sum, value) => sum + value, 0), 2);
   assert.equal(Object.values(visible.allTime.modelOutputs).reduce((sum, value) => sum + value, 0), 2);
 });
+
+test('allocates tied model remainders independently of map property order', () => {
+  const captureWithModels = (models) => {
+    const summary = liveSummary();
+    Object.assign(summary.allTime.sessions['opencode:o1'], {
+      models,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 2,
+      outputTokens: 2
+    });
+    const archive = captureSessionUsageArchive({}, summary, new Date('2026-07-09T08:15:00.000Z'));
+    return applySessionUsageArchive({ allTime: { sessions: {} } }, archive).allTime;
+  };
+
+  const forward = captureWithModels({ alpha: 1, beta: 1, gamma: 1 });
+  const reverse = captureWithModels({ gamma: 1, beta: 1, alpha: 1 });
+  assert.deepEqual(forward.modelCacheReads, reverse.modelCacheReads);
+  assert.deepEqual(forward.modelCacheWrites, reverse.modelCacheWrites);
+  assert.deepEqual(forward.modelOutputs, reverse.modelOutputs);
+});
