@@ -843,7 +843,13 @@
             </div>
             <div id="hubClientFields" class="hub-mode-fields hidden">
               <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
-              <label><span data-i18n="settings.sync.secret">Secret</span><input id="secretInput" type="password" spellcheck="false" placeholder="optional shared secret" data-i18n-placeholder="settings.sync.secretPlaceholder" /></label>
+              <div class="settings-field hub-secret-field">
+                <label for="secretInput" data-i18n="settings.sync.secret">Secret</label>
+                <div class="hub-secret-row">
+                  <input id="secretInput" type="password" spellcheck="false" placeholder="optional shared secret" data-i18n-placeholder="settings.sync.secretPlaceholder" />
+                  <button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings.sync.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings.sync.pasteSecret">⎘</button>
+                </div>
+              </div>
               <div id="syncClientStatus" class="hub-status" hidden></div>
             </div>
             <div id="hubHostFields" class="hub-mode-fields hidden">

@@ -105,6 +105,49 @@ test('Cursor account status stays inline with an email-only summary', () => {
   assert.equal(declaration(expandedRule, 'transform'), 'rotate(180deg)');
 });
 
+test('Hub secret input stays masked and exposes an accessible paste button', () => {
+  const html = readRendererFile('index.html');
+  const secretFieldMatch = html.match(/<div class="settings-field hub-secret-field">[\s\S]*?<\/div>\s*<div/);
+  const secretField = secretFieldMatch?.[0]?.replace(/<div$/, '') || '';
+  const secretLabel = secretField.match(/<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>/)?.[0] || '';
+  const secretRow = secretField.match(/<div class="hub-secret-row">[\s\S]*?<\/div>/)?.[0] || '';
+  // Outer container must carry settings-field so it inherits font-size 11px
+  assert.match(secretField, /<div class="settings-field hub-secret-field">[\s\S]*?<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>[\s\S]*?<div class="hub-secret-row">/);
+  assert.match(secretLabel, /<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>/);
+  assert.doesNotMatch(secretLabel, /secretPasteButton/);
+  assert.match(secretRow, /<input id="secretInput" type="password"[\s\S]*data-i18n-placeholder="settings\.sync\.secretPlaceholder"/);
+  assert.match(secretRow, /<button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings\.sync\.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings\.sync\.pasteSecret">/);
+
+  const css = readRendererFile('styles.css');
+  // No standalone .hub-secret-field layout rule — settings-field handles it
+  assert.doesNotMatch(css, /\.hub-secret-field\s*\{/);
+
+  const sharedInputRule = cssRule(css, '.settings-panel input, .settings-panel select');
+  assert.equal(declaration(sharedInputRule, 'width'), '100%');
+  assert.equal(declaration(sharedInputRule, 'min-width'), '0');
+  assert.equal(declaration(sharedInputRule, 'padding'), '7px 8px');
+  assert.equal(declaration(sharedInputRule, 'border'), '1px solid var(--line)');
+  assert.equal(declaration(sharedInputRule, 'border-radius'), '6px');
+  assert.equal(declaration(sharedInputRule, 'background'), 'rgba(var(--sunken-rgb), 0.48)');
+
+  const secretRowRule = cssRule(css, '.settings-panel .hub-secret-row input');
+  assert.equal(declaration(secretRowRule, 'flex'), '1 1 0');
+  assert.equal(declaration(secretRowRule, 'width'), '0');
+  assert.equal(declaration(secretRowRule, 'min-width'), '0');
+  assert.equal(declaration(secretRowRule, 'padding'), '');
+  assert.equal(declaration(secretRowRule, 'font-size'), '');
+
+  const app = readRendererFile('app.js');
+  const start = app.indexOf("els.secretPasteButton?.addEventListener('click', async () => {");
+  const end = app.indexOf("els.limitsRefreshInput.addEventListener('change', async () => {", start);
+  assert.notEqual(start, -1, 'secret paste handler should exist');
+  assert.notEqual(end, -1, 'secret paste handler should end before limits refresh handler');
+  const pasteBody = app.slice(start, end);
+  assert.match(pasteBody, /const text = await navigator\.clipboard\.readText\(\);/);
+  assert.match(pasteBody, /els\.secretInput\.value = text\.trim\(\);/);
+  assert.doesNotMatch(pasteBody, /dispatchEvent\(new Event\('input'/);
+});
+
 test('Cursor account header omits plan and reset details', () => {
   const body = functionBody(readRendererFile('app.js'), 'renderCursorStatus', 'refreshCursorStatus');
   assert.match(body, /const summary = status\.email \|\| t\('settings\.cursor\.loggedIn'\);/);

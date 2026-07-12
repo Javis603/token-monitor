@@ -112,14 +112,15 @@ test('applyTranslations updates text, title, aria-label, placeholders, and docum
   const button = fakeElement({ i18nTitle: 'settings.sync.copySecret' });
   const dismiss = fakeElement({ i18nAriaLabel: 'settings.appUpdate.dismiss' });
   const input = fakeElement({ i18nPlaceholder: 'settings.sync.secretPlaceholder' });
+  const paste = fakeElement({ i18nTitle: 'settings.sync.pasteSecret', i18nAriaLabel: 'settings.sync.pasteSecret' });
   const langOption = fakeElement({ i18n: 'settings.language.zhTW' });
   const documentElement = fakeElement();
   const root = {
     documentElement,
     querySelectorAll(selector) {
       if (selector === '[data-i18n]') return [title, langOption];
-      if (selector === '[data-i18n-title]') return [button];
-      if (selector === '[data-i18n-aria-label]') return [dismiss];
+      if (selector === '[data-i18n-title]') return [button, paste];
+      if (selector === '[data-i18n-aria-label]') return [dismiss, paste];
       if (selector === '[data-i18n-placeholder]') return [input];
       return [];
     }
@@ -129,6 +130,8 @@ test('applyTranslations updates text, title, aria-label, placeholders, and docum
 
   assert.equal(title.textContent, '多裝置同步');
   assert.equal(button.title, '複製密鑰');
+  assert.equal(paste.title, '貼上密鑰');
+  assert.equal(paste.getAttribute('aria-label'), '貼上密鑰');
   assert.equal(dismiss.getAttribute('aria-label'), '忽略此版本');
   assert.equal(input.placeholder, '選填的共享密鑰');
   assert.equal(langOption.textContent, '繁體中文');
