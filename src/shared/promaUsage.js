@@ -15,7 +15,6 @@ const path = require('node:path');
 const os = require('node:os');
 
 const PROMA_ROOT = path.join(os.homedir(), '.proma', 'agent-sessions');
-const PROMA_CONVERSATIONS_ROOT = path.join(os.homedir(), '.proma', 'conversations');
 
 function numberValue(value) {
   const n = Number(value || 0);
@@ -65,6 +64,7 @@ function estimatedRowCost(row, pricingByModel) {
 }
 
 function collectSessionRows(filePath) {
+  const sessionId = path.basename(filePath, path.extname(filePath));
   const content = String(fs.readFileSync(filePath, 'utf8') || '');
   const lines = content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const msgGroups = new Map(); // message.id -> [{ usage, model, createdAt }]
@@ -87,7 +87,7 @@ function collectSessionRows(filePath) {
       const createdAt = timestampMs(obj._createdAt || obj.createdAt || obj.created_at || obj.timestamp);
 
       if (!msgGroups.has(msgId)) msgGroups.set(msgId, []);
-      msgGroups.get(msgId).push({ model, input, output, cacheRead, cacheWrite, createdAt });
+      msgGroups.get(msgId).push({ sessionId, model, input, output, cacheRead, cacheWrite, createdAt });
     } catch (_) {
       // skip malformed lines
     }
@@ -101,6 +101,7 @@ function collectSessionRows(filePath) {
     chunks.sort((a, b) => rowTotal(b) - rowTotal(a));
     const row = { ...chunks[0] };
     row.createdAt = Math.max(0, ...chunks.map((chunk) => chunk.createdAt || 0));
+    row.messages = 1;
     collapsed.push(row);
   }
   return collapsed;
@@ -110,19 +111,19 @@ function collectSessionRows(filePath) {
  * Parse a single JSONL session file, returning per-model usage rows.
  *
  * @param {string} filePath  Absolute path to a .jsonl file
- * @param {{ sinceMs?: number }} options
- * @returns {{ model: string, input: number, output: number, cacheRead: number, cacheWrite: number, messages: number, cost: number, _createdAt: number }}
+ * @param {{ sinceMs?: number, includeUndated?: boolean }} options
+ * @returns {{ sessionId: string, model: string, input: number, output: number, cacheRead: number, cacheWrite: number, messages: number, cost: number, _createdAt: number }}
  */
 function parseSessionFile(filePath, options = {}) {
   const sinceMs = Math.max(0, Number(options.sinceMs || 0));
   const collapsed = collectSessionRows(filePath)
-    .filter((row) => !sinceMs || !row.createdAt || row.createdAt >= sinceMs);
+    .filter((row) => !sinceMs || (row.createdAt ? row.createdAt >= sinceMs : options.includeUndated === true));
 
   // Aggregate by model
   const byModel = new Map();
   for (const entry of collapsed) {
     if (!byModel.has(entry.model)) {
-      byModel.set(entry.model, { model: entry.model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, cost: 0, _createdAt: entry.createdAt });
+      byModel.set(entry.model, { sessionId: entry.sessionId, model: entry.model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, cost: 0, _createdAt: entry.createdAt });
     }
     const m = byModel.get(entry.model);
     m.input += entry.input;
@@ -186,28 +187,38 @@ function buildTokscaleJson(windows = {}, options = {}) {
   // aggregation would use the model's earliest timestamp and drop today's
   // usage from a session that began before midnight.
   const allRows = (Array.isArray(options.rows) ? options.rows : collectPromaRows(options))
-    .filter((row) => !sinceMs || !row.createdAt || row.createdAt >= sinceMs);
+    .filter((row) => {
+      if (!sinceMs) return true;
+      if (!row.createdAt) return options.includeUndated === true;
+      return row.createdAt >= sinceMs;
+    });
 
-  // Aggregate by model
-  const byModel = new Map();
+  // Keep the source JSONL's stable session id while aggregating streamed
+  // messages by model. extractUsageFromTokscale() then merges all model rows
+  // for the same session into one period.sessions entry.
+  const bySessionModel = new Map();
   for (const row of allRows) {
-    if (!byModel.has(row.model)) {
-      byModel.set(row.model, { model: row.model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, cost: 0 });
+    const key = `${row.sessionId || 'unknown'}\u0000${row.model}`;
+    if (!bySessionModel.has(key)) {
+      bySessionModel.set(key, { sessionId: row.sessionId || 'unknown', model: row.model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, cost: 0, startedAt: 0, lastUsedAt: 0 });
     }
-    const m = byModel.get(row.model);
+    const m = bySessionModel.get(key);
     const cost = estimatedRowCost(row, options.pricingByModel);
     m.input += row.input;
     m.output += row.output;
     m.cacheRead += row.cacheRead;
     m.cacheWrite += row.cacheWrite;
-    m.messages += row.messages;
+    m.messages += Number(row.messages || 1);
     m.cost += cost === null ? 0 : cost;
+    if (row.createdAt && (!m.startedAt || row.createdAt < m.startedAt)) m.startedAt = row.createdAt;
+    if (row.createdAt > m.lastUsedAt) m.lastUsedAt = row.createdAt;
   }
 
-  for (const m of byModel.values()) {
+  for (const m of bySessionModel.values()) {
     entries.push({
       client: 'proma',
       mergedClients: null,
+      sessionId: m.sessionId,
       model: m.model,
       provider: 'proma',
       input: m.input,
@@ -217,6 +228,8 @@ function buildTokscaleJson(windows = {}, options = {}) {
       reasoning: 0,
       messageCount: m.messages,
       cost: m.cost,
+      startedAt: m.startedAt ? new Date(m.startedAt).toISOString() : '',
+      lastUsedAt: m.lastUsedAt ? new Date(m.lastUsedAt).toISOString() : '',
       performance: null
     });
     allInput += m.input;
@@ -228,7 +241,7 @@ function buildTokscaleJson(windows = {}, options = {}) {
   }
 
   return {
-    groupBy: 'client,model',
+    groupBy: 'client,session,model',
     entries,
     totalInput: allInput,
     totalOutput: allOutput,
@@ -301,13 +314,12 @@ function buildPromaPeriods(options = {}) {
   return {
     today: buildTokscaleJson({ todayStart }, buildOptions),
     month: buildTokscaleJson({ monthStart }, buildOptions),
-    allTime: buildTokscaleJson({ allTimeSince: options.allTimeSince }, buildOptions)
+    allTime: buildTokscaleJson({ allTimeSince: options.allTimeSince }, { ...buildOptions, includeUndated: true })
   };
 }
 
 module.exports = {
   PROMA_ROOT,
-  PROMA_CONVERSATIONS_ROOT,
   collectSessionRows,
   collectPromaRows,
   parseSessionFile,

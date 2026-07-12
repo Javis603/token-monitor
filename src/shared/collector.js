@@ -731,7 +731,7 @@ function clientWatchCandidates(clientsCsv) {
   // `.workbuddy` so a db-only WSL home is still scanned.
   add('workbuddy', path.join(home, '.workbuddy', 'projects'));
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
-  add('proma', path.join(home, '.proma', 'agent-sessions'), path.join(home, '.proma', 'conversations'));
+  add('proma', path.join(home, '.proma', 'agent-sessions'));
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute

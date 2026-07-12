@@ -119,6 +119,46 @@ test('Proma periods read each session file once before deriving all windows', ()
   }
 });
 
+test('Proma periods preserve JSONL session attribution across models', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
+  writeJsonl(path.join(root, 'session-alpha.jsonl'), [
+    assistantRow({ id: 'first', model: 'claude-sonnet', createdAt: '2026-07-09T10:00:00.000Z', input: 10 }),
+    assistantRow({ id: 'second', model: 'gpt-5', createdAt: '2026-07-09T11:00:00.000Z', output: 4 })
+  ]);
+  writeJsonl(path.join(root, 'session-beta.jsonl'), [
+    assistantRow({ id: 'third', model: 'gpt-5', createdAt: '2026-07-09T12:00:00.000Z', input: 20 })
+  ]);
+
+  const periods = buildPromaPeriods({ now: '2026-07-09T13:00:00.000Z', allTimeSince: '2026-01-01', roots: [root] });
+  assert.equal(periods.today.groupBy, 'client,session,model');
+  assert.deepEqual(periods.today.entries.map((entry) => entry.sessionId).sort(), ['session-alpha', 'session-alpha', 'session-beta']);
+
+  const usage = extractUsageFromTokscale(periods.today);
+  assert.equal(usage.sessions['proma:session-alpha'].totalTokens, 14);
+  assert.equal(usage.sessions['proma:session-alpha'].messageCount, 2);
+  assert.deepEqual(usage.sessions['proma:session-alpha'].models, { 'claude-sonnet': 10, 'gpt-5': 4 });
+  assert.equal(usage.sessions['proma:session-alpha'].startedAt, '2026-07-09T10:00:00.000Z');
+  assert.equal(usage.sessions['proma:session-alpha'].lastUsedAt, '2026-07-09T11:00:00.000Z');
+  assert.equal(usage.sessions['proma:session-beta'].totalTokens, 20);
+});
+
+test('Proma keeps undated usage out of bounded periods and Trends', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
+  writeJsonl(path.join(root, 'session.jsonl'), [
+    assistantRow({ id: 'undated', createdAt: 'not-a-date', input: 50 }),
+    assistantRow({ id: 'dated', createdAt: '2026-07-09T12:00:00.000Z', input: 10 })
+  ]);
+
+  const periods = buildPromaPeriods({ now: '2026-07-09T13:00:00.000Z', allTimeSince: '2026-01-01', roots: [root] });
+  assert.equal(extractUsageFromTokscale(periods.today).totalTokens, 10);
+  assert.equal(extractUsageFromTokscale(periods.month).totalTokens, 10);
+  assert.equal(extractUsageFromTokscale(periods.allTime).totalTokens, 60);
+
+  const graph = buildPromaHistoryGraph({ roots: [root] });
+  assert.equal(graph.contributions.length, 1);
+  assert.equal(graph.contributions[0].clients[0].tokens.input, 10);
+});
+
 test('Proma history keeps per-day and per-model token attribution', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
   writeJsonl(path.join(root, 'session.jsonl'), [
