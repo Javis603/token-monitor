@@ -158,6 +158,19 @@ function targetPeriod(summary, periodName) {
   return summary[periodName];
 }
 
+function allocateIntegerTotal(total, weightedEntries) {
+  if (total <= 0 || weightedEntries.length === 0) return new Map();
+  const weightTotal = weightedEntries.reduce((sum, [, weight]) => sum + weight, 0);
+  const allocations = weightedEntries.map(([key, weight], index) => {
+    const exact = total * weight / weightTotal;
+    return { key, index, value: Math.floor(exact), remainder: exact - Math.floor(exact) };
+  });
+  let remaining = total - allocations.reduce((sum, item) => sum + item.value, 0);
+  allocations.sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (let index = 0; index < remaining; index += 1) allocations[index].value += 1;
+  return new Map(allocations.map(({ key, value }) => [key, value]));
+}
+
 function addSessionBreakdown(period, session) {
   const client = session.client;
   const cacheRead = Math.max(0, Math.round(numberValue(session.cacheReadTokens)));
@@ -174,11 +187,14 @@ function addSessionBreakdown(period, session) {
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
   if (totalModelTokens === 0) return;
 
-  for (const [model, tokens] of modelTokens) {
-    const share = modelTokens.length === 1 ? 1 : tokens / totalModelTokens;
-    const cr = Math.round(cacheRead * share);
-    const cw = Math.round(cacheWrite * share);
-    const ou = Math.round(output * share);
+  const cacheReads = allocateIntegerTotal(cacheRead, modelTokens);
+  const cacheWrites = allocateIntegerTotal(cacheWrite, modelTokens);
+  const outputs = allocateIntegerTotal(output, modelTokens);
+
+  for (const [model] of modelTokens) {
+    const cr = cacheReads.get(model) || 0;
+    const cw = cacheWrites.get(model) || 0;
+    const ou = outputs.get(model) || 0;
     if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
     if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
     if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;

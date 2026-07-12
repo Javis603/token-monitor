@@ -643,6 +643,14 @@ test('aggregateDevices combines session usage across devices', () => {
   assert.equal(session.modelCosts['gpt-5'], 0.3);
 });
 
+test('aggregateDevices keeps a zero-usage live session unarchived in either merge order', () => {
+  const archived = { deviceId: 'archived', allTime: { sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 10, archived: true } } } };
+  const live = { deviceId: 'live', allTime: { sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 0 } } } };
+
+  assert.equal(aggregateDevices([live, archived], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
+  assert.equal(aggregateDevices([archived, live], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
+});
+
 const { normalizeDeviceRecord, aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');
 
 test('normalizeDeviceRecord carries a history field when present', () => {

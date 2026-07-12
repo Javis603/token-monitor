@@ -339,3 +339,18 @@ test('clears persisted archive data and treats a missing file as already clear',
     unlinkSync: () => { const error = new Error('missing'); error.code = 'ENOENT'; throw error; }
   }), false);
 });
+
+test('allocates archived token components across models without rounding drift', () => {
+  const summary = liveSummary();
+  const session = summary.allTime.sessions['opencode:o1'];
+  session.models = { alpha: 1, beta: 1, gamma: 1 };
+  session.cacheReadTokens = 2;
+  session.cacheWriteTokens = 2;
+  session.outputTokens = 2;
+  const archive = captureSessionUsageArchive({}, summary, new Date('2026-07-09T08:15:00.000Z'));
+  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive);
+
+  assert.equal(Object.values(visible.allTime.modelCacheReads).reduce((sum, value) => sum + value, 0), 2);
+  assert.equal(Object.values(visible.allTime.modelCacheWrites).reduce((sum, value) => sum + value, 0), 2);
+  assert.equal(Object.values(visible.allTime.modelOutputs).reduce((sum, value) => sum + value, 0), 2);
+});
