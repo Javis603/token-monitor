@@ -218,7 +218,7 @@ Object.assign(els, {
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
-  sessionUsageArchiveCount: document.getElementById('sessionUsageArchiveCount'),
+  sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -3335,6 +3335,7 @@ function renderHome() {
 
 function render() {
   if (!state.stats) return;
+  renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
@@ -4326,6 +4327,14 @@ function applyInitialBreakdownPreference() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
+function renderSessionUsageArchiveStatus() {
+  if (!els.sessionUsageArchiveStatus) return;
+  const count = sessionRowsApi.archivedSessionCount(state.stats);
+  els.sessionUsageArchiveStatus.textContent = count > 0
+    ? t('settings.collection.sessionArchiveActiveCount', { count })
+    : t('settings.collection.sessionArchiveEmpty');
+}
+
 function syncSettingsForm() {
   applySettingsTranslations();
   applyInitialBreakdownPreference();
@@ -4353,14 +4362,7 @@ function syncSettingsForm() {
   }
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
-  if (els.sessionUsageArchiveCount) {
-    els.sessionUsageArchiveCount.textContent = t('settings.collection.sessionArchiveCount', {
-      count: Number(state.settings.sessionUsageArchiveCount || 0)
-    });
-  }
-  if (els.clearSessionUsageArchiveButton) {
-    els.clearSessionUsageArchiveButton.disabled = Number(state.settings.sessionUsageArchiveCount || 0) === 0;
-  }
+  renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
   if (els.exportAutoInput) els.exportAutoInput.checked = exportAutoOn;
@@ -5793,11 +5795,9 @@ els.clearSessionUsageArchiveButton?.addEventListener('click', async () => {
         : 'settings.collection.sessionArchiveFailed'));
       return;
     }
-    state.settings.sessionUsageArchiveCount = 0;
-    syncSettingsForm();
     await refreshStats();
   } finally {
-    els.clearSessionUsageArchiveButton.disabled = Number(state.settings.sessionUsageArchiveCount || 0) === 0;
+    els.clearSessionUsageArchiveButton.disabled = false;
   }
 });
 els.wslScanInput?.addEventListener('change', async () => {

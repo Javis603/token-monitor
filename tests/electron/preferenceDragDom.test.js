@@ -249,14 +249,15 @@ test('session archive retention has its own setting separate from Trends', () =>
   const preload = readRendererFile('../preload.js');
   assert.match(html, /settings-subgroup session-archive-settings/);
   assert.match(html, /id="sessionUsageArchiveInput"/);
-  assert.match(html, /id="sessionUsageArchiveCount"/);
+  assert.match(html, /id="sessionUsageArchiveStatus"/);
   assert.match(html, /id="clearSessionUsageArchiveButton" class="session-archive-clear"/);
   assert.match(app, /sessionUsageArchiveEnabled:\s*els\.sessionUsageArchiveInput\.checked/);
-  assert.match(app, /settings\.collection\.sessionArchiveCount/);
+  assert.doesNotMatch(app, /sessionUsageArchiveCount/);
+  assert.match(app, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
   assert.doesNotMatch(app, /sessionSettingsExpanded|renderSessionSettingsList/);
   assert.match(css, /\.session-archive-clear\s*\{[\s\S]*?width:\s*auto;[\s\S]*?font-size:\s*10px;/);
   assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
-  assert.match(main, /sessionUsageArchiveCount:/);
+  assert.doesNotMatch(main, /sessionUsageArchiveCount:/);
   assert.match(main, /settings\?\.sessionUsageArchiveEnabled === false/);
   assert.match(main, /ipcMain\.handle\('sessionUsageArchive:clear'/);
   assert.match(agent, /TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);

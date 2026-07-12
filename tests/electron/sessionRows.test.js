@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+const { archivedSessionCount, sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
 
 const clientLabels = { claude: 'Claude Code', codex: 'Codex' };
 const clientColors = { claude: '#cc7c5e', codex: '#49a3b0', default: '#6ab4f0' };
@@ -107,6 +107,23 @@ test('session rows label archived sessions without claiming the source was delet
   assert.equal(rows[0].archived, true);
   assert.equal(rows[0].subtitle, 'Archived · 12:07 · 3 msgs');
   assert.equal(rows[0].title, 'OpenCode session deleted');
+});
+
+test('archived session count deduplicates retained sessions across periods', () => {
+  assert.equal(archivedSessionCount({
+    periods: {
+      today: { sessions: {
+        'claude:archived': { client: 'claude', sessionId: 'archived', archived: true },
+        'claude:live': { client: 'claude', sessionId: 'live' }
+      } },
+      month: { sessions: {
+        'claude:archived': { client: 'claude', sessionId: 'archived', archived: true },
+        'codex:archived': { client: 'codex', sessionId: 'archived', archived: true }
+      } },
+      allTime: { sessions: {} }
+    }
+  }), 2);
+  assert.equal(archivedSessionCount(null), 0);
 });
 
 test('session layout keeps page chrome consistent and lets details wrap', () => {

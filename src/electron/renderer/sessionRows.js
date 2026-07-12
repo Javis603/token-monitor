@@ -122,7 +122,20 @@
     return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
   }
 
+  function archivedSessionCount(stats) {
+    const periods = stats?.periods && typeof stats.periods === 'object' ? stats.periods : stats;
+    const archivedKeys = new Set();
+    for (const periodName of ['today', 'month', 'allTime']) {
+      for (const [key, session] of Object.entries(periods?.[periodName]?.sessions || {})) {
+        if (session?.archived !== true && session?.deleted !== true && session?.sourceDeleted !== true) continue;
+        archivedKeys.add(`${session?.client || ''}:${session?.sessionId || key}`);
+      }
+    }
+    return archivedKeys.size;
+  }
+
   return {
+    archivedSessionCount,
     compactSessionTime,
     sessionIdLabel,
     sessionRowsForPeriod
