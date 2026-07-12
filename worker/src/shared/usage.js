@@ -290,6 +290,7 @@ function emptySession(client, id) {
 }
 
 function mergeSession(target, source) {
+  const targetHadUsage = target.totalTokens > 0 || target.costUsd > 0;
   target.totalTokens += Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.costUsd += asNumber(source.costUsd);
   target.messageCount += Math.max(0, Math.round(asNumber(source.messageCount)));
@@ -316,7 +317,9 @@ function mergeSession(target, source) {
     const key = normalizeProviderName(provider);
     if (key) target.providers[key] = (target.providers[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
   }
-  if (source.archived === true || source.deleted === true || source.sourceDeleted === true) target.archived = true;
+  const sourceArchived = source.archived === true || source.deleted === true || source.sourceDeleted === true;
+  if (!sourceArchived) delete target.archived;
+  else if (!targetHadUsage || target.archived === true) target.archived = true;
   return target;
 }
 

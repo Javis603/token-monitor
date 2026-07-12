@@ -40,11 +40,19 @@ const collectorOptions = { clients, allTimeSince, commandTimeoutMs, deviceId, ag
 let sessionUsageArchive;
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
-  if (!sessionUsageArchiveEnabled || dryRun) return summary;
+  if (!sessionUsageArchiveEnabled) return summary;
   const previous = sessionUsageArchive || readSessionUsageArchive();
   const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) !== JSON.stringify(previous)) writeSessionUsageArchive(next);
-  sessionUsageArchive = next;
+  if (!dryRun && JSON.stringify(next) !== JSON.stringify(previous)) {
+    try {
+      writeSessionUsageArchive(next);
+      sessionUsageArchive = next;
+    } catch (error) {
+      console.error(`[session-archive] write failed: ${error.message}`);
+    }
+  } else if (!dryRun) {
+    sessionUsageArchive = next;
+  }
   return applySessionUsageArchive(summary, next, { now });
 }
 

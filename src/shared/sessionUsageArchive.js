@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('./usage');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 
@@ -44,7 +45,7 @@ function clone(value) {
 }
 
 function sameJson(left, right) {
-  return JSON.stringify(left || null) === JSON.stringify(right || null);
+  return isDeepStrictEqual(left || null, right || null);
 }
 
 function periodFor(record, periodName) {
@@ -124,7 +125,13 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
         periods: {}
       };
       const nextSession = clone(session);
-      if (sameJson(entry.periods[periodName], nextSession)) continue;
+      const window = entry.periodWindows?.[periodName] || {};
+      const sameWindow = periodName === 'today'
+        ? window.day === localDay(captureDate)
+        : periodName === 'month'
+          ? window.month === localMonth(captureDate)
+          : true;
+      if (sameJson(entry.periods[periodName], nextSession) && sameWindow) continue;
       entry.client = session.client;
       entry.sessionId = session.sessionId;
       entry.capturedAt = captureDate.toISOString();

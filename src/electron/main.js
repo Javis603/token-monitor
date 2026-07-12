@@ -1463,13 +1463,13 @@ function updateSessionUsageArchive(summary, now) {
   const previous = ensureSessionUsageArchiveLoaded();
   const next = captureSessionUsageArchive(previous, summary, now);
   if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
-  sessionUsageArchive = next;
   try {
     writeSessionUsageArchive(next);
+    sessionUsageArchive = next;
   } catch (error) {
     console.log(`[session-archive] write failed: ${error.message}`);
   }
-  return sessionUsageArchive;
+  return next;
 }
 
 function summaryWithArchivedClientUsage(summary) {
@@ -1479,6 +1479,10 @@ function summaryWithArchivedClientUsage(summary) {
     now
   });
   if (settings?.sessionUsageArchiveEnabled === false) return withArchivedClients;
+  if (isExternalAgentActive()) {
+    sessionUsageArchive = null;
+    return applySessionUsageArchive(withArchivedClients, ensureSessionUsageArchiveLoaded(), { now });
+  }
   const sessionArchive = updateSessionUsageArchive(summary, now);
   return applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
 }
@@ -1750,7 +1754,7 @@ function startSyncCollector() {
     codexManagedAccounts: codexManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: async (summary) => {
-      if (isExternalAgentActive()) return;
+      if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = summaryWithArchivedClientUsage(summary);
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       try {
@@ -1806,7 +1810,7 @@ function startHostCollector() {
     codexManagedAccounts: codexManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: (summary) => {
-      if (isExternalAgentActive()) return;
+      if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = summaryWithArchivedClientUsage(summary);
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       if (!embeddedHub) return;
@@ -3196,10 +3200,16 @@ app.whenReady().then(() => {
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('sessionUsageArchive:clear', () => {
-    sessionUsageArchive = normalizeSessionUsageArchive({});
-    clearSessionUsageArchive();
-    startMode();
-    return { ok: true };
+    if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
+    try {
+      clearSessionUsageArchive();
+      sessionUsageArchive = normalizeSessionUsageArchive({});
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    } finally {
+      startMode();
+    }
   });
   ipcMain.handle('pricing:lookup', async (_event, modelId) => {
     try {

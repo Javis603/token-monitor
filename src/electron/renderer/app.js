@@ -4991,7 +4991,13 @@ function renderSessionSettingsList() {
     if (!window.confirm(t('settings.views.clearArchivedSessionsConfirm'))) return;
     clearButton.disabled = true;
     try {
-      await window.tokenMonitor.clearSessionUsageArchive();
+      const result = await window.tokenMonitor.clearSessionUsageArchive();
+      if (!result?.ok) {
+        window.alert(t(result?.error === 'agentActive'
+          ? 'settings.views.clearArchivedSessionsAgentActive'
+          : 'settings.views.clearArchivedSessionsFailed'));
+        return;
+      }
       await refreshStats();
     } finally {
       clearButton.disabled = false;
