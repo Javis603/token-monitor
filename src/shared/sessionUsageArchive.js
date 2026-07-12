@@ -16,6 +16,11 @@ function toDate(value) {
   return Number.isNaN(date.getTime()) ? new Date() : date;
 }
 
+function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
+  const collectedAt = new Date(deviceRecord?.updatedAt || '');
+  return Number.isNaN(collectedAt.getTime()) ? toDate(fallback) : collectedAt;
+}
+
 function pad2(value) {
   return String(value).padStart(2, '0');
 }
@@ -293,6 +298,7 @@ module.exports = {
   clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
+  sessionUsageArchiveDate,
   sessionUsageArchivePath,
   writeSessionUsageArchive
 };

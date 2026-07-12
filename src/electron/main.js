@@ -80,6 +80,7 @@ const {
   clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
+  sessionUsageArchiveDate,
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
 const { aggregateDevices, aggregateHistory, carryDeviceHistory } = require('../shared/usage');
@@ -1473,7 +1474,7 @@ function updateSessionUsageArchive(summary, now) {
 }
 
 function summaryWithArchivedClientUsage(summary) {
-  const now = new Date();
+  const now = sessionUsageArchiveDate(summary);
   const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
     activeClients: settings?.clients,
     now

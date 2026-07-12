@@ -15,6 +15,7 @@ const {
   clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
+  sessionUsageArchiveDate,
   sessionUsageArchivePath,
   writeSessionUsageArchive
 } = archiveApi;
@@ -204,6 +205,24 @@ test('archive day and month windows expire while all-time stays available', () =
   assert.equal(nextMonth.month.sessions['opencode:o1'], undefined);
   assert.equal(nextMonth.allTime.sessions['opencode:o1'].archived, true);
   assert.equal(nextMonth.allTime.clients.opencode, 100);
+});
+
+test('uses the collector snapshot time when delivery crosses a period boundary', () => {
+  const collectedAt = new Date(2026, 6, 31, 23, 59);
+  const deliveredAt = new Date(2026, 7, 1, 0, 1);
+  const summary = liveSummary();
+  summary.updatedAt = collectedAt.toISOString();
+
+  const archiveDate = sessionUsageArchiveDate(summary, deliveredAt);
+  const archive = captureSessionUsageArchive({}, summary, archiveDate);
+  const nextPeriod = applySessionUsageArchive(summaryAfterOpenCodeDelete(), archive, {
+    now: deliveredAt
+  });
+
+  assert.equal(archiveDate.toISOString(), collectedAt.toISOString());
+  assert.equal(nextPeriod.today.sessions['opencode:o1'], undefined);
+  assert.equal(nextPeriod.month.sessions['opencode:o1'], undefined);
+  assert.equal(nextPeriod.allTime.sessions['opencode:o1'].archived, true);
 });
 
 test('month refresh does not make an old today session apply to a new day', () => {

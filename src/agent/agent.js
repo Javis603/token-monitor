@@ -12,6 +12,7 @@ const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
   readSessionUsageArchive,
+  sessionUsageArchiveDate,
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
 
@@ -41,8 +42,9 @@ let sessionUsageArchive;
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
   if (!sessionUsageArchiveEnabled) return summary;
+  const archiveDate = sessionUsageArchiveDate(summary, now);
   const previous = sessionUsageArchive || readSessionUsageArchive();
-  const next = captureSessionUsageArchive(previous, summary, now);
+  const next = captureSessionUsageArchive(previous, summary, archiveDate);
   if (!dryRun && JSON.stringify(next) !== JSON.stringify(previous)) {
     try {
       writeSessionUsageArchive(next);
@@ -53,7 +55,7 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
   } else if (!dryRun) {
     sessionUsageArchive = next;
   }
-  return applySessionUsageArchive(summary, next, { now });
+  return applySessionUsageArchive(summary, next, { now: archiveDate });
 }
 
 async function postUsage(summary) {
