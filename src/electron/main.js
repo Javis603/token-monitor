@@ -1875,13 +1875,15 @@ function injectLocalDeviceStatus(stats) {
     }
   }
   // syncPayload drops the unbounded allTime.sessions from uploads (#118), so the hub's
-  // aggregate carries no all-time session detail and the TOTAL session view would fall back to
-  // a model list. Rebuild it: the hub's cross-device month sessions are the immediate
-  // baseline (available on the first frame — before this restart's first local scan), then
-  // this machine's own full all-time sessions merge in once collected (free, in-process).
-  // Totals/breakdowns are untouched, so this only restores the session list.
+  // aggregate carries no all-time session detail and the TOTAL session view would fall back
+  // to a model list. Rebuild the list — the hub's cross-device month sessions as the
+  // immediate baseline (present on the first frame, before this restart's first local scan),
+  // then this machine's own full all-time sessions once collected (free, in-process). Carry
+  // it as a display-only sibling instead of mutating periods.allTime.sessions: the exporter
+  // writes periods verbatim under a lossless contract, so the export must keep the true
+  // aggregate. The renderer overlays this onto periods.allTime for the session view.
   if (stats.periods?.allTime) {
-    stats.periods.allTime.sessions = mergedLocalAllTimeSessions(stats.periods, lastCollectedDevice);
+    stats.allTimeSessionsView = mergedLocalAllTimeSessions(stats.periods, lastCollectedDevice);
   }
   return stats;
 }

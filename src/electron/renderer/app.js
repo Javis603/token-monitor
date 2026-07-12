@@ -3532,6 +3532,18 @@ function settleRefreshButtonState(status) {
   }, REFRESH_BUTTON_FEEDBACK_MS);
 }
 
+// The main process rebuilds the TOTAL session list for display but ships it as a
+// display-only sibling (`allTimeSessionsView`) so it never pollutes the lossless
+// period export. Overlay it onto periods.allTime here, on the renderer's own copy, so
+// every session-view reader (list, archived count, detail lookup) sees it. See
+// injectLocalDeviceStatus in main.js.
+function overlayAllTimeSessions(stats) {
+  if (stats && stats.allTimeSessionsView && stats.periods?.allTime) {
+    stats.periods.allTime.sessions = stats.allTimeSessionsView;
+  }
+  return stats;
+}
+
 async function refreshStats(options = {}) {
   const feedback = options.feedback === true;
   if (feedback) {
@@ -3541,7 +3553,7 @@ async function refreshStats(options = {}) {
     setRefreshButtonState('refreshing');
   }
   try {
-    state.stats = await window.tokenMonitor.getStats(options);
+    state.stats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
     applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
     render();
@@ -6021,7 +6033,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     state.streamConnected = true;
     state.streamFailure = null;
     if (payload.data?.mode) state.mode = payload.data.mode;
-    state.stats = payload.data.stats;
+    state.stats = overlayAllTimeSessions(payload.data.stats);
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
