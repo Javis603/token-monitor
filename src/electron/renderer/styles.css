@@ -388,6 +388,36 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-collection-cadence {
   grid-template-columns: minmax(0, 1fr);
 }
+.session-archive-settings { display: grid; gap: 6px; }
+.session-archive-settings .session-archive-toggle { justify-content: flex-start; gap: 8px; color: var(--text); }
+.session-archive-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.session-archive-footer .settings-note { min-width: 0; }
+.session-archive-clear {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 26px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+.session-archive-clear:hover:not(:disabled),
+.session-archive-clear:focus-visible {
+  border-color: rgba(244, 119, 136, 0.28);
+  background: rgba(244, 119, 136, 0.06);
+  color: var(--red);
+}
+.session-archive-clear:focus-visible { outline: 1px solid rgba(244, 119, 136, 0.46); outline-offset: 1px; }
+.session-archive-clear:disabled { opacity: 0.38; cursor: default; }
 .settings-wsl-block { display: grid; gap: 6px; min-width: 0; }
 .settings-wsl-block.hidden { display: none; }
 .settings-wsl-block .wsl-scan-toggle { justify-content: flex-start; gap: 8px; }

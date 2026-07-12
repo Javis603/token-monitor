@@ -284,6 +284,15 @@
               </label>
               <p id="collectionCadenceNote" class="settings-note" data-i18n="settings.collection.modeDesc" hidden>Interval mode turns off file watching.</p>
             </div>
+            <div class="settings-subgroup session-archive-settings">
+              <div class="settings-group-header"><span data-i18n="settings.collection.sessionArchiveTitle">Session history</span></div>
+              <label class="checkbox-label session-archive-toggle"><input id="sessionUsageArchiveInput" type="checkbox" /><span data-i18n="settings.collection.sessionArchiveToggle">Preserve deleted session usage</span></label>
+              <p class="settings-note" data-i18n="settings.collection.sessionArchiveDesc">Keep token totals when sessions disappear from source tools.</p>
+              <div class="session-archive-footer">
+                <span id="sessionUsageArchiveCount" class="settings-note"></span>
+                <button id="clearSessionUsageArchiveButton" class="session-archive-clear" type="button" data-i18n="settings.collection.sessionArchiveClear">Clear retained data</button>
+              </div>
+            </div>
             <div id="wslScanRow" class="settings-wsl-block hidden">
               <label class="checkbox-label wsl-scan-toggle"><input id="wslScanInput" type="checkbox" /><span data-i18n="settings.collection.wslScan">Scan tools inside WSL</span></label>
               <p class="settings-note" data-i18n="settings.collection.wslScanDesc">When off, Windows no longer scans WSL tools over \\wsl$.</p>

@@ -242,13 +242,21 @@ test('Trends has a master toggle separate from main-screen visibility', () => {
 
 test('session archive retention has its own setting separate from Trends', () => {
   const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const css = readRendererFile('styles.css');
   const main = readRendererFile('../main.js');
   const agent = readRendererFile('../../agent/agent.js');
   const preload = readRendererFile('../preload.js');
-  assert.match(app, /id === 'session'/);
-  assert.match(app, /function renderSessionSettingsList/);
-  assert.match(app, /sessionUsageArchiveEnabled:\s*input\.checked/);
+  assert.match(html, /settings-subgroup session-archive-settings/);
+  assert.match(html, /id="sessionUsageArchiveInput"/);
+  assert.match(html, /id="sessionUsageArchiveCount"/);
+  assert.match(html, /id="clearSessionUsageArchiveButton" class="session-archive-clear"/);
+  assert.match(app, /sessionUsageArchiveEnabled:\s*els\.sessionUsageArchiveInput\.checked/);
+  assert.match(app, /settings\.collection\.sessionArchiveCount/);
+  assert.doesNotMatch(app, /sessionSettingsExpanded|renderSessionSettingsList/);
+  assert.match(css, /\.session-archive-clear\s*\{[\s\S]*?width:\s*auto;[\s\S]*?font-size:\s*10px;/);
   assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
+  assert.match(main, /sessionUsageArchiveCount:/);
   assert.match(main, /settings\?\.sessionUsageArchiveEnabled === false/);
   assert.match(main, /ipcMain\.handle\('sessionUsageArchive:clear'/);
   assert.match(agent, /TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);

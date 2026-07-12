@@ -192,7 +192,6 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 }
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
-state.sessionSettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
 let preferenceDrag = null;
@@ -218,6 +217,9 @@ Object.assign(els, {
   hubAddressList: document.getElementById('hubAddressList'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
+  sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
+  sessionUsageArchiveCount: document.getElementById('sessionUsageArchiveCount'),
+  clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
   startupNote: document.getElementById('startupNote'),
@@ -4350,6 +4352,15 @@ function syncSettingsForm() {
     }
   }
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
+  if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
+  if (els.sessionUsageArchiveCount) {
+    els.sessionUsageArchiveCount.textContent = t('settings.collection.sessionArchiveCount', {
+      count: Number(state.settings.sessionUsageArchiveCount || 0)
+    });
+  }
+  if (els.clearSessionUsageArchiveButton) {
+    els.clearSessionUsageArchiveButton.disabled = Number(state.settings.sessionUsageArchiveCount || 0) === 0;
+  }
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
   if (els.exportAutoInput) els.exportAutoInput.checked = exportAutoOn;
@@ -4712,36 +4723,6 @@ function renderViewPreferences() {
       listContainer.appendChild(inner);
       els.viewDisplayList.appendChild(listContainer);
     }
-    if (id === 'session') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.sessionSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.title = t('settings.views.configureSession', { name: label });
-      toggle.setAttribute('aria-label', toggle.title);
-      toggle.setAttribute('aria-expanded', String(Boolean(state.sessionSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.sessionSettingsExpanded = !state.sessionSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.sessionSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.sessionSettingsExpanded)));
-        const container = document.getElementById('sessionSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.sessionSettingsExpanded);
-      });
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'sessionSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.sessionSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderSessionSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
     if (id === 'trends') {
       row.classList.add('has-subgroup');
       const toggle = document.createElement('button');
@@ -4966,44 +4947,6 @@ function renderHomeSettingsList() {
       wrap.append(listContainer);
     }
   }
-  return wrap;
-}
-
-function renderSessionSettingsList() {
-  const wrap = document.createElement('div');
-  wrap.id = 'sessionSettingsList';
-  wrap.className = 'trend-settings-list';
-  const label = document.createElement('label');
-  label.className = 'checkbox-label trend-settings-row';
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.checked = state.settings?.sessionUsageArchiveEnabled !== false;
-  const text = document.createElement('span');
-  text.textContent = t('settings.views.preserveArchivedSessions');
-  label.append(input, text);
-  wrap.append(label);
-  input.addEventListener('change', () => void saveSettings({ sessionUsageArchiveEnabled: input.checked }));
-
-  const clearButton = document.createElement('button');
-  clearButton.type = 'button';
-  clearButton.textContent = t('settings.views.clearArchivedSessions');
-  clearButton.addEventListener('click', async () => {
-    if (!window.confirm(t('settings.views.clearArchivedSessionsConfirm'))) return;
-    clearButton.disabled = true;
-    try {
-      const result = await window.tokenMonitor.clearSessionUsageArchive();
-      if (!result?.ok) {
-        window.alert(t(result?.error === 'agentActive'
-          ? 'settings.views.clearArchivedSessionsAgentActive'
-          : 'settings.views.clearArchivedSessionsFailed'));
-        return;
-      }
-      await refreshStats();
-    } finally {
-      clearButton.disabled = false;
-    }
-  });
-  wrap.append(clearButton);
   return wrap;
 }
 
@@ -5835,6 +5778,27 @@ els.collectionCadenceInput?.addEventListener('change', async () => {
     collectionMode: value === 'live' ? 'live' : 'interval',
     collectionIntervalMs: value === 'live' ? Number(state.settings.collectionIntervalMs || 300000) : Number(value)
   });
+});
+els.sessionUsageArchiveInput?.addEventListener('change', async () => {
+  await saveSettings({ sessionUsageArchiveEnabled: els.sessionUsageArchiveInput.checked });
+});
+els.clearSessionUsageArchiveButton?.addEventListener('click', async () => {
+  if (!window.confirm(t('settings.collection.sessionArchiveConfirm'))) return;
+  els.clearSessionUsageArchiveButton.disabled = true;
+  try {
+    const result = await window.tokenMonitor.clearSessionUsageArchive();
+    if (!result?.ok) {
+      window.alert(t(result?.error === 'agentActive'
+        ? 'settings.collection.sessionArchiveAgentActive'
+        : 'settings.collection.sessionArchiveFailed'));
+      return;
+    }
+    state.settings.sessionUsageArchiveCount = 0;
+    syncSettingsForm();
+    await refreshStats();
+  } finally {
+    els.clearSessionUsageArchiveButton.disabled = Number(state.settings.sessionUsageArchiveCount || 0) === 0;
+  }
 });
 els.wslScanInput?.addEventListener('change', async () => {
   await saveSettings({ wslScanEnabled: els.wslScanInput.checked });
