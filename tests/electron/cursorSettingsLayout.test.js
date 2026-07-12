@@ -530,6 +530,13 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">API key \/ Access key ID[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="ark-\.\.\. or AKLT\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
   assert.match(html, /<div id="qoderAccountGroup"[\s\S]*?<select id="qoderSiteInput">[\s\S]*?<textarea id="qoderCookieInput"[\s\S]*?<button id="qoderCookieSubmit"[\s\S]*data-i18n="settings\.qoder\.saveCookie">/);
   assert.match(html, /<div id="ollamaAccountGroup"[\s\S]*?<textarea id="ollamaCookieInput"[\s\S]*?<button id="ollamaCookieSubmit"[\s\S]*data-i18n="settings\.ollama\.saveCookie">/);
+  const ollamaDetails = html.match(/<div id="ollamaSettingsDetails"[\s\S]*?<div id="ollamaErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(ollamaDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.ollama\.step1">/);
+  assert.match(ollamaDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.ollama\.step2">/);
+  assert.match(ollamaDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.ollama\.step3">/);
+  assert.match(ollamaDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.ollama\.step4">/);
+  assert.match(ollamaDetails, /placeholder="wos-session=\.\.\."/);
+  assert.doesNotMatch(ollamaDetails, /settings\.ollama\.note/);
   const qoderDetails = html.match(/<div id="qoderSettingsDetails"[\s\S]*?<div id="qoderErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
   assert.match(qoderDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.qoder\.step1Before">[\s\S]*?<code id="qoderUsagePageHint">qoder\.com\/account\/usage<\/code>[\s\S]*?<span data-i18n="settings\.qoder\.step1After">/);
   assert.doesNotMatch(qoderDetails, /<\/code>\s*\/\s*<code>qoder\.com\.cn\/account\/usage<\/code>/);
