@@ -484,6 +484,52 @@ test('createLimitsCollector retains the only live Codex account across a transie
   assert.equal(second.providers[0].updatedAt, '2026-06-01T00:00:00.000Z');
 });
 
+test('createLimitsCollector seeds retention from previousLimits so a collector restart keeps a transiently-failing Codex account', async () => {
+  // Switching the active Codex account reloads the collector (startMode), which
+  // used to reset the in-memory transient-window cache. Seeding it from the last
+  // published limits keeps each account's bars through the cold RPC/token-refresh
+  // probe that commonly fails on the first tick right after a switch.
+  const now = Date.parse('2026-06-01T00:02:00Z');
+  const seededAt = '2026-06-01T00:00:00.000Z';
+  const collector = createLimitsCollector({
+    limitProviders: 'codex',
+    limitsRefreshMs: 60_000,
+    previousLimits: {
+      updatedAt: seededAt,
+      providers: [
+        codexProvider('sha256:codex-a', 'a@example.com', 80, seededAt),
+        codexProvider('sha256:codex-b', 'b@example.com', 55, seededAt),
+        codexProvider('sha256:codex-c', 'c@example.com', 30, seededAt)
+      ]
+    }
+  }, {
+    now: () => now,
+    providerFetchers: {
+      codex: async () => ([
+        codexProvider('sha256:codex-a', 'a@example.com', 80, new Date(now).toISOString()),
+        codexProvider('sha256:codex-b', 'b@example.com', 55, new Date(now).toISOString()),
+        {
+          provider: 'codex',
+          accountKey: 'sha256:codex-c',
+          accountEmail: 'c@example.com',
+          status: 'unavailable',
+          source: 'rpc',
+          updatedAt: new Date(now).toISOString(),
+          windows: []
+        }
+      ])
+    }
+  });
+
+  const first = await collector.snapshot(true);
+  const c = first.providers.find((provider) => provider.accountKey === 'sha256:codex-c');
+
+  assert.equal(c.status, 'ok');
+  assert.equal(c.windows.length, 1);
+  assert.equal(c.windows[0].remainingPercent, 30);
+  assert.equal(c.updatedAt, seededAt);
+});
+
 test('fetchCodexLimits skips disabled managed Codex accounts', async () => {
   const seenHomes = [];
   const providers = await fetchCodexLimits({

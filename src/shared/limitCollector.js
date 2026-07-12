@@ -2451,7 +2451,15 @@ async function collectLimitsOnce(options = {}, deps = {}) {
 
 function createLimitsCollector(options = {}, deps = {}) {
   const refreshMs = normalizeLimitsRefreshMs(options.limitsRefreshMs ?? options.refreshMs);
-  let cached = null;
+  // Seed the Codex transient-window retention from the last published limits.
+  // The collector is recreated on any settings change that reloads it (notably
+  // switching the active Codex account), and without a seed that restart wipes
+  // the 10-minute window that keeps an account's bars visible through a
+  // transient probe failure — which is exactly the cold RPC/token-refresh that
+  // tends to fail on the first tick after a switch. cachedAt stays 0 so the seed
+  // is never served as fresh: the first snapshot still refetches and only uses
+  // the seed as the retention baseline.
+  let cached = options.previousLimits ? normalizeLimitsSummary(options.previousLimits) : null;
   let cachedAt = 0;
   let inFlight = null;
 
