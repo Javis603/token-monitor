@@ -1874,7 +1874,7 @@ function injectLocalDeviceStatus(stats) {
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
   }
-  // syncPayload drops the unbounded allTime.sessions from uploads (#118), so the hub's
+  // syncPayload drops the unbounded allTime.sessions from uploads (#118), so a hub
   // aggregate carries no all-time session detail and the TOTAL session view would fall back
   // to a model list. Rebuild the list — the hub's cross-device month sessions as the
   // immediate baseline (present on the first frame, before this restart's first local scan),
@@ -1882,7 +1882,9 @@ function injectLocalDeviceStatus(stats) {
   // it as a display-only sibling instead of mutating periods.allTime.sessions: the exporter
   // writes periods verbatim under a lossless contract, so the export must keep the true
   // aggregate. The renderer overlays this onto periods.allTime for the session view.
-  if (stats.periods?.allTime) {
+  // Only sync/host mode needs this: in local mode periods.allTime.sessions already holds the
+  // full native list, so building the sibling there would just ship the unbounded map twice.
+  if (mode !== 'local' && stats.periods?.allTime) {
     stats.allTimeSessionsView = mergedLocalAllTimeSessions(stats.periods, lastCollectedDevice);
   }
   return stats;
