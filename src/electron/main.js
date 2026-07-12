@@ -22,6 +22,7 @@ const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared
 const { createHub } = require('../hub/server');
 const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { mergeCodexTransientWindows } = require('../shared/limits');
+const { fetchOllamaLimits } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
 const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
@@ -3567,6 +3568,12 @@ app.whenReady().then(() => {
     } catch (err) {
       return { ok: false, error: err.message };
     }
+  });
+  ipcMain.handle('ollama:validateCookie', async (_event, raw) => {
+    const cookie = normalizeOllamaCookie(raw);
+    if (!cookie) return { ok: false, status: 'notConfigured' };
+    const provider = await fetchOllamaLimits({ ollamaCookie: cookie });
+    return { ok: provider.status === 'ok', status: provider.status };
   });
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);

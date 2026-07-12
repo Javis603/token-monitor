@@ -659,6 +659,21 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   assert.doesNotMatch(app, /renderGrokStatus|grokAccountLinked|grokAccountExpanded/);
 });
 
+test('saving Ollama credentials enables its provider and always settles validation', () => {
+  const app = readRendererFile('app.js');
+  const selection = functionBody(app, 'limitProviderSelectionIncluding', 'missingLimitProviderStatus');
+  const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
+  assert.match(selection, /selected\.add\(providerName\)/);
+  assert.match(selection, /\.filter\(\(id\) => selected\.has\(id\)\)/);
+  assert.match(setup, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
+  assert.match(setup, /limitsEnabled: true/);
+  assert.match(setup, /await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\)/);
+  assert.match(setup, /if \(!validation\?\.ok\)/);
+  assert.match(setup, /await refreshStats\(\{ force: true \}\);/);
+  assert.match(setup, /clearExternalProviderCheckPending\('ollama'\);/);
+  assert.match(setup, /ollamaValidationError\(validation\)/);
+});
+
 test('account validation reads the local device raw limits, not the collapsed aggregate', () => {
   const app = readRendererFile('app.js');
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');

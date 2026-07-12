@@ -558,8 +558,25 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(zaiPlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(volcenginePlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(qoderPlatformUrl\(\)\)/);
-  assert.match(setupBody, /saveSettings\(\{ ollamaCookie: input\.value \}\)/);
+  assert.match(setupBody, /ollamaCookie: input\.value/);
+  assert.match(setupBody, /const validation = await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\);/);
+  assert.match(setupBody, /if \(!validation\?\.ok\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?ollamaValidationError\(validation\);[\s\S]*?return;/);
+  assert.match(setupBody, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
+  assert.match(setupBody, /limitsEnabled: true/);
+  assert.match(setupBody, /clearExternalProviderCheckPending\('ollama'\);/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(ollamaPlatformUrl\(\)\)/);
+
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  assert.match(preload, /validateCookie: \(cookie\) => ipcRenderer\.invoke\('ollama:validateCookie', cookie\)/);
+
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const validationHandler = main.slice(
+    main.indexOf("ipcMain.handle('ollama:validateCookie'"),
+    main.indexOf("ipcMain.handle('opencode:saveCookie'")
+  );
+  assert.match(validationHandler, /const cookie = normalizeOllamaCookie\(raw\);/);
+  assert.match(validationHandler, /await fetchOllamaLimits\(\{ ollamaCookie: cookie \}\)/);
+  assert.match(validationHandler, /return \{ ok: provider\.status === 'ok', status: provider\.status \};/);
 
   const qoderSiteBody = functionBody(app, 'selectedQoderSite', 'qoderUsagePagePath');
   assert.match(qoderSiteBody, /document\.getElementById\('qoderSiteInput'\)\?\.value/);

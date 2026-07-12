@@ -1136,6 +1136,15 @@ function enabledLimitProviderSet() {
   return new Set(configuredLimitProviderSelection());
 }
 
+function limitProviderSelectionIncluding(providerName) {
+  const selected = new Set(configuredLimitProviderSelection());
+  selected.add(providerName);
+  return LIMIT_PROVIDERS
+    .map((provider) => provider.id)
+    .filter((id) => selected.has(id))
+    .join(',');
+}
+
 function missingLimitProviderStatus() {
   return state.mode === 'sync' || String(state.settings?.hubUrl || '').trim() ? 'noSyncedData' : 'notConfigured';
 }
@@ -6857,6 +6866,14 @@ function ollamaPlatformUrl() {
   return 'https://ollama.com/settings';
 }
 
+function ollamaValidationError(provider) {
+  if (provider?.status === 'unauthorized') return t('settings.ollama.validationInvalid');
+  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
+    return t('settings.ollama.validationRateLimited');
+  }
+  return t('settings.ollama.validationUnavailable');
+}
+
 function renderExternalProviderStatus(providerName) {
   const config = externalLimitAccountConfig[providerName];
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
@@ -7943,12 +7960,33 @@ function setupCursorAccountUI() {
       }
       try {
         markExternalProviderCheckPending('ollama');
-        await saveSettings({ ollamaCookie: input.value });
+        renderExternalProviderStatus('ollama');
+        const validation = await window.tokenMonitor.ollama.validateCookie(input.value);
+        if (!validation?.ok) {
+          clearExternalProviderCheckPending('ollama');
+          renderExternalProviderStatus('ollama');
+          errorEl.textContent = ollamaValidationError(validation);
+          errorEl.classList.remove('hidden');
+          return;
+        }
+        await saveSettings({
+          ollamaCookie: input.value,
+          limitProviders: limitProviderSelectionIncluding('ollama'),
+          limitsEnabled: true
+        });
+        if (!state.settings?.ollamaCookieConfigured) {
+          clearExternalProviderCheckPending('ollama');
+          renderExternalProviderStatus('ollama');
+          errorEl.textContent = t('settings.ollama.validationInvalid');
+          errorEl.classList.remove('hidden');
+          return;
+        }
         input.value = '';
         renderExternalProviderStatus('ollama');
         await refreshStats({ force: true });
-        setExternalAccountExpanded('ollama', !externalProviderAccountLinked('ollama'));
+        clearExternalProviderCheckPending('ollama');
         renderExternalProviderStatus('ollama');
+        setExternalAccountExpanded('ollama', false);
       } catch (err) {
         clearExternalProviderCheckPending('ollama');
         errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
