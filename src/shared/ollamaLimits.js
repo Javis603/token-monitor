@@ -111,7 +111,11 @@ function parseOllamaUsageHtml(html) {
     const current = labels[index];
     const kind = /^weekly/i.test(current.label) ? 'weekly' : 'session';
     if (seenKinds.has(kind)) continue;
-    const end = labels[index + 1]?.index ?? Math.min(text.length, current.index + 4000);
+    const nextOtherKind = labels.slice(index + 1).find((candidate) => {
+      const candidateKind = /^weekly/i.test(candidate.label) ? 'weekly' : 'session';
+      return candidateKind !== kind;
+    });
+    const end = nextOtherKind?.index ?? Math.min(text.length, current.index + 4000);
     const block = text.slice(current.index, Math.min(end, current.index + 4000));
     const percentText = firstCapture(block, /([0-9]+(?:\.[0-9]+)?)\s*%\s*used/i)
       || firstCapture(block, /width\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%/i);
@@ -128,7 +132,7 @@ function parseOllamaUsageHtml(html) {
   }
 
   windows.sort((a, b) => ({ session: 0, weekly: 1 }[a.kind] ?? 2) - ({ session: 0, weekly: 1 }[b.kind] ?? 2));
-  const planName = firstCapture(text, /Cloud Usage\s*<\/span>\s*<span[^>]*>([^<]+)<\/span>/i).trim();
+  const planName = firstCapture(text, /Cloud Usage\s*<\/span\s*>\s*<span[^>]*>([^<]+)<\/span\s*>/i).trim();
   const accountEmail = firstCapture(text, /id=["']header-email["'][^>]*>([^<]+)</i).trim();
   return {
     windows,

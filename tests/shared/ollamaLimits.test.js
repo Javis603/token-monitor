@@ -78,6 +78,28 @@ test('parses reversed blocks plus Hourly and CSS-width fallbacks', () => {
   ]);
 });
 
+test('parses formatted closing tags and ignores repeated aria usage labels', () => {
+  const parsed = parseOllamaUsageHtml(`
+    <h2><span>Cloud usage</span><span class="badge">free</span
+    ></h2>
+    <h2 id="header-email">user@example.com</h2>
+    <div>
+      <span>Session usage</span><span>0% used</span>
+      <div aria-label="Session usage 0% used"></div>
+      <div class="local-time" data-time="2026-07-12T06:00:00Z">Resets in 2 hours.</div>
+    </div>
+    <div>
+      <span>Weekly usage</span><span>0% used</span>
+      <div aria-label="Weekly usage 0% used"></div>
+      <div class="local-time" data-time="2026-07-13T00:00:00Z">Resets in 20 hours.</div>
+    </div>
+  `);
+
+  assert.equal(parsed.planName, 'free');
+  assert.equal(parsed.session.resetsAt, '2026-07-12T06:00:00.000Z');
+  assert.equal(parsed.weekly.resetsAt, '2026-07-13T00:00:00.000Z');
+});
+
 test('fetches with current WorkOS cookies and uses email for stable identity', async () => {
   const requests = [];
   const provider = await fetchOllamaLimits({ ollamaCookie: 'wos-session=current; aid=1' }, {
