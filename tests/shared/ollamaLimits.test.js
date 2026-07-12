@@ -105,6 +105,44 @@ test('reuses a successful validation once without polling settings again', async
   assert.equal(requests, 1);
 });
 
+test('a failed validation invalidates only the matching cached cookie', async () => {
+  const firstCookie = 'wos-session=first-cache';
+  const secondCookie = 'wos-session=second-cache';
+  const validated = await fetchOllamaLimits({ ollamaCookie: firstCookie }, {
+    env: {},
+    bypassValidationCache: true,
+    fetch: async () => response(200, { html: SETTINGS_HTML })
+  });
+  rememberOllamaValidation(firstCookie, validated, 1_000);
+
+  let requests = 0;
+  const otherCookie = await fetchOllamaLimits({ ollamaCookie: secondCookie }, {
+    env: {},
+    now: () => 1_001,
+    fetch: async () => { requests += 1; return response(401); }
+  });
+  assert.equal(otherCookie.status, 'unauthorized');
+  assert.equal(requests, 1);
+
+  const preserved = await fetchOllamaLimits({ ollamaCookie: firstCookie }, {
+    env: {},
+    now: () => 1_002,
+    fetch: async () => { requests += 1; return response(500); }
+  });
+  assert.equal(preserved.status, 'ok');
+  assert.equal(requests, 1);
+
+  rememberOllamaValidation(firstCookie, validated, 2_000);
+  rememberOllamaValidation(firstCookie, { status: 'unauthorized' }, 2_001);
+  const invalidated = await fetchOllamaLimits({ ollamaCookie: firstCookie }, {
+    env: {},
+    now: () => 2_002,
+    fetch: async () => { requests += 1; return response(401); }
+  });
+  assert.equal(invalidated.status, 'unauthorized');
+  assert.equal(requests, 2);
+});
+
 test('parses formatted closing tags and ignores repeated aria usage labels', () => {
   const parsed = parseOllamaUsageHtml(`
     <h2><span>Cloud usage</span><span class="badge">free</span

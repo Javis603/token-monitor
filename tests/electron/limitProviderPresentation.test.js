@@ -677,10 +677,20 @@ test('saving Ollama credentials enables its provider and always settles validati
   assert.doesNotMatch(ollamaSetup, /await refreshStats\(\{ force: true \}\);/);
   assert.match(ollamaSetup, /clearExternalProviderCheckPending\('ollama'\);/);
   assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
+  assert.match(
+    renderExternalStatus,
+    /providerName === 'ollama' && wasPending && !pending && linked[\s\S]*?setExternalAccountExpanded\('ollama', false\)/,
+    'Ollama should collapse only after a fresh provider confirms the account is linked'
+  );
   assert.doesNotMatch(
     ollamaSetup,
     /input\.value = '';[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
     'a successful save must stay pending until the collector publishes a fresh provider'
+  );
+  assert.doesNotMatch(
+    ollamaSetup,
+    /input\.value = '';[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
+    'the setup panel must remain open while validation is pending'
   );
   assert.match(ollamaSetup, /catch \(err\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?renderExternalProviderStatus\('ollama'\);/);
   assert.match(ollamaSetup, /ollamaValidationError\(validation\)/);

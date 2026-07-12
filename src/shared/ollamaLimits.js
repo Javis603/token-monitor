@@ -88,9 +88,12 @@ function validationCacheKey(cookieHeader) {
 }
 
 function rememberOllamaValidation(cookieHeader, provider, nowMs = Date.now()) {
-  if (!cookieHeader || provider?.status !== 'ok') return;
+  if (!cookieHeader) return;
+  const key = validationCacheKey(cookieHeader);
+  if (validationCache?.key === key) validationCache = null;
+  if (provider?.status !== 'ok') return;
   validationCache = {
-    key: validationCacheKey(cookieHeader),
+    key,
     expiresAt: nowMs + VALIDATION_CACHE_MS,
     provider: normalizeLimitProvider(provider)
   };
@@ -99,8 +102,14 @@ function rememberOllamaValidation(cookieHeader, provider, nowMs = Date.now()) {
 function consumeOllamaValidation(cookieHeader, nowMs = Date.now()) {
   const key = validationCacheKey(cookieHeader);
   const cached = validationCache;
+  if (!cached) return null;
+  if (cached.expiresAt < nowMs) {
+    validationCache = null;
+    return null;
+  }
+  if (cached.key !== key) return null;
   validationCache = null;
-  return cached?.key === key && cached.expiresAt >= nowMs ? cached.provider : null;
+  return cached.provider;
 }
 
 function parseOllamaUsageHtml(html) {

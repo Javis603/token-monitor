@@ -6888,10 +6888,14 @@ function renderExternalProviderStatus(providerName) {
   errorEl.textContent = '';
 
   const source = state.settings?.[config.sourceKey] || '';
+  const wasPending = Number(state[config.pendingKey] || 0) > 0;
   const provider = externalProviderForAccount(providerName);
   const configured = Boolean(state.settings?.[config.configuredKey]);
   const pending = Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
+  if (providerName === 'ollama' && wasPending && !pending && linked) {
+    setExternalAccountExpanded('ollama', false);
+  }
   if (providerName === 'zai') {
     const regionInput = document.getElementById('zaiApiRegionInput');
     if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
@@ -7987,7 +7991,6 @@ function setupCursorAccountUI() {
         }
         input.value = '';
         renderExternalProviderStatus('ollama');
-        setExternalAccountExpanded('ollama', false);
       } catch (err) {
         clearExternalProviderCheckPending('ollama');
         renderExternalProviderStatus('ollama');
