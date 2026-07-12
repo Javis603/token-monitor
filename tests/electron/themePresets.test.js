@@ -8,6 +8,7 @@ const {
   THEME_VAR_MAP,
   DEFAULT_THEME,
   THEME_PRESETS,
+  VENDOR_ORDER,
   VENDOR_LABELS,
   isValidHex,
   normalizeHex,
@@ -164,4 +165,9 @@ test('every non-default brand vendor has a display label', () => {
   }
   assert.equal(vendorLabel('claude'), 'Claude Code');
   assert.equal(vendorLabel('somethingnew'), 'Somethingnew'); // graceful fallback
+});
+
+test('Kimi usage and limits share one vendor color entry', () => {
+  assert.equal(VENDOR_ORDER.filter((id) => id === 'kimi').length, 1);
+  assert.equal(clientColors.kimi, '#16191e');
 });

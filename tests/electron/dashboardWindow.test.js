@@ -12,6 +12,7 @@ test('preload exposes the dashboard IPC surface', () => {
   const preload = read('src', 'electron', 'preload.js');
   assert.match(preload, /openDashboard: \(\) => ipcRenderer\.invoke\('dashboard:open'\)/);
   assert.match(preload, /getDashboardHistory: \(\) => ipcRenderer\.invoke\('dashboard:getHistory'\)/);
+  assert.match(preload, /ipcRenderer\.on\('dashboard:historyChanged', listener\)/);
   assert.match(preload, /dashboard: \{/);
   assert.match(preload, /minimize: \(\) => ipcRenderer\.send\('dashboard:minimize'\)/);
   assert.match(preload, /close: \(\) => ipcRenderer\.send\('dashboard:close'\)/);
@@ -29,7 +30,7 @@ test('main registers dashboard handlers and a sender-scoped close', () => {
 
 test('getDashboardHistory mirrors the local/sync split of fetchStats', () => {
   const main = read('src', 'electron', 'main.js');
-  assert.match(main, /aggregateHistory\(localDevice \? \[localDevice\] : \[\], 0\)/);
+  assert.match(main, /aggregateHistory\(localDevice \? \[localDevice\] : \[\]\)/);
   assert.match(main, /\/api\/history/);
 });
 
@@ -47,7 +48,7 @@ test('dashboard history is gated by the historyEnabled setting', () => {
   const main = read('src', 'electron', 'main.js');
   assert.match(main, /historyEnabled:\s*true/);
   assert.match(main, /historyEnabled:\s*parseBoolean\(patch\.historyEnabled[\s\S]*?,\s*false\)/);
-  assert.match(main, /if \(settings\?\.historyEnabled === false\) return aggregateHistory\(\[\], 0\)/);
+  assert.match(main, /if \(settings\?\.historyEnabled === false\) return aggregateHistory\(\[\]\)/);
   assert.match(main, /historyEnabled:\s*settings\.historyEnabled !== false/);
 });
 
@@ -97,6 +98,14 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /charts\.heatmapSvg/);
   assert.match(js, /updateSettings\(\{ dashboardFlat: state\.flat \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
+  assert.match(js, /onDashboardHistoryChanged\?\.\(\(\) => \{ void refresh\(\); \}\)/);
+});
+
+test('main invalidates an open dashboard only when stats history changes', () => {
+  const main = read('src', 'electron', 'main.js');
+  const sendPush = /function sendPush\(payload\)\s*\{([\s\S]*?)\n\}\n\nfunction statsHistoryRevision/.exec(main);
+  assert.ok(sendPush, 'sendPush should be defined before statsHistoryRevision');
+  assert.match(sendPush[1], /if \(payload\?\.data\?\.stats\) \{[\s\S]*?nextHistoryRevision !== previousHistoryRevision[\s\S]*?dashboardWindow\.webContents\.send\('dashboard:historyChanged'\)/);
 });
 
 test('dashboard repains on a rate-only settings push, not just a currency-code change', () => {

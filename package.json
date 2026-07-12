@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.22.1",
+  "version": "0.25.0",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -22,6 +22,7 @@
     "dist:mac": "electron-builder --mac --arm64 --publish never",
     "dist:win": "electron-builder --win --x64 --publish never",
     "dist:linux": "electron-builder --linux --x64 --publish never",
+    "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "lint": "eslint .",
     "verify": "npm run lint && npm test"
   },
@@ -45,6 +46,7 @@
       "node_modules/koffi/**/*"
     ],
     "mac": {
+      "artifactName": "Token-Monitor-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "dmg",
@@ -84,6 +86,7 @@
       "icon": "build/icons/icon.ico"
     },
     "linux": {
+      "artifactName": "Token-Monitor-${version}.${ext}",
       "target": [
         {
           "target": "AppImage",
@@ -96,6 +99,12 @@
       "icon": "build/icons",
       "synopsis": "Live token & cost widget for AI coding tools",
       "description": "Real-time token, cost, and AI limits widget with multi-device sync for Claude Code, Codex, OpenCode and more."
+    },
+    "nsis": {
+      "artifactName": "Token-Monitor-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Token-Monitor-${version}.${ext}"
     },
     "publish": [
       {
@@ -138,7 +147,7 @@
     "koffi": "^3.0.2",
     "semver": "^7.8.1",
     "tar": "^7.5.15",
-    "tokscale": "^4.2.0"
+    "tokscale": "^4.4.1"
   },
   "devDependencies": {
     "@eslint/compat": "^2.1.0",

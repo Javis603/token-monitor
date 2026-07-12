@@ -29,6 +29,27 @@ function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
   };
 }
 
+function mimoProvider(accountKey, accountName, usedPercent, updatedAt) {
+  return {
+    provider: 'mimo',
+    accountKey,
+    accountName,
+    accountLabel: 'Token Plan',
+    status: 'ok',
+    source: 'web',
+    updatedAt,
+    windows: [
+      {
+        kind: 'billing',
+        usedPercent,
+        remainingPercent: 100 - usedPercent,
+        resetsAt: '',
+        windowMinutes: null
+      }
+    ]
+  };
+}
+
 test('aggregateLimits preserves distinct Codex accounts by hashed account key', () => {
   const aggregate = aggregateLimits([
     {
@@ -53,6 +74,41 @@ test('aggregateLimits preserves distinct Codex accounts by hashed account key', 
     new Set(codexProviders.map((provider) => provider.accountEmail)),
     new Set(['a@example.com', 'b@example.com'])
   );
+});
+
+test('aggregateLimits preserves distinct MiMo accounts by hashed account key', () => {
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'macbook',
+      limits: {
+        updatedAt: '2026-07-08T10:00:00.000Z',
+        providers: [
+          mimoProvider('sha256:mimo-a', 'alpha', 10, '2026-07-08T10:00:00.000Z'),
+          mimoProvider('sha256:mimo-b', 'beta', 30, '2026-07-08T10:01:00.000Z')
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-07-08T10:02:00.000Z'));
+
+  const mimoProviders = aggregate.providers.filter((provider) => provider.provider === 'mimo');
+  assert.equal(mimoProviders.length, 2);
+  assert.deepEqual(
+    new Set(mimoProviders.map((provider) => provider.accountKey)),
+    new Set(['sha256:mimo-a', 'sha256:mimo-b'])
+  );
+});
+
+test('publicLimits preserves MiMo plan status while removing account identity', () => {
+  const payload = publicLimits({
+    providers: [{
+      ...mimoProvider('sha256:mimo-a', 'alpha', 0, '2026-07-10T00:00:00.000Z'),
+      balance: { amount: 7.51, currency: 'CNY', planStatus: 'expired' }
+    }]
+  });
+
+  assert.equal(payload.providers[0].balance.planStatus, 'expired');
+  assert.equal(Object.hasOwn(payload.providers[0], 'accountKey'), false);
+  assert.equal(Object.hasOwn(payload.providers[0], 'accountName'), false);
 });
 
 test('aggregateLimits merges the same Codex account across devices and keeps distinct ones', () => {
@@ -119,6 +175,68 @@ test('aggregateLimits keeps Codex quota windows over a newer empty transient sna
   assert.equal(accountA.windows[0].remainingPercent, 50);
 });
 
+test('aggregateLimits prefers a fresh notConfigured state over stale configured Codex quota', () => {
+  const staleProvider = codexProvider(
+    'sha256:codex-a',
+    'a@example.com',
+    41,
+    '2026-07-08T13:04:49.000Z'
+  );
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'old-device-id',
+      stale: true,
+      limits: {
+        updatedAt: '2026-07-08T13:04:49.000Z',
+        providers: [staleProvider]
+      }
+    },
+    {
+      deviceId: 'current-device-id',
+      stale: false,
+      limits: {
+        updatedAt: '2026-07-10T02:55:17.000Z',
+        providers: [{
+          provider: 'codex',
+          status: 'notConfigured',
+          updatedAt: '2026-07-10T02:55:17.000Z',
+          windows: []
+        }]
+      }
+    }
+  ], 10 * 60 * 1000, Date.parse('2026-07-10T03:00:00.000Z'));
+
+  const codexProviders = aggregate.providers.filter((provider) => provider.provider === 'codex');
+  assert.equal(codexProviders.length, 1);
+  assert.equal(codexProviders[0].status, 'notConfigured');
+  assert.equal(codexProviders[0].sourceDeviceId, 'current-device-id');
+  assert.equal(codexProviders[0].stale, false);
+  assert.deepEqual(codexProviders[0].windows, []);
+});
+
+test('aggregateLimits still exposes stale configured Codex quota when no fresh observation exists', () => {
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'offline-device',
+      stale: true,
+      limits: {
+        updatedAt: '2026-07-08T13:04:49.000Z',
+        providers: [codexProvider(
+          'sha256:codex-a',
+          'a@example.com',
+          41,
+          '2026-07-08T13:04:49.000Z'
+        )]
+      }
+    }
+  ], 10 * 60 * 1000, Date.parse('2026-07-10T03:00:00.000Z'));
+
+  assert.equal(aggregate.providers.length, 1);
+  assert.equal(aggregate.providers[0].status, 'ok');
+  assert.equal(aggregate.providers[0].stale, true);
+  assert.equal(aggregate.providers[0].windows[0].remainingPercent, 41);
+});
+
 test('mergeCodexTransientWindows keeps recent Codex windows when the same account reads empty', () => {
   const previous = {
     updatedAt: '2026-06-14T10:00:00.000Z',
@@ -141,6 +259,174 @@ test('mergeCodexTransientWindows keeps recent Codex windows when the same accoun
   assert.equal(merged.providers[0].windows.length, 1);
   assert.equal(merged.providers[0].windows[0].remainingPercent, 50);
   assert.equal(merged.providers[0].updatedAt, '2026-06-14T10:00:00.000Z');
+});
+
+test('mergeCodexTransientWindows keeps recent Codex windows across a transient read error', () => {
+  const previous = {
+    updatedAt: '2026-06-14T10:00:00.000Z',
+    providers: [codexProvider('sha256:codex-a', 'a@example.com', 50, '2026-06-14T10:00:00.000Z')]
+  };
+  const current = {
+    updatedAt: '2026-06-14T10:05:00.000Z',
+    providers: [{
+      ...codexProvider('sha256:codex-a', 'a@example.com', 0, '2026-06-14T10:05:00.000Z'),
+      status: 'unavailable',
+      windows: []
+    }]
+  };
+
+  const merged = mergeCodexTransientWindows(previous, current, Date.parse('2026-06-14T10:05:00.000Z'));
+
+  assert.equal(merged.providers[0].status, 'ok');
+  assert.equal(merged.providers[0].windows[0].remainingPercent, 50);
+  assert.equal(merged.providers[0].updatedAt, '2026-06-14T10:00:00.000Z');
+});
+
+test('mergeCodexTransientWindows does not hide a real Codex sign-out', () => {
+  const previous = {
+    updatedAt: '2026-06-14T10:00:00.000Z',
+    providers: [codexProvider('sha256:codex-a', 'a@example.com', 50, '2026-06-14T10:00:00.000Z')]
+  };
+  const current = {
+    updatedAt: '2026-06-14T10:05:00.000Z',
+    providers: [{
+      ...codexProvider('sha256:codex-a', 'a@example.com', 0, '2026-06-14T10:05:00.000Z'),
+      status: 'notConfigured',
+      windows: []
+    }]
+  };
+
+  const merged = mergeCodexTransientWindows(previous, current, Date.parse('2026-06-14T10:05:00.000Z'));
+
+  assert.equal(merged.providers[0].status, 'notConfigured');
+  assert.deepEqual(merged.providers[0].windows, []);
+  assert.equal(merged.providers[0].updatedAt, '2026-06-14T10:05:00.000Z');
+});
+
+test('mergeCodexTransientWindows accepts a successful quota increase within the same reset window', () => {
+  const previousProvider = codexProvider('sha256:codex-a', 'a@example.com', 99, '2026-06-14T10:00:00.000Z');
+  const currentProvider = codexProvider('sha256:codex-a', 'a@example.com', 100, '2026-06-14T10:05:00.000Z');
+  const merged = mergeCodexTransientWindows(
+    { updatedAt: previousProvider.updatedAt, providers: [previousProvider] },
+    { updatedAt: currentProvider.updatedAt, providers: [currentProvider] },
+    Date.parse('2026-06-14T10:05:00.000Z')
+  );
+
+  assert.equal(merged.providers[0].windows[0].remainingPercent, 100);
+  assert.equal(merged.providers[0].updatedAt, '2026-06-14T10:05:00.000Z');
+});
+
+test('mergeCodexTransientWindows accepts a successful reset-target change before the previous reset', () => {
+  const previousProvider = codexProvider('sha256:codex-a', 'a@example.com', 97, '2026-06-14T10:00:00.000Z');
+  const currentProvider = codexProvider('sha256:codex-a', 'a@example.com', 0, '2026-06-14T10:05:00.000Z');
+  currentProvider.windows[0].resetsAt = '2026-06-14T10:10:00.000Z';
+  const merged = mergeCodexTransientWindows(
+    { updatedAt: previousProvider.updatedAt, providers: [previousProvider] },
+    { updatedAt: currentProvider.updatedAt, providers: [currentProvider] },
+    Date.parse('2026-06-14T10:05:00.000Z')
+  );
+
+  assert.equal(merged.providers[0].windows[0].remainingPercent, 0);
+  assert.equal(merged.providers[0].windows[0].resetsAt, '2026-06-14T10:10:00.000Z');
+  assert.equal(merged.providers[0].updatedAt, '2026-06-14T10:05:00.000Z');
+});
+
+test('mergeCodexTransientWindows does not backfill missing windows into a successful non-empty snapshot', () => {
+  const previousProvider = codexProvider('sha256:codex-a', 'a@example.com', 97, '2026-06-14T10:00:00.000Z');
+  previousProvider.windows.push({
+    kind: 'weekly',
+    usedPercent: 40,
+    remainingPercent: 60,
+    resetsAt: '2026-06-20T00:00:00.000Z',
+    windowMinutes: 10_080
+  });
+  const currentProvider = codexProvider('sha256:codex-a', 'a@example.com', 96, '2026-06-14T10:05:00.000Z');
+  const merged = mergeCodexTransientWindows(
+    { updatedAt: previousProvider.updatedAt, providers: [previousProvider] },
+    { updatedAt: currentProvider.updatedAt, providers: [currentProvider] },
+    Date.parse('2026-06-14T10:05:00.000Z')
+  );
+
+  assert.deepEqual(merged.providers[0].windows.map((window) => window.kind), ['session']);
+  assert.equal(merged.providers[0].windows[0].remainingPercent, 96);
+  assert.equal(merged.providers[0].updatedAt, '2026-06-14T10:05:00.000Z');
+});
+
+test('mergeCodexTransientWindows does not guess an identity when multiple previous Codex accounts are eligible', () => {
+  const previous = {
+    updatedAt: '2026-06-14T10:00:00.000Z',
+    providers: [
+      codexProvider('sha256:codex-a', 'a@example.com', 50, '2026-06-14T10:00:00.000Z'),
+      codexProvider('sha256:codex-b', 'b@example.com', 75, '2026-06-14T10:00:00.000Z')
+    ]
+  };
+  const current = {
+    updatedAt: '2026-06-14T10:05:00.000Z',
+    providers: [{ provider: 'codex', status: 'unavailable', updatedAt: '2026-06-14T10:05:00.000Z', windows: [] }]
+  };
+
+  const merged = mergeCodexTransientWindows(previous, current, Date.parse('2026-06-14T10:05:00.000Z'));
+
+  assert.equal(merged.providers[0].status, 'unavailable');
+  assert.equal(merged.providers[0].accountKey, '');
+  assert.deepEqual(merged.providers[0].windows, []);
+});
+
+test('mergeCodexTransientWindows rejects conflicting account key and email matches', () => {
+  const previous = {
+    updatedAt: '2026-06-14T10:00:00.000Z',
+    providers: [
+      codexProvider('sha256:codex-a', 'a@example.com', 50, '2026-06-14T10:00:00.000Z'),
+      codexProvider('sha256:codex-b', 'b@example.com', 75, '2026-06-14T10:00:00.000Z')
+    ]
+  };
+  const current = {
+    updatedAt: '2026-06-14T10:05:00.000Z',
+    providers: [{
+      ...codexProvider('sha256:codex-a', 'b@example.com', 0, '2026-06-14T10:05:00.000Z'),
+      status: 'unavailable',
+      windows: []
+    }]
+  };
+
+  const merged = mergeCodexTransientWindows(previous, current, Date.parse('2026-06-14T10:05:00.000Z'));
+
+  assert.equal(merged.providers[0].status, 'unavailable');
+  assert.deepEqual(merged.providers[0].windows, []);
+});
+
+test('mergeCodexTransientWindows keeps the effective successful summary timestamp during retention', () => {
+  const previousProvider = codexProvider('sha256:codex-a', 'a@example.com', 50, '');
+  const first = mergeCodexTransientWindows(
+    { updatedAt: '2026-06-14T10:00:00.000Z', providers: [previousProvider] },
+    {
+      updatedAt: '2026-06-14T10:05:00.000Z',
+      providers: [{
+        ...codexProvider('sha256:codex-a', 'a@example.com', 0, '2026-06-14T10:05:00.000Z'),
+        status: 'unavailable',
+        windows: []
+      }]
+    },
+    Date.parse('2026-06-14T10:05:00.000Z')
+  );
+
+  assert.equal(first.providers[0].updatedAt, '2026-06-14T10:00:00.000Z');
+
+  const expired = mergeCodexTransientWindows(
+    first,
+    {
+      updatedAt: '2026-06-14T10:11:00.000Z',
+      providers: [{
+        ...codexProvider('sha256:codex-a', 'a@example.com', 0, '2026-06-14T10:11:00.000Z'),
+        status: 'unavailable',
+        windows: []
+      }]
+    },
+    Date.parse('2026-06-14T10:11:00.000Z')
+  );
+
+  assert.equal(expired.providers[0].status, 'unavailable');
+  assert.deepEqual(expired.providers[0].windows, []);
 });
 
 test('mergeCodexTransientWindows stops keeping old Codex windows after retention expires', () => {

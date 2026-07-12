@@ -60,6 +60,32 @@ test('watchPathsForClients excludes the tokscale cache dirs our own syncs write'
   }
 });
 
+test('watchPathsForClients watches the Antigravity CLI data dir but not the IDE sync cache', () => {
+  // antigravity is self-synced (its IDE cache is watch-excluded to avoid the
+  // issue #15 loop), but the CLI writes parse-local SQLite we don't touch, so it
+  // must be watched for the seconds-level refresh the sync path can't give.
+  const tmp = withTmpHome([
+    path.join('.gemini', 'antigravity-cli', 'conversations'),
+    path.join('.config', 'tokscale', 'antigravity-cache')
+  ]);
+  const originalHomedir = os.homedir;
+  const previousGeminiHome = process.env.GEMINI_CLI_HOME;
+  os.homedir = () => tmp;
+  try {
+    delete process.env.GEMINI_CLI_HOME;
+    const { watchPathsForClients } = freshCollector();
+    const dirs = watchPathsForClients('antigravity');
+    assert.ok(dirs.includes(path.join(tmp, '.gemini', 'antigravity-cli', 'conversations')));
+    assert.equal(dirs.filter((dir) => dir.includes(path.join('.config', 'tokscale'))).length, 0);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = previousGeminiHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('clientDataDirPresence still detects cursor/antigravity via their cache dirs', () => {
   const tmp = withTmpHome([
     path.join('.config', 'tokscale', 'cursor-cache'),
@@ -367,6 +393,43 @@ test('antigravity sync runs at most once per throttle window across ticks', asyn
     await collectUsageOnce(options);
     await collectUsageOnce(options);
     assert.equal(calls.filter((args) => args.includes('sync')).length, 1);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectUsageOnce scans tokscale for antigravity-cli when antigravity is tracked', async () => {
+  // tokscale 4.x exposes Antigravity CLI (`agy`) under its own parse-local client
+  // id `antigravity-cli`; our tracked-client list only knows the umbrella
+  // `antigravity` id, so the scan filter must be widened or the CLI rows are
+  // dropped and never reach extractUsageFromTokscale (which folds them back in).
+  const tmp = withTmpHome([]);
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+  try {
+    const { collectUsageOnce } = freshCollector();
+    await collectUsageOnce({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      homeDir: tmp
+    });
+    const scanFilters = calls
+      .filter((args) => args.includes('--client'))
+      .map((args) => args[args.indexOf('--client') + 1]);
+    assert.ok(scanFilters.length > 0, 'expected at least one tokscale scan');
+    for (const filter of scanFilters) {
+      const ids = filter.split(',');
+      assert.ok(ids.includes('antigravity'), `antigravity missing from --client ${filter}`);
+      assert.ok(ids.includes('antigravity-cli'), `antigravity-cli missing from --client ${filter}`);
+    }
   } finally {
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];

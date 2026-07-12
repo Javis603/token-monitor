@@ -15,19 +15,19 @@ jobs:
             artifact_path: |
               dist/*.dmg
               dist/*.zip
-              dist/*.yml
+              dist/latest-mac.yml
               dist/*.blockmap
           - os: windows-latest
             target: win
             artifact_path: |
               dist/*.exe
-              dist/*.yml
+              dist/latest.yml
               dist/*.blockmap
           - os: ubuntu-latest
             target: linux
             artifact_path: |
               dist/*.AppImage
-              dist/*.yml
+              dist/latest-linux.yml
               dist/*.blockmap
     runs-on: ${{ matrix.os }}
     steps:
@@ -56,6 +56,9 @@ jobs:
           APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
       - name: Verify mac code signing and notarization
         if: matrix.target == 'mac'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set -euo pipefail
           app_path=$(find dist -maxdepth 2 -name '*.app' -print -quit)
@@ -71,7 +74,15 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app_path"
           spctl -a -vvv --type execute "$app_path"
           xcrun stapler validate "$app_path"
+          xcrun notarytool submit "$dmg_path" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$dmg_path"
           xcrun stapler validate "$dmg_path"
+      - name: Verify updater artifact names
+        run: npm run verify:release-artifact-names
       - uses: actions/upload-artifact@v4
         with:
           name: token-monitor-${{ matrix.target }}
@@ -96,6 +107,8 @@ jobs:
             artifacts/*.zip
             artifacts/*.exe
             artifacts/*.AppImage
-            artifacts/*.yml
+            artifacts/latest.yml
+            artifacts/latest-mac.yml
+            artifacts/latest-linux.yml
             artifacts/*.blockmap
           body_path: .github/RELEASE_TEMPLATE.md

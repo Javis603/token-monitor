@@ -179,6 +179,7 @@
                       <option value="tokensAll" data-i18n="settings.tray.tokensTotal">Tokens Total (1.36B)</option>
                       <option value="costAll" data-i18n="settings.tray.costTotal">Cost Total ($8.28)</option>
                       <option value="bothAll" data-i18n="settings.tray.bothTotal">Tokens + Cost Total (1.36B - $8.28)</option>
+                      <option value="limitsAllSessions" data-i18n="settings.tray.limitsAllSessions">Limits: first two session quotas (12% · 34%)</option>
                       <option value="barsSession" data-i18n="settings.tray.barsSession">Limit bars: lowest session remaining</option>
                       <option value="barsWeekly" data-i18n="settings.tray.barsWeekly">Limit bars: lowest weekly remaining</option>
                       <option value="barsAllSessions" data-i18n="settings.tray.barsAllSessions">Limit bars: first two session limits</option>
@@ -198,6 +199,7 @@
                       <option value="tokensAll" data-i18n="settings.tray.tokensTotal">Tokens Total (1.36B)</option>
                       <option value="costAll" data-i18n="settings.tray.costTotal">Cost Total ($8.28)</option>
                       <option value="bothAll" data-i18n="settings.tray.bothTotal">Tokens + Cost Total (1.36B - $8.28)</option>
+                      <option value="limitsAllSessions" data-i18n="settings.tray.limitsAllSessions">Limits: first two session quotas (12% · 34%)</option>
                       <option value="barsSession" data-i18n="settings.tray.barsSession">Limit bars: lowest session remaining</option>
                       <option value="barsWeekly" data-i18n="settings.tray.barsWeekly">Limit bars: lowest weekly remaining</option>
                       <option value="barsAllSessions" data-i18n="settings.tray.barsAllSessions">Limit bars: first two session limits</option>
@@ -226,6 +228,7 @@
               <label class="checkbox-label"><input id="liveDotInput" type="checkbox" /><span data-i18n="settings.appearance.liveIndicator">Live Indicator</span></label>
               <label class="checkbox-label"><input id="toolIconsInput" type="checkbox" /><span data-i18n="settings.appearance.toolIcons">Tool Icons</span></label>
               <label class="checkbox-label"><input id="titleIconInput" type="checkbox" /><span data-i18n="settings.appearance.titleIcon">Use Title Icon</span></label>
+              <label class="checkbox-label"><input id="showCompactTotalTokensInput" type="checkbox" /><span data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></label>
               <label class="checkbox-label"><input id="settingsInTitlebarInput" type="checkbox" /><span data-i18n="settings.appearance.settingsInTitlebar">Settings button in title bar</span></label>
               <label><span class="slider-label"><span data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span><input id="glassInput" type="range" min="0" max="100" step="1" /></label>
               <label><span class="slider-label"><span data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span><input id="blurInput" type="range" min="0" max="100" step="1" /></label>
@@ -376,6 +379,7 @@
               </select>
             </label>
             <label class="checkbox-label"><input id="showLimitSourceInput" type="checkbox" /><span data-i18n="settings.limits.showSource">Show Source</span></label>
+            <label class="checkbox-label"><input id="maskLimitAccountEmailsInput" type="checkbox" /><span data-i18n="settings.limits.maskAccountEmails">Mask account emails</span></label>
             <label><span data-i18n="settings.limits.barsShow">Bars show</span>
               <select id="showLimitUsedInput">
                 <option value="remaining" data-i18n="settings.limits.barsRemaining">Remaining</option>
@@ -406,7 +410,16 @@
                   <button id="codexAddAccountButton" data-i18n="settings.codex.addAccount">Add account</button>
                   <button id="codexRefreshAccountsButton" data-i18n="settings.codex.refresh">Refresh</button>
                 </div>
-                <pre id="codexLoginOutput" class="codex-login-output hidden"></pre>
+                <div id="codexLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
+                <div id="codexLoginUrlActions" class="settings-actions hidden">
+                  <button id="codexOpenLoginUrlButton" type="button" data-i18n="settings.codex.openLoginUrl">Open browser</button>
+                  <button id="codexCopyLoginUrlButton" type="button" data-i18n="settings.codex.copyLoginUrl">Copy link</button>
+                  <button id="codexCancelLoginButton" type="button" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                </div>
+                <details id="codexLoginDetails" class="codex-login-details hidden">
+                  <summary data-i18n="settings.codex.loginDetails">Details</summary>
+                  <pre id="codexLoginOutput" class="codex-login-output"></pre>
+                </details>
                 <div id="codexAccountErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
@@ -677,6 +690,98 @@
                 <div id="qoderErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="ollamaAccountGroup" class="settings-group cursor-account-group">
+              <button id="ollamaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="ollamaSettingsDetails">
+                <span data-i18n="settings.ollama.title">Ollama Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="ollamaAccountStatus" class="cursor-status-pill" data-i18n="settings.ollama.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="ollamaSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="ollamaOpenBrowser" data-i18n="settings.ollama.openBrowser">Open Ollama settings</button>
+                  <button id="ollamaLogoutButton" class="hidden" data-i18n="settings.ollama.clearCookie">Clear cookie</button>
+                  <button id="ollamaRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="ollamaManualPanel">
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.ollama.step1">Open Ollama settings in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.ollama.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the settings document request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.ollama.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.ollama.step4">Paste it below and click Save cookie.</span>
+                  </p>
+                  <textarea id="ollamaCookieInput" rows="3" spellcheck="false" placeholder="wos-session=..." data-i18n-placeholder="settings.ollama.cookiePlaceholder"></textarea>
+                  <div class="settings-actions">
+                    <button id="ollamaCookieSubmit" data-i18n="settings.ollama.saveCookie">Save cookie</button>
+                  </div>
+                </div>
+                <div id="ollamaErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="kimiAccountGroup" class="settings-group cursor-account-group">
+              <button id="kimiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="kimiSettingsDetails">
+                <span data-i18n="settings.kimi.title">Kimi Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="kimiAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="kimiSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="kimiOpenBrowser" data-i18n="settings.kimi.openBrowser">Open Kimi Code Console</button>
+                  <button id="kimiLogoutButton" class="hidden" data-i18n="settings.kimi.clearApiKey">Clear key</button>
+                  <button id="kimiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="kimiManualPanel">
+                  <p class="settings-note" data-i18n="settings.kimi.note">Paste your Kimi Code API key. It stays on this device and is used only to check Kimi Code quota.</p>
+                  <input id="kimiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
+                  <div class="settings-actions">
+                    <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
+                  </div>
+                </div>
+                <div id="kimiErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="mimoAccountGroup" class="settings-group cursor-account-group">
+              <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
+                <span data-i18n="settings.mimo.title">MiMo Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="mimoAccountStatus" class="cursor-status-pill" data-i18n="settings.mimo.notConfigured">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="mimoSettingsDetails" class="cursor-settings-details hidden">
+                <div id="mimoAccountList" class="managed-account-list"></div>
+                <div id="mimoAccountEmpty" class="opencode-empty" data-i18n="settings.mimo.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
+                <div id="mimoManualPanel" class="opencode-add-form">
+                  <button id="mimoAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="mimoAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.mimo.addAccount">Add account</span>
+                  </button>
+                  <div id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="mimoOpenConsoleButton" type="button" data-i18n="settings.mimo.openConsole">Open MiMo console in browser</button>
+                      </div>
+                      <p class="settings-note">
+                        <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the MiMo console in your browser (button above) and sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.mimo.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, then reload the page.</span><br>
+                        <strong>3.</strong> <span data-i18n="settings.mimo.step3Before">In Network, select</span> <code>balance</code><span data-i18n="settings.mimo.step3After">, then copy the full Cookie value from Headers -> Request Headers.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.mimo.step4">Paste it below, then click Save account.</span>
+                      </p>
+                      <textarea id="mimoCookieInput" rows="3" autocomplete="off" spellcheck="false" data-i18n-aria-label="settings.mimo.cookieLabel" aria-label="Cookie header" data-i18n-placeholder="settings.mimo.cookiePlaceholder" placeholder="Cookie: ..."></textarea>
+                      <div class="settings-actions">
+                        <button id="mimoSaveAccountButton" type="button" data-i18n="settings.mimo.saveAccount">Save account</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="mimoAccountErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="copilotAccountGroup" class="settings-group cursor-account-group">
               <button id="copilotSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="copilotSettingsDetails">
                 <span data-i18n="settings.copilot.title">GitHub Copilot Account</span>
@@ -765,7 +870,7 @@
 
       <section class="total-panel">
         <div class="label-row"><span>TOTAL TOKENS</span></div>
-        <div id="totalTokens" class="total-number">0</div>
+        <div class="total-number-row"><div id="totalTokens" class="total-number">0</div><div id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"></div></div>
         <div id="cost" class="cost">$0.00</div>
       </section>
 

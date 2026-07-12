@@ -4,12 +4,14 @@
 
 ## What's changed
 
-### Improved
-- **Account labels:** AI Tool Limits account labels now render with consistent capitalization in provider cards and the Codex account list.
-- **Bundled tokscale 4.2.0:** Detects Kiro IDE sessions (the usage watcher now covers them for live refresh), keeps OpenCode's own recorded costs instead of re-pricing them from tokens, and counts Claude Code deep-nested subagent transcripts.
+### Added
+- **MiMo account tracking:** AI Tool Limits now supports MiMo (Xiaomi), with cookie-based sign-in and multi-account tracking for balance and Token Plan quota. (#97)
+- **Kimi Code account tracking:** AI Tool Limits now supports Kimi Code, with API-key-based quota checks. (#91)
 
 ### Fixed
-- **GLM / Z.ai legacy quota:** Old GLM Coding Plans with a single 5-hour token quota no longer show it as a "Weekly" window — it renders as the 5-hour session window, and the monthly MCP bucket now shows a Monthly reset instead of a bogus 1-minute window. (#85)
+- **Codex quota refreshes:** Session and weekly percentages no longer flicker to empty or incorrect values during transient refresh failures (rate limiting, temporary unavailability); the last known-good values are kept until a real update lands. (#116)
+- **Multi-device sync payloads:** Oversized usage payloads are now rejected with a clear error instead of failing unpredictably, and synced data drops the unbounded all-time session history while keeping all totals and breakdowns intact. (#121)
+- **Total tokens display:** Long total-token numbers now scale to fit the available width instead of clipping. (#117)
 
 ## Which file should I download?
 
@@ -47,12 +49,14 @@ open-source: https://github.com/junhoyeo/tokscale
 
 ## 更新内容
 
-### 改进
-- **账号标签：** AI 工具额度的账号标签现在在额度卡片和 Codex 账号列表中统一首字母大写显示。
-- **内置 tokscale 4.2.0：** 新增 Kiro IDE 会话识别（用量监看现在也覆盖该目录，实现秒级刷新），保留 OpenCode 自身记录的费用、不再按 token 重新计价，并计入 Claude Code 深层子代理会话。
+### 新增
+- **MiMo 账号追踪：** AI 工具额度现已支持 MiMo（小米），通过 Cookie 登录并支持多账号追踪余额与 Token Plan 额度。（#97）
+- **Kimi Code 账号追踪：** AI 工具额度现已支持 Kimi Code，通过 API 密钥查询额度。（#91）
 
 ### 修复
-- **GLM / Z.ai 旧版额度：** 旧版 GLM Coding Plan 的单一 5 小时 token 额度不再误显示为「Weekly」窗口，而是正确显示为 5 小时会话窗口；按月的 MCP 桶现在显示按月重置，不再出现错误的 1 分钟窗口。（#85）
+- **Codex 额度刷新：** 在额度刷新出现暂时性失败（限流、暂不可用）时，单次与每周百分比不再闪烁为空白或错误数值，会保留最近一次的正确数据，直到下一次真正更新。（#116）
+- **多设备同步负载：** 超大用量负载现在会返回明确的错误，而不是不可预期地失败；同步数据不再包含无上限增长的全部时间会话记录，但仍保留全部汇总与明细。（#121）
+- **总 Token 显示：** 较长的总 Token 数字现在会自动缩放以适应显示宽度，不再被裁切。（#117）
 
 ## 应该下载哪个文件？
 

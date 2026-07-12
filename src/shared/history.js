@@ -154,6 +154,16 @@ function monthlyRollup(days) {
 
 const DEFAULT_CAP_DAYS = 370;
 
+function rollingDailyWindow(days, todayKey, capDays = DEFAULT_CAP_DAYS) {
+  const count = Math.max(0, Math.floor(num(capDays)));
+  if (count === 0) return [];
+  const startKey = dayKeyAddDays(todayKey, -(count - 1));
+  return (Array.isArray(days) ? days : []).filter((d) => {
+    const key = String(d?.date || '').slice(0, 10);
+    return key >= startKey && key <= todayKey;
+  });
+}
+
 function favoriteModelOf(contributions) {
   const totals = {};
   for (const d of contributions) {
@@ -179,10 +189,7 @@ function normalizeHistory(graphData, options = {}) {
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const cutoffMs = Date.parse(`${todayKey}T00:00:00Z`) - capDays * 86400000;
-  const daily = full
-    .filter((d) => Date.parse(`${d.date}T00:00:00Z`) >= cutoffMs)
-    .map((d) => ({ ...d }));
+  const daily = rollingDailyWindow(full, todayKey, capDays).map((d) => ({ ...d }));
   computeIntensities(daily);
 
   const monthly = monthlyRollup(full);
@@ -242,8 +249,12 @@ function mergeMonthlyMaps(histories) {
 function mergeHistories(histories, options = {}) {
   const list = Array.isArray(histories) ? histories : [];
   const todayKey = String(options.todayKey || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const capDays = Number.isFinite(options.capDays) ? options.capDays : DEFAULT_CAP_DAYS;
 
-  const daily = mergeDailyMaps(list);
+  // Re-cap after merging: an offline device's persisted daily tier no longer
+  // advances at collection time, but the aggregate must keep a rolling window.
+  // Monthly/lifetime data remains durable and uncapped.
+  const daily = rollingDailyWindow(mergeDailyMaps(list), todayKey, capDays);
   computeIntensities(daily);
   const monthly = mergeMonthlyMaps(list);
 
@@ -289,8 +300,33 @@ function historyPreview(history, options = {}) {
   return { daily, monthly, summary: h.summary };
 }
 
+function stableJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const entries = Object.keys(value)
+    .filter((key) => value[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`);
+  return `{${entries.join(',')}}`;
+}
+
+// Compact, deterministic invalidation token for the full history payload. This
+// includes daily/monthly breakdowns (not just headline totals), stays portable
+// to the Worker runtime, and keeps /api/stats small.
+function historyRevision(history) {
+  const source = stableJson(coerceHistory(history));
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let i = 0; i < source.length; i += 1) {
+    const code = source.charCodeAt(i);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 module.exports = {
   num, sumTokens, parseGraphResult, computeIntensities,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
-  coerceHistory, historyPreview
+  coerceHistory, historyPreview, historyRevision
 };

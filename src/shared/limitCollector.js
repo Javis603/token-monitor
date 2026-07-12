@@ -22,6 +22,8 @@ const { recordConsumption } = require('./deepseekBalanceHistory');
 const { codexAuthIdentity } = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
+const mimoLimits = require('./mimoLimits');
+const { fetchMimoLimits } = mimoLimits;
 const grokLimits = require('./grokLimits');
 const copilotLimits = require('./copilotLimits');
 const { copilotToken, fetchCopilotLimits } = copilotLimits;
@@ -35,6 +37,10 @@ const volcengineLimits = require('./volcengineLimits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('./qoderLimits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
+const ollamaLimits = require('./ollamaLimits');
+const { ollamaSessionCookie, fetchOllamaLimits } = ollamaLimits;
+const kimiLimits = require('./kimiLimits');
+const { kimiToken, fetchKimiLimits } = kimiLimits;
 const {
   grokCredential,
   readAuthJson,
@@ -45,7 +51,7 @@ const {
   fetchGrokLimits
 } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam'];
+const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama'];
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -56,6 +62,7 @@ const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 const CODEX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api';
 const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
+const CODEX_RPC_TIMEOUT_MS = 20_000;
 const TOKEN_MONITOR_USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
 
 function nowIso(nowMs) {
@@ -1170,15 +1177,65 @@ function codexDirectRateLimits(payload = {}) {
   return payload.rateLimits || payload.rate_limits || {};
 }
 
+function codexRateLimitWindowSignature(snapshot) {
+  return JSON.stringify(['primary', 'secondary'].map((key) => {
+    const window = snapshot?.[key];
+    if (!window) return null;
+    return [
+      key,
+      window.usedPercent ?? window.used_percent ?? null,
+      window.resetsAt ?? window.resets_at ?? null,
+      window.windowDurationMins ?? window.window_duration_mins ?? null
+    ];
+  }));
+}
+
+function codexAlternatePlanType(snapshot) {
+  const value = snapshot?.planType ?? snapshot?.plan_type;
+  const normalized = String(value ?? '').trim();
+  return normalized || null;
+}
+
+function codexAlternateResetCredits(snapshot) {
+  const resetCredits = snapshot?.rateLimitResetCredits ?? snapshot?.rate_limit_reset_credits;
+  return normalizeLimitProvider({ provider: 'codex', resetCredits }).resetCredits;
+}
+
+function unambiguousAlternateCodexRateLimits(rateLimitsById) {
+  // Object key order is not a quota-selection contract. Keep agreed window
+  // data, but only carry optional metadata when every alternate agrees too.
+  const candidates = Object.entries(rateLimitsById)
+    .filter(([id, snapshot]) => id !== 'codex' && hasCodexRateLimitWindows(snapshot))
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (candidates.length === 0) return null;
+  const signatures = new Set(candidates.map(([, snapshot]) => codexRateLimitWindowSignature(snapshot)));
+  if (signatures.size !== 1) return null;
+
+  const snapshots = candidates.map(([, snapshot]) => snapshot);
+  const first = snapshots[0];
+  const consensus = {
+    ...(first.primary ? { primary: first.primary } : {}),
+    ...(first.secondary ? { secondary: first.secondary } : {})
+  };
+  const planTypes = snapshots.map(codexAlternatePlanType);
+  const normalizedPlanTypes = new Set(planTypes.map((value) => value?.toLowerCase() || null));
+  if (normalizedPlanTypes.size === 1 && planTypes[0]) consensus.planType = planTypes[0];
+
+  const resetCredits = snapshots.map(codexAlternateResetCredits);
+  const resetCreditSignatures = new Set(resetCredits.map((value) => JSON.stringify(value)));
+  if (resetCreditSignatures.size === 1 && resetCredits[0]) {
+    consensus.rateLimitResetCredits = resetCredits[0];
+  }
+  return consensus;
+}
+
 function codexRateLimitSnapshot(payload = {}) {
   const rateLimitsById = codexRateLimitsById(payload);
   const direct = codexDirectRateLimits(payload);
   if (hasCodexRateLimitWindows(rateLimitsById.codex)) return rateLimitsById.codex;
   if (hasCodexRateLimitWindows(direct)) return direct;
-  for (const [id, snapshot] of Object.entries(rateLimitsById)) {
-    if (id === 'codex') continue;
-    if (hasCodexRateLimitWindows(snapshot)) return snapshot;
-  }
+  const alternate = unambiguousAlternateCodexRateLimits(rateLimitsById);
+  if (alternate) return alternate;
   return rateLimitsById.codex || direct || {};
 }
 
@@ -1512,17 +1569,16 @@ function killCodexLoginProcess(child, platform = process.platform, deps = {}) {
 // account gets its own OAuth grant, fully decoupled from the user's live Codex
 // CLI login. Returns { outcome, exitCode, output }; output is streamed to
 // options.onOutput as it arrives (so the renderer can surface the login URL).
-function runCodexLogin(options = {}, deps = {}) {
+function runCodexLoginWithCommand(command, options = {}, deps = {}) {
   const spawnFn = deps.spawn || spawn;
   const env = deps.env || process.env;
   const platform = deps.platform || process.platform;
+  const signal = options.signal || deps.signal;
   const setTimer = deps.setTimeout || setTimeout;
   const clearTimer = deps.clearTimeout || clearTimeout;
   const onOutput = typeof options.onOutput === 'function' ? options.onOutput : () => {};
   const timeoutMs = Number(options.timeoutMs || deps.codexLoginTimeoutMs || 180000);
-  const command = codexRpcCommandCandidates({ ...deps, env, platform })[0];
-  if (!command) return Promise.resolve({ outcome: 'missingBinary', exitCode: null, output: '' });
-
+  if (signal?.aborted) return Promise.resolve({ outcome: 'cancelled', exitCode: null, output: '' });
   const spec = codexLoginSpawnSpec(command, platform);
   let child;
   try {
@@ -1532,6 +1588,7 @@ function runCodexLogin(options = {}, deps = {}) {
       env: { ...withCodexPathHints(env, platform), CODEX_HOME: options.homePath }
     });
   } catch (error) {
+    if (signal?.aborted) return Promise.resolve({ outcome: 'cancelled', exitCode: null, output: '' });
     return Promise.resolve({ outcome: 'launchFailed', exitCode: null, output: String(error?.message || error) });
   }
 
@@ -1550,17 +1607,67 @@ function runCodexLogin(options = {}, deps = {}) {
       if (settled) return;
       settled = true;
       if (timer !== null) clearTimer(timer);
+      signal?.removeEventListener?.('abort', onAbort);
       resolve({ outcome, exitCode: exitCode ?? null, output: output.trim() });
+    };
+    const onAbort = () => {
+      killCodexLoginProcess(child, platform, { spawn: spawnFn });
+      finish('cancelled', null);
     };
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
     child.on('error', (error) => { append(String(error?.message || error)); finish('launchFailed', null); });
     child.on('close', (code) => finish(code === 0 ? 'success' : 'failed', code));
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
     timer = setTimer(() => {
       killCodexLoginProcess(child, platform, { spawn: spawnFn });
       finish('timedOut', null);
     }, timeoutMs);
   });
+}
+
+function shouldTryNextCodexLoginCommand(result) {
+  if (result?.outcome === 'launchFailed') return true;
+  if (result?.outcome !== 'failed') return false;
+  const output = String(result.output || '').toLowerCase();
+  return (
+    output.includes('enoent') ||
+    output.includes('not recognized as an internal or external command') ||
+    output.includes('command not found') ||
+    output.includes('no such file or directory') ||
+    output.includes('the system cannot find the file specified') ||
+    output.includes('the system cannot find the path specified')
+  );
+}
+
+function codexLoginAttemptsOutput(attempts) {
+  if (attempts.length <= 1) return attempts[0]?.result.output || '';
+  return attempts.map(({ command, result }) => {
+    const detail = String(result.output || '').trim();
+    return detail ? `${command}: ${detail}` : `${command}: ${result.outcome}`;
+  }).join('\n\n');
+}
+
+async function runCodexLogin(options = {}, deps = {}) {
+  const env = deps.env || process.env;
+  const platform = deps.platform || process.platform;
+  const commands = codexRpcCommandCandidates({ ...deps, env, platform });
+  if (commands.length === 0) return { outcome: 'missingBinary', exitCode: null, output: '' };
+
+  const attempts = [];
+  for (const command of commands) {
+    if (options.signal?.aborted) return { outcome: 'cancelled', exitCode: null, output: '' };
+    const result = await runCodexLoginWithCommand(command, options, { ...deps, env, platform });
+    attempts.push({ command, result });
+    if (!shouldTryNextCodexLoginCommand(result)) return result;
+  }
+
+  const result = attempts.at(-1).result;
+  return { ...result, output: codexLoginAttemptsOutput(attempts) };
 }
 
 function spawnCodexAppServer(deps = {}) {
@@ -1675,7 +1782,10 @@ function codexCommandCandidates(env = process.env, platform = process.platform, 
   const pathApi = pathApiForPlatform(platform);
   const candidates = [];
   if (platform === 'darwin') {
-    candidates.push('/Applications/Codex.app/Contents/Resources/codex');
+    candidates.push(
+      '/Applications/Codex.app/Contents/Resources/codex',
+      '/Applications/ChatGPT.app/Contents/Resources/codex'
+    );
   } else if (platform === 'win32') {
     const localAppData = envValue(env, 'LOCALAPPDATA');
     const programFiles = envValue(env, 'PROGRAMFILES');
@@ -1698,7 +1808,7 @@ function codexCommandSourceDetail(command, platform = process.platform) {
   if (!raw) return 'unknown';
   const normalized = raw.replace(/\\/g, '/').toLowerCase();
 
-  if (normalized.includes('/codex.app/')) return 'app';
+  if (normalized.includes('/codex.app/') || normalized.includes('/chatgpt.app/')) return 'app';
   if (platform === 'win32') {
     if (
       normalized.includes('/programs/codex/') ||
@@ -1809,7 +1919,7 @@ function codexRpcPayload(rateLimitResult, account, command, deps = {}) {
 }
 
 async function readCodexRpcWithCommand(command, deps = {}) {
-  const timeoutMs = Number(deps.codexRpcTimeoutMs || 12000);
+  const timeoutMs = Number(deps.codexRpcTimeoutMs || CODEX_RPC_TIMEOUT_MS);
   const child = spawnCodexAppServer({ ...deps, codexCommand: command });
   const rpc = createJsonRpcClient(child, timeoutMs);
   try {
@@ -1957,9 +2067,12 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const managedAccounts = normalizeCodexManagedAccounts(options.codexManagedAccounts || deps.codexManagedAccounts)
     .filter((account) => account.enabled !== false);
+  const includeLiveAccount = options.includeLiveCodexAccount !== false;
   // Single live account: keep the original single-provider shape (and error
   // propagation) so a signed-out/not-configured state surfaces as before.
-  if (managedAccounts.length === 0) return fetchLiveCodexAccount(deps, nowMs);
+  if (managedAccounts.length === 0) {
+    return includeLiveAccount ? fetchLiveCodexAccount(deps, nowMs) : [];
+  }
 
   const providers = [];
   // Dedupe by account id (accountKey) first, then email — so signing in the
@@ -1977,11 +2090,13 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   // stays visible alongside managed accounts — adding a managed account never
   // hides the login you are actually using. Best-effort: a signed-out/Keychain-
   // only live account just drops out, leaving the managed accounts.
-  try {
-    const live = await fetchLiveCodexAccount(deps, nowMs);
-    providers.push(live);
-    markSeen(live);
-  } catch (_) {}
+  if (includeLiveAccount) {
+    try {
+      const live = await fetchLiveCodexAccount(deps, nowMs);
+      providers.push(live);
+      markSeen(live);
+    } catch (_) {}
+  }
   for (const account of managedAccounts) {
     const provider = await fetchManagedCodexAccountLimits(account, options, deps);
     if (alreadySeen(provider)) continue;
@@ -2309,6 +2424,7 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     opencode: (providerOptions) => fetchOpenCodeLimits(providerOptions, deps),
     deepseek: (providerOptions) => fetchDeepSeekLimits(providerOptions, deps),
     minimax: (providerOptions) => minimaxLimits.fetchMinimaxLimits(providerOptions, deps),
+    mimo: (providerOptions) => fetchMimoLimits(providerOptions, deps),
     grok: (providerOptions) => grokLimits.fetchGrokLimits(providerOptions, deps),
     copilot: (providerOptions) => copilotLimits.fetchCopilotLimits(providerOptions, deps),
     kiro: (providerOptions) => kiroLimits.fetchKiroLimits(providerOptions, deps),
@@ -2316,6 +2432,8 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     zaiteam: (providerOptions) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, deps),
     volcengine: (providerOptions) => volcengineLimits.fetchVolcengineLimits(providerOptions, deps),
     qoder: (providerOptions) => qoderLimits.fetchQoderLimits(providerOptions, deps),
+    ollama: (providerOptions) => ollamaLimits.fetchOllamaLimits(providerOptions, deps),
+    kimi: (providerOptions) => kimiLimits.fetchKimiLimits(providerOptions, deps),
     ...(deps.providerFetchers || {})
   };
   const providers = [];
@@ -2537,6 +2655,7 @@ module.exports = {
   fetchCodexLimits,
   fetchCursorLimits,
   fetchDeepSeekLimits,
+  fetchMimoLimits,
   runCodexLogin,
   deepseekToken,
   selectFundedRow,
@@ -2564,6 +2683,10 @@ module.exports = {
   fetchVolcengineLimits,
   qoderCookie,
   fetchQoderLimits,
+  ollamaSessionCookie,
+  fetchOllamaLimits,
+  kimiToken,
+  fetchKimiLimits,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   mapCodexRateLimitsToProvider,

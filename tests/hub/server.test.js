@@ -84,3 +84,28 @@ test('onStats fires on ingest and on deleteDevice, and unsubscribe stops it', ()
     fs.rmSync(dataFile, { force: true });
   }
 });
+
+test('oversized ingest returns 413 without storing the device', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'oversized', padding: '🚀'.repeat(70_000) })
+    });
+
+    assert.equal(response.status, 413);
+    assert.equal(response.headers.get('connection'), 'close');
+    assert.deepEqual(await response.json(), {
+      error: 'payload_too_large',
+      message: 'Request body too large'
+    });
+    assert.equal(hub.getStats().devices.length, 0);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});

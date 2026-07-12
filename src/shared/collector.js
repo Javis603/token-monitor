@@ -13,7 +13,7 @@ const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./toksc
 const { customPricingPath } = require('./tokscaleConfig');
 const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
-const { hermesProfileWatchDirs, resolveHermesHome, tokscaleEnvFromSpawnArgs } = require('./hermesProfiles');
+const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
 const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
 const cursorAuth = require('./cursorAuth');
@@ -112,14 +112,10 @@ function parseJsonOutput(stdout) {
   throw new Error(`Could not parse tokscale JSON output: ${text.slice(0, 300)}`);
 }
 
-function spawnTokscaleJson(userArgs, commandTimeoutMs, spawnOpts = {}) {
+function spawnTokscaleJson(userArgs, commandTimeoutMs) {
   const { bin, prefixArgs, env } = tokscaleCommand();
-  const childEnv = tokscaleEnvFromSpawnArgs(env, userArgs, {
-    env,
-    homeDir: spawnOpts.homeDir || os.homedir()
-  });
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, [...prefixArgs, ...userArgs], { env: childEnv, windowsHide: true });
+    const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timeout = setTimeout(() => { child.kill('SIGTERM'); reject(new Error(`tokscale timed out after ${commandTimeoutMs}ms`)); }, commandTimeoutMs);
@@ -134,12 +130,33 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, spawnOpts = {}) {
   });
 }
 
+// A few tools surface as one umbrella client in our tracked-client list but as
+// several client ids inside tokscale. Antigravity is the case today: tokscale 4.x
+// reads the CLI (`agy`) from its own parse-local id `antigravity-cli` (no
+// `antigravity sync`), separate from the IDE-backed `antigravity`. Widen the
+// tokscale --client filter so those sub-source rows aren't filtered out;
+// extractUsageFromTokscale's normalizeClientName folds them back into the umbrella
+// id. Unknown ids are dropped silently by tokscale, so this is safe on any 4.x.
+const TOKSCALE_CLIENT_ALIASES = { antigravity: ['antigravity-cli'] };
+
+function tokscaleClientFilter(clients) {
+  const ordered = [];
+  const seen = new Set();
+  for (const id of String(clients ?? '').split(',').map((value) => value.trim()).filter(Boolean)) {
+    if (!seen.has(id)) { seen.add(id); ordered.push(id); }
+    for (const alias of TOKSCALE_CLIENT_ALIASES[id] || []) {
+      if (!seen.has(alias)) { seen.add(alias); ordered.push(alias); }
+    }
+  }
+  return ordered.join(',');
+}
+
 function runTokscale({ clients, flags, commandTimeoutMs }) {
-  return spawnTokscaleJson(['--json', '--client', clients, '--group-by', 'client,session,model', ...flags], commandTimeoutMs);
+  return spawnTokscaleJson(['--json', '--client', tokscaleClientFilter(clients), '--group-by', 'client,session,model', ...flags], commandTimeoutMs);
 }
 
 function runTokscaleGraph({ clients, commandTimeoutMs }) {
-  return spawnTokscaleJson(['graph', '--client', clients, '--no-spinner'], commandTimeoutMs);
+  return spawnTokscaleJson(['graph', '--client', tokscaleClientFilter(clients), '--no-spinner'], commandTimeoutMs);
 }
 
 function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
@@ -761,12 +778,27 @@ function clientWatchCandidates(clientsCsv) {
 // Watching them turns every tick into the trigger for the next one (issue #15).
 const SELF_SYNCED_CLIENTS = new Set(['cursor', 'antigravity']);
 
+// The Antigravity CLI's parse-local data dir (honors GEMINI_CLI_HOME like tokscale).
+// It belongs to the umbrella `antigravity` client but, unlike that client's IDE
+// sync cache, is written by `agy` and never by us — so it is both watchable and a
+// real presence signal, sharing this single source of truth.
+function antigravityCliDataDir() {
+  const geminiHome = process.env.GEMINI_CLI_HOME || path.join(os.homedir(), '.gemini');
+  return path.join(geminiHome, 'antigravity-cli', 'conversations');
+}
+
 function watchPathsForClients(clientsCsv) {
   const candidates = [];
   for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv))) {
     if (SELF_SYNCED_CLIENTS.has(client)) continue;
     candidates.push(...dirs);
   }
+  // antigravity is self-synced (its IDE cache is written by our sync and must stay
+  // watch-excluded), but its CLI data dir is safe to watch (no self-trigger loop)
+  // and gives the seconds-level refresh the sync path can't. tokscaleClientFilter
+  // pulls the antigravity-cli rows in on the tick.
+  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
+  if (enabled.has('antigravity')) candidates.push(antigravityCliDataDir());
   return candidates.filter(dirExists);
 }
 
@@ -804,6 +836,12 @@ function clientDataDirPresence(clientsCsv) {
   const presence = {};
   for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv))) {
     presence[client] = dirs.some(dirExists);
+  }
+  // antigravity's watch candidate is only the IDE sync cache, so fold its separate
+  // CLI data dir into the umbrella presence too — otherwise a CLI-only user with no
+  // countable usage yet reads `missing` instead of `waiting`.
+  if (Object.prototype.hasOwnProperty.call(presence, 'antigravity') && dirExists(antigravityCliDataDir())) {
+    presence.antigravity = true;
   }
   return presence;
 }

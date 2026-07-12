@@ -65,6 +65,58 @@ test('mergeDeviceRecord allows explicit empty limits to clear stale provider sta
   assert.deepEqual(merged.limits.providers, []);
 });
 
+test('aggregateDevices does not let an orphaned stale device id override the current limits state', () => {
+  const oldDevice = recordWithLimits({
+    deviceId: 'old-device-id',
+    updatedAt: '2026-07-08T13:08:54.000Z',
+    receivedAt: '2026-07-08T13:08:54.000Z',
+    limits: {
+      updatedAt: '2026-07-08T13:04:49.000Z',
+      refreshMs: 300000,
+      providers: [{
+        provider: 'codex',
+        accountKey: 'sha256:old-codex',
+        status: 'ok',
+        source: 'rpc',
+        updatedAt: '2026-07-08T13:04:49.000Z',
+        windows: [
+          { kind: 'session', usedPercent: 59, resetsAt: '2026-07-08T15:37:24.000Z', windowMinutes: 300 },
+          { kind: 'weekly', usedPercent: 54, resetsAt: '2026-07-14T04:16:57.000Z', windowMinutes: 10080 }
+        ]
+      }]
+    }
+  });
+  const currentDevice = recordWithLimits({
+    deviceId: 'current-device-id',
+    updatedAt: '2026-07-10T02:58:40.000Z',
+    receivedAt: '2026-07-10T02:58:41.000Z',
+    limits: {
+      updatedAt: '2026-07-10T02:55:17.000Z',
+      refreshMs: 300000,
+      providers: [{
+        provider: 'codex',
+        status: 'notConfigured',
+        updatedAt: '2026-07-10T02:55:17.000Z',
+        windows: []
+      }]
+    }
+  });
+
+  const aggregate = aggregateDevices(
+    [oldDevice, currentDevice],
+    10 * 60 * 1000,
+    Date.parse('2026-07-10T03:00:00.000Z')
+  );
+
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'old-device-id').stale, true);
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'current-device-id').stale, false);
+  assert.equal(aggregate.limits.providers.length, 1);
+  assert.equal(aggregate.limits.providers[0].provider, 'codex');
+  assert.equal(aggregate.limits.providers[0].status, 'notConfigured');
+  assert.equal(aggregate.limits.providers[0].sourceDeviceId, 'current-device-id');
+  assert.deepEqual(aggregate.limits.providers[0].windows, []);
+});
+
 test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods', () => {
   const existing = recordWithLimits();
   const incoming = {
@@ -623,8 +675,7 @@ test('mergeDeviceRecord clears prior history when incoming history is explicitly
   assert.deepEqual(merged.history, { daily: [], monthly: [], summary: {} });
 });
 
-test('aggregateHistory merges non-stale devices and skips stale ones', () => {
-  const now = Date.parse('2026-06-07T12:00:00.000Z');
+test('aggregateHistory retains stored history from stale devices', () => {
   const fresh = {
     deviceId: 'm1', receivedAt: '2026-06-07T11:59:00.000Z',
     history: { daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: { claude: { tokens: 10, cost: 1, messages: 1 } }, perModel: {} }],
@@ -635,14 +686,14 @@ test('aggregateHistory merges non-stale devices and skips stale ones', () => {
     history: { daily: [{ date: '2026-06-07', tokens: 999, cost: 99, perClient: {}, perModel: {} }],
       monthly: [{ month: '2026-06', tokens: 999, cost: 99, perClient: {}, perModel: {} }], summary: {} }
   };
-  const merged = aggregateHistory([fresh, stale], 10 * 60 * 1000, now);
+  const merged = aggregateHistory([fresh, stale]);
   assert.equal(merged.daily.length, 1);
-  assert.equal(merged.daily[0].tokens, 10);     // stale m2 excluded
-  assert.equal(merged.summary.totalTokens, 10);
+  assert.equal(merged.daily[0].tokens, 1009);
+  assert.equal(merged.summary.totalTokens, 1009);
 });
 
 test('aggregateHistory tolerates devices without history', () => {
-  const merged = aggregateHistory([{ deviceId: 'm1', receivedAt: new Date().toISOString() }], 10 * 60 * 1000);
+  const merged = aggregateHistory([{ deviceId: 'm1', receivedAt: new Date().toISOString() }]);
   assert.deepEqual(merged.daily, []);
 });
 
@@ -684,7 +735,7 @@ test('a history-less local tick keeps the trends dashboard populated', () => {
       monthly: [{ month: '2026-06', tokens: 5, cost: 1, perClient: {}, perModel: {} }], summary: {} }
   };
   const second = carryDeviceHistory(first, { deviceId: 'm1', receivedAt: '2026-06-08T00:05:00.000Z' });
-  const agg = aggregateHistory([second], 0);
+  const agg = aggregateHistory([second]);
   assert.equal(agg.daily.length, 1);
   assert.equal(agg.daily[0].tokens, 5);
 });

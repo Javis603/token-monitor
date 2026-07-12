@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   getDashboardHistory: () => ipcRenderer.invoke('dashboard:getHistory'),
+  onDashboardHistoryChanged: (callback) => {
+    const listener = () => { try { callback(); } catch (_) {} };
+    ipcRenderer.on('dashboard:historyChanged', listener);
+    return () => ipcRenderer.removeListener('dashboard:historyChanged', listener);
+  },
   dashboard: {
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
@@ -42,6 +47,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
+  mimo: {
+    accounts: () => ipcRenderer.invoke('mimo:accounts'),
+    addAccount: (cookieHeader) => ipcRenderer.invoke('mimo:addAccount', cookieHeader),
+    openConsole: () => ipcRenderer.invoke('mimo:openConsole'),
+    removeAccount: (id) => ipcRenderer.invoke('mimo:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('mimo:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('mimo:accounts', handler);
+      return () => ipcRenderer.removeListener('mimo:accounts', handler);
+    }
+  },
   exportNow: () => ipcRenderer.invoke('export:now'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),
@@ -76,6 +93,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: () => ipcRenderer.invoke('cursor:logout'),
     status: () => ipcRenderer.invoke('cursor:status')
   },
+  ollama: {
+    validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
+  },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),
     logout: () => ipcRenderer.invoke('opencode:logout'),
@@ -88,15 +108,16 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   codex: {
     accounts: () => ipcRenderer.invoke('codex:accounts'),
-    addAccount: () => ipcRenderer.invoke('codex:addAccount'),
+    addAccount: (options = {}) => ipcRenderer.invoke('codex:addAccount', options),
+    cancelLogin: (options = {}) => ipcRenderer.invoke('codex:cancelLogin', options),
     removeAccount: (id) => ipcRenderer.invoke('codex:removeAccount', id),
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('codex:setAccountEnabled', id, enabled),
     switchSystemAccount: (id) => ipcRenderer.invoke('codex:switchSystemAccount', id),
     refreshAccountLimits: (id) => ipcRenderer.invoke('codex:refreshAccountLimits', id),
-    onLoginOutput: (callback) => {
-      const handler = (_event, text) => callback(text);
-      ipcRenderer.on('codex:loginOutput', handler);
-      return () => ipcRenderer.removeListener('codex:loginOutput', handler);
+    onLoginStatus: (callback) => {
+      const handler = (_event, status) => callback(status);
+      ipcRenderer.on('codex:loginStatus', handler);
+      return () => ipcRenderer.removeListener('codex:loginStatus', handler);
     }
   },
   copilot: {

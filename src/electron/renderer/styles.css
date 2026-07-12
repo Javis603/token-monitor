@@ -699,6 +699,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   display: grid;
   gap: 6px;
 }
+.managed-account-list:empty { display: none; }
 .managed-account-row {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
@@ -795,6 +796,20 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   word-break: break-word;
 }
 .codex-login-output.hidden { display: none; }
+.codex-login-details {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.codex-login-details summary {
+  width: max-content;
+  cursor: pointer;
+  user-select: none;
+}
+.codex-login-details .codex-login-output { margin-top: 6px; }
+.codex-login-details.hidden,
+#codexLoginUrlActions.hidden,
+#codexLoginStatus.hidden { display: none; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
 .inline-link {
@@ -1577,17 +1592,36 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   backdrop-filter: none;
 }
 .label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.total-number-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
 .total-number {
+  flex: 0 1 auto;
+  min-width: 0;
   margin-top: 8px;
   color: var(--number);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   font-weight: 500;
   font-size: clamp(30px, 11vw, 46px);
   line-height: 1.05;
+  /* Equal-width digits so the counting animation does not wobble the number's
+     width (and shove the compact chip) frame to frame. */
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.total-compact {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.total-compact.hidden { display: none; }
 .cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
 .breakdown {
   position: relative;
@@ -2166,11 +2200,13 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-zai        { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-zaiteam    { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-cohere     { -webkit-mask-image: url(../../../assets/icons/cohere.svg);        mask-image: url(../../../assets/icons/cohere.svg); }
-.row-icon-xiaomi     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
+.row-icon-xiaomi,
+.row-icon-mimo       { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
+.row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
@@ -2242,6 +2278,19 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .limit-icon-qoder {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);
   mask-image: url(../../../assets/icons/qoder.svg);
+}
+
+.limit-icon-ollama {
+  -webkit-mask-image: url(../../../assets/icons/ollama.svg);
+  mask-image: url(../../../assets/icons/ollama.svg);
+}
+.limit-icon-kimi {
+  -webkit-mask-image: url(../../../assets/icons/moonshot.svg);
+  mask-image: url(../../../assets/icons/moonshot.svg);
+}
+.limit-icon-mimo {
+  -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
+  mask-image: url(../../../assets/icons/xiaomi.svg);
 }
 .row-label {
   display: grid;
@@ -2531,6 +2580,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
+}
+html.is-windows .limit-live-badge {
+  font-size: 8px;
 }
 .limit-account-active-zone {
   position: relative;
@@ -3104,6 +3156,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   .total-panel { padding: 2px 2px; }
   .label-row { font-size: clamp(11px, 2.6vw, 16px); }
   .total-number { margin-top: clamp(2px, 1.2vh, 8px); font-size: clamp(22px, 13vw, 60px); }
+  .total-compact { font-size: clamp(11px, 3vw, 16px); }
   .cost { margin-top: clamp(2px, 1vh, 6px); font-size: clamp(12px, 2.8vw, 18px); }
   .breakdown,
   .home-panel,
@@ -3118,6 +3171,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
+#ollamaManualPanel.hidden,
+#mimoManualPanel.hidden,
+#kimiManualPanel.hidden,
 #copilotManualPanel.hidden,
 #copilotManualDetails.hidden,
 #cursorErrorMessage.hidden,
@@ -3128,6 +3184,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
 #qoderErrorMessage.hidden,
+#ollamaErrorMessage.hidden,
+#kimiErrorMessage.hidden,
 #copilotErrorMessage.hidden,
 #copilotLoginStatus.hidden { display: none; }
 #cursorManualPanel,
@@ -3138,6 +3196,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
+#ollamaManualPanel,
+#mimoManualPanel,
+#kimiManualPanel,
 #copilotManualPanel {
   min-width: 0;
 }
@@ -3148,7 +3209,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiManualPanel > .accordion-animation-inner,
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner {
+#qoderManualPanel > .accordion-animation-inner,
+#ollamaManualPanel > .accordion-animation-inner,
+#mimoManualPanel > .accordion-animation-inner,
+#kimiManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
@@ -3163,6 +3227,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#ollamaManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#kimiManualPanel input,
 #copilotManualDetails input {
   width: 100%;
   font-size: 12px;
@@ -3175,6 +3243,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
+#ollamaManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#kimiManualPanel input,
 #copilotManualDetails input {
   font-family: monospace;
 }
@@ -3443,6 +3515,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-size: 11px;
   text-align: center;
 }
+.opencode-empty.hidden { display: none; }
 .opencode-profile-item {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;

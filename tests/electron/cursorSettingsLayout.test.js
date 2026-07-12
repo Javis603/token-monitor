@@ -46,6 +46,29 @@ function runMainFunction(source, name, nextName, expression, context = {}) {
   return vm.runInNewContext(`${body}\n${expression}`, context);
 }
 
+function runRendererFunctions(source, names, expression, context = {}) {
+  const snippets = names.map((name) => {
+    const start = source.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `${name} function should exist`);
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < source.length; i += 1) {
+      const char = source[i];
+      if (char === '{') depth += 1;
+      if (char === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    assert.notEqual(end, -1, `${name} function should close`);
+    return source.slice(start, end);
+  }).join('\n');
+  return vm.runInNewContext(`${snippets}\n${expression}`, context);
+}
+
 test('Cursor account status stays inline with an email-only summary', () => {
   const html = readRendererFile('index.html');
   const toggle = html.match(/<button id="cursorSettingsToggle"[\s\S]*?<\/button>/)?.[0] || '';
@@ -199,6 +222,65 @@ test('Codex account panel supports per-account enable toggles without showing ti
   assert.match(main, /setCodexManagedAccountEnabled\(id, enabled\)/);
 });
 
+test('Codex account email masking is an opt-in display-only setting', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+
+  assert.match(html, /<input id="maskLimitAccountEmailsInput" type="checkbox" \/>/);
+  assert.match(html, /data-i18n="settings\.limits\.maskAccountEmails"/);
+
+  const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
+  assert.match(defaults, /maskLimitAccountEmails:\s*false/);
+
+  const updateHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('settings:openConfig'")
+  );
+  assert.match(updateHandler, /maskLimitAccountEmails:\s*parseBoolean\(patch\.maskLimitAccountEmails \?\? settings\.maskLimitAccountEmails, false\)/);
+  assert.doesNotMatch(updateHandler, /accountEmail|accountKey|syncLimits|publicLimits/);
+
+  const settingsBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
+  assert.match(settingsBody, /els\.maskLimitAccountEmailsInput\.checked = Boolean\(state\.settings\.maskLimitAccountEmails\);/);
+
+  assert.match(app, /maskLimitAccountEmailsInput: document\.getElementById\('maskLimitAccountEmailsInput'\)/);
+  assert.match(app, /els\.maskLimitAccountEmailsInput\.addEventListener\('change'/);
+  assert.match(app, /saveSettings\(\{ maskLimitAccountEmails: els\.maskLimitAccountEmailsInput\.checked \}\)/);
+  assert.match(app, /renderLimits\(\);/);
+
+  assert.equal(
+    runRendererFunctions(app, ['maskEmailAddressForDisplay'], "maskEmailAddressForDisplay('javis603@gmail.com')")
+    , 'j***3@gmail.com'
+  );
+  assert.equal(
+    runRendererFunctions(app, ['maskEmailAddressForDisplay'], "maskEmailAddressForDisplay('linus.chua328@gmail.com')")
+    , 'l***8@gmail.com'
+  );
+  assert.equal(
+    runRendererFunctions(app, ['maskEmailAddressForDisplay'], "maskEmailAddressForDisplay('ab@example.com')")
+    , 'a***b@example.com'
+  );
+
+  assert.equal(
+    runRendererFunctions(
+      app,
+      ['maskEmailAddressForDisplay', 'codexAccountTitle'],
+      "codexAccountTitle({ accountEmail: 'javis603@gmail.com' }, 0)",
+      { state: { settings: { maskLimitAccountEmails: false } } }
+    ),
+    'javis603@gmail.com'
+  );
+  assert.equal(
+    runRendererFunctions(
+      app,
+      ['maskEmailAddressForDisplay', 'codexAccountTitle'],
+      "codexAccountTitle({ accountEmail: 'javis603@gmail.com' }, 0)",
+      { state: { settings: { maskLimitAccountEmails: true } } }
+    ),
+    'j***3@gmail.com'
+  );
+});
+
 test('Codex system account switching is exposed from limits account rows', () => {
   const app = readRendererFile('app.js');
   const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
@@ -216,7 +298,12 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(renderHead, /activeZone\.append\(title, badge, activePopover\)/);
   assert.match(renderHead, /badge\.textContent = '\\u2713';/);
   assert.doesNotMatch(renderHead, /badge\.textContent = 'Active'/);
-  assert.match(renderHead, /options\.accountTitle && limitProviderPresentationApi\.isCodexLiveAccount\(provider, provenance\)/);
+  // The ✓ tracks state.codexActiveAccount only (the account THIS device's Codex
+  // is signed into). It must NOT re-derive "live" from the row being rendered:
+  // in sync mode that row can be a remote device's record for a different account.
+  assert.match(renderHead, /options\.showActiveBadge && codexActiveAccountMatchesProvider\(provider\)/);
+  assert.doesNotMatch(renderHead, /!state\.codexActiveAccount && liveCodexAccount/);
+  assert.doesNotMatch(renderHead, /const liveCodexAccount =/);
   assert.match(renderHead, /codexSwitchAccountForProvider\(provider\)/);
   assert.match(renderHead, /switchZone\.className = 'limit-account-switch-zone'/);
   assert.match(renderHead, /switchPopover\.className = 'limit-account-switch-popover'/);
@@ -240,12 +327,14 @@ test('Codex system account switching is exposed from limits account rows', () =>
 
   const group = functionBody(app, 'renderCodexAccountGroup', 'renderOpenCodeAccountGroup');
   assert.match(group, /allowSystemSwitch: true/);
+  assert.match(group, /showActiveBadge: true/);
 
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   assert.match(css, /\.limit-account-switch-zone/);
   assert.match(css, /\.limit-live-badge\s*\{[^}]*display: inline-flex;/s);
   assert.match(css, /\.limit-live-badge\s*\{[^}]*width: 14px;/s);
   assert.match(css, /\.limit-live-badge\s*\{[^}]*margin-left: -6px;/s);
+  assert.match(css, /html\.is-windows \.limit-live-badge\s*\{[^}]*font-size: 8px;/s);
   assert.doesNotMatch(css, /\.limit-live-badge::before/);
   assert.match(css, /\.limit-account-active-zone/);
   assert.match(css, /\.limit-account-active-popover/);
@@ -331,10 +420,16 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(main, /function codexEmailDerivedAccountKey\(account, identity\)/);
   const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
   assert.match(refreshBody, /limitProviders: 'codex'/);
+  assert.match(refreshBody, /includeLiveCodexAccount: false/);
   assert.match(refreshBody, /codexManagedAccounts: \[account\]/);
+  assert.match(refreshBody, /mergeCodexTransientWindows\(latestStats\?\.limits, summary\)/);
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(renderLimits, /id === 'codex' \? \{\s*accountTitle: true,\s*allowSystemSwitch: true\s*\} : undefined/s);
+  assert.doesNotMatch(
+    renderLimits,
+    /renderLimitProviderRow\(id, label, provider, color, id === 'codex' \? \{[\s\S]*?showActiveBadge: true/
+  );
   assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexSwitchPopoverShouldHoldRender\(\);/);
   assert.match(renderLimits, /holdResetCreditsTooltipRender \|\| holdCodexSwitchPopoverRender/);
   assert.match(renderLimits, /if \(holdCodexSwitchPopoverRender\) state\.codexSwitchPopoverRenderPending = true;/);
@@ -369,18 +464,19 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel'/);
+  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   assert.match(css, /#deepseekManualPanel\.hidden,\n#minimaxManualPanel\.hidden,/);
-  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
+  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
-  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -428,11 +524,19 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(flowBody, /return current && incoming === current;/);
 });
 
-test('Z.ai, Volcengine, and Qoder account panels are exposed in settings', () => {
+test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /<div id="zaiAccountGroup"[\s\S]*?<select id="zaiApiRegionInput">[\s\S]*?<input id="zaiApiKeyInput" type="password"[\s\S]*?<button id="zaiApiKeySubmit"[\s\S]*data-i18n="settings\.zai\.saveApiKey">/);
   assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">API key \/ Access key ID[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="ark-\.\.\. or AKLT\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
   assert.match(html, /<div id="qoderAccountGroup"[\s\S]*?<select id="qoderSiteInput">[\s\S]*?<textarea id="qoderCookieInput"[\s\S]*?<button id="qoderCookieSubmit"[\s\S]*data-i18n="settings\.qoder\.saveCookie">/);
+  assert.match(html, /<div id="ollamaAccountGroup"[\s\S]*?<textarea id="ollamaCookieInput"[\s\S]*?<button id="ollamaCookieSubmit"[\s\S]*data-i18n="settings\.ollama\.saveCookie">/);
+  const ollamaDetails = html.match(/<div id="ollamaSettingsDetails"[\s\S]*?<div id="ollamaErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(ollamaDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.ollama\.step1">/);
+  assert.match(ollamaDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.ollama\.step2">/);
+  assert.match(ollamaDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.ollama\.step3">/);
+  assert.match(ollamaDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.ollama\.step4">/);
+  assert.match(ollamaDetails, /placeholder="wos-session=\.\.\."/);
+  assert.doesNotMatch(ollamaDetails, /settings\.ollama\.note/);
   const qoderDetails = html.match(/<div id="qoderSettingsDetails"[\s\S]*?<div id="qoderErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
   assert.match(qoderDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.qoder\.step1Before">[\s\S]*?<code id="qoderUsagePageHint">qoder\.com\/account\/usage<\/code>[\s\S]*?<span data-i18n="settings\.qoder\.step1After">/);
   assert.doesNotMatch(qoderDetails, /<\/code>\s*\/\s*<code>qoder\.com\.cn\/account\/usage<\/code>/);
@@ -440,6 +544,7 @@ test('Z.ai, Volcengine, and Qoder account panels are exposed in settings', () =>
   assert.match(qoderDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.qoder\.step3">/);
   assert.match(qoderDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.qoder\.step4">/);
   assert.doesNotMatch(qoderDetails, /settings\.qoder\.note/);
+  assert.doesNotMatch(qoderDetails, /mimoAccountGroup|copilotAccountGroup/);
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
@@ -453,6 +558,26 @@ test('Z.ai, Volcengine, and Qoder account panels are exposed in settings', () =>
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(zaiPlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(volcenginePlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(qoderPlatformUrl\(\)\)/);
+  assert.match(setupBody, /ollamaCookie: input\.value/);
+  assert.match(setupBody, /const validation = await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\);/);
+  assert.match(setupBody, /if \(!validation\?\.ok\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?ollamaValidationError\(validation\);[\s\S]*?return;/);
+  assert.match(setupBody, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
+  assert.match(setupBody, /limitsEnabled: true/);
+  assert.match(setupBody, /clearExternalProviderCheckPending\('ollama'\);/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(ollamaPlatformUrl\(\)\)/);
+
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  assert.match(preload, /validateCookie: \(cookie\) => ipcRenderer\.invoke\('ollama:validateCookie', cookie\)/);
+
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const validationHandler = main.slice(
+    main.indexOf("ipcMain.handle('ollama:validateCookie'"),
+    main.indexOf("ipcMain.handle('opencode:saveCookie'")
+  );
+  assert.match(validationHandler, /const cookie = normalizeOllamaCookie\(raw\);/);
+  assert.match(validationHandler, /await fetchOllamaLimits\(\{ ollamaCookie: cookie \}, \{ bypassValidationCache: true \}\)/);
+  assert.match(validationHandler, /rememberOllamaValidation\(cookie, provider\);/);
+  assert.match(validationHandler, /return \{ ok: provider\.status === 'ok', status: provider\.status \};/);
 
   const qoderSiteBody = functionBody(app, 'selectedQoderSite', 'qoderUsagePagePath');
   assert.match(qoderSiteBody, /document\.getElementById\('qoderSiteInput'\)\?\.value/);
@@ -469,6 +594,26 @@ test('Z.ai, Volcengine, and Qoder account panels are exposed in settings', () =>
   assert.match(zaiUrlBody, /https:\/\/z\.ai\/manage-apikey\/coding-plan\/personal\/my-plan/);
   const volcengineUrlBody = functionBody(app, 'volcenginePlatformUrl', 'qoderPlatformUrl');
   assert.match(volcengineUrlBody, /console\.volcengine\.com\/ark\/region:ark\+cn-beijing\/openManagement/);
+});
+
+test('Kimi account panel opens the allowlisted Code console', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /data-i18n="settings\.kimi\.title">Kimi Account<\/span>/);
+  assert.match(html, /data-i18n="settings\.kimi\.openBrowser">Open Kimi Code Console<\/button>/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*data-i18n="settings\.kimi\.saveApiKey">/);
+
+  const app = readRendererFile('app.js');
+  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /saveSettings\(\{ kimiApiKey: input\.value \}\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(kimiPlatformUrl\(\)\)/);
+  const urlBody = functionBody(app, 'kimiPlatformUrl', 'renderExternalProviderStatus');
+  assert.match(urlBody, /return 'https:\/\/www\.kimi\.com\/code\/console';/);
+
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /parsed\.hostname === 'kimi\.com' \|\| parsed\.hostname === 'www\.kimi\.com'/);
+  assert.match(allowlist, /parsed\.hostname === 'ollama\.com' \|\| parsed\.hostname === 'www\.ollama\.com'/);
+  assert.match(allowlist, /parsed\.pathname\.startsWith\('\/code'\)/);
 });
 
 test('DeepSeek account linked state requires a validated API key', () => {
@@ -539,6 +684,57 @@ test('MiniMax key changes invalidate stale provider status before re-checking', 
   assert.match(clearBody, /provider\.provider !== 'minimax'/);
 });
 
+test('MiMo account panel matches the manual Cookie provider layout', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const details = html.match(/<div id="mimoSettingsDetails"[\s\S]*?<div id="mimoAccountErrorMessage"/)?.[0] || '';
+
+  assert.match(details, /id="mimoCookieInput"/);
+  assert.doesNotMatch(details, /id="mimoAccountNameInput"/);
+  assert.match(details, /id="mimoOpenConsoleButton"/);
+  assert.match(details, /id="mimoAddToggle"[\s\S]*aria-controls="mimoAddDetails"/);
+  assert.match(details, /id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden"/);
+  assert.match(details, /id="mimoSaveAccountButton"/);
+  assert.match(details, /id="mimoManualPanel"/);
+  assert.match(details, /<strong>1\.<\/strong>[\s\S]*<strong>4\.<\/strong>/);
+  assert.match(details, /data-i18n="settings\.mimo\.step3Before">In Network, select<\/span> <code>balance<\/code>/);
+  assert.match(details, /data-i18n="settings\.mimo\.step4">Paste it below, then click Save account\.<\/span>/);
+  assert.doesNotMatch(details, /Only the cookies required for balance/);
+  assert.match(details, /placeholder="Cookie: \.\.\."/);
+  assert.match(details, /data-i18n-aria-label="settings\.mimo\.cookieLabel" aria-label="Cookie header"/);
+  assert.ok(details.indexOf('mimoAddToggle') < details.indexOf('mimoOpenConsoleButton'));
+  assert.ok(details.indexOf('mimoOpenConsoleButton') < details.indexOf('mimoCookieInput'));
+  assert.ok(details.indexOf('mimoCookieInput') < details.indexOf('mimoSaveAccountButton'));
+  assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 12px/);
+  assert.match(css, /#qoderManualPanel textarea,[\s\S]*#mimoManualPanel textarea,[\s\S]*font-family: monospace/);
+  assert.match(css, /\.managed-account-list:empty \{ display: none; \}/);
+  assert.match(css, /\.opencode-empty\.hidden \{ display: none; \}/);
+  assert.match(app, /getElementById\('mimoManualPanel'\)\?\.classList\.toggle\('expanded', next\)/);
+  assert.doesNotMatch(app, /settings\.mimo\.empty/);
+  assert.match(app, /window\.tokenMonitor\.mimo\.openConsole\(\)/);
+  assert.match(app, /window\.tokenMonitor\.mimo\.addAccount\(input\.value\)/);
+  assert.match(app, /saveButton\.textContent = t\('settings\.mimo\.checking'\)/);
+  assert.match(app, /result\?\.errorCode === 'invalidCookie'/);
+  assert.match(app, /function setMimoAddExpanded\(expanded\)/);
+  assert.match(app, /setMimoAddExpanded\(false\)/);
+  assert.match(preload, /addAccount: \(cookieHeader\) => ipcRenderer\.invoke\('mimo:addAccount', cookieHeader\)/);
+  assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
+  assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
+  assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
+  assert.match(app, /maskEmailAddressForDisplay\(email\)/);
+  assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
+  assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
+  const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
+  assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}\)/);
+  assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
+  assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
+  assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);
+  assert.doesNotMatch(main, /MIMO_SESSION_PARTITION|mimoLoginWindow|configureMimoLoginWindow/);
+});
+
 test('DeepSeek account copy says browser and external URL is allowlisted', () => {
   const html = readRendererFile('index.html');
   const details = html.match(/<div id="deepseekSettingsDetails"[\s\S]*?<div id="deepseekErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
@@ -576,7 +772,7 @@ test('opencode status env account avoids saved profile names', () => {
   assert.doesNotMatch(handler, /hasOwnProperty\.call\(result, envKey\)/);
 });
 
-test('settingsForRenderer strips OpenCode cookies before they reach the renderer', () => {
+test('settingsForRenderer strips provider cookies before they reach the renderer', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const body = main.slice(
     main.indexOf('function settingsForRenderer'),
@@ -587,6 +783,20 @@ test('settingsForRenderer strips OpenCode cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  const mimoRendererShape = main.slice(
+    main.indexOf('function mimoAccountsForRenderer'),
+    main.indexOf('function mimoManagedAccountsForCollector')
+  );
+  assert.match(mimoRendererShape, /id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled/);
+  assert.doesNotMatch(mimoRendererShape, /cookieHeader/);
+  assert.doesNotMatch(main, /safeStorage/);
+  assert.match(main, /fs\.writeFileSync\(temporary, `\$\{cookieHeader\}\\n`, \{ encoding: 'utf8', mode: 0o600 \}\)/);
+  assert.match(main, /fs\.chmodSync\(destination, 0o600\)/);
+  assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
+  assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
+  assert.doesNotMatch(main, /legacyCookieHeader|keepLegacyCookie|hadPlaintextMimoCookie/);
+  assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
+  assert.match(main, /delete result\.account\.cookieHeader/);
 });
 
 test('main settings normalize the Z.ai API region', () => {
@@ -714,5 +924,24 @@ test('main collectors pass GUI limit credentials in every widget mode', () => {
     assert.match(collector, /volcengineRegion: settings\.volcengineRegion \|\| ''/);
     assert.match(collector, /qoderCookie: settings\.qoderCookie \|\| ''/);
     assert.match(collector, /qoderSite: settings\.qoderSite \|\| 'global'/);
+    assert.match(collector, /ollamaCookie: settings\.ollamaCookie \|\| ''/);
   }
+});
+
+test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const body = functionBody(main, 'migrateLimitProviders', 'migrateLimitProviderOrder');
+  assert.match(body, /return parseLimitProviders\(value\)\.join/);
+  assert.doesNotMatch(body, /preMimoDefault|legacyDefault.*return defaultLimitProviders/);
+});
+
+test('Home limits groups multiple MiMo accounts like Codex', () => {
+  const app = readRendererFile('app.js');
+  const groupBody = functionBody(app, 'renderMimoAccountGroup', 'renderOpenCodeAccountGroup');
+  const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  assert.match(groupBody, /const groupProvider = \{ provider: 'mimo', status: 'ok', windows: \[\] \};/);
+  assert.match(groupBody, /planText: `\$\{providers\.length\} accounts`/);
+  assert.match(groupBody, /renderLimitProviderRow\('mimo', mimoAccountTitle\(provider, index\), provider, color/);
+  assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
 });

@@ -54,53 +54,8 @@ function hermesProfileWatchDirs(hermesHome, deps = {}) {
   return discoverHermesProfileScanPaths(hermesHome, deps);
 }
 
-function clientsCsvIncludesHermes(clientsCsv) {
-  return String(clientsCsv || '')
-    .split(',')
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean)
-    .includes('hermes');
-}
-
-function mergeTokscaleExtraDirs(env, additions) {
-  const base = env && typeof env === 'object' ? { ...env } : {};
-  const extra = (additions || []).filter(Boolean);
-  if (extra.length === 0) return base;
-
-  const existing = String(base.TOKSCALE_EXTRA_DIRS || '').trim();
-  const merged = existing
-    ? `${existing},${extra.join(',')}`
-    : extra.join(',');
-  base.TOKSCALE_EXTRA_DIRS = merged;
-  return base;
-}
-
-function tokscaleEnvWithHermesProfiles(env, clientsCsv, opts = {}) {
-  if (!clientsCsvIncludesHermes(clientsCsv)) return env;
-  const hermesHome = resolveHermesHome(opts);
-  const profileDirs = discoverHermesProfileScanPaths(hermesHome, opts);
-  if (profileDirs.length === 0) return env;
-  const additions = profileDirs.map((dir) => `hermes:${dir}`);
-  return mergeTokscaleExtraDirs(env, additions);
-}
-
-function tokscaleEnvFromSpawnArgs(env, userArgs, opts = {}) {
-  const args = Array.isArray(userArgs) ? userArgs : [];
-  // A `--home` scan (WSL) disables tokscale's env roots, so it ignores
-  // TOKSCALE_EXTRA_DIRS entirely — injecting host profile dirs there is dead
-  // work and would point at host paths that don't exist under that home.
-  if (args.includes('--home')) return env;
-  const clientIndex = args.indexOf('--client');
-  if (clientIndex < 0 || clientIndex >= args.length - 1) return env;
-  return tokscaleEnvWithHermesProfiles(env, args[clientIndex + 1], opts);
-}
-
 module.exports = {
-  clientsCsvIncludesHermes,
   discoverHermesProfileScanPaths,
   hermesProfileWatchDirs,
-  mergeTokscaleExtraDirs,
-  resolveHermesHome,
-  tokscaleEnvFromSpawnArgs,
-  tokscaleEnvWithHermesProfiles
+  resolveHermesHome
 };

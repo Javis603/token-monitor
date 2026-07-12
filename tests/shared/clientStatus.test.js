@@ -78,6 +78,27 @@ test('deriveClientStatus reads dir presence and usage together', () => {
   }
 });
 
+test('clientDataDirPresence detects Antigravity via the CLI conversations dir', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'client-status-agy-'));
+  const cliDir = path.join(base, '.gemini', 'antigravity-cli', 'conversations');
+  const originalHome = os.homedir;
+  const prevGeminiHome = process.env.GEMINI_CLI_HOME;
+  try {
+    delete process.env.GEMINI_CLI_HOME;
+    os.homedir = () => base;
+    assert.equal(clientDataDirPresence('antigravity').antigravity, false);
+    fs.mkdirSync(cliDir, { recursive: true });
+    assert.equal(clientDataDirPresence('antigravity').antigravity, true);
+    // CLI-only home, no countable usage yet: must read waiting, not missing.
+    assert.deepEqual(deriveClientStatus('antigravity', { clients: {} }), { antigravity: 'waiting' });
+  } finally {
+    os.homedir = originalHome;
+    if (prevGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = prevGeminiHome;
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('normalizeDeviceRecord keeps valid clientStatus and drops junk', () => {
   const normalized = normalizeDeviceRecord({
     deviceId: 'mac',
