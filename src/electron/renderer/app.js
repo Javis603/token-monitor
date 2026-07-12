@@ -4329,6 +4329,10 @@ function applyInitialBreakdownPreference() {
 
 function renderSessionUsageArchiveStatus() {
   if (!els.sessionUsageArchiveStatus) return;
+  if (state.settings?.sessionUsageArchiveEnabled === false) {
+    els.sessionUsageArchiveStatus.textContent = t('settings.collection.sessionArchivePaused');
+    return;
+  }
   const count = sessionRowsApi.archivedSessionCount(state.stats);
   els.sessionUsageArchiveStatus.textContent = count > 0
     ? t('settings.collection.sessionArchiveActiveCount', { count })
