@@ -85,6 +85,7 @@ const {
 } = require('../shared/sessionUsageArchive');
 const { aggregateDevices, aggregateHistory, carryDeviceHistory } = require('../shared/usage');
 const { syncPayload } = require('../shared/syncPayload');
+const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
   MIMO_PLATFORM_CONSOLE_URL,
   createMimoManagedAccount,
@@ -1865,11 +1866,23 @@ function startHostStats() {
 // sync/host mode without depending on the hub (or a remote Worker) being
 // redeployed to preserve these fields.
 function injectLocalDeviceStatus(stats) {
-  if (!stats || !lastCollectedDevice || !Array.isArray(stats.devices)) return stats;
-  const device = stats.devices.find((entry) => entry.deviceId === lastCollectedDevice.deviceId);
-  if (!device) return stats;
-  if (lastCollectedDevice.clientStatus) device.clientStatus = lastCollectedDevice.clientStatus;
-  if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
+  if (!stats || !Array.isArray(stats.devices)) return stats;
+  if (lastCollectedDevice) {
+    const device = stats.devices.find((entry) => entry.deviceId === lastCollectedDevice.deviceId);
+    if (device) {
+      if (lastCollectedDevice.clientStatus) device.clientStatus = lastCollectedDevice.clientStatus;
+      if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
+    }
+  }
+  // syncPayload drops the unbounded allTime.sessions from uploads (#118), so the hub's
+  // aggregate carries no all-time session detail and the TOTAL session view would fall back to
+  // a model list. Rebuild it: the hub's cross-device month sessions are the immediate
+  // baseline (available on the first frame — before this restart's first local scan), then
+  // this machine's own full all-time sessions merge in once collected (free, in-process).
+  // Totals/breakdowns are untouched, so this only restores the session list.
+  if (stats.periods?.allTime) {
+    stats.periods.allTime.sessions = mergedLocalAllTimeSessions(stats.periods, lastCollectedDevice);
+  }
   return stats;
 }
 
