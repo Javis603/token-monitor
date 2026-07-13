@@ -18,22 +18,6 @@
     return String(n);
   }
 
-  function pickWorstLimit(stats) {
-    const providers = stats?.limits?.providers || [];
-    let worst = null;
-    for (const provider of providers) {
-      if (provider.status !== 'ok' || provider.stale) continue;
-      for (const window of provider.windows || []) {
-        const remaining = Number(window.remainingPercent);
-        if (!Number.isFinite(remaining)) continue;
-        if (!worst || remaining < worst.remaining) {
-          worst = { remaining, provider: provider.provider };
-        }
-      }
-    }
-    return worst;
-  }
-
   function csvValues(value) {
     return Array.isArray(value) ? value : String(value || '').split(',');
   }
@@ -43,8 +27,10 @@
   }
 
   function limitFillPercent(remainingPercent, usedPercent, showUsed) {
-    const remaining = Number(remainingPercent);
-    const used = Number(usedPercent);
+    const remaining = remainingPercent === null || remainingPercent === undefined || remainingPercent === ''
+      ? NaN : Number(remainingPercent);
+    const used = usedPercent === null || usedPercent === undefined || usedPercent === ''
+      ? NaN : Number(usedPercent);
     if (showUsed) {
       if (Number.isFinite(remaining)) return 100 - remaining;
       if (Number.isFinite(used)) return used;
@@ -59,6 +45,77 @@
     if (value === null || value === undefined || value === '') return '';
     const number = Number(value);
     return Number.isFinite(number) ? `${Math.round(Math.max(0, Math.min(100, number)))}%` : '';
+  }
+
+  function remainingPercent(window) {
+    return limitFillPercent(window?.remainingPercent, window?.usedPercent, false);
+  }
+
+  function meteredWindows(provider, kind = '') {
+    return (provider?.windows || []).filter((window) => {
+      if (!window || window.showMeter === false || (kind && window.kind !== kind)) return false;
+      return remainingPercent(window) !== null;
+    });
+  }
+
+  function preferredWindow(provider, kind) {
+    const windows = meteredWindows(provider, kind);
+    if (windows.length < 2) return windows[0] || null;
+
+    // A compact, unlabeled icon cannot explain two pools of the same kind. Prefer
+    // the provider's canonical aggregate window instead of silently substituting
+    // a scoped/model pool (Claude Fable) or a sub-quota (Cursor API) for it.
+    const canonicalLabels = kind === 'weekly' ? new Set(['', 'weekly'])
+      : kind === 'billing' ? new Set(['', 'total'])
+        : new Set(['']);
+    return windows.find((window) => canonicalLabels.has(String(window.label || '').trim().toLowerCase())) || windows[0];
+  }
+
+  function compactLimitSelection(provider) {
+    if (!provider || provider.status !== 'ok' || provider.stale) return null;
+    const session = preferredWindow(provider, 'session');
+    const weekly = preferredWindow(provider, 'weekly');
+    const billing = preferredWindow(provider, 'billing');
+    const primaryWindow = session || weekly || billing;
+    if (!primaryWindow) return null;
+    return {
+      provider: normalizedProviderId(provider.provider),
+      providerRecord: provider,
+      primaryWindow,
+      secondaryWindow: session ? weekly : null
+    };
+  }
+
+  function pickWorstLimitProvider(stats, options = {}) {
+    const requestedKind = String(options.kind || '').trim().toLowerCase();
+    let worst = null;
+    for (const provider of stats?.limits?.providers || []) {
+      const selection = compactLimitSelection(provider);
+      if (!selection) continue;
+      const candidates = [selection.primaryWindow, selection.secondaryWindow].filter(Boolean);
+      const selectedWindow = requestedKind
+        ? candidates.find((window) => window.kind === requestedKind)
+        : candidates.reduce((pick, window) => (
+            !pick || remainingPercent(window) < remainingPercent(pick) ? window : pick
+          ), null);
+      if (!selectedWindow) continue;
+      const remaining = remainingPercent(selectedWindow);
+      if (!worst || remaining < worst.remaining) worst = { ...selection, selectedWindow, remaining };
+    }
+    return worst;
+  }
+
+  function pickWorstLimit(stats) {
+    const pick = pickWorstLimitProvider(stats);
+    return pick ? { remaining: pick.remaining, provider: pick.provider } : null;
+  }
+
+  function pickLimitProviderByKindPriority(stats, kinds = []) {
+    for (const kind of kinds) {
+      const pick = pickWorstLimitProvider(stats, { kind });
+      if (pick) return pick;
+    }
+    return null;
   }
 
   function providerOrderFromStats(providers) {
@@ -93,7 +150,7 @@
     return order;
   }
 
-  function pickConfiguredSessionLimits(stats, options = {}) {
+  function pickConfiguredLimitProviders(stats, options = {}) {
     const providers = Array.isArray(stats?.limits?.providers) ? stats.limits.providers : [];
     const byId = new Map();
     for (const provider of providers) {
@@ -107,14 +164,32 @@
     for (const id of configuredProviderOrder(providers, options)) {
       let pick = null;
       for (const provider of byId.get(id) || []) {
-        if (!provider || provider.status !== 'ok' || provider.stale) continue;
-        const session = (provider.windows || []).find((window) => window?.kind === 'session');
-        const weekly = (provider.windows || []).find((window) => window?.kind === 'weekly');
-        const remaining = limitFillPercent(session?.remainingPercent, session?.usedPercent, false);
-        const percent = limitFillPercent(session?.remainingPercent, session?.usedPercent, Boolean(options.showLimitUsed));
-        if (!session || remaining === null || percent === null) continue;
-        const weeklyPercent = limitFillPercent(weekly?.remainingPercent, weekly?.usedPercent, Boolean(options.showLimitUsed));
-        if (!pick || remaining < pick.remaining) pick = { provider: id, remaining, percent, weeklyPercent };
+        const selection = compactLimitSelection(provider);
+        if (!selection) continue;
+        const remaining = remainingPercent(selection.primaryWindow);
+        const percent = limitFillPercent(
+          selection.primaryWindow.remainingPercent,
+          selection.primaryWindow.usedPercent,
+          Boolean(options.showLimitUsed)
+        );
+        const secondaryPercent = limitFillPercent(
+          selection.secondaryWindow?.remainingPercent,
+          selection.secondaryWindow?.usedPercent,
+          Boolean(options.showLimitUsed)
+        );
+        const candidate = {
+          ...selection,
+          selectedWindow: selection.primaryWindow,
+          remaining,
+          percent,
+          secondaryPercent,
+          // Keep the old field available to internal callers while the mode id
+          // remains a compatibility surface.
+          weeklyPercent: selection.secondaryWindow?.kind === 'weekly' ? secondaryPercent : null
+        };
+        const candidateRank = ['session', 'weekly', 'billing'].indexOf(selection.primaryWindow.kind);
+        const pickRank = pick ? ['session', 'weekly', 'billing'].indexOf(pick.primaryWindow.kind) : Infinity;
+        if (!pick || candidateRank < pickRank || (candidateRank === pickRank && remaining < pick.remaining)) pick = candidate;
       }
       if (!pick) continue;
       picks.push(pick);
@@ -123,11 +198,15 @@
     return picks;
   }
 
+  function pickConfiguredSessionLimits(stats, options = {}) {
+    return pickConfiguredLimitProviders(stats, options);
+  }
+
   function formatConfiguredSessionLimits(stats, options = {}) {
-    const picks = pickConfiguredSessionLimits(stats, options);
+    const picks = pickConfiguredLimitProviders(stats, options);
     if (picks.length === 0) return '';
     if (picks.length === 1) {
-      return [formatPercent(picks[0].percent), formatPercent(picks[0].weeklyPercent)]
+      return [formatPercent(picks[0].percent), formatPercent(picks[0].secondaryPercent)]
         .filter(Boolean)
         .join(' · ');
     }
@@ -151,5 +230,15 @@
     return formatCompactNumber(today.totalTokens);
   }
 
-  return { formatCompactNumber, pickConfiguredSessionLimits, pickWorstLimit, formatTrayText };
+  return {
+    compactLimitSelection,
+    formatCompactNumber,
+    formatConfiguredSessionLimits,
+    pickConfiguredLimitProviders,
+    pickConfiguredSessionLimits,
+    pickLimitProviderByKindPriority,
+    pickWorstLimit,
+    pickWorstLimitProvider,
+    formatTrayText
+  };
 });

@@ -6374,31 +6374,16 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   restartTimer();
 });
 
-function pickWorstProvider(stats, windowFilter) {
-  const providers = stats?.limits?.providers || [];
-  let worstProvider = null;
-  let worstRemaining = Infinity;
-  for (const provider of providers) {
-    if (provider.status !== 'ok' || provider.stale) continue;
-    for (const window of provider.windows || []) {
-      if (windowFilter && !windowFilter(window)) continue;
-      const remaining = Number(window.remainingPercent);
-      if (!Number.isFinite(remaining)) continue;
-      if (remaining < worstRemaining) {
-        worstRemaining = remaining;
-        worstProvider = provider;
-      }
-    }
-  }
-  return worstProvider;
+function pickWorstProvider(stats) {
+  return window.TokenMonitorTrayText.pickWorstLimitProvider(stats);
 }
 
 function pickWorstSessionProvider(stats) {
-  return pickWorstProvider(stats, (window) => window.kind === 'session');
+  return window.TokenMonitorTrayText.pickLimitProviderByKindPriority(stats, ['session', 'weekly']);
 }
 
 function pickWorstWeeklyProvider(stats) {
-  return pickWorstProvider(stats, (window) => window.kind === 'weekly');
+  return window.TokenMonitorTrayText.pickWorstLimitProvider(stats, { kind: 'weekly' });
 }
 
 function roundedRectPath(ctx, x, y, w, h, r) {
@@ -6417,12 +6402,10 @@ const trayProviderImages = {};
 function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors = {}) {
   const trackColor = colors.track || 'rgba(0, 0, 0, 0.32)';
   const fillColor = colors.fill || 'rgba(0, 0, 0, 1)';
-  const provider = picker(stats);
-  if (!provider) return null;
-  const session = (provider.windows || []).find((w) => w.kind === 'session');
-  const weekly = (provider.windows || []).find((w) => w.kind === 'weekly');
-  const billing = (provider.windows || []).find((w) => w.kind === 'billing');
-  const providerImage = trayProviderImages[provider.provider];
+  const selection = picker(stats);
+  if (!selection) return null;
+  const { providerRecord, primaryWindow, secondaryWindow } = selection;
+  const providerImage = trayProviderImages[providerRecord.provider];
   const { trayBarFillWidth, trayBarsLayout } = window.TokenMonitorTrayBars;
   const layout = trayBarsLayout(height);
 
@@ -6451,36 +6434,17 @@ function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors =
     ctx.restore();
   }
 
-  if (session || weekly) {
-    drawBar(layout.barsStartY, Number(session?.remainingPercent));
-    drawBar(layout.barsStartY + layout.barHeight + layout.barGap, Number(weekly?.remainingPercent));
-  } else if (billing) {
-    // Billing-only providers (Grok Monthly) have no session/weekly pair — draw the
-    // single monthly bar on the top track and leave the bottom track empty, instead
-    // of painting two empty bars.
-    drawBar(layout.barsStartY, Number(billing.remainingPercent));
-  }
+  drawBar(layout.barsStartY, primaryWindow?.remainingPercent);
+  drawBar(layout.barsStartY + layout.barHeight + layout.barGap, secondaryWindow?.remainingPercent);
   return canvas.toDataURL('image/png');
 }
 
 function pickConfiguredSessionProviders(stats, configOrder) {
-  const providers = stats?.limits?.providers || [];
-  const byId = providersByLimitProviderId(providers);
-  const result = [];
-  for (const id of configOrder) {
-    let pick = null;
-    for (const p of byId.get(id) || []) {
-      if (!p || p.status !== 'ok' || p.stale) continue;
-      const session = (p.windows || []).find((w) => w.kind === 'session');
-      const remaining = Number(session?.remainingPercent);
-      if (!session || !Number.isFinite(remaining)) continue;
-      if (!pick || remaining < Number(pick.session.remainingPercent)) pick = { provider: p, session };
-    }
-    if (!pick) continue;
-    result.push(pick);
-    if (result.length === 2) break;
-  }
-  return result;
+  return window.TokenMonitorTrayText.pickConfiguredLimitProviders(stats, {
+    limitProviderOrder: configOrder,
+    limitProviders: configOrder,
+    showLimitUsed: Boolean(state.settings?.showLimitUsed)
+  });
 }
 
 function renderAllSessionsIcon(stats, height = 44, configOrder, colors = {}) {
@@ -6488,8 +6452,9 @@ function renderAllSessionsIcon(stats, height = 44, configOrder, colors = {}) {
   const fillColor = colors.fill || 'rgba(0, 0, 0, 1)';
   const picks = pickConfiguredSessionProviders(stats, configOrder);
   if (picks.length === 0) return null;
-  // Only one tool has session data → fall back to that tool's session+weekly view.
-  if (picks.length === 1) return renderBarsIcon(stats, height, () => picks[0].provider, colors);
+  // With one tool, preserve its canonical pair; a lone weekly/billing window is
+  // promoted to the top lane and the lower lane remains an empty track.
+  if (picks.length === 1) return renderBarsIcon(stats, height, () => picks[0], colors);
 
   const { trayBarFillWidth, trayBarsLayout } = window.TokenMonitorTrayBars;
   const layout = trayBarsLayout(height, { contentOnly: true });
@@ -6515,8 +6480,8 @@ function renderAllSessionsIcon(stats, height = 44, configOrder, colors = {}) {
     ctx.restore();
   }
 
-  drawBar(layout.barsStartY, Number(picks[0].session.remainingPercent));
-  drawBar(layout.barsStartY + layout.barHeight + layout.barGap, Number(picks[1].session.remainingPercent));
+  drawBar(layout.barsStartY, picks[0].primaryWindow.remainingPercent);
+  drawBar(layout.barsStartY + layout.barHeight + layout.barGap, picks[1].primaryWindow.remainingPercent);
   return canvas.toDataURL('image/png');
 }
 
@@ -6539,24 +6504,20 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
   const measureCtx = measureCanvas.getContext('2d');
   measureCtx.font = font;
   const visiblePicks = picks.length === 1
-    ? (() => {
-        const weekly = (picks[0].provider.windows || []).find((w) => w.kind === 'weekly');
-        const weeklyPercent = limitFillPercent(weekly?.remainingPercent, weekly?.usedPercent, showUsed);
-        return [{
-          ...picks[0],
-          text: [
-            formatPercent(limitFillPercent(picks[0].session.remainingPercent, picks[0].session.usedPercent, showUsed)),
-            weeklyPercent === null ? '' : formatPercent(weeklyPercent)
-          ].filter(Boolean).join(separator)
-        }];
-      })()
+    ? [{
+        ...picks[0],
+        text: [picks[0].primaryWindow, picks[0].secondaryWindow]
+          .filter(Boolean)
+          .map((window) => formatPercent(limitFillPercent(window.remainingPercent, window.usedPercent, showUsed)))
+          .join(separator)
+      }]
     : picks.map((pick) => ({
         ...pick,
-        text: formatPercent(limitFillPercent(pick.session.remainingPercent, pick.session.usedPercent, showUsed))
+        text: formatPercent(limitFillPercent(pick.primaryWindow.remainingPercent, pick.primaryWindow.usedPercent, showUsed))
       }));
   const entries = visiblePicks.map((pick) => {
     const text = pick.text;
-    const image = trayProviderImages[pick.provider.provider];
+    const image = trayProviderImages[pick.providerRecord.provider];
     const textWidth = Math.ceil(measureCtx.measureText(text).width);
     const iconWidth = image ? iconSize + gap : 0;
     return { pick, text, image, width: iconWidth + textWidth };

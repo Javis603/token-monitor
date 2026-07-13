@@ -334,13 +334,18 @@ test('Codex limits render as one provider group with account subrows', () => {
   assert.match(styles, /\.limit-account-row\s*\{/);
 });
 
-test('tray all-sessions mode can consider multiple providers for one configured id', () => {
+test('tray primary-limit modes use the shared provider-aware resolver', () => {
   const app = readRendererFile('app.js');
   const pickConfigured = functionBody(app, 'pickConfiguredSessionProviders', 'renderAllSessionsIcon');
   const renderAllSessions = functionBody(app, 'renderAllSessionsIcon', 'renderLimitSessionsIcon');
+  const renderBars = functionBody(app, 'renderBarsIcon', 'pickConfiguredSessionProviders');
+  const pickSession = functionBody(app, 'pickWorstSessionProvider', 'pickWorstWeeklyProvider');
 
-  assert.match(pickConfigured, /providersByLimitProviderId\(providers\)/);
-  assert.doesNotMatch(pickConfigured, /new Map\(providers\.map\(\(p\) => \[String\(p\.provider\)\.toLowerCase\(\), p\]\)\)/);
+  assert.match(pickConfigured, /pickConfiguredLimitProviders\(stats/);
+  assert.match(pickSession, /pickLimitProviderByKindPriority\(stats, \['session', 'weekly'\]\)/);
+  assert.match(renderBars, /primaryWindow/);
+  assert.match(renderBars, /secondaryWindow/);
+  assert.doesNotMatch(renderBars, /\.find\(\(w\) => w\.kind/);
   assert.match(renderAllSessions, /trayBarsLayout\(height, \{ contentOnly: true \}\)/);
 });
 
@@ -355,9 +360,9 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /trayBarsLayout\(height/);
   assert.match(renderLimitSessionsIcon, /layout\.iconSize/);
   assert.match(renderLimitSessionsIcon, /picks\.length === 1/);
-  assert.match(renderLimitSessionsIcon, /kind === 'weekly'/);
-  assert.match(renderLimitSessionsIcon, /weeklyPercent === null \? '' : formatPercent\(weeklyPercent\)/);
-  assert.match(renderLimitSessionsIcon, /trayProviderImages\[pick\.provider\.provider\]/);
+  assert.match(renderLimitSessionsIcon, /primaryWindow/);
+  assert.match(renderLimitSessionsIcon, /secondaryWindow/);
+  assert.match(renderLimitSessionsIcon, /trayProviderImages\[pick\.providerRecord\.provider\]/);
   assert.match(renderLimitSessionsIcon, /`500 \$\{fontSize\}px/);
   assert.match(renderLimitSessionsIcon, /formatPercent\(limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);
@@ -520,17 +525,14 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);
 });
 
-test('tray bars draw the billing window for a billing-only provider instead of two empty bars', () => {
-  // renderBarsIcon used to unconditionally draw session+weekly, painting two
-  // empty tracks for a Grok-only selection. It must now branch: session/weekly
-  // when present, else the single billing bar on the top track.
+test('tray bars draw the resolved primary window on top and preserve an empty lower track', () => {
   const app = readRendererFile('app.js');
   const renderBarsIcon = functionBody(app, 'renderBarsIcon', 'renderAllSessionsIcon');
 
-  assert.match(renderBarsIcon, /w\.kind === 'billing'/);
-  assert.match(renderBarsIcon, /if \(session \|\| weekly\)/);
-  assert.match(renderBarsIcon, /} else if \(billing\)/);
-  assert.match(renderBarsIcon, /drawBar\(layout\.barsStartY, Number\(billing\.remainingPercent\)\)/);
+  assert.match(renderBarsIcon, /primaryWindow\?\.remainingPercent/);
+  assert.match(renderBarsIcon, /secondaryWindow\?\.remainingPercent/);
+  assert.equal((renderBarsIcon.match(/drawBar\(/g) || []).length, 3);
+  assert.doesNotMatch(renderBarsIcon, /\.find\(\(w\) => w\.kind/);
 });
 
 test('DeepSeek main Limits row uses a balance meter without since-tracking copy', () => {
