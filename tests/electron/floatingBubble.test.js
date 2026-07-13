@@ -93,6 +93,10 @@ test('normalizeInitialRendererViewState restores a persisted last-used view', ()
     normalizeInitialRendererViewState({ period: 'month', breakdown: 'trends' }),
     { period: 'month', breakdown: 'trends' }
   );
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'allTime', breakdown: 'project' }),
+    { period: 'allTime', breakdown: 'project' }
+  );
   // A bogus saved snapshot collapses onto the provided fallback rather than the
   // hard default, so a partial/corrupt value can't wipe the live state.
   assert.deepEqual(
@@ -380,6 +384,7 @@ test('floating bubble collapsed styles fill the mini window with app glass styli
   assert.match(boot, /floatingBubbleSide/);
   assert.match(boot, /suppressInitialNumberAnimation/);
   assert.match(boot, /__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__/);
+  assert.match(boot, /\['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'\]\.includes\(breakdown\)/);
   assert.match(boot, /document\.documentElement\.classList\.add/);
   assert.match(css, /html\.floating-bubble-collapsed-left,\s*body\.floating-bubble-collapsed-left/);
   assert.match(css, /html\.floating-bubble-collapsed-right,\s*body\.floating-bubble-collapsed-right/);

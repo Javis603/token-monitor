@@ -288,6 +288,7 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.match(cssRule(css, '.view-switcher-disclosure'), /flex:\s*0 0 24px/);
   assert.match(cssRule(css, '.view-switcher-menu'), /position:\s*absolute/);
   assert.match(cssRule(css, '.view-switcher-menu'), /width:\s*100%/);
+  assert.match(cssRule(css, '.view-switcher-menu'), /max-height:\s*min\(280px, calc\(100vh - 84px\)\)/);
   assert.match(cssRule(css, '.view-switcher-menu'), /transform-origin:\s*left bottom/);
   assert.match(cssRule(css, '.view-switcher-menu'), /transition:[\s\S]*opacity 190ms/);
   assert.match(cssRule(css, '.view-switcher-menu'), /visibility 0s linear 0s/);
@@ -307,4 +308,23 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.doesNotMatch(css, /@media \(max-width: 280px\)[\s\S]*\.view-switcher-current > \.view-switcher-icon/);
   assert.match(cssRule(css, '.view-switcher-icon'), /flex:\s*0 0 auto/);
   assert.doesNotMatch(css, /\.view-dock/);
+});
+
+test('Projects view separates visibility from metadata collection', () => {
+  const app = readRendererFile('app.js');
+  assert.match(app, /state\.projectSettingsExpanded = false/);
+  assert.match(app, /id === 'project' && !projectsEnabled/);
+  assert.match(app, /projectSettingsContainer/);
+  assert.match(app, /function renderProjectSettingsList/);
+  assert.match(app, /settings\.views\.enableProjects/);
+  assert.match(app, /function setProjectsEnabled/);
+  assert.match(app, /saveSettings\(\{ projectsEnabled: false \}\)/);
+  assert.match(app, /hidden\.delete\('project'\)/);
+  assert.match(app, /function onProjectVisibilityToggle/);
+});
+
+test('project rows use a fuller icon without changing the navigation icon', () => {
+  const css = readRendererFile('styles.css');
+  assert.match(css, /\.view-icon-project\s*\{[^}]*icons\/views\/project\.svg/);
+  assert.match(css, /\.row-icon-project\s*\{[^}]*icons\/views\/project-row\.svg/);
 });

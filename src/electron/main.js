@@ -218,6 +218,7 @@ function defaultSettings() {
     hiddenViews: defaultViewDisplayPreferences().hiddenViews,
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
+    projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
@@ -1338,6 +1339,9 @@ function readSettings() {
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
+    if (saved.projectsEnabled !== undefined) {
+      merged.projectsEnabled = parseBoolean(saved.projectsEnabled, true);
+    }
     if (saved.sessionUsageArchiveEnabled !== undefined) {
       merged.sessionUsageArchiveEnabled = parseBoolean(saved.sessionUsageArchiveEnabled, true);
     }
@@ -1728,6 +1732,7 @@ function startSyncCollector() {
     agentRuntime: 'electron-widget',
     intervalMs: collectorIntervalMs(),
     historyEnabled: settings.historyEnabled !== false,
+    projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
     watchDebounceMs: 1500,
@@ -1785,6 +1790,7 @@ function startHostCollector() {
     agentRuntime: 'electron-widget',
     intervalMs: collectorIntervalMs(),
     historyEnabled: settings.historyEnabled !== false,
+    projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
     watchDebounceMs: 1500,
@@ -2015,6 +2021,7 @@ function startLocalCollector() {
     agentRuntime: 'electron-widget',
     intervalMs: collectorIntervalMs(),
     historyEnabled: settings.historyEnabled !== false,
+    projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
     watchDebounceMs: 1500,
@@ -3253,6 +3260,7 @@ app.whenReady().then(() => {
     const previousLimitProviders = settings.limitProviders;
     const previousLimitsRefreshMs = settings.limitsRefreshMs;
     const previousHistoryEnabled = settings.historyEnabled;
+    const previousProjectsEnabled = settings.projectsEnabled;
     const previousSessionUsageArchiveEnabled = settings.sessionUsageArchiveEnabled;
     const previousHistoryIntervalMs = settings.historyIntervalMs;
     const previousWslScanEnabled = settings.wslScanEnabled;
@@ -3336,6 +3344,7 @@ app.whenReady().then(() => {
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
+      projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
@@ -3419,6 +3428,7 @@ app.whenReady().then(() => {
       settings.limitProviders !== previousLimitProviders ||
       settings.limitsRefreshMs !== previousLimitsRefreshMs ||
       settings.historyEnabled !== previousHistoryEnabled ||
+      settings.projectsEnabled !== previousProjectsEnabled ||
       settings.sessionUsageArchiveEnabled !== previousSessionUsageArchiveEnabled ||
       settings.historyIntervalMs !== previousHistoryIntervalMs ||
       settings.wslScanEnabled !== previousWslScanEnabled ||

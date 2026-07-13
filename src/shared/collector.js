@@ -526,6 +526,7 @@ async function collectUsageOnce(options) {
   // tokscale binary resolution, which is genuinely platform-bound).
   const platformValue = options.platform || process.platform;
   const normalizedClients = normalizeClientsCsv(clients);
+  const projectsEnabled = options.projectsEnabled !== false;
   // tokscale doesn't know about Proma yet — filter it out of the subprocess
   // calls so --client doesn't reject an unknown value. Proma is parsed
   // separately below and merged back in.
@@ -567,7 +568,7 @@ async function collectUsageOnce(options) {
       if (tokscaleClients) {
         const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
         today = extractUsageFromTokscale(todayJson);
-        applySessionTimestamps({ today }, options.homeDir || os.homedir());
+        if (projectsEnabled) applySessionTimestamps({ today }, options.homeDir || os.homedir());
       }
       // The persisted anchor contains every Windows-side client, including
       // locally parsed Proma. Include its fresh today usage before deriving
@@ -580,16 +581,16 @@ async function collectUsageOnce(options) {
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
       today = extractUsageFromTokscale(todayJson);
-      applySessionTimestamps({ today }, options.homeDir || os.homedir());
+      if (projectsEnabled) applySessionTimestamps({ today }, options.homeDir || os.homedir());
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
       const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
       month = extractUsageFromTokscale(monthJson);
-      applySessionTimestamps({ today, month }, options.homeDir || os.homedir());
+      if (projectsEnabled) applySessionTimestamps({ today, month }, options.homeDir || os.homedir());
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
-    applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
+    if (projectsEnabled) applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
     if (promaPeriods && !anchorUsed) {
       today = mergePeriods(today, promaPeriods.today);
       month = mergePeriods(month, promaPeriods.month);
@@ -626,7 +627,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: (periods, home) => applySessionTimestamps(periods, home)
+        decoratePeriods: projectsEnabled ? (periods, home) => applySessionTimestamps(periods, home) : undefined
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -646,7 +647,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: (periods, home) => applySessionTimestamps(periods, home)
+        decoratePeriods: projectsEnabled ? (periods, home) => applySessionTimestamps(periods, home) : undefined
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;

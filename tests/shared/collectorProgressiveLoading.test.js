@@ -86,6 +86,27 @@ test('progressive previews include opaque project attribution', async () => {
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 
+test('disabling project tracking skips local metadata attribution', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-progress-project-disabled-'));
+  try {
+    const transcriptDir = path.join(home, '.claude', 'projects', 'repo');
+    fs.mkdirSync(transcriptDir, { recursive: true });
+    fs.writeFileSync(path.join(transcriptDir, 's1.jsonl'), `${JSON.stringify({ cwd: '/work/private-repo' })}\n`);
+    const summary = await collectUsageOnce({
+      clients: 'claude', allTimeSince: '2025-01-01', deviceId: 'dev1', homeDir: home,
+      projectsEnabled: false, limitsEnabled: false, historyEnabled: false,
+      runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 's1', model: 'm', input: 1 }] }),
+      collectWslUsage: async (options) => {
+        assert.equal(options.decoratePeriods, undefined);
+        return { bundle: emptyWslBundle(), detected: [] };
+      }
+    });
+    const session = summary.today.sessions['claude:s1'];
+    assert.equal(session.projectId, '');
+    assert.equal(session.projectLabel, '');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
 test('progressive loading skips onProgress on anchored ticks', async () => {
   calls = 0;
   const partials = [];

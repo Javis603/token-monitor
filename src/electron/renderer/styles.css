@@ -3041,7 +3041,7 @@ html.is-windows .limit-live-badge {
   bottom: calc(100% + 6px);
   display: grid;
   width: 100%;
-  max-height: min(264px, calc(100vh - 84px));
+  max-height: min(280px, calc(100vh - 84px));
   gap: 2px;
   padding: 4px;
   overflow: hidden auto;
@@ -3121,7 +3121,7 @@ html.is-windows .limit-live-badge {
 .view-icon-project { -webkit-mask-image: url("icons/views/project.svg"); mask-image: url("icons/views/project.svg"); }
 .view-icon-session { -webkit-mask-image: url("icons/views/session.svg"); mask-image: url("icons/views/session.svg"); }
 
-.row-icon-project { -webkit-mask-image: url("icons/views/project.svg"); mask-image: url("icons/views/project.svg"); }
+.row-icon-project { -webkit-mask-image: url("icons/views/project-row.svg"); mask-image: url("icons/views/project-row.svg"); }
 .view-icon-limits { -webkit-mask-image: url("icons/views/limits.svg"); mask-image: url("icons/views/limits.svg"); }
 .view-icon-trends { -webkit-mask-image: url("icons/views/trends.svg"); mask-image: url("icons/views/trends.svg"); }
 .mode-button { width: auto; max-width: 52%; min-width: 0; height: 30px; padding: 0 10px; overflow: hidden; color: var(--muted); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
@@ -3518,6 +3518,14 @@ html.is-windows .limit-live-badge {
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
   text-align: right;
+}
+.project-tool-breakdown { gap: 5px; }
+.project-tool-row { align-items: center; }
+.project-tool-mark {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
 }
 
 .custom-pricing-form {
