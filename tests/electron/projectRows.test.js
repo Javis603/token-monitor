@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { clientGradient, projectName, projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
+const { clientGradient, projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
 
 test('projectRowsForPeriod merges sessions by workspace and sorts by cost', () => {
   const rows = projectRowsForPeriod({ sessions: {
@@ -37,9 +37,11 @@ test('projectRowsForPeriod safely aggregates client ids inherited by Object.prot
   assert.equal(rows[0].accordionRows[0].value, 10);
 });
 
-test('projectName supports Windows and POSIX paths', () => {
-  assert.equal(projectName('C:\\Code\\token-monitor'), 'token-monitor');
-  assert.equal(projectName('/work/token-monitor/'), 'token-monitor');
-  assert.equal(projectName('C:\\'), 'C:\\');
-  assert.equal(projectName('/'), '/');
+test('projectRowsForPeriod labels unattributed tool usage', () => {
+  const rows = projectRowsForPeriod({ sessions: {
+    a: { projectId: 'sha256:a', projectLabel: 'client-a', totalTokens: 10, costUsd: 1 }
+  } }, { unknownClientLabel: 'Unknown tool' });
+  assert.deepEqual(rows[0].accordionRows, [
+    { key: 'unknown', name: 'Unknown tool', value: 10, percent: 100, color: '#73bdf5' }
+  ]);
 });

@@ -99,6 +99,15 @@ maybe('readSessionMeta returns an empty map when sqlite is unavailable', () => {
   assert.strictEqual(meta.size, 0);
 });
 
+maybe('readSessionMeta honors a custom OPENCODE_DB path', () => {
+  const file = fixture();
+  const meta = ocs.readSessionMeta(['s1'], {
+    sqlite,
+    env: { OPENCODE_DB: file, XDG_DATA_HOME: '/ignored' }
+  });
+  assert.equal(meta.get('s1').title, 'Greeting');
+});
+
 maybe('readSessionMetaForHome discovers stable and channel databases inside that home', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ocsess-home-'));
   tmpDirs.push(home);

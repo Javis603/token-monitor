@@ -334,7 +334,9 @@ function projectIdentity(value) {
   const normalized = normalizeProjectPath(value);
   if (!normalized) return {};
   const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
-  const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : normalized.split('/').pop();
+  let displayPath = String(value || '').trim().replace(/\\/g, '/');
+  if (!root) displayPath = displayPath.replace(/\/+$/, '');
+  const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : displayPath.split('/').pop();
   return { projectId: hashKey('project', normalized), projectLabel: label };
 }
 
@@ -361,13 +363,15 @@ function sessionRefsForPeriods(periods) {
 
 function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const refs = sessionRefsForPeriods(periods);
+  const metadata = deps.metadataCache || new Map();
+  const resolvedSessionKeys = deps.resolvedSessionKeys || new Set(metadata.keys());
   const byClient = new Map();
   for (const ref of refs.values()) {
+    if (resolvedSessionKeys.has(`${ref.client}:${ref.sessionId}`)) continue;
     if (!byClient.has(ref.client)) byClient.set(ref.client, new Set());
     byClient.get(ref.client).add(ref.sessionId);
   }
 
-  const metadata = new Map();
   const applyFile = (client, sessionId, filePath) => {
     const startedAt = timestampFromSessionId(sessionId);
     const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
@@ -377,7 +381,9 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   // OpenCode has no transcript file — its timestamps come from the opencode.db `session` table.
   const opencodeIds = byClient.get('opencode') || new Set();
   if (opencodeIds.size > 0) {
-    const readOpencodeMeta = deps.readOpencodeMeta || ((ids) => opencodeSession.readSessionMetaForHome(ids, home));
+    const readOpencodeMeta = deps.readOpencodeMeta || (deps.scopedHome
+      ? (ids) => opencodeSession.readSessionMetaForHome(ids, home, deps.opencodeDeps)
+      : (ids) => opencodeSession.readSessionMeta(ids, deps.opencodeDeps));
     for (const [sessionId, meta] of readOpencodeMeta(opencodeIds)) {
       const startedAt = meta.startedAt || '';
       const lastUsedAt = meta.lastUsedAt || startedAt;
@@ -400,10 +406,12 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
 
   for (const ref of refs.values()) {
     const key = `${ref.client}:${ref.sessionId}`;
+    if (resolvedSessionKeys.has(key)) continue;
     if (metadata.has(key)) continue;
     const timestamp = timestampFromSessionId(ref.sessionId);
     if (timestamp) metadata.set(key, { startedAt: timestamp, lastUsedAt: timestamp });
   }
+  for (const ref of refs.values()) resolvedSessionKeys.add(`${ref.client}:${ref.sessionId}`);
 
   return metadata;
 }
@@ -527,6 +535,16 @@ async function collectUsageOnce(options) {
   const platformValue = options.platform || process.platform;
   const normalizedClients = normalizeClientsCsv(clients);
   const projectsEnabled = options.projectsEnabled !== false;
+  const localSessionMetadataDeps = {
+    ...(options.sessionMetadataDeps || {}),
+    metadataCache: new Map(),
+    resolvedSessionKeys: new Set()
+  };
+  const decorateLocalPeriods = (periods) => applySessionTimestamps(
+    periods,
+    options.homeDir || os.homedir(),
+    localSessionMetadataDeps
+  );
   // tokscale doesn't know about Proma yet — filter it out of the subprocess
   // calls so --client doesn't reject an unknown value. Proma is parsed
   // separately below and merged back in.
@@ -568,7 +586,6 @@ async function collectUsageOnce(options) {
       if (tokscaleClients) {
         const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
         today = extractUsageFromTokscale(todayJson);
-        if (projectsEnabled) applySessionTimestamps({ today }, options.homeDir || os.homedir());
       }
       // The persisted anchor contains every Windows-side client, including
       // locally parsed Proma. Include its fresh today usage before deriving
@@ -581,16 +598,16 @@ async function collectUsageOnce(options) {
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
       today = extractUsageFromTokscale(todayJson);
-      if (projectsEnabled) applySessionTimestamps({ today }, options.homeDir || os.homedir());
+      if (projectsEnabled && typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
       const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
       month = extractUsageFromTokscale(monthJson);
-      if (projectsEnabled) applySessionTimestamps({ today, month }, options.homeDir || os.homedir());
+      if (projectsEnabled && typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
-    if (projectsEnabled) applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
+    if (projectsEnabled) decorateLocalPeriods({ today, month, allTime });
     if (promaPeriods && !anchorUsed) {
       today = mergePeriods(today, promaPeriods.today);
       month = mergePeriods(month, promaPeriods.month);
@@ -627,7 +644,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: projectsEnabled ? (periods, home) => applySessionTimestamps(periods, home) : undefined
+        decoratePeriods: projectsEnabled ? (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true }) : undefined
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -647,7 +664,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: projectsEnabled ? (periods, home) => applySessionTimestamps(periods, home) : undefined
+        decoratePeriods: projectsEnabled ? (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true }) : undefined
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;

@@ -43,7 +43,11 @@ test('opaque project identity survives normalization while raw paths are discard
 });
 
 test('projectIdentity canonicalizes Windows paths and preserves root labels', () => {
-  assert.deepEqual(projectIdentity('C:\\Code\\App\\'), projectIdentity('c:/code/app'));
+  const cased = projectIdentity('C:\\Code\\App\\');
+  const lower = projectIdentity('c:/code/app');
+  assert.equal(cased.projectId, lower.projectId);
+  assert.equal(cased.projectLabel, 'App');
+  assert.equal(lower.projectLabel, 'app');
   assert.equal(projectIdentity('C:\\').projectLabel, 'C:\\');
   assert.equal(projectIdentity('/').projectLabel, '/');
 });

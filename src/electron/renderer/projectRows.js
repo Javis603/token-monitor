@@ -5,13 +5,6 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorProjectRows = api;
 })(typeof window !== 'undefined' ? window : null, function createProjectRowsApi() {
-  function projectName(projectPath) {
-    const raw = String(projectPath || '').trim();
-    if (raw === '/' || /^[a-z]:[\\/]$/i.test(raw)) return raw === '/' ? '/' : `${raw[0].toUpperCase()}:\\`;
-    const clean = raw.replace(/[\\/]+$/, '');
-    return clean.split(/[\\/]/).pop() || clean;
-  }
-
   function clientGradient(clients, colorFor, fallbackColor = '#73bdf5') {
     const entries = Object.entries(clients || {})
       .map(([client, value]) => ({ client, value: Math.max(0, Number(value || 0)) }))
@@ -65,7 +58,7 @@
         .filter(([, value]) => Number(value) > 0)
         .map(([client, value]) => ({
           key: client || 'unknown',
-          name: client ? (options.clientLabels?.[client] || client) : '',
+          name: client ? (options.clientLabels?.[client] || client) : (options.unknownClientLabel || 'Unknown'),
           value: Number(value),
           percent: project.value > 0 ? Number(value) / project.value * 100 : 0,
           color: clientColor(client)
@@ -84,5 +77,5 @@
     }).sort((a, b) => b.cost - a.cost || b.value - a.value || a.name.localeCompare(b.name));
   }
 
-  return { clientGradient, projectName, projectRowsForPeriod };
+  return { clientGradient, projectRowsForPeriod };
 });

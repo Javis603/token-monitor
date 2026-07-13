@@ -1095,7 +1095,13 @@ function sessionRowsForPeriod(period) {
 }
 
 function projectRowsForPeriod(period) {
-  return projectRowsApi.projectRowsForPeriod(period, { clientLabels, clientColors, stableColor, fallbackColors: fallbackModelColors });
+  return projectRowsApi.projectRowsForPeriod(period, {
+    clientLabels,
+    clientColors,
+    stableColor,
+    fallbackColors: fallbackModelColors,
+    unknownClientLabel: t('projects.unknownTool')
+  });
 }
 
 function rowsForPeriod(period) {

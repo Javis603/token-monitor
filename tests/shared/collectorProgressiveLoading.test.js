@@ -86,6 +86,27 @@ test('progressive previews include opaque project attribution', async () => {
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 
+test('progressive project attribution resolves unchanged sessions once per tick', async () => {
+  let metadataReads = 0;
+  const partials = [];
+  const summary = await collectUsageOnce({
+    clients: 'opencode', allTimeSince: '2025-01-01', deviceId: 'dev1',
+    limitsEnabled: false, historyEnabled: false,
+    runTokscale: async () => ({ entries: [{ client: 'opencode', sessionId: 's1', model: 'm', input: 1 }] }),
+    collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [] }),
+    sessionMetadataDeps: {
+      readOpencodeMeta: (ids) => {
+        metadataReads += 1;
+        return new Map([...ids].map((id) => [id, { projectPath: '/work/project' }]));
+      }
+    },
+    onProgress: (value) => partials.push(value)
+  });
+  assert.equal(metadataReads, 1);
+  assert.equal(partials[0].today.sessions['opencode:s1'].projectLabel, 'project');
+  assert.equal(summary.allTime.sessions['opencode:s1'].projectLabel, 'project');
+});
+
 test('disabling project tracking skips local metadata attribution', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-progress-project-disabled-'));
   try {
@@ -125,6 +146,40 @@ test('progressive loading skips onProgress on anchored ticks', async () => {
     onProgress: () => partials.push('called')
   });
   assert.equal(partials.length, 0, 'anchored tick should not fire onProgress');
+});
+
+test('anchored project attribution performs one final metadata pass', async () => {
+  const runTokscale = async () => ({ entries: [{ client: 'opencode', sessionId: 's1', model: 'm', input: 1 }] });
+  const initial = await collectUsageOnce({
+    clients: 'opencode', allTimeSince: '2025-01-01', deviceId: 'dev1',
+    projectsEnabled: false, limitsEnabled: false, historyEnabled: false,
+    runTokscale,
+    collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [] })
+  });
+  let metadataReads = 0;
+  const summary = await collectUsageOnce({
+    clients: 'opencode', allTimeSince: '2025-01-01', deviceId: 'dev1',
+    limitsEnabled: false, historyEnabled: false,
+    todayOnlyAnchor: {
+      dateKey: require('../../src/shared/collector').localTodayKey(),
+      today: initial.today,
+      month: initial.month,
+      allTime: initial.allTime
+    },
+    wslAnchor: emptyWslBundle(),
+    runTokscale,
+    collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [] }),
+    sessionMetadataDeps: {
+      readOpencodeMeta: (ids) => {
+        metadataReads += 1;
+        return new Map([...ids].map((id) => [id, { projectPath: '/work/project' }]));
+      }
+    }
+  });
+  assert.equal(metadataReads, 1);
+  assert.equal(summary.today.sessions['opencode:s1'].projectLabel, 'project');
+  assert.equal(summary.month.sessions['opencode:s1'].projectLabel, 'project');
+  assert.equal(summary.allTime.sessions['opencode:s1'].projectLabel, 'project');
 });
 
 function emptyWslBundle() {
