@@ -15,7 +15,7 @@ function appUpdateInstallSupport({
 } = {}) {
   if (!isPackaged) return { supported: false, reason: 'unpackaged' };
   if (platform === 'darwin') return { supported: true, reason: '' };
-  if (platform === 'win32') return { supported: false, reason: 'windows-signing-pending' };
+  if (platform === 'win32') return { supported: true, reason: '' };
   if (platform === 'linux') {
     return env?.APPIMAGE ? { supported: true, reason: '' } : { supported: false, reason: 'linux-not-appimage' };
   }

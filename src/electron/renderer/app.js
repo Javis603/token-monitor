@@ -650,7 +650,9 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateMessage.textContent = t('settings.appUpdate.downloading', { percent });
     els.appUpdateMessage.classList.remove('error');
   } else if (s.downloaded) {
-    els.appUpdateMessage.textContent = t('settings.appUpdate.ready');
+    els.appUpdateMessage.textContent = state.appInfo?.platform === 'win32'
+      ? t('settings.appUpdate.readyWindowsUnsigned')
+      : t('settings.appUpdate.ready');
     els.appUpdateMessage.classList.remove('error');
   } else if (s.installError) {
     els.appUpdateMessage.textContent = t('settings.appUpdate.installError');
