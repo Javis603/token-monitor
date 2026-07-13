@@ -79,10 +79,58 @@ test('MiMo parsers match the official balance and Token Plan shapes', () => {
   } }, 0);
   assert.equal(detail.label, 'standard');
   assert.equal(detail.expired, false);
+  assert.equal(detail.active, true);
   assert.match(detail.resetsAt, /^2099-01-01T00:00:00/);
   assert.deepEqual(parseMimoProfile({ data: { email: 'user@example.com' } }), {
     email: 'user@example.com'
   });
+});
+
+test('MiMo usage parser selects only the exact month_total_token item', () => {
+  assert.deepEqual(parseMimoPlanUsage({ data: { monthUsage: { items: [
+    { name: 'model_a', used: 10, limit: 100 },
+    { name: 'MONTH_TOTAL_TOKEN', used: 30, limit: 1000 },
+    { name: 'model_b', used: 20, limit: 200 }
+  ] } } }), { used: 30, limit: 1000, usedPercent: 3 });
+});
+
+test('MiMo plan detail requires explicit activation evidence', () => {
+  const now = Date.parse('2026-07-12T00:00:00Z');
+  const defaultPlan = parseMimoPlanDetail({ data: {
+    planCode: 'default', currentPeriodEnd: '2099-01-01 00:00:00'
+  } }, now);
+  assert.equal(defaultPlan.active, false);
+  assert.equal(defaultPlan.expired, false);
+
+  const labelOnly = parseMimoPlanDetail({ data: { planCode: 'standard' } }, now);
+  assert.equal(labelOnly.active, false);
+
+  assert.equal(parseMimoPlanDetail({ data: { status: 'active', planCode: 'standard' } }, now).active, true);
+  assert.equal(parseMimoPlanDetail({ data: {
+    planCode: 'standard', currentPeriodEnd: '2099-01-01 00:00:00'
+  } }, now).active, true);
+});
+
+test('MiMo negative statuses never become active', () => {
+  for (const status of ['not_active', 'not_available', 'not_valid', 'unknown']) {
+    const detail = parseMimoPlanDetail({ data: {
+      status,
+      planCode: 'standard',
+      currentPeriodEnd: '2099-01-01 00:00:00'
+    } });
+    assert.equal(detail.active, false);
+    assert.equal(detail.expired, false);
+  }
+});
+
+test('MiMo boolean inactive flag blocks future-period activation', () => {
+  const detail = parseMimoPlanDetail({ data: {
+    planCode: 'standard',
+    active: false,
+    currentPeriodEnd: '2099-01-01 00:00:00'
+  } });
+  assert.equal(detail.active, false);
+  assert.equal(detail.expired, false);
 });
 
 test('fetchMimoLimits requests fixed official endpoints concurrently with minimized cookies', async () => {
@@ -94,8 +142,8 @@ test('fetchMimoLimits requests fixed official endpoints concurrently with minimi
       assert.equal(init.redirect, 'manual');
       if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '25.51', currency: 'USD' } });
       if (url.endsWith('/userProfile')) return response({ code: 0, data: { email: 'user@example.com' } });
-      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: { planCode: 'standard', expired: false } });
-      return response({ code: 0, data: { monthUsage: { items: [{ used: 10, limit: 100, percent: 0.1 }] } } });
+      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: { planCode: 'standard', currentPeriodEnd: '2099-01-01 00:00:00', expired: false } });
+      return response({ code: 0, data: { monthUsage: { items: [{ name: 'month_total_token', used: 10, limit: 100, percent: 0.1 }] } } });
     }
   });
   assert.equal(result.length, 1);
@@ -137,6 +185,145 @@ test('fetchMimoLimits does not synthesize a Token Plan from zero-valued no-plan 
   assert.equal(provider.balance.planLimit, null);
   assert.equal(provider.balance.planPercent, null);
   assert.equal(provider.balance.planStatus, null);
+});
+
+test('fetchMimoLimits does not activate a default plan with positive quota', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url) => {
+      if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '9.73', currency: 'CNY' } });
+      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: {
+        planCode: 'default', status: 'active', currentPeriodEnd: '2099-01-01 00:00:00'
+      } });
+      if (url.endsWith('/tokenPlan/usage')) return response({ code: 0, data: {
+        monthUsage: { items: [{ name: 'month_total_token', used: 1000, limit: 1000, percent: 1 }] }
+      } });
+      return response({ code: 0, data: {} });
+    }
+  });
+  assert.equal(provider.windows.length, 0);
+  assert.equal(provider.balance.planUsed, null);
+  assert.equal(provider.balance.planLimit, null);
+  assert.equal(provider.balance.planPercent, null);
+  assert.equal(provider.balance.planStatus, null);
+  assert.equal(provider.accountLabel, '');
+});
+
+test('MiMo no-plan code takes priority over active status', () => {
+  const detail = parseMimoPlanDetail({ data: {
+    planCode: 'default',
+    status: 'active',
+    currentPeriodEnd: '2099-01-01 00:00:00'
+  } });
+  assert.equal(detail.active, false);
+  assert.equal(detail.expired, false);
+});
+
+test('fetchMimoLimits does not infer a Token Plan from quota without detail evidence', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url) => {
+      if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '9.73', currency: 'CNY' } });
+      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: {} });
+      if (url.endsWith('/tokenPlan/usage')) return response({ code: 0, data: {
+        monthUsage: { items: [{ name: 'month_total_token', used: 0, limit: 1000, percent: 0 }] }
+      } });
+      return response({ code: 0, data: {} });
+    }
+  });
+  assert.equal(provider.windows.length, 0);
+});
+
+test('fetchMimoLimits activates an explicitly active Token Plan', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url) => {
+      if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '9.73', currency: 'CNY' } });
+      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: {
+        status: 'active', planCode: 'standard'
+      } });
+      if (url.endsWith('/tokenPlan/usage')) return response({ code: 0, data: {
+        monthUsage: { items: [{ name: 'month_total_token', used: 100, limit: 1000, percent: 0.1 }] }
+      } });
+      return response({ code: 0, data: {} });
+    }
+  });
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].remainingPercent, 90);
+  assert.equal(provider.balance.planUsed, 100);
+  assert.equal(provider.balance.planLimit, 1000);
+});
+
+test('fetchMimoLimits keeps an explicitly active exhausted plan at zero remaining', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url) => {
+      if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '9.73', currency: 'CNY' } });
+      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: {
+        status: 'subscribed', planCode: 'standard'
+      } });
+      if (url.endsWith('/tokenPlan/usage')) return response({ code: 0, data: {
+        monthUsage: { items: [{ name: 'month_total_token', used: 1000, limit: 1000, percent: 1 }] }
+      } });
+      return response({ code: 0, data: {} });
+    }
+  });
+  assert.equal(provider.windows[0].remaining, 0);
+  assert.equal(provider.windows[0].remainingPercent, 0);
+});
+
+test('fetchMimoLimits keeps expired Token Plan behavior', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url) => {
+      if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '9.73', currency: 'CNY' } });
+      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: {
+        planCode: 'standard', currentPeriodEnd: '2020-01-01 00:00:00'
+      } });
+      if (url.endsWith('/tokenPlan/usage')) return response({ code: 0, data: {
+        monthUsage: { items: [{ name: 'month_total_token', used: 1000, limit: 1000, percent: 1 }] }
+      } });
+      return response({ code: 0, data: {} });
+    }
+  });
+  assert.equal(provider.windows.length, 0);
+  assert.equal(provider.balance.planStatus, 'expired');
+});
+
+test('MiMo no-plan code never becomes expired', () => {
+  const detail = parseMimoPlanDetail({ data: {
+    planCode: 'default',
+    status: 'expired',
+    currentPeriodEnd: '2020-01-01 00:00:00'
+  } });
+  assert.equal(detail.active, false);
+  assert.equal(detail.expired, false);
+});
+
+test('MiMo no-plan status fields override a historical plan label', () => {
+  for (const field of ['status', 'state', 'subscriptionStatus']) {
+    const detail = parseMimoPlanDetail({ data: {
+      planCode: 'standard',
+      [field]: 'default',
+      currentPeriodEnd: '2020-01-01 00:00:00'
+    } });
+    assert.equal(detail.active, false);
+    assert.equal(detail.expired, false);
+  }
+});
+
+test('MiMo usage parser returns empty quota when total item is absent', () => {
+  assert.deepEqual(parseMimoPlanUsage({ data: { monthUsage: {
+    percent: 0.5,
+    items: [
+      { name: 'model_a', used: 10, limit: 100 },
+      { name: 'model_b', used: 20, limit: 200 }
+    ]
+  } } }), { used: null, limit: null, usedPercent: null });
+});
+
+test('MiMo usage parser preserves direct month quota compatibility', () => {
+  assert.deepEqual(parseMimoPlanUsage({ data: { monthUsage: {
+    used: 20,
+    limit: 200,
+    percent: 0.1,
+    items: []
+  } } }), { used: 20, limit: 200, usedPercent: 10 });
 });
 
 test('fetchMimoLimits rejects a successful-looking response without a balance', async () => {

@@ -220,6 +220,90 @@ test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance'
   ]);
 });
 
+test('MiMo balance without plan data does not synthesize a Token Plan meter', () => {
+  const rows = homeLimitAccountsForProviders({
+    providers: [{
+      provider: 'mimo',
+      accountKey: 'mimo-no-plan',
+      status: 'ok',
+      windows: [],
+      balance: {
+        amount: 9.61,
+        currency: 'CNY',
+        planStatus: null,
+        planUsed: null,
+        planLimit: null,
+        planPercent: null
+      }
+    }],
+    providerOptions: [{ id: 'mimo', label: 'MiMo' }],
+    enabledProviderIds: ['mimo'],
+    colors: { mimo: '#5daeea' },
+    limit: 5
+  });
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].windows.map((window) => window.kind), ['balance']);
+  assert.equal(rows[0].windows.some((window) => window.kind === 'billing'), false);
+  assert.equal(rows[0].windows[0].amount, 9.61);
+});
+
+test('MiMo empty plan values do not synthesize a Token Plan meter', () => {
+  const rows = homeLimitAccounts([
+    {
+      key: 'mimo-empty-plan',
+      providerId: 'mimo',
+      name: 'MiMo',
+      windows: [],
+      balance: {
+        amount: 4.83,
+        currency: 'CNY',
+        planUsed: '',
+        planLimit: '',
+        planPercent: ''
+      }
+    }
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].windows.map((window) => window.kind), ['balance']);
+});
+
+test('MiMo active unused plan keeps a real 100 percent remaining meter', () => {
+  const rows = homeLimitAccounts([
+    {
+      key: 'mimo-active-plan',
+      providerId: 'mimo',
+      name: 'MiMo',
+      windows: [],
+      balance: {
+        amount: 9.61,
+        currency: 'CNY',
+        planUsed: 0,
+        planLimit: 1000,
+        planPercent: 0
+      }
+    }
+  ]);
+
+  assert.equal(rows.length, 1);
+  const billing = rows[0].windows.find((window) => window.kind === 'billing');
+  assert.ok(billing);
+  assert.equal(billing.remainingPercent, 100);
+});
+
+test('home limit windows ignore missing percentage values', () => {
+  const rows = homeLimitAccounts([
+    {
+      key: 'missing-meter',
+      providerId: 'mimo',
+      windows: [{ kind: 'billing', usedPercent: null, remainingPercent: null }]
+    }
+  ]);
+
+  assert.deepEqual(rows, []);
+});
+
 test('homeModelRows returns one-line token shares without cost fields', () => {
   const rows = homeModelRows([
     { name: 'claude-opus-4-8', value: 34_000_000, cost: 21.96, color: '#cc7c5e' },

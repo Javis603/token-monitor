@@ -14,9 +14,22 @@ const MIMO_COOKIE_NAMES = new Set([
   'api-platform_slh'
 ]);
 const MIMO_REQUIRED_COOKIE_NAMES = new Set(['api-platform_serviceToken', 'userId']);
+const MIMO_NO_PLAN_CODES = new Set([
+  'default',
+  'none',
+  'no_plan',
+  'not_subscribed',
+  'unsubscribed'
+]);
+const MIMO_ACTIVE_STATUSES = new Set(['active', 'subscribed']);
+const MIMO_EXPIRED_STATUSES = new Set(['expired', 'ended']);
 
 function cleanText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizePlanValue(value) {
+  return cleanText(value).toLowerCase().replace(/[\s-]+/g, '_');
 }
 
 function cookiePairs(value) {
@@ -93,12 +106,56 @@ function parseMimoProfile(body) {
 
 function parseMimoPlanDetail(body, now = Date.now()) {
   const data = unwrapApiBody(body);
+  const label = cleanText(
+    data.planCode
+    ?? data.plan_code
+    ?? data.planName
+    ?? data.plan_name
+  );
+  const normalizedLabel = normalizePlanValue(label);
+  const rawStatus = normalizePlanValue(
+    data.planStatus
+    ?? data.plan_status
+    ?? data.subscriptionStatus
+    ?? data.subscription_status
+    ?? data.status
+    ?? data.state
+  );
   const rawEnd = data.currentPeriodEnd ?? data.current_period_end;
-  const parsedEnd = rawEnd ? Date.parse(String(rawEnd).replace(' ', 'T') + (/Z$|[+-]\d\d:?\d\d$/.test(String(rawEnd)) ? '' : 'Z')) : NaN;
-  const expired = data.expired === true || (Number.isFinite(parsedEnd) && parsedEnd <= now);
+  const parsedEnd = rawEnd
+    ? Date.parse(
+      String(rawEnd).replace(' ', 'T')
+      + (/Z$|[+-]\d\d:?\d\d$/.test(String(rawEnd)) ? '' : 'Z')
+    )
+    : NaN;
+  const hasFuturePeriod = Number.isFinite(parsedEnd) && parsedEnd > now;
+  const hasExpiredPeriod = Number.isFinite(parsedEnd) && parsedEnd <= now;
+  const isKnownNoPlan = MIMO_NO_PLAN_CODES.has(normalizedLabel)
+    || MIMO_NO_PLAN_CODES.has(rawStatus);
+  const hasRealPlanIdentity = Boolean(normalizedLabel) && !MIMO_NO_PLAN_CODES.has(normalizedLabel);
+  const hasExplicitActiveFlag = typeof data.active === 'boolean'
+    || typeof data.isActive === 'boolean';
+  const explicitActive = MIMO_ACTIVE_STATUSES.has(rawStatus)
+    || data.active === true
+    || data.isActive === true;
+  const explicitExpired = MIMO_EXPIRED_STATUSES.has(rawStatus)
+    || data.expired === true
+    || String(data.expired).toLowerCase() === 'true';
+  const hasExplicitStatus = Boolean(rawStatus) || hasExplicitActiveFlag;
+  const expired = !isKnownNoPlan && (
+    explicitExpired
+    || (hasRealPlanIdentity && hasExpiredPeriod)
+  );
+  const active = !isKnownNoPlan
+    && !expired
+    && (
+      explicitActive
+      || (!hasExplicitStatus && hasRealPlanIdentity && hasFuturePeriod)
+    );
   return {
-    label: cleanText(data.planCode ?? data.plan_code ?? data.planName ?? data.plan_name),
+    label,
     resetsAt: Number.isFinite(parsedEnd) ? new Date(parsedEnd).toISOString() : null,
+    active,
     expired
   };
 }
@@ -107,10 +164,16 @@ function parseMimoPlanUsage(body) {
   const data = unwrapApiBody(body);
   const month = data.monthUsage ?? data.month_usage ?? {};
   const items = Array.isArray(month.items) ? month.items : [];
-  const item = items.find((entry) => cleanText(entry?.name) === 'month_total_token') || items[0] || month;
+  const totalItem = items.find(
+    (entry) => cleanText(entry?.name).toLowerCase() === 'month_total_token'
+  );
+  if (items.length > 0 && !totalItem) {
+    return { used: null, limit: null, usedPercent: null };
+  }
+  const item = totalItem || month;
   const used = numberFrom(item.used);
   const limit = numberFrom(item.limit);
-  const usedPercent = normalizePercent(item.percent ?? month.percent, used, limit);
+  const usedPercent = normalizePercent(item.percent, used, limit);
   return { used, limit, usedPercent };
 }
 
@@ -188,7 +251,7 @@ async function fetchMimoAccount(account, deps = {}) {
     const detail = parseMimoPlanDetail(detailBody, (deps.now || Date.now)());
     const usage = parseMimoPlanUsage(usageBody);
     const windows = [];
-    const hasTokenPlan = !detail.expired && usage.limit !== null && usage.limit > 0;
+    const hasTokenPlan = detail.active && usage.limit !== null && usage.limit > 0;
     const hasExpiredTokenPlan = detail.expired && Boolean(detail.label || (usage.limit !== null && usage.limit > 0));
     if (hasTokenPlan) {
       windows.push({
@@ -210,7 +273,9 @@ async function fetchMimoAccount(account, deps = {}) {
       accountKey: cleanText(account.accountKey) || mimoAccountKey(cookieHeader),
       accountName: '',
       accountEmail,
-      accountLabel: detail.label || (windows.length ? 'Token Plan' : ''),
+      accountLabel: hasTokenPlan || hasExpiredTokenPlan
+        ? (detail.label || 'Token Plan')
+        : '',
       windows,
       balance: {
         ...balance,
