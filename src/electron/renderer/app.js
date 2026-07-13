@@ -274,15 +274,28 @@ Object.assign(els, {
   sessionDetailHead: document.getElementById('session-detail-head')
 });
 
-document.addEventListener('click', (e) => {
-  const row = e.target.closest('.row.has-accordion');
-  if (row) {
-    const isExpanded = row.classList.contains('expanded');
-    document.querySelectorAll('.row.expanded').forEach(r => r.classList.remove('expanded'));
-    if (!isExpanded) {
-      row.classList.add('expanded');
-    }
+function toggleAccordionRow(row) {
+  const isExpanded = row.classList.contains('expanded');
+  document.querySelectorAll('.row.expanded').forEach((other) => {
+    other.classList.remove('expanded');
+    other.setAttribute('aria-expanded', 'false');
+  });
+  if (!isExpanded) {
+    row.classList.add('expanded');
+    row.setAttribute('aria-expanded', 'true');
   }
+}
+
+document.addEventListener('click', (event) => {
+  const row = event.target.closest('.row.has-accordion');
+  if (row) toggleAccordionRow(row);
+});
+
+document.addEventListener('keydown', (event) => {
+  const row = event.target.closest('.row.has-accordion');
+  if (!row || (event.key !== 'Enter' && event.key !== ' ')) return;
+  event.preventDefault();
+  toggleAccordionRow(row);
 });
 
 document.addEventListener('pointerdown', (event) => {
@@ -958,6 +971,15 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
     accordionInner.replaceChildren();
     row.classList.remove('has-accordion');
     row.classList.remove('expanded');
+  }
+  if (row.classList.contains('has-accordion')) {
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-expanded', String(row.classList.contains('expanded')));
+  } else {
+    row.removeAttribute('tabindex');
+    row.removeAttribute('role');
+    row.removeAttribute('aria-expanded');
   }
 }
 

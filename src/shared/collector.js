@@ -940,10 +940,10 @@ function wslPeriodsForPreview(wslAnchor, anchorDateKey, todayKey) {
   };
 }
 
-function configFingerprint(clientsCsv, allTimeSince) {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}`;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}`;
 }
 
 // Force a full scan at least this often even when the anchor is otherwise
@@ -986,7 +986,7 @@ function startCollector(options) {
   try {
     const saved = readJson(anchorPath, null);
     if (saved && saved.dateKey === localTodayKey()) {
-      const fp = configFingerprint(clients, allTimeSince);
+      const fp = configFingerprint(clients, allTimeSince, options.projectsEnabled);
       if (saved.configFingerprint === fp) {
         anchor = { dateKey: saved.dateKey, today: saved.today, month: saved.month, allTime: saved.allTime };
         // Don't restore a persisted WSL snapshot when WSL scanning is now off —
@@ -1097,7 +1097,7 @@ function startCollector(options) {
             allTime: anchor.allTime,
             wslBundle: wslAnchor,
             wslStatus: wslStatusAnchor,
-            configFingerprint: configFingerprint(clients, allTimeSince),
+            configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
             fullScanAt: new Date().toISOString()
           }));
         } catch (_) {}

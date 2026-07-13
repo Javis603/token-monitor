@@ -27,6 +27,14 @@ test('clientGradient softly blends tool-share boundaries while preserving endpoi
   const gradient = clientGradient({ codex: 75, claude: 25 }, (client) => client === 'codex' ? '#111111' : '#eeeeee');
   assert.equal(gradient, 'linear-gradient(90deg, #111111 0%, #111111 73.50%, #eeeeee 76.50%, #eeeeee 100%)');
   assert.equal(clientGradient({ codex: 10 }, () => '#123456'), '#123456');
+  assert.equal(clientGradient({ unknown: 10 }, () => undefined, '#abcdef'), '#abcdef');
+});
+
+test('projectRowsForPeriod safely aggregates client ids inherited by Object.prototype', () => {
+  const rows = projectRowsForPeriod({ sessions: {
+    a: { client: 'constructor', projectId: 'sha256:a', projectLabel: 'client-a', totalTokens: 10, costUsd: 1 }
+  } }, { clientColors: { constructor: '#123456' } });
+  assert.equal(rows[0].accordionRows[0].value, 10);
 });
 
 test('projectName supports Windows and POSIX paths', () => {

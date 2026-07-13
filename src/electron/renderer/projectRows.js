@@ -19,7 +19,7 @@
       .sort((a, b) => b.value - a.value || a.client.localeCompare(b.client));
     if (entries.length === 0) return fallbackColor;
     const total = entries.reduce((sum, entry) => sum + entry.value, 0);
-    const colors = entries.map((entry) => typeof colorFor === 'function' ? colorFor(entry.client) : fallbackColor);
+    const colors = entries.map((entry) => (typeof colorFor === 'function' ? colorFor(entry.client) : '') || fallbackColor);
     if (entries.length === 1) return colors[0];
     const stops = [`${colors[0]} 0%`];
     let cumulative = 0;
@@ -41,7 +41,7 @@
       const key = String(session?.projectId || '').trim();
       const label = String(session?.projectLabel || '').trim();
       if (!key || !label) continue;
-      if (!projects.has(key)) projects.set(key, { key, name: label, value: 0, cost: 0, clients: new Set(), clientTokens: {} });
+      if (!projects.has(key)) projects.set(key, { key, name: label, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
       const project = projects.get(key);
       const sessionTokens = Math.max(0, Number(session.totalTokens || 0));
       project.value += sessionTokens;
@@ -53,6 +53,12 @@
     }
     return Array.from(projects.values()).map((project) => {
       const color = options.stableColor ? options.stableColor(project.key, options.fallbackColors || ['#73bdf5']) : '#73bdf5';
+      const clientColor = (client) => {
+        const candidate = client && Object.prototype.hasOwnProperty.call(options.clientColors || {}, client)
+          ? options.clientColors[client]
+          : '';
+        return typeof candidate === 'string' && candidate ? candidate : color;
+      };
       const attributedTokens = Object.values(project.clientTokens).reduce((sum, value) => sum + Number(value || 0), 0);
       if (project.value > attributedTokens) project.clientTokens[''] = project.value - attributedTokens;
       const accordionRows = Object.entries(project.clientTokens)
@@ -62,7 +68,7 @@
           name: client ? (options.clientLabels?.[client] || client) : '',
           value: Number(value),
           percent: project.value > 0 ? Number(value) / project.value * 100 : 0,
-          color: client ? (options.clientColors?.[client] || color) : color
+          color: clientColor(client)
         }))
         .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
       return {
@@ -71,7 +77,7 @@
         subtitle: '',
         detail: '',
         color,
-        barBackground: clientGradient(project.clientTokens, (client) => client ? options.clientColors?.[client] : color, color),
+        barBackground: clientGradient(project.clientTokens, clientColor, color),
         accordionRows,
         stale: false
       };

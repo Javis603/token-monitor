@@ -328,3 +328,12 @@ test('project rows use a fuller icon without changing the navigation icon', () =
   assert.match(css, /\.view-icon-project\s*\{[^}]*icons\/views\/project\.svg/);
   assert.match(css, /\.row-icon-project\s*\{[^}]*icons\/views\/project-row\.svg/);
 });
+
+test('row accordions expose keyboard and aria interactions', () => {
+  const app = readRendererFile('app.js');
+  assert.match(app, /function toggleAccordionRow/);
+  assert.match(app, /event\.key !== 'Enter' && event\.key !== ' '/);
+  assert.match(app, /row\.tabIndex = 0/);
+  assert.match(app, /row\.setAttribute\('role', 'button'\)/);
+  assert.match(app, /row\.setAttribute\('aria-expanded'/);
+});
