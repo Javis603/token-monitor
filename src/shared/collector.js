@@ -364,10 +364,13 @@ function sessionRefsForPeriods(periods) {
 function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const refs = sessionRefsForPeriods(periods);
   const metadata = deps.metadataCache || new Map();
-  const resolvedSessionKeys = deps.resolvedSessionKeys || new Set(metadata.keys());
+  const resolvedSessionKeys = deps.resolvedSessionKeys || new Set();
+  const attemptedSessionKeys = deps.attemptedSessionKeys || new Set();
   const byClient = new Map();
   for (const ref of refs.values()) {
-    if (resolvedSessionKeys.has(`${ref.client}:${ref.sessionId}`)) continue;
+    const key = `${ref.client}:${ref.sessionId}`;
+    if (resolvedSessionKeys.has(key)) continue;
+    if (!deps.retryMisses && attemptedSessionKeys.has(key)) continue;
     if (!byClient.has(ref.client)) byClient.set(ref.client, new Set());
     byClient.get(ref.client).add(ref.sessionId);
   }
@@ -375,7 +378,10 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const applyFile = (client, sessionId, filePath) => {
     const startedAt = timestampFromSessionId(sessionId);
     const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
-    metadata.set(`${client}:${sessionId}`, { startedAt, lastUsedAt, ...projectIdentity(projectPathFromJsonl(filePath)) });
+    const identity = projectIdentity(projectPathFromJsonl(filePath));
+    const key = `${client}:${sessionId}`;
+    metadata.set(key, { startedAt, lastUsedAt, ...identity });
+    if (identity.projectId) resolvedSessionKeys.add(key);
   };
 
   // OpenCode has no transcript file — its timestamps come from the opencode.db `session` table.
@@ -387,7 +393,10 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     for (const [sessionId, meta] of readOpencodeMeta(opencodeIds)) {
       const startedAt = meta.startedAt || '';
       const lastUsedAt = meta.lastUsedAt || startedAt;
-      if (startedAt || lastUsedAt || meta.projectPath) metadata.set(`opencode:${sessionId}`, { startedAt, lastUsedAt, ...projectIdentity(meta.projectPath) });
+      const identity = projectIdentity(meta.projectPath);
+      const key = `opencode:${sessionId}`;
+      if (startedAt || lastUsedAt || identity.projectId) metadata.set(key, { startedAt, lastUsedAt, ...identity });
+      if (identity.projectId) resolvedSessionKeys.add(key);
     }
   }
 
@@ -410,8 +419,9 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     if (metadata.has(key)) continue;
     const timestamp = timestampFromSessionId(ref.sessionId);
     if (timestamp) metadata.set(key, { startedAt: timestamp, lastUsedAt: timestamp });
+    if (!['claude', 'codex', 'opencode'].includes(ref.client)) resolvedSessionKeys.add(key);
   }
-  for (const ref of refs.values()) resolvedSessionKeys.add(`${ref.client}:${ref.sessionId}`);
+  for (const ref of refs.values()) attemptedSessionKeys.add(`${ref.client}:${ref.sessionId}`);
 
   return metadata;
 }
@@ -538,12 +548,13 @@ async function collectUsageOnce(options) {
   const localSessionMetadataDeps = {
     ...(options.sessionMetadataDeps || {}),
     metadataCache: new Map(),
-    resolvedSessionKeys: new Set()
+    resolvedSessionKeys: new Set(),
+    attemptedSessionKeys: new Set()
   };
-  const decorateLocalPeriods = (periods) => applySessionTimestamps(
+  const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionTimestamps(
     periods,
     options.homeDir || os.homedir(),
-    localSessionMetadataDeps
+    { ...localSessionMetadataDeps, retryMisses }
   );
   // tokscale doesn't know about Proma yet — filter it out of the subprocess
   // calls so --client doesn't reject an unknown value. Proma is parsed
@@ -607,7 +618,7 @@ async function collectUsageOnce(options) {
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
-    if (projectsEnabled) decorateLocalPeriods({ today, month, allTime });
+    if (projectsEnabled) decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     if (promaPeriods && !anchorUsed) {
       today = mergePeriods(today, promaPeriods.today);
       month = mergePeriods(month, promaPeriods.month);

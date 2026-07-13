@@ -107,6 +107,29 @@ test('progressive project attribution resolves unchanged sessions once per tick'
   assert.equal(summary.allTime.sessions['opencode:s1'].projectLabel, 'project');
 });
 
+test('final project attribution retries a transient progressive miss', async () => {
+  let metadataReads = 0;
+  const partials = [];
+  const summary = await collectUsageOnce({
+    clients: 'opencode', allTimeSince: '2025-01-01', deviceId: 'dev1',
+    limitsEnabled: false, historyEnabled: false,
+    runTokscale: async () => ({ entries: [{ client: 'opencode', sessionId: 's1', model: 'm', input: 1 }] }),
+    collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [] }),
+    sessionMetadataDeps: {
+      readOpencodeMeta: (ids) => {
+        metadataReads += 1;
+        if (metadataReads === 1) return new Map();
+        return new Map([...ids].map((id) => [id, { projectPath: '/work/project' }]));
+      }
+    },
+    onProgress: (value) => partials.push(value.today.sessions['opencode:s1'].projectId)
+  });
+  assert.equal(metadataReads, 2);
+  assert.equal(partials[0], '');
+  assert.equal(summary.today.sessions['opencode:s1'].projectLabel, 'project');
+  assert.equal(summary.allTime.sessions['opencode:s1'].projectLabel, 'project');
+});
+
 test('disabling project tracking skips local metadata attribution', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-progress-project-disabled-'));
   try {
