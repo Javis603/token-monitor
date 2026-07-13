@@ -286,6 +286,10 @@ function toggleAccordionRow(row) {
   }
 }
 
+function setAttributeIfChanged(element, name, value) {
+  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+}
+
 document.addEventListener('click', (event) => {
   const row = event.target.closest('.row.has-accordion');
   if (row) toggleAccordionRow(row);
@@ -915,29 +919,33 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
 
   const accordionInner = row.querySelector('.row-accordion-inner');
   if (Array.isArray(accordionRows) && accordionRows.length > 0) {
-    const content = document.createElement('div');
-    content.className = 'accordion-content project-tool-breakdown';
-    for (const tool of accordionRows) {
-      const item = document.createElement('div');
-      item.className = 'accordion-row project-tool-row';
-      const label = document.createElement('div');
-      label.className = 'accordion-label';
-      const mark = document.createElement('span');
-      mark.className = 'project-tool-mark';
-      mark.style.background = tool.color;
-      const text = document.createElement('span');
-      text.textContent = tool.name;
-      const percent = document.createElement('span');
-      percent.className = 'accordion-pct';
-      percent.textContent = `${Math.round(tool.percent)}%`;
-      label.append(mark, text, percent);
-      const tokens = document.createElement('span');
-      tokens.className = 'accordion-value';
-      tokens.textContent = formatNumber(tool.value);
-      item.append(label, tokens);
-      content.append(item);
+    const accordionSignature = JSON.stringify(accordionRows.map((tool) => [tool.name, tool.value, Math.round(tool.percent), tool.color]));
+    if (accordionInner.dataset.signature !== accordionSignature) {
+      const content = document.createElement('div');
+      content.className = 'accordion-content project-tool-breakdown';
+      for (const tool of accordionRows) {
+        const item = document.createElement('div');
+        item.className = 'accordion-row project-tool-row';
+        const label = document.createElement('div');
+        label.className = 'accordion-label';
+        const mark = document.createElement('span');
+        mark.className = 'project-tool-mark';
+        mark.style.background = tool.color;
+        const text = document.createElement('span');
+        text.textContent = tool.name;
+        const percent = document.createElement('span');
+        percent.className = 'accordion-pct';
+        percent.textContent = `${Math.round(tool.percent)}%`;
+        label.append(mark, text, percent);
+        const tokens = document.createElement('span');
+        tokens.className = 'accordion-value';
+        tokens.textContent = formatNumber(tool.value);
+        item.append(label, tokens);
+        content.append(item);
+      }
+      accordionInner.replaceChildren(content);
+      accordionInner.dataset.signature = accordionSignature;
     }
-    accordionInner.replaceChildren(content);
     row.classList.add('has-accordion');
     if (isExpanded) row.classList.add('expanded');
   } else if ((cacheReadTokens !== undefined || outputTokens !== undefined) && value > 0 && kind !== 'session') {
@@ -949,6 +957,7 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
     const hitPct = inputTokens > 0 ? Math.round((cacheRead / inputTokens) * 100) : 0;
     const missPct = inputTokens > 0 ? 100 - hitPct : 0;
     
+    delete accordionInner.dataset.signature;
     accordionInner.innerHTML = `
       <div class="accordion-content">
         <div class="accordion-row">
@@ -969,19 +978,20 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
     if (isExpanded) row.classList.add('expanded');
   } else {
     accordionInner.replaceChildren();
+    delete accordionInner.dataset.signature;
     row.classList.remove('has-accordion');
     row.classList.remove('expanded');
   }
   if (row.classList.contains('has-accordion')) {
-    row.tabIndex = 0;
-    row.setAttribute('role', 'button');
-    row.setAttribute('aria-expanded', String(row.classList.contains('expanded')));
-    row.setAttribute('aria-label', `${name}, ${t('dashboard.stat.totalTokens')}: ${formatNumber(value)}`);
+    if (row.tabIndex !== 0) row.tabIndex = 0;
+    setAttributeIfChanged(row, 'role', 'button');
+    setAttributeIfChanged(row, 'aria-expanded', String(row.classList.contains('expanded')));
+    setAttributeIfChanged(row, 'aria-label', `${name}, ${t('dashboard.stat.totalTokens')}: ${formatNumber(value)}, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`);
   } else {
-    row.removeAttribute('tabindex');
-    row.removeAttribute('role');
-    row.removeAttribute('aria-expanded');
-    row.removeAttribute('aria-label');
+    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
+    if (row.hasAttribute('role')) row.removeAttribute('role');
+    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
+    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
   }
 }
 

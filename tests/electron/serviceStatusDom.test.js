@@ -332,10 +332,19 @@ test('project rows use a fuller icon without changing the navigation icon', () =
 test('row accordions expose keyboard and aria interactions', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function toggleAccordionRow/);
+  assert.match(app, /function setAttributeIfChanged/);
   assert.match(app, /event\.key !== 'Enter' && event\.key !== ' '/);
   assert.match(app, /row\.tabIndex = 0/);
-  assert.match(app, /row\.setAttribute\('role', 'button'\)/);
-  assert.match(app, /row\.setAttribute\('aria-expanded'/);
-  assert.match(app, /row\.setAttribute\('aria-label', `\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
+  assert.match(app, /setAttributeIfChanged\(row, 'role', 'button'\)/);
+  assert.match(app, /setAttributeIfChanged\(row, 'aria-expanded'/);
+  assert.match(app, /setAttributeIfChanged\(row, 'aria-label', `\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
+  assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{formatCost\(cost \|\| 0\)\}/);
   assert.match(app, /row\.removeAttribute\('aria-label'\)/);
+});
+
+test('project accordions retain unchanged DOM between live refreshes', () => {
+  const app = readRendererFile('app.js');
+  assert.match(app, /accordionSignature = JSON\.stringify/);
+  assert.match(app, /accordionInner\.dataset\.signature !== accordionSignature/);
+  assert.match(app, /accordionInner\.dataset\.signature = accordionSignature/);
 });
