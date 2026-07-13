@@ -6588,12 +6588,40 @@ function loadImage(src) {
   });
 }
 
-function imageToPngDataUrl(img, size) {
+function providerImageToPngDataUrl(img, size) {
+  const { trayProviderBadgeLayout } = window.TokenMonitorTrayProviderIcons;
+  const layout = trayProviderBadgeLayout(size);
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = layout.iconSize;
+  canvas.height = layout.iconSize;
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, size, size);
+  ctx.drawImage(img, 0, 0, layout.iconSize, layout.iconSize);
+
+  const { x, y, badgeSize, radius, borderWidth } = layout;
+  roundedRectPath(ctx, x, y, badgeSize, badgeSize, radius);
+  ctx.fillStyle = '#1688f8';
+  ctx.fill();
+  ctx.lineWidth = borderWidth;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  // Draw the project's sigma mark as geometry so it remains crisp without a font dependency.
+  const left = x + badgeSize * 0.29;
+  const right = x + badgeSize * 0.72;
+  const top = y + badgeSize * 0.27;
+  const middle = y + badgeSize * 0.5;
+  const bottom = y + badgeSize * 0.73;
+  ctx.beginPath();
+  ctx.moveTo(right, top);
+  ctx.lineTo(left, top);
+  ctx.lineTo(x + badgeSize * 0.56, middle);
+  ctx.lineTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.lineWidth = Math.max(2, badgeSize * 0.13);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
   return canvas.toDataURL('image/png');
 }
 
@@ -6605,7 +6633,7 @@ async function deliverTrayProviderIcons() {
     try {
       const img = await loadImage(path);
       trayProviderImages[id] = img;
-      icons[id] = imageToPngDataUrl(img, 44);
+      icons[id] = providerImageToPngDataUrl(img, 44);
     } catch (_) { /* skip missing */ }
   }
   if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
