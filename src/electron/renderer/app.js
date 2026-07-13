@@ -1768,8 +1768,16 @@ function renderProviderWindows(provider, color) {
   if (provider.provider === 'codex') {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
-    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
-    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
+    if (session) {
+      const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
+      if (!weekly) sessionNode.classList.add('limit-window-wide');
+      windows.append(sessionNode);
+    }
+    if (weekly) {
+      const weeklyNode = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
+      if (!session) weeklyNode.classList.add('limit-window-wide');
+      windows.append(weeklyNode);
+    }
     const resetNode = codexResetCreditsNode(provider.resetCredits);
     if (resetNode) windows.append(resetNode);
   } else if (provider.provider === 'cursor') {
