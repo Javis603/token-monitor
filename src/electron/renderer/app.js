@@ -1005,17 +1005,28 @@ function applyHomeListMark(mark, iconKind, color) {
   mark.style.background = color;
 }
 
-function renderRows(rows) {
-  if (rows.length === 0) {
+function renderRows(rows, { showProjectIncompleteHint = false } = {}) {
+  if (rows.length === 0 && !showProjectIncompleteHint) {
     els.breakdown.replaceChildren();
     state.rowSignature = '';
     return;
   }
   const max = Math.max(1, ...rows.map((row) => row.value));
-  const signature = `${state.breakdown}\n${rows.map((row) => row.key).join('\n')}`;
+  const hintText = showProjectIncompleteHint ? t('projects.incomplete') : '';
+  const hintKey = '__projects-incomplete__';
+  const signature = `${state.breakdown}\n${hintText}\n${rows.map((row) => row.key).join('\n')}`;
   const existing = new Map(Array.from(els.breakdown.children).map((child) => [child.dataset.key, child]));
   if (signature !== state.rowSignature) {
-    els.breakdown.replaceChildren(...rows.map((row) => existing.get(row.key) || rowTemplate(row)));
+    const nodes = rows.map((row) => existing.get(row.key) || rowTemplate(row));
+    if (showProjectIncompleteHint) {
+      const hint = existing.get(hintKey) || document.createElement('p');
+      hint.className = 'project-incomplete-hint';
+      hint.dataset.key = hintKey;
+      hint.setAttribute('role', 'status');
+      hint.textContent = hintText;
+      nodes.unshift(hint);
+    }
+    els.breakdown.replaceChildren(...nodes);
     state.rowSignature = signature;
   }
   const current = new Map(Array.from(els.breakdown.children).map((child) => [child.dataset.key, child]));
@@ -3504,7 +3515,10 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
     const rows = rowsForPeriod(period);
-    renderRows(rows);
+    renderRows(rows, {
+      showProjectIncompleteHint: state.breakdown === 'project'
+        && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)
+    });
   }
   
   renderFloatingBubbleContent();

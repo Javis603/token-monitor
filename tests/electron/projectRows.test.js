@@ -2,7 +2,15 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { clientGradient, projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
+const { clientGradient, projectBreakdownIncomplete, projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
+
+test('projectBreakdownIncomplete only flags the all-time project breakdown', () => {
+  const stats = { projectsIncomplete: true };
+  assert.equal(projectBreakdownIncomplete(stats, 'allTime'), true);
+  assert.equal(projectBreakdownIncomplete(stats, 'today'), false);
+  assert.equal(projectBreakdownIncomplete(stats, 'month'), false);
+  assert.equal(projectBreakdownIncomplete({ projectsIncomplete: false }, 'allTime'), false);
+});
 
 test('projectRowsForPeriod merges sessions by workspace and sorts by cost', () => {
   const rows = projectRowsForPeriod({ sessions: {

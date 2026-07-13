@@ -1668,6 +1668,14 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .breakdown.hidden { display: none; }
 .breakdown::-webkit-scrollbar { width: 0; height: 0; }
+.project-incomplete-hint {
+  margin: 0;
+  padding: 0 2px 1px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
 
 .home-panel {
   position: relative;

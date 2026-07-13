@@ -180,6 +180,19 @@ test('aggregateDevices merges project rollups and exposes incomplete-device diag
   });
 });
 
+test('stale project omissions remain incomplete while stale all-time usage is aggregated', () => {
+  const aggregate = aggregateDevices([{
+    deviceId: 'stale',
+    receivedAt: '2026-07-13T00:00:00.000Z',
+    allTimeProjectsOmitted: true,
+    allTime: { totalTokens: 100 }
+  }], 10 * 60 * 1000, Date.parse('2026-07-13T01:00:00.000Z'));
+
+  assert.equal(aggregate.devices[0].stale, true);
+  assert.equal(aggregate.periods.allTime.totalTokens, 100);
+  assert.equal(aggregate.projectsIncomplete, true);
+});
+
 test('mergeDeviceRecord keeps widget Copilot limits when a headless agent reports no local token', () => {
   const existing = recordWithLimits({
     agentRuntime: 'electron-widget',

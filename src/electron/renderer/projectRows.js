@@ -18,6 +18,10 @@
     return a < b ? a : b;
   }
 
+  function projectBreakdownIncomplete(stats, period) {
+    return period === 'allTime' && stats?.projectsIncomplete === true;
+  }
+
   function clientGradient(clients, colorFor, fallbackColor = '#73bdf5') {
     const entries = Object.entries(clients || {})
       .map(([client, value]) => ({ client, value: Math.max(0, Number(value || 0)) }))
@@ -114,5 +118,5 @@
     }).sort((a, b) => b.cost - a.cost || b.value - a.value || a.name.localeCompare(b.name));
   }
 
-  return { canonicalProjectKey, clientGradient, projectRowsForPeriod };
+  return { canonicalProjectKey, clientGradient, projectBreakdownIncomplete, projectRowsForPeriod };
 });

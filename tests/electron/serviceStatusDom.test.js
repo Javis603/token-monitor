@@ -323,6 +323,16 @@ test('Projects view separates visibility from metadata collection', () => {
   assert.match(app, /function onProjectVisibilityToggle/);
 });
 
+test('Projects TOTAL view explains an incomplete cross-device breakdown', () => {
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+  assert.match(app, /projectRowsApi\.projectBreakdownIncomplete\(state\.stats, state\.period\)/);
+  assert.match(app, /hint\.className = 'project-incomplete-hint'/);
+  assert.match(app, /hint\.setAttribute\('role', 'status'\)/);
+  assert.match(app, /t\('projects\.incomplete'\)/);
+  assert.match(cssRule(css, '.project-incomplete-hint'), /color:\s*var\(--muted\)/);
+});
+
 test('project rows use a fuller icon without changing the navigation icon', () => {
   const css = readRendererFile('styles.css');
   assert.match(css, /\.view-icon-project\s*\{[^}]*icons\/views\/project\.svg/);
