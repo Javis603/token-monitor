@@ -370,7 +370,7 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44\)/);
   assert.match(maybeUpdateBarsIcon, /\{ \[mode\]: dataUrl \|\| null \}/);
   assert.match(updateTrayDisplay, /mode === 'limitsAllSessions'/);
-  assert.match(updateTrayDisplay, /const barsImageMode = .*?!limitText && providerTrayIcons\[mode\]/);
+  assert.match(updateTrayDisplay, /const barsImageMode = isBarsTrayIconMode\(mode\) && !limitText && providerTrayIcons\[mode\]/);
   assert.match(updateTrayDisplay, /Boolean\(limitText\)/);
   assert.match(updateTrayDisplay, /const limitText = formatTrayText/);
   assert.match(updateTrayDisplay, /trayImageMode[\s\S]*?\? '' : limitText/);

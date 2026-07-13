@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-const { formatTrayText, isGeneratedTrayIconMode, pickWorstLimit } = require('../shared/trayText');
+const { formatTrayText, isBarsTrayIconMode, isGeneratedTrayIconMode, pickWorstLimit } = require('../shared/trayText');
 const { maskEmailAddress } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
@@ -248,6 +248,7 @@ module.exports = {
   buildTrayMenuTemplate,
   createTray,
   formatTrayText,
+  isBarsTrayIconMode,
   pickUsageTrayIconId,
   pickWorstLimit,
   popoverBounds,

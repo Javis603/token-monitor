@@ -101,6 +101,7 @@ const {
   buildTrayIcon,
   createTray,
   formatTrayText,
+  isBarsTrayIconMode,
   pickUsageTrayIconId,
   popoverBounds,
   reconcileCodexAccountSelection,
@@ -2000,7 +2001,7 @@ function updateTrayDisplay() {
     limitProviders: settings?.limitProviders,
     showLimitUsed: settings?.showLimitUsed
   });
-  const barsImageMode = (mode === 'bars' || mode === 'barsSession' || mode === 'barsWeekly' || mode === 'barsAllSessions') && !limitText && providerTrayIcons[mode];
+  const barsImageMode = isBarsTrayIconMode(mode) && !limitText && providerTrayIcons[mode];
   // A renderer-generated icon is cached in the main process. Only reuse it
   // while the current stats still have quota text; otherwise it can outlive
   // the provider data that generated it.
