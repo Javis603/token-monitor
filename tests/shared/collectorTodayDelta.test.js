@@ -18,7 +18,7 @@ function freshCollector() {
   return require(collectorPath);
 }
 
-function recordingSpawn(calls, tokens = 50) {
+function recordingSpawn(calls, tokens = 50, sessionMeta = {}) {
   return (_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
@@ -28,7 +28,15 @@ function recordingSpawn(calls, tokens = 50) {
     child.kill = () => {};
     setImmediate(() => {
       child.stdout.emit('data', Buffer.from(JSON.stringify({
-        entries: [{ client: 'claude', sessionId: 's1', model: 'claude-opus-4-8', input: tokens, output: 0, cost: tokens / 100 }]
+        entries: [{
+          client: 'claude',
+          sessionId: 's1',
+          model: 'claude-opus-4-8',
+          input: tokens,
+          output: 0,
+          cost: tokens / 100,
+          ...sessionMeta
+        }]
       })));
       child.emit('close', 0);
     });
@@ -89,7 +97,10 @@ test('an anchored watch tick does not re-read session files that only appear in 
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = recordingSpawn(calls, 50);
+  childProcess.spawn = recordingSpawn(calls, 50, {
+    startedAt: '2026-07-13T08:00:00.000Z',
+    lastUsedAt: '2026-07-13T08:30:00.000Z'
+  });
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-home-'));
   const realOpen = fs.openSync;
   try {
@@ -130,6 +141,18 @@ test('an anchored watch tick does not re-read session files that only appear in 
     assert.ok(s1Opens > 0, "today's own session must still be decorated on a watch tick");
     assert.equal(s2Opens, 0, 'a session only in the derived periods must not be re-read on a watch tick');
     assert.equal(summary.month.sessions['claude:s2'].projectLabel, 'two');
+    const todayS1 = summary.today.sessions['claude:s1'];
+    assert.ok(todayS1.projectId, "today's new session must be decorated");
+    assert.equal(todayS1.projectLabel, 'one');
+    assert.equal(todayS1.startedAt, '2026-07-13T08:00:00.000Z');
+    assert.equal(todayS1.lastUsedAt, '2026-07-13T10:00:00.000Z');
+    for (const period of [summary.month, summary.allTime]) {
+      const derivedS1 = period.sessions['claude:s1'];
+      assert.equal(derivedS1.projectId, todayS1.projectId);
+      assert.equal(derivedS1.projectLabel, todayS1.projectLabel);
+      assert.equal(derivedS1.startedAt, todayS1.startedAt);
+      assert.equal(derivedS1.lastUsedAt, todayS1.lastUsedAt);
+    }
   } finally {
     fs.openSync = realOpen;
     childProcess.spawn = originalSpawn;
