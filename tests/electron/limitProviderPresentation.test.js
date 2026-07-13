@@ -375,6 +375,8 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(updateTrayDisplay, /const limitText = formatTrayText/);
   assert.match(updateTrayDisplay, /trayImageMode[\s\S]*?\? '' : limitText/);
   assert.match(main, /if \(dataUrl === null\) \{[\s\S]*?delete providerTrayIcons\[id\]/);
+  assert.match(main, /if \(shouldUseTemplateTrayIcon\(id\)\) sized\.setTemplateImage\(true\)/);
+  assert.doesNotMatch(main, /process\.platform === 'darwin'\) sized\.setTemplateImage\(true\)/);
 });
 
 test('Grok renders its single Monthly billing window full-width instead of an empty session/weekly pair', () => {

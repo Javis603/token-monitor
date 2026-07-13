@@ -104,7 +104,8 @@ const {
   pickUsageTrayIconId,
   popoverBounds,
   reconcileCodexAccountSelection,
-  sortCodexAccountsForDisplay
+  sortCodexAccountsForDisplay,
+  shouldUseTemplateTrayIcon
 } = require('./tray');
 const {
   macActivationPolicyMode,
@@ -3776,7 +3777,7 @@ app.whenReady().then(() => {
       // Resize by height only; aspect ratio is preserved, so wide bar-style
       // icons keep their width while square provider icons stay 20x20.
       const sized = img.resize({ height: 20, quality: 'best' });
-      if (process.platform === 'darwin') sized.setTemplateImage(true);
+      if (shouldUseTemplateTrayIcon(id)) sized.setTemplateImage(true);
       providerTrayIcons[id] = sized;
     }
     updateTrayDisplay();

@@ -7,6 +7,7 @@ const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png');
+const TEMPLATE_TRAY_ICON_IDS = new Set(['bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'limitsAllSessions']);
 
 function buildTrayIcon(options = {}) {
   const platform = options.platform || process.platform;
@@ -49,6 +50,10 @@ function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = [
   if (!client) return null;
   const available = new Set(availableIconIds);
   return available.has(client) ? client : null;
+}
+
+function shouldUseTemplateTrayIcon(id, platform = process.platform) {
+  return platform === 'darwin' && TEMPLATE_TRAY_ICON_IDS.has(String(id || ''));
 }
 
 function sortCodexAccountsForDisplay(accounts) {
@@ -248,5 +253,6 @@ module.exports = {
   pickWorstLimit,
   popoverBounds,
   reconcileCodexAccountSelection,
+  shouldUseTemplateTrayIcon,
   sortCodexAccountsForDisplay
 };

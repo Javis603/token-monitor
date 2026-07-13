@@ -12,6 +12,7 @@ const {
   formatTrayText,
   reconcileCodexAccountSelection,
   pickUsageTrayIconId,
+  shouldUseTemplateTrayIcon,
   sortCodexAccountsForDisplay
 } = require('../../src/electron/tray');
 const { translate } = require('../../src/electron/renderer/i18n');
@@ -298,6 +299,17 @@ test('usage tray icon returns null when the top client has no available icon', (
     pickUsageTrayIconId({ periods: { today: { clients: { unknown: 20, codex: 10 } } } }, 'tokens', ['codex']),
     null
   );
+});
+
+test('macOS templates generated quota displays but preserves colored provider badges', () => {
+  for (const id of ['bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'limitsAllSessions']) {
+    assert.equal(shouldUseTemplateTrayIcon(id, 'darwin'), true, `${id} should follow the menu bar tint`);
+  }
+  for (const id of ['codex', 'antigravity', 'claude']) {
+    assert.equal(shouldUseTemplateTrayIcon(id, 'darwin'), false, `${id} should preserve its colored badge`);
+  }
+  assert.equal(shouldUseTemplateTrayIcon('bars', 'win32'), false);
+  assert.equal(shouldUseTemplateTrayIcon('bars', 'linux'), false);
 });
 
 test('tray can show the first two configured session quotas as percentages', () => {
