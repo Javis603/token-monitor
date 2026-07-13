@@ -976,10 +976,12 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
     row.setAttribute('aria-expanded', String(row.classList.contains('expanded')));
+    row.setAttribute('aria-label', `${name}, ${t('dashboard.stat.totalTokens')}: ${formatNumber(value)}`);
   } else {
     row.removeAttribute('tabindex');
     row.removeAttribute('role');
     row.removeAttribute('aria-expanded');
+    row.removeAttribute('aria-label');
   }
 }
 

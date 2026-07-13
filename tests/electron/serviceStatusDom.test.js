@@ -336,4 +336,6 @@ test('row accordions expose keyboard and aria interactions', () => {
   assert.match(app, /row\.tabIndex = 0/);
   assert.match(app, /row\.setAttribute\('role', 'button'\)/);
   assert.match(app, /row\.setAttribute\('aria-expanded'/);
+  assert.match(app, /row\.setAttribute\('aria-label', `\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
+  assert.match(app, /row\.removeAttribute\('aria-label'\)/);
 });
