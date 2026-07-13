@@ -1,13 +1,12 @@
 'use strict';
 
 const path = require('node:path');
-const { formatTrayText, pickWorstLimit } = require('../shared/trayText');
+const { formatTrayText, isGeneratedTrayIconMode, pickWorstLimit } = require('../shared/trayText');
 const { maskEmailAddress } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png');
-const TEMPLATE_TRAY_ICON_IDS = new Set(['bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'limitsAllSessions']);
 
 function buildTrayIcon(options = {}) {
   const platform = options.platform || process.platform;
@@ -53,7 +52,7 @@ function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = [
 }
 
 function shouldUseTemplateTrayIcon(id, platform = process.platform) {
-  return platform === 'darwin' && TEMPLATE_TRAY_ICON_IDS.has(String(id || ''));
+  return platform === 'darwin' && isGeneratedTrayIconMode(id);
 }
 
 function sortCodexAccountsForDisplay(accounts) {

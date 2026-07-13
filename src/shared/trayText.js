@@ -9,6 +9,15 @@
   if (root) root.TokenMonitorTrayText = api;
 })(typeof window !== 'undefined' ? window : null, function createTrayText(currency) {
   const { formatCurrencyFromUsd } = currency;
+  const BARS_TRAY_ICON_MODES = new Set(['bars', 'barsSession', 'barsWeekly', 'barsAllSessions']);
+
+  function isBarsTrayIconMode(contentMode) {
+    return BARS_TRAY_ICON_MODES.has(String(contentMode || ''));
+  }
+
+  function isGeneratedTrayIconMode(contentMode) {
+    return contentMode === 'limitsAllSessions' || isBarsTrayIconMode(contentMode);
+  }
 
   function formatCompactNumber(value) {
     const n = Math.round(Number(value) || 0);
@@ -221,7 +230,7 @@
   function formatTrayText(stats, contentMode = 'tokens', currencyCode = 'USD', options = {}) {
     if (contentMode === 'icon') return '';
     if (contentMode === 'limitsAllSessions') return formatConfiguredSessionLimits(stats, options);
-    if (contentMode === 'bars' || contentMode === 'barsSession' || contentMode === 'barsWeekly' || contentMode === 'barsAllSessions') {
+    if (isBarsTrayIconMode(contentMode)) {
       // Icon carries all the info; only show text if we have no limit data at all.
       if (pickWorstLimit(stats)) return '';
     }
@@ -239,11 +248,13 @@
     compactLimitSelection,
     formatCompactNumber,
     formatConfiguredSessionLimits,
+    formatTrayText,
+    isBarsTrayIconMode,
+    isGeneratedTrayIconMode,
     pickConfiguredLimitProviders,
     pickConfiguredSessionLimits,
     pickLimitProviderByKindPriority,
     pickWorstLimit,
-    pickWorstLimitProvider,
-    formatTrayText
+    pickWorstLimitProvider
   };
 });
