@@ -85,6 +85,59 @@ test('collectUsageOnce with a valid anchor runs a single --today scan and derive
   }
 });
 
+test('an anchored watch tick does not re-read session files that only appear in the derived periods', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls, 50);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-home-'));
+  const realOpen = fs.openSync;
+  try {
+    const dir = path.join(home, '.claude', 'projects', '-p');
+    fs.mkdirSync(dir, { recursive: true });
+    const s1File = path.join(dir, 's1.jsonl');
+    const s2File = path.join(dir, 's2.jsonl');
+    const line = (cwd, ts) => `${JSON.stringify({ cwd, timestamp: ts })}\n`;
+    fs.writeFileSync(s1File, line('/work/one', '2026-07-13T10:00:00.000Z'));
+    fs.writeFileSync(s2File, line('/work/two', '2026-07-13T09:00:00.000Z'));
+
+    const { collectUsageOnce, localTodayKey } = freshCollector();
+    const { emptyPeriod } = require('../../src/shared/usage');
+    // s2 is only in the broader windows, already resolved at the last full scan.
+    const withS2 = (totalTokens) => ({
+      ...emptyPeriod(),
+      totalTokens,
+      clients: { claude: totalTokens },
+      sessions: { 'claude:s2': { client: 'claude', sessionId: 's2', totalTokens, projectId: 'pid2', projectLabel: 'two' } }
+    });
+    const anchor = {
+      dateKey: localTodayKey(),
+      today: { ...emptyPeriod(), totalTokens: 30, clients: { claude: 30 } },
+      month: withS2(100),
+      allTime: withS2(1000)
+    };
+
+    let s1Opens = 0;
+    let s2Opens = 0;
+    fs.openSync = (target, ...rest) => {
+      if (target === s1File) s1Opens += 1;
+      if (target === s2File) s2Opens += 1;
+      return realOpen(target, ...rest);
+    };
+
+    const summary = await collectUsageOnce({ ...baseOptions, homeDir: home, todayOnlyAnchor: anchor });
+
+    assert.ok(s1Opens > 0, "today's own session must still be decorated on a watch tick");
+    assert.equal(s2Opens, 0, 'a session only in the derived periods must not be re-read on a watch tick');
+    assert.equal(summary.month.sessions['claude:s2'].projectLabel, 'two');
+  } finally {
+    fs.openSync = realOpen;
+    childProcess.spawn = originalSpawn;
+    fs.rmSync(home, { recursive: true, force: true });
+    delete require.cache[collectorPath];
+  }
+});
+
 test('collectUsageOnce ignores a stale anchor from a previous day and runs the full scan', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;

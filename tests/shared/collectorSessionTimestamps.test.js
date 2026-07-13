@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const { applySessionTimestamps } = require('../../src/shared/collector');
@@ -67,6 +70,48 @@ test('applySessionTimestamps reuses resolved metadata across progressive periods
   assert.deepEqual(calls, [['s1'], ['s2']]);
   assert.equal(month.sessions['opencode:s1'].projectLabel, 's1');
   assert.equal(month.sessions['opencode:s2'].projectLabel, 's2');
+});
+
+test('applySessionTimestamps does not re-read an unchanged session file on the next tick', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-tick-'));
+  const realOpen = fs.openSync;
+  try {
+    const dir = path.join(home, '.claude', 'projects', '-work-app');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'sess-1.jsonl');
+    fs.writeFileSync(file, `${JSON.stringify({ cwd: '/work/app', timestamp: '2026-07-13T10:00:00.000Z' })}\n`);
+
+    let opens = 0;
+    fs.openSync = (target, ...rest) => { if (target === file) opens += 1; return realOpen(target, ...rest); };
+
+    // Each collector tick rebuilds the per-tick dedup caches, so persistence
+    // must survive a fresh deps object — that is what a real interval tick sees.
+    // applySessionTimestamps mutates the periods object in place.
+    const tick = () => {
+      const periods = { today: { sessions: { 'claude:sess-1': { client: 'claude', sessionId: 'sess-1' } } } };
+      applySessionTimestamps(periods, home, {
+        metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set()
+      });
+      return periods.today.sessions['claude:sess-1'];
+    };
+
+    tick(); // first tick warms the caches
+    opens = 0;
+    const unchanged = tick(); // second tick, file untouched
+    assert.equal(opens, 0, 'an unchanged session file must not be re-read on the next tick');
+    assert.equal(unchanged.projectLabel, 'app');
+    assert.equal(unchanged.lastUsedAt, '2026-07-13T10:00:00.000Z');
+
+    // A grown session (new size/mtime) must invalidate the cache and refresh lastUsedAt.
+    fs.appendFileSync(file, `${JSON.stringify({ cwd: '/work/app', timestamp: '2026-07-13T11:30:00.000Z' })}\n`);
+    opens = 0;
+    const grown = tick();
+    assert.ok(opens > 0, 'a changed session file must be re-read');
+    assert.equal(grown.lastUsedAt, '2026-07-13T11:30:00.000Z');
+  } finally {
+    fs.openSync = realOpen;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('applySessionTimestamps retries a progressive miss in the final pass', () => {

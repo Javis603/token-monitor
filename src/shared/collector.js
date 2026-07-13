@@ -340,14 +340,28 @@ function projectIdentity(value) {
   return { projectId: hashKey('project', normalized), projectLabel: label };
 }
 
+// Keyed by path -> { key: `size:mtimeMs`, value }, mirroring projectPathCache.
+// The tail timestamp only moves when the transcript grows, so a mtime match lets
+// a full-tick decoration skip re-reading every idle session (issue: periodic UI
+// stutter once project tracking made this run on every session each tick).
+const jsonlTimestampCache = new Map();
+
 function lastJsonlTimestamp(filePath) {
+  let stat;
+  try { stat = fs.statSync(filePath); } catch (_) { return ''; }
+  const cacheKey = `${stat.size}:${stat.mtimeMs}`;
+  const cached = jsonlTimestampCache.get(filePath);
+  if (cached?.key === cacheKey) return cached.value;
   const tail = readFileTail(filePath);
   const lines = tail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let value = '';
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const timestamp = timestampFromJsonLine(lines[index]);
-    if (timestamp) return timestamp;
+    if (timestamp) { value = timestamp; break; }
   }
-  try { return fs.statSync(filePath).mtime.toISOString(); } catch (_) { return ''; }
+  if (!value) value = stat.mtime.toISOString();
+  jsonlTimestampCache.set(filePath, { key: cacheKey, value });
+  return value;
 }
 
 function sessionRefsForPeriods(periods) {
@@ -424,6 +438,30 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   for (const ref of refs.values()) attemptedSessionKeys.add(`${ref.client}:${ref.sessionId}`);
 
   return metadata;
+}
+
+// Copy freshly decorated identities/timestamps from `today` onto the same session
+// in the delta-derived periods. Used on watch ticks, where month/allTime are not
+// re-decorated: a session that started today is absent from the anchor, so its
+// project label would otherwise be missing from the broader-period breakdown.
+function propagateTodayProjects(today, periods) {
+  for (const [key, session] of Object.entries(today?.sessions || {})) {
+    if (!session) continue;
+    for (const period of periods) {
+      const target = period?.sessions?.[key];
+      if (!target) continue;
+      if (session.projectId && !target.projectId) {
+        target.projectId = session.projectId;
+        target.projectLabel = session.projectLabel;
+      }
+      if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
+        target.startedAt = session.startedAt;
+      }
+      if (session.lastUsedAt && (!target.lastUsedAt || Date.parse(session.lastUsedAt) > Date.parse(target.lastUsedAt))) {
+        target.lastUsedAt = session.lastUsedAt;
+      }
+    }
+  }
 }
 
 function applySessionTimestamps(periods, home, deps = {}) {
@@ -618,7 +656,20 @@ async function collectUsageOnce(options) {
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
-    if (projectsEnabled) decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
+    if (projectsEnabled) {
+      if (anchorUsed) {
+        // Watch tick: `today` is a fresh scan and must be decorated, but month/
+        // allTime are derived from the last full-scan anchor and already carry each
+        // session's project label + timestamps through applyPeriodDelta. Decorating
+        // them again would re-stat every historical session file every few seconds
+        // (the perceived UI stutter). Decorate only today, then propagate its freshly
+        // resolved identities onto sessions that started today (absent from the anchor).
+        decorateLocalPeriods({ today }, { retryMisses: true });
+        propagateTodayProjects(today, [month, allTime]);
+      } else {
+        decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
+      }
+    }
     if (promaPeriods && !anchorUsed) {
       today = mergePeriods(today, promaPeriods.today);
       month = mergePeriods(month, promaPeriods.month);
