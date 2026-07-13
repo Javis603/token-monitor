@@ -3,7 +3,12 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { syncPayload } = require('../../src/shared/syncPayload');
+const { postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
+
+test('syncPayload preserves nullish inputs', () => {
+  assert.equal(syncPayload(null), null);
+  assert.equal(syncPayload(undefined), undefined);
+});
 
 test('syncPayload bounds uploads by omitting all-time sessions', () => {
   const summary = {
@@ -29,4 +34,63 @@ test('syncPayload bounds uploads by omitting all-time sessions', () => {
   assert.deepEqual(payload.allTime.models, summary.allTime.models);
   assert.deepEqual(payload.history, summary.history);
   assert.equal(summary.allTime.sessions.old.totalTokens, 30);
+});
+
+test('syncPayload strips recomputable projects and keeps bounded all-time projects', () => {
+  const summary = {
+    today: { sessions: { a: { totalTokens: 1 } }, projects: { today: { tokens: 1 } } },
+    month: { sessions: { a: { totalTokens: 1 } }, projects: { month: { tokens: 1 } } },
+    allTime: { sessions: { a: { totalTokens: 1 } }, projects: { total: { label: 'Total', tokens: 1, clients: {} } } }
+  };
+  const payload = syncPayload(summary);
+  assert.equal(Object.hasOwn(payload.today, 'projects'), false);
+  assert.equal(Object.hasOwn(payload.month, 'projects'), false);
+  assert.equal(Object.hasOwn(payload.allTime, 'sessions'), false);
+  assert.equal(payload.allTime.projects.total.tokens, 1);
+  assert.equal(Object.hasOwn(payload, 'allTimeProjectsOmitted'), false);
+  assert.ok(summary.today.projects.today);
+});
+
+test('serializeSyncPayload drops only all-time projects when they exceed the byte budget', () => {
+  const summary = {
+    deviceId: 'dev',
+    today: { totalTokens: 10, sessions: { current: { totalTokens: 10 } } },
+    month: { totalTokens: 20, sessions: { current: { totalTokens: 20 } } },
+    allTime: {
+      totalTokens: 30,
+      sessions: { old: { totalTokens: 30 } },
+      projects: { huge: { label: 'x'.repeat(400), tokens: 30, costUsd: 1, clients: { codex: 30 } } }
+    }
+  };
+  const { payload, bytes } = serializeSyncPayload(summary, { maxBytes: 250 });
+  assert.equal(payload.allTimeProjectsOmitted, true);
+  assert.equal(Object.hasOwn(payload.allTime, 'projects'), false);
+  assert.equal(Object.hasOwn(payload.allTime, 'sessions'), false);
+  assert.deepEqual(payload.today.sessions, summary.today.sessions);
+  assert.deepEqual(payload.month.sessions, summary.month.sessions);
+  assert.equal(payload.allTime.totalTokens, 30);
+  assert.ok(bytes < 400);
+});
+
+test('postSyncPayload retries a legacy 413 once without all-time projects', async () => {
+  const bodies = [];
+  const responses = [
+    { status: 413, ok: false, async arrayBuffer() { return new ArrayBuffer(0); } },
+    { status: 200, ok: true }
+  ];
+  const logs = [];
+  const { response, payload, retried } = await postSyncPayload(async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return responses.shift();
+  }, 'http://hub/api/ingest', {
+    summary: { allTime: { totalTokens: 5, projects: { app: { label: 'App', tokens: 5, clients: {} } } } },
+    logger: (message) => logs.push(message)
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(retried, true);
+  assert.equal(Object.hasOwn(bodies[0].allTime, 'projects'), true);
+  assert.equal(Object.hasOwn(bodies[1].allTime, 'projects'), false);
+  assert.equal(payload.allTimeProjectsOmitted, true);
+  assert.equal(logs.length, 1);
 });

@@ -1,5 +1,7 @@
 ﻿'use strict';
 
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
+
 function corsHeaders(extraHeaders = {}) {
   return {
     'access-control-allow-origin': '*',
@@ -27,7 +29,7 @@ function sendText(res, statusCode, body, contentType = 'text/plain; charset=utf-
   res.end(body);
 }
 
-function readJsonBody(req, maxBytes = 1024 * 256) {
+function readJsonBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let body = '';
     let bytes = 0;
@@ -67,4 +69,4 @@ function isAuthorized(req, expectedSecret) {
   return requestSecret(req) === expectedSecret;
 }
 
-module.exports = { isAuthorized, readJsonBody, sendJson, sendText };
+module.exports = { MAX_JSON_BODY_BYTES, isAuthorized, readJsonBody, sendJson, sendText };

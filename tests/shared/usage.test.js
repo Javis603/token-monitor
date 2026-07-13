@@ -118,7 +118,7 @@ test('aggregateDevices does not let an orphaned stale device id override the cur
 });
 
 test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods', () => {
-  const existing = recordWithLimits();
+  const existing = recordWithLimits({ allTimeProjectsOmitted: true });
   const incoming = {
     deviceId: 'macbook',
     receivedAt: '2026-05-27T00:02:00.000Z',
@@ -133,6 +133,51 @@ test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods
   const merged = mergeDeviceRecord(existing, incoming);
   assert.equal(merged.periods.today.totalTokens, 1);
   assert.equal(merged.limits.providers[0].status, 'unauthorized');
+  assert.equal(merged.allTimeProjectsOmitted, true);
+});
+
+test('normal device updates replace the all-time project omission diagnostic', () => {
+  const existing = recordWithLimits({ allTimeProjectsOmitted: true });
+  const merged = mergeDeviceRecord(existing, {
+    deviceId: 'macbook',
+    updatedAt: '2026-05-27T00:03:00.000Z',
+    allTime: {
+      totalTokens: 10,
+      projects: { app: { label: 'App', tokens: 10, costUsd: 0.1, clients: { codex: 10 } } }
+    }
+  });
+
+  assert.equal(Object.hasOwn(merged, 'allTimeProjectsOmitted'), false);
+  assert.equal(merged.periods.allTime.projects.app.tokens, 10);
+});
+
+test('aggregateDevices merges project rollups and exposes incomplete-device diagnostics', () => {
+  const aggregate = aggregateDevices([
+    {
+      deviceId: 'a',
+      allTimeProjectsOmitted: true,
+      allTime: {
+        totalTokens: 100,
+        projects: { app: { label: 'App', tokens: 60, costUsd: 0.3333333, clients: { codex: 60 } } }
+      }
+    },
+    {
+      deviceId: 'b',
+      allTime: {
+        totalTokens: 200,
+        projects: { APP: { label: 'APP', tokens: 140, costUsd: 0.6666666, clients: { claude: 140 } } }
+      }
+    }
+  ], 60000);
+
+  assert.equal(aggregate.projectsIncomplete, true);
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'a').allTimeProjectsOmitted, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(aggregate.periods.allTime.projects.app)), {
+    label: 'APP',
+    tokens: 200,
+    costUsd: 1,
+    clients: { codex: 60, claude: 140 }
+  });
 });
 
 test('mergeDeviceRecord keeps widget Copilot limits when a headless agent reports no local token', () => {

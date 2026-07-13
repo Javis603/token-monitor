@@ -151,12 +151,12 @@ test('applyPeriodDelta clamps float residue at zero and never mutates its inputs
   const baseMonth = period({ costUsd: 0.1, clients: { claude: 10 }, totalTokens: 10 });
   const anchorToday = period({ costUsd: 0.1 + 1e-15, clients: { claude: 10 }, totalTokens: 10 });
   const freshToday = period();
-  const baseSnapshot = JSON.parse(JSON.stringify(baseMonth));
+  const baseSnapshot = JSON.stringify(baseMonth);
 
   const result = applyPeriodDelta(baseMonth, freshToday, anchorToday);
 
   assert.ok(result.costUsd >= 0);
   assert.equal(result.clients.claude, 0);
-  assert.deepEqual(baseMonth, baseSnapshot);
+  assert.equal(JSON.stringify(baseMonth), baseSnapshot);
   assert.equal(anchorToday.costUsd, 0.1 + 1e-15);
 });

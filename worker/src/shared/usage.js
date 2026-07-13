@@ -107,6 +107,7 @@ function emptyPeriod() {
     modelOutputs: {},
     clientModels: {},
     clientModelCosts: {},
+    projects: Object.create(null),
     sessions: {}
   };
 }
@@ -160,6 +161,83 @@ function normalizeProviderName(value) {
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function canonicalProjectKey(value) {
+  const label = String(value || '').trim().normalize('NFC');
+  return label ? label.toLowerCase().normalize('NFC') : '';
+}
+
+function deterministicProjectLabel(left, right) {
+  const a = String(left || '').trim().normalize('NFC');
+  const b = String(right || '').trim().normalize('NFC');
+  if (!a) return b;
+  if (!b) return a;
+  return a < b ? a : b;
+}
+
+function emptyProject(label = '') {
+  return {
+    label: String(label || '').trim().normalize('NFC'),
+    tokens: 0,
+    costUsd: 0,
+    clients: Object.create(null)
+  };
+}
+
+function addProjectInto(projects, rawKey, source) {
+  if (!source || typeof source !== 'object') return;
+  const label = String(source.label || rawKey || '').trim().normalize('NFC');
+  const key = canonicalProjectKey(label || rawKey);
+  if (!key) return;
+  if (!hasOwn(projects, key)) projects[key] = emptyProject(label || rawKey);
+  const target = projects[key];
+  target.label = deterministicProjectLabel(target.label, label || rawKey);
+  target.tokens += Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
+  target.costUsd += asNumber(source.costUsd ?? source.cost);
+  for (const [client, tokens] of Object.entries(source.clients || {})) {
+    const clientKey = normalizeClientName(client);
+    if (!clientKey) continue;
+    target.clients[clientKey] = (hasOwn(target.clients, clientKey) ? target.clients[clientKey] : 0)
+      + Math.max(0, Math.round(asNumber(tokens)));
+  }
+}
+
+function normalizeProjects(value) {
+  const projects = Object.create(null);
+  if (!value || typeof value !== 'object') return projects;
+  for (const [key, project] of Object.entries(value)) addProjectInto(projects, key, project);
+  return projects;
+}
+
+function projectRollupFromSessions(sessions) {
+  const projects = Object.create(null);
+  for (const session of Object.values(sessions || {})) {
+    const label = String(session?.projectLabel || '').trim().normalize('NFC');
+    const key = canonicalProjectKey(label);
+    if (!key) continue;
+    if (!hasOwn(projects, key)) projects[key] = emptyProject(label);
+    const project = projects[key];
+    project.label = deterministicProjectLabel(project.label, label);
+    const tokens = Math.max(0, Math.round(asNumber(session.totalTokens)));
+    project.tokens += tokens;
+    project.costUsd += asNumber(session.costUsd);
+    const client = normalizeClientName(session.client);
+    if (client && tokens > 0) {
+      project.clients[client] = (hasOwn(project.clients, client) ? project.clients[client] : 0) + tokens;
+    }
+  }
+  return projects;
+}
+
+function applyProjectRollups(summary) {
+  if (!summary || typeof summary !== 'object') return summary;
+  for (const periodName of PERIODS) {
+    const period = summary.periods?.[periodName] || summary[periodName];
+    if (!period || typeof period !== 'object') continue;
+    period.projects = projectRollupFromSessions(period.sessions);
+  }
+  return summary;
 }
 
 function normalizeTrackedClients(value) {
@@ -477,6 +555,9 @@ function normalizePeriod(input) {
       if (session) addSession(period, session);
     }
   }
+  period.projects = hasOwn(input, 'projects')
+    ? normalizeProjects(input.projects)
+    : projectRollupFromSessions(period.sessions);
   return period;
 }
 
@@ -555,6 +636,7 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'trackedClients')) normalized.trackedClients = normalizeTrackedClients(record.trackedClients);
   if (hasOwn(record, 'clientStatus')) normalized.clientStatus = normalizeClientStatus(record.clientStatus);
   if (hasOwn(record, 'wslStatus')) normalized.wslStatus = normalizeWslStatus(record.wslStatus);
+  if (hasOwn(record, 'allTimeProjectsOmitted')) normalized.allTimeProjectsOmitted = record.allTimeProjectsOmitted === true;
   if (hasOwn(record, 'history')) normalized.history = coerceHistory(record.history);
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
@@ -671,6 +753,7 @@ function mergeDeviceRecord(existing, incoming) {
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
     if (hasOwn(normalizedExisting, 'periodWindows')) normalizedIncoming.periodWindows = normalizedExisting.periodWindows;
+    if (hasOwn(normalizedExisting, 'allTimeProjectsOmitted')) normalizedIncoming.allTimeProjectsOmitted = normalizedExisting.allTimeProjectsOmitted;
   }
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
@@ -744,6 +827,7 @@ function addPeriodInto(target, source) {
       target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
     }
   }
+  for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);
   for (const session of Object.values(source.sessions)) addSession(target, session);
   return target;
 }
@@ -779,7 +863,7 @@ function isPeriodExpired(record, periodName, nowMs) {
 }
 
 function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
-  const aggregate = { updatedAt: new Date().toISOString(), periods: {}, devices: [] };
+  const aggregate = { updatedAt: new Date().toISOString(), periods: {}, devices: [], projectsIncomplete: false };
   for (const periodName of PERIODS) aggregate.periods[periodName] = emptyPeriod();
   const now = nowMs;
   for (const record of devices) {
@@ -799,9 +883,11 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       ...(hasOwn(normalized, 'trackedClients') ? { trackedClients: normalized.trackedClients } : {}),
       ...(hasOwn(normalized, 'clientStatus') ? { clientStatus: normalized.clientStatus } : {}),
       ...(hasOwn(normalized, 'wslStatus') ? { wslStatus: normalized.wslStatus } : {}),
+      ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),
       periods: normalized.periods,
       limits: normalized.limits
     });
+    if (normalized.allTimeProjectsOmitted === true) aggregate.projectsIncomplete = true;
     for (const periodName of PERIODS) {
       if (isPeriodExpired(normalized, periodName, now)) continue;
       addPeriodInto(aggregate.periods[periodName], normalizePeriod(normalized.periods[periodName]));
@@ -822,6 +908,9 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       for (const [model, cost] of Object.entries(models)) {
         models[model] = Number(cost.toFixed(6));
       }
+    }
+    for (const project of Object.values(aggregate.periods[periodName].projects)) {
+      project.costUsd = Number(project.costUsd.toFixed(6));
     }
     for (const session of Object.values(aggregate.periods[periodName].sessions)) {
       session.costUsd = Number(session.costUsd.toFixed(6));
@@ -862,7 +951,7 @@ function deltaValue(base, fresh, anchor, key) {
   if (typeof sample === 'string') return base ?? fresh;
   if (sample && typeof sample === 'object') {
     const keys = new Set([...Object.keys(base || {}), ...Object.keys(fresh || {}), ...Object.keys(anchor || {})]);
-    const result = {};
+    const result = Object.getPrototypeOf(sample) === null ? Object.create(null) : {};
     for (const childKey of keys) {
       result[childKey] = deltaValue(
         base ? base[childKey] : undefined,
@@ -876,4 +965,4 @@ function deltaValue(base, fresh, anchor, key) {
   return base ?? fresh;
 }
 
-module.exports = { PERIODS, addPeriodInto, aggregateDevices, aggregateHistory, applyPeriodDelta, carryDeviceHistory, emptyPeriod, extractUsageFromTokscale, mergeDeviceRecord, mergePeriods, normalizeDeviceRecord, normalizePeriod };
+module.exports = { PERIODS, addPeriodInto, aggregateDevices, aggregateHistory, applyPeriodDelta, applyProjectRollups, canonicalProjectKey, carryDeviceHistory, emptyPeriod, extractUsageFromTokscale, mergeDeviceRecord, mergePeriods, normalizeDeviceRecord, normalizePeriod, projectRollupFromSessions };

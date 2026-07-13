@@ -6,7 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { projectIdentity, projectPathFromJsonl } = require('../../src/shared/collector');
-const { aggregateDevices, normalizePeriod } = require('../../src/shared/usage');
+const { applySessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
+const { aggregateDevices, applyProjectRollups, canonicalProjectKey, normalizePeriod, projectRollupFromSessions } = require('../../src/shared/usage');
 
 test('projectPathFromJsonl reads direct and nested session cwd metadata', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-project-'));
@@ -59,4 +60,69 @@ test('session aggregation keeps project id and label as one identity pair', () =
   ], 60000);
   assert.equal(aggregate.periods.today.sessions['claude:s'].projectId, 'sha256:a');
   assert.equal(aggregate.periods.today.sessions['claude:s'].projectLabel, 'project-a');
+});
+
+test('project rollups merge case and Unicode-equivalent folder labels safely', () => {
+  const sessions = {
+    a: { client: 'codex', projectLabel: 'Cafe\u0301', totalTokens: 100, costUsd: 1 },
+    b: { client: 'claude', projectLabel: 'CAFÉ', totalTokens: 50, costUsd: 0.5 },
+    c: { client: 'codex', projectLabel: '__proto__', totalTokens: 25, costUsd: 0.25 },
+    d: { client: 'claude', projectLabel: 'constructor', totalTokens: 10, costUsd: 0.1 }
+  };
+  const projects = projectRollupFromSessions(sessions);
+
+  assert.equal(canonicalProjectKey(' Cafe\u0301 '), 'café');
+  assert.equal(Object.getPrototypeOf(projects), null);
+  assert.deepEqual(JSON.parse(JSON.stringify(projects.café)), {
+    label: 'CAFÉ',
+    tokens: 150,
+    costUsd: 1.5,
+    clients: { codex: 100, claude: 50 }
+  });
+  assert.equal(projects.__proto__.tokens, 25);
+  assert.equal(projects.constructor.tokens, 10);
+  assert.equal({}.polluted, undefined);
+});
+
+test('project normalization accepts reserved wire keys without prototype pollution', () => {
+  const input = JSON.parse('{"projects":{"__proto__":{"label":"__proto__","tokens":5,"clients":{"constructor":5}},"constructor":{"label":"constructor","tokens":7,"clients":{"codex":7}},"prototype":{"label":"prototype","tokens":9,"clients":{"claude":9}}}}');
+  const period = normalizePeriod(input);
+
+  assert.equal(Object.getPrototypeOf(period.projects), null);
+  assert.equal(period.projects.__proto__.tokens, 5);
+  assert.equal(period.projects.__proto__.clients.constructor, 5);
+  assert.equal(period.projects.constructor.tokens, 7);
+  assert.equal(period.projects.prototype.tokens, 9);
+  assert.equal({}.polluted, undefined);
+});
+
+test('post-archive project rollup includes deleted sessions', () => {
+  const summary = {
+    deviceId: 'dev',
+    updatedAt: '2026-07-13T00:00:00.000Z',
+    allTime: { totalTokens: 0, sessions: {} }
+  };
+  const archived = applySessionUsageArchive(summary, {
+    sessions: {
+      'codex:deleted': {
+        client: 'codex',
+        sessionId: 'deleted',
+        capturedAt: '2026-07-13T00:00:00.000Z',
+        periods: {
+          allTime: {
+            client: 'codex',
+            sessionId: 'deleted',
+            totalTokens: 90,
+            costUsd: 0.9,
+            projectId: 'sha256:deleted',
+            projectLabel: 'Archived Project'
+          }
+        }
+      }
+    }
+  }, { now: new Date('2026-07-13T00:00:00.000Z') });
+
+  applyProjectRollups(archived);
+  assert.equal(archived.allTime.projects['archived project'].tokens, 90);
+  assert.equal(archived.allTime.projects['archived project'].clients.codex, 90);
 });

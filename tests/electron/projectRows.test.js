@@ -12,7 +12,7 @@ test('projectRowsForPeriod merges sessions by workspace and sorts by cost', () =
     d: { client: 'claude', totalTokens: 999, costUsd: 99 }
   } }, { clientLabels: { claude: 'Claude Code', codex: 'Codex' }, clientColors: { codex: '#00aabb', claude: '#cc7755' } });
   assert.equal(rows.length, 2);
-  assert.deepEqual({ key: rows[0].key, name: rows[0].name, value: rows[0].value, cost: rows[0].cost, detail: rows[0].detail }, { key: 'sha256:a', name: 'client-a', value: 150, cost: 3, detail: '' });
+  assert.deepEqual({ key: rows[0].key, name: rows[0].name, value: rows[0].value, cost: rows[0].cost, detail: rows[0].detail }, { key: 'client-a', name: 'client-a', value: 150, cost: 3, detail: '' });
   assert.deepEqual(rows[0].accordionRows, [
     { key: 'codex', name: 'Codex', value: 100, percent: 100 / 150 * 100, color: '#00aabb' },
     { key: 'claude', name: 'Claude Code', value: 50, percent: 50 / 150 * 100, color: '#cc7755' }
@@ -21,6 +21,32 @@ test('projectRowsForPeriod merges sessions by workspace and sorts by cost', () =
   assert.match(rows[0].barBackground, /^linear-gradient\(90deg, /);
   assert.match(rows[0].barBackground, /#00aabb/);
   assert.match(rows[0].barBackground, /#cc7755/);
+});
+
+test('projectRowsForPeriod prefers the bounded project rollup', () => {
+  const rows = projectRowsForPeriod({
+    projects: {
+      'token monitor': {
+        label: 'Token Monitor',
+        tokens: 300,
+        costUsd: 2.5,
+        clients: { codex: 200, claude: 100 }
+      }
+    },
+    sessions: {
+      ignored: { client: 'codex', projectLabel: 'Ignored', totalTokens: 999, costUsd: 99 }
+    }
+  }, { clientLabels: { codex: 'Codex', claude: 'Claude Code' } });
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(
+    { key: rows[0].key, name: rows[0].name, value: rows[0].value, cost: rows[0].cost },
+    { key: 'token monitor', name: 'Token Monitor', value: 300, cost: 2.5 }
+  );
+  assert.deepEqual(rows[0].accordionRows.map(({ key, value }) => ({ key, value })), [
+    { key: 'codex', value: 200 },
+    { key: 'claude', value: 100 }
+  ]);
 });
 
 test('clientGradient softly blends tool-share boundaries while preserving endpoints', () => {

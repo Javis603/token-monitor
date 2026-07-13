@@ -216,13 +216,17 @@ export class HubDO {
 }
 
 function publicPeriods(periods) {
-  return Object.fromEntries(Object.entries(periods || {}).map(([name, period]) => [name, {
-    ...period,
-    sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, session]) => {
+  return Object.fromEntries(Object.entries(periods || {}).map(([name, period]) => {
+    const safePeriod = { ...(period || {}) };
+    delete safePeriod.projects;
+    return [name, {
+      ...safePeriod,
+      sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, session]) => {
       const { projectId, projectLabel, projectPath, ...safe } = session;
       return [key, safe];
-    }))
-  }]));
+      }))
+    }];
+  }));
 }
 
 export { publicPeriods };

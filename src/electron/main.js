@@ -83,8 +83,8 @@ const {
   sessionUsageArchiveDate,
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
-const { aggregateDevices, aggregateHistory, carryDeviceHistory } = require('../shared/usage');
-const { syncPayload } = require('../shared/syncPayload');
+const { aggregateDevices, aggregateHistory, applyProjectRollups, carryDeviceHistory } = require('../shared/usage');
+const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
   MIMO_PLATFORM_CONSOLE_URL,
@@ -1484,13 +1484,18 @@ function summaryWithArchivedClientUsage(summary) {
     activeClients: settings?.clients,
     now
   });
-  if (settings?.sessionUsageArchiveEnabled === false) return withArchivedClients;
+  let visibleSummary = withArchivedClients;
+  if (settings?.sessionUsageArchiveEnabled === false) {
+    return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+  }
   if (isExternalAgentActive()) {
     sessionUsageArchive = null;
-    return applySessionUsageArchive(withArchivedClients, ensureSessionUsageArchiveLoaded(), { now });
+    visibleSummary = applySessionUsageArchive(withArchivedClients, ensureSessionUsageArchiveLoaded(), { now });
+  } else {
+    const sessionArchive = updateSessionUsageArchive(summary, now);
+    visibleSummary = applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
   }
-  const sessionArchive = updateSessionUsageArchive(summary, now);
-  return applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
 }
 
 function applyMacActivationPolicy(state = {}) {
@@ -1702,10 +1707,10 @@ async function postToHub(summary) {
     catch (error) { console.log(`[sync] cleanup of old deviceId ${stale} failed: ${error.message}`); }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
-  const response = await fetch(url, {
-    method: 'POST',
+  const { response } = await postSyncPayload(fetch, url, {
     headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
-    body: JSON.stringify(syncPayload(summary))
+    summary,
+    logger: (message) => console.log(`[sync] ${message}`)
   });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   if (settings.lastPostedDeviceId !== summary.deviceId) {
@@ -1829,7 +1834,11 @@ function startHostCollector() {
         if (stale && stale !== visibleSummary.deviceId) {
           embeddedHub.hub.deleteDevice(stale);
         }
-        embeddedHub.hub.ingest(syncPayload(visibleSummary));
+        const payload = syncPayload(visibleSummary);
+        if (payload.allTimeProjectsOmitted === true) {
+          console.log('[host-ingest] all-time project breakdown omitted to keep the sync snapshot within budget');
+        }
+        embeddedHub.hub.ingest(payload);
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
