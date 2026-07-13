@@ -6,6 +6,7 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { extractUsageFromTokscale, mergePeriods } = require('../../src/shared/usage');
 
 // Isolate the shared data dir so startCollector's persisted collector-anchor.json
 // does not write the real user data dir during the suite.
@@ -126,6 +127,101 @@ test('collectUsageOnce returns empty usage without spawning tokscale when client
     assert.equal(summary.allTime.totalTokens, 0);
   } finally {
     childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
+test('collectUsageOnce handles proma-only tracking without spawning tokscale', async () => {
+  const promaPath = require.resolve('../../src/shared/promaUsage');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const promaUsage = require(promaPath);
+  const originalBuildPromaPeriods = promaUsage.buildPromaPeriods;
+  let tokscaleCalls = 0;
+
+  promaUsage.buildPromaPeriods = () => ({
+    today: { entries: [{ client: 'proma', model: 'm', input: 12, output: 3 }] },
+    month: { entries: [{ client: 'proma', model: 'm', input: 20 }] },
+    allTime: { entries: [{ client: 'proma', model: 'm', input: 30 }] }
+  });
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    const summary = await collectUsageOnce({
+      clients: 'proma',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      runTokscale: async () => {
+        tokscaleCalls += 1;
+        throw new Error('tokscale should not run for proma-only tracking');
+      }
+    });
+
+    assert.equal(tokscaleCalls, 0);
+    assert.deepEqual(summary.trackedClients, ['proma']);
+    assert.equal(summary.today.clients.proma, 15);
+    assert.equal(summary.month.clients.proma, 20);
+    assert.equal(summary.allTime.clients.proma, 30);
+  } finally {
+    promaUsage.buildPromaPeriods = originalBuildPromaPeriods;
+    delete require.cache[collectorPath];
+  }
+});
+
+test('anchored Proma refresh derives broader windows from the combined fresh today period', async () => {
+  const promaPath = require.resolve('../../src/shared/promaUsage');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const promaUsage = require(promaPath);
+  const originalBuildPromaPeriods = promaUsage.buildPromaPeriods;
+  let receivedAllTimeSince = null;
+
+  const period = (client, input) => extractUsageFromTokscale({
+    entries: [{ client, model: 'm', input, output: 0, cost: 0 }]
+  });
+  const anchor = {
+    dateKey: require('../../src/shared/collector').localTodayKey(),
+    today: mergePeriods(period('claude', 10), period('proma', 5)),
+    month: mergePeriods(period('claude', 100), period('proma', 50)),
+    allTime: mergePeriods(period('claude', 1000), period('proma', 500))
+  };
+
+  promaUsage.buildPromaPeriods = ({ allTimeSince }) => {
+    receivedAllTimeSince = allTimeSince;
+    return {
+      today: { entries: [{ client: 'proma', model: 'm', input: 8 }] },
+      month: { entries: [{ client: 'proma', model: 'm', input: 53 }] },
+      allTime: { entries: [{ client: 'proma', model: 'm', input: 503 }] }
+    };
+  };
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    const summary = await collectUsageOnce({
+      clients: 'claude,proma',
+      allTimeSince: '2026-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      limitsEnabled: false,
+      todayOnlyAnchor: anchor,
+      runTokscale: async ({ clients, flags }) => {
+        assert.equal(clients, 'claude');
+        assert.deepEqual(flags, ['--today']);
+        return { entries: [{ client: 'claude', model: 'm', input: 15 }] };
+      }
+    });
+
+    assert.equal(receivedAllTimeSince, '2026-01-01');
+    assert.equal(summary.today.totalTokens, 23);
+    assert.equal(summary.month.totalTokens, 158);
+    assert.equal(summary.allTime.totalTokens, 1508);
+    assert.equal(summary.month.clients.proma, 53);
+    assert.equal(summary.allTime.clients.proma, 503);
+  } finally {
+    promaUsage.buildPromaPeriods = originalBuildPromaPeriods;
     delete require.cache[collectorPath];
   }
 });

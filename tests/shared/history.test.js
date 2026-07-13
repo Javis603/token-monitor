@@ -221,7 +221,34 @@ test('mergeHistories handles empty list', () => {
   assert.equal(m.summary.totalTokens, 0);
 });
 
-const { coerceHistory, historyPreview } = require('../../src/shared/history');
+const { coerceHistory, historyPreview, historyRevision } = require('../../src/shared/history');
+
+test('mergeHistories re-caps stale device daily rows without losing lifetime totals', () => {
+  const history = {
+    daily: [
+      { date: '2025-05-01', tokens: 100, cost: 5, perClient: {}, perModel: {} },
+      { date: '2026-06-07', tokens: 10, cost: 1, perClient: {}, perModel: {} }
+    ],
+    monthly: [
+      { month: '2025-05', tokens: 100, cost: 5, perClient: {}, perModel: {} },
+      { month: '2026-06', tokens: 10, cost: 1, perClient: {}, perModel: {} }
+    ],
+    summary: {}
+  };
+  const merged = mergeHistories([history], { todayKey: '2026-06-07', capDays: 370 });
+  assert.deepEqual(merged.daily.map((day) => day.date), ['2026-06-07']);
+  assert.equal(merged.summary.activeDays, 1);
+  assert.equal(merged.summary.peakDayTokens, 10);
+  assert.equal(merged.summary.totalTokens, 110);
+});
+
+test('historyRevision is key-order stable and tracks breakdown changes', () => {
+  const first = { daily: [{ date: '2026-06-07', tokens: 10, perClient: { codex: { tokens: 10 } } }], monthly: [], summary: { totalTokens: 10 } };
+  const reordered = { summary: { totalTokens: 10 }, monthly: [], daily: [{ perClient: { codex: { tokens: 10 } }, tokens: 10, date: '2026-06-07' }] };
+  const changed = { ...first, daily: [{ date: '2026-06-07', tokens: 10, perClient: { claude: { tokens: 10 } } }] };
+  assert.equal(historyRevision(first), historyRevision(reordered));
+  assert.notEqual(historyRevision(first), historyRevision(changed));
+});
 
 test('coerceHistory normalizes shape and drops garbage', () => {
   assert.deepEqual(coerceHistory(null), { daily: [], monthly: [], summary: {} });

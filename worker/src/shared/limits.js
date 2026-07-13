@@ -4,12 +4,13 @@
 'use strict';
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
-const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam']);
+const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama']);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'managed', 'unknown']);
 const WINDOW_ORDER = ['session', 'weekly', 'billing'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
+const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -91,6 +92,15 @@ function normalizeIsoTimestamp(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function normalizeDateText(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const iso = normalizeIsoTimestamp(raw);
+  if (iso) return iso.slice(0, 10);
+  return raw.length <= 32 ? raw : '';
+}
+
 function numberOrNull(value) {
   const number = asNumber(value);
   return number === null ? null : number;
@@ -128,15 +138,66 @@ function normalizeLimitWindow(input) {
 
 function normalizeProviderBalance(input) {
   if (!input || typeof input !== 'object') return null;
-  const amount = numberOrNull(input.amount);
-  const currency = String(input.currency || '').trim().toUpperCase().slice(0, 8) || null;
-  if (amount === null && !currency) return null;
+  const amount = numberOrNull(input.amount ?? input.balance ?? input.accountBalance ?? input.account_balance);
+  const currency = String(
+    input.currency
+    || input.balanceCurrency
+    || input.balance_currency
+    || input.accountCurrency
+    || input.account_currency
+    || ''
+  ).trim().toUpperCase().slice(0, 8) || null;
+  const todaySpend = numberOrNull(input.todaySpend ?? input.today_spend);
+  const monthSpend = numberOrNull(input.monthSpend ?? input.month_spend);
+  const monthSinceTracking = input.monthSinceTracking ?? input.month_since_tracking;
+  const giftBalance = numberOrNull(input.giftBalance ?? input.gift_balance);
+  const cashBalance = numberOrNull(input.cashBalance ?? input.cash_balance);
+  const planUsed = numberOrNull(input.planUsed ?? input.plan_used);
+  const planLimit = numberOrNull(input.planLimit ?? input.plan_limit);
+  const planPercent = numberOrNull(input.planPercent ?? input.plan_percent);
+  const planStatus = ['active', 'expired'].includes(String(input.planStatus ?? input.plan_status ?? '').trim().toLowerCase())
+    ? String(input.planStatus ?? input.plan_status).trim().toLowerCase()
+    : null;
+  const todayTokenTotal = numberOrNull(input.todayTokenTotal ?? input.today_token_total);
+  const todayUsageDate = normalizeDateText(input.todayUsageDate ?? input.today_usage_date);
+  const latestModelUsageDate = normalizeDateText(input.latestModelUsageDate ?? input.latest_model_usage_date);
+  const todayUsageBasis = String(input.todayUsageBasis ?? input.today_usage_basis ?? '').trim().slice(0, 64);
+  const snapshotDate = normalizeDateText(input.snapshotDate ?? input.snapshot_date ?? input.date);
+  if (
+    amount === null
+    && !currency
+    && todaySpend === null
+    && monthSpend === null
+    && monthSinceTracking === undefined
+    && giftBalance === null
+    && cashBalance === null
+    && planUsed === null
+    && planLimit === null
+    && planPercent === null
+    && planStatus === null
+    && todayTokenTotal === null
+    && !todayUsageDate
+    && !latestModelUsageDate
+    && !todayUsageBasis
+    && !snapshotDate
+  ) return null;
   return {
     amount,
     currency,
-    todaySpend: numberOrNull(input.todaySpend),
-    monthSpend: numberOrNull(input.monthSpend),
-    monthSinceTracking: Boolean(input.monthSinceTracking)
+    todaySpend,
+    monthSpend,
+    monthSinceTracking: Boolean(monthSinceTracking),
+    giftBalance,
+    cashBalance,
+    planUsed,
+    planLimit,
+    planPercent,
+    planStatus,
+    todayTokenTotal,
+    todayUsageDate,
+    latestModelUsageDate,
+    todayUsageBasis,
+    snapshotDate
   };
 }
 
@@ -271,7 +332,7 @@ function isConfiguredProvider(provider) {
 }
 
 function providerCollapseKey(provider) {
-  if ((provider.provider === 'codex' || provider.provider === 'opencode') && isConfiguredProvider(provider)) {
+  if ((provider.provider === 'codex' || provider.provider === 'opencode' || provider.provider === 'mimo') && isConfiguredProvider(provider)) {
     return providerAggregateKey(provider);
   }
   return provider.provider;
@@ -294,36 +355,81 @@ function hasProviderWindows(provider) {
   return Array.isArray(provider?.windows) && provider.windows.length > 0;
 }
 
+function cloneLimitWindows(windows) {
+  return (windows || []).map((window) => ({ ...window }));
+}
+
+function retainedCodexProvider(previousProvider, currentProvider, windows) {
+  return {
+    ...previousProvider,
+    ...currentProvider,
+    accountKey: currentProvider.accountKey || previousProvider.accountKey,
+    accountLabel: currentProvider.accountLabel || previousProvider.accountLabel,
+    accountName: currentProvider.accountName || previousProvider.accountName,
+    accountEmail: currentProvider.accountEmail || previousProvider.accountEmail,
+    source: currentProvider.source || previousProvider.source,
+    sourceDetail: currentProvider.sourceDetail || previousProvider.sourceDetail,
+    status: 'ok',
+    updatedAt: previousProvider.updatedAt || currentProvider.updatedAt,
+    windows: cloneLimitWindows(windows),
+    resetCredits: currentProvider.resetCredits || previousProvider.resetCredits
+  };
+}
+
+function mergeCodexProviderSnapshot(previousProvider, currentProvider) {
+  if (CODEX_TRANSIENT_PROVIDER_STATUSES.has(currentProvider.status)) {
+    return retainedCodexProvider(previousProvider, currentProvider, previousProvider.windows);
+  }
+  if (currentProvider.status !== 'ok') return currentProvider;
+  if (!hasProviderWindows(currentProvider)) {
+    return retainedCodexProvider(previousProvider, currentProvider, previousProvider.windows);
+  }
+  // A successful non-empty snapshot is authoritative. Codex can legitimately
+  // change percentages and reset targets after a global reset or reset-credit
+  // action, so quota values are not monotonic client-side invariants.
+  return currentProvider;
+}
+
 function mergeCodexTransientWindows(previousInput, currentInput, nowMs = Date.now(), retentionMs = CODEX_TRANSIENT_WINDOW_RETENTION_MS) {
   const current = normalizeLimitsSummary(currentInput);
   if (!previousInput || !Number.isFinite(Number(retentionMs)) || Number(retentionMs) <= 0) return current;
   const previous = normalizeLimitsSummary(previousInput);
   const currentMs = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
   const previousByIdentity = new Map();
+  const eligiblePreviousCodexProviders = [];
 
   for (const provider of previous.providers) {
     if (provider.provider !== 'codex' || provider.status !== 'ok' || !hasProviderWindows(provider)) continue;
-    const providerUpdatedAt = timestampMs(provider.updatedAt || previous.updatedAt);
+    const effectiveUpdatedAt = provider.updatedAt || previous.updatedAt;
+    const providerUpdatedAt = timestampMs(effectiveUpdatedAt);
     if (!providerUpdatedAt || currentMs - providerUpdatedAt < 0 || currentMs - providerUpdatedAt > Number(retentionMs)) continue;
-    for (const key of codexProviderIdentityKeys(provider)) {
+    const eligibleProvider = provider.updatedAt ? provider : { ...provider, updatedAt: effectiveUpdatedAt };
+    eligiblePreviousCodexProviders.push(eligibleProvider);
+    for (const key of codexProviderIdentityKeys(eligibleProvider)) {
       const existing = previousByIdentity.get(key);
-      if (!existing || timestampMs(provider.updatedAt) >= timestampMs(existing.updatedAt)) previousByIdentity.set(key, provider);
+      if (!existing || providerUpdatedAt >= timestampMs(existing.updatedAt)) previousByIdentity.set(key, eligibleProvider);
     }
   }
+
+  const currentCodexProviders = current.providers.filter((provider) => provider.provider === 'codex');
+  const singletonFallback = currentCodexProviders.length === 1 && eligiblePreviousCodexProviders.length === 1
+    ? eligiblePreviousCodexProviders[0]
+    : null;
 
   return {
     ...current,
     providers: current.providers.map((provider) => {
-      if (provider.provider !== 'codex' || provider.status !== 'ok' || hasProviderWindows(provider)) return provider;
-      const previousProvider = codexProviderIdentityKeys(provider)
-        .map((key) => previousByIdentity.get(key))
-        .find(Boolean);
+      if (provider.provider !== 'codex') return provider;
+      const identityKeys = codexProviderIdentityKeys(provider);
+      const identityMatches = new Set(identityKeys.map((key) => previousByIdentity.get(key)).filter(Boolean));
+      const identityMatch = identityMatches.size === 1 ? identityMatches.values().next().value : null;
+      const previousProvider = identityMatch || (
+        CODEX_TRANSIENT_PROVIDER_STATUSES.has(provider.status) && identityKeys.length === 0
+          ? singletonFallback
+          : null
+      );
       if (!previousProvider) return provider;
-      return {
-        ...provider,
-        updatedAt: previousProvider.updatedAt || provider.updatedAt,
-        windows: previousProvider.windows.map((window) => ({ ...window }))
-      };
+      return mergeCodexProviderSnapshot(previousProvider, provider);
     })
   };
 }

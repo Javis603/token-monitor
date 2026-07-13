@@ -132,6 +132,7 @@ function normalizeClientName(value) {
   if (raw.includes('kiro')) return 'kiro';
   if (raw.includes('codebuddy')) return 'codebuddy';
   if (raw.includes('workbuddy')) return 'workbuddy';
+  if (raw.includes('proma')) return 'proma';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
@@ -143,7 +144,7 @@ function detectClient(obj) {
 }
 
 function normalizeModelName(value) {
-  const raw = String(value || '').trim();
+  const raw = String(value || '').trim().toLowerCase();
   return raw || null;
 }
 
@@ -291,6 +292,8 @@ function emptySession(client, id) {
   };
 }
 
+const sessionsWithLiveSource = new WeakSet();
+
 function mergeSession(target, source) {
   target.totalTokens += Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.costUsd += asNumber(source.costUsd);
@@ -324,6 +327,13 @@ function mergeSession(target, source) {
   for (const [provider, tokens] of Object.entries(source.providers || {})) {
     const key = normalizeProviderName(provider);
     if (key) target.providers[key] = (target.providers[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
+  }
+  const sourceArchived = source.archived === true || source.deleted === true || source.sourceDeleted === true;
+  if (!sourceArchived) {
+    sessionsWithLiveSource.add(target);
+    delete target.archived;
+  } else if (!sessionsWithLiveSource.has(target)) {
+    target.archived = true;
   }
   return target;
 }
@@ -391,6 +401,7 @@ function normalizeSession(input, fallbackKey) {
       if (key) session.providers[key] = (session.providers[key] || 0) + Math.max(0, Math.round(asNumber(value)));
     }
   }
+  if (input.archived === true || input.deleted === true || input.sourceDeleted === true) session.archived = true;
   return session;
 }
 
@@ -684,14 +695,15 @@ function carryDeviceHistory(previous, incoming) {
   return incoming;
 }
 
-function aggregateHistory(devices, staleAfterMs, nowMs = Date.now()) {
+// History is durable device data, not live presence. Keep a stored device's
+// contributions in the aggregate while it is offline; explicit device deletion
+// is the boundary that removes them. Staleness still applies independently to
+// live limits and expired today/month period snapshots.
+function aggregateHistory(devices) {
   const histories = [];
   for (const record of devices) {
     const normalized = normalizeDeviceRecord(record);
     if (!hasOwn(normalized, 'history')) continue;
-    const ageMs = nowMs - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
-    const stale = Number.isFinite(ageMs) && staleAfterMs > 0 ? ageMs > staleAfterMs : false;
-    if (stale) continue;
     histories.push(normalized.history);
   }
   return mergeHistories(histories);

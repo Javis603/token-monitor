@@ -86,6 +86,23 @@ test('watchPathsForClients watches the Antigravity CLI data dir but not the IDE 
   }
 });
 
+test('watchPathsForClients watches only Proma data that is currently parsed', () => {
+  const tmp = withTmpHome([
+    path.join('.proma', 'agent-sessions'),
+    path.join('.proma', 'conversations')
+  ]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchPathsForClients } = freshCollector();
+    assert.deepEqual(watchPathsForClients('proma'), [path.join(tmp, '.proma', 'agent-sessions')]);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('clientDataDirPresence still detects cursor/antigravity via their cache dirs', () => {
   const tmp = withTmpHome([
     path.join('.config', 'tokscale', 'cursor-cache'),

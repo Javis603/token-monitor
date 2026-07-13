@@ -51,6 +51,43 @@ test('compact total is an opt-in appearance preference', () => {
   assert.match(app, /state\.settings\?\.showCompactTotalTokens !== true[\s\S]*?hideTotalCompact\(\)/);
 });
 
-test('compact total appears after the exact total finishes animating', () => {
-  assert.match(app, /hideTotalCompact\(\);\s*animateNumber\([^;]+\(\) => updateTotalCompact\(nextTotal\)\)/s);
+test('compact total stays visible through the count-up, with the font pre-locked', () => {
+  // The font is fitted to the widest endpoint before the roll starts, so the number
+  // does not vanish, clip, or resize mid-animation in either direction.
+  assert.match(app, /const widest = formatNumber\(nextTotal\)\.length >= formatNumber\(state\.currentTotal\)\.length \? nextTotal : state\.currentTotal;/);
+  assert.match(app, /els\.totalTokens\.textContent = formatNumber\(widest\);\s*updateTotalCompact\(nextTotal\);\s*animateNumber\(els\.totalTokens, state\.currentTotal, nextTotal, 2200, fitTotalNumber\);/s);
+  // animateNumber must not reset the font, or the pre-locked size would be lost.
+  const animateBody = app.slice(app.indexOf('function animateNumber('), app.indexOf('function rowWidth('));
+  assert.doesNotMatch(animateBody, /style\.fontSize/);
+  // Tabular figures keep the number's width constant as it counts, so the chip
+  // beside it does not jitter.
+  assert.match(css, /\.total-number\s*\{[^}]*font-variant-numeric:\s*tabular-nums/s);
+});
+
+test('total number font scale shrinks to fit instead of clipping', () => {
+  const totalNumberFontScale = rendererFunction('totalNumberFontScale', 'fitTotalNumber');
+  // Fits: never scale up past the base font size.
+  assert.equal(totalNumberFontScale(200, 150), 1);
+  assert.equal(totalNumberFontScale(200, 200), 1);
+  // Overflows: shrink by the available/natural ratio.
+  assert.equal(totalNumberFontScale(150, 200), 0.75);
+  // Extreme overflow clamps at the minimum scale (ellipsis is the last resort).
+  assert.equal(totalNumberFontScale(50, 200), 0.5);
+  assert.equal(totalNumberFontScale(50, 200, 0.4), 0.4);
+  // Missing measurements are a no-op.
+  assert.equal(totalNumberFontScale(0, 200), 1);
+  assert.equal(totalNumberFontScale(200, 0), 1);
+});
+
+test('exact total is fitted to width, not left to clip', () => {
+  // updateTotalCompact always re-fits the number after toggling the chip.
+  assert.match(app, /els\.totalTokensCompact\.classList\.remove\('hidden'\);\s*\}\s*fitTotalNumber\(\);/s);
+  // fitTotalNumber measures the allotted vs natural width and scales the font.
+  assert.match(app, /function fitTotalNumber\(\)[\s\S]*?getComputedStyle\(el\)\.fontSize/);
+  assert.match(app, /totalNumberFontScale\(el\.clientWidth, el\.scrollWidth\)/);
+  assert.match(app, /el\.style\.fontSize = `\$\{Math\.floor\(base \* scale\)\}px`/);
+  // Resize re-fits the settled number.
+  assert.match(app, /window\.addEventListener\('resize',[\s\S]*?fitTotalNumber\(\)/);
+  // Ellipsis is kept only as the last-resort fallback.
+  assert.match(css, /\.total-number\s*\{[^}]*text-overflow:\s*ellipsis/s);
 });

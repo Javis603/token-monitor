@@ -31,7 +31,12 @@ test('parseTag returns null for invalid or empty input', () => {
 test('appUpdateInstallSupport only enables packaged auto-updatable targets', () => {
   assert.deepEqual(appUpdateInstallSupport({ isPackaged: false, platform: 'darwin' }), { supported: false, reason: 'unpackaged' });
   assert.deepEqual(appUpdateInstallSupport({ isPackaged: true, platform: 'darwin' }), { supported: true, reason: '' });
-  assert.deepEqual(appUpdateInstallSupport({ isPackaged: true, platform: 'win32' }), { supported: false, reason: 'windows-signing-pending' });
+  assert.deepEqual(appUpdateInstallSupport({ isPackaged: true, platform: 'win32', env: {} }), { supported: true, reason: '' });
+  assert.deepEqual(appUpdateInstallSupport({
+    isPackaged: true,
+    platform: 'win32',
+    env: { PORTABLE_EXECUTABLE_FILE: 'C:\\Downloads\\Token-Monitor.exe' }
+  }), { supported: false, reason: 'windows-portable' });
   assert.deepEqual(appUpdateInstallSupport({ isPackaged: true, platform: 'linux', env: {} }), { supported: false, reason: 'linux-not-appimage' });
   assert.deepEqual(appUpdateInstallSupport({ isPackaged: true, platform: 'linux', env: { APPIMAGE: '/tmp/Token Monitor.AppImage' } }), { supported: true, reason: '' });
 });

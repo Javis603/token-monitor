@@ -10,14 +10,16 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
+const { customPricingPath } = require('./tokscaleConfig');
 const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
-const { hermesProfileWatchDirs, resolveHermesHome, tokscaleEnvFromSpawnArgs } = require('./hermesProfiles');
-const { parseGraphResult, normalizeHistory } = require('./history');
+const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
+const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
+const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 const { hashKey } = require('./hashKey');
 
 function toUnpackedPath(p) {
@@ -111,14 +113,10 @@ function parseJsonOutput(stdout) {
   throw new Error(`Could not parse tokscale JSON output: ${text.slice(0, 300)}`);
 }
 
-function spawnTokscaleJson(userArgs, commandTimeoutMs, spawnOpts = {}) {
+function spawnTokscaleJson(userArgs, commandTimeoutMs) {
   const { bin, prefixArgs, env } = tokscaleCommand();
-  const childEnv = tokscaleEnvFromSpawnArgs(env, userArgs, {
-    env,
-    homeDir: spawnOpts.homeDir || os.homedir()
-  });
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, [...prefixArgs, ...userArgs], { env: childEnv, windowsHide: true });
+    const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timeout = setTimeout(() => { child.kill('SIGTERM'); reject(new Error(`tokscale timed out after ${commandTimeoutMs}ms`)); }, commandTimeoutMs);
@@ -166,6 +164,63 @@ function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
   const id = String(modelId || '').trim();
   if (!id) return Promise.reject(new Error('lookupModelPricing: modelId is required'));
   return spawnTokscaleJson(['pricing', id, '--json', '--no-spinner'], commandTimeoutMs);
+}
+
+const PROMA_PRICING_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const PROMA_PRICING_LOOKUP_TIMEOUT_MS = 3000;
+const promaPricingCache = new Map();
+
+function promaPricingRevision() {
+  try { return fs.statSync(customPricingPath()).mtimeMs; } catch (_) { return 0; }
+}
+
+function normalizePromaPricing(result) {
+  const source = result?.pricing;
+  if (!source || typeof source !== 'object') return null;
+  const pick = (key) => {
+    const value = Number(source[key]);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  const pricing = {
+    inputCostPerToken: pick('inputCostPerToken'),
+    outputCostPerToken: pick('outputCostPerToken'),
+    cacheReadInputTokenCost: pick('cacheReadInputTokenCost'),
+    cacheCreationInputTokenCost: pick('cacheCreationInputTokenCost')
+  };
+  return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
+}
+
+async function resolvePromaPricing(rows, options = {}) {
+  const lookup = options.lookupModelPricing || lookupModelPricing;
+  const revision = options.pricingRevision ?? promaPricingRevision();
+  const nowMs = options.nowMs ?? Date.now();
+  // Pricing is supplementary: never let a missing catalog entry hold up the
+  // live usage refresh for the normal tokscale command timeout.
+  const commandTimeoutMs = options.commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS;
+  const pricingByModel = {};
+  const modelIds = [...new Set((Array.isArray(rows) ? rows : [])
+    .map((row) => String(row?.model || '').trim().toLowerCase()).filter(Boolean))];
+  for (const modelId of modelIds) {
+    const cached = promaPricingCache.get(modelId);
+    if (cached && cached.revision === revision && nowMs - cached.at < PROMA_PRICING_CACHE_TTL_MS) {
+      if (cached.pricing) pricingByModel[modelId] = cached.pricing;
+      continue;
+    }
+    let pricing = null;
+    try {
+      pricing = normalizePromaPricing(await lookup(modelId, commandTimeoutMs));
+    } catch (_) {
+      // An unknown model, offline lookup, or custom channel must remain
+      // cost-unavailable instead of inheriting an unrelated catalog price.
+    }
+    promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
+    if (pricing) pricingByModel[modelId] = pricing;
+  }
+  return pricingByModel;
+}
+
+function resetPromaPricingCache() {
+  promaPricingCache.clear();
 }
 
 function localTodayKey(date = new Date()) {
@@ -433,18 +488,22 @@ function normalizeHistoryIntervalMs(value) {
 async function collectHistoryOnce(options) {
   const clients = normalizeClientsCsv(options.clients);
   if (options.historyEnabled === false) return null;
-  if (!clients) return null;
+  const histories = [];
   const runGraph = options.runGraph || runTokscaleGraph;
   const capDays = Number.isFinite(options.capDays) ? options.capDays : HISTORY_CAP_DAYS;
   const todayKey = options.todayKey || localTodayKey();
-  try {
-    const graphJson = await runGraph({ clients, commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS });
-    const history = normalizeHistory(parseGraphResult(graphJson), { capDays, todayKey });
-    return history.daily.length || history.monthly.length ? history : null;
-  } catch (error) {
-    if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
-    return null;
+  if (clients) {
+    try {
+      const graphJson = await runGraph({ clients, commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS });
+      histories.push(normalizeHistory(parseGraphResult(graphJson), { capDays, todayKey }));
+    } catch (error) {
+      if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
+    }
   }
+  if (options.promaGraph) histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
+  if (histories.length === 0) return null;
+  const history = histories.length === 1 ? histories[0] : mergeHistories(histories, { todayKey });
+  return history.daily.length || history.monthly.length ? history : null;
 }
 
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
@@ -467,38 +526,75 @@ async function collectUsageOnce(options) {
   // tokscale binary resolution, which is genuinely platform-bound).
   const platformValue = options.platform || process.platform;
   const normalizedClients = normalizeClientsCsv(clients);
+  // tokscale doesn't know about Proma yet — filter it out of the subprocess
+  // calls so --client doesn't reject an unknown value. Proma is parsed
+  // separately below and merged back in.
+  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',') : normalizedClients;
+  const includesProma = normalizedClients.split(',').includes('proma');
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
   const anchor = options.todayOnlyAnchor;
   const anchorUsed = Boolean(anchor && anchor.dateKey === localTodayKey(collectedAt));
+  let promaPeriods = null;
+  let promaRows = null;
+  let promaPricing = null;
   if (normalizedClients) {
-    await maybeSyncCursor(normalizedClients, options.logger);
-    await maybeSyncAntigravity(normalizedClients, options.logger, options.homeDir || os.homedir());
+    await maybeSyncCursor(tokscaleClients, options.logger);
+    await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
+    if (includesProma) {
+      try {
+        promaRows = collectPromaRows();
+        promaPricing = await resolvePromaPricing(promaRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const promaJson = buildPromaPeriods({ now: collectedAt, allTimeSince, rows: promaRows, pricingByModel: promaPricing });
+        promaPeriods = {
+          today: extractUsageFromTokscale(promaJson.today),
+          month: extractUsageFromTokscale(promaJson.month),
+          allTime: extractUsageFromTokscale(promaJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
       // windows exactly via applyPeriodDelta — one spawn instead of three.
-      const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
-      today = extractUsageFromTokscale(todayJson);
-      applySessionTimestamps({ today }, options.homeDir || os.homedir());
+      if (tokscaleClients) {
+        const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
+        today = extractUsageFromTokscale(todayJson);
+        applySessionTimestamps({ today }, options.homeDir || os.homedir());
+      }
+      // The persisted anchor contains every Windows-side client, including
+      // locally parsed Proma. Include its fresh today usage before deriving
+      // broader windows so base + (fresh today - anchor today) stays exact.
+      if (promaPeriods) today = mergePeriods(today, promaPeriods.today);
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
-    } else {
+    } else if (tokscaleClients) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
-      const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs });
+      const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
       today = extractUsageFromTokscale(todayJson);
       applySessionTimestamps({ today }, options.homeDir || os.homedir());
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
-      const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs });
+      const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
       month = extractUsageFromTokscale(monthJson);
       applySessionTimestamps({ today, month }, options.homeDir || os.homedir());
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
-      const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs });
+      const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
     applySessionTimestamps({ today, month, allTime }, options.homeDir || os.homedir());
+    if (promaPeriods && !anchorUsed) {
+      today = mergePeriods(today, promaPeriods.today);
+      month = mergePeriods(month, promaPeriods.month);
+      allTime = mergePeriods(allTime, promaPeriods.allTime);
+    }
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -518,10 +614,17 @@ async function collectUsageOnce(options) {
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
-        clients: normalizedClients,
+        clients: tokscaleClients,
+        trackedClients: normalizedClients,
         allTimeSince,
+        now: collectedAt,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
+        resolvePromaPricing: (rows) => resolvePromaPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        }),
         logger: options.logger,
         decoratePeriods: (periods, home) => applySessionTimestamps(periods, home)
       });
@@ -531,10 +634,17 @@ async function collectUsageOnce(options) {
       wslBundle = options.wslAnchor;
     } else if (!anchorUsed) {
       const wslResult = await collectWsl({
-        clients: normalizedClients,
+        clients: tokscaleClients,
+        trackedClients: normalizedClients,
         allTimeSince,
+        now: collectedAt,
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
+        resolvePromaPricing: (rows) => resolvePromaPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        }),
         logger: options.logger,
         decoratePeriods: (periods, home) => applySessionTimestamps(periods, home)
       });
@@ -547,8 +657,8 @@ async function collectUsageOnce(options) {
   allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
 
   // WSL attribution (Windows only; null elsewhere). detected = markers found,
-  // withData = tools tokscale actually returned tokens for. The gap is the
-  // diagnostic (e.g. Hermes detected but unreadable over 9P).
+  // withData = clients whose WSL scan or local parser returned tokens. The gap
+  // is the diagnostic (e.g. Hermes detected but unreadable over 9P).
   //
   // Like wslBundle, this is FROZEN between full scans: anchored watch ticks
   // (which skip the WSL scan) reuse the snapshot via options.wslStatus instead
@@ -596,7 +706,8 @@ async function collectUsageOnce(options) {
     summary.history = null;
   } else if (options.includeHistory) {
     const history = await collectHistoryOnce({
-      clients: normalizedClients,
+      clients: tokscaleClients,
+      promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -679,6 +790,8 @@ function clientWatchCandidates(clientsCsv) {
   // refreshes via the periodic full tick; the WSL marker stays the broader
   // `.workbuddy` so a db-only WSL home is still scanned.
   add('workbuddy', path.join(home, '.workbuddy', 'projects'));
+  // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
+  add('proma', path.join(home, '.proma', 'agent-sessions'));
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
@@ -1114,8 +1227,11 @@ module.exports = {
   sessionTimestampMap,
   locateBundledBinary,
   lookupModelPricing,
+  normalizePromaPricing,
   readDownloadedPointer,
   resolvePlatformBinary,
+  resolvePromaPricing,
+  resetPromaPricingCache,
   shouldIncludeHistory,
   startCollector,
   tokscaleCommand,

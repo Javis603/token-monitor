@@ -1,10 +1,10 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy',
-  'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'volcengine', 'qoder'
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
+  'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama'
 ]);
 
 function osIconFor(platform) {
@@ -58,7 +58,8 @@ const KNOWN_CLIENTS = [
   { id: 'zcode', label: 'ZCode' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'codebuddy', label: 'CodeBuddy' },
-  { id: 'workbuddy', label: 'WorkBuddy' }
+  { id: 'workbuddy', label: 'WorkBuddy' },
+  { id: 'proma', label: 'Proma' }
 ];
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
@@ -68,13 +69,16 @@ const LIMIT_PROVIDERS = [
   { id: 'opencode', label: 'OpenCode' },
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'minimax', label: 'Minimax' },
+  { id: 'mimo', label: 'MiMo' },
   { id: 'grok', label: 'Grok' },
   { id: 'copilot', label: 'GitHub Copilot' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'zai', label: 'GLM' },
   { id: 'zaiteam', label: 'GLM Team' },
   { id: 'volcengine', label: 'Volcengine' },
-  { id: 'qoder', label: 'Qoder' }
+  { id: 'qoder', label: 'Qoder' },
+  { id: 'kimi', label: 'Kimi' },
+  { id: 'ollama', label: 'Ollama' }
 ];
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
@@ -192,7 +196,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
 let preferenceDrag = null;
@@ -213,11 +217,15 @@ Object.assign(els, {
   hubSecretInput: document.getElementById('hubSecretInput'),
   hubSecretCopyButton: document.getElementById('hubSecretCopyButton'),
   hubSecretRegenButton: document.getElementById('hubSecretRegenButton'),
+  secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
   syncClientStatus: document.getElementById('syncClientStatus'),
   hubAddressList: document.getElementById('hubAddressList'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
+  sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
+  sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
+  clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
   startupNote: document.getElementById('startupNote'),
@@ -392,11 +400,14 @@ function settingsSectionSummary(section) {
     const zaiteamLinked = externalProviderAccountLinked('zaiteam');
     const volcengineLinked = externalProviderAccountLinked('volcengine');
     const qoderLinked = externalProviderAccountLinked('qoder');
+    const kimiLinked = externalProviderAccountLinked('kimi');
+    const ollamaLinked = externalProviderAccountLinked('ollama');
+    const mimoLinked = mimoAccountLinked();
     const copilotLinked = copilotAccountLinked();
     const codexLinked = (state.settings?.codexManagedAccounts || []).length > 0;
     return t('settings.summary.accounts', {
-      linked: (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (zaiLinked ? 1 : 0) + (zaiteamLinked ? 1 : 0) + (volcengineLinked ? 1 : 0) + (qoderLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
-      total: 10
+      linked: (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (zaiLinked ? 1 : 0) + (zaiteamLinked ? 1 : 0) + (volcengineLinked ? 1 : 0) + (qoderLinked ? 1 : 0) + (kimiLinked ? 1 : 0) + (ollamaLinked ? 1 : 0) + (mimoLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
+      total: 13
     });
   }
   if (section === 'limits') {
@@ -455,22 +466,36 @@ function formatCompact(value) {
 }
 function updateTotalCompact(value) {
   if (!els.totalTokensCompact) return;
-  if (state.settings?.showCompactTotalTokens !== true) {
-    hideTotalCompact();
-    return;
-  }
   const num = Math.round(Number(value || 0));
-  if (Math.abs(num) < 1000) {
+  if (state.settings?.showCompactTotalTokens !== true || Math.abs(num) < 1000) {
     hideTotalCompact();
-    return;
+  } else {
+    els.totalTokensCompact.textContent = `≈ ${formatCompact(num)}`;
+    els.totalTokensCompact.classList.remove('hidden');
   }
-  els.totalTokensCompact.textContent = `≈ ${formatCompact(num)}`;
-  els.totalTokensCompact.classList.remove('hidden');
+  fitTotalNumber();
 }
 function hideTotalCompact() {
   if (!els.totalTokensCompact) return;
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
+}
+// Scale the exact total to fit the width it is actually given instead of clipping
+// it to an ellipsis. The compact chip (when shown) is flex:0 0 auto and claims its
+// width first, so the number's clientWidth is its allotted box while scrollWidth is
+// its natural width; the ratio is how far the font must shrink to stay whole.
+function totalNumberFontScale(availableWidth, naturalWidth, minScale = 0.5) {
+  if (!(naturalWidth > 0) || !(availableWidth > 0)) return 1;
+  return Math.min(1, Math.max(minScale, availableWidth / naturalWidth));
+}
+function fitTotalNumber() {
+  const el = els.totalTokens;
+  if (!el) return;
+  el.style.fontSize = '';
+  const base = parseFloat(getComputedStyle(el).fontSize);
+  if (!(base > 0)) return;
+  const scale = totalNumberFontScale(el.clientWidth, el.scrollWidth);
+  if (scale < 1) el.style.fontSize = `${Math.floor(base * scale)}px`;
 }
 function trendShortLabel(label, labelKey) {
   const value = String(label || '');
@@ -629,7 +654,9 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateMessage.textContent = t('settings.appUpdate.downloading', { percent });
     els.appUpdateMessage.classList.remove('error');
   } else if (s.downloaded) {
-    els.appUpdateMessage.textContent = t('settings.appUpdate.ready');
+    els.appUpdateMessage.textContent = state.appInfo?.platform === 'win32'
+      ? t('settings.appUpdate.readyWindowsUnsigned')
+      : t('settings.appUpdate.ready');
     els.appUpdateMessage.classList.remove('error');
   } else if (s.installError) {
     els.appUpdateMessage.textContent = t('settings.appUpdate.installError');
@@ -998,7 +1025,8 @@ function sessionRowsForPeriod(period) {
     clientColors,
     modelColor,
     stableColor,
-    fallbackColors: fallbackModelColors
+    fallbackColors: fallbackModelColors,
+    archivedLabel: t('session.archived')
   });
   if (rows.length > 0) return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
   if (Number(period?.totalTokens || 0) === 0) return [];
@@ -1101,6 +1129,7 @@ function limitProviderMeta(provider, provenance = null) {
 }
 
 function limitProviderPlan(provider) {
+  if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
   const label = String(provider?.accountLabel || '').trim();
   if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(label);
   return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
@@ -1122,6 +1151,15 @@ function configuredLimitProviderSelection() {
 function enabledLimitProviderSet() {
   if (state.settings?.limitsEnabled === false) return new Set();
   return new Set(configuredLimitProviderSelection());
+}
+
+function limitProviderSelectionIncluding(providerName) {
+  const selected = new Set(configuredLimitProviderSelection());
+  selected.add(providerName);
+  return LIMIT_PROVIDERS
+    .map((provider) => provider.id)
+    .filter((id) => selected.has(id))
+    .join(',');
 }
 
 function missingLimitProviderStatus() {
@@ -1293,6 +1331,12 @@ function formatMoney(value, currency) {
   return `${symbol}${number.toFixed(2)}`;
 }
 
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
   if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
   if (!window) return '--';
@@ -1306,6 +1350,7 @@ function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
 }
 
 function formatHomeLimitWindowValue(window, showUsed) {
+  if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
   if (window?.kind === 'balance') {
     return `${formatMoney(window.amount, window.currency)} left`;
   }
@@ -1319,6 +1364,31 @@ function balanceRemainingWindow(balance) {
   const total = amount + spend;
   const remainingPercent = total > 0 ? (amount / total) * 100 : 100;
   return { remainingPercent };
+}
+
+function mimoTokenPlanWindowFromBalance(balance) {
+  if (!balance) return null;
+  if (balance.planStatus === 'expired') return null;
+  const used = optionalFiniteNumber(balance.planUsed);
+  const limit = optionalFiniteNumber(balance.planLimit);
+  const percent = optionalFiniteNumber(balance.planPercent);
+  const hasUsed = used !== null;
+  const hasLimit = limit !== null;
+  const hasPercent = percent !== null;
+  if (!hasUsed && !hasLimit && !hasPercent) return null;
+  const resolvedPercent = hasPercent
+    ? Math.max(0, Math.min(100, percent))
+    : (hasUsed && hasLimit && limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : null);
+  return {
+    kind: 'billing',
+    label: 'Token Plan',
+    used: hasUsed ? used : null,
+    limit: hasLimit ? limit : null,
+    remaining: hasUsed && hasLimit ? Math.max(0, limit - used) : null,
+    usedPercent: resolvedPercent,
+    remainingPercent: resolvedPercent == null ? null : Math.max(0, Math.min(100, 100 - resolvedPercent)),
+    showMeter: true
+  };
 }
 
 function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
@@ -1443,20 +1513,30 @@ function codexAccountsShareIdentity(left, right) {
   return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
 }
 
+// The account THIS device's Codex app/CLI is signed into is a purely local fact:
+// the local device's own record for it carries a live (non-managed) sourceDetail.
+// Read it from the local device's RAW limits, not the cross-device aggregate:
+// aggregateLimits() keeps one record per account by freshness, so after sync the
+// selected codex row can belong to a remote device signed into a *different*
+// account. Reading the aggregate would move the active marker onto that remote
+// login, or drop it entirely when every selected row is 'managed'. Legacy stats
+// without per-device rows fall back to the aggregate (localDeviceLimitsProviders
+// returns null there), mirroring localProviderStatus().
+function localLiveCodexProvider() {
+  const localProviders = localDeviceLimitsProviders();
+  const providers = localProviders !== null ? localProviders : (state.stats?.limits?.providers || []);
+  return providers.find((provider) => limitProviderPresentationApi.isCodexLiveAccount(provider)) || null;
+}
+
 function codexActiveAccountFromStats() {
-  const providers = state.stats?.limits?.providers || [];
-  for (const provider of providers) {
-    if (provider?.provider !== 'codex') continue;
-    const provenance = limitProviderProvenance(provider);
-    if (!limitProviderPresentationApi.isCodexLiveAccount(provider, provenance)) continue;
-    return {
-      id: codexSwitchAccountForProvider(provider)?.id || '',
-      email: provider.accountEmail || '',
-      accountKey: provider.accountKey || '',
-      accountLabel: provider.accountLabel || ''
-    };
-  }
-  return null;
+  const provider = localLiveCodexProvider();
+  if (!provider) return null;
+  return {
+    id: codexSwitchAccountForProvider(provider)?.id || '',
+    email: provider.accountEmail || '',
+    accountKey: provider.accountKey || '',
+    accountLabel: provider.accountLabel || ''
+  };
 }
 
 function clearCodexPendingActiveAccount() {
@@ -1549,14 +1629,13 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   title.className = 'limit-name-title';
   title.textContent = options.title || label;
   const provenance = limitProviderProvenance(provider);
-  const liveCodexAccount = options.accountTitle && limitProviderPresentationApi.isCodexLiveAccount(provider, provenance);
-  // The local marker only disambiguates rows when the Codex provider is
-  // rendered as a multi-account group. A single visible account is necessarily
-  // the only choice, so a checkmark there adds noise and can look selected.
-  const activeCodexAccount = options.showActiveBadge && (
-    codexActiveAccountMatchesProvider(provider) ||
-    (!state.codexActiveAccount && liveCodexAccount)
-  );
+  // The ✓ marks the account THIS device's Codex is signed into
+  // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
+  // It only disambiguates rows in the multi-account group, so it's gated on
+  // showActiveBadge. Never re-derive "live" from the row being rendered — in
+  // sync mode that row can be a remote device's record for a different account,
+  // which would move the ✓ onto the wrong one.
+  const activeCodexAccount = options.showActiveBadge && codexActiveAccountMatchesProvider(provider);
   const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexSwitchAccountForProvider(provider) : null;
   if (switchAccount && window.tokenMonitor?.codex?.switchSystemAccount) {
     const switchZone = document.createElement('span');
@@ -1700,8 +1779,16 @@ function renderProviderWindows(provider, color) {
   if (provider.provider === 'codex') {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
-    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
-    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
+    if (session) {
+      const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
+      if (!weekly) sessionNode.classList.add('limit-window-wide');
+      windows.append(sessionNode);
+    }
+    if (weekly) {
+      const weeklyNode = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
+      if (!session) weeklyNode.classList.add('limit-window-wide');
+      windows.append(weeklyNode);
+    }
     const resetNode = codexResetCreditsNode(provider.resetCredits);
     if (resetNode) windows.append(resetNode);
   } else if (provider.provider === 'cursor') {
@@ -1770,6 +1857,38 @@ function renderProviderWindows(provider, color) {
         spendNode.classList.add('limit-window-wide', 'limit-window-note');
         windows.append(spendNode);
       }
+    }
+  } else if (provider.provider === 'mimo') {
+    windows.classList.add('limit-windows-mimo');
+    const balance = provider.balance || null;
+    const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
+    if (tokenPlan) {
+      const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
+      node.classList.add('limit-window-wide');
+      windows.append(node);
+    } else if (balance?.planStatus === 'expired') {
+      const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
+      node.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(node);
+    }
+    const amount = optionalFiniteNumber(balance?.amount);
+    const giftBalance = optionalFiniteNumber(balance?.giftBalance);
+    const cashBalance = optionalFiniteNumber(balance?.cashBalance);
+    if (amount !== null || giftBalance !== null || cashBalance !== null) {
+      const detailParts = [];
+      if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
+      if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
+      const balanceText = formatMoney(amount, balance.currency) || '—';
+      const balanceNode = limitWindowNode(
+        'Balance',
+        { showMeter: false },
+        color,
+        0.68,
+        balanceText,
+        detailParts.join(' · ')
+      );
+      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(balanceNode);
     }
   } else if (provider.provider === 'grok') {
     // Grok exposes a single Monthly billing window (no session/weekly). Render it
@@ -1860,6 +1979,15 @@ function renderProviderWindows(provider, color) {
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
+  } else if (provider.provider === 'ollama') {
+    const session = windowForKind(provider, 'session');
+    const weekly = windowForKind(provider, 'weekly');
+    if (session) {
+      const node = limitWindowNode('Session', session, color, 0.95);
+      if (!weekly) node.classList.add('limit-window-wide');
+      windows.append(node);
+    }
+    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
   } else if (provider.provider === 'claude') {
     // Claude usually shows session + one all-models weekly, but can carry a second
     // model-scoped weekly (the temporary "Fable only" promo cap). Render every
@@ -1943,6 +2071,37 @@ function renderCodexAccountGroup(label, providers, color) {
   return row;
 }
 
+function mimoAccountTitle(provider, index) {
+  const email = String(provider?.accountEmail || '').trim();
+  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddressForDisplay(email) : email;
+  return `Account ${index + 1}`;
+}
+
+function mimoSettingsAccountTitle(account, index) {
+  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
+}
+
+function renderMimoAccountGroup(label, providers, color) {
+  const row = document.createElement('div');
+  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+  const groupProvider = { provider: 'mimo', status: 'ok', windows: [] };
+  const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
+    planText: `${providers.length} accounts`,
+    hideMeta: true
+  });
+  const accountList = document.createElement('div');
+  accountList.className = 'limit-account-list';
+  providers.forEach((provider, index) => {
+    accountList.append(renderLimitProviderRow('mimo', mimoAccountTitle(provider, index), provider, color, {
+      accountRow: true,
+      accountTitle: true,
+      showIcon: false
+    }));
+  });
+  row.append(head, accountList);
+  return row;
+}
+
 function renderOpenCodeAccountGroup(label, providers, color) {
   const row = document.createElement('div');
   row.className = 'limit-row limit-row-group';
@@ -1993,13 +2152,17 @@ function renderLimits() {
     const visibleProviders = providerEntries.length > 0
       ? providerEntries
       : { provider: id, status: 'disabled', windows: [] };
-    const color = clientColors[id] || clientColors.default;
+    const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
     if (id === 'codex' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderCodexAccountGroup(label, visibleProviders, color));
       continue;
     }
     if (id === 'opencode' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderOpenCodeAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
@@ -3193,6 +3356,7 @@ function renderHome() {
 
 function render() {
   if (!state.stats) return;
+  renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
@@ -3206,8 +3370,14 @@ function render() {
     updateTotalCompact(nextTotal);
     state.suppressInitialNumberAnimation = false;
   } else if (totalChanged) {
-    hideTotalCompact();
-    animateNumber(els.totalTokens, state.currentTotal, nextTotal, 2200, () => updateTotalCompact(nextTotal));
+    // Keep the compact chip visible through the count-up and lock the font to the
+    // widest endpoint first (a downward roll starts wider than it settles), so the
+    // number never vanishes, clips, or resizes mid-roll. Re-fit on completion so a
+    // window resize during the animation, or a downward settle, still ends correct.
+    const widest = formatNumber(nextTotal).length >= formatNumber(state.currentTotal).length ? nextTotal : state.currentTotal;
+    els.totalTokens.textContent = formatNumber(widest);
+    updateTotalCompact(nextTotal);
+    animateNumber(els.totalTokens, state.currentTotal, nextTotal, 2200, fitTotalNumber);
     pulseLiveDot();
   } else {
     cancelNumberAnimation();
@@ -3381,6 +3551,18 @@ function settleRefreshButtonState(status) {
   }, REFRESH_BUTTON_FEEDBACK_MS);
 }
 
+// The main process rebuilds the TOTAL session list for display but ships it as a
+// display-only sibling (`allTimeSessionsView`) so it never pollutes the lossless
+// period export. Overlay it onto periods.allTime here, on the renderer's own copy, so
+// every session-view reader (list, archived count, detail lookup) sees it. See
+// injectLocalDeviceStatus in main.js.
+function overlayAllTimeSessions(stats) {
+  if (stats && stats.allTimeSessionsView && stats.periods?.allTime) {
+    stats.periods.allTime.sessions = stats.allTimeSessionsView;
+  }
+  return stats;
+}
+
 async function refreshStats(options = {}) {
   const feedback = options.feedback === true;
   if (feedback) {
@@ -3390,7 +3572,7 @@ async function refreshStats(options = {}) {
     setRefreshButtonState('refreshing');
   }
   try {
-    state.stats = await window.tokenMonitor.getStats(options);
+    state.stats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
     applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
     render();
@@ -3403,6 +3585,9 @@ async function refreshStats(options = {}) {
     renderExternalProviderStatus('zaiteam');
     renderExternalProviderStatus('volcengine');
     renderExternalProviderStatus('qoder');
+    renderExternalProviderStatus('kimi');
+    renderExternalProviderStatus('ollama');
+    renderMimoStatus();
     renderCopilotStatus();
     maybeUpdateBarsIcon();
     if (feedback) settleRefreshButtonState('refreshed');
@@ -4175,6 +4360,18 @@ function applyInitialBreakdownPreference() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
+function renderSessionUsageArchiveStatus() {
+  if (!els.sessionUsageArchiveStatus) return;
+  if (state.settings?.sessionUsageArchiveEnabled === false) {
+    els.sessionUsageArchiveStatus.textContent = t('settings.collection.sessionArchivePaused');
+    return;
+  }
+  const count = sessionRowsApi.archivedSessionCount(state.stats);
+  els.sessionUsageArchiveStatus.textContent = count > 0
+    ? t('settings.collection.sessionArchiveActiveCount', { count })
+    : t('settings.collection.sessionArchiveEmpty');
+}
+
 function syncSettingsForm() {
   applySettingsTranslations();
   applyInitialBreakdownPreference();
@@ -4201,6 +4398,8 @@ function syncSettingsForm() {
     }
   }
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
+  if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
+  renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
   if (els.exportAutoInput) els.exportAutoInput.checked = exportAutoOn;
@@ -4257,6 +4456,9 @@ function syncSettingsForm() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('kimi');
+  renderExternalProviderStatus('ollama');
+  renderMimoStatus();
   renderCopilotStatus();
   renderViewPreferences();
   renderToolPreferences();
@@ -5449,6 +5651,7 @@ async function init() {
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
   state.settings = await window.tokenMonitor.getSettings();
   applyEffectiveCurrencyRates();
+
   state.appUpdate = await window.tokenMonitor.getAppUpdateState();
   renderAppUpdatePill();
   renderSettingsAppUpdateRow();
@@ -5594,6 +5797,14 @@ els.hubSecretRegenButton?.addEventListener('click', async () => {
   els.hubSecretInput.value = info.secret;
   renderHubStatus();
 });
+els.secretPasteButton?.addEventListener('click', async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) {
+      els.secretInput.value = text.trim();
+    }
+  } catch (_) {}
+});
 els.limitsRefreshInput.addEventListener('change', async () => {
   await saveSettings({ limitsRefreshMs: Number(els.limitsRefreshInput.value) });
   await refreshStats({ force: true });
@@ -5614,6 +5825,25 @@ els.collectionCadenceInput?.addEventListener('change', async () => {
     collectionMode: value === 'live' ? 'live' : 'interval',
     collectionIntervalMs: value === 'live' ? Number(state.settings.collectionIntervalMs || 300000) : Number(value)
   });
+});
+els.sessionUsageArchiveInput?.addEventListener('change', async () => {
+  await saveSettings({ sessionUsageArchiveEnabled: els.sessionUsageArchiveInput.checked });
+});
+els.clearSessionUsageArchiveButton?.addEventListener('click', async () => {
+  if (!window.confirm(t('settings.collection.sessionArchiveConfirm'))) return;
+  els.clearSessionUsageArchiveButton.disabled = true;
+  try {
+    const result = await window.tokenMonitor.clearSessionUsageArchive();
+    if (!result?.ok) {
+      window.alert(t(result?.error === 'agentActive'
+        ? 'settings.collection.sessionArchiveAgentActive'
+        : 'settings.collection.sessionArchiveFailed'));
+      return;
+    }
+    await refreshStats();
+  } finally {
+    els.clearSessionUsageArchiveButton.disabled = false;
+  }
 });
 els.wslScanInput?.addEventListener('change', async () => {
   await saveSettings({ wslScanEnabled: els.wslScanInput.checked });
@@ -5670,6 +5900,7 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
   if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
 });
+window.addEventListener('resize', () => { if (!numberAnimHandle) fitTotalNumber(); });
 els.settingsInTitlebarInput.addEventListener('change', saveAppearanceFromControls);
 els.discordRpcInput.addEventListener('change', saveAppearanceFromControls);
 els.windowBehaviorInput.addEventListener('change', () => saveSettings({ windowBehavior: els.windowBehaviorInput.value }));
@@ -5821,7 +6052,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     state.streamConnected = true;
     state.streamFailure = null;
     if (payload.data?.mode) state.mode = payload.data.mode;
-    state.stats = payload.data.stats;
+    state.stats = overlayAllTimeSessions(payload.data.stats);
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
@@ -5844,6 +6075,8 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     renderExternalProviderStatus('zaiteam');
     renderExternalProviderStatus('volcengine');
     renderExternalProviderStatus('qoder');
+    renderExternalProviderStatus('kimi');
+    renderExternalProviderStatus('ollama');
     renderCopilotStatus();
     maybeUpdateBarsIcon();
   }
@@ -6153,6 +6386,10 @@ function setDeepseekAccountExpanded(expanded) {
   setAccountGroupExpanded('deepseek', expanded, 'deepseekAccountExpanded');
 }
 
+function setMimoAccountExpanded(expanded) {
+  setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
+}
+
 function setCopilotAccountExpanded(expanded) {
   setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
 }
@@ -6358,6 +6595,106 @@ function clearDeepseekProviderStatus() {
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
 }
 
+function mimoAccountLinked() {
+  return (state.settings?.mimoManagedAccounts || []).length > 0;
+}
+
+function renderMimoStatus() {
+  const statusEl = document.getElementById('mimoAccountStatus');
+  const listEl = document.getElementById('mimoAccountList');
+  const emptyEl = document.getElementById('mimoAccountEmpty');
+  const errorEl = document.getElementById('mimoAccountErrorMessage');
+  if (!statusEl || !listEl || !emptyEl || !errorEl) return;
+  const accounts = state.settings?.mimoManagedAccounts || [];
+  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
+  const statusText = accounts.length === 0
+    ? t('settings.mimo.notConfigured')
+    : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
+  setCursorStatusText(statusEl, statusText);
+  errorEl.textContent = state.mimoAccountError || '';
+  errorEl.classList.toggle('hidden', !state.mimoAccountError);
+  emptyEl.classList.toggle('hidden', accounts.length > 0);
+
+  listEl.replaceChildren();
+  if (accounts.length > 0) {
+    for (const [index, account] of accounts.entries()) {
+      const enabled = account.enabled !== false;
+      const accountName = mimoSettingsAccountTitle(account, index);
+      const row = document.createElement('div');
+      row.className = 'managed-account-row';
+      row.classList.toggle('disabled', !enabled);
+
+      const input = document.createElement('input');
+      input.className = 'managed-account-checkbox';
+      input.type = 'checkbox';
+      input.checked = enabled;
+      input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
+        account: accountName
+      }));
+      input.addEventListener('change', async () => {
+        input.disabled = true;
+        const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
+        if (!result?.ok) {
+          state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
+        } else {
+          state.mimoAccountError = '';
+          state.settings.mimoManagedAccounts = result.accounts || [];
+        }
+        renderMimoStatus();
+        renderSettingsSummaries();
+      });
+
+      const main = document.createElement('div');
+      main.className = 'managed-account-main';
+      const label = document.createElement('div');
+      label.className = 'managed-account-email';
+      label.textContent = accountName;
+      main.append(label);
+
+      const right = document.createElement('span');
+      right.className = 'managed-account-right';
+      const info = document.createElement('span');
+      info.className = 'managed-account-info';
+      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'managed-account-remove';
+      remove.textContent = '✕';
+      remove.title = t('settings.mimo.remove');
+      let confirmingRemove = false;
+      remove.addEventListener('click', async () => {
+        if (!confirmingRemove) {
+          confirmingRemove = true;
+          remove.classList.add('confirming');
+          remove.textContent = '✓';
+          remove.title = t('settings.mimo.removeConfirm', {
+            account: accountName
+          });
+          return;
+        }
+        const result = await window.tokenMonitor.mimo.removeAccount(account.id);
+        if (result?.ok) {
+          state.mimoAccountError = '';
+          state.settings.mimoManagedAccounts = result.accounts || [];
+          renderMimoStatus();
+          renderSettingsSummaries();
+          refreshStats({ force: true }).catch(() => {});
+          return;
+        }
+        state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
+        renderMimoStatus();
+        renderSettingsSummaries();
+      });
+
+      right.append(info, remove);
+      row.append(input, main, right);
+      listEl.append(row);
+    }
+  }
+  renderSettingsSummaries();
+}
+
 function minimaxProviderStatus() {
   return localProviderStatus('minimax');
 }
@@ -6444,6 +6781,16 @@ const externalLimitAccountConfig = {
     configuredKey: 'qoderCookieConfigured',
     sourceKey: 'qoderCookieSource',
     pendingKey: 'qoderPendingCheckSince'
+  },
+  kimi: {
+    configuredKey: 'kimiApiKeyConfigured',
+    sourceKey: 'kimiApiKeySource',
+    pendingKey: 'kimiPendingCheckSince'
+  },
+  ollama: {
+    configuredKey: 'ollamaCookieConfigured',
+    sourceKey: 'ollamaCookieSource',
+    pendingKey: 'ollamaPendingCheckSince'
   }
 };
 
@@ -6590,6 +6937,22 @@ function updateQoderUsagePageHint() {
   if (hint) hint.textContent = qoderUsagePagePath();
 }
 
+function kimiPlatformUrl() {
+  return 'https://www.kimi.com/code/console';
+}
+
+function ollamaPlatformUrl() {
+  return 'https://ollama.com/settings';
+}
+
+function ollamaValidationError(provider) {
+  if (provider?.status === 'unauthorized') return t('settings.ollama.validationInvalid');
+  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
+    return t('settings.ollama.validationRateLimited');
+  }
+  return t('settings.ollama.validationUnavailable');
+}
+
 function renderExternalProviderStatus(providerName) {
   const config = externalLimitAccountConfig[providerName];
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
@@ -6604,9 +6967,14 @@ function renderExternalProviderStatus(providerName) {
   errorEl.textContent = '';
 
   const source = state.settings?.[config.sourceKey] || '';
+  const wasPending = Number(state[config.pendingKey] || 0) > 0;
   const provider = externalProviderForAccount(providerName);
   const configured = Boolean(state.settings?.[config.configuredKey]);
+  const pending = Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
+  if (providerName === 'ollama' && wasPending && !pending && linked) {
+    setExternalAccountExpanded('ollama', false);
+  }
   if (providerName === 'zai') {
     const regionInput = document.getElementById('zaiApiRegionInput');
     if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
@@ -6616,7 +6984,10 @@ function renderExternalProviderStatus(providerName) {
     if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
     updateQoderUsagePageHint();
   }
-  setCursorStatusText(statusEl, apiKeyAccountStatusText(providerName, provider, configured, source));
+  setCursorStatusText(
+    statusEl,
+    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source)
+  );
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
   logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
@@ -7646,6 +8017,191 @@ function setupCursorAccountUI() {
     });
   }
 
+  const ollamaToggle = document.getElementById('ollamaSettingsToggle');
+  if (ollamaToggle) {
+    ollamaToggle.addEventListener('click', () => setExternalAccountExpanded('ollama', !state.ollamaAccountExpanded));
+    setExternalAccountExpanded('ollama', false);
+    renderExternalProviderStatus('ollama');
+
+    document.getElementById('ollamaOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(ollamaPlatformUrl());
+    });
+    document.getElementById('ollamaLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ ollamaCookie: '' });
+      clearExternalProviderCheckPending('ollama');
+      clearExternalProviderPendingStatus('ollama');
+      renderExternalProviderStatus('ollama');
+      await refreshStats({ force: true });
+    });
+    document.getElementById('ollamaRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+    document.getElementById('ollamaCookieSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('ollamaCookieInput');
+      const errorEl = document.getElementById('ollamaErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.ollama.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('ollama');
+        renderExternalProviderStatus('ollama');
+        const validation = await window.tokenMonitor.ollama.validateCookie(input.value);
+        if (!validation?.ok) {
+          clearExternalProviderCheckPending('ollama');
+          renderExternalProviderStatus('ollama');
+          errorEl.textContent = ollamaValidationError(validation);
+          errorEl.classList.remove('hidden');
+          return;
+        }
+        await saveSettings({
+          ollamaCookie: input.value,
+          limitProviders: limitProviderSelectionIncluding('ollama'),
+          limitsEnabled: true
+        });
+        if (!state.settings?.ollamaCookieConfigured) {
+          clearExternalProviderCheckPending('ollama');
+          renderExternalProviderStatus('ollama');
+          errorEl.textContent = t('settings.ollama.validationInvalid');
+          errorEl.classList.remove('hidden');
+          return;
+        }
+        input.value = '';
+        renderExternalProviderStatus('ollama');
+      } catch (err) {
+        clearExternalProviderCheckPending('ollama');
+        renderExternalProviderStatus('ollama');
+        errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const kimiToggle = document.getElementById('kimiSettingsToggle');
+  if (kimiToggle) {
+    kimiToggle.addEventListener('click', () => setExternalAccountExpanded('kimi', !state.kimiAccountExpanded));
+    setExternalAccountExpanded('kimi', false);
+    renderExternalProviderStatus('kimi');
+
+    document.getElementById('kimiOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(kimiPlatformUrl());
+    });
+
+    document.getElementById('kimiLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ kimiApiKey: '' });
+      clearExternalProviderCheckPending('kimi');
+      clearExternalProviderPendingStatus('kimi');
+      renderExternalProviderStatus('kimi');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('kimiRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('kimiApiKeySubmit').addEventListener('click', async () => {
+      const input = document.getElementById('kimiApiKeyInput');
+      const errorEl = document.getElementById('kimiErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.kimi.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('kimi');
+        await saveSettings({ kimiApiKey: input.value });
+        input.value = '';
+        renderExternalProviderStatus('kimi');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
+        renderExternalProviderStatus('kimi');
+      } catch (err) {
+        clearExternalProviderCheckPending('kimi');
+        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const mimoToggle = document.getElementById('mimoSettingsToggle');
+  if (mimoToggle) {
+    mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
+
+    const addToggle = document.getElementById('mimoAddToggle');
+    const addDetails = document.getElementById('mimoAddDetails');
+    function setMimoAddExpanded(expanded) {
+      const next = Boolean(expanded);
+      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
+      addDetails?.classList.toggle('hidden', !next);
+      document.getElementById('mimoManualPanel')?.classList.toggle('expanded', next);
+    }
+    addToggle?.addEventListener('click', () => setMimoAddExpanded(addDetails?.classList.contains('hidden')));
+    setMimoAccountExpanded(false);
+    renderMimoStatus();
+
+    window.tokenMonitor.mimo.onAccounts((accounts) => {
+      state.settings.mimoManagedAccounts = accounts || [];
+      renderMimoStatus();
+    });
+
+    window.tokenMonitor.mimo.accounts().then((accounts) => {
+      state.settings.mimoManagedAccounts = accounts || [];
+      renderMimoStatus();
+    }).catch(() => {});
+
+    document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
+      const result = await window.tokenMonitor.mimo.openConsole();
+      if (!result?.ok) {
+        state.mimoAccountError = result?.error || t('settings.mimo.openFailed');
+        renderMimoStatus();
+        return;
+      }
+      state.mimoAccountError = '';
+      renderMimoStatus();
+    });
+
+    document.getElementById('mimoSaveAccountButton').addEventListener('click', async () => {
+      const input = document.getElementById('mimoCookieInput');
+      const saveButton = document.getElementById('mimoSaveAccountButton');
+      saveButton.disabled = true;
+      saveButton.textContent = t('settings.mimo.checking');
+      let result;
+      try {
+        result = await window.tokenMonitor.mimo.addAccount(input.value);
+      } catch (_) {
+        result = { ok: false, errorCode: 'validationUnavailable' };
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = t('settings.mimo.saveAccount');
+      }
+      if (!result?.ok) {
+        if (result?.errorCode === 'missingRequiredCookies') {
+          state.mimoAccountError = t('settings.mimo.missingCookies', { cookies: (result.missingCookies || []).join(', ') });
+        } else if (result?.errorCode === 'invalidCookie') {
+          state.mimoAccountError = t('settings.mimo.invalidCookie');
+        } else if (result?.errorCode === 'validationRateLimited') {
+          state.mimoAccountError = t('settings.mimo.validationRateLimited');
+        } else if (result?.errorCode === 'validationUnavailable') {
+          state.mimoAccountError = t('settings.mimo.validationUnavailable');
+        } else if (result?.errorCode === 'credentialStorageUnavailable') {
+          state.mimoAccountError = t('settings.mimo.credentialStorageUnavailable');
+        } else {
+          state.mimoAccountError = result?.error || t('settings.mimo.addFailed');
+        }
+        renderMimoStatus();
+        return;
+      }
+      input.value = '';
+      state.mimoAccountError = '';
+      state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
+      renderMimoStatus();
+      setMimoAddExpanded(false);
+      await refreshStats({ force: true });
+    });
+  }
   const copilotToggle = document.getElementById('copilotSettingsToggle');
   if (copilotToggle) {
     copilotToggle.addEventListener('click', () => setCopilotAccountExpanded(!state.copilotAccountExpanded));
@@ -7794,7 +8350,9 @@ function initSettingsAnimationWrappers() {
     '#zaiManualPanel',
     '#zaiteamManualPanel',
     '#volcengineManualPanel',
-    '#qoderManualPanel'
+    '#qoderManualPanel',
+    '#kimiManualPanel',
+    '#ollamaManualPanel'
   ].join(', ');
 
   document.querySelectorAll(selectors).forEach(el => {

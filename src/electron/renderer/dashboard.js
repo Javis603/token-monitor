@@ -365,10 +365,27 @@ function showHeatTooltip(date, day, ev) {
   positionTooltip(ev);
 }
 
+let refreshRunning = false;
+let refreshQueued = false;
+
 async function refresh() {
-  try { state.history = await window.tokenMonitor.getDashboardHistory(); }
-  catch (error) { console.log(`[dashboard] history failed: ${error.message}`); state.history = { daily: [], monthly: [], summary: {} }; }
-  render();
+  if (refreshRunning) {
+    refreshQueued = true;
+    return;
+  }
+  refreshRunning = true;
+  try {
+    state.history = await window.tokenMonitor.getDashboardHistory();
+    render();
+  } catch (error) {
+    console.log(`[dashboard] history failed: ${error.message}`);
+  } finally {
+    refreshRunning = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      void refresh();
+    }
+  }
 }
 
 async function boot() {
@@ -405,6 +422,8 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   }
   if (needsRender) render();
 });
+
+window.tokenMonitor.onDashboardHistoryChanged?.(() => { void refresh(); });
 
 els.tabs.forEach((tab) => tab.addEventListener('click', () => { state.tab = tab.dataset.tab; els.tabs.forEach((x) => x.classList.toggle('active', x === tab)); render(); }));
 els.stackBtns.forEach((b) => b.addEventListener('click', () => { state.stackBy = b.dataset.stack; render(); }));

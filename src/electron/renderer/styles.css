@@ -388,6 +388,36 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-collection-cadence {
   grid-template-columns: minmax(0, 1fr);
 }
+.session-archive-settings { display: grid; gap: 6px; }
+.session-archive-settings .session-archive-toggle { justify-content: flex-start; gap: 8px; color: var(--text); }
+.session-archive-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.session-archive-footer .settings-note { min-width: 0; }
+.session-archive-clear {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 26px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+.session-archive-clear:hover:not(:disabled),
+.session-archive-clear:focus-visible {
+  border-color: rgba(244, 119, 136, 0.28);
+  background: rgba(244, 119, 136, 0.06);
+  color: var(--red);
+}
+.session-archive-clear:focus-visible { outline: 1px solid rgba(244, 119, 136, 0.46); outline-offset: 1px; }
+.session-archive-clear:disabled { opacity: 0.38; cursor: default; }
 .settings-wsl-block { display: grid; gap: 6px; min-width: 0; }
 .settings-wsl-block.hidden { display: none; }
 .settings-wsl-block .wsl-scan-toggle { justify-content: flex-start; gap: 8px; }
@@ -699,6 +729,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   display: grid;
   gap: 6px;
 }
+.managed-account-list:empty { display: none; }
 .managed-account-row {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
@@ -857,6 +888,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .hub-secret-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
 .settings-panel .hub-secret-row input { flex: 1 1 0; width: 0; min-width: 0; }
 .hub-secret-row .icon-button { width: 30px; height: 30px; flex: 0 0 auto; font-size: 13px; }
+#secretPasteButton { font-size: 17px; }
 .shortcut-recorder {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1606,6 +1638,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-weight: 500;
   font-size: clamp(30px, 11vw, 46px);
   line-height: 1.05;
+  /* Equal-width digits so the counting animation does not wobble the number's
+     width (and shove the compact chip) frame to frame. */
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2184,6 +2219,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-kiro       { -webkit-mask-image: url(../../../assets/icons/kiro.svg);          mask-image: url(../../../assets/icons/kiro.svg); }
 .row-icon-codebuddy  { -webkit-mask-image: url(../../../assets/icons/codebuddy.svg);     mask-image: url(../../../assets/icons/codebuddy.svg); }
 .row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
+.row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
 .row-icon-deepseek   { -webkit-mask-image: url(../../../assets/icons/deepseek.svg);      mask-image: url(../../../assets/icons/deepseek.svg); }
@@ -2195,11 +2231,13 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-icon-zai        { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-zaiteam    { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-cohere     { -webkit-mask-image: url(../../../assets/icons/cohere.svg);        mask-image: url(../../../assets/icons/cohere.svg); }
-.row-icon-xiaomi     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
+.row-icon-xiaomi,
+.row-icon-mimo       { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
+.row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
@@ -2271,6 +2309,19 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .limit-icon-qoder {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);
   mask-image: url(../../../assets/icons/qoder.svg);
+}
+
+.limit-icon-ollama {
+  -webkit-mask-image: url(../../../assets/icons/ollama.svg);
+  mask-image: url(../../../assets/icons/ollama.svg);
+}
+.limit-icon-kimi {
+  -webkit-mask-image: url(../../../assets/icons/moonshot.svg);
+  mask-image: url(../../../assets/icons/moonshot.svg);
+}
+.limit-icon-mimo {
+  -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
+  mask-image: url(../../../assets/icons/xiaomi.svg);
 }
 .row-label {
   display: grid;
@@ -2560,6 +2611,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
+}
+html.is-windows .limit-live-badge {
+  font-size: 8px;
 }
 .limit-account-active-zone {
   position: relative;
@@ -3151,6 +3205,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
+#ollamaManualPanel.hidden,
+#mimoManualPanel.hidden,
+#kimiManualPanel.hidden,
 #copilotManualPanel.hidden,
 #copilotManualDetails.hidden,
 #cursorErrorMessage.hidden,
@@ -3161,6 +3218,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
 #qoderErrorMessage.hidden,
+#ollamaErrorMessage.hidden,
+#kimiErrorMessage.hidden,
 #copilotErrorMessage.hidden,
 #copilotLoginStatus.hidden { display: none; }
 #cursorManualPanel,
@@ -3171,6 +3230,9 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
+#ollamaManualPanel,
+#mimoManualPanel,
+#kimiManualPanel,
 #copilotManualPanel {
   min-width: 0;
 }
@@ -3181,7 +3243,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiManualPanel > .accordion-animation-inner,
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner {
+#qoderManualPanel > .accordion-animation-inner,
+#ollamaManualPanel > .accordion-animation-inner,
+#mimoManualPanel > .accordion-animation-inner,
+#kimiManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
@@ -3196,6 +3261,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#ollamaManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#kimiManualPanel input,
 #copilotManualDetails input {
   width: 100%;
   font-size: 12px;
@@ -3208,6 +3277,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
+#ollamaManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#kimiManualPanel input,
 #copilotManualDetails input {
   font-family: monospace;
 }
@@ -3476,6 +3549,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-size: 11px;
   text-align: center;
 }
+.opencode-empty.hidden { display: none; }
 .opencode-profile-item {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;

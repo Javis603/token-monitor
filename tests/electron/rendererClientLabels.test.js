@@ -67,6 +67,8 @@ test('renderer wires limit provider brand icons for Z.ai, Volcengine, and Qoder'
   assert.match(styles, /\.limit-icon-zai\s*\{[^}]*assets\/icons\/zai\.svg/s);
   assert.match(styles, /\.limit-icon-volcengine\s*\{[^}]*assets\/icons\/volcengine\.svg/s);
   assert.match(styles, /\.limit-icon-qoder\s*\{[^}]*assets\/icons\/qoder\.svg/s);
+  assert.match(styles, /\.limit-icon-ollama\s*\{[^}]*assets\/icons\/ollama\.svg/s);
+  assert.match(styles, /\.row-icon-ollama\s*\{[^}]*assets\/icons\/ollama\.svg/s);
 });
 
 test('renderer wires the Doubao vendor icon for Doubao model rows', () => {
@@ -75,6 +77,14 @@ test('renderer wires the Doubao vendor icon for Doubao model rows', () => {
 
   assert.match(source, /clientsWithIcon = new Set\(\[[\s\S]*'doubao'[\s\S]*'volcengine'[\s\S]*'qoder'/);
   assert.match(styles, /\.row-icon-doubao\s*\{[^}]*assets\/icons\/doubao\.svg/s);
+});
+
+test('renderer maps MiMo provider rows to the Xiaomi brand icon', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+
+  assert.match(source, /clientsWithIcon = new Set\(\[[\s\S]*'xiaomi', 'mimo'/);
+  assert.match(styles, /\.row-icon-xiaomi,\s*\.row-icon-mimo\s*\{[^}]*assets\/icons\/xiaomi\.svg/s);
 });
 
 test('renderer uses the CodeBuddy and WorkBuddy brand icons for their tool rows', () => {

@@ -240,6 +240,32 @@ test('Trends has a master toggle separate from main-screen visibility', () => {
   assert.match(css, /\.trend-settings-list/);
 });
 
+test('session archive retention has its own setting separate from Trends', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const css = readRendererFile('styles.css');
+  const main = readRendererFile('../main.js');
+  const agent = readRendererFile('../../agent/agent.js');
+  const preload = readRendererFile('../preload.js');
+  assert.match(html, /settings-subgroup session-archive-settings/);
+  assert.match(html, /id="sessionUsageArchiveInput"/);
+  assert.match(html, /id="sessionUsageArchiveStatus"/);
+  assert.match(html, /id="clearSessionUsageArchiveButton" class="session-archive-clear"/);
+  assert.match(app, /sessionUsageArchiveEnabled:\s*els\.sessionUsageArchiveInput\.checked/);
+  assert.doesNotMatch(app, /sessionUsageArchiveCount/);
+  assert.match(app, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
+  assert.match(app, /sessionUsageArchiveEnabled === false[\s\S]{0,160}sessionArchivePaused/);
+  assert.doesNotMatch(app, /sessionSettingsExpanded|renderSessionSettingsList/);
+  assert.match(css, /\.session-archive-clear\s*\{[\s\S]*?width:\s*auto;[\s\S]*?font-size:\s*10px;/);
+  assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
+  assert.doesNotMatch(main, /sessionUsageArchiveCount:/);
+  assert.match(main, /settings\?\.sessionUsageArchiveEnabled === false/);
+  assert.match(main, /ipcMain\.handle\('sessionUsageArchive:clear'/);
+  assert.match(agent, /TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
+  assert.match(preload, /clearSessionUsageArchive/);
+  assert.doesNotMatch(app, /historyEnabled[\s\S]{0,120}sessionUsageArchiveEnabled|sessionUsageArchiveEnabled[\s\S]{0,120}historyEnabled/);
+});
+
 test('view visibility changes do not toggle trend history collection', () => {
   const app = readRendererFile('app.js');
   const body = functionBody(app, 'onViewVisibilityToggle', 'onTrendVisibilityToggle');

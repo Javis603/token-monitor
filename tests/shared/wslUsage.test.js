@@ -30,6 +30,13 @@ test('homeHasData maps an alternate-root marker to its client id', () => {
   assert.deepEqual([...ids], ['kimi']);
 });
 
+test('homeHasData maps Proma agent sessions to proma', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.proma\\agent-sessions`]);
+  const ids = homeHasData(home, (p) => present.has(p));
+  assert.deepEqual(ids, ['proma']);
+});
+
 test('homeHasData returns empty array when no markers present', () => {
   const ids = homeHasData('\\\\wsl$\\Ubuntu\\home\\u', () => false);
   assert.deepEqual(ids, []);
@@ -329,6 +336,71 @@ test('collectWslUsage does not report detected clients the user is not tracking'
     deps
   );
   assert.deepEqual(detected, ['codex']); // openclaw marker present but untracked -> excluded
+});
+
+test('collectWslUsage parses Proma-only WSL homes without calling tokscale', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const now = new Date('2026-07-10T08:00:00.000Z');
+  let promaOptions = null;
+  const { bundle, detected } = await collectWslUsage(
+    {
+      clients: '',
+      trackedClients: 'proma',
+      allTimeSince: '2025-01-01',
+      commandTimeoutMs: 1000,
+      now,
+      buildPromaPeriods: (options) => {
+        promaOptions = options;
+        return {
+          today: { entries: [{ client: 'proma', model: 'm', input: 9, output: 1 }] },
+          month: { entries: [{ client: 'proma', model: 'm', input: 20 }] },
+          allTime: { entries: [{ client: 'proma', model: 'm', input: 30 }] }
+        };
+      }
+    },
+    {
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: () => ['u'],
+      existsSync: (p) => p === `${home}\\.proma\\agent-sessions`
+    }
+  );
+  assert.deepEqual(detected, ['proma']);
+  assert.deepEqual(promaOptions, {
+    now,
+    allTimeSince: '2025-01-01',
+    roots: [`${home}\\.proma\\agent-sessions`]
+  });
+  assert.equal(bundle.today.clients.proma, 10);
+  assert.equal(bundle.month.clients.proma, 20);
+  assert.equal(bundle.allTime.clients.proma, 30);
+});
+
+test('collectWslUsage applies the cached Proma price to WSL rows', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  let pricingRows = null;
+  let buildOptions = null;
+  await collectWslUsage(
+    {
+      clients: '', trackedClients: 'proma', allTimeSince: '2025-01-01', now: new Date('2026-07-10T08:00:00.000Z'),
+      collectPromaRows: () => [{ model: 'gpt-5', input: 10 }],
+      resolvePromaPricing: async (rows) => {
+        pricingRows = rows;
+        return { 'gpt-5': { inputCostPerToken: 0.000001 } };
+      },
+      buildPromaPeriods: (options) => {
+        buildOptions = options;
+        return { today: { entries: [] }, month: { entries: [] }, allTime: { entries: [] } };
+      }
+    },
+    {
+      platform: 'win32', exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'), readdirSync: () => ['u'],
+      existsSync: (p) => p === `${home}\\.proma\\agent-sessions`
+    }
+  );
+  assert.deepEqual(pricingRows, [{ model: 'gpt-5', input: 10 }]);
+  assert.deepEqual(buildOptions.rows, pricingRows);
+  assert.deepEqual(buildOptions.pricingByModel, { 'gpt-5': { inputCostPerToken: 0.000001 } });
 });
 
 test('collectWslUsage returns empty bundle when no homes', async () => {

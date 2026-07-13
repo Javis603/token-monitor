@@ -643,6 +643,14 @@ test('aggregateDevices combines session usage across devices', () => {
   assert.equal(session.modelCosts['gpt-5'], 0.3);
 });
 
+test('aggregateDevices keeps a zero-usage live session unarchived in either merge order', () => {
+  const archived = { deviceId: 'archived', allTime: { sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 10, archived: true } } } };
+  const live = { deviceId: 'live', allTime: { sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 0 } } } };
+
+  assert.equal(aggregateDevices([live, archived], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
+  assert.equal(aggregateDevices([archived, live], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
+});
+
 const { normalizeDeviceRecord, aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');
 
 test('normalizeDeviceRecord carries a history field when present', () => {
@@ -675,8 +683,7 @@ test('mergeDeviceRecord clears prior history when incoming history is explicitly
   assert.deepEqual(merged.history, { daily: [], monthly: [], summary: {} });
 });
 
-test('aggregateHistory merges non-stale devices and skips stale ones', () => {
-  const now = Date.parse('2026-06-07T12:00:00.000Z');
+test('aggregateHistory retains stored history from stale devices', () => {
   const fresh = {
     deviceId: 'm1', receivedAt: '2026-06-07T11:59:00.000Z',
     history: { daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: { claude: { tokens: 10, cost: 1, messages: 1 } }, perModel: {} }],
@@ -687,14 +694,14 @@ test('aggregateHistory merges non-stale devices and skips stale ones', () => {
     history: { daily: [{ date: '2026-06-07', tokens: 999, cost: 99, perClient: {}, perModel: {} }],
       monthly: [{ month: '2026-06', tokens: 999, cost: 99, perClient: {}, perModel: {} }], summary: {} }
   };
-  const merged = aggregateHistory([fresh, stale], 10 * 60 * 1000, now);
+  const merged = aggregateHistory([fresh, stale]);
   assert.equal(merged.daily.length, 1);
-  assert.equal(merged.daily[0].tokens, 10);     // stale m2 excluded
-  assert.equal(merged.summary.totalTokens, 10);
+  assert.equal(merged.daily[0].tokens, 1009);
+  assert.equal(merged.summary.totalTokens, 1009);
 });
 
 test('aggregateHistory tolerates devices without history', () => {
-  const merged = aggregateHistory([{ deviceId: 'm1', receivedAt: new Date().toISOString() }], 10 * 60 * 1000);
+  const merged = aggregateHistory([{ deviceId: 'm1', receivedAt: new Date().toISOString() }]);
   assert.deepEqual(merged.daily, []);
 });
 
@@ -736,7 +743,7 @@ test('a history-less local tick keeps the trends dashboard populated', () => {
       monthly: [{ month: '2026-06', tokens: 5, cost: 1, perClient: {}, perModel: {} }], summary: {} }
   };
   const second = carryDeviceHistory(first, { deviceId: 'm1', receivedAt: '2026-06-08T00:05:00.000Z' });
-  const agg = aggregateHistory([second], 0);
+  const agg = aggregateHistory([second]);
   assert.equal(agg.daily.length, 1);
   assert.equal(agg.daily[0].tokens, 5);
 });

@@ -48,9 +48,38 @@
     };
   }
 
+  function mimoPlanWindow(balance) {
+    if (!balance || balance.planStatus === 'expired') return null;
+    const used = finiteNumber(balance.planUsed);
+    const limit = finiteNumber(balance.planLimit);
+    const percent = finiteNumber(balance.planPercent);
+    if (used == null && limit == null && percent == null) return null;
+    const usedPercent = percent != null
+      ? clampPercent(percent)
+      : (used != null && limit != null && limit > 0 ? clampPercent((used / limit) * 100) : null);
+    return {
+      kind: 'billing',
+      label: 'Token Plan',
+      usedPercent,
+      remainingPercent: usedPercent == null ? null : clampPercent(100 - usedPercent)
+    };
+  }
+
   function accountWindows(account) {
+    const providerId = String(account?.providerId || '').trim().toLowerCase();
     const windows = Array.isArray(account?.windows) ? [...account.windows] : [];
-    if (account?.providerId === 'deepseek') {
+    if (providerId === 'mimo' && account?.balance?.planStatus === 'expired') {
+      const withoutStalePlan = windows.filter((window) => String(window?.kind || '').trim().toLowerCase() !== 'billing');
+      withoutStalePlan.push({ kind: 'billing', label: 'Token Plan', showMeter: false, planStatus: 'expired' });
+      const balance = balanceWindow(account.balance);
+      if (balance) withoutStalePlan.push(balance);
+      return withoutStalePlan;
+    }
+    if (providerId === 'mimo' && !windows.some((window) => String(window?.kind || '').trim().toLowerCase() === 'billing')) {
+      const plan = mimoPlanWindow(account.balance);
+      if (plan) windows.push(plan);
+    }
+    if (providerId === 'deepseek' || providerId === 'mimo') {
       const balance = balanceWindow(account.balance);
       if (balance) windows.push(balance);
     }
@@ -68,11 +97,12 @@
             resetsAt: window.resetsAt,
             resetDescription: window.resetDescription || '',
             value: window.value || '',
+            planStatus: window.planStatus || '',
             amount: finiteNumber(window.amount),
             currency: window.currency || '',
             index: windowIndex
           }))
-          .filter((window) => window.remainingPercent != null)
+          .filter((window) => window.remainingPercent != null || window.planStatus === 'expired' || window.value)
           .sort((a, b) => {
             const aPriority = windowPriority.get(a.kind) ?? 10;
             const bPriority = windowPriority.get(b.kind) ?? 10;
@@ -86,7 +116,7 @@
           providerId: account.providerId || '',
           name: account.name || '',
           color: account.color || '',
-          lowestRemaining: Math.min(...windows.map((window) => window.remainingPercent)),
+          lowestRemaining: Math.min(...windows.map((window) => window.remainingPercent ?? 100)),
           windows,
           index
         };

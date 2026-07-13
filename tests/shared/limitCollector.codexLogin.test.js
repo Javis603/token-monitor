@@ -76,6 +76,63 @@ test('runCodexLogin selects the ChatGPT-bundled Codex binary when the legacy app
   assert.equal(result.outcome, 'success');
 });
 
+test('runCodexLogin retries the next candidate only after a launch failure', async () => {
+  const legacyCodex = '/Applications/Codex.app/Contents/Resources/codex';
+  const chatgptCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  const firstChild = fakeChild();
+  const secondChild = fakeChild();
+  const commands = [];
+  const promise = runCodexLogin(
+    { homePath: '/tmp/managed/retry-home' },
+    {
+      ...noopTimers,
+      platform: 'darwin',
+      env: {},
+      existsSync: (candidate) => candidate === legacyCodex || candidate === chatgptCodex,
+      spawn: (command) => {
+        commands.push(command);
+        return commands.length === 1 ? firstChild : secondChild;
+      }
+    }
+  );
+
+  firstChild.emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  secondChild.emit('close', 0);
+  const result = await promise;
+
+  assert.deepEqual(commands, [legacyCodex, chatgptCodex]);
+  assert.equal(result.outcome, 'success');
+});
+
+test('runCodexLogin does not retry after a started login exits unsuccessfully', async () => {
+  const legacyCodex = '/Applications/Codex.app/Contents/Resources/codex';
+  const chatgptCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  const child = fakeChild();
+  const commands = [];
+  const promise = runCodexLogin(
+    { homePath: '/tmp/managed/no-retry-home' },
+    {
+      ...noopTimers,
+      platform: 'darwin',
+      env: {},
+      existsSync: (candidate) => candidate === legacyCodex || candidate === chatgptCodex,
+      spawn: (command) => {
+        commands.push(command);
+        return child;
+      }
+    }
+  );
+
+  child.stderr.emit('data', 'login cancelled');
+  child.emit('close', 1);
+  const result = await promise;
+
+  assert.deepEqual(commands, [legacyCodex]);
+  assert.equal(result.outcome, 'failed');
+  assert.match(result.output, /cancelled/);
+});
+
 test('runCodexLogin reports a failed outcome for a non-zero exit', async () => {
   const child = fakeChild();
   const promise = runCodexLogin(

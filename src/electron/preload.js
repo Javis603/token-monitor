@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('tokenMonitor', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
@@ -13,6 +14,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   getDashboardHistory: () => ipcRenderer.invoke('dashboard:getHistory'),
+  onDashboardHistoryChanged: (callback) => {
+    const listener = () => { try { callback(); } catch (_) {} };
+    ipcRenderer.on('dashboard:historyChanged', listener);
+    return () => ipcRenderer.removeListener('dashboard:historyChanged', listener);
+  },
   dashboard: {
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
@@ -42,6 +48,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
+  mimo: {
+    accounts: () => ipcRenderer.invoke('mimo:accounts'),
+    addAccount: (cookieHeader) => ipcRenderer.invoke('mimo:addAccount', cookieHeader),
+    openConsole: () => ipcRenderer.invoke('mimo:openConsole'),
+    removeAccount: (id) => ipcRenderer.invoke('mimo:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('mimo:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('mimo:accounts', handler);
+      return () => ipcRenderer.removeListener('mimo:accounts', handler);
+    }
+  },
   exportNow: () => ipcRenderer.invoke('export:now'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),
@@ -75,6 +93,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     loginManual: (token) => ipcRenderer.invoke('cursor:loginManual', token),
     logout: () => ipcRenderer.invoke('cursor:logout'),
     status: () => ipcRenderer.invoke('cursor:status')
+  },
+  ollama: {
+    validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),
