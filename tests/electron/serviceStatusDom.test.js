@@ -337,6 +337,9 @@ test('Projects TOTAL view explains an incomplete cross-device breakdown', () => 
   const css = readRendererFile('styles.css');
   assert.match(app, /projectRowsApi\.projectBreakdownIncomplete\(state\.stats, state\.period\)/);
   assert.match(app, /hint\.className = 'project-incomplete-hint'/);
+  assert.doesNotMatch(app, /hint\.dataset\.key/);
+  assert.match(app, /children\.filter\(\(child\) => child !== existingHint\)/);
+  assert.match(app, /JSON\.stringify\(\[state\.breakdown, hintText, rows\.map\(\(row\) => row\.key\)\]\)/);
   assert.match(app, /hint\.setAttribute\('role', 'status'\)/);
   assert.match(app, /t\('projects\.incomplete'\)/);
   assert.match(cssRule(css, '.project-incomplete-hint'), /color:\s*var\(--muted\)/);

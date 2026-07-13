@@ -16,21 +16,44 @@ function projectEntries(period) {
     : 0;
 }
 
+function sessionsWithoutProjectMetadata(sessions) {
+  if (!sessions || typeof sessions !== 'object') return sessions;
+  const sanitized = Object.create(null);
+  for (const [key, session] of Object.entries(sessions)) {
+    if (!session || typeof session !== 'object') {
+      sanitized[key] = session;
+      continue;
+    }
+    sanitized[key] = { ...session };
+    delete sanitized[key].projectId;
+    delete sanitized[key].project_id;
+    delete sanitized[key].projectLabel;
+    delete sanitized[key].project_label;
+  }
+  return sanitized;
+}
+
 function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
+  const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
+  delete payload.allTimeProjectsIncomplete;
 
   for (const periodName of ['today', 'month']) {
     const period = summary[periodName];
     if (!period || typeof period !== 'object') continue;
     payload[periodName] = { ...period };
     delete payload[periodName].projects;
+    if (!projectsEnabled && hasOwn(payload[periodName], 'sessions')) {
+      payload[periodName].sessions = sessionsWithoutProjectMetadata(payload[periodName].sessions);
+    }
   }
 
   if (summary.allTime && typeof summary.allTime === 'object') {
     payload.allTime = { ...summary.allTime };
     delete payload.allTime.sessions;
+    if (!projectsEnabled) delete payload.allTime.projects;
     if (omitAllTimeProjects && hasOwn(payload.allTime, 'projects')) {
       delete payload.allTime.projects;
       payload.allTimeProjectsOmitted = true;

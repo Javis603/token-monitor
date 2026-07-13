@@ -146,6 +146,7 @@ test('disabling project tracking skips local metadata attribution', async () => 
       }
     });
     const session = summary.today.sessions['claude:s1'];
+    assert.equal(summary.projectsEnabled, false);
     assert.equal(session.projectId, '');
     assert.equal(session.projectLabel, '');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }

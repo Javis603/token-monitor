@@ -471,9 +471,10 @@ function normalizeSession(input, fallbackKey) {
   return session;
 }
 
-function normalizePeriod(input) {
+function normalizePeriod(input, options = {}) {
   const period = emptyPeriod();
   if (!input || typeof input !== 'object') return period;
+  const projectsEnabled = options.projectsEnabled !== false;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
   period.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
@@ -540,12 +541,17 @@ function normalizePeriod(input) {
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
       const session = normalizeSession(value, key);
-      if (session) addSession(period, session);
+      if (!session) continue;
+      if (!projectsEnabled) {
+        session.projectId = '';
+        session.projectLabel = '';
+      }
+      addSession(period, session);
     }
   }
-  period.projects = hasOwn(input, 'projects')
-    ? normalizeProjects(input.projects)
-    : projectRollupFromSessions(period.sessions);
+  period.projects = projectsEnabled
+    ? (hasOwn(input, 'projects') ? normalizeProjects(input.projects) : projectRollupFromSessions(period.sessions))
+    : Object.create(null);
   return period;
 }
 
@@ -624,13 +630,19 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'trackedClients')) normalized.trackedClients = normalizeTrackedClients(record.trackedClients);
   if (hasOwn(record, 'clientStatus')) normalized.clientStatus = normalizeClientStatus(record.clientStatus);
   if (hasOwn(record, 'wslStatus')) normalized.wslStatus = normalizeWslStatus(record.wslStatus);
+  if (hasOwn(record, 'projectsEnabled')) normalized.projectsEnabled = record.projectsEnabled !== false;
   if (hasOwn(record, 'allTimeProjectsOmitted')) normalized.allTimeProjectsOmitted = record.allTimeProjectsOmitted === true;
+  if (hasOwn(record, 'allTimeProjectsIncomplete')) normalized.allTimeProjectsIncomplete = record.allTimeProjectsIncomplete === true;
   if (hasOwn(record, 'history')) normalized.history = coerceHistory(record.history);
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
     if (windows) normalized.periodWindows = windows;
   }
-  for (const periodName of PERIODS) normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName]);
+  for (const periodName of PERIODS) {
+    normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
+      projectsEnabled: normalized.projectsEnabled !== false
+    });
+  }
   return normalized;
 }
 
@@ -647,12 +659,26 @@ function addClientModelUsage(target, client, models, costs) {
   }
 }
 
-function addClientSessionUsage(target, client, sessions, restoredSessions) {
+function addClientSessionUsage(target, client, sessions, restoredSessions, projectsEnabled) {
   for (const [key, session] of Object.entries(sessions || {})) {
     if (session?.client !== client) continue;
-    addSession(target, session);
-    restoredSessions[key] = session;
+    const restored = projectsEnabled ? session : { ...session, projectId: '', projectLabel: '' };
+    addSession(target, restored);
+    if (projectsEnabled) restoredSessions[key] = restored;
   }
+}
+
+function missingProjectAttribution(sourceProjects, restoredProjects, clients) {
+  for (const [rawKey, source] of Object.entries(sourceProjects || {})) {
+    const key = canonicalProjectKey(source?.label || rawKey);
+    const restored = restoredProjects?.[key];
+    for (const client of clients) {
+      const expectedTokens = Math.max(0, Math.round(asNumber(source?.clients?.[client])));
+      const restoredTokens = Math.max(0, Math.round(asNumber(restored?.clients?.[client])));
+      if (restoredTokens < expectedTokens) return true;
+    }
+  }
+  return false;
 }
 
 function shouldPreservePeriod(periodName, existingRecord, incomingRecord) {
@@ -667,11 +693,13 @@ function shouldPreservePeriod(periodName, existingRecord, incomingRecord) {
 
 function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedClients) {
   const active = new Set(trackedClients || []);
+  const projectsEnabled = incomingRecord.projectsEnabled !== false;
   for (const periodName of PERIODS) {
     if (!shouldPreservePeriod(periodName, existingRecord, incomingRecord)) continue;
     const source = existingRecord.periods?.[periodName] || emptyPeriod();
     const target = incomingRecord.periods?.[periodName] || emptyPeriod();
     const restoredSessions = Object.create(null);
+    const preservedClients = new Set();
     incomingRecord.periods[periodName] = target;
     for (const [client, tokens] of Object.entries(source.clients || {})) {
       if (active.has(client) || hasOwn(target.clients, client)) continue;
@@ -679,12 +707,23 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       target.totalTokens += tokens;
       target.costUsd += cost;
       target.clients[client] = tokens;
+      preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
       addClientModelUsage(target, client, source.clientModels?.[client], source.clientModelCosts?.[client]);
-      addClientSessionUsage(target, client, source.sessions, restoredSessions);
+      addClientSessionUsage(target, client, source.sessions, restoredSessions, projectsEnabled);
     }
-    for (const [key, project] of Object.entries(projectRollupFromSessions(restoredSessions))) {
-      addProjectInto(target.projects, key, project);
+    if (!projectsEnabled) continue;
+    const restoredProjects = projectRollupFromSessions(restoredSessions);
+    for (const [key, project] of Object.entries(restoredProjects)) addProjectInto(target.projects, key, project);
+    if (
+      periodName === 'allTime'
+      && preservedClients.size > 0
+      && (existingRecord.allTimeProjectsIncomplete === true
+        || existingRecord.allTimeProjectsOmitted === true
+        || existingRecord.projectsEnabled === false
+        || missingProjectAttribution(source.projects, restoredProjects, preservedClients))
+    ) {
+      incomingRecord.allTimeProjectsIncomplete = true;
     }
   }
 }
@@ -746,7 +785,9 @@ function mergeDeviceRecord(existing, incoming) {
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
     if (hasOwn(normalizedExisting, 'periodWindows')) normalizedIncoming.periodWindows = normalizedExisting.periodWindows;
+    if (hasOwn(normalizedExisting, 'projectsEnabled')) normalizedIncoming.projectsEnabled = normalizedExisting.projectsEnabled;
     if (hasOwn(normalizedExisting, 'allTimeProjectsOmitted')) normalizedIncoming.allTimeProjectsOmitted = normalizedExisting.allTimeProjectsOmitted;
+    if (hasOwn(normalizedExisting, 'allTimeProjectsIncomplete')) normalizedIncoming.allTimeProjectsIncomplete = normalizedExisting.allTimeProjectsIncomplete;
   }
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
@@ -876,11 +917,17 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       ...(hasOwn(normalized, 'trackedClients') ? { trackedClients: normalized.trackedClients } : {}),
       ...(hasOwn(normalized, 'clientStatus') ? { clientStatus: normalized.clientStatus } : {}),
       ...(hasOwn(normalized, 'wslStatus') ? { wslStatus: normalized.wslStatus } : {}),
+      ...(hasOwn(normalized, 'projectsEnabled') ? { projectsEnabled: normalized.projectsEnabled } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),
+      ...(hasOwn(normalized, 'allTimeProjectsIncomplete') ? { allTimeProjectsIncomplete: normalized.allTimeProjectsIncomplete } : {}),
       periods: normalized.periods,
       limits: normalized.limits
     });
-    if (normalized.allTimeProjectsOmitted === true) aggregate.projectsIncomplete = true;
+    if (
+      normalized.allTimeProjectsOmitted === true
+      || normalized.allTimeProjectsIncomplete === true
+      || (normalized.projectsEnabled === false && normalized.periods.allTime.totalTokens > 0)
+    ) aggregate.projectsIncomplete = true;
     for (const periodName of PERIODS) {
       if (isPeriodExpired(normalized, periodName, now)) continue;
       addPeriodInto(aggregate.periods[periodName], normalizePeriod(normalized.periods[periodName]));

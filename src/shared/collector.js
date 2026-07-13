@@ -723,6 +723,7 @@ async function collectUsageOnce(options) {
     updatedAt: collectedAt.toISOString(),
     agentVersion,
     ...(agentRuntime ? { agentRuntime } : {}),
+    projectsEnabled,
     trackedClients: normalizedClients ? normalizedClients.split(',') : [],
     clientStatus: deriveClientStatus(normalizedClients, allTime),
     wslStatus,

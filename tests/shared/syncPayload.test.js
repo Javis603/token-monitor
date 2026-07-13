@@ -51,6 +51,36 @@ test('syncPayload strips recomputable projects and keeps bounded all-time projec
   assert.ok(summary.today.projects.today);
 });
 
+test('syncPayload strips project metadata when project tracking is disabled', () => {
+  const summary = {
+    projectsEnabled: false,
+    today: {
+      sessions: { a: { client: 'codex', projectId: 'sha256:private', projectLabel: 'Private App', project_id: 'legacy-id', project_label: 'Legacy App', totalTokens: 1 } },
+      projects: { private: { label: 'Private App', tokens: 1 } }
+    },
+    month: {
+      sessions: { a: { client: 'codex', projectId: 'sha256:private', projectLabel: 'Private App', totalTokens: 1 } },
+      projects: { private: { label: 'Private App', tokens: 1 } }
+    },
+    allTime: { projects: { private: { label: 'Private App', tokens: 1 } } },
+    allTimeProjectsIncomplete: true
+  };
+
+  const payload = syncPayload(summary);
+
+  assert.equal(payload.projectsEnabled, false);
+  assert.equal(Object.hasOwn(payload.today, 'projects'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions.a, 'projectId'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions.a, 'projectLabel'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions.a, 'project_id'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions.a, 'project_label'), false);
+  assert.equal(Object.hasOwn(payload.month.sessions.a, 'projectId'), false);
+  assert.equal(Object.hasOwn(payload.month.sessions.a, 'projectLabel'), false);
+  assert.equal(Object.hasOwn(payload.allTime, 'projects'), false);
+  assert.equal(Object.hasOwn(payload, 'allTimeProjectsIncomplete'), false);
+  assert.equal(summary.today.sessions.a.projectLabel, 'Private App');
+});
+
 test('serializeSyncPayload drops only all-time projects when they exceed the byte budget', () => {
   const summary = {
     deviceId: 'dev',
