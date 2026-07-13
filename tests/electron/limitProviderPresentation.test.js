@@ -368,11 +368,13 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /·/);
   assert.match(maybeUpdateBarsIcon, /limitsAllSessions/);
   assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44\)/);
+  assert.match(maybeUpdateBarsIcon, /\{ \[mode\]: dataUrl \|\| null \}/);
   assert.match(updateTrayDisplay, /mode === 'limitsAllSessions'/);
   assert.match(updateTrayDisplay, /const barsImageMode = .*?!limitText && providerTrayIcons\[mode\]/);
   assert.match(updateTrayDisplay, /Boolean\(limitText\)/);
   assert.match(updateTrayDisplay, /const limitText = formatTrayText/);
   assert.match(updateTrayDisplay, /trayImageMode[\s\S]*?\? '' : limitText/);
+  assert.match(main, /if \(dataUrl === null\) \{[\s\S]*?delete providerTrayIcons\[id\]/);
 });
 
 test('Grok renders its single Monthly billing window full-width instead of an empty session/weekly pair', () => {

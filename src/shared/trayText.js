@@ -68,7 +68,11 @@
     const canonicalLabels = kind === 'weekly' ? new Set(['', 'weekly'])
       : kind === 'billing' ? new Set(['', 'total'])
         : new Set(['']);
-    return windows.find((window) => canonicalLabels.has(String(window.label || '').trim().toLowerCase())) || windows[0];
+    const canonical = windows.find((window) => canonicalLabels.has(String(window.label || '').trim().toLowerCase()));
+    if (canonical) return canonical;
+    return windows.reduce((pick, window) => (
+      !pick || remainingPercent(window) < remainingPercent(pick) ? window : pick
+    ), null);
   }
 
   function compactLimitSelection(provider) {
@@ -94,7 +98,7 @@
       if (!selection) continue;
       const candidates = [selection.primaryWindow, selection.secondaryWindow].filter(Boolean);
       const selectedWindow = requestedKind
-        ? candidates.find((window) => window.kind === requestedKind)
+        ? preferredWindow(selection.providerRecord, requestedKind)
         : candidates.reduce((pick, window) => (
             !pick || remainingPercent(window) < remainingPercent(pick) ? window : pick
           ), null);
@@ -134,7 +138,8 @@
     const statsOrder = providerOrderFromStats(providers);
     const statsIds = new Set(statsOrder);
     const enabledRaw = csvValues(options.limitProviders).map(normalizedProviderId).filter(Boolean);
-    const enabled = enabledRaw.length ? new Set(enabledRaw) : null;
+    const enabled = options.limitProviders === undefined || options.limitProviders === null
+      ? null : new Set(enabledRaw);
     const seen = new Set();
     const order = [];
     for (const id of csvValues(options.limitProviderOrder).map(normalizedProviderId)) {

@@ -6572,8 +6572,7 @@ async function maybeUpdateBarsIcon() {
   if (mode !== 'bars' && mode !== 'barsSession' && mode !== 'barsWeekly' && mode !== 'barsAllSessions' && mode !== 'limitsAllSessions') return;
   if (!window.tokenMonitor.setTrayIcons) return;
   const dataUrl = trayDataUrlForMode(mode, 44);
-  if (!dataUrl) return;
-  try { await window.tokenMonitor.setTrayIcons({ [mode]: dataUrl }); } catch (_) {}
+  try { await window.tokenMonitor.setTrayIcons({ [mode]: dataUrl || null }); } catch (_) {}
 }
 
 function loadImage(src) {

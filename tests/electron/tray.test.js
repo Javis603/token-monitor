@@ -227,6 +227,25 @@ test('configured provider account selection prefers session over fallback window
   assert.equal(pick.primaryWindow.kind, 'session');
 });
 
+test('configured provider selection preserves an explicit empty filter', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 25 }] }
+      ]
+    }
+  };
+
+  assert.deepEqual(pickConfiguredLimitProviders(limitStats, {
+    limitProviderOrder: [],
+    limitProviders: []
+  }), []);
+  assert.deepEqual(pickConfiguredLimitProviders(limitStats, {
+    limitProviderOrder: '',
+    limitProviders: ''
+  }), []);
+});
+
 test('compact provider windows preserve Claude session plus general weekly', () => {
   const selection = compactLimitSelection({
     provider: 'claude',
@@ -256,6 +275,21 @@ test('compact provider windows use billing as a final fallback and ignore non-me
 
   assert.equal(selection.primaryWindow.label, 'Total');
   assert.equal(selection.secondaryWindow, null);
+});
+
+test('compact provider windows choose the lowest pool when no aggregate exists', () => {
+  const selection = compactLimitSelection({
+    provider: 'antigravity',
+    status: 'ok',
+    windows: [
+      { kind: 'weekly', label: 'Gemini Pro', remainingPercent: 72 },
+      { kind: 'weekly', label: 'Gemini Flash', remainingPercent: 0 },
+      { kind: 'weekly', label: 'Claude', remainingPercent: 35 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.label, 'Gemini Flash');
+  assert.equal(selection.primaryWindow.remainingPercent, 0);
 });
 
 test('compact window policy covers every supported limits provider shape', () => {
@@ -316,6 +350,26 @@ test('worst-provider resolver returns the window it actually selected', () => {
   assert.equal(pick.provider, 'claude');
   assert.equal(pick.selectedWindow, weekly);
   assert.equal(pick.secondaryWindow, weekly);
+});
+
+test('kind-specific resolver can select billing from a mixed-window provider', () => {
+  const billing = { kind: 'billing', label: 'Monthly', remainingPercent: 9 };
+  const pick = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'weekly', remainingPercent: 70 },
+          billing
+        ]
+      }]
+    }
+  }, { kind: 'billing' });
+
+  assert.equal(pick.selectedWindow, billing);
+  assert.equal(pick.remaining, 9);
 });
 
 test('tray session quota text keeps lowest-remaining account selection when showing used percent', () => {

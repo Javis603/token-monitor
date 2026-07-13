@@ -3570,6 +3570,10 @@ app.whenReady().then(() => {
   ipcMain.handle('tray:setIcons', (_event, icons) => {
     if (!icons || typeof icons !== 'object') return false;
     for (const [id, dataUrl] of Object.entries(icons)) {
+      if (dataUrl === null) {
+        delete providerTrayIcons[id];
+        continue;
+      }
       if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) continue;
       const img = nativeImage.createFromDataURL(dataUrl);
       if (img.isEmpty()) continue;

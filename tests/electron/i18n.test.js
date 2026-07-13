@@ -73,6 +73,8 @@ test('tray limit labels describe remaining quota instead of ambiguous worst wind
   assert.equal(translate('zh-TW', 'settings.tray.barsAllSessions'), '額度條：前兩個工具的主要額度');
   assert.equal(translate('zh-CN', 'settings.tray.limitsAllSessions'), '额度：前两个工具的主要额度（12% · 34%）');
   assert.equal(translate('zh-CN', 'settings.tray.barsWindow'), '额度条：任一额度剩余最少');
+  assert.equal(translate('ko', 'settings.tray.barsAllSessions'), '한도 바: 처음 두 도구의 주요 한도');
+  assert.equal(translate('ko', 'settings.tray.limitsAllSessions'), '한도: 처음 두 도구의 주요 한도 (12% · 34%)');
 });
 
 test('window shortcut labels stay concise in Chinese', () => {
