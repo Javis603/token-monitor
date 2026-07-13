@@ -136,7 +136,7 @@ Example payload:
     "clients": {},
     "clientCosts": {},
     "projects": {
-      "token-monitor": {
+      "token monitor": {
         "label": "Token Monitor",
         "tokens": 8901,
         "costUsd": 0.08,

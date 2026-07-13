@@ -65,7 +65,7 @@ function syncPayload(summary, options = {}) {
 async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } = {}) {
   let serialized = serializeSyncPayload(summary);
   if (serialized.payload?.allTimeProjectsOmitted === true && typeof logger === 'function') {
-    logger(`all-time project breakdown omitted to keep the payload under ${SYNC_PAYLOAD_BUDGET_BYTES} bytes`);
+    logger(`all-time project breakdown omitted; payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
   let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   const canRetryWithoutProjects = response.status === 413

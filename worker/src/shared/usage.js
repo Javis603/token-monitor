@@ -6,6 +6,7 @@
 const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { coerceHistory, mergeHistories } = require('./history');
+const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
 // Additive components for a token total. `reasoning` is deliberately excluded: OpenAI/Codex report
 // reasoning_output_tokens WITHIN output_tokens (tokscale's `output` already includes it and exposes
@@ -161,19 +162,6 @@ function normalizeProviderName(value) {
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
-}
-
-function canonicalProjectKey(value) {
-  const label = String(value || '').trim().normalize('NFC');
-  return label ? label.toLowerCase().normalize('NFC') : '';
-}
-
-function deterministicProjectLabel(left, right) {
-  const a = String(left || '').trim().normalize('NFC');
-  const b = String(right || '').trim().normalize('NFC');
-  if (!a) return b;
-  if (!b) return a;
-  return a < b ? a : b;
 }
 
 function emptyProject(label = '') {
@@ -659,10 +647,11 @@ function addClientModelUsage(target, client, models, costs) {
   }
 }
 
-function addClientSessionUsage(target, client, sessions) {
-  for (const session of Object.values(sessions || {})) {
+function addClientSessionUsage(target, client, sessions, restoredSessions) {
+  for (const [key, session] of Object.entries(sessions || {})) {
     if (session?.client !== client) continue;
     addSession(target, session);
+    restoredSessions[key] = session;
   }
 }
 
@@ -682,6 +671,7 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
     if (!shouldPreservePeriod(periodName, existingRecord, incomingRecord)) continue;
     const source = existingRecord.periods?.[periodName] || emptyPeriod();
     const target = incomingRecord.periods?.[periodName] || emptyPeriod();
+    const restoredSessions = Object.create(null);
     incomingRecord.periods[periodName] = target;
     for (const [client, tokens] of Object.entries(source.clients || {})) {
       if (active.has(client) || hasOwn(target.clients, client)) continue;
@@ -691,7 +681,10 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       target.clients[client] = tokens;
       if (cost > 0) target.clientCosts[client] = cost;
       addClientModelUsage(target, client, source.clientModels?.[client], source.clientModelCosts?.[client]);
-      addClientSessionUsage(target, client, source.sessions);
+      addClientSessionUsage(target, client, source.sessions, restoredSessions);
+    }
+    for (const [key, project] of Object.entries(projectRollupFromSessions(restoredSessions))) {
+      addProjectInto(target.projects, key, project);
     }
   }
 }

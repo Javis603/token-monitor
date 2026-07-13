@@ -1,22 +1,14 @@
 'use strict';
 
 (function exposeProjectRows(root, factory) {
-  const api = factory();
+  const projectKeyApi = typeof module === 'object' && module.exports
+    ? require('../../shared/projectKey')
+    : root?.TokenMonitorProjectKey;
+  const api = factory(projectKeyApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorProjectRows = api;
-})(typeof window !== 'undefined' ? window : null, function createProjectRowsApi() {
-  function canonicalProjectKey(value) {
-    const label = String(value || '').trim().normalize('NFC');
-    return label ? label.toLowerCase().normalize('NFC') : '';
-  }
-
-  function deterministicLabel(left, right) {
-    const a = String(left || '').trim().normalize('NFC');
-    const b = String(right || '').trim().normalize('NFC');
-    if (!a) return b;
-    if (!b) return a;
-    return a < b ? a : b;
-  }
+})(typeof window !== 'undefined' ? window : null, function createProjectRowsApi(projectKeyApi) {
+  const { canonicalProjectKey, deterministicProjectLabel } = projectKeyApi;
 
   function projectBreakdownIncomplete(stats, period) {
     return period === 'allTime' && stats?.projectsIncomplete === true;
@@ -52,21 +44,22 @@
       for (const [rawKey, entry] of rollupEntries) {
         if (!entry || typeof entry !== 'object') continue;
         const name = String(entry.label || rawKey || '').trim().normalize('NFC');
-        const key = canonicalProjectKey(rawKey || name);
+        const key = canonicalProjectKey(name || rawKey);
         if (!key || !name) continue;
         const clientTokens = Object.create(null);
         for (const [client, value] of Object.entries(entry.clients || {})) {
           const tokens = Math.max(0, Number(value || 0));
           if (tokens > 0) clientTokens[client] = tokens;
         }
-        projects.set(key, {
-          key,
-          name,
-          value: Math.max(0, Number(entry.tokens || 0)),
-          cost: Number(entry.costUsd || 0),
-          clients: new Set(Object.keys(clientTokens)),
-          clientTokens
-        });
+        if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
+        const project = projects.get(key);
+        project.name = deterministicProjectLabel(project.name, name);
+        project.value += Math.max(0, Number(entry.tokens || 0));
+        project.cost += Number(entry.costUsd || 0);
+        for (const [client, tokens] of Object.entries(clientTokens)) {
+          project.clients.add(client);
+          project.clientTokens[client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, client) ? project.clientTokens[client] : 0) + tokens;
+        }
       }
     } else {
       for (const session of Object.values(period?.sessions || {})) {
@@ -75,7 +68,7 @@
         if (!key || !label) continue;
         if (!projects.has(key)) projects.set(key, { key, name: label, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
         const project = projects.get(key);
-        project.name = deterministicLabel(project.name, label);
+        project.name = deterministicProjectLabel(project.name, label);
         const sessionTokens = Math.max(0, Number(session.totalTokens || 0));
         project.value += sessionTokens;
         project.cost += Number(session.costUsd || 0);

@@ -1836,7 +1836,7 @@ function startHostCollector() {
         }
         const payload = syncPayload(visibleSummary);
         if (payload.allTimeProjectsOmitted === true) {
-          console.log('[host-ingest] all-time project breakdown omitted to keep the sync snapshot within budget');
+          console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
         embeddedHub.hub.ingest(payload);
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {

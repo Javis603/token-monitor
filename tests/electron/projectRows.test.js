@@ -57,6 +57,25 @@ test('projectRowsForPeriod prefers the bounded project rollup', () => {
   ]);
 });
 
+test('projectRowsForPeriod merges noncanonical rollup keys with the same identity', () => {
+  const rows = projectRowsForPeriod({
+    projects: {
+      'legacy-cafe': { label: 'Café', tokens: 100, costUsd: 1, clients: { codex: 100 } },
+      'legacy-cafe-uppercase': { label: 'CAFÉ', tokens: 50, costUsd: 0.5, clients: { codex: 25, claude: 25 } }
+    }
+  }, { clientLabels: { codex: 'Codex', claude: 'Claude Code' } });
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(
+    { key: rows[0].key, name: rows[0].name, value: rows[0].value, cost: rows[0].cost },
+    { key: 'café', name: 'CAFÉ', value: 150, cost: 1.5 }
+  );
+  assert.deepEqual(rows[0].accordionRows.map(({ key, value }) => ({ key, value })), [
+    { key: 'codex', value: 125 },
+    { key: 'claude', value: 25 }
+  ]);
+});
+
 test('clientGradient softly blends tool-share boundaries while preserving endpoints', () => {
   const gradient = clientGradient({ codex: 75, claude: 25 }, (client) => client === 'codex' ? '#111111' : '#eeeeee');
   assert.equal(gradient, 'linear-gradient(90deg, #111111 0%, #111111 73.50%, #eeeeee 76.50%, #eeeeee 100%)');

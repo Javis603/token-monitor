@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
+const { SYNC_PAYLOAD_BUDGET_BYTES, postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
 
 test('syncPayload preserves nullish inputs', () => {
   assert.equal(syncPayload(null), null);
@@ -93,4 +93,26 @@ test('postSyncPayload retries a legacy 413 once without all-time projects', asyn
   assert.equal(Object.hasOwn(bodies[1].allTime, 'projects'), false);
   assert.equal(payload.allTimeProjectsOmitted, true);
   assert.equal(logs.length, 1);
+});
+
+test('postSyncPayload reports the actual reduced size after budget omission', async () => {
+  let postedBody = '';
+  const logs = [];
+  const { payload } = await postSyncPayload(async (_url, options) => {
+    postedBody = options.body;
+    return { status: 200, ok: true };
+  }, 'http://hub/api/ingest', {
+    summary: {
+      deviceId: 'large-project-list',
+      allTime: {
+        totalTokens: 1,
+        projects: { huge: { label: 'x'.repeat(SYNC_PAYLOAD_BUDGET_BYTES), tokens: 1, clients: { codex: 1 } } }
+      }
+    },
+    logger: (message) => logs.push(message)
+  });
+
+  const postedBytes = Buffer.byteLength(postedBody, 'utf8');
+  assert.equal(payload.allTimeProjectsOmitted, true);
+  assert.equal(logs[0], `all-time project breakdown omitted; payload reduced to ${postedBytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
 });

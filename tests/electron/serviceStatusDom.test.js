@@ -323,6 +323,15 @@ test('Projects view separates visibility from metadata collection', () => {
   assert.match(app, /function onProjectVisibilityToggle/);
 });
 
+test('project identity helpers load before the Projects row renderer', () => {
+  const html = readRendererFile('index.html');
+  const projectKeyIndex = html.indexOf('../../shared/projectKey.js');
+  const projectRowsIndex = html.indexOf('projectRows.js');
+  assert.ok(projectKeyIndex >= 0);
+  assert.ok(projectRowsIndex >= 0);
+  assert.ok(projectKeyIndex < projectRowsIndex);
+});
+
 test('Projects TOTAL view explains an incomplete cross-device breakdown', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');

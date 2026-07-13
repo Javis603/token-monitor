@@ -312,6 +312,7 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
           totalTokens: 100,
           costUsd: 1.25,
           messageCount: 4,
+          projectLabel: 'Shared App',
           models: { 'claude-3-5-sonnet': 100 },
           modelCosts: { 'claude-3-5-sonnet': 1.25 }
         },
@@ -339,7 +340,18 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
       models: { 'gpt-5': 75 },
       modelCosts: { 'gpt-5': 0.5 },
       clientModels: { codex: { 'gpt-5': 75 } },
-      clientModelCosts: { codex: { 'gpt-5': 0.5 } }
+      clientModelCosts: { codex: { 'gpt-5': 0.5 } },
+      sessions: {
+        'codex:c2': {
+          client: 'codex',
+          sessionId: 'c2',
+          totalTokens: 75,
+          costUsd: 0.5,
+          projectLabel: 'shared app',
+          models: { 'gpt-5': 75 },
+          modelCosts: { 'gpt-5': 0.5 }
+        }
+      }
     }
   };
 
@@ -353,6 +365,12 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
   assert.equal(merged.periods.today.clientModels.hermes['claude-3-5-sonnet'], 100);
   assert.equal(merged.periods.today.sessions['hermes:h1'].totalTokens, 100);
   assert.equal(merged.periods.today.sessions['codex:c1'], undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(merged.periods.today.projects['shared app'])), {
+    label: 'Shared App',
+    tokens: 175,
+    costUsd: 1.75,
+    clients: { codex: 75, hermes: 100 }
+  });
 });
 
 test('mergeDeviceRecord preserves omitted-client day and month usage only inside matching calendar periods', () => {
