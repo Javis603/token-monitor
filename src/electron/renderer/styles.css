@@ -851,6 +851,13 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-size: inherit;
 }
 .inline-link:hover { color: var(--text); }
+.about-settings-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+.about-settings-links .inline-link { font-size: 10px; }
 .hub-mode-options {
   display: grid;
   min-width: 0;
