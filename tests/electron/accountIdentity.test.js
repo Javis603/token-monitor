@@ -25,6 +25,10 @@ test('Codex account identity matches by key or normalized email fields', () => {
     { provider: 'codex', accountKey: 'account-1' }
   ), true);
   assert.equal(codexAccountMatchesProvider(
+    { accountKey: 'account-1', email: 'shared@example.com' },
+    { provider: 'codex', accountKey: 'account-2', accountEmail: 'shared@example.com' }
+  ), false);
+  assert.equal(codexAccountMatchesProvider(
     { accountEmail: 'User@Example.com' },
     { provider: 'codex', accountEmail: 'user@example.com' }
   ), true);
@@ -36,6 +40,14 @@ test('Codex account identity matches by key or normalized email fields', () => {
     { id: 'one', accountKey: 'account-1' },
     { id: 'two', accountKey: 'account-2' }
   ], { provider: 'codex', accountKey: 'account-2' }), 'two');
+  assert.equal(codexAccountIdForProvider([
+    { id: 'one', accountKey: 'account-1', email: 'shared@example.com' },
+    { id: 'two', accountKey: 'account-2', email: 'shared@example.com' }
+  ], {
+    provider: 'codex',
+    accountKey: 'account-2',
+    accountEmail: 'shared@example.com'
+  }), 'two');
 });
 
 test('live Codex provider selection uses local raw limits with a legacy aggregate fallback', () => {

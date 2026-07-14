@@ -6800,13 +6800,10 @@ async function refreshCodexAccounts() {
 // Linked. Only legacy/non-aggregated stats without a `devices` array may fall
 // back to the aggregate; once raw device rows are present they are authoritative.
 function localDeviceLimitsProviders() {
-  const devices = state.stats?.devices;
-  if (!Array.isArray(devices)) return null;
-  const localId = state.settings?.deviceId || '';
-  const local = localId
-    ? devices.find((device) => device.deviceId === localId)
-    : (devices.length === 1 ? devices[0] : null);
-  return local?.limits?.providers || [];
+  return accountIdentityApi.localDeviceLimitsProviders(
+    state.stats,
+    state.settings?.deviceId || ''
+  );
 }
 
 function localProviderStatus(name) {

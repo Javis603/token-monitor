@@ -20,9 +20,9 @@
     if (!account || !provider || provider.provider !== 'codex') return false;
     const accountKey = String(account.accountKey || '').trim();
     const providerKey = String(provider.accountKey || '').trim();
-    if (accountKey && providerKey && accountKey === providerKey) return true;
+    if (accountKey && providerKey) return accountKey === providerKey;
     const accountEmail = String(account.email || account.accountEmail || '').trim().toLowerCase();
-    const providerEmail = String(provider.accountEmail || '').trim().toLowerCase();
+    const providerEmail = String(provider.accountEmail || provider.email || '').trim().toLowerCase();
     return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
   }
 

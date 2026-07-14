@@ -68,7 +68,7 @@ function runLocalProviderStatus(source, state, providerName) {
   const localProviderHelper = functionBody(source, 'localProviderStatus', 'deepseekAccountLinked');
   return vm.runInNewContext(
     `${localDeviceHelper}\n${localProviderHelper}\nlocalProviderStatus(${JSON.stringify(providerName)});`,
-    { state }
+    { accountIdentityApi, state }
   );
 }
 
@@ -695,10 +695,9 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // where it has already been dropped. Searching the aggregate would miss the
   // local row and fall back to the remote `ok`, falsely reporting an invalid
   // local key as Linked.
-  assert.match(rawHelper, /state\.stats\?\.devices/);
-  assert.match(rawHelper, /Array\.isArray\(devices\)/);
-  assert.match(rawHelper, /device\.deviceId === localId/);
-  assert.match(rawHelper, /limits\?\.providers/);
+  assert.match(rawHelper, /accountIdentityApi\.localDeviceLimitsProviders/);
+  assert.match(rawHelper, /state\.stats/);
+  assert.match(rawHelper, /state\.settings\?\.deviceId/);
   assert.match(helper, /localDeviceLimitsProviders\(\)/);
   assert.match(helper, /localProviders !== null/);
   // Falls back to the aggregate only for legacy/non-aggregated stats that do
