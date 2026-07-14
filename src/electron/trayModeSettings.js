@@ -27,6 +27,17 @@ function trayToggleAction(settings = {}) {
   return normalized.trayMode ? 'togglePopover' : 'focusWindow';
 }
 
+function macTrayPopoverWorkspaceOptions(settings = {}, platform = process.platform) {
+  const normalized = normalizeTrayModeSettings(settings);
+  if (platform !== 'darwin' || !normalized.trayMode) return null;
+  return {
+    visibleOnFullScreen: true,
+    // Tray mode already uses the accessory activation policy (UIElement on
+    // macOS), so Electron does not need to briefly transform the process type.
+    skipTransformProcessType: true
+  };
+}
+
 function macActivationPolicyMode(settings = {}, state = {}) {
   const normalized = normalizeTrayModeSettings(settings);
   if (normalized.trayMode) return 'accessory';
@@ -42,6 +53,7 @@ function mainWindowCloseAction(settings = {}, _state = {}) {
 }
 
 module.exports = {
+  macTrayPopoverWorkspaceOptions,
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,

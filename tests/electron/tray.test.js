@@ -268,6 +268,12 @@ test('tray main-process actions surface refresh errors and expand a collapsed bu
   assert.match(source, /if \(value === 'tray'\)[\s\S]*?saveSettings\(\);\s*syncFloatingBubbleAvailability\(\);\s*enterTrayMode\(\);/);
 });
 
+test('tray popover reapplies macOS workspace visibility before every show', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.match(source, /function showPopover\(\)[\s\S]*?applyMacActivationPolicy\(\);\s*applyWindowSettings\(\);\s*applyTrayPopoverWorkspaceVisibility\(\);[\s\S]*?mainWindow\.show\(\);/);
+  assert.match(source, /function applyTrayPopoverWorkspaceVisibility\(\)[\s\S]*?mainWindow\.setVisibleOnAllWorkspaces\(true, options\);/);
+});
+
 test('usage tray icon picks the top token client for day and total token modes', () => {
   assert.equal(pickUsageTrayIconId(stats, 'tokens', ['claude', 'codex']), 'codex');
   assert.equal(pickUsageTrayIconId(stats, 'both', ['claude', 'codex']), 'codex');

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  macTrayPopoverWorkspaceOptions,
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
@@ -52,6 +53,15 @@ test('uses accessory activation when macOS is running from the menu bar only', (
   assert.equal(macActivationPolicyMode({ showTrayIcon: true, trayMode: false }, { mainWindowVisible: false }), 'accessory');
   assert.equal(macActivationPolicyMode({ showTrayIcon: true, trayMode: false }, { mainWindowVisible: true }), 'regular');
   assert.equal(macActivationPolicyMode({ showTrayIcon: false, trayMode: false }, { mainWindowVisible: false }), 'regular');
+});
+
+test('keeps the macOS tray popover visible across Spaces and fullscreen apps', () => {
+  assert.deepEqual(macTrayPopoverWorkspaceOptions({ showTrayIcon: true, trayMode: true }, 'darwin'), {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true
+  });
+  assert.equal(macTrayPopoverWorkspaceOptions({ showTrayIcon: true, trayMode: false }, 'darwin'), null);
+  assert.equal(macTrayPopoverWorkspaceOptions({ showTrayIcon: true, trayMode: true }, 'win32'), null);
 });
 
 test('maps main-window close to the platform-appropriate background behavior', () => {

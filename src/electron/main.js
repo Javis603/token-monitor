@@ -108,6 +108,7 @@ const {
   sortCodexAccountsForDisplay
 } = require('./tray');
 const {
+  macTrayPopoverWorkspaceOptions,
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
@@ -2210,6 +2211,7 @@ function showPopover() {
   if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
   applyMacActivationPolicy();
   applyWindowSettings();
+  applyTrayPopoverWorkspaceVisibility();
   const current = mainWindow.getBounds();
   const target = popoverBounds(tray, current.width, current.height);
   mainWindow.setBounds(target);
@@ -2626,6 +2628,15 @@ function destroyTray() {
   tray = null;
 }
 
+function applyTrayPopoverWorkspaceVisibility() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const options = macTrayPopoverWorkspaceOptions(settings);
+  if (!options || typeof mainWindow.setVisibleOnAllWorkspaces !== 'function') return;
+  // Reapply before every show: macOS can occasionally lose the native Space
+  // collection behavior while the long-lived popover window is hidden.
+  mainWindow.setVisibleOnAllWorkspaces(true, options);
+}
+
 function enterTrayMode() {
   applyMacActivationPolicy();
   ensureTray();
@@ -2634,11 +2645,7 @@ function enterTrayMode() {
   applyMacActivationPolicy();
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
-    // Without this, .show() yanks the user back to the Space the window was last
-    // shown on instead of popping over the current Space / fullscreen app.
-    if (typeof mainWindow.setVisibleOnAllWorkspaces === 'function') {
-      mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    }
+    applyTrayPopoverWorkspaceVisibility();
     mainWindow.hide();
   }
 }
