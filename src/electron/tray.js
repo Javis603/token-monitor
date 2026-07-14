@@ -2,7 +2,7 @@
 
 const path = require('node:path');
 const { formatTrayText, pickWorstLimit } = require('../shared/trayText');
-const { codexAccountMatchesProvider, maskEmailAddress } = require('./renderer/accountIdentity');
+const { maskEmailAddress } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
@@ -58,34 +58,10 @@ function sortCodexAccountsForDisplay(accounts) {
   return [...(accounts || [])].sort((left, right) => label(left).localeCompare(label(right)));
 }
 
-function pickLiveCodexProvider(stats, localDeviceId = '') {
-  const devices = stats?.devices;
-  let providers;
-  if (Array.isArray(devices)) {
-    const local = localDeviceId
-      ? devices.find((device) => device?.deviceId === localDeviceId)
-      : (devices.length === 1 ? devices[0] : null);
-    providers = local?.limits?.providers || [];
-  } else {
-    providers = stats?.limits?.providers || [];
-  }
-  return providers.find((provider) => (
-    provider?.provider === 'codex'
-    && provider?.status === 'ok'
-    && String(provider?.sourceDetail || '').trim().toLowerCase() !== 'managed'
-  )) || null;
-}
-
-function pickActiveCodexAccountId(accounts, stats, localDeviceId = '') {
-  const live = pickLiveCodexProvider(stats, localDeviceId);
-  return (accounts || []).find((account) => codexAccountMatchesProvider(account, live))?.id || '';
-}
-
 function reconcileCodexAccountSelection({ detectedAccountId, detectedAt, pendingAccountId, pendingSince } = {}) {
   const detected = String(detectedAccountId || '').trim();
   const pending = String(pendingAccountId || '').trim();
   if (!pending) return { activeAccountId: detected, pendingAccountId: '' };
-  if (detected === pending) return { activeAccountId: detected, pendingAccountId: '' };
   const detectedTime = typeof detectedAt === 'number' ? detectedAt : Date.parse(detectedAt || '');
   if (!detected || !Number.isFinite(detectedTime) || detectedTime < Number(pendingSince || 0)) {
     return { activeAccountId: pending, pendingAccountId: pending };
@@ -263,8 +239,6 @@ module.exports = {
   buildTrayMenuTemplate,
   createTray,
   formatTrayText,
-  pickActiveCodexAccountId,
-  pickLiveCodexProvider,
   pickUsageTrayIconId,
   pickWorstLimit,
   popoverBounds,

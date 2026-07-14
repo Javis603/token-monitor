@@ -26,5 +26,37 @@
     return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
   }
 
-  return { codexAccountMatchesProvider, maskEmailAddress };
+  function codexAccountIdForProvider(accounts, provider) {
+    return (accounts || []).find((account) => codexAccountMatchesProvider(account, provider))?.id || '';
+  }
+
+  function isCodexLiveAccount(provider) {
+    return String(provider?.provider || '').trim().toLowerCase() === 'codex'
+      && String(provider?.status || '').trim() === 'ok'
+      && String(provider?.sourceDetail || '').trim().toLowerCase() !== 'managed';
+  }
+
+  function localDeviceLimitsProviders(stats, localDeviceId = '') {
+    const devices = stats?.devices;
+    if (!Array.isArray(devices)) return null;
+    const local = localDeviceId
+      ? devices.find((device) => device?.deviceId === localDeviceId)
+      : (devices.length === 1 ? devices[0] : null);
+    return local?.limits?.providers || [];
+  }
+
+  function localLiveCodexProvider(stats, localDeviceId = '') {
+    const localProviders = localDeviceLimitsProviders(stats, localDeviceId);
+    const providers = localProviders !== null ? localProviders : (stats?.limits?.providers || []);
+    return providers.find(isCodexLiveAccount) || null;
+  }
+
+  return {
+    codexAccountIdForProvider,
+    codexAccountMatchesProvider,
+    isCodexLiveAccount,
+    localDeviceLimitsProviders,
+    localLiveCodexProvider,
+    maskEmailAddress
+  };
 });

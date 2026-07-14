@@ -1,10 +1,13 @@
 'use strict';
 
 (function exposeLimitProviderPresentation(root, factory) {
-  const api = factory();
+  const accountIdentityApi = typeof module === 'object' && module.exports
+    ? require('./accountIdentity')
+    : root?.TokenMonitorAccountIdentity;
+  const api = factory(accountIdentityApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitProviderPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi() {
+})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi) {
   const SOURCE_LABELS = {
     oauth: 'OAuth',
     cli: 'CLI',
@@ -125,14 +128,13 @@
   // device's live login (selectedIsRemote) is also not "live" from here — across
   // synced devices, "Live" only ever points at the local account.
   function isCodexLiveAccount(provider, provenance) {
-    if (providerId(provider) !== 'codex') return false;
-    if (statusId(provider) !== 'ok') return false;
+    if (!accountIdentityApi?.isCodexLiveAccount(provider)) return false;
     // "Active" means this device is signed into the account — not that the shown
     // quota came from here. So hide it only when the selected record is remote
     // AND this device has no login of its own for the account; when both devices
     // are signed in, the remote record is selected but the badge still belongs.
     if (provenance && provenance.selectedIsRemote && !provenance.hasLocalCandidate) return false;
-    return sourceDetailId(provider) !== 'managed';
+    return true;
   }
 
   function isLinkedStatus(provider) {

@@ -96,12 +96,11 @@ const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const linuxAutostart = require('./linuxAutostart');
+const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
   buildTrayIcon,
   createTray,
   formatTrayText,
-  pickActiveCodexAccountId,
-  pickLiveCodexProvider,
   pickUsageTrayIconId,
   popoverBounds,
   reconcileCodexAccountSelection,
@@ -2496,9 +2495,9 @@ function enabledTrayCodexAccounts() {
 function syncTrayCodexActiveAccount() {
   const accounts = enabledTrayCodexAccounts();
   const localDeviceId = settings?.deviceId || '';
-  const liveProvider = pickLiveCodexProvider(latestStats, localDeviceId);
+  const liveProvider = localLiveCodexProvider(latestStats, localDeviceId);
   const selection = reconcileCodexAccountSelection({
-    detectedAccountId: pickActiveCodexAccountId(accounts, latestStats, localDeviceId),
+    detectedAccountId: codexAccountIdForProvider(accounts, liveProvider),
     detectedAt: liveProvider?.updatedAt,
     pendingAccountId: trayCodexPendingAccountId,
     pendingSince: trayCodexPendingSince

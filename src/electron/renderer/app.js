@@ -1626,9 +1626,7 @@ function codexAccountsShareIdentity(left, right) {
 // without per-device rows fall back to the aggregate (localDeviceLimitsProviders
 // returns null there), mirroring localProviderStatus().
 function localLiveCodexProvider() {
-  const localProviders = localDeviceLimitsProviders();
-  const providers = localProviders !== null ? localProviders : (state.stats?.limits?.providers || []);
-  return providers.find((provider) => limitProviderPresentationApi.isCodexLiveAccount(provider)) || null;
+  return accountIdentityApi.localLiveCodexProvider(state.stats, state.settings?.deviceId || '');
 }
 
 function codexActiveAccountFromStats() {

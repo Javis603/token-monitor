@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 
 const {
   apiKeyAccountStatus,
@@ -44,7 +45,7 @@ test('limitProviderDisplayLabel normalizes short account labels without rewritin
   assert.equal(limitProviderDisplayLabel('pro'), 'Pro');
   assert.equal(limitProviderDisplayLabel('go'), 'Go');
   assert.equal(limitProviderDisplayLabel('Team'), 'Team');
-  assert.equal(limitProviderDisplayLabel('javis603@gmail.com'), 'javis603@gmail.com');
+  assert.equal(limitProviderDisplayLabel('primary.user@example.com'), 'primary.user@example.com');
   assert.equal(limitProviderDisplayLabel(''), '');
 });
 
@@ -72,11 +73,10 @@ function runLocalProviderStatus(source, state, providerName) {
 }
 
 function runLocalLiveCodexProvider(source, state) {
-  const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
   const liveHelper = functionBody(source, 'localLiveCodexProvider', 'codexActiveAccountFromStats');
   return vm.runInNewContext(
-    `${localDeviceHelper}\n${liveHelper}\nlocalLiveCodexProvider();`,
-    { state, limitProviderPresentationApi: { isCodexLiveAccount } }
+    `${liveHelper}\nlocalLiveCodexProvider();`,
+    { accountIdentityApi, state }
   );
 }
 
@@ -804,41 +804,41 @@ test('account validation does not use a remote aggregate when the local device l
 });
 
 test('active Codex account follows the local login, not a remote device signed into a different account', () => {
-  // Local machine is signed into `quality` (App) and only manages the other two.
-  // A synced device (9950x3d) is signed into `javis`, so aggregateLimits() picks
-  // its live App record for the `javis` row — which sorts first. Reading the
-  // aggregate would move the ✓ onto `javis`; the marker must instead track this
-  // device's own live login (`quality`).
+  // Local machine is signed into account C (App) and only manages the other two.
+  // A synced device is signed into account A, so aggregateLimits() picks its live
+  // App record for the account A row — which sorts first. Reading the aggregate
+  // would move the ✓ onto account A; the marker must instead track this device's
+  // own live login (account C).
   const app = readRendererFile('app.js');
   const localProviders = [
-    { provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:javis', accountEmail: 'javis603@gmail.com' },
-    { provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:linus', accountEmail: 'linus@gmail.com' },
-    { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:quality', accountEmail: 'quality@icloud.com' }
+    { provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:account-a', accountEmail: 'primary@example.com' },
+    { provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:account-b', accountEmail: 'secondary@example.com' },
+    { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:account-c', accountEmail: 'tertiary@example.com' }
   ];
-  const remoteJavisLive = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:javis', accountEmail: 'javis603@gmail.com', sourceDeviceId: '9950x3d' };
+  const remoteAccountALive = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:account-a', accountEmail: 'primary@example.com', sourceDeviceId: 'remote-device' };
   const provider = runLocalLiveCodexProvider(app, {
     settings: { deviceId: 'this-mac' },
     stats: {
       devices: [
         { deviceId: 'this-mac', limits: { providers: localProviders } },
-        { deviceId: '9950x3d', limits: { providers: [remoteJavisLive] } }
+        { deviceId: 'remote-device', limits: { providers: [remoteAccountALive] } }
       ],
-      limits: { providers: [remoteJavisLive, localProviders[1], localProviders[2]] }
+      limits: { providers: [remoteAccountALive, localProviders[1], localProviders[2]] }
     }
   });
 
-  assert.equal(provider.accountKey, 'sha256:quality');
+  assert.equal(provider.accountKey, 'sha256:account-c');
 });
 
 test('no active Codex account when this device is signed out, even if a synced device is live', () => {
   const app = readRendererFile('app.js');
-  const remoteLive = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:javis', sourceDeviceId: '9950x3d' };
+  const remoteLive = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:account-a', sourceDeviceId: 'remote-device' };
   const provider = runLocalLiveCodexProvider(app, {
     settings: { deviceId: 'this-mac' },
     stats: {
       devices: [
-        { deviceId: 'this-mac', limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:javis' }] } },
-        { deviceId: '9950x3d', limits: { providers: [remoteLive] } }
+        { deviceId: 'this-mac', limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:account-a' }] } },
+        { deviceId: 'remote-device', limits: { providers: [remoteLive] } }
       ],
       limits: { providers: [remoteLive] }
     }

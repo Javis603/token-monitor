@@ -8,7 +8,6 @@ const test = require('node:test');
 const {
   buildTrayMenuTemplate,
   formatTrayText,
-  pickActiveCodexAccountId,
   reconcileCodexAccountSelection,
   pickUsageTrayIconId,
   sortCodexAccountsForDisplay
@@ -113,8 +112,8 @@ test('tray context menu switches between enabled Codex accounts', () => {
       trayContent: 'tokens',
       trayMode: true,
       codexAccounts: [
-        { id: 'one', email: 'javis603@gmail.com' },
-        { id: 'two', email: 'linus.chua328@gmail.com' }
+        { id: 'one', email: 'primary.user@example.com' },
+        { id: 'two', email: 'secondary.user@example.com' }
       ],
       activeCodexAccountId: 'one',
       maskAccountEmails: true
@@ -122,10 +121,10 @@ test('tray context menu switches between enabled Codex accounts', () => {
     onSwitchCodexAccount: (id) => calls.push(id)
   });
 
-  assert.equal(template[2].label, 'Codex Account · j***3@gmail.com');
+  assert.equal(template[2].label, 'Codex Account · p***r@example.com');
   assert.deepEqual(template[2].submenu.map((item) => [item.label, item.checked]), [
-    ['j***3@gmail.com', true],
-    ['l***8@gmail.com', false]
+    ['p***r@example.com', true],
+    ['s***r@example.com', false]
   ]);
   template[2].submenu[0].click();
   template[2].submenu[1].click();
@@ -145,47 +144,28 @@ test('tray context menu hides Codex switching until two accounts are enabled', (
   assert.equal(template.some((item) => item.label?.startsWith('Codex Account')), false);
 });
 
-test('active Codex account comes from the local device instead of the synced aggregate', () => {
-  const accounts = [
-    { id: 'local', email: 'local@example.com', accountKey: 'local-key' },
-    { id: 'remote', email: 'remote@example.com', accountKey: 'remote-key' }
-  ];
-  const statsWithDevices = {
-    devices: [
-      {
-        deviceId: 'this-device',
-        limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'local-key' }] }
-      },
-      {
-        deviceId: 'other-device',
-        limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'remote-key' }] }
-      }
-    ],
-    limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'remote-key' }] }
-  };
-
-  assert.equal(pickActiveCodexAccountId(accounts, statsWithDevices, 'this-device'), 'local');
-  assert.equal(
-    pickActiveCodexAccountId(accounts, { limits: statsWithDevices.limits }, 'this-device'),
-    'remote'
-  );
-});
-
 test('Codex tray accounts use the same stable label order as Limits', () => {
   const accounts = [
-    { id: 'quality', email: 'quality@example.com' },
-    { id: 'linus', email: 'linus@example.com' },
-    { id: 'javis', email: 'javis@example.com' }
+    { id: 'gamma', email: 'gamma@example.com' },
+    { id: 'beta', email: 'beta@example.com' },
+    { id: 'alpha', email: 'alpha@example.com' }
   ];
 
   assert.deepEqual(
     sortCodexAccountsForDisplay(accounts).map((account) => account.id),
-    ['javis', 'linus', 'quality']
+    ['alpha', 'beta', 'gamma']
   );
-  assert.deepEqual(accounts.map((account) => account.id), ['quality', 'linus', 'javis']);
+  assert.deepEqual(accounts.map((account) => account.id), ['gamma', 'beta', 'alpha']);
 });
 
 test('Codex tray account selection waits for a post-switch local provider snapshot', () => {
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'new',
+    detectedAt: '2026-07-14T03:00:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
   assert.deepEqual(reconcileCodexAccountSelection({
     detectedAccountId: 'old',
     detectedAt: '2026-07-14T03:00:00.000Z',

@@ -293,12 +293,12 @@ test('Codex account email masking is an opt-in display-only setting', () => {
   assert.match(app, /renderLimits\(\);/);
 
   assert.equal(
-    maskEmailAddress('javis603@gmail.com')
-    , 'j***3@gmail.com'
+    maskEmailAddress('primary.user@example.com')
+    , 'p***r@example.com'
   );
   assert.equal(
-    maskEmailAddress('linus.chua328@gmail.com')
-    , 'l***8@gmail.com'
+    maskEmailAddress('secondary.user@example.com')
+    , 's***r@example.com'
   );
   assert.equal(
     maskEmailAddress('ab@example.com')
@@ -309,19 +309,19 @@ test('Codex account email masking is an opt-in display-only setting', () => {
     runRendererFunctions(
       app,
       ['codexAccountTitle'],
-      "codexAccountTitle({ accountEmail: 'javis603@gmail.com' }, 0)",
+      "codexAccountTitle({ accountEmail: 'primary.user@example.com' }, 0)",
       { accountIdentityApi: { maskEmailAddress }, state: { settings: { maskLimitAccountEmails: false } } }
     ),
-    'javis603@gmail.com'
+    'primary.user@example.com'
   );
   assert.equal(
     runRendererFunctions(
       app,
       ['codexAccountTitle'],
-      "codexAccountTitle({ accountEmail: 'javis603@gmail.com' }, 0)",
+      "codexAccountTitle({ accountEmail: 'primary.user@example.com' }, 0)",
       { accountIdentityApi: { maskEmailAddress }, state: { settings: { maskLimitAccountEmails: true } } }
     ),
-    'j***3@gmail.com'
+    'p***r@example.com'
   );
 });
 

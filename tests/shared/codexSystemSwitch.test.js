@@ -42,7 +42,7 @@ test('Codex auth files are written atomically with private permissions and reada
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'token-monitor-codex-switch-'));
   const authPath = path.join(root, 'live', 'auth.json');
   const authData = JSON.stringify({
-    account: { email: 'Linus.Chua328@Gmail.com', planType: 'plus' }
+    account: { email: 'Primary.User@Example.com', planType: 'plus' }
   });
 
   await writeCodexAuthFile(authPath, authData);
@@ -54,6 +54,6 @@ test('Codex auth files are written atomically with private permissions and reada
 
   const material = await readCodexAuthMaterial(authPath);
   assert.equal(material.data, authData);
-  assert.equal(material.identity.email, 'linus.chua328@gmail.com');
+  assert.equal(material.identity.email, 'primary.user@example.com');
   assert.equal(material.identity.accountLabel, 'plus');
 });
