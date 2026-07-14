@@ -40,6 +40,16 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('settings:push', listener);
     return () => ipcRenderer.removeListener('settings:push', listener);
   },
+  onOpenSettings: (callback) => {
+    const listener = () => { try { callback(); } catch (_) {} };
+    ipcRenderer.on('settings:open', listener);
+    return () => ipcRenderer.removeListener('settings:open', listener);
+  },
+  onOpenView: (callback) => {
+    const listener = (_event, viewId) => { try { callback(viewId); } catch (_) {} };
+    ipcRenderer.on('view:open', listener);
+    return () => ipcRenderer.removeListener('view:open', listener);
+  },
   onTokscalePush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('tokscale:push', listener);

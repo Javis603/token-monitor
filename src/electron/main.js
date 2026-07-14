@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const { installSafeStdout } = require('../shared/safeStdio');
@@ -37,7 +37,7 @@ const {
   normalizeHiddenClients,
   normalizePinnedClients
 } = require('./renderer/clientDisplayPreferences');
-const { LANGUAGE_OPTIONS } = require('./renderer/i18n');
+const { LANGUAGE_OPTIONS, resolveLocale, translate } = require('./renderer/i18n');
 const {
   defaultViewDisplayPreferences,
   normalizeHiddenViews,
@@ -96,7 +96,7 @@ const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const linuxAutostart = require('./linuxAutostart');
-const { buildTrayIcon, createTray, formatTrayText, pickUsageTrayIconId, popoverBounds } = require('./tray');
+const { buildTrayIcon, createTray, formatTrayText, pickActiveCodexAccountId, pickUsageTrayIconId, popoverBounds, sortCodexAccountsForDisplay } = require('./tray');
 const {
   macActivationPolicyMode,
   mainWindowCloseAction,
@@ -161,6 +161,7 @@ const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
 const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
 const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
+const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
 let dashboardWindow = null;
@@ -1577,6 +1578,12 @@ let syncCollectorHandle = null;
 let lastCollectedDevice = null;
 let tray = null;
 let latestStats = null;
+let trayRefreshInFlight = false;
+let trayCodexActiveAccountId = '';
+let trayCodexPendingAccountId = '';
+let trayCodexPendingUntil = 0;
+let trayCodexSwitchInFlight = false;
+const TRAY_CODEX_PENDING_GRACE_MS = 15 * 1000;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
 let lastExportAt = 0;
 let lastAutoExport = { dir: null, signature: null };
@@ -1910,6 +1917,7 @@ function sendPush(payload) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
@@ -2388,6 +2396,151 @@ function handleTrayToggle() {
   else if (action === 'focusWindow') focusExistingWindow();
 }
 
+function trayMenuLocale() {
+  const preferredLanguages = typeof app.getPreferredSystemLanguages === 'function'
+    ? app.getPreferredSystemLanguages()
+    : [app.getLocale()];
+  return resolveLocale(settings?.language || 'auto', preferredLanguages);
+}
+
+function sendMainWindowEvent(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const send = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try { mainWindow.webContents.send(channel, payload); } catch (_) {}
+  };
+  if (mainWindow.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', send);
+  else send();
+}
+
+async function refreshFromTray() {
+  if (trayRefreshInFlight) return;
+  trayRefreshInFlight = true;
+  try {
+    const stats = await fetchStats({ force: true });
+    // Collector ticks normally publish their own final snapshot. Only bridge the
+    // result when fetchStats returned a different object (for example, a remote hub
+    // fetch while an external headless agent owns collection).
+    if (stats && stats !== latestStats) {
+      sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } });
+    }
+  } catch (error) {
+    console.warn(`[tray] refresh failed: ${error.message}`);
+  } finally {
+    trayRefreshInFlight = false;
+  }
+}
+
+function setTrayContentFromMenu(value) {
+  const next = normalizeTrayContent(value, settings?.trayContent || 'tokens');
+  if (next === settings?.trayContent) return;
+  settings.trayContent = next;
+  saveSettings();
+  updateTrayDisplay();
+  pushSettingsToRenderer();
+}
+
+function setWindowPresentationFromMenu(value) {
+  if (value === 'tray') {
+    if (settings.trayMode) return;
+    settings.trayMode = true;
+    saveSettings();
+    enterTrayMode();
+    pushSettingsToRenderer();
+    return;
+  }
+
+  const previousTrayMode = settings.trayMode;
+  settings = normalizeWindowBehaviorSettings(settings, {
+    trayMode: false,
+    windowBehavior: value
+  });
+  saveSettings();
+  if (previousTrayMode) exitTrayMode();
+  else {
+    applyWindowSettings();
+    focusExistingWindow();
+  }
+  pushSettingsToRenderer();
+}
+
+function openSettingsFromTray() {
+  focusExistingWindow();
+  sendMainWindowEvent('settings:open');
+}
+
+function openViewFromTray(viewId) {
+  const normalized = String(viewId || '').trim().toLowerCase();
+  if (!TRAY_OPEN_VIEW_IDS.has(normalized)) return;
+  focusExistingWindow();
+  sendMainWindowEvent('view:open', normalized);
+}
+
+function enabledTrayCodexAccounts() {
+  return sortCodexAccountsForDisplay(
+    codexAccountsForRenderer().filter((account) => account.enabled !== false)
+  );
+}
+
+function syncTrayCodexActiveAccount() {
+  const activeId = pickActiveCodexAccountId(enabledTrayCodexAccounts(), latestStats, settings?.deviceId || '');
+  if (trayCodexPendingAccountId) {
+    if (activeId === trayCodexPendingAccountId) {
+      trayCodexPendingAccountId = '';
+      trayCodexPendingUntil = 0;
+    } else if (Date.now() < trayCodexPendingUntil) {
+      return;
+    } else {
+      trayCodexPendingAccountId = '';
+      trayCodexPendingUntil = 0;
+    }
+  }
+  trayCodexActiveAccountId = activeId;
+}
+
+function trayCodexMenuState() {
+  syncTrayCodexActiveAccount();
+  const accounts = enabledTrayCodexAccounts();
+  return {
+    accounts,
+    activeAccountId: trayCodexPendingAccountId || trayCodexActiveAccountId,
+    switching: trayCodexSwitchInFlight
+  };
+}
+
+function showTrayCodexSwitchError(error) {
+  const locale = trayMenuLocale();
+  const title = translate(locale, 'trayMenu.codexSwitchFailedTitle');
+  const body = translate(locale, 'trayMenu.codexSwitchFailedBody', { error: String(error || '') });
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
+  } else {
+    dialog.showErrorBox(title, body);
+  }
+}
+
+async function switchCodexAccountFromTray(accountId) {
+  if (trayCodexSwitchInFlight || !accountId) return;
+  const currentId = trayCodexPendingAccountId || trayCodexActiveAccountId;
+  if (accountId === currentId) return;
+  trayCodexSwitchInFlight = true;
+  try {
+    const result = await switchCodexSystemAccount(accountId);
+    if (!result?.ok) {
+      showTrayCodexSwitchError(result?.error);
+      return;
+    }
+    trayCodexActiveAccountId = result.activeAccountId || accountId;
+    trayCodexPendingAccountId = trayCodexActiveAccountId;
+    trayCodexPendingUntil = Date.now() + TRAY_CODEX_PENDING_GRACE_MS;
+    pushSettingsToRenderer();
+  } catch (error) {
+    showTrayCodexSwitchError(error?.message || error);
+  } finally {
+    trayCodexSwitchInFlight = false;
+  }
+}
+
 function configureWindowToggleShortcut() {
   unregisterWindowToggleShortcut();
   const shortcut = normalizeWindowToggleShortcut(settings?.windowToggleShortcut);
@@ -2411,14 +2564,37 @@ function ensureTray() {
   if (!shouldCreateTray(settings)) return false;
   if (tray && !tray.isDestroyed()) return;
   tray = createTray({
+    getMenuState: () => {
+      const codex = trayCodexMenuState();
+      return {
+        appVersion: appVersion(),
+        refreshing: trayRefreshInFlight,
+        trayContent: settings?.trayContent || 'tokens',
+        trayMode: Boolean(settings?.trayMode),
+        windowBehavior: settings?.windowBehavior || 'floating',
+        codexAccounts: codex.accounts,
+        activeCodexAccountId: codex.activeAccountId,
+        codexSwitching: codex.switching,
+        maskAccountEmails: Boolean(settings?.maskLimitAccountEmails),
+        viewEnabled: {
+          home: true,
+          project: settings?.projectsEnabled !== false,
+          session: true,
+          limits: settings?.limitsEnabled !== false && parseLimitProviders(settings?.limitProviders).length > 0,
+          trends: settings?.historyEnabled !== false,
+          status: true
+        }
+      };
+    },
     onToggle: handleTrayToggle,
+    onOpenView: openViewFromTray,
+    onRefresh: () => { void refreshFromTray(); },
+    onSetTrayContent: setTrayContentFromMenu,
+    onSetWindowPresentation: setWindowPresentationFromMenu,
+    onSwitchCodexAccount: (accountId) => { void switchCodexAccountFromTray(accountId); },
+    onOpenSettings: openSettingsFromTray,
     onQuit: requestAppQuit,
-    onSwitchToWindowMode: () => {
-      settings.trayMode = false;
-      saveSettings();
-      exitTrayMode();
-      pushSettingsToRenderer();
-    }
+    translateMenu: (key, params) => translate(trayMenuLocale(), key, params)
   });
   updateTrayDisplay();
   return true;

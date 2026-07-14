@@ -197,6 +197,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 }
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
@@ -1166,11 +1167,14 @@ function visibleBreakdownOrder() {
 }
 
 function ensureBreakdownVisible() {
+  const availableIds = availableBreakdownIds();
+  if (directBreakdownOverride === state.breakdown && availableIds.includes(state.breakdown)) return;
+  directBreakdownOverride = null;
   const next = viewDisplayPreferencesApi.preferredViewId({
     views: VIEW_DISPLAY_OPTIONS,
     orderValue: effectiveViewDisplayOrderValue(),
     hiddenValue: state.settings?.hiddenViews,
-    availableIds: availableBreakdownIds(),
+    availableIds,
     currentId: state.breakdown
   });
   if (next !== state.breakdown) setBreakdown(next);
@@ -2666,6 +2670,26 @@ function openTrendSettings() {
   });
 }
 
+function openSettingsPanel() {
+  if (!els.settingsPanel) return;
+  if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  els.settingsPanel.classList.remove('hidden');
+  els.shell.classList.add('settings-open');
+  els.shell.style.transform = 'translateZ(0)';
+  requestAnimationFrame(() => { els.shell.style.transform = ''; });
+}
+
+function openViewFromTray(viewId) {
+  if (!availableBreakdownIds().includes(viewId)) return;
+  if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  stopWindowShortcutRecording();
+  els.settingsPanel?.classList.add('hidden');
+  els.shell.classList.remove('settings-open');
+  state.openSession = null;
+  setBreakdown(viewId, { allowHidden: true });
+  render();
+}
+
 async function loadHomeHistory() {
   if (state.homeHistoryBusy || !window.tokenMonitor.getDashboardHistory) return;
   if (!homeOverviewApi.shouldFetchHomeHistory({
@@ -3747,8 +3771,9 @@ function setPeriod(period) {
   return true;
 }
 
-function setBreakdown(breakdown) {
+function setBreakdown(breakdown, options = {}) {
   const next = normalizeInitialViewValue(breakdown, viewBreakdownValues, state.breakdown);
+  directBreakdownOverride = options.allowHidden === true ? next : null;
   if (next === state.breakdown) {
     publishViewState();
     return false;
@@ -6307,6 +6332,9 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   syncSettingsForm();
   maybeUpdateBarsIcon();
 });
+
+window.tokenMonitor.onOpenSettings?.(openSettingsPanel);
+window.tokenMonitor.onOpenView?.(openViewFromTray);
 
 window.tokenMonitor.onFloatingBubbleState?.((payload) => {
   applyFloatingBubbleState(payload);

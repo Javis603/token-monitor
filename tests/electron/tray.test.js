@@ -3,7 +3,15 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { formatTrayText, pickUsageTrayIconId } = require('../../src/electron/tray');
+const {
+  buildTrayMenuTemplate,
+  formatTrayText,
+  maskEmailAddress,
+  pickActiveCodexAccountId,
+  pickUsageTrayIconId,
+  sortCodexAccountsForDisplay
+} = require('../../src/electron/tray');
+const { translate } = require('../../src/electron/renderer/i18n');
 const {
   compactLimitSelection,
   pickConfiguredLimitProviders,
@@ -24,6 +32,161 @@ const stats = {
     }
   }
 };
+
+test('tray context menu complements the primary click with useful commands', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({
+    state: { appVersion: '0.27.0', trayContent: 'both', trayMode: true, windowBehavior: 'floating' },
+    onRefresh: () => calls.push(['refresh']),
+    onOpenView: (value) => calls.push(['view', value]),
+    onSetTrayContent: (value) => calls.push(['content', value]),
+    onSetWindowPresentation: (value) => calls.push(['presentation', value]),
+    onOpenSettings: () => calls.push(['settings']),
+    onQuit: () => calls.push(['quit'])
+  });
+
+  assert.deepEqual(template.map((item) => item.label || item.type), [
+    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Quit Token Monitor'
+  ]);
+  assert.equal(template.some((item) => item.label === 'Show / Hide'), false);
+  assert.equal(template[3].submenu.find((item) => item.label === 'Today Tokens + Cost').checked, true);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Tray Popover').checked, true);
+
+  template[0].click();
+  template[1].submenu.find((item) => item.label === 'Projects').click();
+  template[3].submenu.find((item) => item.label === 'App Icon Only').click();
+  template[4].submenu.find((item) => item.label === 'Desktop Pinned').click();
+  assert.equal(template[6].enabled, false);
+  template[7].click();
+  template[8].click();
+  assert.deepEqual(calls, [
+    ['refresh'], ['view', 'project'], ['content', 'icon'], ['presentation', 'desktop'], ['settings'], ['quit']
+  ]);
+});
+
+test('tray context menu exposes refresh progress and current window mode', () => {
+  const template = buildTrayMenuTemplate({
+    state: { refreshing: true, trayContent: 'tokens', trayMode: false, windowBehavior: 'desktop' }
+  });
+
+  assert.equal(template[0].label, 'Refreshing…');
+  assert.equal(template[0].enabled, false);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Desktop Pinned').checked, true);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Tray Popover').checked, false);
+});
+
+test('tray context menu uses the selected locale for every visible level', () => {
+  const template = buildTrayMenuTemplate({
+    state: { appVersion: '0.27.0', trayContent: 'tokens', trayMode: true, windowBehavior: 'floating' },
+    translate: (key, params) => translate('zh-TW', key, params)
+  });
+
+  assert.deepEqual(template.map((item) => item.label || item.type), [
+    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '結束 Token Monitor'
+  ]);
+  assert.equal(template[1].submenu[0].label, '主頁');
+  assert.equal(template[3].submenu[0].label, '今日 Tokens');
+  assert.equal(template[3].submenu.at(-1).label, '僅顯示 App 圖示');
+  assert.equal(template[4].submenu[0].label, '托盤彈出視窗');
+  assert.equal(template[4].submenu.at(-1).label, '固定於桌面');
+});
+
+test('tray context menu disables unavailable views', () => {
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      viewEnabled: { project: false, limits: false, trends: false }
+    }
+  });
+
+  assert.equal(template[1].submenu.find((item) => item.label === 'Projects').enabled, false);
+  assert.equal(template[1].submenu.find((item) => item.label === 'Sessions').enabled, true);
+});
+
+test('tray context menu switches between enabled Codex accounts', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        { id: 'one', email: 'javis603@gmail.com' },
+        { id: 'two', email: 'linus.chua328@gmail.com' }
+      ],
+      activeCodexAccountId: 'one',
+      maskAccountEmails: true
+    },
+    onSwitchCodexAccount: (id) => calls.push(id)
+  });
+
+  assert.equal(template[2].label, 'Codex Account · j***3@gmail.com');
+  assert.deepEqual(template[2].submenu.map((item) => [item.label, item.checked]), [
+    ['j***3@gmail.com', true],
+    ['l***8@gmail.com', false]
+  ]);
+  template[2].submenu[0].click();
+  template[2].submenu[1].click();
+  assert.deepEqual(calls, ['two']);
+});
+
+test('tray context menu hides Codex switching until two accounts are enabled', () => {
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [{ id: 'one', email: 'one@example.com' }],
+      activeCodexAccountId: 'one'
+    }
+  });
+
+  assert.equal(template.some((item) => item.label?.startsWith('Codex Account')), false);
+});
+
+test('active Codex account comes from the local device instead of the synced aggregate', () => {
+  const accounts = [
+    { id: 'local', email: 'local@example.com', accountKey: 'local-key' },
+    { id: 'remote', email: 'remote@example.com', accountKey: 'remote-key' }
+  ];
+  const statsWithDevices = {
+    devices: [
+      {
+        deviceId: 'this-device',
+        limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'local-key' }] }
+      },
+      {
+        deviceId: 'other-device',
+        limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'remote-key' }] }
+      }
+    ],
+    limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'remote-key' }] }
+  };
+
+  assert.equal(pickActiveCodexAccountId(accounts, statsWithDevices, 'this-device'), 'local');
+  assert.equal(
+    pickActiveCodexAccountId(accounts, { limits: statsWithDevices.limits }, 'this-device'),
+    'remote'
+  );
+});
+
+test('Codex tray account masking preserves the first and last local-part characters', () => {
+  assert.equal(maskEmailAddress('javis603@gmail.com'), 'j***3@gmail.com');
+  assert.equal(maskEmailAddress('ab@example.com'), 'a***b@example.com');
+});
+
+test('Codex tray accounts use the same stable label order as Limits', () => {
+  const accounts = [
+    { id: 'quality', email: 'quality@example.com' },
+    { id: 'linus', email: 'linus@example.com' },
+    { id: 'javis', email: 'javis@example.com' }
+  ];
+
+  assert.deepEqual(
+    sortCodexAccountsForDisplay(accounts).map((account) => account.id),
+    ['javis', 'linus', 'quality']
+  );
+  assert.deepEqual(accounts.map((account) => account.id), ['quality', 'linus', 'javis']);
+});
 
 test('usage tray icon picks the top token client for day and total token modes', () => {
   assert.equal(pickUsageTrayIconId(stats, 'tokens', ['claude', 'codex']), 'codex');
