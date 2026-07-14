@@ -842,6 +842,49 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #codexLoginStatus.hidden { display: none; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
+.app-update-notes {
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.075);
+  color: var(--muted);
+  font-size: 10px;
+}
+.app-update-notes.hidden { display: none; }
+.app-update-notes summary {
+  width: max-content;
+  max-width: 100%;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  user-select: none;
+}
+.app-update-notes summary::marker { color: var(--muted); }
+.app-update-notes summary:focus-visible {
+  border-radius: 3px;
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 3px;
+}
+.app-update-notes-body {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+.app-update-note-title {
+  color: var(--text);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.app-update-note-group ul {
+  margin: 3px 0 0;
+  padding-left: 17px;
+  line-height: 1.45;
+}
+.app-update-note-group li + li { margin-top: 3px; }
+.app-update-notes .inline-link { margin-top: 7px; font-size: 10px; }
+.app-update-notes .inline-link.hidden { display: none; }
 .inline-link {
   padding: 0;
   border: 0;
@@ -3204,6 +3247,67 @@ html.is-windows .limit-live-badge {
   cursor: pointer;
 }
 .update-pill-dismiss:hover { opacity: 1; }
+.app-update-popover {
+  inset: auto;
+  margin: 0;
+  max-height: min(360px, calc(100vh - 64px));
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(var(--line-rgb), 0.14);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 96%, transparent);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.28);
+  color: var(--muted);
+  font-size: 10px;
+  opacity: 0;
+  transform: translateY(5px) scale(0.985);
+  transition: opacity 140ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1), overlay 140ms allow-discrete, display 140ms allow-discrete;
+}
+.app-update-popover:popover-open { opacity: 1; transform: none; }
+@starting-style {
+  .app-update-popover:popover-open { opacity: 0; transform: translateY(5px) scale(0.985); }
+}
+.app-update-popover::backdrop { background: transparent; }
+.app-update-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.app-update-popover-header strong { color: var(--text); font-size: 11px; line-height: 1.35; }
+.app-update-popover-close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.app-update-popover-close:hover { background: rgba(var(--overlay-rgb), 0.07); color: var(--text); }
+.app-update-popover .app-update-notes-body { max-height: 230px; overflow: auto; }
+.app-update-popover-actions { display: flex; align-items: center; gap: 10px; margin-top: 11px; }
+.app-update-popover-primary {
+  min-height: 27px;
+  padding: 0 10px;
+  border: 1px solid rgba(115, 189, 245, 0.46);
+  border-radius: 6px;
+  background: rgba(115, 189, 245, 0.14);
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+}
+.app-update-popover-primary:hover { background: rgba(115, 189, 245, 0.22); }
+.app-update-popover-primary:disabled { cursor: default; opacity: 0.5; }
+.app-update-popover .inline-link { font-size: 10px; }
+.app-update-popover .inline-link.hidden { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .app-update-popover { transition-duration: 0.01ms; }
+}
 
 /* Progressive collapse as the window gets shorter. Width is intentionally not a */
 /* trigger — a narrow but tall window is a valid sidebar layout. Sections drop */

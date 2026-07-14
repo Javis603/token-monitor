@@ -7,6 +7,11 @@ const RELEASES_LATEST_URL = `https://api.github.com/repos/${GITHUB_REPO}/release
 const REQUEST_TIMEOUT_MS = 10 * 1000;
 const APP_UPDATE_BACKGROUND_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const APP_UPDATE_OUTDATED_COOLDOWN_MS = 60 * 60 * 1000;
+const MAX_RELEASE_BODY_CHARS = 128 * 1024;
+const MAX_RELEASE_NOTE_GROUPS = 4;
+const MAX_RELEASE_NOTE_ITEMS = 12;
+const MAX_RELEASE_NOTE_ITEM_CHARS = 600;
+const TRAILING_PULL_REQUEST_REFERENCES_RE = /\s*(?:\(\s*#\d+(?:\s*,\s*#\d+)*\s*\)|（\s*#\d+(?:\s*[、，,]\s*#\d+)*\s*）)\s*$/;
 
 function appUpdateInstallSupport({
   isPackaged = false,
@@ -34,6 +39,92 @@ function parseTag(tag) {
   return semver.valid(stripped) ? stripped : null;
 }
 
+function truncateReleaseNoteText(value, maxChars) {
+  const characters = Array.from(value);
+  if (characters.length <= maxChars) return value;
+  return `${characters.slice(0, maxChars - 1).join('').trimEnd()}…`;
+}
+
+function plainReleaseNoteText(value, maxChars = MAX_RELEASE_NOTE_ITEM_CHARS) {
+  const text = String(value || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/<\/?[^>]+>/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\s+/g, ' ')
+    .replace(/([：。！？])\s+/g, '$1')
+    .trim()
+    .replace(TRAILING_PULL_REQUEST_REFERENCES_RE, '')
+    .trimEnd();
+  return truncateReleaseNoteText(text, maxChars);
+}
+
+function markedReleaseNoteSection(body, locale) {
+  const startMarker = `<!-- app-update-notes:${locale}:start -->`;
+  const endMarker = `<!-- app-update-notes:${locale}:end -->`;
+  const start = body.indexOf(startMarker);
+  if (start < 0) return '';
+  const contentStart = start + startMarker.length;
+  const end = body.indexOf(endMarker, contentStart);
+  return end < 0 ? '' : body.slice(contentStart, end);
+}
+
+function parseReleaseNoteGroups(section) {
+  const groups = [];
+  let current = null;
+  let itemCount = 0;
+
+  function finishCurrent() {
+    if (!current?.title || current.items.length === 0 || groups.length >= MAX_RELEASE_NOTE_GROUPS) return;
+    groups.push(current);
+  }
+
+  for (const line of section.split(/\r?\n/)) {
+    const heading = /^\s*###\s+(.+?)\s*#*\s*$/.exec(line);
+    if (heading) {
+      finishCurrent();
+      current = groups.length < MAX_RELEASE_NOTE_GROUPS
+        ? { title: plainReleaseNoteText(heading[1], 80), items: [] }
+        : null;
+      continue;
+    }
+    const bullet = /^\s*[-*]\s+(.+?)\s*$/.exec(line);
+    if (!bullet || !current || itemCount >= MAX_RELEASE_NOTE_ITEMS) continue;
+    const text = plainReleaseNoteText(bullet[1]);
+    if (!text) continue;
+    current.items.push(text);
+    itemCount += 1;
+  }
+  finishCurrent();
+  return groups;
+}
+
+function extractReleaseNotes(value) {
+  if (typeof value !== 'string' || !value.trim()) return {};
+  const body = value.slice(0, MAX_RELEASE_BODY_CHARS);
+  const notes = {};
+  for (const locale of ['en', 'zh']) {
+    const section = markedReleaseNoteSection(body, locale);
+    const groups = section ? parseReleaseNoteGroups(section) : [];
+    if (groups.length > 0) notes[locale] = groups;
+  }
+  return notes;
+}
+
+function mergeLatestReleaseMetadata(existing, incoming) {
+  if (!incoming || typeof incoming !== 'object') return null;
+  if (!existing || existing.version !== incoming.version) return incoming;
+  const releaseNotes = incoming.releaseNotes || existing.releaseNotes;
+  return {
+    ...existing,
+    ...incoming,
+    ...(releaseNotes ? { releaseNotes } : {})
+  };
+}
+
 function parseLatestReleasePayload(payload) {
   if (!payload || typeof payload !== 'object') return null;
   const tag = typeof payload.tag_name === 'string' ? payload.tag_name : '';
@@ -41,12 +132,14 @@ function parseLatestReleasePayload(payload) {
   if (!version) return null;
   const htmlUrl = typeof payload.html_url === 'string' ? payload.html_url : '';
   if (!htmlUrl.startsWith('https://')) return null;
+  const releaseNotes = extractReleaseNotes(payload.body);
   return {
     version,
     tag,
     name: (typeof payload.name === 'string' && payload.name.trim()) ? payload.name : tag,
     htmlUrl,
-    publishedAt: typeof payload.published_at === 'string' ? payload.published_at : ''
+    publishedAt: typeof payload.published_at === 'string' ? payload.published_at : '',
+    ...(Object.keys(releaseNotes).length > 0 ? { releaseNotes } : {})
   };
 }
 
@@ -125,6 +218,8 @@ module.exports = {
   parseLatestReleasePayload,
   shouldSkipAppUpdateCheck,
   downloadedAppUpdateMatchesLatest,
+  extractReleaseNotes,
+  mergeLatestReleaseMetadata,
   checkLatestRelease,
   RELEASES_LATEST_URL,
   GITHUB_REPO,

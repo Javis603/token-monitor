@@ -1,11 +1,16 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
   appUpdateInstallSupport,
   downloadedAppUpdateMatchesLatest,
+  extractReleaseNotes,
+  mergeLatestReleaseMetadata,
+  parseLatestReleasePayload,
   parseTag,
   shouldSkipAppUpdateCheck
 } = require('../../src/shared/appUpdater');
@@ -101,21 +106,175 @@ test('downloadedAppUpdateMatchesLatest only trusts the downloaded latest version
   }), false);
 });
 
-const { parseLatestReleasePayload } = require('../../src/shared/appUpdater');
+test('extractReleaseNotes reads marked bilingual summaries as plain text', () => {
+  const body = `
+## What's changed
+<!-- app-update-notes:en:start -->
+### Added
+- **Projects view:** Track usage by \`workspace\` with [setup notes](https://example.com).
+### Fixed
+- <strong>Updater:</strong> Keeps the action available.
+<!-- app-update-notes:en:end -->
+
+## 更新内容
+<!-- app-update-notes:zh:start -->
+### 新增
+- **项目视图：** 按工作区追踪用量。
+<!-- app-update-notes:zh:end -->
+`;
+
+  assert.deepEqual(extractReleaseNotes(body), {
+    en: [
+      { title: 'Added', items: ['Projects view: Track usage by workspace with setup notes.'] },
+      { title: 'Fixed', items: ['Updater: Keeps the action available.'] }
+    ],
+    zh: [
+      { title: '新增', items: ['项目视图：按工作区追踪用量。'] }
+    ]
+  });
+});
+
+test('extractReleaseNotes hides trailing PR references from App summaries', () => {
+  const body = `
+<!-- app-update-notes:en:start -->
+### Added
+- Projects view tracks workspace usage. (#122, #138, #144)
+- Issue #150 remains visible when it is part of the sentence.
+<!-- app-update-notes:en:end -->
+<!-- app-update-notes:zh:start -->
+### 新增
+- 项目视图可按工作区追踪用量。（#122、#138、#144）
+- 问题 #150 是句子内容的一部分，应该保留。
+<!-- app-update-notes:zh:end -->
+`;
+
+  assert.deepEqual(extractReleaseNotes(body), {
+    en: [{
+      title: 'Added',
+      items: [
+        'Projects view tracks workspace usage.',
+        'Issue #150 remains visible when it is part of the sentence.'
+      ]
+    }],
+    zh: [{
+      title: '新增',
+      items: [
+        '项目视图可按工作区追踪用量。',
+        '问题 #150 是句子内容的一部分，应该保留。'
+      ]
+    }]
+  });
+});
+
+test('extractReleaseNotes ignores unmarked release sections', () => {
+  const body = `
+## What's changed
+
+### Improved
+- Clearer update status.
+
+## Download
+- Installer
+
+## 更新内容
+
+### 改进
+- 更新状态更清楚。
+
+## 下载
+- 安装包
+`;
+
+  assert.deepEqual(extractReleaseNotes(body), {});
+});
+
+test('extractReleaseNotes bounds groups, items, and item length', () => {
+  const added = Array.from({ length: 5 }, (_, index) => (
+    `- Added ${index + 1}${index === 0 ? ` ${'😀'.repeat(700)}` : ''}`
+  )).join('\n');
+  const notes = extractReleaseNotes(`
+<!-- app-update-notes:en:start -->
+### Added
+${added}
+### Changed
+- Changed 1
+- Changed 2
+- Changed 3
+### Improved
+- Improved 1
+- Improved 2
+- Improved 3
+### Fixed
+- Fixed 1
+- Fixed 2
+- Fixed 3
+### Extra
+- Extra
+<!-- app-update-notes:en:end -->
+`);
+
+  assert.deepEqual(notes.en.map((group) => group.title), ['Added', 'Changed', 'Improved', 'Fixed']);
+  assert.deepEqual(notes.en.map((group) => group.items.length), [5, 3, 3, 1]);
+  assert.equal(notes.en.reduce((total, group) => total + group.items.length, 0), 12);
+  assert.equal(Array.from(notes.en[0].items[0]).length, 600);
+  assert.match(notes.en[0].items[0], /…$/);
+});
+
+test('release template exposes marked English and Chinese app summaries', () => {
+  const template = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'), 'utf8');
+  const notes = extractReleaseNotes(template);
+  assert.deepEqual(notes.en.map((group) => group.title), ['Added', 'Improved', 'Fixed']);
+  assert.deepEqual(notes.zh.map((group) => group.title), ['新增', '改进', '修复']);
+  assert.ok(notes.en.every((group) => group.items.length > 0));
+  assert.ok(notes.zh.every((group) => group.items.length > 0));
+  assert.ok(notes.en.every((group) => group.items.every((item) => !/\(#\d/.test(item))));
+  assert.ok(notes.zh.every((group) => group.items.every((item) => !/（#\d/.test(item))));
+  assert.match(template, /\(#122, #138, #144\)/);
+  assert.match(template, /（#122、#138、#144）/);
+});
+
+test('mergeLatestReleaseMetadata preserves notes when native updater metadata omits them', () => {
+  const releaseNotes = { en: [{ title: 'Fixed', items: ['An updater fix.'] }] };
+  assert.deepEqual(
+    mergeLatestReleaseMetadata(
+      { version: '0.28.0', name: 'GitHub release', releaseNotes },
+      { version: '0.28.0', name: 'Native updater' }
+    ),
+    { version: '0.28.0', name: 'Native updater', releaseNotes }
+  );
+  assert.deepEqual(
+    mergeLatestReleaseMetadata(
+      { version: '0.28.0', releaseNotes },
+      { version: '0.29.0', name: 'Next release' }
+    ),
+    { version: '0.29.0', name: 'Next release' }
+  );
+});
 
 test('parseLatestReleasePayload returns normalized object for valid payload', () => {
   const result = parseLatestReleasePayload({
     tag_name: 'v0.1.3',
     name: 'Token Monitor 0.1.3',
     html_url: 'https://github.com/Javis603/token-monitor/releases/tag/v0.1.3',
-    published_at: '2026-05-26T12:00:00Z'
+    published_at: '2026-05-26T12:00:00Z',
+    body: `
+## What's changed
+<!-- app-update-notes:en:start -->
+### Added
+- Release summaries in the app.
+<!-- app-update-notes:en:end -->
+## Download
+`
   });
   assert.deepEqual(result, {
     version: '0.1.3',
     tag: 'v0.1.3',
     name: 'Token Monitor 0.1.3',
     htmlUrl: 'https://github.com/Javis603/token-monitor/releases/tag/v0.1.3',
-    publishedAt: '2026-05-26T12:00:00Z'
+    publishedAt: '2026-05-26T12:00:00Z',
+    releaseNotes: {
+      en: [{ title: 'Added', items: ['Release summaries in the app.'] }]
+    }
   });
 });
 

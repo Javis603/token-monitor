@@ -68,6 +68,11 @@
                 <button id="appUpdateCheckButton" type="button" data-i18n="settings.appUpdate.check">Check for updates</button>
                 <button id="appUpdateViewReleaseButton" type="button" class="hidden" data-i18n="settings.appUpdate.viewRelease">View release</button>
               </div>
+              <details id="appUpdateNotes" class="app-update-notes hidden">
+                <summary id="appUpdateNotesTitle">What's new</summary>
+                <div id="appUpdateNotesBody" class="app-update-notes-body"></div>
+                <button id="appUpdateReleaseNotesButton" type="button" class="inline-link" data-i18n="settings.appUpdate.viewFullRelease">View full release</button>
+              </details>
               <div id="appUpdateMessage" class="tokscale-message"></div>
             </div>
             <div id="tokscaleGroup" class="settings-group settings-subgroup">
@@ -926,13 +931,24 @@
       <footer class="footer">
         <div id="viewSwitcher" class="view-switcher"></div>
         <div id="appUpdatePill" class="update-pill hidden" title="">
-          <button id="appUpdatePillAction" type="button" class="update-pill-action">
+          <button id="appUpdatePillAction" type="button" class="update-pill-action" aria-haspopup="dialog" aria-controls="appUpdatePopover" aria-expanded="false">
             <span id="appUpdatePillLabel" class="update-pill-label"></span>
           </button>
           <button id="appUpdatePillDismiss" type="button" class="update-pill-dismiss" title="Dismiss this version" aria-label="Dismiss this version">×</button>
         </div>
         <span id="footerActionSlot"><button id="settingsButton" class="icon-button settings-icon-button" title="Settings" aria-label="Settings"></button></span>
       </footer>
+      <div id="appUpdatePopover" class="app-update-popover" popover="auto" role="dialog" aria-labelledby="appUpdatePopoverTitle">
+        <div class="app-update-popover-header">
+          <strong id="appUpdatePopoverTitle"></strong>
+          <button id="appUpdatePopoverClose" type="button" class="app-update-popover-close" data-i18n-title="settings.appUpdate.close" data-i18n-aria-label="settings.appUpdate.close" title="Close" aria-label="Close">×</button>
+        </div>
+        <div id="appUpdatePopoverBody" class="app-update-notes-body"></div>
+        <div class="app-update-popover-actions">
+          <button id="appUpdatePopoverAction" type="button" class="app-update-popover-primary"></button>
+          <button id="appUpdatePopoverRelease" type="button" class="inline-link" data-i18n="settings.appUpdate.viewFullRelease">View full release</button>
+        </div>
+      </div>
     </main>
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>

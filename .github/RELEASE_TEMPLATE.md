@@ -4,6 +4,7 @@
 
 ## What's changed
 
+<!-- app-update-notes:en:start -->
 ### Added
 - **Projects view:** Disabled by default; enable it under **Settings → Main Screen → Enable project tracking** to track Claude Code, Codex, and OpenCode token usage and costs by workspace, with cross-device rollups and no raw workspace paths sent to the hub. (#122, #138, #144)
 - **Shareable theme codes:** Copy or import a `TM1` theme code to share appearance settings. (#130)
@@ -16,6 +17,7 @@
 ### Fixed
 - **Session details:** The `TOTAL` session view is available again in sync and host modes. (#131)
 - **AI Tool Limits:** Tray limit bars now fall back to weekly windows when a provider has no session window, and MiMo no longer shows Token Plan for inactive or free accounts. (#137, #142)
+<!-- app-update-notes:en:end -->
 
 ## Download
 
@@ -60,6 +62,7 @@ open-source: https://github.com/junhoyeo/tokscale
 
 ## 更新内容
 
+<!-- app-update-notes:zh:start -->
 ### 新增
 - **项目视图：** 此功能默认关闭，可前往 **设置 → 主界面 → 启用项目追踪** 开启，按工作区追踪 Claude Code、Codex 与 OpenCode 的 Token 用量和费用；支持跨设备汇总，且不会向 Hub 发送原始工作区路径。（#122、#138、#144）
 - **主题分享码：** 可复制或导入 `TM1` 主题码，分享外观设置。（#130）
@@ -72,6 +75,7 @@ open-source: https://github.com/junhoyeo/tokscale
 ### 修复
 - **会话明细：** 同步与主机模式现已恢复 `TOTAL` 会话视图。（#131）
 - **AI 工具额度：** 当服务商没有会话窗口时，托盘额度条现会改用每周窗口；MiMo 的未订阅或免费账号也不再误显示 Token Plan。（#137、#142）
+<!-- app-update-notes:zh:end -->
 
 ## 下载
 

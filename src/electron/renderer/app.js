@@ -198,6 +198,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 }
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+state.appUpdateNotesPresentedVersion = '';
 let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
@@ -246,10 +247,20 @@ Object.assign(els, {
   appUpdatePillAction: document.getElementById('appUpdatePillAction'),
   appUpdatePillLabel: document.getElementById('appUpdatePillLabel'),
   appUpdatePillDismiss: document.getElementById('appUpdatePillDismiss'),
+  appUpdatePopover: document.getElementById('appUpdatePopover'),
+  appUpdatePopoverTitle: document.getElementById('appUpdatePopoverTitle'),
+  appUpdatePopoverBody: document.getElementById('appUpdatePopoverBody'),
+  appUpdatePopoverAction: document.getElementById('appUpdatePopoverAction'),
+  appUpdatePopoverRelease: document.getElementById('appUpdatePopoverRelease'),
+  appUpdatePopoverClose: document.getElementById('appUpdatePopoverClose'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
   appUpdateLatest: document.getElementById('appUpdateLatest'),
   appUpdateCheckButton: document.getElementById('appUpdateCheckButton'),
   appUpdateViewReleaseButton: document.getElementById('appUpdateViewReleaseButton'),
+  appUpdateNotes: document.getElementById('appUpdateNotes'),
+  appUpdateNotesTitle: document.getElementById('appUpdateNotesTitle'),
+  appUpdateNotesBody: document.getElementById('appUpdateNotesBody'),
+  appUpdateReleaseNotesButton: document.getElementById('appUpdateReleaseNotesButton'),
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
@@ -647,6 +658,80 @@ function renderAppUpdatePill() {
     els.appUpdatePillLabel.textContent = `${mode === 'install' ? '↻' : '↑'} v${version}`;
   }
 }
+function releaseNoteGroupsForCurrentLocale(latest) {
+  const notes = latest?.releaseNotes;
+  if (!notes || typeof notes !== 'object') return [];
+  const preferred = currentLocale().startsWith('zh') ? notes.zh : notes.en;
+  if (Array.isArray(preferred) && preferred.length > 0) return preferred;
+  if (Array.isArray(notes.en) && notes.en.length > 0) return notes.en;
+  return Array.isArray(notes.zh) ? notes.zh : [];
+}
+function buildAppUpdateNoteGroupNodes(groups) {
+  return groups.map((group) => {
+    const section = document.createElement('section');
+    section.className = 'app-update-note-group';
+    const title = document.createElement('div');
+    title.className = 'app-update-note-title';
+    title.textContent = String(group?.title || '');
+    const list = document.createElement('ul');
+    for (const item of Array.isArray(group?.items) ? group.items : []) {
+      const row = document.createElement('li');
+      row.textContent = String(item || '');
+      list.append(row);
+    }
+    section.append(title, list);
+    return section;
+  });
+}
+function renderAppUpdatePopover(s) {
+  const version = s?.latest?.version || '';
+  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
+  const mode = appUpdateActionMode(s);
+  if (!version || groups.length === 0 || !mode) {
+    if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
+    els.appUpdatePopoverTitle.textContent = '';
+    els.appUpdatePopoverBody.replaceChildren();
+    return false;
+  }
+  els.appUpdatePopoverTitle.textContent = t('settings.appUpdate.whatsNew', { version });
+  els.appUpdatePopoverBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
+  els.appUpdatePopoverAction.textContent = mode === 'install'
+    ? t('settings.appUpdate.restart')
+    : mode === 'download'
+      ? t('settings.appUpdate.download')
+      : t('settings.appUpdate.viewRelease');
+  els.appUpdatePopoverAction.disabled = Boolean(s.installBusy);
+  els.appUpdatePopoverRelease.classList.toggle('hidden', !s.latest?.htmlUrl);
+  return true;
+}
+function positionAppUpdatePopover() {
+  const rect = els.appUpdatePill.getBoundingClientRect();
+  const width = Math.min(320, window.innerWidth - 24);
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width));
+  els.appUpdatePopover.style.width = `${width}px`;
+  els.appUpdatePopover.style.left = `${left}px`;
+  els.appUpdatePopover.style.bottom = `${Math.max(12, window.innerHeight - rect.top + 8)}px`;
+}
+function renderAppUpdateNotes(s) {
+  const version = s?.latest?.version || '';
+  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
+  const visible = Boolean(version && groups.length > 0);
+  els.appUpdateNotes.classList.toggle('hidden', !visible);
+  if (!visible) {
+    els.appUpdateNotes.open = false;
+    els.appUpdateNotesTitle.textContent = '';
+    els.appUpdateNotesBody.replaceChildren();
+    return;
+  }
+
+  els.appUpdateNotesTitle.textContent = t('settings.appUpdate.whatsNew', { version });
+  els.appUpdateNotesBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
+  els.appUpdateReleaseNotesButton.classList.toggle('hidden', !s.latest?.htmlUrl);
+  if (s.hasUpdate && state.appUpdateNotesPresentedVersion !== version) {
+    els.appUpdateNotes.open = true;
+    state.appUpdateNotesPresentedVersion = version;
+  }
+}
 function renderSettingsAppUpdateRow() {
   const s = state.appUpdate;
   if (!s) {
@@ -657,6 +742,7 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateViewReleaseButton.classList.add('hidden');
     els.appUpdateMessage.textContent = '';
     els.appUpdateMessage.classList.remove('error');
+    renderAppUpdateNotes(null);
     return;
   }
   els.appUpdateInstalled.textContent = `v${s.currentVersion}`;
@@ -679,6 +765,7 @@ function renderSettingsAppUpdateRow() {
   }
   els.appUpdateCheckButton.disabled = Boolean(s.checking || s.installBusy);
   els.appUpdateCheckButton.textContent = s.checking ? t('settings.appUpdate.checking') : t('settings.appUpdate.check');
+  renderAppUpdateNotes(s);
   if (s.installPhase === 'downloading') {
     const percent = Number.isFinite(s.installProgress) ? Math.round(s.installProgress) : 0;
     els.appUpdateMessage.textContent = t('settings.appUpdate.downloading', { percent });
@@ -5928,6 +6015,7 @@ async function init() {
     state.appUpdate = payload;
     renderAppUpdatePill();
     renderSettingsAppUpdateRow();
+    if (els.appUpdatePopover.matches(':popover-open')) renderAppUpdatePopover(payload);
   });
   if (state.appInfo?.loginItemSupported) {
     state.settings.startAtLogin = Boolean(state.appInfo.loginItemOpenAtLogin);
@@ -6281,14 +6369,42 @@ async function runAppUpdateAction() {
 }
 
 els.appUpdatePillAction.addEventListener('click', async () => {
-  await runAppUpdateAction();
+  if (!renderAppUpdatePopover(state.appUpdate) || typeof els.appUpdatePopover.showPopover !== 'function') {
+    await runAppUpdateAction();
+    return;
+  }
+  positionAppUpdatePopover();
+  els.appUpdatePopover.showPopover();
 });
 
 els.appUpdatePillDismiss.addEventListener('click', async () => {
   const version = state.appUpdate?.latest?.version;
   if (!version) return;
   state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);
+  if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
   renderAppUpdatePill();
+});
+
+els.appUpdatePopoverClose.addEventListener('click', () => {
+  els.appUpdatePopover.hidePopover();
+});
+
+els.appUpdatePopover.addEventListener('toggle', (event) => {
+  els.appUpdatePillAction.setAttribute('aria-expanded', String(event.newState === 'open'));
+});
+
+els.appUpdatePopoverAction.addEventListener('click', async () => {
+  els.appUpdatePopover.hidePopover();
+  await runAppUpdateAction();
+});
+
+els.appUpdatePopoverRelease.addEventListener('click', async () => {
+  const url = state.appUpdate?.latest?.htmlUrl;
+  if (url) await window.tokenMonitor.openExternal(url);
+});
+
+window.addEventListener('resize', () => {
+  if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
 });
 
 els.appUpdateCheckButton.addEventListener('click', async () => {
@@ -6299,6 +6415,11 @@ els.appUpdateCheckButton.addEventListener('click', async () => {
 
 els.appUpdateViewReleaseButton.addEventListener('click', async () => {
   await runAppUpdateAction();
+});
+
+els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
+  const url = state.appUpdate?.latest?.htmlUrl;
+  if (url) await window.tokenMonitor.openExternal(url);
 });
 
 window.tokenMonitor.onSettingsPush?.((next) => {

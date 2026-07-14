@@ -60,6 +60,7 @@ const {
   checkLatestRelease,
   downloadedAppUpdateMatchesLatest,
   GITHUB_REPO,
+  mergeLatestReleaseMetadata,
   shouldSkipAppUpdateCheck
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
@@ -2899,6 +2900,18 @@ function latestFromUpdaterInfo(info) {
   };
 }
 
+function rememberLatestAppUpdate(latest, checkedAt = new Date().toISOString()) {
+  if (!latest) return null;
+  const merged = mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest);
+  settings.appUpdate = {
+    ...(settings.appUpdate || {}),
+    lastCheckedAt: checkedAt,
+    lastKnownLatest: merged
+  };
+  saveSettings();
+  return merged;
+}
+
 function setNativeAppUpdateState(patch = {}) {
   appUpdateNativeState = { ...appUpdateNativeState, ...patch };
   sendAppUpdatePush();
@@ -2914,28 +2927,12 @@ function configureNativeAppUpdater() {
     setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
   });
   autoUpdater.on('update-available', (info) => {
-    const latest = latestFromUpdaterInfo(info);
-    if (latest) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: new Date().toISOString(),
-        lastKnownLatest: latest
-      };
-      saveSettings();
-    }
+    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
     setNativeAppUpdateState({ phase: 'available', version: latest?.version || info?.version || null, progress: null, error: null });
   });
   autoUpdater.on('update-not-available', (info) => {
     appUpdateNativeBusy = false;
-    const latest = latestFromUpdaterInfo(info);
-    if (latest) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: new Date().toISOString(),
-        lastKnownLatest: latest
-      };
-      saveSettings();
-    }
+    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
     setNativeAppUpdateState({ phase: 'idle', version: latest?.version || null, progress: null, error: null });
   });
   autoUpdater.on('download-progress', (progress) => {
@@ -3012,12 +3009,7 @@ async function runAppUpdateCheck({ force = false } = {}) {
   try {
     const result = await checkLatestRelease(app.getVersion());
     if (result.ok) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: result.checkedAt,
-        lastKnownLatest: result.latest
-      };
-      saveSettings();
+      rememberLatestAppUpdate(result.latest, result.checkedAt);
       appUpdateLastError = null;
     } else {
       appUpdateLastError = force ? (result.error || 'Update check failed') : null;
