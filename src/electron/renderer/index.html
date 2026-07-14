@@ -903,6 +903,14 @@
               <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
             </div>
             <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
+            <label class="sync-upload-interval-row"><span data-i18n="settings.sync.uploadInterval">Sync upload frequency</span>
+              <select id="syncUploadIntervalInput">
+                <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
+                <option value="600000" data-i18n="settings.sync.uploadInterval.10m">Every 10 minutes</option>
+                <option value="1200000" data-i18n="settings.sync.uploadInterval.20m">Every 20 minutes</option>
+                <option value="1800000" data-i18n="settings.sync.uploadInterval.30m">Every 30 minutes</option>
+              </select>
+            </label>
             <div class="settings-actions">
               <button id="saveSettingsButton" data-i18n="settings.common.save">Save</button>
             </div>

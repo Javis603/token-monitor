@@ -1,0 +1,154 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  createSyncUploadScheduler,
+  normalizeSyncUploadIntervalMs
+} = require('../../src/electron/syncUploadScheduler');
+
+function createManualClock() {
+  let nowMs = 0;
+  let nextId = 1;
+  const timers = new Map();
+  return {
+    now: () => nowMs,
+    setTimeout(fn, delayMs) {
+      const id = nextId++;
+      timers.set(id, { fn, dueAt: nowMs + delayMs });
+      return id;
+    },
+    clearTimeout(id) {
+      timers.delete(id);
+    },
+    async advance(ms) {
+      nowMs += ms;
+      for (;;) {
+        const due = Array.from(timers.entries())
+          .filter(([, timer]) => timer.dueAt <= nowMs)
+          .sort((a, b) => a[1].dueAt - b[1].dueAt);
+        if (due.length === 0) break;
+        const [id, timer] = due[0];
+        timers.delete(id);
+        timer.fn();
+        await Promise.resolve();
+      }
+    },
+    timerCount() {
+      return timers.size;
+    }
+  };
+}
+
+test('normalizeSyncUploadIntervalMs accepts live and fixed interval choices', () => {
+  assert.equal(normalizeSyncUploadIntervalMs(0), 0);
+  assert.equal(normalizeSyncUploadIntervalMs('600000'), 600000);
+  assert.equal(normalizeSyncUploadIntervalMs(1200000), 1200000);
+  assert.equal(normalizeSyncUploadIntervalMs(1800000), 1800000);
+  assert.equal(normalizeSyncUploadIntervalMs('bad'), 0);
+  assert.equal(normalizeSyncUploadIntervalMs('bad', 1200000), 1200000);
+});
+
+test('live upload mode posts every summary immediately', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => uploads.push(summary.id)
+  });
+
+  await scheduler.enqueue({ id: 'first' });
+  await scheduler.enqueue({ id: 'second' });
+
+  assert.deepEqual(uploads, ['first', 'second']);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('interval mode uploads the first summary immediately and coalesces later updates', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 600000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => uploads.push(summary.id)
+  });
+
+  await scheduler.enqueue({ id: 'initial' });
+  await scheduler.enqueue({ id: 'mid-1' });
+  await scheduler.enqueue({ id: 'mid-2' });
+  await clock.advance(599999);
+
+  assert.deepEqual(uploads, ['initial']);
+
+  await clock.advance(1);
+
+  assert.deepEqual(uploads, ['initial', 'mid-2']);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('a failed upload does not throttle the next summary', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 600000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      if (summary.id === 'failed') throw new Error('offline');
+    }
+  });
+
+  await assert.rejects(scheduler.enqueue({ id: 'failed' }), /offline/);
+  await scheduler.enqueue({ id: 'retry' });
+
+  assert.deepEqual(uploads, ['failed', 'retry']);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('flush uploads the pending summary without waiting for the interval', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 1200000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => uploads.push(summary.id)
+  });
+
+  await scheduler.enqueue({ id: 'initial' });
+  await scheduler.enqueue({ id: 'pending' });
+  await scheduler.flush();
+  await clock.advance(1200000);
+
+  assert.deepEqual(uploads, ['initial', 'pending']);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('stop clears a pending interval upload', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 600000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => uploads.push(summary.id)
+  });
+
+  await scheduler.enqueue({ id: 'initial' });
+  await scheduler.enqueue({ id: 'pending' });
+  scheduler.stop();
+  await clock.advance(600000);
+
+  assert.deepEqual(uploads, ['initial']);
+  assert.equal(clock.timerCount(), 0);
+});

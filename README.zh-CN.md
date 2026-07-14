@@ -151,6 +151,8 @@ npx wrangler deploy
 
 把部署 URL 贴到每台设备的小部件 设置 → 多设备同步。iOS 小部件配方与端点参考见 [worker/README.md](worker/README.md)，hub HTTP API 见 [docs/API.md](docs/API.md)。
 
+如果你使用 Cloudflare 免费额度，或只是想减少 hub 写入次数，可以保持本地采集为实时模式，并在 设置 → 多设备同步 把 **同步上传频率** 改成 10、20 或 30 分钟。Token Monitor 会合并本地更新，只按这个频率上传最新汇总。
+
 ## App 数据
 
 App 状态保存在系统的用户数据目录——卸载时一并删除该目录即可完整移除。
@@ -225,7 +227,7 @@ TOKEN_MONITOR_LIMIT_PROVIDERS=       # 可选——默认为所有支持的提�
 
 小部件会把同样的环境变量读作首次启动的默认值，之后改由 GUI 设置接管。
 
-每个值也都可以通过 CLI 参数传入（`--hub=`、`--secret=`、`--device=`、`--clients=`、`--history=`、`--limits=`、`--limitProviders=`）——参数优先于环境变量。较少用的调整项（`TOKEN_MONITOR_INTERVAL_MS`、`TOKEN_MONITOR_PORT`、`TOKEN_MONITOR_STALE_AFTER_MS`、`TOKEN_MONITOR_HISTORY_INTERVAL_MS`、`TOKEN_MONITOR_LIMITS_REFRESH_MS`、…）一样可通过环境变量／参数配置，但为减少噪音不放进 `.env.example`。
+每个值也都可以通过 CLI 参数传入（`--hub=`、`--secret=`、`--device=`、`--clients=`、`--history=`、`--limits=`、`--limitProviders=`）——参数优先于环境变量。较少用的调整项（`TOKEN_MONITOR_INTERVAL_MS`、`TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS`、`TOKEN_MONITOR_PORT`、`TOKEN_MONITOR_STALE_AFTER_MS`、`TOKEN_MONITOR_HISTORY_INTERVAL_MS`、`TOKEN_MONITOR_LIMITS_REFRESH_MS`、…）一样可通过环境变量／参数配置，但为减少噪音不放进 `.env.example`。
 
 一次性执行示例:
 

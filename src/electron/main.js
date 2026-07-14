@@ -106,6 +106,7 @@ const {
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { classifyStreamFailure } = require('./syncConnection');
+const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
 const {
   normalizeWindowToggleShortcut,
@@ -228,6 +229,7 @@ function defaultSettings() {
     exportIntervalMs: 60 * 1000,
     collectionMode: 'live',
     collectionIntervalMs: 5 * 60 * 1000,
+    syncUploadIntervalMs: normalizeSyncUploadIntervalMs(process.env.TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS),
     serviceProviderDisplayOrder: '',
     hiddenServiceProviders: '',
     serviceStatusRefreshMs: 60000,
@@ -300,6 +302,10 @@ function collectorIntervalMs() {
 
 function collectorWatchEnabled() {
   return normalizeCollectionMode(settings?.collectionMode) === 'live';
+}
+
+function syncUploadIntervalMs() {
+  return normalizeSyncUploadIntervalMs(settings?.syncUploadIntervalMs);
 }
 
 function defaultLimitProviders() {
@@ -1350,6 +1356,7 @@ function readSettings() {
     }
     merged.collectionMode = normalizeCollectionMode(merged.collectionMode);
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
+    merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     if (saved.serviceProviderDisplayOrder !== undefined) {
       merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
     }
@@ -1728,7 +1735,12 @@ function stopSyncCollector() {
 function startSyncCollector() {
   stopSyncCollector();
   if (!effectiveHubConfig().url) return;
-  syncCollectorHandle = startCollector({
+  const syncUploadScheduler = createSyncUploadScheduler({
+    intervalMs: syncUploadIntervalMs(),
+    upload: postToHub,
+    onError: (error) => console.log(`[sync-collector] post failed: ${error.message}`)
+  });
+  const collectorHandle = startCollector({
     clients: clientsCsvForSetting(settings.clients),
     allTimeSince: settings.allTimeSince || '2024-01-01',
     commandTimeoutMs: 120 * 1000,
@@ -1771,7 +1783,7 @@ function startSyncCollector() {
       const visibleSummary = summaryWithArchivedClientUsage(summary);
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       try {
-        await postToHub(visibleSummary);
+        await syncUploadScheduler.enqueue(visibleSummary);
       } catch (error) {
         console.log(`[sync-collector] post failed: ${error.message}`);
       }
@@ -1779,6 +1791,13 @@ function startSyncCollector() {
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`),
     logger: (msg) => console.log(`[sync-collector] ${msg}`)
   });
+  syncCollectorHandle = {
+    stop() {
+      syncUploadScheduler.stop();
+      collectorHandle.stop();
+    },
+    tick: collectorHandle.tick
+  };
 }
 
 // Host mode: this device's own usage goes straight into the embedded hub's store
@@ -3275,6 +3294,7 @@ app.whenReady().then(() => {
     const previousWslScanEnabled = settings.wslScanEnabled;
     const previousCollectionMode = settings.collectionMode;
     const previousCollectionIntervalMs = settings.collectionIntervalMs;
+    const previousSyncUploadIntervalMs = settings.syncUploadIntervalMs;
     const previousDeepSeekApiKey = settings.deepseekApiKey;
     const previousMinimaxApiKey = settings.minimaxApiKey;
     const previousCopilotApiToken = settings.copilotApiToken;
@@ -3322,6 +3342,7 @@ app.whenReady().then(() => {
     if (patch.ollamaCookie !== undefined) normalizedPatch.ollamaCookie = normalizeOllamaCookie(patch.ollamaCookie);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
+    if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     settings = normalizeWindowBehaviorSettings({
       ...settings,
       ...normalizedPatch,
@@ -3359,6 +3380,7 @@ app.whenReady().then(() => {
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
+      syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),
       serviceProviderDisplayOrder: patch.serviceProviderDisplayOrder !== undefined ? String(patch.serviceProviderDisplayOrder || '') : (settings.serviceProviderDisplayOrder || ''),
       hiddenServiceProviders: patch.hiddenServiceProviders !== undefined ? String(patch.hiddenServiceProviders || '') : (settings.hiddenServiceProviders || ''),
       serviceStatusRefreshMs: normalizeServiceStatusRefreshMs(patch.serviceStatusRefreshMs ?? settings.serviceStatusRefreshMs),
@@ -3443,6 +3465,7 @@ app.whenReady().then(() => {
       settings.wslScanEnabled !== previousWslScanEnabled ||
       settings.collectionMode !== previousCollectionMode ||
       settings.collectionIntervalMs !== previousCollectionIntervalMs ||
+      settings.syncUploadIntervalMs !== previousSyncUploadIntervalMs ||
       settings.deepseekApiKey !== previousDeepSeekApiKey ||
       settings.minimaxApiKey !== previousMinimaxApiKey ||
       settings.copilotApiToken !== previousCopilotApiToken ||

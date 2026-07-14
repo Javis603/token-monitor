@@ -222,6 +222,7 @@ Object.assign(els, {
   hubStatusRow: document.getElementById('hubStatusRow'),
   syncClientStatus: document.getElementById('syncClientStatus'),
   hubAddressList: document.getElementById('hubAddressList'),
+  syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
@@ -4581,6 +4582,11 @@ function syncSettingsForm() {
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
   els.showLimitUsedInput.value = state.settings.showLimitUsed ? 'used' : 'remaining';
+  if (els.syncUploadIntervalInput) {
+    const value = Number(state.settings.syncUploadIntervalMs);
+    const allowed = [0, 600000, 1200000, 1800000];
+    els.syncUploadIntervalInput.value = String(allowed.includes(value) ? value : 0);
+  }
   if (els.collectionCadenceInput) {
     const value = Number(state.settings.collectionIntervalMs);
     const allowed = [300000, 900000, 1800000];
@@ -6086,6 +6092,9 @@ els.maskLimitAccountEmailsInput.addEventListener('change', async () => {
 });
 els.showLimitUsedInput.addEventListener('change', async () => {
   await saveSettings({ showLimitUsed: els.showLimitUsedInput.value === 'used' });
+});
+els.syncUploadIntervalInput?.addEventListener('change', async () => {
+  await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
 });
 els.collectionCadenceInput?.addEventListener('change', async () => {
   const value = els.collectionCadenceInput.value;

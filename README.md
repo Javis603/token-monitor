@@ -151,6 +151,8 @@ npx wrangler deploy
 
 Paste the deployed URL into each device's widget at Settings → Multi-device Sync. See [worker/README.md](worker/README.md) for the iOS widget recipe and endpoint reference, or [docs/API.md](docs/API.md) for the hub HTTP API.
 
+If you are on Cloudflare's free tier or otherwise want fewer hub writes, keep local collection live and set **Sync upload frequency** to 10, 20, or 30 minutes under Settings → Multi-device Sync. Token Monitor will coalesce local updates and upload only the latest summary on that cadence.
+
 ## App data
 
 App state lives in the OS user-data dir — delete it along with the app to fully uninstall.
@@ -226,7 +228,7 @@ TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported (c
 
 The widget reads the same env vars as first-run defaults, then takes over with its own GUI-managed settings.
 
-Every value can also be passed as a CLI flag (`--hub=`, `--secret=`, `--device=`, `--clients=`, `--projects=`, `--history=`, `--limits=`, `--limitProviders=`) — flags win over env. Less-common knobs (`TOKEN_MONITOR_INTERVAL_MS`, `TOKEN_MONITOR_PORT`, `TOKEN_MONITOR_STALE_AFTER_MS`, `TOKEN_MONITOR_HISTORY_INTERVAL_MS`, `TOKEN_MONITOR_LIMITS_REFRESH_MS`, …) are also accepted via env / flag but kept out of `.env.example` to reduce noise.
+Every value can also be passed as a CLI flag (`--hub=`, `--secret=`, `--device=`, `--clients=`, `--projects=`, `--history=`, `--limits=`, `--limitProviders=`) — flags win over env. Less-common knobs (`TOKEN_MONITOR_INTERVAL_MS`, `TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS`, `TOKEN_MONITOR_PORT`, `TOKEN_MONITOR_STALE_AFTER_MS`, `TOKEN_MONITOR_HISTORY_INTERVAL_MS`, `TOKEN_MONITOR_LIMITS_REFRESH_MS`, …) are also accepted via env / flag but kept out of `.env.example` to reduce noise.
 
 Example one-off run:
 
