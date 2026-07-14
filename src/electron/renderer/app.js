@@ -638,6 +638,18 @@ function appUpdateActionMode(s) {
   if (s.installSupported) return 'download';
   return s.latest?.htmlUrl ? 'release' : '';
 }
+function setAppUpdatePillDisclosure(available) {
+  const action = els.appUpdatePillAction;
+  if (available) {
+    action.setAttribute('aria-haspopup', 'dialog');
+    action.setAttribute('aria-controls', 'appUpdatePopover');
+    action.setAttribute('aria-expanded', String(els.appUpdatePopover.matches(':popover-open')));
+    return;
+  }
+  action.removeAttribute('aria-haspopup');
+  action.removeAttribute('aria-controls');
+  action.removeAttribute('aria-expanded');
+}
 function renderAppUpdatePill() {
   const s = state.appUpdate;
   const pill = els.appUpdatePill;
@@ -648,8 +660,11 @@ function renderAppUpdatePill() {
     pill.classList.add('hidden');
     pill.setAttribute('title', '');
     els.appUpdatePillLabel.textContent = '';
+    setAppUpdatePillDisclosure(false);
     return;
   }
+  const hasReleaseNotes = releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
+  setAppUpdatePillDisclosure(hasReleaseNotes);
   pill.classList.remove('hidden');
   pill.setAttribute('title', mode === 'install' ? t('settings.appUpdate.ready') : (s.latest?.name || `v${version}`));
   if (s.installPhase === 'downloading' && Number.isFinite(s.installProgress)) {
@@ -6375,6 +6390,7 @@ els.appUpdatePillAction.addEventListener('click', async () => {
   }
   positionAppUpdatePopover();
   els.appUpdatePopover.showPopover();
+  els.appUpdatePopoverAction.focus();
 });
 
 els.appUpdatePillDismiss.addEventListener('click', async () => {
@@ -6390,7 +6406,16 @@ els.appUpdatePopoverClose.addEventListener('click', () => {
 });
 
 els.appUpdatePopover.addEventListener('toggle', (event) => {
-  els.appUpdatePillAction.setAttribute('aria-expanded', String(event.newState === 'open'));
+  const open = event.newState === 'open';
+  if (els.appUpdatePillAction.hasAttribute('aria-haspopup')) {
+    els.appUpdatePillAction.setAttribute('aria-expanded', String(open));
+  }
+  if (!open) {
+    const active = document.activeElement;
+    if (active === document.body || active === els.appUpdatePopover || els.appUpdatePopover.contains(active)) {
+      els.appUpdatePillAction.focus();
+    }
+  }
 });
 
 els.appUpdatePopoverAction.addEventListener('click', async () => {

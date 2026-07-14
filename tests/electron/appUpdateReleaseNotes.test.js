@@ -20,7 +20,8 @@ test('App Updates includes an inline release-note disclosure and full-release ac
 
 test('footer update pill opens an accessible release-note popover', () => {
   const html = read('index.html');
-  assert.match(html, /id="appUpdatePillAction"[^>]*aria-haspopup="dialog"[^>]*aria-controls="appUpdatePopover"[^>]*aria-expanded="false"/);
+  assert.match(html, /id="appUpdatePillAction"[^>]*class="update-pill-action"/);
+  assert.doesNotMatch(html, /id="appUpdatePillAction"[^>]*aria-haspopup/);
   assert.match(html, /id="appUpdatePopover"[^>]*popover="auto"[^>]*role="dialog"/);
   assert.match(html, /id="appUpdatePopoverAction"/);
   assert.match(html, /id="appUpdatePopoverRelease"[\s\S]*settings\.appUpdate\.viewFullRelease/);
@@ -49,7 +50,20 @@ test('footer pill progressively discloses notes before running the update action
   assert.match(handler, /renderAppUpdatePopover\(state\.appUpdate\)/);
   assert.match(handler, /positionAppUpdatePopover\(\)/);
   assert.match(handler, /showPopover\(\)/);
+  assert.match(handler, /appUpdatePopoverAction\.focus\(\)/);
   assert.match(handler, /await runAppUpdateAction\(\)/);
+});
+
+test('footer pill only exposes dialog semantics when release notes are available', () => {
+  const app = read('app.js');
+  const renderer = app.slice(
+    app.indexOf('function setAppUpdatePillDisclosure'),
+    app.indexOf('function releaseNoteGroupsForCurrentLocale')
+  );
+  assert.match(renderer, /setAttribute\('aria-haspopup', 'dialog'\)/);
+  assert.match(renderer, /setAttribute\('aria-controls', 'appUpdatePopover'\)/);
+  assert.match(renderer, /removeAttribute\('aria-haspopup'\)/);
+  assert.match(renderer, /releaseNoteGroupsForCurrentLocale\(s\.latest\)\.length > 0/);
 });
 
 test('release-note disclosure has keyboard focus and compact reading styles', () => {
@@ -58,5 +72,11 @@ test('release-note disclosure has keyboard focus and compact reading styles', ()
   assert.match(css, /\.app-update-note-group ul[\s\S]*line-height: 1\.45/);
   assert.match(css, /\.app-update-notes\.hidden \{ display: none; \}/);
   assert.match(css, /\.app-update-popover:popover-open/);
+  assert.match(css, /\.app-update-popover button:focus-visible[\s\S]*outline:/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.app-update-popover/);
+});
+
+test('Japanese release-note heading describes updates rather than only new features', () => {
+  const i18n = read('i18n.js');
+  assert.match(i18n, /'settings\.appUpdate\.whatsNew': 'v\{version\} の更新内容'/);
 });

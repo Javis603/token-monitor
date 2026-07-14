@@ -3297,7 +3297,7 @@
       'settings.appUpdate.upToDateShort': '最新',
       'settings.appUpdate.viewRelease': 'リリースを表示',
       'settings.appUpdate.viewFullRelease': 'リリースノート全文を表示',
-      'settings.appUpdate.whatsNew': 'v{version} の新機能',
+      'settings.appUpdate.whatsNew': 'v{version} の更新内容',
       'settings.clientDisplay.moveDown': 'CLIリストで{name}を下に移動',
       'settings.clientDisplay.moveUp': 'CLIリストで{name}を上に移動',
       'settings.clientDisplay.note': 'メインリストのツール表示と順序のみ調整します。収集は上の追跡設定で制御されます。',
