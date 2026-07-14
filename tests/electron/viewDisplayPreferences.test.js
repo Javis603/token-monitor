@@ -131,6 +131,19 @@ test('visibleViewOrder applies order, hidden views, and runtime availability', (
   );
 });
 
+test('visibleViewOrder temporarily includes a directly opened hidden view in configured order', () => {
+  assert.deepEqual(
+    visibleViewOrder({
+      views,
+      orderValue: 'session,limits,tool,device,model',
+      hiddenValue: 'device,session',
+      availableIds: ['tool', 'device', 'model', 'session'],
+      includeIds: ['device']
+    }),
+    ['tool', 'device', 'model']
+  );
+});
+
 test('visibleViewOrder falls back to the first available view when preferences hide every available view', () => {
   assert.deepEqual(
     visibleViewOrder({

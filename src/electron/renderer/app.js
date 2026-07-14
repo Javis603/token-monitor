@@ -83,6 +83,7 @@ const LIMIT_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
@@ -1162,7 +1163,8 @@ function visibleBreakdownOrder() {
     views: VIEW_DISPLAY_OPTIONS,
     orderValue: effectiveViewDisplayOrderValue(),
     hiddenValue: state.settings?.hiddenViews,
-    availableIds: availableBreakdownIds()
+    availableIds: availableBreakdownIds(),
+    includeIds: directBreakdownOverride ? [directBreakdownOverride] : []
   });
 }
 
@@ -1583,24 +1585,11 @@ function renderLimitProviderMark(id, color) {
 
 function codexSwitchAccountForProvider(provider) {
   if (!provider || provider.provider !== 'codex') return null;
-  const accountKey = String(provider.accountKey || '').trim();
-  const email = String(provider.accountEmail || '').trim().toLowerCase();
-  if (!accountKey && !email) return null;
+  if (!provider.accountKey && !provider.accountEmail) return null;
   return (state.settings?.codexManagedAccounts || []).find((account) => {
     if (account.enabled === false) return false;
-    if (accountKey && String(account.accountKey || '').trim() === accountKey) return true;
-    return Boolean(email && String(account.email || '').trim().toLowerCase() === email);
+    return accountIdentityApi.codexAccountMatchesProvider(account, provider);
   }) || null;
-}
-
-function codexAccountMatchesProvider(account, provider) {
-  if (!account || !provider || provider.provider !== 'codex') return false;
-  const accountKey = String(account.accountKey || '').trim();
-  const providerKey = String(provider.accountKey || '').trim();
-  if (accountKey && providerKey && accountKey === providerKey) return true;
-  const accountEmail = String(account.email || account.accountEmail || '').trim().toLowerCase();
-  const providerEmail = String(provider.accountEmail || '').trim().toLowerCase();
-  return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
 }
 
 function codexProviderMatchesProvider(left, right) {
@@ -1614,7 +1603,7 @@ function codexProviderMatchesProvider(left, right) {
 }
 
 function codexActiveAccountMatchesProvider(provider) {
-  return codexAccountMatchesProvider(state.codexActiveAccount, provider);
+  return accountIdentityApi.codexAccountMatchesProvider(state.codexActiveAccount, provider);
 }
 
 function codexAccountsShareIdentity(left, right) {
@@ -2143,20 +2132,9 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
   return row;
 }
 
-function maskEmailAddressForDisplay(value) {
-  const email = String(value || '').trim();
-  const at = email.indexOf('@');
-  if (at <= 0 || at === email.length - 1) return email;
-  const local = email.slice(0, at);
-  const domain = email.slice(at + 1);
-  const first = local[0] || '';
-  const last = local.length > 1 ? local[local.length - 1] : '';
-  return `${first}***${last}@${domain}`;
-}
-
 function codexAccountTitle(provider, index) {
   const email = String(provider?.accountEmail || '').trim();
-  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddressForDisplay(email) : email;
+  if (email) return state.settings?.maskLimitAccountEmails ? accountIdentityApi.maskEmailAddress(email) : email;
   // Never fall back to the plan label here — "Plus" as a title reads like an
   // account name. The plan still shows on the right via limitProviderPlan().
   return `Account ${index + 1}`;
@@ -2187,7 +2165,7 @@ function renderCodexAccountGroup(label, providers, color) {
 
 function mimoAccountTitle(provider, index) {
   const email = String(provider?.accountEmail || '').trim();
-  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddressForDisplay(email) : email;
+  if (email) return state.settings?.maskLimitAccountEmails ? accountIdentityApi.maskEmailAddress(email) : email;
   return `Account ${index + 1}`;
 }
 

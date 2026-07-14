@@ -2,6 +2,7 @@
 
 const path = require('node:path');
 const { formatTrayText, pickWorstLimit } = require('../shared/trayText');
+const { codexAccountMatchesProvider, maskEmailAddress } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
@@ -45,24 +46,6 @@ function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = [
   return available.has(client) ? client : null;
 }
 
-function maskEmailAddress(value) {
-  const email = String(value || '').trim();
-  const at = email.indexOf('@');
-  if (at <= 0 || at === email.length - 1) return email;
-  const local = email.slice(0, at);
-  const domain = email.slice(at + 1);
-  return `${local[0] || ''}***${local.length > 1 ? local.at(-1) : ''}@${domain}`;
-}
-
-function codexAccountMatchesProvider(account, provider) {
-  const accountKey = String(account?.accountKey || '').trim();
-  const providerKey = String(provider?.accountKey || '').trim();
-  if (accountKey && providerKey && accountKey === providerKey) return true;
-  const email = String(account?.email || '').trim().toLowerCase();
-  const providerEmail = String(provider?.accountEmail || '').trim().toLowerCase();
-  return Boolean(email && providerEmail && email === providerEmail);
-}
-
 function sortCodexAccountsForDisplay(accounts) {
   const label = (account) => String(
     account?.email
@@ -75,7 +58,7 @@ function sortCodexAccountsForDisplay(accounts) {
   return [...(accounts || [])].sort((left, right) => label(left).localeCompare(label(right)));
 }
 
-function pickActiveCodexAccountId(accounts, stats, localDeviceId = '') {
+function pickLiveCodexProvider(stats, localDeviceId = '') {
   const devices = stats?.devices;
   let providers;
   if (Array.isArray(devices)) {
@@ -86,12 +69,28 @@ function pickActiveCodexAccountId(accounts, stats, localDeviceId = '') {
   } else {
     providers = stats?.limits?.providers || [];
   }
-  const live = providers.find((provider) => (
+  return providers.find((provider) => (
     provider?.provider === 'codex'
     && provider?.status === 'ok'
     && String(provider?.sourceDetail || '').trim().toLowerCase() !== 'managed'
-  ));
+  )) || null;
+}
+
+function pickActiveCodexAccountId(accounts, stats, localDeviceId = '') {
+  const live = pickLiveCodexProvider(stats, localDeviceId);
   return (accounts || []).find((account) => codexAccountMatchesProvider(account, live))?.id || '';
+}
+
+function reconcileCodexAccountSelection({ detectedAccountId, detectedAt, pendingAccountId, pendingSince } = {}) {
+  const detected = String(detectedAccountId || '').trim();
+  const pending = String(pendingAccountId || '').trim();
+  if (!pending) return { activeAccountId: detected, pendingAccountId: '' };
+  if (detected === pending) return { activeAccountId: detected, pendingAccountId: '' };
+  const detectedTime = typeof detectedAt === 'number' ? detectedAt : Date.parse(detectedAt || '');
+  if (!detected || !Number.isFinite(detectedTime) || detectedTime < Number(pendingSince || 0)) {
+    return { activeAccountId: pending, pendingAccountId: pending };
+  }
+  return { activeAccountId: detected, pendingAccountId: '' };
 }
 
 const TRAY_CONTENT_MENU_ITEMS = [
@@ -264,10 +263,11 @@ module.exports = {
   buildTrayMenuTemplate,
   createTray,
   formatTrayText,
-  maskEmailAddress,
   pickActiveCodexAccountId,
+  pickLiveCodexProvider,
   pickUsageTrayIconId,
   pickWorstLimit,
   popoverBounds,
+  reconcileCodexAccountSelection,
   sortCodexAccountsForDisplay
 };

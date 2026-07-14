@@ -1,13 +1,15 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
   buildTrayMenuTemplate,
   formatTrayText,
-  maskEmailAddress,
   pickActiveCodexAccountId,
+  reconcileCodexAccountSelection,
   pickUsageTrayIconId,
   sortCodexAccountsForDisplay
 } = require('../../src/electron/tray');
@@ -169,11 +171,6 @@ test('active Codex account comes from the local device instead of the synced agg
   );
 });
 
-test('Codex tray account masking preserves the first and last local-part characters', () => {
-  assert.equal(maskEmailAddress('javis603@gmail.com'), 'j***3@gmail.com');
-  assert.equal(maskEmailAddress('ab@example.com'), 'a***b@example.com');
-});
-
 test('Codex tray accounts use the same stable label order as Limits', () => {
   const accounts = [
     { id: 'quality', email: 'quality@example.com' },
@@ -186,6 +183,41 @@ test('Codex tray accounts use the same stable label order as Limits', () => {
     ['javis', 'linus', 'quality']
   );
   assert.deepEqual(accounts.map((account) => account.id), ['quality', 'linus', 'javis']);
+});
+
+test('Codex tray account selection waits for a post-switch local provider snapshot', () => {
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'old',
+    detectedAt: '2026-07-14T03:00:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: '',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'new',
+    detectedAt: '2026-07-14T03:02:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: '' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'other',
+    detectedAt: '2026-07-14T03:02:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'other', pendingAccountId: '' });
+});
+
+test('tray main-process actions surface refresh errors and expand a collapsed bubble before tray mode', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.match(source, /async function refreshFromTray[\s\S]*?catch \(error\)[\s\S]*?showTrayRefreshError\(error\?\.message \|\| error\)/);
+  assert.match(source, /if \(value === 'tray'\)[\s\S]*?saveSettings\(\);\s*syncFloatingBubbleAvailability\(\);\s*enterTrayMode\(\);/);
 });
 
 test('usage tray icon picks the top token client for day and total token modes', () => {

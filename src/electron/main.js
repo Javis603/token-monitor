@@ -96,7 +96,17 @@ const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const linuxAutostart = require('./linuxAutostart');
-const { buildTrayIcon, createTray, formatTrayText, pickActiveCodexAccountId, pickUsageTrayIconId, popoverBounds, sortCodexAccountsForDisplay } = require('./tray');
+const {
+  buildTrayIcon,
+  createTray,
+  formatTrayText,
+  pickActiveCodexAccountId,
+  pickLiveCodexProvider,
+  pickUsageTrayIconId,
+  popoverBounds,
+  reconcileCodexAccountSelection,
+  sortCodexAccountsForDisplay
+} = require('./tray');
 const {
   macActivationPolicyMode,
   mainWindowCloseAction,
@@ -1581,9 +1591,8 @@ let latestStats = null;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
-let trayCodexPendingUntil = 0;
+let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
-const TRAY_CODEX_PENDING_GRACE_MS = 15 * 1000;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
 let lastExportAt = 0;
 let lastAutoExport = { dir: null, signature: null };
@@ -2426,6 +2435,7 @@ async function refreshFromTray() {
     }
   } catch (error) {
     console.warn(`[tray] refresh failed: ${error.message}`);
+    showTrayRefreshError(error?.message || error);
   } finally {
     trayRefreshInFlight = false;
   }
@@ -2445,6 +2455,7 @@ function setWindowPresentationFromMenu(value) {
     if (settings.trayMode) return;
     settings.trayMode = true;
     saveSettings();
+    syncFloatingBubbleAvailability();
     enterTrayMode();
     pushSettingsToRenderer();
     return;
@@ -2483,19 +2494,18 @@ function enabledTrayCodexAccounts() {
 }
 
 function syncTrayCodexActiveAccount() {
-  const activeId = pickActiveCodexAccountId(enabledTrayCodexAccounts(), latestStats, settings?.deviceId || '');
-  if (trayCodexPendingAccountId) {
-    if (activeId === trayCodexPendingAccountId) {
-      trayCodexPendingAccountId = '';
-      trayCodexPendingUntil = 0;
-    } else if (Date.now() < trayCodexPendingUntil) {
-      return;
-    } else {
-      trayCodexPendingAccountId = '';
-      trayCodexPendingUntil = 0;
-    }
-  }
-  trayCodexActiveAccountId = activeId;
+  const accounts = enabledTrayCodexAccounts();
+  const localDeviceId = settings?.deviceId || '';
+  const liveProvider = pickLiveCodexProvider(latestStats, localDeviceId);
+  const selection = reconcileCodexAccountSelection({
+    detectedAccountId: pickActiveCodexAccountId(accounts, latestStats, localDeviceId),
+    detectedAt: liveProvider?.updatedAt,
+    pendingAccountId: trayCodexPendingAccountId,
+    pendingSince: trayCodexPendingSince
+  });
+  trayCodexActiveAccountId = selection.activeAccountId;
+  trayCodexPendingAccountId = selection.pendingAccountId;
+  if (!trayCodexPendingAccountId) trayCodexPendingSince = 0;
 }
 
 function trayCodexMenuState() {
@@ -2519,6 +2529,17 @@ function showTrayCodexSwitchError(error) {
   }
 }
 
+function showTrayRefreshError(error) {
+  const locale = trayMenuLocale();
+  const title = translate(locale, 'trayMenu.refreshFailedTitle');
+  const body = translate(locale, 'trayMenu.refreshFailedBody', { error: String(error || '') });
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
+  } else {
+    dialog.showErrorBox(title, body);
+  }
+}
+
 async function switchCodexAccountFromTray(accountId) {
   if (trayCodexSwitchInFlight || !accountId) return;
   const currentId = trayCodexPendingAccountId || trayCodexActiveAccountId;
@@ -2532,7 +2553,7 @@ async function switchCodexAccountFromTray(accountId) {
     }
     trayCodexActiveAccountId = result.activeAccountId || accountId;
     trayCodexPendingAccountId = trayCodexActiveAccountId;
-    trayCodexPendingUntil = Date.now() + TRAY_CODEX_PENDING_GRACE_MS;
+    trayCodexPendingSince = Date.now();
     pushSettingsToRenderer();
   } catch (error) {
     showTrayCodexSwitchError(error?.message || error);
