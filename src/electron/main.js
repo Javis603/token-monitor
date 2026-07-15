@@ -141,6 +141,7 @@ const {
   moveFloatingBubbleBounds
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
+const { macVibrancyMaterial } = require('./macVibrancy');
 
 if (!app.isPackaged) loadDotEnv();
 
@@ -1562,7 +1563,7 @@ function applyNativeMaterial(source = settings) {
   if (!mainWindow) return;
   const enabled = nativeBlurEnabled(source);
   if (process.platform === 'darwin' && typeof mainWindow.setVibrancy === 'function') {
-    mainWindow.setVibrancy(enabled ? 'hud' : null);
+    mainWindow.setVibrancy(enabled ? macVibrancyMaterial() : null);
     if (typeof mainWindow.setVisualEffectState === 'function') {
       mainWindow.setVisualEffectState(enabled ? 'active' : 'inactive');
     }
@@ -3218,6 +3219,7 @@ function createWindow(boundsOverride, options = {}) {
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
   const glass = nativeBlurEnabled();
+  const macMaterial = macVibrancyMaterial();
   const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
   const collapsedSizeLimits = {
     minWidth: bounds.width,
@@ -3239,7 +3241,7 @@ function createWindow(boundsOverride, options = {}) {
     skipTaskbar: collapsedFloatingBubble || Boolean(settings?.trayMode),
     ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
     ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
-    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    ...(macMaterial && glass ? { vibrancy: macMaterial, visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -3341,6 +3343,7 @@ function createDashboardWindow() {
     return dashboardWindow;
   }
   const glass = nativeBlurEnabled();
+  const macMaterial = macVibrancyMaterial();
   const win = new BrowserWindow({
     width: 920,
     height: 620,
@@ -3352,7 +3355,7 @@ function createDashboardWindow() {
     backgroundColor: '#00000000',
     icon: APP_ICON_PATH,
     skipTaskbar: false,
-    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    ...(macMaterial && glass ? { vibrancy: macMaterial, visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
