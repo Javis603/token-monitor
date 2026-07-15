@@ -30,7 +30,155 @@ const els = {
 };
 
 const RANGES = ['7', '30', '90', '365', 'all'];
-const state = { tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false, locale: 'en', currency: 'USD', history: null, chartModel: null, chartKind: 'bars' };
+const state = {
+  tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
+  locale: 'en', currency: 'USD', history: null, chartModel: null,
+  chartKind: 'bars', motion: 'none'
+};
+
+const DATA_MOTION_MS = 800;
+const KLINE_MOTION_MS = 560;
+const HEATMAP_MOTION_MS = 720;
+const HEAT_CELL_MOTION_MS = 280;
+let heatmapMotionGeneration = 0;
+
+function prefersReducedMotion() {
+  return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+}
+
+function captureGeometry(root, selector = '[data-motion-key]') {
+  const geometry = new Map();
+  for (const el of root?.querySelectorAll(selector) || []) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) geometry.set(el.dataset.motionKey, rect);
+  }
+  return geometry;
+}
+
+function animateChartGeometry(previous, { fromZero = false } = {}) {
+  if (state.motion === 'none' || prefersReducedMotion()) return;
+  if (state.chartKind === 'candle') {
+    animateCandles();
+    return;
+  }
+  const shapes = Array.from(els.chart.querySelectorAll('.bar-stack[data-motion-key]'));
+  shapes.forEach((shape, index) => {
+    const target = shape.getBoundingClientRect();
+    const old = !fromZero && previous.get(shape.dataset.motionKey);
+    let first;
+    if (old && target.width > 0 && target.height > 0) {
+      const sx = old.width / target.width;
+      const sy = old.height / target.height;
+      const dx = old.left - target.left;
+      const dy = old.top - target.top;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
+      first = { transformOrigin: '0 0', transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` };
+    } else {
+      first = { transformOrigin: 'center bottom', transform: 'scaleY(0)' };
+    }
+    shape.animate([first, { transformOrigin: first.transformOrigin, transform: 'none' }], {
+      duration: DATA_MOTION_MS,
+      delay: old ? 0 : Math.min(index, 18) * 12,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'backwards'
+    });
+  });
+}
+
+function animateCandles() {
+  const candles = Array.from(els.chart.querySelectorAll('.candle-stack'));
+  candles.forEach((candle, index) => {
+    const delay = Math.min(index, 18) * 10;
+    const body = candle.querySelector('.candle-body');
+    body?.animate([
+      { transform: 'scaleY(0)', transformOrigin: 'center center' },
+      { transform: 'scaleY(1)', transformOrigin: 'center center' }
+    ], {
+      duration: KLINE_MOTION_MS,
+      delay,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'backwards'
+    });
+    for (const wick of candle.querySelectorAll('.candle-wick')) {
+      const length = wick.getTotalLength?.() || 0;
+      if (length <= 0) continue;
+      wick.animate([
+        { strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
+        { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }
+      ], {
+        duration: KLINE_MOTION_MS,
+        delay,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'backwards'
+      });
+    }
+  });
+}
+
+function animateHeatmapEntry() {
+  if (prefersReducedMotion()) {
+    els.heatmap.classList.remove('is-motion-pending');
+    return;
+  }
+  // A focus event can trigger a second render while the cold entry animation
+  // is pending. Restart against that new SVG instead of exposing it or letting
+  // an obsolete schedule animate detached cells.
+  const continuingEntry = els.heatmap.classList.contains('is-motion-pending');
+  if (state.motion !== 'entry' && !continuingEntry) return;
+  els.heatmap.classList.add('is-motion-pending');
+  const generation = ++heatmapMotionGeneration;
+  const startWhenVisible = () => {
+    if (generation !== heatmapMotionGeneration) return;
+    if (state.tab !== 'activity') {
+      els.heatmap.classList.remove('is-motion-pending');
+      return;
+    }
+    if (!document.hasFocus()) {
+      window.addEventListener('focus', startWhenVisible, { once: true });
+      return;
+    }
+    if (refreshRunning) {
+      setTimeout(startWhenVisible, 16);
+      return;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (generation !== heatmapMotionGeneration || state.tab !== 'activity') return;
+      const cells = Array.from(els.heatmap.querySelectorAll('.heat-base-layer .heat'));
+      if (!cells.length) {
+        els.heatmap.classList.remove('is-motion-pending');
+        return;
+      }
+      const columns = cells.map((cell) => Number(cell.getAttribute('x') || 0));
+      const first = Math.min(...columns);
+      const last = Math.max(...columns);
+      const delaySpan = HEATMAP_MOTION_MS - HEAT_CELL_MOTION_MS;
+      cells.forEach((cell, index) => {
+        const position = last > first ? (columns[index] - first) / (last - first) : 0;
+        const animation = cell.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: HEAT_CELL_MOTION_MS,
+          delay: position * delaySpan,
+          easing: 'ease',
+          fill: 'both'
+        });
+        animation.finished.then(() => {
+          if (!cell.isConnected) return;
+          cell.removeAttribute('data-motion-hidden');
+          cell.removeAttribute('opacity');
+          animation.cancel();
+        }).catch(() => {});
+      });
+      // On a cold BrowserWindow the animation effect is not composited until
+      // the next paint. Keep the pre-paint guard for one more frame so there is
+      // never a gap where the fully-rendered heatmap can flash through.
+      requestAnimationFrame(() => {
+        if (generation === heatmapMotionGeneration && state.tab === 'activity') {
+          els.heatmap.classList.remove('is-motion-pending');
+        }
+      });
+    }));
+  };
+  startWhenVisible();
+}
 
 function t(key, params) { return i18n.translate(state.locale, key, params); }
 
@@ -111,7 +259,9 @@ function populateRangeSelect() {
   els.rangeSelect.innerHTML = RANGES.map((r) => `<button class="range-btn${r === state.range ? ' active' : ''}" data-val="${r}">${t(`dashboard.range.${r}`)}</button>`).join('');
   els.rangeSelect.querySelectorAll('.range-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
+      if (state.range === e.target.dataset.val) return;
       state.range = e.target.dataset.val;
+      state.motion = 'update';
       els.rangeSelect.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b === e.target));
       render();
     });
@@ -138,7 +288,7 @@ function colorFor(key) {
 // colors are carried in data-c and applied via the CSSOM (.style, which CSP allows).
 function applySwatchColors(root) {
   root.querySelectorAll('[data-c]').forEach((el) => { el.style.background = el.getAttribute('data-c'); });
-  root.querySelectorAll('[data-w]').forEach((el) => { el.style.width = el.getAttribute('data-w'); });
+  root.querySelectorAll('[data-w]').forEach((el) => { el.style.setProperty('--bar-scale', el.getAttribute('data-w')); });
 }
 
 function renderLegend(model) {
@@ -159,6 +309,8 @@ function renderLegend(model) {
 }
 
 function renderTrends() {
+  const previousKind = state.chartKind;
+  const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
   const daily = charts.clampDaily(state.history?.daily || [], state.range === 'all' ? 0 : Number(state.range));
   if (daily.length === 0) { els.chart.innerHTML = ''; els.legend.innerHTML = ''; state.chartModel = null; return; }
   const pad = { padTop: 10, padRight: 14, padBottom: 24, padLeft: 52 };
@@ -173,6 +325,7 @@ function renderTrends() {
     state.chartModel = model; state.chartKind = 'candle';
     const every = axisEvery(model.candles);
     els.chart.innerHTML = charts.candleChartSvg(model, { yTicks: 4, formatTick: formatCompact, axisLabel: (c, i) => (i % every === 0 ? shortDate(c.key) : '') });
+    animateChartGeometry(previousGeometry, { fromZero: state.motion === 'entry' || previousKind !== 'candle' });
     return;
   }
   
@@ -188,11 +341,13 @@ function renderTrends() {
   state.chartModel = model; state.chartKind = 'bars';
   const every = axisEvery(model.bars);
   els.chart.innerHTML = charts.barsChartSvg(model, { colorFor, yTicks: 4, formatTick: formatCompact, axisLabel: (bar, i) => (i % every === 0 ? shortDate(bar.label) : '') });
+  animateChartGeometry(previousGeometry, { fromZero: state.motion === 'entry' || state.motion === 'series' || previousKind !== 'bars' });
 }
 
 function renderBreakdown() {
   const elsBreakdown = document.getElementById('dashBreakdown');
   if (!elsBreakdown) return;
+  const previousBars = captureGeometry(elsBreakdown, '.dash-bd-bar-fill[data-motion-key]');
   const daily = state.history?.daily || [];
   if (daily.length === 0) { elsBreakdown.innerHTML = ''; return; }
   
@@ -214,9 +369,10 @@ function renderBreakdown() {
       const pctGrand = grandTotal > 0 ? (val / grandTotal * 100).toFixed(1) : '0.0';
       const pctMax = maxVal > 0 ? (val / maxVal * 100).toFixed(1) : '0.0';
       const color = displayColor(colorFn(key));
+      const motionKey = `${titleKey}:${encodeURIComponent(key)}`;
       return `<div class="dash-bd-row">
         <span class="dash-bd-name"><span class="dash-bd-swatch" data-c="${color}"></span>${String(key).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</span>
-        <div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-w="${pctMax}%" data-c="${color}"></div></div>
+        <div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-motion-key="${motionKey}" data-w="${Number(pctMax) / 100}" data-c="${color}"></div></div>
         <span class="dash-bd-val">${formatCompact(val)}</span>
         <span class="dash-bd-pct">${pctGrand}%</span>
       </div>`;
@@ -229,6 +385,18 @@ function renderBreakdown() {
   
   elsBreakdown.innerHTML = colModel + colClient;
   applySwatchColors(elsBreakdown);
+  if (state.motion !== 'none' && !prefersReducedMotion()) {
+    for (const fill of elsBreakdown.querySelectorAll('.dash-bd-bar-fill[data-motion-key]')) {
+      const trackWidth = fill.parentElement?.getBoundingClientRect().width || 0;
+      const old = state.motion === 'entry' ? null : previousBars.get(fill.dataset.motionKey);
+      const fromScale = old && trackWidth > 0 ? old.width / trackWidth : 0;
+      fill.animate([{ transform: `scaleX(${fromScale})` }, { transform: `scaleX(${fill.dataset.w})` }], {
+        duration: DATA_MOTION_MS,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'backwards'
+      });
+    }
+  }
 }
 
 let statCardMeasureCanvas = null;
@@ -287,9 +455,12 @@ function renderActivity() {
     const cell = Math.max(9, Math.min(22, (avail - heat.weeks * gap) / heat.weeks)); // fractional → fills exactly
     heat = charts.contribHeatmap(daily, { cell, gap, startDate: start, endDate: end });
   }
+  const hideHeatmapForEntry = !prefersReducedMotion()
+    && (state.motion === 'entry' || els.heatmap.classList.contains('is-motion-pending'));
   els.heatmap.innerHTML = heat.cells.length
-    ? charts.heatmapSvg(heat, { monthLabel: (m) => monthLabel(m.label) })
+    ? charts.heatmapSvg(heat, { monthLabel: (m) => monthLabel(m.label), initialHidden: hideHeatmapForEntry })
     : '';
+  animateHeatmapEntry();
   state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0) }]));
   const cards = charts.statsCards(state.history?.summary || {});
   const LABELS = {
@@ -317,7 +488,14 @@ function render() {
   els.modeBtns.forEach((b) => b.classList.toggle('active', b.dataset.mode === state.mode));
   els.stackBtns.forEach((b) => b.classList.toggle('active', b.dataset.stack === state.stackBy));
   document.querySelector('[data-control="stack"]').style.display = state.mode === 'kline' ? 'none' : '';
-  if (state.tab === 'trends') renderTrends(); else renderActivity();
+  if (state.tab === 'trends') {
+    heatmapMotionGeneration += 1;
+    els.heatmap.classList.remove('is-motion-pending');
+    renderTrends();
+  } else {
+    renderActivity();
+  }
+  state.motion = 'none';
 }
 
 function hideTooltip() { els.tooltip.classList.add('hidden'); }
@@ -375,9 +553,11 @@ async function refresh() {
   }
   refreshRunning = true;
   try {
+    state.motion = state.history ? 'update' : 'entry';
     state.history = await window.tokenMonitor.getDashboardHistory();
     render();
   } catch (error) {
+    state.motion = 'none';
     console.log(`[dashboard] history failed: ${error.message}`);
   } finally {
     refreshRunning = false;
@@ -402,6 +582,7 @@ async function boot() {
   populateRangeSelect();
   render();
   await refresh();
+  window.tokenMonitor.dashboard.ready();
 }
 
 // Effective rates can change after boot (auto refresh / manual override). The
@@ -425,9 +606,25 @@ window.tokenMonitor.onSettingsPush?.((next) => {
 
 window.tokenMonitor.onDashboardHistoryChanged?.(() => { void refresh(); });
 
-els.tabs.forEach((tab) => tab.addEventListener('click', () => { state.tab = tab.dataset.tab; els.tabs.forEach((x) => x.classList.toggle('active', x === tab)); render(); }));
-els.stackBtns.forEach((b) => b.addEventListener('click', () => { state.stackBy = b.dataset.stack; render(); }));
-els.modeBtns.forEach((b) => b.addEventListener('click', () => { state.mode = b.dataset.mode; render(); }));
+els.tabs.forEach((tab) => tab.addEventListener('click', () => {
+  if (state.tab === tab.dataset.tab) return;
+  state.tab = tab.dataset.tab;
+  state.motion = 'entry';
+  els.tabs.forEach((x) => x.classList.toggle('active', x === tab));
+  render();
+}));
+els.stackBtns.forEach((b) => b.addEventListener('click', () => {
+  if (state.stackBy === b.dataset.stack) return;
+  state.stackBy = b.dataset.stack;
+  state.motion = 'series';
+  render();
+}));
+els.modeBtns.forEach((b) => b.addEventListener('click', () => {
+  if (state.mode === b.dataset.mode) return;
+  state.mode = b.dataset.mode;
+  state.motion = 'update';
+  render();
+}));
 els.themeToggle.addEventListener('click', () => { state.flat = !state.flat; els.body.classList.toggle('flat', state.flat); window.tokenMonitor.updateSettings({ dashboardFlat: state.flat }); });
 els.refreshBtn.addEventListener('click', refresh);
 els.minBtn.addEventListener('click', () => window.tokenMonitor.dashboard.minimize());
@@ -458,7 +655,7 @@ els.heatmap.addEventListener('mouseleave', hideTooltip);
 let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(render, 120); // both the chart and the heatmap are sized to the window
+  resizeTimer = setTimeout(() => { state.motion = 'none'; render(); }, 120); // both the chart and the heatmap are sized to the window
 });
 window.addEventListener('focus', refresh);
 

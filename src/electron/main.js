@@ -3336,8 +3336,8 @@ function createDashboardWindow() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     // Reload so a reopened window always picks up the latest renderer + fresh history,
     // instead of showing whatever was loaded when it first opened.
+    dashboardWindow.hide();
     dashboardWindow.webContents.reload();
-    dashboardWindow.focus();
     return dashboardWindow;
   }
   const glass = nativeBlurEnabled();
@@ -3370,7 +3370,15 @@ function createDashboardWindow() {
     event.preventDefault();
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
-  win.once('ready-to-show', () => win.show());
+  // The renderer waits for history and installs the heatmap's hidden entry
+  // state before sending dashboard:ready. ready-to-show alone is too early: on
+  // a cold transparent window it can expose an unprepared or retained surface.
+  win.once('ready-to-show', () => {
+    const fallback = setTimeout(() => {
+      if (!win.isDestroyed() && !win.isVisible()) win.show();
+    }, 2000);
+    win.once('show', () => clearTimeout(fallback));
+  });
   win.on('closed', () => { dashboardWindow = null; });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => console.log(`[dashboard] load failed: ${error.message}`));
@@ -4216,6 +4224,13 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', () => getDashboardHistory());
+  ipcMain.on('dashboard:ready', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
