@@ -144,6 +144,43 @@ test('interval mode serializes uploads and keeps the latest summary received in 
   assert.equal(maxActiveUploads, 1);
 });
 
+test('flush waits for an active upload and uploads the newest pending summary', async () => {
+  const completed = [];
+  const clock = createManualClock();
+  let releaseActive;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 600000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      if (summary.id === 'active') {
+        await new Promise((resolve) => { releaseActive = resolve; });
+      }
+      completed.push(summary.id);
+    }
+  });
+
+  await scheduler.enqueue({ id: 'initial' });
+  await scheduler.enqueue({ id: 'active' });
+  clock.jump(600000);
+  const activeUpload = scheduler.flush();
+  await Promise.resolve();
+  await scheduler.enqueue({ id: 'newer' });
+  await scheduler.enqueue({ id: 'newest' });
+
+  let flushResolved = false;
+  const pendingFlush = scheduler.flush().then(() => { flushResolved = true; });
+  await Promise.resolve();
+  assert.equal(flushResolved, false);
+
+  releaseActive();
+  await Promise.all([activeUpload, pendingFlush]);
+
+  assert.deepEqual(completed, ['initial', 'active', 'newest']);
+  assert.equal(clock.timerCount(), 0);
+});
+
 test('a failed upload does not throttle the next summary', async () => {
   const uploads = [];
   const clock = createManualClock();

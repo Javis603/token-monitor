@@ -138,8 +138,23 @@ test('aggregateDevices keeps interval-synced devices and limits fresh through th
   assert.equal(stale.limits.providers[0].stale, true);
 });
 
+test('aggregateDevices keeps device staleness disabled when staleAfterMs is zero', () => {
+  const aggregate = aggregateDevices(
+    [recordWithLimits({ syncUploadIntervalMs: 20 * 60 * 1000 })],
+    0,
+    Date.parse('2026-05-27T02:00:00.000Z')
+  );
+
+  assert.equal(aggregate.devices[0].stale, false);
+});
+
 test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods', () => {
-  const existing = recordWithLimits({ projectsEnabled: false, allTimeProjectsOmitted: true, allTimeProjectsIncomplete: true });
+  const existing = recordWithLimits({
+    projectsEnabled: false,
+    allTimeProjectsOmitted: true,
+    allTimeProjectsIncomplete: true,
+    syncUploadIntervalMs: 20 * 60 * 1000
+  });
   const incoming = {
     deviceId: 'macbook',
     receivedAt: '2026-05-27T00:02:00.000Z',
@@ -157,6 +172,7 @@ test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods
   assert.equal(merged.projectsEnabled, false);
   assert.equal(merged.allTimeProjectsOmitted, true);
   assert.equal(merged.allTimeProjectsIncomplete, true);
+  assert.equal(merged.syncUploadIntervalMs, 20 * 60 * 1000);
 });
 
 test('normal device updates replace all-time project diagnostics', () => {

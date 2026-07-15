@@ -25,6 +25,7 @@ function staleAfterMsForSyncUpload(value, staleAfterMs = 0) {
   const baseStaleAfterMs = Number.isFinite(numericStaleAfterMs) && numericStaleAfterMs > 0
     ? numericStaleAfterMs
     : 0;
+  if (baseStaleAfterMs <= 0) return 0;
   const intervalMs = normalizeSyncUploadIntervalMs(value);
   return intervalMs > 0 ? Math.max(baseStaleAfterMs, intervalMs * 2) : baseStaleAfterMs;
 }

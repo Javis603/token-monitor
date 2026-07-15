@@ -790,6 +790,9 @@ function mergeDeviceRecord(existing, incoming) {
     if (hasOwn(normalizedExisting, 'projectsEnabled')) normalizedIncoming.projectsEnabled = normalizedExisting.projectsEnabled;
     if (hasOwn(normalizedExisting, 'allTimeProjectsOmitted')) normalizedIncoming.allTimeProjectsOmitted = normalizedExisting.allTimeProjectsOmitted;
     if (hasOwn(normalizedExisting, 'allTimeProjectsIncomplete')) normalizedIncoming.allTimeProjectsIncomplete = normalizedExisting.allTimeProjectsIncomplete;
+    if (!hasOwn(normalizedIncoming, 'syncUploadIntervalMs') && hasOwn(normalizedExisting, 'syncUploadIntervalMs')) {
+      normalizedIncoming.syncUploadIntervalMs = normalizedExisting.syncUploadIntervalMs;
+    }
   }
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);

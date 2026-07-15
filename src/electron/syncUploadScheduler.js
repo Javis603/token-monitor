@@ -74,8 +74,19 @@ function createSyncUploadScheduler(options = {}) {
   }
 
   async function flush() {
-    if (stopped || !pendingSummary) return;
+    if (stopped) return;
     clearPendingTimer();
+    while (uploadInFlight) {
+      const activeTask = uploadInFlight;
+      try {
+        await activeTask;
+      } catch (_) {
+        // The caller that started the upload owns its error; flush still drains newer data.
+      }
+      if (stopped) return;
+      clearPendingTimer();
+    }
+    if (!pendingSummary) return;
     const summary = pendingSummary;
     pendingSummary = null;
     await uploadNow(summary);
