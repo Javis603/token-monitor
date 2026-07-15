@@ -1180,6 +1180,7 @@ function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
     intervalMs, historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled, watchDebounceMs, limitsEnabled,
+    watchUsePolling = true, watchTriggersCollection = true, intervalRequiresActivity = false,
     onUpdate, onPreview, onError, logger
   } = options;
   const deviceOsInfo = options.osInfo === undefined
@@ -1214,6 +1215,9 @@ function startCollector(options) {
   let lastSummary = null;
   let stopped = false;
   const attemptedResetBoundaries = new Set();
+  let activityRevision = 0;
+  let collectedActivityRevision = 0;
+  let initialCollectionComplete = false;
   const watchers = [];
 
   // On-disk anchor: persist full-scan snapshots so the collector can reuse
@@ -1401,9 +1405,15 @@ function startCollector(options) {
       lastSummary = summary;
       scheduleLimitsResetBoundary(summary.limits);
       await onUpdate?.(summary, reason);
+      if (Number.isFinite(tickOptions.activityRevision)) {
+        collectedActivityRevision = Math.max(collectedActivityRevision, tickOptions.activityRevision);
+        initialCollectionComplete = true;
+      }
+      return true;
     } catch (error) {
       if (stopped) return;
       if (onError) onError(error, reason); else log(`collector tick failed (${reason}): ${error.message}`);
+      return false;
     }
   }
 
@@ -1455,16 +1465,19 @@ function startCollector(options) {
       const watcher = chokidar.watch(dirs, {
         ignoreInitial: true,
         persistent: true,
-        usePolling: true,
-        interval: 2000,
-        binaryInterval: 5000,
+        ...(watchUsePolling
+          ? { usePolling: true, interval: 2000, binaryInterval: 5000 }
+          : { usePolling: false }),
         ...(ignored ? { ignored } : {}),
         awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 200 }
       });
-      watcher.on('all', (event, filePath) => scheduleTick(`watch:${event}:${path.basename(filePath || '')}`));
+      watcher.on('all', (event, filePath) => {
+        activityRevision += 1;
+        if (watchTriggersCollection) scheduleTick(`watch:${event}:${path.basename(filePath || '')}`);
+      });
       watcher.on('error', (error) => log(`chokidar error: ${error.message}`));
       watchers.push(watcher);
-      for (const dir of dirs) log(`Watching ${dir} (polling 2s)`);
+      for (const dir of dirs) log(`Watching ${dir} (${watchUsePolling ? 'polling 2s' : 'native events'})`);
     } catch (error) {
       log(`Cannot watch ${dirs.join(', ')}: ${error.message}`);
     }
@@ -1472,13 +1485,25 @@ function startCollector(options) {
 
   function loop() {
     if (stopped) return;
+    const activityRevisionAtStart = activityRevision;
+    if (
+      intervalRequiresActivity &&
+      initialCollectionComplete &&
+      activityRevisionAtStart <= collectedActivityRevision
+    ) {
+      intervalTimer = setTimeout(loop, intervalMs);
+      return;
+    }
     // Full scan at least once per FULL_SCAN_INTERVAL_MS so the anchor
     // does not drift from reality over a long-running session.
     // lastFullScanAt === 0 means no valid timestamp exists (cold start,
     // unparseable, or future timestamp) — force a full scan immediately.
     const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
     const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
-    runTick('interval', anchorToday ? { todayOnly: true, refreshWsl: true } : {}).finally(() => {
+    runTick('interval', {
+      ...(anchorToday ? { todayOnly: true, refreshWsl: true } : {}),
+      activityRevision: activityRevisionAtStart
+    }).finally(() => {
       if (stopped) return;
       intervalTimer = setTimeout(loop, intervalMs);
     });
