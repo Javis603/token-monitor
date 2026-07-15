@@ -26,6 +26,10 @@ test('period tabs use one sliding selection indicator', () => {
 test('data bars animate on the compositor instead of changing layout width', () => {
   const css = read('styles.css');
   const app = read('app.js');
+  const applyBarScale = app.slice(
+    app.indexOf('function applyBarScale('),
+    app.indexOf('function rowWidth(', app.indexOf('function applyBarScale('))
+  );
 
   assert.match(css, /\.bar-fill\s*\{[^}]*transform:\s*scaleX\(var\(--bar-scale, 0\)\)/s);
   assert.match(css, /\.limit-meter-fill\s*\{[^}]*transform:\s*scaleX\(var\(--bar-scale, 0\)\)/s);
@@ -33,7 +37,7 @@ test('data bars animate on the compositor instead of changing layout width', () 
   assert.match(app, /applyBarScale\(fill, width \/ 100\)/);
   assert.match(app, /applyBarScale\(fill, safePercent \/ 100\)/);
   assert.match(app, /state\.animateBarsFromZero[\s\S]*?transform: 'scaleX\(0\)'[\s\S]*?duration: 420/s);
-  assert.match(app, /for \(const animation of fill\.getAnimations\(\)\) animation\.cancel\(\)/);
+  assert.match(applyBarScale, /for \(const animation of fill\.getAnimations\(\)\) animation\.cancel\(\)/);
 });
 
 test('period changes preserve row identity, animate rank changes, and count from the previous total', () => {
@@ -71,10 +75,20 @@ test('view changes render immediately without a page crossfade', () => {
   assert.doesNotMatch(app, /startViewTransition|renderViewChange|animateFallbackViewPanel/);
   assert.doesNotMatch(css, /view-transition-name|::view-transition|motion-view-(?:in|out)/);
   assert.match(app, /function renderBreakdownChange\(breakdown, options = \{\}\)/);
-  assert.match(app, /state\.animateBarsFromZero = true;[\s\S]*?render\(\);[\s\S]*?state\.animateBarsFromZero = false;/);
+  assert.match(app, /state\.animateBarsFromZero = true;[\s\S]*?let renderSucceeded = false;[\s\S]*?render\(\);[\s\S]*?renderSucceeded = true;[\s\S]*?state\.animateBarsFromZero = false;[\s\S]*?if \(!renderSucceeded\) state\.animateChartsOnRender = false;/);
   assert.match(app, /else renderBreakdownChange\(id\)/);
   assert.match(app, /renderBreakdownChange\(viewId\)/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.bar-fill,[\s\S]*?\.tab-indicator[\s\S]*?transition:\s*none/s);
+});
+
+test('headline counting respects reduced-motion preferences', () => {
+  const app = read('app.js');
+  const animateNumber = app.slice(
+    app.indexOf('function animateNumber('),
+    app.indexOf('const rowNumberAnimationHandles', app.indexOf('function animateNumber('))
+  );
+
+  assert.match(animateNumber, /if \(prefersReducedMotion\(\)\) \{[\s\S]*?el\.textContent = formatNumber\(to\);[\s\S]*?onDone\(\);[\s\S]*?return;/);
 });
 
 test('Trends bars grow from the baseline and preserve matching period heights', () => {

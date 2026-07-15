@@ -972,6 +972,11 @@ function cancelNumberAnimation() {
 
 function animateNumber(el, from, to, duration = 1000, onDone = null) {
   cancelNumberAnimation();
+  if (prefersReducedMotion()) {
+    el.textContent = formatNumber(to);
+    if (typeof onDone === 'function') onDone();
+    return;
+  }
   const start = performance.now();
   const delta = to - from;
   function frame(now) {
@@ -1167,6 +1172,7 @@ function applyBarScale(fill, scale) {
   const safeScale = Math.max(0, Math.min(1, Number(scale) || 0));
   fill.style.setProperty('--bar-scale', String(safeScale));
   if (!state.animateBarsFromZero || prefersReducedMotion() || !fill.animate) return;
+  for (const animation of fill.getAnimations()) animation.cancel();
   fill.animate([
     { transform: 'scaleX(0)' },
     { transform: `scaleX(${safeScale})` }
@@ -4106,10 +4112,15 @@ function renderBreakdownChange(breakdown, options = {}) {
   if (!setBreakdown(breakdown, options)) return false;
   state.animateBarsFromZero = true;
   state.animateChartsOnRender = true;
+  let renderSucceeded = false;
   try {
     render();
+    renderSucceeded = true;
   } finally {
     state.animateBarsFromZero = false;
+    // Home consumes this flag asynchronously after ResizeObserver confirms layout.
+    // Clear it only after a failed render so that deferred entry motion still runs.
+    if (!renderSucceeded) state.animateChartsOnRender = false;
   }
   return true;
 }
