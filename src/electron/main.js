@@ -1780,7 +1780,10 @@ function startSyncCollector() {
     mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: async (summary) => {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
-      const visibleSummary = summaryWithArchivedClientUsage(summary);
+      const visibleSummary = {
+        ...summaryWithArchivedClientUsage(summary),
+        syncUploadIntervalMs: syncUploadIntervalMs()
+      };
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       try {
         await syncUploadScheduler.enqueue(visibleSummary);
@@ -3465,7 +3468,7 @@ app.whenReady().then(() => {
       settings.wslScanEnabled !== previousWslScanEnabled ||
       settings.collectionMode !== previousCollectionMode ||
       settings.collectionIntervalMs !== previousCollectionIntervalMs ||
-      settings.syncUploadIntervalMs !== previousSyncUploadIntervalMs ||
+      (settings.hubMode === 'client' && settings.syncUploadIntervalMs !== previousSyncUploadIntervalMs) ||
       settings.deepseekApiKey !== previousDeepSeekApiKey ||
       settings.minimaxApiKey !== previousMinimaxApiKey ||
       settings.copilotApiToken !== previousCopilotApiToken ||

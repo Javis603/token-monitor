@@ -4584,7 +4584,7 @@ function syncSettingsForm() {
   els.showLimitUsedInput.value = state.settings.showLimitUsed ? 'used' : 'remaining';
   if (els.syncUploadIntervalInput) {
     const value = Number(state.settings.syncUploadIntervalMs);
-    const allowed = [0, 600000, 1200000, 1800000];
+    const allowed = Array.from(els.syncUploadIntervalInput.options, (option) => Number(option.value));
     els.syncUploadIntervalInput.value = String(allowed.includes(value) ? value : 0);
   }
   if (els.collectionCadenceInput) {

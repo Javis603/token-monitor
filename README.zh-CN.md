@@ -227,7 +227,7 @@ TOKEN_MONITOR_LIMIT_PROVIDERS=       # 可选——默认为所有支持的提�
 
 小部件会把同样的环境变量读作首次启动的默认值，之后改由 GUI 设置接管。
 
-每个值也都可以通过 CLI 参数传入（`--hub=`、`--secret=`、`--device=`、`--clients=`、`--history=`、`--limits=`、`--limitProviders=`）——参数优先于环境变量。较少用的调整项（`TOKEN_MONITOR_INTERVAL_MS`、`TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS`、`TOKEN_MONITOR_PORT`、`TOKEN_MONITOR_STALE_AFTER_MS`、`TOKEN_MONITOR_HISTORY_INTERVAL_MS`、`TOKEN_MONITOR_LIMITS_REFRESH_MS`、…）一样可通过环境变量／参数配置，但为减少噪音不放进 `.env.example`。
+每个值也都可以通过 CLI 参数传入（`--hub=`、`--secret=`、`--device=`、`--clients=`、`--history=`、`--limits=`、`--limitProviders=`）——参数优先于环境变量。较少用的调整项（`TOKEN_MONITOR_INTERVAL_MS`、`TOKEN_MONITOR_PORT`、`TOKEN_MONITOR_STALE_AFTER_MS`、`TOKEN_MONITOR_HISTORY_INTERVAL_MS`、`TOKEN_MONITOR_LIMITS_REFRESH_MS`、…）一样可通过环境变量／参数配置，但为减少噪音不放进 `.env.example`。
 
 一次性执行示例:
 

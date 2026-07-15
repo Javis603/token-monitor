@@ -228,7 +228,7 @@ TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported (c
 
 The widget reads the same env vars as first-run defaults, then takes over with its own GUI-managed settings.
 
-Every value can also be passed as a CLI flag (`--hub=`, `--secret=`, `--device=`, `--clients=`, `--projects=`, `--history=`, `--limits=`, `--limitProviders=`) — flags win over env. Less-common knobs (`TOKEN_MONITOR_INTERVAL_MS`, `TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS`, `TOKEN_MONITOR_PORT`, `TOKEN_MONITOR_STALE_AFTER_MS`, `TOKEN_MONITOR_HISTORY_INTERVAL_MS`, `TOKEN_MONITOR_LIMITS_REFRESH_MS`, …) are also accepted via env / flag but kept out of `.env.example` to reduce noise.
+Every value can also be passed as a CLI flag (`--hub=`, `--secret=`, `--device=`, `--clients=`, `--projects=`, `--history=`, `--limits=`, `--limitProviders=`) — flags win over env. Less-common knobs (`TOKEN_MONITOR_INTERVAL_MS`, `TOKEN_MONITOR_PORT`, `TOKEN_MONITOR_STALE_AFTER_MS`, `TOKEN_MONITOR_HISTORY_INTERVAL_MS`, `TOKEN_MONITOR_LIMITS_REFRESH_MS`, …) are also accepted via env / flag but kept out of `.env.example` to reduce noise.
 
 Example one-off run:
 

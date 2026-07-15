@@ -117,6 +117,27 @@ test('aggregateDevices does not let an orphaned stale device id override the cur
   assert.deepEqual(aggregate.limits.providers[0].windows, []);
 });
 
+test('aggregateDevices keeps interval-synced devices and limits fresh through their upload window', () => {
+  const device = recordWithLimits({ syncUploadIntervalMs: 20 * 60 * 1000 });
+  const active = aggregateDevices(
+    [device],
+    10 * 60 * 1000,
+    Date.parse('2026-05-27T00:30:00.000Z')
+  );
+
+  assert.equal(active.devices[0].syncUploadIntervalMs, 20 * 60 * 1000);
+  assert.equal(active.devices[0].stale, false);
+  assert.equal(active.limits.providers[0].stale, false);
+
+  const stale = aggregateDevices(
+    [device],
+    10 * 60 * 1000,
+    Date.parse('2026-05-27T00:41:00.000Z')
+  );
+  assert.equal(stale.devices[0].stale, true);
+  assert.equal(stale.limits.providers[0].stale, true);
+});
+
 test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods', () => {
   const existing = recordWithLimits({ projectsEnabled: false, allTimeProjectsOmitted: true, allTimeProjectsIncomplete: true });
   const incoming = {

@@ -927,6 +927,8 @@ test('collection cadence setting is exposed in the Collection panel', () => {
 test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
   const html = readRendererFile('index.html');
   const controls = html.match(/<label class="sync-upload-interval-row"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
+  const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
+  assert.match(clientFields, /sync-upload-interval-row/);
   assert.match(controls, /data-i18n="settings\.sync\.uploadInterval"/);
   assert.match(controls, /<option value="0"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.live"/);
   assert.match(controls, /<option value="600000"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.10m"/);
@@ -937,6 +939,8 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(syncBody, /syncUploadIntervalInput/);
   assert.match(syncBody, /state\.settings\.syncUploadIntervalMs/);
+  assert.match(syncBody, /Array\.from\(els\.syncUploadIntervalInput\.options/);
+  assert.doesNotMatch(syncBody, /const allowed = \[0, 600000, 1200000, 1800000\]/);
 
   const listenerSlice = app.slice(
     app.indexOf("els.syncUploadIntervalInput?.addEventListener('change'"),
@@ -987,6 +991,7 @@ test('main settings normalize sync upload intervals and restart sync collectors 
   const syncCollector = main.slice(main.indexOf('function startSyncCollector'), main.indexOf('// Host mode'));
   assert.match(syncCollector, /createSyncUploadScheduler\(\{/);
   assert.match(syncCollector, /intervalMs: syncUploadIntervalMs\(\)/);
+  assert.match(syncCollector, /const visibleSummary = \{[\s\S]*summaryWithArchivedClientUsage\(summary\)[\s\S]*syncUploadIntervalMs: syncUploadIntervalMs\(\)[\s\S]*\};/);
   assert.match(syncCollector, /await syncUploadScheduler\.enqueue\(visibleSummary\)/);
 
   const hostCollector = main.slice(main.indexOf('function startHostCollector'), main.indexOf('function stopHostStats'));
@@ -997,7 +1002,7 @@ test('main settings normalize sync upload intervals and restart sync collectors 
   assert.match(updateHandler, /previousSyncUploadIntervalMs/);
   assert.match(updateHandler, /normalizedPatch\.syncUploadIntervalMs = normalizeSyncUploadIntervalMs/);
   assert.match(updateHandler, /syncUploadIntervalMs: normalizeSyncUploadIntervalMs/);
-  assert.match(updateHandler, /settings\.syncUploadIntervalMs !== previousSyncUploadIntervalMs/);
+  assert.match(updateHandler, /\(settings\.hubMode === 'client' && settings\.syncUploadIntervalMs !== previousSyncUploadIntervalMs\)/);
 });
 
 test('main collectors pass GUI limit credentials in every widget mode', () => {

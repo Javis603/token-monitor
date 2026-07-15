@@ -1,16 +1,10 @@
 'use strict';
 
-const SYNC_UPLOAD_INTERVAL_OPTIONS = [0, 10 * 60 * 1000, 20 * 60 * 1000, 30 * 60 * 1000];
-const DEFAULT_SYNC_UPLOAD_INTERVAL_MS = 0;
-
-function normalizeSyncUploadIntervalMs(value, fallback = DEFAULT_SYNC_UPLOAD_INTERVAL_MS) {
-  const numeric = Number(value);
-  if (SYNC_UPLOAD_INTERVAL_OPTIONS.includes(numeric)) return numeric;
-  const fallbackNumeric = Number(fallback);
-  return SYNC_UPLOAD_INTERVAL_OPTIONS.includes(fallbackNumeric)
-    ? fallbackNumeric
-    : DEFAULT_SYNC_UPLOAD_INTERVAL_MS;
-}
+const {
+  DEFAULT_SYNC_UPLOAD_INTERVAL_MS,
+  SYNC_UPLOAD_INTERVAL_OPTIONS,
+  normalizeSyncUploadIntervalMs
+} = require('../shared/syncUploadInterval');
 
 function createSyncUploadScheduler(options = {}) {
   const upload = typeof options.upload === 'function' ? options.upload : async () => {};
@@ -21,6 +15,7 @@ function createSyncUploadScheduler(options = {}) {
   const intervalMs = normalizeSyncUploadIntervalMs(options.intervalMs);
   let lastUploadAt = null;
   let pendingSummary = null;
+  let uploadInFlight = null;
   let timer = null;
   let stopped = false;
 
@@ -31,8 +26,22 @@ function createSyncUploadScheduler(options = {}) {
   }
 
   async function uploadNow(summary) {
-    await upload(summary);
-    lastUploadAt = now();
+    if (uploadInFlight) {
+      pendingSummary = summary;
+      return;
+    }
+    const task = Promise.resolve().then(() => upload(summary));
+    uploadInFlight = task;
+    try {
+      await task;
+      lastUploadAt = now();
+    } finally {
+      uploadInFlight = null;
+      if (pendingSummary && !stopped) {
+        const elapsedMs = lastUploadAt === null ? intervalMs : now() - lastUploadAt;
+        schedulePending(intervalMs <= 0 ? 0 : intervalMs - elapsedMs);
+      }
+    }
   }
 
   function schedulePending(delayMs) {

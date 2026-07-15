@@ -22,6 +22,9 @@ function createManualClock() {
     clearTimeout(id) {
       timers.delete(id);
     },
+    jump(ms) {
+      nowMs += ms;
+    },
     async advance(ms) {
       nowMs += ms;
       for (;;) {
@@ -90,6 +93,55 @@ test('interval mode uploads the first summary immediately and coalesces later up
 
   assert.deepEqual(uploads, ['initial', 'mid-2']);
   assert.equal(clock.timerCount(), 0);
+});
+
+test('interval mode serializes uploads and keeps the latest summary received in flight', async () => {
+  const started = [];
+  const completed = [];
+  const clock = createManualClock();
+  let activeUploads = 0;
+  let maxActiveUploads = 0;
+  let releasePending;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 600000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      started.push(summary.id);
+      activeUploads += 1;
+      maxActiveUploads = Math.max(maxActiveUploads, activeUploads);
+      if (summary.id === 'pending') {
+        await new Promise((resolve) => { releasePending = resolve; });
+      }
+      activeUploads -= 1;
+      completed.push(summary.id);
+    }
+  });
+
+  await scheduler.enqueue({ id: 'initial' });
+  await scheduler.enqueue({ id: 'pending' });
+  clock.jump(600000);
+  const flushPromise = scheduler.flush();
+  await Promise.resolve();
+
+  await scheduler.enqueue({ id: 'newer' });
+  await scheduler.enqueue({ id: 'newest' });
+
+  assert.deepEqual(started, ['initial', 'pending']);
+  assert.equal(maxActiveUploads, 1);
+
+  releasePending();
+  await flushPromise;
+  assert.deepEqual(completed, ['initial', 'pending']);
+  assert.equal(clock.timerCount(), 1);
+
+  await clock.advance(600000);
+  await Promise.resolve();
+
+  assert.deepEqual(started, ['initial', 'pending', 'newest']);
+  assert.deepEqual(completed, ['initial', 'pending', 'newest']);
+  assert.equal(maxActiveUploads, 1);
 });
 
 test('a failed upload does not throttle the next summary', async () => {
