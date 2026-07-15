@@ -2,6 +2,8 @@
 
 const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
+const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
   'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama'
@@ -207,7 +209,7 @@ state.animateChartsOnRender = true;
 let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
 let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
@@ -234,6 +236,7 @@ Object.assign(els, {
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
   sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
+  reduceMotionInput: document.getElementById('reduceMotionInput'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -995,7 +998,23 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
 const rowNumberAnimationHandles = new WeakMap();
 
 function prefersReducedMotion() {
-  return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
+}
+
+function settleMotionAnimations() {
+  cancelNumberAnimation();
+  els.totalTokens.textContent = formatNumber(state.currentTotal);
+  updateTotalCompact(state.currentTotal);
+  for (const animation of document.getAnimations?.() || []) {
+    try { animation.finish(); } catch (_) { animation.cancel(); }
+  }
+}
+
+function applyReduceMotionPreference(value) {
+  const preference = motionPreferenceApi.normalize(value);
+  document.documentElement.dataset.reduceMotion = preference;
+  if (motionPreferenceApi.shouldReduceMotion(preference, reducedMotionMedia?.matches)) settleMotionAnimations();
+  return preference;
 }
 
 function captureBreakdownMotion() {
@@ -1028,6 +1047,12 @@ function animateRowNumber(el, from, to, duration = 420) {
   el.textContent = formatNumber(from);
   el.dataset.motionValue = String(from);
   function frame(now) {
+    if (prefersReducedMotion()) {
+      el.textContent = formatNumber(to);
+      el.dataset.motionValue = String(Number(to) || 0);
+      rowNumberAnimationHandles.delete(el);
+      return;
+    }
     const progress = Math.min(1, (now - startedAt) / duration);
     const current = from + delta * easeOutQuart(progress);
     el.textContent = formatNumber(current);
@@ -4158,6 +4183,7 @@ function applyAppearanceSettings(settings) {
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.style.setProperty('--highlight-alpha', (0.045 + depth * 0.06).toFixed(3));
+  applyReduceMotionPreference(settings?.reduceMotion);
   // Only full settings objects carry themeColors; glass/zoom preview patches
   // omit it, so we must not wipe theme overrides mid-slider-drag.
   if (settings && 'themeColors' in settings) applyThemeColors(settings.themeColors);
@@ -4766,6 +4792,7 @@ function handleFloatingBubblePointerUp(event) {
 function appearancePatchFromControls() {
   return {
     systemGlass: Boolean(els.systemGlassInput.checked),
+    reduceMotion: els.reduceMotionInput?.value || 'system',
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
@@ -4981,6 +5008,8 @@ function syncSettingsForm() {
   }
   renderWslPanel();
   els.systemGlassInput.checked = state.settings.systemGlass !== false;
+  const reduceMotion = motionPreferenceApi.normalize(state.settings.reduceMotion);
+  if (els.reduceMotionInput) els.reduceMotionInput.value = reduceMotion;
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
@@ -6569,6 +6598,10 @@ function setupThemeAccordion(group, toggle, details) {
 setupThemeAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
 setupThemeAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
 els.systemGlassInput.addEventListener('change', saveAppearanceFromControls);
+els.reduceMotionInput?.addEventListener('change', async () => {
+  state.settings.reduceMotion = applyReduceMotionPreference(els.reduceMotionInput.value);
+  await saveAppearanceFromControls();
+});
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
 els.toolIconsInput.addEventListener('change', saveAppearanceFromControls);
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
@@ -6740,6 +6773,11 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   applyEffectiveCurrencyRates();
   syncSettingsForm();
   maybeUpdateBarsIcon();
+});
+
+reducedMotionMedia?.addEventListener?.('change', () => {
+  if (motionPreferenceApi.normalize(state.settings?.reduceMotion) !== 'system') return;
+  applyReduceMotionPreference('system');
 });
 
 window.tokenMonitor.onOpenSettings?.(openSettingsPanel);

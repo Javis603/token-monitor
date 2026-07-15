@@ -1638,8 +1638,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.1), 0 0 12px rgba(255, 99, 99, 0.14);
 }
 @media (prefers-reduced-motion: reduce) {
-  .refresh-button,
-  .refresh-button-icon {
+  :root:not([data-reduce-motion="off"]) .refresh-button,
+  :root:not([data-reduce-motion="off"]) .refresh-button-icon {
     transition-duration: 0.01ms;
   }
 }
@@ -2848,10 +2848,10 @@ html.is-windows .limit-live-badge {
   color: var(--red);
 }
 @media (prefers-reduced-motion: reduce) {
-  .limit-account-switch-zone .limit-name-title,
-  .limit-account-active-zone .limit-name-title,
-  .limit-account-active-popover,
-  .limit-account-switch-popover {
+  :root:not([data-reduce-motion="off"]) .limit-account-switch-zone .limit-name-title,
+  :root:not([data-reduce-motion="off"]) .limit-account-active-zone .limit-name-title,
+  :root:not([data-reduce-motion="off"]) .limit-account-active-popover,
+  :root:not([data-reduce-motion="off"]) .limit-account-switch-popover {
     transition: none;
   }
 }
@@ -2891,9 +2891,9 @@ html.is-windows .limit-live-badge {
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 @media (prefers-reduced-motion: reduce) {
-  .bar-fill,
-  .limit-meter-fill,
-  .tab-indicator {
+  :root:not([data-reduce-motion="off"]) .bar-fill,
+  :root:not([data-reduce-motion="off"]) .limit-meter-fill,
+  :root:not([data-reduce-motion="off"]) .tab-indicator {
     transition: none;
   }
 }
@@ -3062,7 +3062,7 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
-  .limit-reset-credits-tooltip {
+  :root:not([data-reduce-motion="off"]) .limit-reset-credits-tooltip {
     transition: none;
   }
 }
@@ -3246,7 +3246,7 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
-  .view-switcher-menu {
+  :root:not([data-reduce-motion="off"]) .view-switcher-menu {
     filter: none;
     transition-duration: 0.01ms;
   }
@@ -3377,7 +3377,16 @@ html.is-windows .limit-live-badge {
 .app-update-popover .inline-link { font-size: 10px; }
 .app-update-popover .inline-link.hidden { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .app-update-popover { transition-duration: 0.01ms; }
+  :root:not([data-reduce-motion="off"]) .app-update-popover { transition-duration: 0.01ms; }
+}
+
+:root[data-reduce-motion="on"] *,
+:root[data-reduce-motion="on"] *::before,
+:root[data-reduce-motion="on"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
 }
 
 /* Progressive collapse as the window gets shorter. Width is intentionally not a */

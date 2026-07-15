@@ -129,5 +129,6 @@ body.flat { background: rgb(var(--glass-rgb)); }
 .dash-empty.hidden { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .range-btn, .bar-seg { transition: none; }
+  :root:not([data-reduce-motion="off"]) .range-btn,
+  :root:not([data-reduce-motion="off"]) .bar-seg { transition: none; }
 }

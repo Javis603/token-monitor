@@ -247,6 +247,14 @@
               <label><span class="slider-label"><span data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span><input id="glassInput" type="range" min="0" max="100" step="1" /></label>
               <label><span class="slider-label"><span data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span><input id="blurInput" type="range" min="0" max="100" step="1" /></label>
               <label><span class="slider-label"><span data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" title="Reset zoom" data-i18n-title="settings.appearance.resetZoom">↺</button></span><input id="zoomInput" type="range" min="70" max="160" step="5" /></label>
+              <label><span data-i18n="settings.appearance.reduceMotion">Reduce Motion</span>
+                <select id="reduceMotionInput">
+                  <option value="system" data-i18n="settings.appearance.motion.system">System</option>
+                  <option value="on" data-i18n="settings.appearance.motion.on">On</option>
+                  <option value="off" data-i18n="settings.appearance.motion.off">Off</option>
+                </select>
+              </label>
+              <p class="settings-note" data-i18n="settings.appearance.reduceMotionNote">Reduce animations, or follow the system setting.</p>
             </div>
             <div class="settings-subgroup settings-theme-group">
               <div class="settings-note-row">
@@ -987,6 +995,7 @@
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/trayText.js"></script>
+    <script src="motionPreference.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -4,6 +4,8 @@ const charts = window.TokenMonitorUsageCharts;
 const themePresetsApi = window.TokenMonitorThemePresets;
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
+const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 // Canonical brand colours, captured before any override (clientColors is shared
 // by reference and mutated in place to apply vendor overrides).
@@ -33,7 +35,7 @@ const RANGES = ['7', '30', '90', '365', 'all'];
 const state = {
   tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
   locale: 'en', currency: 'USD', history: null, chartModel: null,
-  chartKind: 'bars', motion: 'none'
+  chartKind: 'bars', motion: 'none', reduceMotion: 'system'
 };
 
 const DATA_MOTION_MS = 800;
@@ -43,7 +45,18 @@ const HEAT_CELL_MOTION_MS = 280;
 let heatmapMotionGeneration = 0;
 
 function prefersReducedMotion() {
-  return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  return motionPreferenceApi.shouldReduceMotion(state.reduceMotion, reducedMotionMedia?.matches);
+}
+
+function applyReduceMotionPreference(value) {
+  state.reduceMotion = motionPreferenceApi.normalize(value);
+  document.documentElement.dataset.reduceMotion = state.reduceMotion;
+  if (!prefersReducedMotion()) return;
+  heatmapMotionGeneration += 1;
+  state.motion = 'none';
+  for (const animation of document.getAnimations?.() || []) {
+    try { animation.finish(); } catch (_) { animation.cancel(); }
+  }
 }
 
 function captureGeometry(root, selector = '[data-motion-key]') {
@@ -193,6 +206,7 @@ function applyAppearance(settings) {
   const root = document.documentElement.style;
   root.setProperty('--glass-alpha', opacity.toFixed(2));
   root.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
+  applyReduceMotionPreference(settings?.reduceMotion);
   applyThemeColors(settings?.themeColors);
   applyVendorColorOverrides(settings?.vendorColors);
   els.body.classList.toggle('flat', state.flat);
@@ -601,7 +615,18 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     state.currency = next.currency;
     needsRender = true;
   }
+  const reduceMotion = motionPreferenceApi.normalize(next.reduceMotion);
+  if (state.reduceMotion !== reduceMotion) {
+    applyReduceMotionPreference(reduceMotion);
+    needsRender = true;
+  }
   if (needsRender) render();
+});
+
+reducedMotionMedia?.addEventListener?.('change', () => {
+  if (state.reduceMotion !== 'system') return;
+  applyReduceMotionPreference('system');
+  render();
 });
 
 window.tokenMonitor.onDashboardHistoryChanged?.(() => { void refresh(); });
