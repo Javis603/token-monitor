@@ -154,12 +154,8 @@ function shouldSkipAppUpdateCheck({
   if (force || !lastCheckedAt) return false;
   const last = Date.parse(lastCheckedAt);
   if (!Number.isFinite(last)) return false;
-  const latestVersion = latest?.version;
-  const current = semver.valid(currentVersion);
-  const cachedUpdate = semver.valid(latestVersion)
-    && current
-    && semver.gt(latestVersion, current)
-    && latestVersion !== dismissedVersion;
+  const availability = deriveAppUpdateAvailability({ currentVersion, latest, dismissedVersion });
+  const cachedUpdate = availability.hasUpdate && !availability.dismissed;
   const cooldownMs = cachedUpdate ? APP_UPDATE_OUTDATED_COOLDOWN_MS : APP_UPDATE_BACKGROUND_COOLDOWN_MS;
   return nowMs - last < cooldownMs;
 }

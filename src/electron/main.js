@@ -2877,6 +2877,7 @@ async function downloadTokscaleFromNpm() {
 }
 
 let appUpdateCheckInFlight = false;
+let appUpdateCheckPromise = null;
 let appUpdateLastError = null;
 let appUpdateBackgroundTimer = null;
 let appUpdateNativeBusy = false;
@@ -3004,7 +3005,14 @@ function sendAppUpdatePush() {
 }
 
 async function runAppUpdateCheck({ force = false } = {}) {
-  if (appUpdateCheckInFlight) return deriveAppUpdateState();
+  if (appUpdateCheckPromise) {
+    const activeResult = await appUpdateCheckPromise;
+    if (force && activeResult?.ok && activeResult.newer) {
+      restoreDismissedAppUpdate(activeResult.latest?.version);
+      sendAppUpdatePush();
+    }
+    return deriveAppUpdateState();
+  }
   const block = settings?.appUpdate || {};
   if (shouldSkipAppUpdateCheck({
     force,
@@ -3015,25 +3023,35 @@ async function runAppUpdateCheck({ force = false } = {}) {
   })) {
     return deriveAppUpdateState();
   }
-  appUpdateCheckInFlight = true;
-  appUpdateLastError = null;
-  if (force) sendAppUpdatePush();
-  try {
-    const result = await checkLatestRelease(app.getVersion());
-    if (result.ok) {
-      rememberLatestAppUpdate(result.latest, result.checkedAt);
-      if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
-      appUpdateLastError = null;
-    } else {
-      appUpdateLastError = force ? (result.error || 'Update check failed') : null;
-      if (!force) console.warn('App update check failed:', result.error);
+  const checkTask = (async () => {
+    appUpdateCheckInFlight = true;
+    appUpdateLastError = null;
+    if (force) sendAppUpdatePush();
+    let result = null;
+    try {
+      result = await checkLatestRelease(app.getVersion());
+      if (result.ok) {
+        rememberLatestAppUpdate(result.latest, result.checkedAt);
+        if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
+        appUpdateLastError = null;
+      } else {
+        appUpdateLastError = force ? (result.error || 'Update check failed') : null;
+        if (!force) console.warn('App update check failed:', result.error);
+      }
+    } catch (error) {
+      appUpdateLastError = force ? (error.message || String(error)) : null;
+      if (!force) console.warn('App update check threw:', error);
+    } finally {
+      appUpdateCheckInFlight = false;
+      sendAppUpdatePush();
     }
-  } catch (error) {
-    appUpdateLastError = force ? (error.message || String(error)) : null;
-    if (!force) console.warn('App update check threw:', error);
+    return result;
+  })();
+  appUpdateCheckPromise = checkTask;
+  try {
+    await checkTask;
   } finally {
-    appUpdateCheckInFlight = false;
-    sendAppUpdatePush();
+    if (appUpdateCheckPromise === checkTask) appUpdateCheckPromise = null;
   }
   return deriveAppUpdateState();
 }
