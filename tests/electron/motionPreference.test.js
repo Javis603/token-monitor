@@ -50,7 +50,8 @@ test('enabling reduced motion settles active row counters immediately', () => {
 
 test('system reduced motion receives the same catch-all CSS as explicit On', () => {
   const css = read('styles.css');
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?:root:not\(\[data-reduce-motion="off"\]\) \*[\s\S]*?animation-duration: 0\.01ms !important/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?:root:not\(\[data-reduce-motion="off"\]\) \*[\s\S]*?animation-duration: 0\.01ms !important[\s\S]*?transition-delay: 0s !important/);
+  assert.match(css, /:root\[data-reduce-motion="on"\] \*[\s\S]*?transition-delay: 0s !important/);
 });
 
 test('main window and dashboard load the shared preference before their renderer', () => {
