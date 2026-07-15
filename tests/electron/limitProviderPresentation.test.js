@@ -521,7 +521,8 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);
   assert.match(homeLabel, /if \(window\?\.kind === 'balance'\) return 'Balance';/);
-  assert.match(homeModule, /value\.textContent = window\.value \|\| formatHomeLimitWindowValue\(window, Boolean\(state\.settings\?\.showLimitUsed\)\);/);
+  assert.match(homeModule, /const showUsed = Boolean\(state\.settings\?\.showLimitUsed\);/);
+  assert.match(homeModule, /value\.textContent = window\.value \|\| formatHomeLimitWindowValue\(window, showUsed\);/);
   assert.match(valueFormatter, /`\$\{formatMoney\(window\.amount, window\.currency\)\} left`/);
   assert.match(valueFormatter, /`\$\{formatPercent\(percent\)\} \$\{limitModeSuffix\(showUsed\)\}`/);
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);

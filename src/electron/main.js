@@ -230,6 +230,7 @@ function defaultSettings() {
     hiddenViews: defaultViewDisplayPreferences().hiddenViews,
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
+    showHomeLimitBars: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false),
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
@@ -1342,6 +1343,7 @@ function readSettings() {
     if (saved.hiddenHomeModules !== undefined) {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
+    merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
@@ -3578,6 +3580,7 @@ app.whenReady().then(() => {
       hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
+      showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),

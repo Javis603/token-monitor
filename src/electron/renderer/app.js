@@ -1617,6 +1617,20 @@ function mimoTokenPlanWindowFromBalance(balance) {
   };
 }
 
+function limitMeterNode(color, percent, tone = 1) {
+  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+  const meter = document.createElement('div');
+  meter.className = 'limit-meter';
+  meter.style.background = colorWithAlpha(color, 0.16);
+  const fill = document.createElement('div');
+  fill.className = 'limit-meter-fill';
+  fill.style.width = `${safePercent}%`;
+  fill.style.background = color;
+  fill.style.opacity = tone;
+  meter.append(fill);
+  return meter;
+}
+
 function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
   const remaining = Number(window?.remainingPercent);
   const used = Number(window?.usedPercent);
@@ -1627,7 +1641,6 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   // windows honour the used-mode flip.
   const showUsed = Boolean(state.settings?.showLimitUsed) && valueOverride == null;
   const fillPercent = limitFillPercent(remaining, used, showUsed);
-  const safePercent = Math.max(0, Math.min(100, fillPercent));
   const item = document.createElement('div');
   item.className = 'limit-window';
   const text = document.createElement('div');
@@ -1637,15 +1650,7 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   const value = document.createElement('span');
   value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent, showUsed);
   text.append(name, value);
-  const meter = document.createElement('div');
-  meter.className = 'limit-meter';
-  meter.style.background = colorWithAlpha(color, 0.16);
-  const fill = document.createElement('div');
-  fill.className = 'limit-meter-fill';
-  fill.style.width = `${safePercent}%`;
-  fill.style.background = color;
-  fill.style.opacity = tone;
-  meter.append(fill);
+  const meter = limitMeterNode(color, fillPercent, tone);
   const reset = document.createElement('div');
   reset.className = 'limit-reset';
   const resetText = formatReset(window?.resetsAt) || window?.resetDescription || '';
@@ -3094,15 +3099,26 @@ function renderHomeLimitModule() {
       label.textContent = homeLimitWindowLabel(window);
       const value = document.createElement('span');
       value.className = 'home-list-value';
-      value.textContent = window.value || formatHomeLimitWindowValue(window, Boolean(state.settings?.showLimitUsed));
+      const showUsed = Boolean(state.settings?.showLimitUsed);
+      value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
+      if (state.settings?.showHomeLimitBars === true && window.remainingPercent != null) {
+        const remainingPercent = Math.max(0, Math.min(100, Number(window.remainingPercent) || 0));
+        if (remainingPercent < 20) {
+          value.classList.add('home-limit-value-critical');
+        } else if (remainingPercent < 50) {
+          value.classList.add('home-limit-value-low');
+          value.style.setProperty('--home-limit-accent', row.color);
+        }
+      }
       line.append(label, value);
+      metric.append(line);
       const resetAt = formatReset(window.resetsAt);
       const resetText = document.createElement('span');
       resetText.className = 'home-limit-reset';
       resetText.textContent = resetAt || (window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
         : '\u00a0');
-      metric.append(line, resetText);
+      metric.append(resetText);
       windows.append(metric);
     }
     item.append(account, windows);
@@ -5175,6 +5191,15 @@ function renderHomeLimitProviderList() {
     .orderedLimitProviders(LIMIT_PROVIDERS, homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
   const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
+  const statusLabel = document.createElement('label');
+  statusLabel.className = 'checkbox-label home-limit-status-setting';
+  const statusInput = document.createElement('input');
+  statusInput.type = 'checkbox';
+  statusInput.checked = state.settings?.showHomeLimitBars === true;
+  const statusText = document.createElement('span');
+  statusText.textContent = t('settings.home.showLimitBars');
+  statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
+  statusLabel.append(statusInput, statusText);
   const header = document.createElement('div');
   header.className = 'settings-note-row home-limit-provider-header';
   const note = document.createElement('p');
@@ -5203,7 +5228,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(header);
+  wrap.append(statusLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');

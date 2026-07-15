@@ -1846,7 +1846,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 6px;
 }
 .home-module-limits .home-module-body {
-  gap: 10px;
+  gap: 12px;
 }
 .home-list-row {
   display: grid;
@@ -1954,7 +1954,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .home-limit-account {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 8px;
 }
 .home-limit-account-head {
   display: grid;
@@ -1966,7 +1966,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .home-limit-windows {
   display: grid;
   min-width: 0;
-  margin-left: 18px;
+  margin-left: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
@@ -1977,18 +1977,37 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .home-limit-window {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 4px;
 }
 .home-limit-window-line {
   display: flex;
   min-width: 0;
   align-items: baseline;
   justify-content: space-between;
-  gap: 5px;
+  gap: 4px;
 }
 .home-limit-window .home-list-value {
   font-size: 10px;
   line-height: 1.1;
+}
+.home-limit-value-low {
+  color: var(--home-limit-accent, var(--yellow));
+}
+.home-limit-value-critical {
+  position: relative;
+  padding-left: 8px;
+  color: var(--red);
+}
+.home-limit-value-critical::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+  transform: translateY(-50%);
 }
 .home-limit-window-label {
   overflow: hidden;
@@ -2843,6 +2862,11 @@ html.is-windows .limit-live-badge {
   border-radius: 3px;
   transition: width 420ms ease;
 }
+@media (prefers-reduced-motion: reduce) {
+  .limit-meter-fill {
+    transition: none;
+  }
+}
 .limit-reset {
   min-height: 11px;
   overflow: hidden;
@@ -3559,6 +3583,9 @@ html.is-windows .limit-live-badge {
   border-left: 1px solid rgba(var(--line-rgb), 0.14);
 }
 .home-limit-provider-header { margin-bottom: 1px; }
+.home-limit-status-setting {
+  min-height: 24px;
+}
 .home-limit-provider-row {
   grid-template-columns: minmax(0, 1fr) repeat(2, 22px);
 }
