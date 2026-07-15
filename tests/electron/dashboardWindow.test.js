@@ -30,13 +30,15 @@ test('main registers dashboard handlers and a sender-scoped close', () => {
   assert.match(main, /function getDashboardHistory/);
 });
 
-test('dashboard ready fallback is armed for initial load and every reload', () => {
+test('dashboard readiness waits for data and recovers only from actual failures', () => {
   const main = read('src', 'electron', 'main.js');
-  assert.match(main, /function armDashboardShowFallback\(win\)[\s\S]*?setTimeout\([\s\S]*?win\.show\(\)[\s\S]*?2000/);
-  assert.match(main, /dashboardWindow\.hide\(\);\s*armDashboardShowFallback\(dashboardWindow\);\s*dashboardWindow\.webContents\.reload\(\)/);
-  assert.match(main, /armDashboardShowFallback\(win\);\s*win\.loadFile/);
-  assert.match(main, /win\.on\('show', clearDashboardShowFallback\)/);
-  assert.match(main, /win\.on\('closed',[\s\S]*?clearDashboardShowFallback\(\)/);
+  assert.doesNotMatch(main, /dashboardShowFallback|armDashboardShowFallback/);
+  assert.match(main, /webContents\.on\('did-fail-load'/);
+  assert.match(main, /errorCode === -3/);
+  assert.match(main, /webContents\.on\('render-process-gone'/);
+  assert.match(main, /win\.on\('unresponsive'/);
+  assert.match(main, /function discardFailedDashboardWindow\(win, reason\)[\s\S]*?win\.destroy\(\)/);
+  assert.match(main, /const controller = new AbortController\(\);[\s\S]*?signal: controller\.signal[\s\S]*?clearTimeout\(timeout\)/);
 });
 
 test('getDashboardHistory mirrors the local/sync split of fetchStats', () => {

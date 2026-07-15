@@ -176,7 +176,6 @@ const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'tre
 
 let mainWindow = null;
 let dashboardWindow = null;
-let dashboardShowFallback = null;
 let settingsPath = null;
 let settings = null;
 let sessionUsageArchive = null;
@@ -3333,18 +3332,10 @@ function replaceMainWindow(bounds, options = {}) {
   });
 }
 
-function clearDashboardShowFallback() {
-  if (dashboardShowFallback === null) return;
-  clearTimeout(dashboardShowFallback);
-  dashboardShowFallback = null;
-}
-
-function armDashboardShowFallback(win) {
-  clearDashboardShowFallback();
-  dashboardShowFallback = setTimeout(() => {
-    dashboardShowFallback = null;
-    if (!win.isDestroyed() && !win.isVisible()) win.show();
-  }, 2000);
+function discardFailedDashboardWindow(win, reason) {
+  if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+  console.log(`[dashboard] ${reason}`);
+  win.destroy();
 }
 
 function createDashboardWindow() {
@@ -3352,7 +3343,6 @@ function createDashboardWindow() {
     // Reload so a reopened window always picks up the latest renderer + fresh history,
     // instead of showing whatever was loaded when it first opened.
     dashboardWindow.hide();
-    armDashboardShowFallback(dashboardWindow);
     dashboardWindow.webContents.reload();
     return dashboardWindow;
   }
@@ -3386,17 +3376,22 @@ function createDashboardWindow() {
     event.preventDefault();
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
-  // The renderer waits for history and installs the heatmap's hidden entry
-  // state before sending dashboard:ready. The fallback is armed immediately
-  // and re-armed on reload so a failed renderer cannot leave the window hidden.
-  win.on('show', clearDashboardShowFallback);
-  win.on('closed', () => {
-    clearDashboardShowFallback();
-    dashboardWindow = null;
+  // Only dashboard:ready may reveal a healthy window. Slow hub history must not
+  // race a wall-clock fallback and expose the unprepared heatmap. Actual load or
+  // renderer failures discard the hidden window so the next open starts cleanly.
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // ERR_ABORTED is expected during reloads.
+    discardFailedDashboardWindow(win, `load failed: ${errorDescription}`);
   });
-  armDashboardShowFallback(win);
+  win.webContents.on('render-process-gone', (_event, details) => {
+    discardFailedDashboardWindow(win, `renderer stopped: ${details.reason}`);
+  });
+  win.on('unresponsive', () => {
+    if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
+  });
+  win.on('closed', () => { dashboardWindow = null; });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
-    .catch((error) => console.log(`[dashboard] load failed: ${error.message}`));
+    .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
 }
 
@@ -3418,9 +3413,18 @@ async function getDashboardHistory() {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return aggregateHistory([]);
   const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
-  const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
-  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  return response.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 let cursorStatusCache = { value: null, at: 0 };
