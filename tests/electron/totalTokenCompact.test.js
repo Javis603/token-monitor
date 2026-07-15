@@ -55,7 +55,7 @@ test('compact total stays visible through the count-up, with the font pre-locked
   // The font is fitted to the widest endpoint before the roll starts, so the number
   // does not vanish, clip, or resize mid-animation in either direction.
   assert.match(app, /const widest = formatNumber\(nextTotal\)\.length >= formatNumber\(state\.currentTotal\)\.length \? nextTotal : state\.currentTotal;/);
-  assert.match(app, /els\.totalTokens\.textContent = formatNumber\(widest\);\s*updateTotalCompact\(nextTotal\);\s*animateNumber\(els\.totalTokens, state\.currentTotal, nextTotal, 2200, fitTotalNumber\);/s);
+  assert.match(app, /els\.totalTokens\.textContent = formatNumber\(widest\);\s*updateTotalCompact\(nextTotal\);\s*animateNumber\(els\.totalTokens, state\.currentTotal, nextTotal, state\.periodMotionActive \? 800 : 1000, fitTotalNumber\);/s);
   // animateNumber must not reset the font, or the pre-locked size would be lost.
   const animateBody = app.slice(app.indexOf('function animateNumber('), app.indexOf('function rowWidth('));
   assert.doesNotMatch(animateBody, /style\.fontSize/);

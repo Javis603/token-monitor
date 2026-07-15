@@ -201,6 +201,9 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.appUpdateNotesPresentedVersion = '';
+state.periodMotionActive = false;
+state.animateBarsFromZero = false;
+state.animateChartsOnRender = true;
 let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
@@ -967,7 +970,7 @@ function cancelNumberAnimation() {
   if (numberAnimHandle) { cancelAnimationFrame(numberAnimHandle); numberAnimHandle = 0; }
 }
 
-function animateNumber(el, from, to, duration = 2200, onDone = null) {
+function animateNumber(el, from, to, duration = 1000, onDone = null) {
   cancelNumberAnimation();
   const start = performance.now();
   const delta = to - from;
@@ -982,6 +985,192 @@ function animateNumber(el, from, to, duration = 2200, onDone = null) {
     }
   }
   numberAnimHandle = requestAnimationFrame(frame);
+}
+
+const rowNumberAnimationHandles = new WeakMap();
+
+function prefersReducedMotion() {
+  return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+}
+
+function captureBreakdownMotion() {
+  const snapshot = new Map();
+  for (const row of els.breakdown?.querySelectorAll('.row[data-key]') || []) {
+    const rect = row.getBoundingClientRect();
+    const fill = row.querySelector('.bar-fill');
+    const trackWidth = fill?.parentElement?.getBoundingClientRect().width || 0;
+    const fillWidth = fill?.getBoundingClientRect().width || 0;
+    snapshot.set(row.dataset.key, {
+      top: rect.top,
+      value: Number(row.querySelector('.row-value')?.dataset.motionValue || row.dataset.motionValue || 0),
+      barScale: trackWidth > 0 ? Math.max(0, Math.min(1, fillWidth / trackWidth)) : 0
+    });
+  }
+  return snapshot;
+}
+
+function animateRowNumber(el, from, to, duration = 420) {
+  const previousHandle = rowNumberAnimationHandles.get(el);
+  if (previousHandle) cancelAnimationFrame(previousHandle);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to || prefersReducedMotion()) {
+    el.textContent = formatNumber(to);
+    el.dataset.motionValue = String(Number(to) || 0);
+    rowNumberAnimationHandles.delete(el);
+    return;
+  }
+  const startedAt = performance.now();
+  const delta = to - from;
+  el.textContent = formatNumber(from);
+  el.dataset.motionValue = String(from);
+  function frame(now) {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const current = from + delta * easeOutQuart(progress);
+    el.textContent = formatNumber(current);
+    el.dataset.motionValue = String(current);
+    if (progress < 1) {
+      rowNumberAnimationHandles.set(el, requestAnimationFrame(frame));
+    } else {
+      rowNumberAnimationHandles.delete(el);
+    }
+  }
+  rowNumberAnimationHandles.set(el, requestAnimationFrame(frame));
+}
+
+function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
+  if (prefersReducedMotion()) return;
+  let enteringIndex = 0;
+  for (const row of els.breakdown?.querySelectorAll('.row[data-key]') || []) {
+    const previous = snapshot.get(row.dataset.key);
+    const value = Number(row.dataset.motionValue || 0);
+    const fill = row.querySelector('.bar-fill');
+    const targetScale = Math.max(0, Math.min(1, Number(fill?.style.getPropertyValue('--bar-scale')) || 0));
+    if (previous) {
+      const deltaY = previous.top - row.getBoundingClientRect().top;
+      if (Math.abs(deltaY) > 0.5) {
+        row.animate([
+          { transform: `translate3d(0, ${deltaY}px, 0)` },
+          { transform: 'translate3d(0, 0, 0)' }
+        ], { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+      }
+      animateBarBetween(fill, previous.barScale, targetScale, 0, duration);
+      animateRowNumber(row.querySelector('.row-value'), previous.value, value, duration);
+      continue;
+    }
+    row.animate([
+      { opacity: 0, transform: 'translate3d(0, 7px, 0)' },
+      { opacity: 1, transform: 'translate3d(0, 0, 0)' }
+    ], {
+      duration: 240,
+      delay: Math.min(enteringIndex, 6) * 18,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'backwards'
+    });
+    const delay = Math.min(enteringIndex, 6) * 18;
+    animateBarBetween(fill, 0, targetScale, delay, Math.max(1, duration - delay));
+    animateRowNumber(row.querySelector('.row-value'), 0, value, duration);
+    enteringIndex += 1;
+  }
+}
+
+function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) {
+  if (!fill?.animate || Math.abs(toScale - fromScale) < 0.001) return;
+  for (const animation of fill.getAnimations()) animation.cancel();
+  fill.animate([
+    { transform: `scaleX(${fromScale})` },
+    { transform: `scaleX(${toScale})` }
+  ], {
+    duration,
+    delay,
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    fill: 'backwards'
+  });
+}
+
+function captureTrendBarMotion() {
+  const snapshot = new Map();
+  for (const bar of els.trendsPanel?.querySelectorAll('.spark-bar[data-motion-key]') || []) {
+    snapshot.set(bar.dataset.motionKey, { height: bar.getBoundingClientRect().height });
+  }
+  return snapshot;
+}
+
+function animateTrendBarsFrom(snapshot, { fromZero = false } = {}) {
+  if (prefersReducedMotion()) return;
+  const bars = Array.from(els.trendsPanel?.querySelectorAll('.spark-bar[data-motion-key]') || []);
+  bars.forEach((bar, index) => {
+    const previous = snapshot.get(bar.dataset.motionKey);
+    const targetHeight = bar.getBoundingClientRect().height;
+    const fromScale = fromZero || !previous
+      ? 0
+      : targetHeight > 0 ? previous.height / targetHeight : 1;
+    if (Math.abs(fromScale - 1) < 0.001) return;
+    bar.animate([
+      { transform: `scaleY(${fromScale})` },
+      { transform: 'scaleY(1)' }
+    ], {
+      duration: 420,
+      delay: previous && !fromZero ? 0 : Math.min(index, 14) * 14,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'backwards'
+    });
+  });
+}
+
+const HOME_HISTORY_MOTION_MS = 920;
+const HOME_HEAT_CELL_MOTION_MS = 360;
+
+function animateHomeHistoryVisuals(activityScroll, activityCanvas, trendChart) {
+  if (!state.animateChartsOnRender) return;
+  state.animateChartsOnRender = false;
+  if (prefersReducedMotion()) return;
+
+  const heatCells = Array.from(activityCanvas?.querySelectorAll('.heat-base-layer .heat') || []);
+  const viewport = activityScroll?.getBoundingClientRect();
+  const visibleCells = heatCells.map((cell, index) => ({ cell, column: Math.floor(index / 7), rect: cell.getBoundingClientRect() }))
+    .filter(({ rect }) => viewport && rect.right > viewport.left && rect.left < viewport.right);
+  const firstVisibleColumn = visibleCells.length ? visibleCells[0].column : 0;
+  const lastVisibleColumn = visibleCells.length ? visibleCells[visibleCells.length - 1].column : firstVisibleColumn;
+  const heatColumnDelay = (HOME_HISTORY_MOTION_MS - HOME_HEAT_CELL_MOTION_MS) / Math.max(1, lastVisibleColumn - firstVisibleColumn);
+  visibleCells.forEach(({ cell, column }) => {
+    cell.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: HOME_HEAT_CELL_MOTION_MS,
+      delay: (column - firstVisibleColumn) * heatColumnDelay,
+      easing: 'ease',
+      fill: 'backwards'
+    });
+  });
+
+  const line = trendChart?.querySelector('.area-line-stroke');
+  const fill = trendChart?.querySelector('.area-line-fill');
+  const length = line?.getTotalLength?.() || 0;
+  if (length > 0) {
+    line.animate([
+      { strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
+      { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }
+    ], {
+      duration: HOME_HISTORY_MOTION_MS,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'backwards'
+    });
+  }
+  fill?.animate([
+    { clipPath: 'inset(0 100% 0 0)' },
+    { clipPath: 'inset(0 0 0 0)' }
+  ], {
+    duration: HOME_HISTORY_MOTION_MS,
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    fill: 'backwards'
+  });
+}
+
+function applyBarScale(fill, scale) {
+  const safeScale = Math.max(0, Math.min(1, Number(scale) || 0));
+  fill.style.setProperty('--bar-scale', String(safeScale));
+  if (!state.animateBarsFromZero || prefersReducedMotion() || !fill.animate) return;
+  fill.animate([
+    { transform: 'scaleX(0)' },
+    { transform: `scaleX(${safeScale})` }
+  ], { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
 }
 
 function rowWidth(value, max) {
@@ -1033,11 +1222,14 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
   const detailEl = row.querySelector('.row-detail');
   detailEl.textContent = detail || '';
   detailEl.classList.toggle('hidden', !detail);
-  row.querySelector('.row-value').textContent = formatNumber(value);
+  const valueEl = row.querySelector('.row-value');
+  valueEl.textContent = formatNumber(value);
+  valueEl.dataset.motionValue = String(Number(value) || 0);
+  row.dataset.motionValue = String(Number(value) || 0);
   row.querySelector('.row-cost').textContent = formatCost(cost || 0);
   const fill = row.querySelector('.bar-fill');
   fill.style.background = barBackground || color;
-  fill.style.width = `${width}%`;
+  applyBarScale(fill, width / 100);
 
   const accordionInner = row.querySelector('.row-accordion-inner');
   if (Array.isArray(accordionRows) && accordionRows.length > 0) {
@@ -1134,6 +1326,9 @@ function renderRows(rows, { showProjectIncompleteHint = false } = {}) {
     return;
   }
   const max = Math.max(1, ...rows.map((row) => row.value));
+  const liveMotionSnapshot = !state.periodMotionActive && !state.animateBarsFromZero
+    ? captureBreakdownMotion()
+    : null;
   const hintText = showProjectIncompleteHint ? t('projects.incomplete') : '';
   const signature = JSON.stringify([state.breakdown, hintText, rows.map((row) => row.key)]);
   const children = Array.from(els.breakdown.children);
@@ -1158,6 +1353,7 @@ function renderRows(rows, { showProjectIncompleteHint = false } = {}) {
     const row = current.get(rowData.key);
     if (row) updateRow(row, { ...rowData, max });
   }
+  if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
 
 function deviceLabel(device) {
@@ -1624,7 +1820,7 @@ function limitMeterNode(color, percent, tone = 1) {
   meter.style.background = colorWithAlpha(color, 0.16);
   const fill = document.createElement('div');
   fill.className = 'limit-meter-fill';
-  fill.style.width = `${safePercent}%`;
+  applyBarScale(fill, safePercent / 100);
   fill.style.background = color;
   fill.style.opacity = tone;
   meter.append(fill);
@@ -2658,7 +2854,7 @@ function exchangeNode(row, max) {
   wrap.querySelector('.detail-ex-sub').textContent = row.subtitle;
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
   wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost);
-  wrap.querySelector('.bar-fill').style.width = `${rowWidth(row.value, max)}%`;
+  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
   const turnsEl = wrap.querySelector('.detail-turns');
   for (const turn of row.turns) turnsEl.append(turnNode(turn));
@@ -2694,6 +2890,7 @@ let contentReadySignaled = false;
 
 function renderTrends() {
   const charts = window.TokenMonitorUsageCharts;
+  const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
   const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
   const { points, metric, labelKey } = charts.selectPreviewSeries(preview, state.period);
@@ -2728,6 +2925,13 @@ function renderTrends() {
     + `<div class="trends-spark" role="button" tabindex="0" title="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
     + `<div class="trends-stats">${statsHtml}</div>`;
+  const bars = Array.from(els.trendsPanel.querySelectorAll('.spark-bar'));
+  bars.forEach((bar, index) => {
+    bar.dataset.motionKey = String(finalPoints[index]?.[labelKey] || index);
+  });
+  const fromZero = state.animateChartsOnRender;
+  animateTrendBarsFrom(previousBars, { fromZero });
+  if (fromZero) state.animateChartsOnRender = false;
 }
 
 function viewLabelById(id) {
@@ -2777,8 +2981,7 @@ function openViewFromTray(viewId) {
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.openSession = null;
-  setBreakdown(viewId, { allowHidden: true });
-  render();
+  renderBreakdownChange(viewId, { allowHidden: true });
 }
 
 async function loadHomeHistory() {
@@ -2894,7 +3097,8 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
       return;
     }
     state.viewSwitcherOpen = false;
-    if (setBreakdown(nextBreakdown(state.breakdown))) render();
+    updateViewSwitcherOpenState();
+    renderBreakdownChange(nextBreakdown(state.breakdown));
   });
   current.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
@@ -2955,8 +3159,9 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
     item.append(itemLabel);
     item.addEventListener('click', () => {
       state.viewSwitcherOpen = false;
-      if (setBreakdown(id)) render();
-      else renderViewSwitcher({ focusDisclosure: true });
+      updateViewSwitcherOpenState();
+      if (id === state.breakdown) renderViewSwitcher({ focusDisclosure: true });
+      else renderBreakdownChange(id);
     });
     menu.append(item);
   }
@@ -2994,13 +3199,13 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   module.setAttribute('aria-label', title);
   module.addEventListener('click', (event) => {
     if (event.target.closest('.home-activity-scroll')) return;
-    if (setBreakdown(viewId)) render();
+    renderBreakdownChange(viewId);
   });
   module.addEventListener('keydown', (event) => {
     if (event.target !== module) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    if (setBreakdown(viewId)) render();
+    renderBreakdownChange(viewId);
   });
   const head = document.createElement('div');
   head.className = 'home-module-head';
@@ -3263,8 +3468,17 @@ function applyHomeActivityScroll(scroller) {
   scroller.classList.toggle('is-scrolled', target > 2);
 }
 
-function setupHomeActivityScroller(scroller) {
+function setupHomeActivityScroller(scroller, onReady = null) {
   let drag = null;
+  let readySignaled = false;
+  const applySettledLayout = () => {
+    applyHomeActivityScroll(scroller);
+    if (readySignaled || typeof onReady !== 'function') return;
+    const svg = scroller.querySelector('.dash-heatmap');
+    if (scroller.clientWidth <= 0 || !svg || svg.getBoundingClientRect().width <= 0) return;
+    readySignaled = true;
+    onReady();
+  };
   scroller.addEventListener('scroll', () => {
     scroller.classList.toggle('is-scrolled', scroller.scrollLeft > 2);
     const record = homeOverviewApi.homeActivityScrollRecord({
@@ -3305,8 +3519,10 @@ function setupHomeActivityScroller(scroller) {
   // the panel becomes visible / the window resizes, so the measurement is always real.
   state.homeActivityResizeObserver?.disconnect();
   if (typeof ResizeObserver === 'function') {
-    state.homeActivityResizeObserver = new ResizeObserver(() => applyHomeActivityScroll(scroller));
+    state.homeActivityResizeObserver = new ResizeObserver(applySettledLayout);
     state.homeActivityResizeObserver.observe(scroller);
+  } else if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => requestAnimationFrame(applySettledLayout));
   }
   applyHomeActivityScroll(scroller);
 }
@@ -3518,8 +3734,6 @@ function renderHomeTrendsModule() {
     spotlightRadius: 82
   });
   activityScroll.append(activityCanvas);
-  setupHomeActivityScroller(activityScroll);
-  setupHomeActivityHover(activityScroll);
   const linePoints = charts.clampDaily(points, 45);
   const summary = homeOverviewApi.homeTrendSummary(linePoints);
   const trendHead = document.createElement('div');
@@ -3546,6 +3760,8 @@ function renderHomeTrendsModule() {
     dates.append(label);
   }
   body.append(activityScroll, trendHead, plot, dates);
+  setupHomeActivityScroller(activityScroll, () => animateHomeHistoryVisuals(activityScroll, activityCanvas, chart));
+  setupHomeActivityHover(activityScroll);
   return module;
 }
 
@@ -3613,7 +3829,7 @@ function render() {
     const widest = formatNumber(nextTotal).length >= formatNumber(state.currentTotal).length ? nextTotal : state.currentTotal;
     els.totalTokens.textContent = formatNumber(widest);
     updateTotalCompact(nextTotal);
-    animateNumber(els.totalTokens, state.currentTotal, nextTotal, 2200, fitTotalNumber);
+    animateNumber(els.totalTokens, state.currentTotal, nextTotal, state.periodMotionActive ? 800 : 1000, fitTotalNumber);
     pulseLiveDot();
   } else {
     cancelNumberAnimation();
@@ -3883,6 +4099,18 @@ function setBreakdown(breakdown, options = {}) {
   state.breakdown = next;
   state.rowSignature = '';
   publishViewState();
+  return true;
+}
+
+function renderBreakdownChange(breakdown, options = {}) {
+  if (!setBreakdown(breakdown, options)) return false;
+  state.animateBarsFromZero = true;
+  state.animateChartsOnRender = true;
+  try {
+    render();
+  } finally {
+    state.animateBarsFromZero = false;
+  }
   return true;
 }
 
@@ -4662,8 +4890,13 @@ async function refreshHubInfo() {
 }
 
 function syncPeriodTabs() {
-  for (const tab of document.querySelectorAll('.tab')) {
-    tab.classList.toggle('active', tab.dataset.period === state.period);
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.period === state.period));
+  document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
+  for (const tab of tabs) {
+    const active = tab.dataset.period === state.period;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', String(active));
   }
 }
 
@@ -6091,12 +6324,15 @@ async function init() {
 
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {
-    setPeriod(tab.dataset.period);
+    const snapshot = captureBreakdownMotion();
+    if (!setPeriod(tab.dataset.period)) return;
     syncPeriodTabs();
     if (state.openSession) openSessionDetail(state.openSession);
-    state.currentTotal = 0;
     state.rowSignature = '';
+    state.periodMotionActive = true;
     render();
+    state.periodMotionActive = false;
+    animateBreakdownFrom(snapshot, { duration: 800 });
   });
 }
 
