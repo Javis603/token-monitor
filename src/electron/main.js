@@ -58,6 +58,7 @@ const {
 const {
   appUpdateInstallSupport,
   checkLatestRelease,
+  deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
   GITHUB_REPO,
   mergeLatestReleaseMetadata,
@@ -2959,14 +2960,18 @@ function deriveAppUpdateState() {
   const latest = block.lastKnownLatest || null;
   const dismissedVersion = block.dismissedVersion || null;
   const installSupport = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
-  let hasUpdate = false;
-  if (latest && semver.valid(latest.version) && semver.valid(currentVersion)) {
-    hasUpdate = semver.gt(latest.version, currentVersion) && latest.version !== dismissedVersion;
-  }
+  const availability = deriveAppUpdateAvailability({
+    currentVersion,
+    latest,
+    dismissedVersion,
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version
+  });
   return {
     currentVersion,
     latest,
-    hasUpdate,
+    hasUpdate: availability.hasUpdate,
+    showUpdateNotice: availability.showUpdateNotice,
     dismissedVersion,
     lastCheckedAt: block.lastCheckedAt || null,
     checking: appUpdateCheckInFlight,
@@ -2977,13 +2982,20 @@ function deriveAppUpdateState() {
     installProgress: appUpdateNativeState.progress,
     installVersion: appUpdateNativeState.version,
     installError: appUpdateNativeState.error,
-    downloaded: downloadedAppUpdateMatchesLatest({
-      phase: appUpdateNativeState.phase,
-      downloadedVersion: appUpdateNativeState.version,
-      latest
-    }),
+    downloaded: availability.downloaded,
     installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
   };
+}
+
+function restoreDismissedAppUpdate(version) {
+  const block = settings?.appUpdate || {};
+  if (!version || block.dismissedVersion !== version) return false;
+  settings.appUpdate = {
+    ...block,
+    dismissedVersion: null
+  };
+  saveSettings();
+  return true;
 }
 
 function sendAppUpdatePush() {
@@ -3010,6 +3022,7 @@ async function runAppUpdateCheck({ force = false } = {}) {
     const result = await checkLatestRelease(app.getVersion());
     if (result.ok) {
       rememberLatestAppUpdate(result.latest, result.checkedAt);
+      if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
       appUpdateLastError = null;
     } else {
       appUpdateLastError = force ? (result.error || 'Update check failed') : null;
@@ -3059,6 +3072,7 @@ async function downloadAndPrepareAppUpdate() {
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
+  restoreDismissedAppUpdate(latest?.version);
   configureNativeAppUpdater();
   appUpdateNativeBusy = true;
   setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });

@@ -175,6 +175,26 @@ function downloadedAppUpdateMatchesLatest({
   return Boolean(version && latestVersion && version === latestVersion);
 }
 
+function deriveAppUpdateAvailability({
+  currentVersion,
+  latest,
+  dismissedVersion,
+  phase,
+  downloadedVersion
+} = {}) {
+  const current = semver.valid(currentVersion);
+  const latestVersion = semver.valid(latest?.version);
+  const hasUpdate = Boolean(current && latestVersion && semver.gt(latestVersion, current));
+  const dismissed = Boolean(hasUpdate && latestVersion === dismissedVersion);
+  const downloaded = downloadedAppUpdateMatchesLatest({ phase, downloadedVersion, latest });
+  return {
+    hasUpdate,
+    dismissed,
+    downloaded,
+    showUpdateNotice: downloaded || (hasUpdate && !dismissed)
+  };
+}
+
 async function withTimeout(ms, task) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -218,6 +238,7 @@ module.exports = {
   parseLatestReleasePayload,
   shouldSkipAppUpdateCheck,
   downloadedAppUpdateMatchesLatest,
+  deriveAppUpdateAvailability,
   extractReleaseNotes,
   mergeLatestReleaseMetadata,
   checkLatestRelease,

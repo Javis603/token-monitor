@@ -661,21 +661,24 @@ function renderAppUpdatePill() {
   if (!pill) return;
   const mode = appUpdateActionMode(s);
   const version = s?.latest?.version || s?.installVersion || '';
-  if (!s || !mode || !version) {
+  if (!s || !mode || !version || !s.showUpdateNotice) {
     pill.classList.add('hidden');
     pill.setAttribute('title', '');
     els.appUpdatePillLabel.textContent = '';
     setAppUpdatePillDisclosure(false);
     return;
   }
-  const hasReleaseNotes = releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
+  const hasReleaseNotes = mode !== 'install' && releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
   setAppUpdatePillDisclosure(hasReleaseNotes);
   pill.classList.remove('hidden');
+  els.appUpdatePillDismiss.classList.toggle('hidden', mode === 'install' || s.installBusy);
   pill.setAttribute('title', mode === 'install' ? t('settings.appUpdate.ready') : (s.latest?.name || `v${version}`));
   if (s.installPhase === 'downloading' && Number.isFinite(s.installProgress)) {
     els.appUpdatePillLabel.textContent = `${Math.round(s.installProgress)}%`;
   } else {
-    els.appUpdatePillLabel.textContent = `${mode === 'install' ? '↻' : '↑'} v${version}`;
+    els.appUpdatePillLabel.textContent = mode === 'install'
+      ? `↻ ${t('settings.appUpdate.restart')}`
+      : `↑ v${version}`;
   }
 }
 function releaseNoteGroupsForCurrentLocale(latest) {
@@ -6392,6 +6395,10 @@ async function runAppUpdateAction() {
 }
 
 els.appUpdatePillAction.addEventListener('click', async () => {
+  if (appUpdateActionMode(state.appUpdate) === 'install') {
+    await runAppUpdateAction();
+    return;
+  }
   if (!renderAppUpdatePopover(state.appUpdate) || typeof els.appUpdatePopover.showPopover !== 'function') {
     await runAppUpdateAction();
     return;

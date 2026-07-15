@@ -41,17 +41,30 @@ test('release notes render as text nodes and auto-open once for a new version', 
   assert.match(renderer, /s\.hasUpdate && state\.appUpdateNotesPresentedVersion !== version/);
 });
 
-test('footer pill progressively discloses notes before running the update action', () => {
+test('footer pill progressively discloses notes before download but installs directly once ready', () => {
   const app = read('app.js');
   const handler = app.slice(
     app.indexOf("els.appUpdatePillAction.addEventListener"),
     app.indexOf("els.appUpdatePillDismiss.addEventListener")
   );
+  assert.match(handler, /appUpdateActionMode\(state\.appUpdate\) === 'install'/);
+  assert.match(handler, /await runAppUpdateAction\(\);\s*return;/);
   assert.match(handler, /renderAppUpdatePopover\(state\.appUpdate\)/);
   assert.match(handler, /positionAppUpdatePopover\(\)/);
   assert.match(handler, /showPopover\(\)/);
   assert.match(handler, /appUpdatePopoverAction\.focus\(\)/);
   assert.match(handler, /await runAppUpdateAction\(\)/);
+});
+
+test('footer pill separates dismissed notices from available settings actions', () => {
+  const app = read('app.js');
+  const renderer = app.slice(
+    app.indexOf('function renderAppUpdatePill'),
+    app.indexOf('function releaseNoteGroupsForCurrentLocale')
+  );
+  assert.match(renderer, /!s\.showUpdateNotice/);
+  assert.match(renderer, /mode === 'install' \|\| s\.installBusy/);
+  assert.match(renderer, /t\('settings\.appUpdate\.restart'\)/);
 });
 
 test('footer pill only exposes dialog semantics when release notes are available', () => {

@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const {
   appUpdateInstallSupport,
+  deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
   extractReleaseNotes,
   mergeLatestReleaseMetadata,
@@ -104,6 +105,35 @@ test('downloadedAppUpdateMatchesLatest only trusts the downloaded latest version
     downloadedVersion: '0.19.0',
     latest: null
   }), false);
+});
+
+test('deriveAppUpdateAvailability keeps availability separate from notification dismissal', () => {
+  assert.deepEqual(deriveAppUpdateAvailability({
+    currentVersion: '0.28.0',
+    latest: { version: '0.28.1' },
+    dismissedVersion: '0.28.1',
+    phase: 'idle'
+  }), {
+    hasUpdate: true,
+    dismissed: true,
+    downloaded: false,
+    showUpdateNotice: false
+  });
+});
+
+test('deriveAppUpdateAvailability always surfaces a downloaded matching update', () => {
+  assert.deepEqual(deriveAppUpdateAvailability({
+    currentVersion: '0.28.0',
+    latest: { version: '0.28.1' },
+    dismissedVersion: '0.28.1',
+    phase: 'downloaded',
+    downloadedVersion: '0.28.1'
+  }), {
+    hasUpdate: true,
+    dismissed: true,
+    downloaded: true,
+    showUpdateNotice: true
+  });
 });
 
 test('extractReleaseNotes reads marked bilingual summaries as plain text', () => {

@@ -3254,6 +3254,7 @@ html.is-windows .limit-live-badge {
   cursor: pointer;
 }
 .update-pill-dismiss:hover { opacity: 1; }
+.update-pill-dismiss.hidden { display: none; }
 .app-update-popover {
   inset: auto;
   margin: 0;
