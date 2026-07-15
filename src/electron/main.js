@@ -3006,9 +3006,15 @@ function sendAppUpdatePush() {
 
 async function runAppUpdateCheck({ force = false } = {}) {
   if (appUpdateCheckPromise) {
+    if (force) sendAppUpdatePush();
     const activeResult = await appUpdateCheckPromise;
-    if (force && activeResult?.ok && activeResult.newer) {
-      restoreDismissedAppUpdate(activeResult.latest?.version);
+    if (force) {
+      if (activeResult?.ok) {
+        if (activeResult.newer) restoreDismissedAppUpdate(activeResult.latest?.version);
+        appUpdateLastError = null;
+      } else {
+        appUpdateLastError = activeResult?.error || 'Update check failed';
+      }
       sendAppUpdatePush();
     }
     return deriveAppUpdateState();
@@ -3027,7 +3033,7 @@ async function runAppUpdateCheck({ force = false } = {}) {
     appUpdateCheckInFlight = true;
     appUpdateLastError = null;
     if (force) sendAppUpdatePush();
-    let result = null;
+    let result;
     try {
       result = await checkLatestRelease(app.getVersion());
       if (result.ok) {
@@ -3039,8 +3045,10 @@ async function runAppUpdateCheck({ force = false } = {}) {
         if (!force) console.warn('App update check failed:', result.error);
       }
     } catch (error) {
-      appUpdateLastError = force ? (error.message || String(error)) : null;
+      const message = error.message || String(error);
+      appUpdateLastError = force ? message : null;
       if (!force) console.warn('App update check threw:', error);
+      return { ok: false, newer: false, latest: null, error: message };
     } finally {
       appUpdateCheckInFlight = false;
       sendAppUpdatePush();

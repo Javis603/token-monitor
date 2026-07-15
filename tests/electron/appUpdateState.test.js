@@ -20,11 +20,12 @@ test('manual update checks restore a matching dismissed version', () => {
   assert.match(check, /if \(force && result\.newer\) restoreDismissedAppUpdate\(result\.latest\?\.version\)/);
 });
 
-test('manual checks reuse an in-flight background check before restoring the notice', () => {
+test('manual checks preserve feedback when reusing an in-flight background check', () => {
   const check = sourceBetween('async function runAppUpdateCheck', 'function maybeRunBackgroundUpdateCheck');
-  assert.match(check, /const activeResult = await appUpdateCheckPromise/);
-  assert.match(check, /force && activeResult\?\.ok && activeResult\.newer/);
-  assert.match(check, /restoreDismissedAppUpdate\(activeResult\.latest\?\.version\)/);
+  assert.match(check, /if \(force\) sendAppUpdatePush\(\);\s*const activeResult = await appUpdateCheckPromise/);
+  assert.match(check, /if \(activeResult\.newer\) restoreDismissedAppUpdate\(activeResult\.latest\?\.version\)/);
+  assert.match(check, /appUpdateLastError = activeResult\?\.error \|\| 'Update check failed'/);
+  assert.match(check, /return \{ ok: false, newer: false, latest: null, error: message \}/);
 });
 
 test('starting a user-requested download restores its dismissed notification', () => {
