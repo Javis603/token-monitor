@@ -995,7 +995,7 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
   numberAnimHandle = requestAnimationFrame(frame);
 }
 
-const rowNumberAnimationHandles = new WeakMap();
+const rowNumberAnimationHandles = new Map();
 
 function prefersReducedMotion() {
   return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
@@ -1005,6 +1005,14 @@ function settleMotionAnimations() {
   cancelNumberAnimation();
   els.totalTokens.textContent = formatNumber(state.currentTotal);
   updateTotalCompact(state.currentTotal);
+  for (const [el, handle] of rowNumberAnimationHandles) {
+    cancelAnimationFrame(handle);
+    const target = Number(el.dataset.motionTarget || el.dataset.motionValue || 0);
+    el.textContent = formatNumber(target);
+    el.dataset.motionValue = String(target);
+    delete el.dataset.motionTarget;
+  }
+  rowNumberAnimationHandles.clear();
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -1039,6 +1047,7 @@ function animateRowNumber(el, from, to, duration = 420) {
   if (!Number.isFinite(from) || !Number.isFinite(to) || from === to || prefersReducedMotion()) {
     el.textContent = formatNumber(to);
     el.dataset.motionValue = String(Number(to) || 0);
+    delete el.dataset.motionTarget;
     rowNumberAnimationHandles.delete(el);
     return;
   }
@@ -1046,10 +1055,12 @@ function animateRowNumber(el, from, to, duration = 420) {
   const delta = to - from;
   el.textContent = formatNumber(from);
   el.dataset.motionValue = String(from);
+  el.dataset.motionTarget = String(to);
   function frame(now) {
     if (prefersReducedMotion()) {
       el.textContent = formatNumber(to);
       el.dataset.motionValue = String(Number(to) || 0);
+      delete el.dataset.motionTarget;
       rowNumberAnimationHandles.delete(el);
       return;
     }
@@ -1060,6 +1071,7 @@ function animateRowNumber(el, from, to, duration = 420) {
     if (progress < 1) {
       rowNumberAnimationHandles.set(el, requestAnimationFrame(frame));
     } else {
+      delete el.dataset.motionTarget;
       rowNumberAnimationHandles.delete(el);
     }
   }

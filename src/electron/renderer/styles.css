@@ -3378,6 +3378,15 @@ html.is-windows .limit-live-badge {
 .app-update-popover .inline-link.hidden { display: none; }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .app-update-popover { transition-duration: 0.01ms; }
+
+  :root:not([data-reduce-motion="off"]) *,
+  :root:not([data-reduce-motion="off"]) *::before,
+  :root:not([data-reduce-motion="off"]) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 :root[data-reduce-motion="on"] *,

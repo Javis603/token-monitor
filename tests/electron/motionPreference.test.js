@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
-const motionPreference = require(path.join(rendererDir, 'motionPreference.js'));
+const motionPreference = require(path.join(rendererDir, '..', 'motionPreference.js'));
 
 function read(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
@@ -35,15 +35,38 @@ test('appearance exposes and persists the three-state motion control', () => {
   assert.match(app, /reduceMotion: els\.reduceMotionInput\?\.value \|\| 'system'/);
   assert.match(app, /document\.documentElement\.dataset\.reduceMotion = preference/);
   assert.match(main, /reduceMotion: 'system'/);
-  assert.match(main, /normalizeReduceMotion\(patch\.reduceMotion \?\? settings\.reduceMotion\)/);
+  assert.match(main, /require\('\.\/motionPreference'\)/);
+  assert.doesNotMatch(main, /function normalizeReduceMotion|REDUCE_MOTION_VALUES/);
+  assert.match(main, /motionPreferenceApi\.normalize\(patch\.reduceMotion \?\? settings\.reduceMotion\)/);
+  assert.match(main, /merged\.reduceMotion = motionPreferenceApi\.normalize\(merged\.reduceMotion\)/);
+});
+
+test('enabling reduced motion settles active row counters immediately', () => {
+  const app = read('app.js');
+  assert.match(app, /const rowNumberAnimationHandles = new Map\(\)/);
+  assert.match(app, /for \(const \[el, handle\] of rowNumberAnimationHandles\)[\s\S]*?cancelAnimationFrame\(handle\)[\s\S]*?rowNumberAnimationHandles\.clear\(\)/);
+  assert.match(app, /el\.dataset\.motionTarget = String\(to\)/);
+});
+
+test('system reduced motion receives the same catch-all CSS as explicit On', () => {
+  const css = read('styles.css');
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?:root:not\(\[data-reduce-motion="off"\]\) \*[\s\S]*?animation-duration: 0\.01ms !important/);
 });
 
 test('main window and dashboard load the shared preference before their renderer', () => {
   const index = read('index.html');
   const dashboard = read('dashboard.html');
 
-  assert.ok(index.indexOf('motionPreference.js') < index.indexOf('app.js'));
-  assert.ok(dashboard.indexOf('motionPreference.js') < dashboard.indexOf('dashboard.js'));
+  const indexMotion = index.indexOf('../motionPreference.js');
+  const indexApp = index.indexOf('app.js');
+  const dashboardMotion = dashboard.indexOf('../motionPreference.js');
+  const dashboardApp = dashboard.indexOf('dashboard.js');
+  assert.notEqual(indexMotion, -1, 'main window should load the shared motion preference');
+  assert.notEqual(indexApp, -1, 'main window should load app.js');
+  assert.notEqual(dashboardMotion, -1, 'dashboard should load the shared motion preference');
+  assert.notEqual(dashboardApp, -1, 'dashboard should load dashboard.js');
+  assert.ok(indexMotion < indexApp, 'main window should load motion preference before app.js');
+  assert.ok(dashboardMotion < dashboardApp, 'dashboard should load motion preference before dashboard.js');
 });
 
 test('motion preference labels exist in every bundled locale', () => {
