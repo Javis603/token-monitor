@@ -978,9 +978,11 @@ test('active Codex account labels are always shown for multi-account limits rows
 
 test('collection cadence setting is exposed in the Collection panel', () => {
   const html = readRendererFile('index.html');
+  const i18n = readRendererFile('i18n.js');
   const controls = html.match(/<div class="settings-subgroup settings-collection-cadence"[\s\S]*?<select id="collectionCadenceInput"[\s\S]*?<\/select>[\s\S]*?<\/div>/)?.[0] || '';
   assert.match(controls, /data-i18n="settings\.collection\.cadence"/);
   assert.match(controls, /value="live"/);
+  assert.match(controls, /value="smart"[\s\S]*data-i18n="settings\.collection\.mode\.smart"/);
   assert.match(controls, /<option value="300000"/);
   assert.match(controls, /<option value="900000"/);
   assert.match(controls, /<option value="1800000"/);
@@ -988,6 +990,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.doesNotMatch(controls, /<option value="3600000"/);
   assert.doesNotMatch(controls, /id="collectionModeInput"/);
   assert.doesNotMatch(controls, /id="collectionIntervalInput"/);
+  assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects only after agent activity; fixed intervals turn off file watching\.'/);
 
   const app = readRendererFile('app.js');
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
@@ -1000,6 +1003,8 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   );
   assert.match(listenerSlice, /saveSettings\(\{[\s\S]*collectionMode:/);
   assert.match(listenerSlice, /collectionIntervalMs:/);
+  assert.match(listenerSlice, /value === 'smart'/);
+  assert.match(listenerSlice, /600000/);
 });
 
 test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
@@ -1031,6 +1036,8 @@ test('main settings normalize collection cadence and restart collectors when it 
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   assert.match(main, /function normalizeCollectionMode/);
   assert.match(main, /function normalizeCollectionIntervalMs/);
+  assert.match(main, /COLLECTION_MODE_VALUES = new Set\(\[[^\]]*'smart'/);
+  assert.match(main, /COLLECTION_INTERVAL_OPTIONS = \[[^\]]*10 \* 60 \* 1000/);
 
   const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
   assert.match(defaults, /collectionMode: 'live'/);
@@ -1039,10 +1046,16 @@ test('main settings normalize collection cadence and restart collectors when it 
   const syncCollector = main.slice(main.indexOf('function startSyncCollector'), main.indexOf('function stopHostStats'));
   assert.match(syncCollector, /intervalMs: collectorIntervalMs\(\)/);
   assert.match(syncCollector, /watchEnabled: collectorWatchEnabled\(\)/);
+  assert.match(syncCollector, /watchUsePolling: collectorWatchUsePolling\(\)/);
+  assert.match(syncCollector, /watchTriggersCollection: collectorWatchTriggersCollection\(\)/);
+  assert.match(syncCollector, /intervalRequiresActivity: collectorIntervalRequiresActivity\(\)/);
 
   const localCollector = main.slice(main.indexOf('function startLocalCollector'), main.indexOf('function scheduleStreamRetry'));
   assert.match(localCollector, /intervalMs: collectorIntervalMs\(\)/);
   assert.match(localCollector, /watchEnabled: collectorWatchEnabled\(\)/);
+  assert.match(localCollector, /watchUsePolling: collectorWatchUsePolling\(\)/);
+  assert.match(localCollector, /watchTriggersCollection: collectorWatchTriggersCollection\(\)/);
+  assert.match(localCollector, /intervalRequiresActivity: collectorIntervalRequiresActivity\(\)/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
   assert.match(updateHandler, /previousCollectionMode/);

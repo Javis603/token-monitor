@@ -342,11 +342,12 @@
                 </span>
                 <select id="collectionCadenceInput">
                   <option value="live" data-i18n="settings.collection.mode.live">Live watch</option>
+                  <option value="smart" data-i18n="settings.collection.mode.smart">Smart (10 minutes)</option>
                   <option value="300000" data-i18n="settings.collection.interval.5m">Every 5 minutes</option>
                   <option value="900000" data-i18n="settings.collection.interval.15m">Every 15 minutes</option>
                   <option value="1800000" data-i18n="settings.collection.interval.30m">Every 30 minutes</option>
                 </select>
-                <span id="collectionCadenceNote" class="settings-note settings-item-desc" data-i18n="settings.collection.modeDesc" hidden>Interval mode turns off file watching.</span>
+                <span id="collectionCadenceNote" class="settings-note settings-item-desc" data-i18n="settings.collection.modeDesc" hidden>Smart mode collects only after agent activity; fixed intervals turn off file watching.</span>
               </label>
             </div>
             <div class="settings-subgroup session-archive-settings">

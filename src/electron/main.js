@@ -180,8 +180,8 @@ const CSP_HEADER = [
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
-const COLLECTION_MODE_VALUES = new Set(['live', 'interval']);
-const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
+const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
+const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 10 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
@@ -346,11 +346,25 @@ function normalizeCollectionIntervalMs(value, fallback = DEFAULT_COLLECTION_INTE
 }
 
 function collectorIntervalMs() {
-  return normalizeCollectionIntervalMs(settings?.collectionIntervalMs);
+  return normalizeCollectionMode(settings?.collectionMode) === 'smart'
+    ? 10 * 60 * 1000
+    : normalizeCollectionIntervalMs(settings?.collectionIntervalMs);
 }
 
 function collectorWatchEnabled() {
+  return normalizeCollectionMode(settings?.collectionMode) !== 'interval';
+}
+
+function collectorWatchUsePolling() {
   return normalizeCollectionMode(settings?.collectionMode) === 'live';
+}
+
+function collectorWatchTriggersCollection() {
+  return normalizeCollectionMode(settings?.collectionMode) === 'live';
+}
+
+function collectorIntervalRequiresActivity() {
+  return normalizeCollectionMode(settings?.collectionMode) === 'smart';
 }
 
 function syncUploadIntervalMs() {
@@ -1980,6 +1994,9 @@ function startSyncCollector() {
     projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
+    watchUsePolling: collectorWatchUsePolling(),
+    watchTriggersCollection: collectorWatchTriggersCollection(),
+    intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     limitsEnabled: settings.limitsEnabled !== false,
     wslScanEnabled: settings.wslScanEnabled !== false,
@@ -2055,6 +2072,9 @@ function startHostCollector() {
     projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
+    watchUsePolling: collectorWatchUsePolling(),
+    watchTriggersCollection: collectorWatchTriggersCollection(),
+    intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     limitsEnabled: settings.limitsEnabled !== false,
     wslScanEnabled: settings.wslScanEnabled !== false,
@@ -2293,6 +2313,9 @@ function startLocalCollector() {
     projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
+    watchUsePolling: collectorWatchUsePolling(),
+    watchTriggersCollection: collectorWatchTriggersCollection(),
+    intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     limitsEnabled: settings.limitsEnabled !== false,
     wslScanEnabled: settings.wslScanEnabled !== false,

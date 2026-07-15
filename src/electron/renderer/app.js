@@ -5310,9 +5310,11 @@ function syncSettingsForm() {
   if (els.collectionCadenceInput) {
     const value = Number(state.settings.collectionIntervalMs);
     const allowed = [300000, 900000, 1800000];
-    els.collectionCadenceInput.value = state.settings.collectionMode === 'interval'
-      ? String(allowed.includes(value) ? value : 300000)
-      : 'live';
+    els.collectionCadenceInput.value = state.settings.collectionMode === 'smart'
+      ? 'smart'
+      : state.settings.collectionMode === 'interval'
+        ? String(allowed.includes(value) ? value : 300000)
+        : 'live';
     if (els.collectionCadenceNote) {
       els.collectionCadenceNote.hidden = els.collectionCadenceInput.value === 'live';
     }
@@ -6924,8 +6926,12 @@ els.syncUploadIntervalInput?.addEventListener('change', async () => {
 els.collectionCadenceInput?.addEventListener('change', async () => {
   const value = els.collectionCadenceInput.value;
   await saveSettings({
-    collectionMode: value === 'live' ? 'live' : 'interval',
-    collectionIntervalMs: value === 'live' ? Number(state.settings.collectionIntervalMs || 300000) : Number(value)
+    collectionMode: value === 'live' ? 'live' : value === 'smart' ? 'smart' : 'interval',
+    collectionIntervalMs: value === 'smart'
+      ? 600000
+      : value === 'live'
+        ? Number(state.settings.collectionIntervalMs || 300000)
+        : Number(value)
   });
 });
 els.sessionUsageArchiveInput?.addEventListener('change', async () => {
