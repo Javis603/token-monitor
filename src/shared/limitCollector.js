@@ -110,7 +110,7 @@ function errorWithStatus(status, message) {
 }
 
 function shouldTryClaudeCliFallback(error) {
-  return ['sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
+  return ['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
 }
 
 async function readJsonFile(filePath, deps) {
