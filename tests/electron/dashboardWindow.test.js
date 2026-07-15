@@ -30,6 +30,15 @@ test('main registers dashboard handlers and a sender-scoped close', () => {
   assert.match(main, /function getDashboardHistory/);
 });
 
+test('dashboard ready fallback is armed for initial load and every reload', () => {
+  const main = read('src', 'electron', 'main.js');
+  assert.match(main, /function armDashboardShowFallback\(win\)[\s\S]*?setTimeout\([\s\S]*?win\.show\(\)[\s\S]*?2000/);
+  assert.match(main, /dashboardWindow\.hide\(\);\s*armDashboardShowFallback\(dashboardWindow\);\s*dashboardWindow\.webContents\.reload\(\)/);
+  assert.match(main, /armDashboardShowFallback\(win\);\s*win\.loadFile/);
+  assert.match(main, /win\.on\('show', clearDashboardShowFallback\)/);
+  assert.match(main, /win\.on\('closed',[\s\S]*?clearDashboardShowFallback\(\)/);
+});
+
 test('getDashboardHistory mirrors the local/sync split of fetchStats', () => {
   const main = read('src', 'electron', 'main.js');
   assert.match(main, /aggregateHistory\(localDevice \? \[localDevice\] : \[\]\)/);

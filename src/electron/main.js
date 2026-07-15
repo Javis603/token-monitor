@@ -176,6 +176,7 @@ const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'tre
 
 let mainWindow = null;
 let dashboardWindow = null;
+let dashboardShowFallback = null;
 let settingsPath = null;
 let settings = null;
 let sessionUsageArchive = null;
@@ -3332,11 +3333,26 @@ function replaceMainWindow(bounds, options = {}) {
   });
 }
 
+function clearDashboardShowFallback() {
+  if (dashboardShowFallback === null) return;
+  clearTimeout(dashboardShowFallback);
+  dashboardShowFallback = null;
+}
+
+function armDashboardShowFallback(win) {
+  clearDashboardShowFallback();
+  dashboardShowFallback = setTimeout(() => {
+    dashboardShowFallback = null;
+    if (!win.isDestroyed() && !win.isVisible()) win.show();
+  }, 2000);
+}
+
 function createDashboardWindow() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     // Reload so a reopened window always picks up the latest renderer + fresh history,
     // instead of showing whatever was loaded when it first opened.
     dashboardWindow.hide();
+    armDashboardShowFallback(dashboardWindow);
     dashboardWindow.webContents.reload();
     return dashboardWindow;
   }
@@ -3371,15 +3387,14 @@ function createDashboardWindow() {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
   // The renderer waits for history and installs the heatmap's hidden entry
-  // state before sending dashboard:ready. ready-to-show alone is too early: on
-  // a cold transparent window it can expose an unprepared or retained surface.
-  win.once('ready-to-show', () => {
-    const fallback = setTimeout(() => {
-      if (!win.isDestroyed() && !win.isVisible()) win.show();
-    }, 2000);
-    win.once('show', () => clearTimeout(fallback));
+  // state before sending dashboard:ready. The fallback is armed immediately
+  // and re-armed on reload so a failed renderer cannot leave the window hidden.
+  win.on('show', clearDashboardShowFallback);
+  win.on('closed', () => {
+    clearDashboardShowFallback();
+    dashboardWindow = null;
   });
-  win.on('closed', () => { dashboardWindow = null; });
+  armDashboardShowFallback(win);
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => console.log(`[dashboard] load failed: ${error.message}`));
   return win;
