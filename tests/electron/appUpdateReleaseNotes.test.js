@@ -89,6 +89,18 @@ test('release-note disclosure has keyboard focus and compact reading styles', ()
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.app-update-popover/);
 });
 
+test('release-note popover uses the view switcher glass surface', () => {
+  const css = read('styles.css');
+  const start = css.indexOf('.app-update-popover {');
+  const end = css.indexOf('}', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const popover = css.slice(start, end);
+  assert.match(popover, /rgba\(var\(--glass-rgb\), 0\.76\)/);
+  assert.match(popover, /backdrop-filter: blur\(28px\) saturate\(115%\)/);
+  assert.doesNotMatch(popover, /var\(--bg\)/);
+});
+
 test('Japanese release-note heading describes updates rather than only new features', () => {
   const i18n = read('i18n.js');
   assert.match(i18n, /'settings\.appUpdate\.whatsNew': 'v\{version\} の更新内容'/);
