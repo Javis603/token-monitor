@@ -2544,6 +2544,210 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .limits-panel::-webkit-scrollbar { width: 0; height: 0; }
 .limits-panel.hidden { display: none; }
+.occupancy-panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+  gap: 10px;
+  overflow: hidden auto;
+  padding: 0 2px 0 0;
+  scrollbar-width: none;
+}
+.occupancy-panel::-webkit-scrollbar { width: 0; height: 0; }
+.occupancy-panel.hidden { display: none; }
+.occupancy-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 1px 3px;
+}
+.occupancy-heading {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.occupancy-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+.occupancy-subtitle {
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+.occupancy-summary,
+.occupancy-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.occupancy-summary { justify-content: flex-end; }
+.occupancy-summary-pill,
+.occupancy-evidence-pill {
+  padding: 2px 6px;
+  border: 1px solid rgba(var(--line-rgb), 0.13);
+  border-radius: 999px;
+  background: rgba(var(--overlay-rgb), 0.025);
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.occupancy-quota-yellow { color: var(--yellow); }
+.occupancy-quota-red { color: var(--red); }
+.occupancy-card {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid rgba(var(--line-rgb), 0.12);
+  border-radius: 12px;
+  background: rgba(var(--overlay-rgb), 0.025);
+}
+.occupancy-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.occupancy-account-identity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.occupancy-account-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+.occupancy-light,
+.occupancy-task-marker {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.occupancy-green .occupancy-light { background: var(--green); box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.45); }
+.occupancy-yellow .occupancy-light { background: var(--yellow); }
+.occupancy-red .occupancy-light { background: var(--red); }
+.occupancy-gray .occupancy-light { background: var(--muted); }
+.occupancy-account-alias {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.occupancy-account-provider {
+  overflow: hidden;
+  padding-left: 14px;
+  color: var(--muted);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.occupancy-account-status {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  justify-items: end;
+  column-gap: 2px;
+}
+.occupancy-count {
+  color: var(--text);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1;
+}
+.occupancy-threshold {
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.occupancy-state-label {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+}
+.occupancy-yellow .occupancy-state-label { color: var(--yellow); }
+.occupancy-red .occupancy-state-label { color: var(--red); }
+.occupancy-green .occupancy-state-label { color: var(--green); }
+.occupancy-tasks {
+  display: grid;
+  gap: 5px;
+  padding-top: 2px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.08);
+}
+.occupancy-task {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 7px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+.occupancy-task-marker {
+  width: 4px;
+  height: 4px;
+  background: var(--muted);
+  opacity: 0.75;
+}
+.occupancy-task-main {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.occupancy-task-label,
+.occupancy-task-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.occupancy-task-label { color: var(--text); font-size: 10px; }
+.occupancy-task-meta,
+.occupancy-more { color: var(--muted); font-size: 9px; }
+.occupancy-more { padding-left: 14px; }
+.occupancy-recent-tasks { opacity: 0.82; }
+.occupancy-task-failed .occupancy-task-label { color: var(--red); }
+.occupancy-task-expired .occupancy-task-label { color: var(--yellow); }
+.occupancy-notice {
+  display: grid;
+  gap: 6px;
+  margin: auto 0;
+  padding: 18px 16px;
+  border: 1px solid rgba(var(--line-rgb), 0.12);
+  border-radius: 12px;
+  background: rgba(var(--overlay-rgb), 0.025);
+  text-align: center;
+}
+.occupancy-notice-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+.occupancy-notice-body {
+  max-width: 36em;
+  margin: 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
 .service-status-panel {
   position: relative;
   z-index: 1;
@@ -3408,6 +3612,7 @@ html.is-windows .limit-live-badge {
 }
 @media (max-height: 240px) {
   .limits-panel,
+  .occupancy-panel,
   .home-panel,
   .service-status-panel,
   .trends-panel { display: none; }
@@ -3422,6 +3627,7 @@ html.is-windows .limit-live-badge {
   .cost { margin-top: clamp(2px, 1vh, 6px); font-size: clamp(12px, 2.8vw, 18px); }
   .breakdown,
   .home-panel,
+  .occupancy-panel,
   .service-status-panel { display: none; }
 }
 

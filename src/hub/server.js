@@ -7,6 +7,10 @@ const { aggregateDevices, mergeDeviceRecord, aggregateHistory } = require('../sh
 const { historyPreview, historyRevision } = require('../shared/history');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
+const { createOccupancyStore } = require('../shared/occupancy');
+const { enrichOccupancyWithLimits } = require('../shared/occupancyQuota');
+const { createOccupancyRoutes } = require('./occupancyRoutes');
+const { serveOccupancyDashboard } = require('./occupancyDashboard');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
@@ -20,17 +24,29 @@ function resolveBindHost(host, secret) {
   return LOOPBACK_HOSTS.has(requested.toLowerCase()) ? requested : '127.0.0.1';
 }
 
+function isLoopbackRequestHost(value) {
+  try {
+    return LOOPBACK_HOSTS.has(new URL(`http://${String(value || '').trim()}`).hostname.toLowerCase());
+  } catch (_) {
+    return false;
+  }
+}
+
 function createHub({
   port = 17321,
   host = '0.0.0.0',
   secret = '',
   staleAfterMs = 10 * 60 * 1000,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
+  occupancyDataFile = path.basename(dataFile) === 'devices.json'
+    ? path.join(path.dirname(dataFile), 'occupancy.json')
+    : `${dataFile}.occupancy.json`,
   logger = console
 } = {}) {
   const store = readJson(dataFile, { version: 1, devices: {} }) || { version: 1, devices: {} };
   if (!store.devices || typeof store.devices !== 'object') store.devices = {};
   const bindHost = resolveBindHost(host, secret);
+  const occupancy = createOccupancyStore({ dataFile: occupancyDataFile, logger });
 
   function persist() {
     store.version = 1;
@@ -39,12 +55,20 @@ function createHub({
   }
 
   function getStats() {
-    const stats = aggregateDevices(Object.values(store.devices), staleAfterMs);
+    const nowMs = Date.now();
+    const stats = aggregateDevices(Object.values(store.devices), staleAfterMs, nowMs);
     stats.staleAfterMs = staleAfterMs;
     const history = aggregateHistory(Object.values(store.devices));
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
+    stats.occupancy = enrichOccupancyWithLimits(occupancy.snapshot({ at: nowMs }), stats);
     return stats;
+  }
+
+  function getOccupancySnapshot() {
+    const nowMs = Date.now();
+    const stats = aggregateDevices(Object.values(store.devices), staleAfterMs, nowMs);
+    return enrichOccupancyWithLimits(occupancy.snapshot({ at: nowMs }), stats);
   }
 
   function getHistory() {
@@ -73,6 +97,9 @@ function createHub({
     }
   }
 
+  const occupancyRoutes = createOccupancyRoutes({ occupancy, getSnapshot: getOccupancySnapshot, logger });
+  const unsubscribeOccupancyStats = occupancy.onChange(() => broadcastStats('occupancy'));
+
   // Transport-agnostic core: both the HTTP POST handler and the same-process
   // widget call these, so a host-mode widget never has to loopback to itself.
   function ingest(payload) {
@@ -98,8 +125,26 @@ function createHub({
   }
 
   async function handleRequest(req, res) {
-    if (req.method === 'OPTIONS') return sendText(res, 204, '');
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const origin = String(req.headers.origin || '').trim();
+    if (!secret && !isLoopbackRequestHost(req.headers.host)) {
+      return sendJson(res, 403, {
+        error: 'loopback_host_required',
+        message: 'Configure TOKEN_MONITOR_SECRET before using the Hub through a non-loopback host.'
+      });
+    }
+    if (!secret && origin) {
+      let sameOrigin = false;
+      try { sameOrigin = new URL(origin).host.toLowerCase() === String(req.headers.host || '').toLowerCase(); }
+      catch (_) {}
+      if (!sameOrigin) {
+        return sendJson(res, 403, {
+          error: 'cross_origin_secret_required',
+          message: 'Configure TOKEN_MONITOR_SECRET before using the Hub from another origin.'
+        });
+      }
+    }
+    if (req.method === 'OPTIONS') return sendText(res, 204, '');
 
     if (url.pathname === '/api/health') {
       return sendJson(res, 200, {
@@ -112,7 +157,14 @@ function createHub({
       });
     }
 
+    // The dashboard shell is public so a browser can load it before the user
+    // supplies an optional Hub secret. All occupancy data remains behind the
+    // authenticated API and the UI keeps that secret in sessionStorage only.
+    if (serveOccupancyDashboard(req, res, url.pathname)) return;
+
     if (!isAuthorized(req, secret)) return sendJson(res, 401, { error: 'unauthorized' });
+
+    if (await occupancyRoutes.handle(req, res, url)) return;
 
     if (req.method === 'GET' && url.pathname === '/api/stats') return sendJson(res, 200, getStats());
     if (req.method === 'GET' && url.pathname === '/api/devices') return sendJson(res, 200, { devices: Object.values(store.devices) });
@@ -179,11 +231,14 @@ function createHub({
     return new Promise((resolve) => {
       for (const res of sseClients) { try { res.end(); } catch (_) {} }
       sseClients.clear();
+      unsubscribeOccupancyStats();
+      occupancyRoutes.close();
+      occupancy.close();
       server.close(() => resolve());
     });
   }
 
-  return { start, stop, server, getStats, getHistory, ingest, deleteDevice, onStats, bindHost };
+  return { start, stop, server, getStats, getHistory, ingest, deleteDevice, onStats, occupancy, bindHost };
 }
 
 if (require.main === module) {
@@ -208,4 +263,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createHub, resolveBindHost };
+module.exports = { createHub, isLoopbackRequestHost, resolveBindHost };

@@ -4,11 +4,15 @@
   "version": "0.29.0",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
+  "bin": {
+    "token-monitor-occupancy": "src/occupancy/cli.js"
+  },
   "scripts": {
     "start": "electron .",
     "hub": "node src/hub/server.js",
     "agent": "node src/agent/agent.js",
     "agent:once": "node src/agent/agent.js --once",
+    "occupancy": "node src/occupancy/cli.js",
     "widget": "electron .",
     "dev": "electron .",
     "test": "node --test \"tests/**/*.test.js\"",
@@ -36,6 +40,7 @@
       "src/electron/**/*",
       "src/shared/**/*",
       "src/hub/**/*",
+      "src/occupancy/**/*",
       "assets/icon.png",
       "assets/icons/**/*",
       "package.json"

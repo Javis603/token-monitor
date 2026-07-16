@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Token Monitor 账号占用设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <h1>Token Monitor 账号占用</h1>
+    <p class="intro">把 ChatGPT 网页生成状态同步到你的 Hub。扩展不会读取或上传提示词、回答、Cookie 或服务商凭证。Claude 网页自动检测因合规边界默认关闭，请使用手动登记或 Claude Code wrapper。</p>
+    <form id="settings-form">
+      <section>
+        <h2>Hub 连接</h2>
+        <label>Hub URL<input id="hub-url" name="hubUrl" type="url" placeholder="http://192.168.1.10:17321" required></label>
+        <label>共享密钥<input id="secret" name="secret" type="password" autocomplete="off" placeholder="TOKEN_MONITOR_SECRET" required></label>
+      </section>
+      <section>
+        <h2>此设备</h2>
+        <label>设备 ID<input id="device-id" name="deviceId" type="text" required maxlength="200"></label>
+        <label>设备名称<input id="device-name" name="deviceName" type="text" maxlength="200" placeholder="办公电脑 · Edge"></label>
+      </section>
+      <section>
+        <h2>网页账号映射</h2>
+        <p>填写 Hub 仪表盘中已经创建的 accountId。留空的网站不会申请占用。</p>
+        <label>chatgpt.com accountId<input id="account-chatgpt-com" type="text" maxlength="200"></label>
+        <label>chat.openai.com accountId<input id="account-chat-openai-com" type="text" maxlength="200"></label>
+      </section>
+      <div class="actions"><button type="submit">保存设置</button><span id="status" role="status" aria-live="polite"></span></div>
+    </form>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

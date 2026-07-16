@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0a0d12" />
+    <title>AI 账号状态</title>
+    <link rel="stylesheet" href="/occupancy.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/occupancy" aria-label="AI 账号状态首页">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span>
+            <strong>AI 账号状态</strong>
+            <small>多设备并发调度台</small>
+          </span>
+        </a>
+
+        <div class="topbar-actions">
+          <button id="addAccountButton" class="button button-primary topbar-add" type="button">+ 添加账号</button>
+          <div id="connectionBadge" class="connection is-connecting" role="status" aria-live="polite">
+            <span class="connection-dot"></span>
+            <span id="connectionText">正在连接</span>
+          </div>
+          <button id="refreshButton" class="icon-button" type="button" title="立即刷新" aria-label="立即刷新">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 5v6h-6" /></svg>
+          </button>
+          <button id="settingsButton" class="icon-button" type="button" title="连接设置" aria-label="连接设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.37.29.72.6 1 .31.28.7.42 1.1.4h.1v4h-.09A1.7 1.7 0 0 0 19.4 15Z" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="errorBanner" class="error-banner" role="alert" hidden>
+        <span id="errorText"></span>
+        <button id="dismissErrorButton" type="button" aria-label="关闭错误提示">×</button>
+      </div>
+
+      <section class="hero" aria-labelledby="pageTitle">
+        <div>
+          <p class="eyebrow">LIVE OCCUPANCY</p>
+          <h1 id="pageTitle">现在，哪个账号可以用？</h1>
+          <p class="hero-copy">汇总本人账号在各设备上的进行中任务，仅提供切换建议，不限制或中断任何 AI 工具。</p>
+        </div>
+        <p id="updatedAt" class="updated-at">等待首个状态快照</p>
+      </section>
+
+      <section id="summary" class="summary-grid" aria-label="占用概览">
+        <article class="metric-card metric-available">
+          <span class="metric-icon" aria-hidden="true"></span>
+          <div><strong id="availableMetric">—</strong><span>阈值内余量</span></div>
+        </article>
+        <article class="metric-card metric-active">
+          <span class="metric-icon" aria-hidden="true"></span>
+          <div><strong id="activeMetric">—</strong><span>进行中任务</span></div>
+        </article>
+        <article class="metric-card metric-accounts">
+          <span class="metric-icon" aria-hidden="true"></span>
+          <div><strong id="accountMetric">—</strong><span>账号总数</span></div>
+        </article>
+        <article class="metric-card metric-full">
+          <span class="metric-icon" aria-hidden="true"></span>
+          <div><strong id="fullMetric">—</strong><span>建议切换</span></div>
+        </article>
+      </section>
+
+      <section class="toolbar" aria-label="账号筛选">
+        <div id="providerFilters" class="filter-scroll" role="group" aria-label="服务商"></div>
+        <div class="toolbar-right">
+          <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+            <span class="sr-only">搜索账号</span>
+            <input id="searchInput" type="search" placeholder="搜索账号或设备" autocomplete="off" />
+          </label>
+          <select id="stateFilter" class="state-filter" aria-label="按状态筛选">
+            <option value="all">全部状态</option>
+            <option value="available">阈值内</option>
+            <option value="busy">使用中</option>
+            <option value="full">建议切换</option>
+          </select>
+        </div>
+      </section>
+
+      <section aria-labelledby="accountsTitle">
+        <div class="section-heading">
+          <h2 id="accountsTitle">账号</h2>
+          <span id="visibleCount">0 个</span>
+        </div>
+        <div id="accountGrid" class="account-grid" aria-live="polite" aria-busy="true">
+          <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+        </div>
+        <div id="emptyState" class="empty-state" hidden>
+          <span class="empty-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+          <h3>没有匹配的账号</h3>
+          <p>调整筛选条件，或先通过命令行添加一个账号。</p>
+        </div>
+      </section>
+
+      <footer>
+        <span>状态通过本地 Hub 实时同步</span>
+        <span class="footer-separator">·</span>
+        <span>默认每 30 秒心跳保活</span>
+      </footer>
+    </main>
+
+    <dialog id="settingsDialog" class="settings-dialog">
+      <form id="settingsForm" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">CONNECTION</p><h2>连接设置</h2></div>
+          <button id="closeSettingsButton" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <p>如果 Hub 配置了访问密钥，请在这里输入。密钥只保留在当前浏览器会话中。</p>
+        <label class="field-label" for="secretInput">Hub 密钥</label>
+        <input id="secretInput" class="secret-input" type="password" placeholder="未配置可留空" autocomplete="current-password" />
+        <div class="dialog-actions">
+          <button id="clearSecretButton" class="button button-secondary" type="button">清除</button>
+          <button class="button button-primary" type="submit">保存并重连</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="accountDialog" class="settings-dialog action-dialog">
+      <form id="accountForm">
+        <input id="accountIdInput" type="hidden" />
+        <div class="dialog-heading">
+          <div><p class="eyebrow">ACCOUNT</p><h2 id="accountDialogTitle">添加账号</h2></div>
+          <button class="icon-button dialog-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="form-grid">
+          <label><span>服务商</span><input id="providerInput" required maxlength="100" placeholder="例如 claude、chatgpt" /></label>
+          <label><span>账号别名</span><input id="aliasInput" required maxlength="200" placeholder="例如 Claude 工作号" /></label>
+          <label><span>脱敏身份（可选）</span><input id="maskedIdentityInput" maxlength="200" placeholder="例如 a***@example.com" /></label>
+          <label><span>关联已检测额度账号（可选）</span><select id="quotaCandidateInput"><option value="">不关联额度</option></select></label>
+          <label><span>建议切换阈值</span><input id="capacityInput" required type="number" min="1" step="1" value="1" /></label>
+          <label id="enabledField" class="toggle-field" hidden><input id="enabledInput" type="checkbox" checked /><span>启用这个账号</span></label>
+        </div>
+        <div class="dialog-actions split-actions">
+          <button id="deleteAccountButton" class="button button-danger" type="button" hidden>删除账号</button>
+          <span></span>
+          <button class="button button-secondary dialog-cancel" type="button">取消</button>
+          <button id="saveAccountButton" class="button button-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="leaseDialog" class="settings-dialog action-dialog">
+      <form id="leaseForm">
+        <input id="leaseAccountIdInput" type="hidden" />
+        <div class="dialog-heading">
+          <div><p class="eyebrow">OCCUPY</p><h2>占用 <span id="leaseAccountName"></span></h2></div>
+          <button class="icon-button dialog-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <p>登记这台设备上的任务。即使达到红灯仍可继续登记；任务结束后请释放记录。</p>
+        <div class="form-grid">
+          <label><span>设备 ID</span><input id="deviceIdInput" required maxlength="200" placeholder="例如 office-pc" /></label>
+          <label><span>设备名称（可选）</span><input id="deviceNameInput" maxlength="200" placeholder="例如 办公室台式机" /></label>
+          <label><span>任务名称（可选）</span><input id="taskLabelInput" maxlength="500" placeholder="例如 重构支付接口" /></label>
+          <label><span>项目名称（可选）</span><input id="projectLabelInput" maxlength="500" placeholder="例如 电商后台" /></label>
+        </div>
+        <div class="dialog-actions">
+          <button class="button button-secondary dialog-cancel" type="button">取消</button>
+          <button id="acquireLeaseButton" class="button button-primary" type="submit">确认占用</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="accountCardTemplate">
+      <article class="account-card">
+        <div class="account-card-top">
+          <div class="provider-identity">
+            <span class="provider-avatar"></span>
+            <div><span class="provider-name"></span><h3 class="account-alias"></h3></div>
+          </div>
+          <div class="traffic-light" aria-hidden="true"><i class="red"></i><i class="yellow"></i><i class="green"></i></div>
+        </div>
+        <div class="card-actions">
+          <button class="card-button edit-account-button" type="button">编辑</button>
+          <button class="card-button card-button-primary occupy-button" type="button">占用</button>
+        </div>
+        <p class="masked-identity"></p>
+        <div class="capacity-row">
+          <div><strong class="active-count"></strong><span class="capacity-total"></span></div>
+          <span class="capacity-label"></span>
+        </div>
+        <div class="capacity-track" aria-hidden="true"><span></span></div>
+        <div class="quota-summary" hidden></div>
+        <div class="task-area">
+          <div class="task-heading"><span>当前任务</span><span class="task-count"></span></div>
+          <div class="task-list"></div>
+        </div>
+      </article>
+    </template>
+
+    <script src="/occupancy.js"></script>
+  </body>
+</html>

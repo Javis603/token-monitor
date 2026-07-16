@@ -221,6 +221,10 @@ Response includes:
 
 If multiple devices report the same provider account, the hub keeps the freshest valid limits status for that account. Public Worker stats omit account identifiers.
 
+Authenticated Node Hub stats may also include `occupancy`. Occupancy accounts can carry an explicit `quotaLink` containing a limits provider ID plus a stable hashed account key or provider-scoped email hash. The Hub derives `account.quota` at read time from `devices[].limits.providers`; it does not copy quota snapshots or raw account emails into the occupancy store. `occupancy.quotaCandidates` is available only through authenticated Node Hub responses and contains masked display identities for the account-binding UI.
+
+Released leases appear in a bounded `occupancy.recentTasks` timeline with `completed`, `failed`, `stopped`, or `expired` status. `expired` means heartbeats stopped; it must not be presented as proof that the AI task completed.
+
 ## `GET /api/devices`
 
 Returns normalized records for all stored devices.

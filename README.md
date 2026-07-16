@@ -70,6 +70,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Live token tracking** for Claude Code, Codex, Hermes Agent, OpenCode, OpenClaw, Cursor, Antigravity, Cline, Kimi, Qwen, Grok Build, GitHub Copilot, Pi, Zed, Kilo Code, MiMo Code, ZCode, Kiro, CodeBuddy, WorkBuddy, and Proma (UI updates within seconds of each turn)
 - **WSL usage (Windows)** — usage from AI tools running inside a running WSL distro is detected automatically and merged into your totals (refreshed on the periodic scan, about every 5 minutes)
 - **Real-time multi-device sync** over Server-Sent Events
+- **Experimental account occupancy lights** — optional per-account active-task signals shared through the existing Hub, with advisory green/yellow/red/gray states; see [docs/OCCUPANCY.md](docs/OCCUPANCY.md)
 - **Breakdown views** grouped by tool, device, model, session, or account limits
 - **Per-session detail** — open a Claude Code, Codex, or OpenCode session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click on any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit rate percentages
@@ -245,8 +246,10 @@ The hub and agent only transmit summary fields:
 
 They do not transmit raw AI logs, prompts, source code, or conversation
 content. They also do not transmit OAuth credentials, access tokens, refresh
-tokens, emails, or raw provider responses. `.env`, `data/`, and `node_modules/`
-are gitignored.
+tokens or raw provider responses. When AI Tool Limits is enabled, authenticated
+Hub snapshots may include provider-supplied account email/label metadata so the
+same account can be identified across devices; public Worker responses strip
+those identity fields. `.env`, `data/`, and `node_modules/` are gitignored.
 
 ## Requirements
 

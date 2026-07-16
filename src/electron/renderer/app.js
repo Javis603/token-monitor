@@ -88,6 +88,7 @@ const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentatio
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
+const occupancyPresentationApi = window.TokenMonitorOccupancyPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
 const viewDisplayPreferencesApi = window.TokenMonitorViewDisplayPreferences;
@@ -155,10 +156,11 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'project', labelKey: 'views.project' },
   { id: 'session', labelKey: 'views.session' },
   { id: 'limits', labelKey: 'views.limits' },
+  { id: 'occupancy', labelKey: 'views.occupancy' },
   { id: 'trends', labelKey: 'views.trends' }
 ];
 const viewPeriodValues = new Set(['today', 'month', 'allTime']);
-const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
+const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'occupancy', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
@@ -177,6 +179,7 @@ const VIEW_ICON_CLASSES = {
   project: 'view-icon-project',
   session: 'view-icon-session',
   limits: 'view-icon-limits',
+  occupancy: 'view-icon-limits',
   trends: 'view-icon-trends'
 };
 const SERVICE_STATUS_PLACEHOLDERS = [
@@ -215,7 +218,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutRecordButton: document.getElementById('windowToggleShortcutRecordButton'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), occupancyPanel: document.getElementById('occupancyPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutRecordButton: document.getElementById('windowToggleShortcutRecordButton'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
@@ -1555,7 +1558,7 @@ function effectiveViewDisplayOrderValue() {
 }
 
 function availableBreakdownIds() {
-  const order = ['home', baseBreakdownOrder[0], 'status', 'trends', ...baseBreakdownOrder.slice(1)];
+  const order = ['home', baseBreakdownOrder[0], 'status', 'occupancy', 'trends', ...baseBreakdownOrder.slice(1)];
   let available = state.settings?.historyEnabled === false ? order.filter((id) => id !== 'trends') : order;
   if (state.settings?.projectsEnabled === false) available = available.filter((id) => id !== 'project');
   return limitViewAvailable() ? [...available, 'limits'] : available;
@@ -2783,6 +2786,141 @@ function renderServiceStatus() {
   els.serviceStatusPanel.replaceChildren(...rows);
 }
 
+function occupancyNode(tag, className, content) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (content !== undefined) node.textContent = content;
+  return node;
+}
+
+function occupancyProviderLabel(provider) {
+  const id = String(provider || '').trim().toLowerCase();
+  const aliases = { chatgpt: 'ChatGPT', openai: 'OpenAI', claude: 'Claude' };
+  if (aliases[id]) return aliases[id];
+  if (clientLabels[id]) return clientLabels[id];
+  return id ? `${id.charAt(0).toUpperCase()}${id.slice(1)}` : t('occupancy.unknownProvider');
+}
+
+function occupancyNotice(titleKey, bodyKey) {
+  const notice = occupancyNode('div', 'occupancy-notice');
+  notice.append(
+    occupancyNode('strong', 'occupancy-notice-title', t(titleKey)),
+    occupancyNode('p', 'occupancy-notice-body', t(bodyKey))
+  );
+  return notice;
+}
+
+function occupancyTaskNode(task) {
+  const row = occupancyNode('div', 'occupancy-task');
+  const marker = occupancyNode('span', 'occupancy-task-marker');
+  marker.setAttribute('aria-hidden', 'true');
+  const main = occupancyNode('div', 'occupancy-task-main');
+  main.append(
+    occupancyNode('span', 'occupancy-task-label', task.taskLabel || t('occupancy.unnamedTask')),
+    occupancyNode('span', 'occupancy-task-meta', [task.deviceName, task.projectLabel].filter(Boolean).join(' · ') || t('occupancy.unknownDevice'))
+  );
+  row.append(marker, main);
+  return row;
+}
+
+function occupancyAccountNode(account) {
+  const card = occupancyNode('article', `occupancy-card occupancy-${account.light}`);
+  const head = occupancyNode('div', 'occupancy-card-head');
+  const identity = occupancyNode('div', 'occupancy-account-identity');
+  const titleRow = occupancyNode('div', 'occupancy-account-title-row');
+  const light = occupancyNode('span', 'occupancy-light');
+  light.setAttribute('aria-hidden', 'true');
+  titleRow.append(light, occupancyNode('strong', 'occupancy-account-alias', account.alias));
+  identity.append(
+    titleRow,
+    occupancyNode('span', 'occupancy-account-provider', [occupancyProviderLabel(account.provider), account.maskedIdentity].filter(Boolean).join(' · '))
+  );
+  const status = occupancyNode('div', 'occupancy-account-status');
+  status.append(
+    occupancyNode('span', 'occupancy-count', String(account.activeCount)),
+    occupancyNode('span', 'occupancy-threshold', t('occupancy.ofThreshold', { threshold: account.threshold })),
+    occupancyNode('span', 'occupancy-state-label', t(`occupancy.state.${account.light}`))
+  );
+  head.append(identity, status);
+  card.append(head);
+
+  const evidence = occupancyNode('div', 'occupancy-evidence');
+  evidence.append(
+    occupancyNode('span', 'occupancy-evidence-pill', t('occupancy.activeCount', { count: account.activeCount })),
+    occupancyNode('span', 'occupancy-evidence-pill', t('occupancy.referenceThreshold', { threshold: account.threshold })),
+    occupancyNode('span', 'occupancy-evidence-pill', t(`occupancy.reliability.${account.reliability === 'estimated' ? 'estimated' : 'exact'}`))
+  );
+  if (account.quota.linkState === 'linked') {
+    const value = account.quota.minimumRemainingPercent == null
+      ? t('occupancy.quotaLinked')
+      : t('occupancy.quotaRemaining', { percent: account.quota.minimumRemainingPercent });
+    const source = account.quota.sourceDeviceId ? ` · ${account.quota.sourceDeviceId}` : '';
+    evidence.append(occupancyNode('span', `occupancy-evidence-pill occupancy-quota-${account.quota.light}`, `${value}${source}`));
+  } else if (account.quota.linkState === 'stale') {
+    evidence.append(occupancyNode('span', 'occupancy-evidence-pill', t('occupancy.quotaStale')));
+  } else if (account.quota.linkState === 'missing' || account.quota.linkState === 'ambiguous') {
+    evidence.append(occupancyNode('span', 'occupancy-evidence-pill', t(`occupancy.quota${account.quota.linkState === 'missing' ? 'Missing' : 'Ambiguous'}`)));
+  }
+  card.append(evidence);
+
+  if (account.tasks.length > 0) {
+    const tasks = occupancyNode('div', 'occupancy-tasks');
+    for (const task of account.tasks.slice(0, 3)) tasks.append(occupancyTaskNode(task));
+    if (account.tasks.length > 3) {
+      tasks.append(occupancyNode('div', 'occupancy-more', t('occupancy.moreTasks', { count: account.tasks.length - 3 })));
+    }
+    card.append(tasks);
+  }
+  if (account.recentTasks.length > 0) {
+    const recent = occupancyNode('div', 'occupancy-tasks occupancy-recent-tasks');
+    recent.append(occupancyNode('div', 'occupancy-more', t('occupancy.recentTasks')));
+    for (const task of account.recentTasks.slice(0, 2)) {
+      const row = occupancyTaskNode({
+        ...task,
+        taskLabel: `${t(`occupancy.taskStatus.${task.status}`)} · ${task.taskLabel || t('occupancy.unnamedTask')}`
+      });
+      row.classList.add(`occupancy-task-${task.status}`);
+      recent.append(row);
+    }
+    card.append(recent);
+  }
+  card.setAttribute('aria-label', `${account.alias}, ${t(`occupancy.state.${account.light}`)}, ${t('occupancy.activeCount', { count: account.activeCount })}`);
+  return card;
+}
+
+function renderOccupancy() {
+  if (!els.occupancyPanel || !occupancyPresentationApi) return;
+  const snapshot = occupancyPresentationApi.normalizeSnapshot(state.stats?.occupancy);
+  const kind = occupancyPresentationApi.viewKind(state.settings?.hubMode, snapshot);
+  if (kind === 'local') {
+    els.occupancyPanel.replaceChildren(occupancyNotice('occupancy.localTitle', 'occupancy.localBody'));
+    return;
+  }
+  if (kind === 'unavailable') {
+    els.occupancyPanel.replaceChildren(occupancyNotice('occupancy.unavailableTitle', 'occupancy.unavailableBody'));
+    return;
+  }
+  if (kind === 'empty') {
+    els.occupancyPanel.replaceChildren(occupancyNotice('occupancy.emptyTitle', 'occupancy.emptyBody'));
+    return;
+  }
+
+  const summary = occupancyPresentationApi.occupancySummary(snapshot);
+  const header = occupancyNode('header', 'occupancy-header');
+  const heading = occupancyNode('div', 'occupancy-heading');
+  heading.append(
+    occupancyNode('strong', 'occupancy-title', t('occupancy.title')),
+    occupancyNode('span', 'occupancy-subtitle', t('occupancy.advisoryOnly'))
+  );
+  const totals = occupancyNode('div', 'occupancy-summary');
+  totals.append(
+    occupancyNode('span', 'occupancy-summary-pill', t('occupancy.accountCount', { count: summary.accounts })),
+    occupancyNode('span', 'occupancy-summary-pill', t('occupancy.activeCount', { count: summary.activeTasks }))
+  );
+  header.append(heading, totals);
+  els.occupancyPanel.replaceChildren(header, ...snapshot.accounts.map(occupancyAccountNode));
+}
+
 async function refreshServiceStatus(options = {}) {
   if (!window.tokenMonitor.getServiceStatus || state.serviceStatusBusy) return;
   state.serviceStatusBusy = true;
@@ -3942,6 +4080,7 @@ function render() {
   // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
   if (state.breakdown !== 'home') hideHomeActivityTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
+  els.occupancyPanel?.classList.toggle('hidden', state.breakdown !== 'occupancy');
   if (state.breakdown === 'home') {
     els.breakdown.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
@@ -3956,6 +4095,13 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.limitsPanel.classList.remove('hidden');
     renderLimits();
+  } else if (state.breakdown === 'occupancy') {
+    els.homePanel.classList.add('hidden');
+    els.breakdown.classList.add('hidden');
+    els.serviceStatusPanel?.classList.add('hidden');
+    els.trendsPanel.classList.add('hidden');
+    els.limitsPanel.classList.add('hidden');
+    renderOccupancy();
   } else if (state.breakdown === 'trends') {
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
