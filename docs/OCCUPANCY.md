@@ -1,6 +1,12 @@
 # Token Monitor account occupancy
 
-![Multi-device account occupancy dashboard](../.github/assets/occupancy-dashboard.png)
+![Account occupancy inside the Token Monitor widget](../.github/assets/occupancy-electron-view.png)
+
+The screenshot above is the feature running inside Token Monitor's normal Electron widget. All account names, masked identities, device names, tasks, usage, and quota values shown in it are synthetic demonstration data from an isolated local Hub.
+
+The same Hub also exposes an optional browser management page:
+
+![Optional multi-device account occupancy Hub dashboard](../.github/assets/occupancy-dashboard.png)
 
 ## Product definition
 
