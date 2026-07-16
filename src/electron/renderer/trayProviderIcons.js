@@ -39,5 +39,18 @@
     };
   }
 
-  return { trayProviderIconSources, trayProviderBadgeLayout };
+  function createTrayProviderIconDeliveryGuard() {
+    let latestDeliveryId = 0;
+    return {
+      begin() {
+        latestDeliveryId += 1;
+        return latestDeliveryId;
+      },
+      isCurrent(deliveryId) {
+        return deliveryId === latestDeliveryId;
+      }
+    };
+  }
+
+  return { createTrayProviderIconDeliveryGuard, trayProviderIconSources, trayProviderBadgeLayout };
 });

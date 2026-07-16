@@ -391,7 +391,9 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
   assert.match(html, /data-i18n="settings\.display\.trayProviderBadge"/);
   assert.match(app, /showTrayProviderBadgeInput: document\.getElementById\('showTrayProviderBadgeInput'\)/);
   assert.match(app, /saveSettings\(\{ showTrayProviderBadge: els\.showTrayProviderBadgeInput\.checked \}\)/);
-  assert.match(app, /providerImageToPngDataUrl\(img, 44, state\.settings\?\.showTrayProviderBadge === true\)/);
+  assert.match(app, /deliverTrayProviderIcons\(patch\.showTrayProviderBadge === true\)/);
+  assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge\)/);
+  assert.match(app, /if \(!trayProviderIconDeliveryGuard\.isCurrent\(deliveryId\)\) return;/);
   assert.match(providerImage, /if \(!showBadge\) return canvas\.toDataURL\('image\/png'\)/);
   assert.match(providerImage, /shadowColor = 'rgba\(255, 255, 255, 0\.95\)'/);
   assert.match(providerImage, /shadowBlur = Math\.max/);

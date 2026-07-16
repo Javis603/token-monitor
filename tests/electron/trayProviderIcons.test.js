@@ -5,7 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { trayProviderIconSources, trayProviderBadgeLayout } = require('../../src/electron/renderer/trayProviderIcons');
+const {
+  createTrayProviderIconDeliveryGuard,
+  trayProviderIconSources,
+  trayProviderBadgeLayout
+} = require('../../src/electron/renderer/trayProviderIcons');
 
 const CURRENT_TOOLS = ['claude', 'codex', 'hermes', 'opencode', 'openclaw', 'cursor', 'antigravity', 'cline', 'grok'];
 
@@ -52,4 +56,14 @@ test('tray provider badge stays legible at renderer and native tray sizes', () =
     radius: 3,
     borderWidth: 2
   });
+});
+
+test('tray provider icon delivery guard invalidates older async work', () => {
+  const guard = createTrayProviderIconDeliveryGuard();
+  const olderDelivery = guard.begin();
+  assert.equal(guard.isCurrent(olderDelivery), true);
+
+  const latestDelivery = guard.begin();
+  assert.equal(guard.isCurrent(olderDelivery), false);
+  assert.equal(guard.isCurrent(latestDelivery), true);
 });

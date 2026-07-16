@@ -5875,7 +5875,9 @@ async function saveSettings(patch) {
   preserveSettingsPanelScroll(syncSettingsForm);
   restartTimer();
   maybeUpdateBarsIcon();
-  if (patch.showTrayProviderBadge !== undefined) await deliverTrayProviderIcons();
+  if (patch.showTrayProviderBadge !== undefined) {
+    await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
+  }
 }
 
 function renderHomeIfVisible() {
@@ -6400,6 +6402,7 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 }
 
 const trayProviderImages = {};
+const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
 
 function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors = {}) {
   const trackColor = colors.track || 'rgba(0, 0, 0, 0.32)';
@@ -6634,18 +6637,21 @@ function providerImageToPngDataUrl(img, size, showBadge = false) {
   return canvas.toDataURL('image/png');
 }
 
-async function deliverTrayProviderIcons() {
+async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProviderBadge === true) {
   if (!window.tokenMonitor.setTrayIcons) return;
+  const deliveryId = trayProviderIconDeliveryGuard.begin();
   const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(clientsWithIcon);
   const icons = {};
   for (const [id, path] of Object.entries(sources)) {
     try {
       const img = await loadImage(path);
       trayProviderImages[id] = img;
-      icons[id] = providerImageToPngDataUrl(img, 44, state.settings?.showTrayProviderBadge === true);
+      icons[id] = providerImageToPngDataUrl(img, 44, showBadge);
     } catch (_) { /* skip missing */ }
   }
+  if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
   if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
+  if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
   // Provider images may unlock a richer bars icon now that they're cached.
   maybeUpdateBarsIcon();
 }
