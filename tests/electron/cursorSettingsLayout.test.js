@@ -980,8 +980,11 @@ test('main settings normalize collection cadence and restart collectors when it 
 
 test('main settings normalize sync upload intervals and restart sync collectors when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
   assert.match(main, /createSyncUploadScheduler/);
   assert.match(main, /normalizeSyncUploadIntervalMs/);
+  assert.match(envExample, /TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS=0/);
+  assert.match(envExample, /600000 \(10 min\).*1200000 \(20 min\).*1800000 \(30 min\)/);
 
   const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
   assert.match(defaults, /syncUploadIntervalMs: normalizeSyncUploadIntervalMs\(process\.env\.TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS\)/);
