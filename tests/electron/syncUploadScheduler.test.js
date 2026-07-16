@@ -202,6 +202,40 @@ test('a failed upload does not throttle the next summary', async () => {
   assert.equal(clock.timerCount(), 0);
 });
 
+test('a failed in-flight upload immediately retries the newest pending summary', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  let rejectActive;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 600000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      if (summary.id === 'failed') {
+        await new Promise((_, reject) => {
+          rejectActive = () => reject(new Error('offline'));
+        });
+      }
+    }
+  });
+
+  const failedUpload = scheduler.enqueue({ id: 'failed' });
+  await Promise.resolve();
+  await scheduler.enqueue({ id: 'newer' });
+
+  rejectActive();
+  await assert.rejects(failedUpload, /offline/);
+  assert.equal(clock.timerCount(), 1);
+
+  await clock.advance(0);
+  await Promise.resolve();
+
+  assert.deepEqual(uploads, ['failed', 'newer']);
+  assert.equal(clock.timerCount(), 0);
+});
+
 test('flush uploads the pending summary without waiting for the interval', async () => {
   const uploads = [];
   const clock = createManualClock();

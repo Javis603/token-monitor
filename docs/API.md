@@ -49,6 +49,7 @@ Example payload:
   "updatedAt": "2026-05-18T00:00:00.000Z",
   "agentVersion": "0.3.0",
   "agentRuntime": "headless-agent",
+  "syncUploadIntervalMs": 1200000,
   "projectsEnabled": true,
   "trackedClients": ["codex"],
   "today": {
@@ -185,6 +186,8 @@ The hub normalizes records before storing them. The Node hub accepts JSON ingest
 Authenticated stats expose `projectsIncomplete: true` when a device omitted its rollup, disabled project tracking while contributing usage, or could not preserve exact all-time attribution after its tracked-client list changed. Affected device entries expose `allTimeProjectsOmitted`, `allTimeProjectsIncomplete`, or `projectsEnabled: false` as the reason. The public Worker stats endpoint removes the entire `projects` map, including both display labels and canonical keys.
 
 `trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
+
+`syncUploadIntervalMs` is optional. A remote-hub widget includes `0` for live uploads or the selected fixed interval in milliseconds (`600000`, `1200000`, or `1800000`). The hub uses a positive interval to keep the device and its limits fresh for at least twice the upload interval; omitted or `0` values retain the configured `staleAfterMs` behavior. Local collection and embedded-host ingest remain live.
 
 `periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). The hub uses it to expire a device's `today`/`month` from the aggregate once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
 
