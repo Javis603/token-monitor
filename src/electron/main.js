@@ -260,6 +260,7 @@ function defaultSettings() {
     showTrayIcon: true,
     trayMode: false,
     trayContent: 'tokens',
+    showTrayProviderBadge: false,
     windowToggleShortcut: '',
     currency: normalizeCurrency(process.env.TOKEN_MONITOR_CURRENCY || 'USD'),
     currencyRates: {},
@@ -1390,6 +1391,7 @@ function readSettings() {
     delete merged.edgeDrawerEnabled;
     merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
     merged.floatingBubbleContent = normalizeTrayContent(merged.floatingBubbleContent, 'icon');
+    merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
     merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
     // 如果设置了 opencodeCookie 但没有 profiles，自动迁移
     if (merged.opencodeCookie && Object.keys(merged.opencodeProfiles || {}).length === 0) {
@@ -3493,6 +3495,7 @@ app.whenReady().then(() => {
     const previousShowTrayIcon = settings.showTrayIcon;
     const previousTrayMode = settings.trayMode;
     const previousTrayContent = settings.trayContent;
+    const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousCurrency = settings.currency;
     const previousStartAtLogin = settings.startAtLogin;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
@@ -3570,6 +3573,7 @@ app.whenReady().then(() => {
         trayMode: patch.trayMode ?? settings.trayMode
       }),
       trayContent: normalizeTrayContent(patch.trayContent ?? settings.trayContent),
+      showTrayProviderBadge: parseBoolean(patch.showTrayProviderBadge ?? settings.showTrayProviderBadge, false),
       floatingBubbleContent: normalizeTrayContent(patch.floatingBubbleContent ?? settings.floatingBubbleContent, 'icon'),
       windowToggleShortcut: normalizeWindowToggleShortcut(patch.windowToggleShortcut ?? settings.windowToggleShortcut),
       currency: normalizedCurrency,
@@ -3667,7 +3671,11 @@ app.whenReady().then(() => {
     if (settings.trayMode !== previousTrayMode) {
       if (settings.trayMode) enterTrayMode();
       else exitTrayMode();
-    } else if (settings.trayContent !== previousTrayContent || settings.currency !== previousCurrency) {
+    } else if (
+      settings.trayContent !== previousTrayContent ||
+      settings.showTrayProviderBadge !== previousShowTrayProviderBadge ||
+      settings.currency !== previousCurrency
+    ) {
       updateTrayDisplay();
     }
     if (patch.currency !== undefined || patch.currencyRates !== undefined) {
@@ -3778,7 +3786,7 @@ app.whenReady().then(() => {
       // Resize by height only; aspect ratio is preserved, so wide bar-style
       // icons keep their width while square provider icons stay 20x20.
       const sized = img.resize({ height: 20, quality: 'best' });
-      if (shouldUseTemplateTrayIcon(id)) sized.setTemplateImage(true);
+      if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
       providerTrayIcons[id] = sized;
     }
     updateTrayDisplay();

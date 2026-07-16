@@ -51,8 +51,8 @@ function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = [
   return available.has(client) ? client : null;
 }
 
-function shouldUseTemplateTrayIcon(id, platform = process.platform) {
-  return platform === 'darwin' && isGeneratedTrayIconMode(id);
+function shouldUseTemplateTrayIcon(id, platform = process.platform, showProviderBadge = false) {
+  return platform === 'darwin' && (isGeneratedTrayIconMode(id) || !showProviderBadge);
 }
 
 function sortCodexAccountsForDisplay(accounts) {
