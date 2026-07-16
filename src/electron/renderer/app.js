@@ -410,10 +410,31 @@ function setSettingsSectionExpanded(section, expanded) {
   applySettingsSectionDom(id, next);
 }
 
+// Expanding a section auto-collapses the previously open one. When that one
+// sits ABOVE the clicked header, the content above shrinks while scrollTop
+// stays put, so the clicked card visually flies upward. Pin the clicked
+// header to its on-screen position for the duration of the 250ms accordion
+// transition (rAF-corrected each frame; a single pass when motion is off).
+const SETTINGS_SCROLL_ANCHOR_MS = 360;
+function anchorSettingsScroll(anchorEl, mutate) {
+  const panel = els.settingsPanel;
+  if (!panel || !anchorEl) { mutate(); return; }
+  const offset = anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+  mutate();
+  const deadline = performance.now() + SETTINGS_SCROLL_ANCHOR_MS;
+  const pin = () => {
+    const drift = anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top - offset;
+    if (drift) panel.scrollTop += drift;
+    if (performance.now() < deadline) requestAnimationFrame(pin);
+  };
+  requestAnimationFrame(pin);
+}
+
 function setupSettingsSections() {
   for (const toggle of document.querySelectorAll('[data-settings-section]')) {
     const section = toggle.dataset.settingsSection;
-    toggle.addEventListener('click', () => setSettingsSectionExpanded(section, !state.settingsSections[section]));
+    toggle.addEventListener('click', () =>
+      anchorSettingsScroll(toggle, () => setSettingsSectionExpanded(section, !state.settingsSections[section])));
     setSettingsSectionExpanded(section, state.settingsSections[section]);
   }
 }
