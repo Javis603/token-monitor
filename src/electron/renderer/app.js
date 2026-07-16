@@ -6836,8 +6836,13 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
   } else if (payload.data?.stats) {
-    state.streamConnected = true;
-    state.streamFailure = null;
+    // Local collector overlays update client-mode data independently of the
+    // Hub SSE transport. Preserve its current Offline/error state until a
+    // real stream status or remote stats event proves the connection changed.
+    if (payload.data?.reason !== 'local') {
+      state.streamConnected = true;
+      state.streamFailure = null;
+    }
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.stats = overlayAllTimeSessions(payload.data.stats);
     applyCodexActiveAccountFromStats();
