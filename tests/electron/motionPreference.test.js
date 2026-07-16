@@ -31,8 +31,8 @@ test('appearance exposes and persists the three-state motion control', () => {
   const app = read('app.js');
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
 
-  assert.match(html, /<select id="reduceMotionInput">[\s\S]*?value="system"[\s\S]*?value="on"[\s\S]*?value="off"/);
-  assert.match(app, /reduceMotion: els\.reduceMotionInput\?\.value \|\| 'system'/);
+  assert.match(html, /name="reduceMotionOption" value="system"[\s\S]*?name="reduceMotionOption" value="on"[\s\S]*?name="reduceMotionOption" value="off"/);
+  assert.match(app, /reduceMotion: els\.reduceMotionInputs\?\.find\(\(input\) => input\.checked\)\?\.value \|\| 'system'/);
   assert.match(app, /document\.documentElement\.dataset\.reduceMotion = preference/);
   assert.match(main, /reduceMotion: 'system'/);
   assert.match(main, /require\('\.\/motionPreference'\)/);

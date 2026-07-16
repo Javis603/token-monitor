@@ -927,7 +927,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
 
 test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
   const html = readRendererFile('index.html');
-  const controls = html.match(/<label class="sync-upload-interval-row"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
+  const controls = html.match(/<label class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
   const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
   assert.match(clientFields, /sync-upload-interval-row/);
   assert.match(controls, /data-i18n="settings\.sync\.uploadInterval"/);

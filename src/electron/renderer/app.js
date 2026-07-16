@@ -215,7 +215,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutRecordButton: document.getElementById('windowToggleShortcutRecordButton'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
@@ -237,7 +237,7 @@ Object.assign(els, {
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
   sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
-  reduceMotionInput: document.getElementById('reduceMotionInput'),
+  reduceMotionInputs: Array.from(document.querySelectorAll('input[name="reduceMotionOption"]')),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -4584,18 +4584,14 @@ function syncWindowBehaviorControls() {
 function syncWindowShortcutStatus() {
   const note = els.windowToggleShortcutNote;
   const value = els.windowToggleShortcutValue;
-  const recordButton = els.windowToggleShortcutRecordButton;
   const clearButton = els.windowToggleShortcutClearButton;
   if (!note || !value) return;
   const shortcut = normalizeWindowToggleShortcutValue(state.settings?.windowToggleShortcut);
-  const display = windowShortcutApi.formatWindowToggleShortcut(shortcut, t('settings.shortcut.off'));
+  // The value pill doubles as the record button, so its empty state is the action ("Record"), not "Off".
+  const display = windowShortcutApi.formatWindowToggleShortcut(shortcut, t('settings.shortcut.record'));
   const status = state.settings?.windowToggleShortcutStatus?.state || (shortcut ? 'unregistered' : 'off');
   value.classList.toggle('recording', state.recordingWindowShortcut);
   value.textContent = state.recordingWindowShortcut ? t('settings.shortcut.recording') : display;
-  if (recordButton) {
-    recordButton.textContent = state.recordingWindowShortcut ? t('settings.shortcut.recording') : t('settings.shortcut.record');
-    recordButton.disabled = state.recordingWindowShortcut;
-  }
   if (clearButton) clearButton.disabled = !shortcut && !state.recordingWindowShortcut;
   note.classList.toggle('error', state.windowShortcutInvalid || (Boolean(shortcut) && status !== 'registered'));
   if (state.recordingWindowShortcut) {
@@ -4603,9 +4599,8 @@ function syncWindowShortcutStatus() {
   } else if (!shortcut) {
     note.textContent = t('settings.display.windowShortcutNote');
   } else if (status === 'registered') {
-    note.textContent = t('settings.display.windowShortcutRegistered', {
-      shortcut: display
-    });
+    // The value pill already shows the active shortcut; repeating it here reads as clutter.
+    note.textContent = t('settings.display.windowShortcutNote');
   } else {
     note.textContent = t('settings.display.windowShortcutConflict', {
       shortcut: display
@@ -4858,7 +4853,7 @@ function handleFloatingBubblePointerUp(event) {
 function appearancePatchFromControls() {
   return {
     systemGlass: Boolean(els.systemGlassInput.checked),
-    reduceMotion: els.reduceMotionInput?.value || 'system',
+    reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
@@ -4870,9 +4865,22 @@ function appearancePatchFromControls() {
   };
 }
 
+function syncSliderRow(input) {
+  if (!input) return;
+  const valueEl = input.closest('.settings-slider-item')?.querySelector('.slider-value');
+  if (valueEl) valueEl.textContent = String(Math.round(Number(input.value)));
+}
+
+function syncSliderRows() {
+  syncSliderRow(els.glassInput);
+  syncSliderRow(els.blurInput);
+  syncSliderRow(els.zoomInput);
+}
+
 function applyAppearanceFromControls() {
   const patch = appearancePatchFromControls();
   applyAppearanceSettings(patch);
+  syncSliderRows();
   window.tokenMonitor.previewAppearance?.(patch).catch(() => {});
 }
 
@@ -5080,7 +5088,7 @@ function syncSettingsForm() {
   renderWslPanel();
   els.systemGlassInput.checked = state.settings.systemGlass !== false;
   const reduceMotion = motionPreferenceApi.normalize(state.settings.reduceMotion);
-  if (els.reduceMotionInput) els.reduceMotionInput.value = reduceMotion;
+  for (const input of els.reduceMotionInputs || []) input.checked = input.value === reduceMotion;
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
@@ -5115,6 +5123,7 @@ function syncSettingsForm() {
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
+  syncSliderRows();
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('zai');
@@ -6672,10 +6681,13 @@ function setupThemeAccordion(group, toggle, details) {
 setupThemeAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
 setupThemeAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
 els.systemGlassInput.addEventListener('change', saveAppearanceFromControls);
-els.reduceMotionInput?.addEventListener('change', async () => {
-  state.settings.reduceMotion = applyReduceMotionPreference(els.reduceMotionInput.value);
-  await saveAppearanceFromControls();
-});
+for (const input of els.reduceMotionInputs || []) {
+  input.addEventListener('change', async () => {
+    if (!input.checked) return;
+    state.settings.reduceMotion = applyReduceMotionPreference(input.value);
+    await saveAppearanceFromControls();
+  });
+}
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
 els.toolIconsInput.addEventListener('change', saveAppearanceFromControls);
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
@@ -6710,7 +6722,7 @@ els.trayModeInput.addEventListener('change', () => {
   saveSettings({ trayMode: els.trayModeInput.checked });
 });
 els.trayContentInput.addEventListener('change', () => saveSettings({ trayContent: els.trayContentInput.value }));
-els.windowToggleShortcutRecordButton?.addEventListener('click', startWindowShortcutRecording);
+els.windowToggleShortcutValue?.addEventListener('click', startWindowShortcutRecording);
 els.windowToggleShortcutClearButton?.addEventListener('click', () => setWindowToggleShortcut('').catch(() => {}));
 els.startAtLoginInput?.addEventListener('change', () => saveSettings({ startAtLogin: els.startAtLoginInput.checked }));
 els.glassInput.addEventListener('change', saveAppearanceFromControls);
@@ -6718,6 +6730,7 @@ els.blurInput.addEventListener('change', saveAppearanceFromControls);
 els.zoomInput.addEventListener('change', saveAppearanceFromControls);
 els.resetZoomButton.addEventListener('click', async () => {
   els.zoomInput.value = String(Math.round(defaultAppearance.zoomFactor * 100));
+  syncSliderRow(els.zoomInput);
   await saveSettings({ zoomFactor: defaultAppearance.zoomFactor });
 });
 els.openConfigButton.addEventListener('click', () => window.tokenMonitor.openUserData());
