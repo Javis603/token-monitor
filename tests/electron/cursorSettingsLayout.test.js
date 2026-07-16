@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+const { maskEmailAddress } = require('../../src/electron/renderer/accountIdentity');
 
 function readRendererFile(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
@@ -292,35 +293,35 @@ test('Codex account email masking is an opt-in display-only setting', () => {
   assert.match(app, /renderLimits\(\);/);
 
   assert.equal(
-    runRendererFunctions(app, ['maskEmailAddressForDisplay'], "maskEmailAddressForDisplay('javis603@gmail.com')")
-    , 'j***3@gmail.com'
+    maskEmailAddress('primary.user@example.com')
+    , 'p***r@example.com'
   );
   assert.equal(
-    runRendererFunctions(app, ['maskEmailAddressForDisplay'], "maskEmailAddressForDisplay('linus.chua328@gmail.com')")
-    , 'l***8@gmail.com'
+    maskEmailAddress('secondary.user@example.com')
+    , 's***r@example.com'
   );
   assert.equal(
-    runRendererFunctions(app, ['maskEmailAddressForDisplay'], "maskEmailAddressForDisplay('ab@example.com')")
+    maskEmailAddress('ab@example.com')
     , 'a***b@example.com'
   );
 
   assert.equal(
     runRendererFunctions(
       app,
-      ['maskEmailAddressForDisplay', 'codexAccountTitle'],
-      "codexAccountTitle({ accountEmail: 'javis603@gmail.com' }, 0)",
-      { state: { settings: { maskLimitAccountEmails: false } } }
+      ['codexAccountTitle'],
+      "codexAccountTitle({ accountEmail: 'primary.user@example.com' }, 0)",
+      { accountIdentityApi: { maskEmailAddress }, state: { settings: { maskLimitAccountEmails: false } } }
     ),
-    'javis603@gmail.com'
+    'primary.user@example.com'
   );
   assert.equal(
     runRendererFunctions(
       app,
-      ['maskEmailAddressForDisplay', 'codexAccountTitle'],
-      "codexAccountTitle({ accountEmail: 'javis603@gmail.com' }, 0)",
-      { state: { settings: { maskLimitAccountEmails: true } } }
+      ['codexAccountTitle'],
+      "codexAccountTitle({ accountEmail: 'primary.user@example.com' }, 0)",
+      { accountIdentityApi: { maskEmailAddress }, state: { settings: { maskLimitAccountEmails: true } } }
     ),
-    'j***3@gmail.com'
+    'p***r@example.com'
   );
 });
 
@@ -767,7 +768,7 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
   assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
   assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
-  assert.match(app, /maskEmailAddressForDisplay\(email\)/);
+  assert.match(app, /accountIdentityApi\.maskEmailAddress\(email\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
   assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');

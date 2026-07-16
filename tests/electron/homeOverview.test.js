@@ -112,7 +112,7 @@ test('homeLimitAccounts keeps account windows together and sorts lowest remainin
     {
       key: 'codex:1',
       providerId: 'codex',
-      name: 'linus@example.com',
+      name: 'secondary@example.com',
       color: '#49a3b0',
       windows: [
         { kind: 'session', usedPercent: 30 },
@@ -122,7 +122,7 @@ test('homeLimitAccounts keeps account windows together and sorts lowest remainin
     {
       key: 'codex:0',
       providerId: 'codex',
-      name: 'javis@example.com',
+      name: 'primary@example.com',
       color: '#49a3b0',
       windows: [
         { kind: 'weekly', usedPercent: 57, resetDescription: '4d 13h' },
@@ -132,7 +132,7 @@ test('homeLimitAccounts keeps account windows together and sorts lowest remainin
   ]);
 
   assert.equal(rows.length, 2);
-  assert.equal(rows[0].name, 'javis@example.com');
+  assert.equal(rows[0].name, 'primary@example.com');
   assert.equal(rows[0].providerId, 'codex');
   assert.equal(rows[0].lowestRemaining, 0);
   assert.deepEqual(rows[0].windows.map((window) => window.kind), ['session', 'weekly']);

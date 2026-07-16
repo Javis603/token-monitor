@@ -1,9 +1,20 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const zlib = require('node:zlib');
 
-const { formatTrayText, pickUsageTrayIconId } = require('../../src/electron/tray');
+const {
+  buildTrayIcon,
+  buildTrayMenuTemplate,
+  formatTrayText,
+  reconcileCodexAccountSelection,
+  pickUsageTrayIconId,
+  sortCodexAccountsForDisplay
+} = require('../../src/electron/tray');
+const { translate } = require('../../src/electron/renderer/i18n');
 const {
   compactLimitSelection,
   pickConfiguredLimitProviders,
@@ -24,6 +35,238 @@ const stats = {
     }
   }
 };
+
+test('fallback tray icon source stays transparent and high-resolution', () => {
+  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png'));
+  assert.equal(icon.toString('ascii', 1, 4), 'PNG');
+  assert.deepEqual([icon.readUInt32BE(16), icon.readUInt32BE(20)], [44, 44]);
+  assert.equal(icon[25], 6, 'tray PNG should use RGBA color');
+  assert.equal(icon[28], 0, 'tray PNG should not be interlaced');
+
+  const idat = [];
+  for (let offset = 8; offset < icon.length;) {
+    const length = icon.readUInt32BE(offset);
+    const type = icon.toString('ascii', offset + 4, offset + 8);
+    if (type === 'IDAT') idat.push(icon.subarray(offset + 8, offset + 8 + length));
+    offset += 12 + length;
+  }
+  const scanlines = zlib.inflateSync(Buffer.concat(idat));
+  assert.equal(scanlines[4], 0, 'tray PNG corner should remain fully transparent');
+});
+
+test('macOS tray icon downsamples the high-resolution template like provider icons', () => {
+  const calls = [];
+  const resized = {
+    setTemplateImage(value) { calls.push(['template', value]); }
+  };
+  const image = {
+    resize(size) { calls.push(['resize', size]); return resized; }
+  };
+
+  assert.equal(buildTrayIcon({
+    platform: 'darwin',
+    nativeImage: {
+      createFromPath(iconPath) {
+        calls.push(['path', iconPath]);
+        return image;
+      }
+    }
+  }), resized);
+
+  assert.match(calls[0][1], /assets[\\/]icons[\\/]tray-token-monitor\.png$/);
+  assert.deepEqual(calls.slice(1), [
+    ['resize', { height: 20, quality: 'best' }],
+    ['template', true]
+  ]);
+});
+
+test('non-macOS tray icon keeps the resized full-color app asset', () => {
+  const calls = [];
+  const resized = {};
+  const image = {
+    setTemplateImage(value) { calls.push(['template', value]); },
+    resize(size) { calls.push(['resize', size]); return resized; }
+  };
+
+  assert.equal(buildTrayIcon({
+    platform: 'win32',
+    nativeImage: {
+      createFromPath(iconPath) {
+        calls.push(['path', iconPath]);
+        return image;
+      }
+    }
+  }), resized);
+
+  assert.match(calls[0][1], /assets[\\/]icon\.png$/);
+  assert.deepEqual(calls.slice(1), [['resize', { width: 20, height: 20 }]]);
+});
+
+test('tray context menu complements the primary click with useful commands', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({
+    state: { appVersion: '0.27.0', trayContent: 'both', trayMode: true, windowBehavior: 'floating' },
+    onRefresh: () => calls.push(['refresh']),
+    onOpenView: (value) => calls.push(['view', value]),
+    onSetTrayContent: (value) => calls.push(['content', value]),
+    onSetWindowPresentation: (value) => calls.push(['presentation', value]),
+    onOpenSettings: () => calls.push(['settings']),
+    onQuit: () => calls.push(['quit'])
+  });
+
+  assert.deepEqual(template.map((item) => item.label || item.type), [
+    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Quit Token Monitor'
+  ]);
+  assert.equal(template.some((item) => item.label === 'Show / Hide'), false);
+  assert.equal(template[3].submenu.find((item) => item.label === 'Today Tokens + Cost').checked, true);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Tray Popover').checked, true);
+
+  template[0].click();
+  template[1].submenu.find((item) => item.label === 'Projects').click();
+  template[3].submenu.find((item) => item.label === 'App Icon Only').click();
+  template[4].submenu.find((item) => item.label === 'Desktop Pinned').click();
+  assert.equal(template[6].enabled, false);
+  template[7].click();
+  template[8].click();
+  assert.deepEqual(calls, [
+    ['refresh'], ['view', 'project'], ['content', 'icon'], ['presentation', 'desktop'], ['settings'], ['quit']
+  ]);
+});
+
+test('tray context menu exposes refresh progress and current window mode', () => {
+  const template = buildTrayMenuTemplate({
+    state: { refreshing: true, trayContent: 'tokens', trayMode: false, windowBehavior: 'desktop' }
+  });
+
+  assert.equal(template[0].label, 'Refreshing…');
+  assert.equal(template[0].enabled, false);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Desktop Pinned').checked, true);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Tray Popover').checked, false);
+});
+
+test('tray context menu uses the selected locale for every visible level', () => {
+  const template = buildTrayMenuTemplate({
+    state: { appVersion: '0.27.0', trayContent: 'tokens', trayMode: true, windowBehavior: 'floating' },
+    translate: (key, params) => translate('zh-TW', key, params)
+  });
+
+  assert.deepEqual(template.map((item) => item.label || item.type), [
+    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '結束 Token Monitor'
+  ]);
+  assert.equal(template[1].submenu[0].label, '主頁');
+  assert.equal(template[3].submenu[0].label, '今日 Tokens');
+  assert.equal(template[3].submenu.at(-1).label, '僅顯示 App 圖示');
+  assert.equal(template[4].submenu[0].label, '托盤彈出視窗');
+  assert.equal(template[4].submenu.at(-1).label, '固定於桌面');
+});
+
+test('tray context menu disables unavailable views', () => {
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      viewEnabled: { project: false, limits: false, trends: false }
+    }
+  });
+
+  assert.equal(template[1].submenu.find((item) => item.label === 'Projects').enabled, false);
+  assert.equal(template[1].submenu.find((item) => item.label === 'Sessions').enabled, true);
+});
+
+test('tray context menu switches between enabled Codex accounts', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        { id: 'one', email: 'primary.user@example.com' },
+        { id: 'two', email: 'secondary.user@example.com' }
+      ],
+      activeCodexAccountId: 'one',
+      maskAccountEmails: true
+    },
+    onSwitchCodexAccount: (id) => calls.push(id)
+  });
+
+  assert.equal(template[2].label, 'Codex Account · p***r@example.com');
+  assert.deepEqual(template[2].submenu.map((item) => [item.label, item.checked]), [
+    ['p***r@example.com', true],
+    ['s***r@example.com', false]
+  ]);
+  template[2].submenu[0].click();
+  template[2].submenu[1].click();
+  assert.deepEqual(calls, ['two']);
+});
+
+test('tray context menu hides Codex switching until two accounts are enabled', () => {
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [{ id: 'one', email: 'one@example.com' }],
+      activeCodexAccountId: 'one'
+    }
+  });
+
+  assert.equal(template.some((item) => item.label?.startsWith('Codex Account')), false);
+});
+
+test('Codex tray accounts use the same stable label order as Limits', () => {
+  const accounts = [
+    { id: 'gamma', email: 'gamma@example.com' },
+    { id: 'beta', email: 'beta@example.com' },
+    { id: 'alpha', email: 'alpha@example.com' }
+  ];
+
+  assert.deepEqual(
+    sortCodexAccountsForDisplay(accounts).map((account) => account.id),
+    ['alpha', 'beta', 'gamma']
+  );
+  assert.deepEqual(accounts.map((account) => account.id), ['gamma', 'beta', 'alpha']);
+});
+
+test('Codex tray account selection waits for a post-switch local provider snapshot', () => {
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'new',
+    detectedAt: '2026-07-14T03:00:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'old',
+    detectedAt: '2026-07-14T03:00:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: '',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'new',
+    detectedAt: '2026-07-14T03:02:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: '' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'other',
+    detectedAt: '2026-07-14T03:02:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'other', pendingAccountId: '' });
+});
+
+test('tray main-process actions surface refresh errors and expand a collapsed bubble before tray mode', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.match(source, /async function refreshFromTray[\s\S]*?catch \(error\)[\s\S]*?showTrayRefreshError\(error\?\.message \|\| error\)/);
+  assert.match(source, /if \(value === 'tray'\)[\s\S]*?saveSettings\(\);\s*syncFloatingBubbleAvailability\(\);\s*enterTrayMode\(\);/);
+});
 
 test('usage tray icon picks the top token client for day and total token modes', () => {
   assert.equal(pickUsageTrayIconId(stats, 'tokens', ['claude', 'codex']), 'codex');

@@ -4,12 +4,13 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
+const motionPreferenceApi = require('./motionPreference');
 
 // Install EPIPE suppression before anything that might log. Without this,
 // a closed parent pipe turns the next log call into an unhandled 'error'
@@ -37,7 +38,7 @@ const {
   normalizeHiddenClients,
   normalizePinnedClients
 } = require('./renderer/clientDisplayPreferences');
-const { LANGUAGE_OPTIONS } = require('./renderer/i18n');
+const { LANGUAGE_OPTIONS, resolveLocale, translate } = require('./renderer/i18n');
 const {
   defaultViewDisplayPreferences,
   normalizeHiddenViews,
@@ -58,8 +59,10 @@ const {
 const {
   appUpdateInstallSupport,
   checkLatestRelease,
+  deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
   GITHUB_REPO,
+  mergeLatestReleaseMetadata,
   shouldSkipAppUpdateCheck
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
@@ -96,7 +99,16 @@ const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const linuxAutostart = require('./linuxAutostart');
-const { buildTrayIcon, createTray, formatTrayText, pickUsageTrayIconId, popoverBounds } = require('./tray');
+const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
+const {
+  buildTrayIcon,
+  createTray,
+  formatTrayText,
+  pickUsageTrayIconId,
+  popoverBounds,
+  reconcileCodexAccountSelection,
+  sortCodexAccountsForDisplay
+} = require('./tray');
 const {
   macActivationPolicyMode,
   mainWindowCloseAction,
@@ -162,6 +174,7 @@ const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
 const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
 const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
+const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
 let dashboardWindow = null;
@@ -197,6 +210,7 @@ function defaultSettings() {
     glassOpacity: 68,
     glassBlur: 32,
     systemGlass: true,
+    reduceMotion: 'system',
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
@@ -219,6 +233,7 @@ function defaultSettings() {
     hiddenViews: defaultViewDisplayPreferences().hiddenViews,
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
+    showHomeLimitBars: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false),
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
@@ -1336,6 +1351,7 @@ function readSettings() {
     if (saved.hiddenHomeModules !== undefined) {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
+    merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
@@ -1357,6 +1373,7 @@ function readSettings() {
     merged.collectionMode = normalizeCollectionMode(merged.collectionMode);
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
+    merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     if (saved.serviceProviderDisplayOrder !== undefined) {
       merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
     }
@@ -1584,6 +1601,11 @@ let syncCollectorHandle = null;
 let lastCollectedDevice = null;
 let tray = null;
 let latestStats = null;
+let trayRefreshInFlight = false;
+let trayCodexActiveAccountId = '';
+let trayCodexPendingAccountId = '';
+let trayCodexPendingSince = 0;
+let trayCodexSwitchInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
 let lastExportAt = 0;
 let lastAutoExport = { dir: null, signature: null };
@@ -1932,6 +1954,7 @@ function sendPush(payload) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
@@ -2410,6 +2433,163 @@ function handleTrayToggle() {
   else if (action === 'focusWindow') focusExistingWindow();
 }
 
+function trayMenuLocale() {
+  const preferredLanguages = typeof app.getPreferredSystemLanguages === 'function'
+    ? app.getPreferredSystemLanguages()
+    : [app.getLocale()];
+  return resolveLocale(settings?.language || 'auto', preferredLanguages);
+}
+
+function sendMainWindowEvent(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const send = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try { mainWindow.webContents.send(channel, payload); } catch (_) {}
+  };
+  if (mainWindow.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', send);
+  else send();
+}
+
+async function refreshFromTray() {
+  if (trayRefreshInFlight) return;
+  trayRefreshInFlight = true;
+  try {
+    const stats = await fetchStats({ force: true });
+    // Collector ticks normally publish their own final snapshot. Only bridge the
+    // result when fetchStats returned a different object (for example, a remote hub
+    // fetch while an external headless agent owns collection).
+    if (stats && stats !== latestStats) {
+      sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } });
+    }
+  } catch (error) {
+    console.warn(`[tray] refresh failed: ${error.message}`);
+    showTrayRefreshError(error?.message || error);
+  } finally {
+    trayRefreshInFlight = false;
+  }
+}
+
+function setTrayContentFromMenu(value) {
+  const next = normalizeTrayContent(value, settings?.trayContent || 'tokens');
+  if (next === settings?.trayContent) return;
+  settings.trayContent = next;
+  saveSettings();
+  updateTrayDisplay();
+  pushSettingsToRenderer();
+}
+
+function setWindowPresentationFromMenu(value) {
+  if (value === 'tray') {
+    if (settings.trayMode) return;
+    settings.trayMode = true;
+    saveSettings();
+    syncFloatingBubbleAvailability();
+    enterTrayMode();
+    pushSettingsToRenderer();
+    return;
+  }
+
+  const previousTrayMode = settings.trayMode;
+  settings = normalizeWindowBehaviorSettings(settings, {
+    trayMode: false,
+    windowBehavior: value
+  });
+  saveSettings();
+  if (previousTrayMode) exitTrayMode();
+  else {
+    applyWindowSettings();
+    focusExistingWindow();
+  }
+  pushSettingsToRenderer();
+}
+
+function openSettingsFromTray() {
+  focusExistingWindow();
+  sendMainWindowEvent('settings:open');
+}
+
+function openViewFromTray(viewId) {
+  const normalized = String(viewId || '').trim().toLowerCase();
+  if (!TRAY_OPEN_VIEW_IDS.has(normalized)) return;
+  focusExistingWindow();
+  sendMainWindowEvent('view:open', normalized);
+}
+
+function enabledTrayCodexAccounts() {
+  return sortCodexAccountsForDisplay(
+    codexAccountsForRenderer().filter((account) => account.enabled !== false)
+  );
+}
+
+function syncTrayCodexActiveAccount() {
+  const accounts = enabledTrayCodexAccounts();
+  const localDeviceId = settings?.deviceId || '';
+  const liveProvider = localLiveCodexProvider(latestStats, localDeviceId);
+  const selection = reconcileCodexAccountSelection({
+    detectedAccountId: codexAccountIdForProvider(accounts, liveProvider),
+    detectedAt: liveProvider?.updatedAt,
+    pendingAccountId: trayCodexPendingAccountId,
+    pendingSince: trayCodexPendingSince
+  });
+  trayCodexActiveAccountId = selection.activeAccountId;
+  trayCodexPendingAccountId = selection.pendingAccountId;
+  if (!trayCodexPendingAccountId) trayCodexPendingSince = 0;
+}
+
+function trayCodexMenuState() {
+  syncTrayCodexActiveAccount();
+  const accounts = enabledTrayCodexAccounts();
+  return {
+    accounts,
+    activeAccountId: trayCodexPendingAccountId || trayCodexActiveAccountId,
+    switching: trayCodexSwitchInFlight
+  };
+}
+
+function showTrayCodexSwitchError(error) {
+  const locale = trayMenuLocale();
+  const title = translate(locale, 'trayMenu.codexSwitchFailedTitle');
+  const body = translate(locale, 'trayMenu.codexSwitchFailedBody', { error: String(error || '') });
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
+  } else {
+    dialog.showErrorBox(title, body);
+  }
+}
+
+function showTrayRefreshError(error) {
+  const locale = trayMenuLocale();
+  const title = translate(locale, 'trayMenu.refreshFailedTitle');
+  const body = translate(locale, 'trayMenu.refreshFailedBody', { error: String(error || '') });
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
+  } else {
+    dialog.showErrorBox(title, body);
+  }
+}
+
+async function switchCodexAccountFromTray(accountId) {
+  if (trayCodexSwitchInFlight || !accountId) return;
+  const currentId = trayCodexPendingAccountId || trayCodexActiveAccountId;
+  if (accountId === currentId) return;
+  trayCodexSwitchInFlight = true;
+  try {
+    const result = await switchCodexSystemAccount(accountId);
+    if (!result?.ok) {
+      showTrayCodexSwitchError(result?.error);
+      return;
+    }
+    trayCodexActiveAccountId = result.activeAccountId || accountId;
+    trayCodexPendingAccountId = trayCodexActiveAccountId;
+    trayCodexPendingSince = Date.now();
+    pushSettingsToRenderer();
+  } catch (error) {
+    showTrayCodexSwitchError(error?.message || error);
+  } finally {
+    trayCodexSwitchInFlight = false;
+  }
+}
+
 function configureWindowToggleShortcut() {
   unregisterWindowToggleShortcut();
   const shortcut = normalizeWindowToggleShortcut(settings?.windowToggleShortcut);
@@ -2433,14 +2613,37 @@ function ensureTray() {
   if (!shouldCreateTray(settings)) return false;
   if (tray && !tray.isDestroyed()) return;
   tray = createTray({
+    getMenuState: () => {
+      const codex = trayCodexMenuState();
+      return {
+        appVersion: appVersion(),
+        refreshing: trayRefreshInFlight,
+        trayContent: settings?.trayContent || 'tokens',
+        trayMode: Boolean(settings?.trayMode),
+        windowBehavior: settings?.windowBehavior || 'floating',
+        codexAccounts: codex.accounts,
+        activeCodexAccountId: codex.activeAccountId,
+        codexSwitching: codex.switching,
+        maskAccountEmails: Boolean(settings?.maskLimitAccountEmails),
+        viewEnabled: {
+          home: true,
+          project: settings?.projectsEnabled !== false,
+          session: true,
+          limits: settings?.limitsEnabled !== false && parseLimitProviders(settings?.limitProviders).length > 0,
+          trends: settings?.historyEnabled !== false,
+          status: true
+        }
+      };
+    },
     onToggle: handleTrayToggle,
+    onOpenView: openViewFromTray,
+    onRefresh: () => { void refreshFromTray(); },
+    onSetTrayContent: setTrayContentFromMenu,
+    onSetWindowPresentation: setWindowPresentationFromMenu,
+    onSwitchCodexAccount: (accountId) => { void switchCodexAccountFromTray(accountId); },
+    onOpenSettings: openSettingsFromTray,
     onQuit: requestAppQuit,
-    onSwitchToWindowMode: () => {
-      settings.trayMode = false;
-      saveSettings();
-      exitTrayMode();
-      pushSettingsToRenderer();
-    }
+    translateMenu: (key, params) => translate(trayMenuLocale(), key, params)
   });
   updateTrayDisplay();
   return true;
@@ -2701,6 +2904,7 @@ async function downloadTokscaleFromNpm() {
 }
 
 let appUpdateCheckInFlight = false;
+let appUpdateCheckPromise = null;
 let appUpdateLastError = null;
 let appUpdateBackgroundTimer = null;
 let appUpdateNativeBusy = false;
@@ -2725,6 +2929,18 @@ function latestFromUpdaterInfo(info) {
   };
 }
 
+function rememberLatestAppUpdate(latest, checkedAt = new Date().toISOString()) {
+  if (!latest) return null;
+  const merged = mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest);
+  settings.appUpdate = {
+    ...(settings.appUpdate || {}),
+    lastCheckedAt: checkedAt,
+    lastKnownLatest: merged
+  };
+  saveSettings();
+  return merged;
+}
+
 function setNativeAppUpdateState(patch = {}) {
   appUpdateNativeState = { ...appUpdateNativeState, ...patch };
   sendAppUpdatePush();
@@ -2740,28 +2956,12 @@ function configureNativeAppUpdater() {
     setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
   });
   autoUpdater.on('update-available', (info) => {
-    const latest = latestFromUpdaterInfo(info);
-    if (latest) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: new Date().toISOString(),
-        lastKnownLatest: latest
-      };
-      saveSettings();
-    }
+    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
     setNativeAppUpdateState({ phase: 'available', version: latest?.version || info?.version || null, progress: null, error: null });
   });
   autoUpdater.on('update-not-available', (info) => {
     appUpdateNativeBusy = false;
-    const latest = latestFromUpdaterInfo(info);
-    if (latest) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: new Date().toISOString(),
-        lastKnownLatest: latest
-      };
-      saveSettings();
-    }
+    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
     setNativeAppUpdateState({ phase: 'idle', version: latest?.version || null, progress: null, error: null });
   });
   autoUpdater.on('download-progress', (progress) => {
@@ -2788,14 +2988,18 @@ function deriveAppUpdateState() {
   const latest = block.lastKnownLatest || null;
   const dismissedVersion = block.dismissedVersion || null;
   const installSupport = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
-  let hasUpdate = false;
-  if (latest && semver.valid(latest.version) && semver.valid(currentVersion)) {
-    hasUpdate = semver.gt(latest.version, currentVersion) && latest.version !== dismissedVersion;
-  }
+  const availability = deriveAppUpdateAvailability({
+    currentVersion,
+    latest,
+    dismissedVersion,
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version
+  });
   return {
     currentVersion,
     latest,
-    hasUpdate,
+    hasUpdate: availability.hasUpdate,
+    showUpdateNotice: availability.showUpdateNotice,
     dismissedVersion,
     lastCheckedAt: block.lastCheckedAt || null,
     checking: appUpdateCheckInFlight,
@@ -2806,13 +3010,20 @@ function deriveAppUpdateState() {
     installProgress: appUpdateNativeState.progress,
     installVersion: appUpdateNativeState.version,
     installError: appUpdateNativeState.error,
-    downloaded: downloadedAppUpdateMatchesLatest({
-      phase: appUpdateNativeState.phase,
-      downloadedVersion: appUpdateNativeState.version,
-      latest
-    }),
+    downloaded: availability.downloaded,
     installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
   };
+}
+
+function restoreDismissedAppUpdate(version) {
+  const block = settings?.appUpdate || {};
+  if (!version || block.dismissedVersion !== version) return false;
+  settings.appUpdate = {
+    ...block,
+    dismissedVersion: null
+  };
+  saveSettings();
+  return true;
 }
 
 function sendAppUpdatePush() {
@@ -2821,7 +3032,20 @@ function sendAppUpdatePush() {
 }
 
 async function runAppUpdateCheck({ force = false } = {}) {
-  if (appUpdateCheckInFlight) return deriveAppUpdateState();
+  if (appUpdateCheckPromise) {
+    if (force) sendAppUpdatePush();
+    const activeResult = await appUpdateCheckPromise;
+    if (force) {
+      if (activeResult?.ok) {
+        if (activeResult.newer) restoreDismissedAppUpdate(activeResult.latest?.version);
+        appUpdateLastError = null;
+      } else {
+        appUpdateLastError = activeResult?.error || 'Update check failed';
+      }
+      sendAppUpdatePush();
+    }
+    return deriveAppUpdateState();
+  }
   const block = settings?.appUpdate || {};
   if (shouldSkipAppUpdateCheck({
     force,
@@ -2832,29 +3056,37 @@ async function runAppUpdateCheck({ force = false } = {}) {
   })) {
     return deriveAppUpdateState();
   }
-  appUpdateCheckInFlight = true;
-  appUpdateLastError = null;
-  if (force) sendAppUpdatePush();
-  try {
-    const result = await checkLatestRelease(app.getVersion());
-    if (result.ok) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: result.checkedAt,
-        lastKnownLatest: result.latest
-      };
-      saveSettings();
-      appUpdateLastError = null;
-    } else {
-      appUpdateLastError = force ? (result.error || 'Update check failed') : null;
-      if (!force) console.warn('App update check failed:', result.error);
+  const checkTask = (async () => {
+    appUpdateCheckInFlight = true;
+    appUpdateLastError = null;
+    if (force) sendAppUpdatePush();
+    let result;
+    try {
+      result = await checkLatestRelease(app.getVersion());
+      if (result.ok) {
+        rememberLatestAppUpdate(result.latest, result.checkedAt);
+        if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
+        appUpdateLastError = null;
+      } else {
+        appUpdateLastError = force ? (result.error || 'Update check failed') : null;
+        if (!force) console.warn('App update check failed:', result.error);
+      }
+    } catch (error) {
+      const message = error.message || String(error);
+      appUpdateLastError = force ? message : null;
+      if (!force) console.warn('App update check threw:', error);
+      return { ok: false, newer: false, latest: null, error: message };
+    } finally {
+      appUpdateCheckInFlight = false;
+      sendAppUpdatePush();
     }
-  } catch (error) {
-    appUpdateLastError = force ? (error.message || String(error)) : null;
-    if (!force) console.warn('App update check threw:', error);
+    return result;
+  })();
+  appUpdateCheckPromise = checkTask;
+  try {
+    await checkTask;
   } finally {
-    appUpdateCheckInFlight = false;
-    sendAppUpdatePush();
+    if (appUpdateCheckPromise === checkTask) appUpdateCheckPromise = null;
   }
   return deriveAppUpdateState();
 }
@@ -2893,6 +3125,7 @@ async function downloadAndPrepareAppUpdate() {
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
+  restoreDismissedAppUpdate(latest?.version);
   configureNativeAppUpdater();
   appUpdateNativeBusy = true;
   setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
@@ -3124,12 +3357,18 @@ function replaceMainWindow(bounds, options = {}) {
   });
 }
 
+function discardFailedDashboardWindow(win, reason) {
+  if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+  console.log(`[dashboard] ${reason}`);
+  win.destroy();
+}
+
 function createDashboardWindow() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     // Reload so a reopened window always picks up the latest renderer + fresh history,
     // instead of showing whatever was loaded when it first opened.
+    dashboardWindow.hide();
     dashboardWindow.webContents.reload();
-    dashboardWindow.focus();
     return dashboardWindow;
   }
   const glass = nativeBlurEnabled();
@@ -3162,10 +3401,22 @@ function createDashboardWindow() {
     event.preventDefault();
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
-  win.once('ready-to-show', () => win.show());
+  // Only dashboard:ready may reveal a healthy window. Slow hub history must not
+  // race a wall-clock fallback and expose the unprepared heatmap. Actual load or
+  // renderer failures discard the hidden window so the next open starts cleanly.
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // ERR_ABORTED is expected during reloads.
+    discardFailedDashboardWindow(win, `load failed: ${errorDescription}`);
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    discardFailedDashboardWindow(win, `renderer stopped: ${details.reason}`);
+  });
+  win.on('unresponsive', () => {
+    if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
+  });
   win.on('closed', () => { dashboardWindow = null; });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
-    .catch((error) => console.log(`[dashboard] load failed: ${error.message}`));
+    .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
 }
 
@@ -3187,9 +3438,18 @@ async function getDashboardHistory() {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return aggregateHistory([]);
   const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
-  const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
-  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  return response.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -3358,6 +3618,7 @@ app.whenReady().then(() => {
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
       systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
+      reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
@@ -3374,6 +3635,7 @@ app.whenReady().then(() => {
       hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
+      showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
@@ -4011,6 +4273,13 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', () => getDashboardHistory());
+  ipcMain.on('dashboard:ready', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

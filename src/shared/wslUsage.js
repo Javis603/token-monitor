@@ -158,7 +158,7 @@ function wslHomePath(home, relativePath) {
   return `${home}\\${relativePath.replace(/\//g, '\\')}`;
 }
 
-function homeHasData(home, existsSync) {
+function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
   const ids = new Set();
   for (const rel of WSL_DATA_MARKERS) {
     if (existsSync(wslHomePath(home, rel))) {
@@ -166,6 +166,17 @@ function homeHasData(home, existsSync) {
       if (client) ids.add(client);
     }
   }
+  // workspaceStorage is not Copilot-specific, so require the nested source
+  // Tokscale 4.5.2 actually parses instead of marking every VS Code WSL home.
+  const workspaceRoot = wslHomePath(home, '.config/Code/User/workspaceStorage');
+  try {
+    for (const workspace of readdirSync(workspaceRoot)) {
+      if (existsSync(`${workspaceRoot}\\${workspace}\\chatSessions`)) {
+        ids.add('copilot');
+        break;
+      }
+    }
+  } catch (_) { /* workspaceStorage missing or unreadable */ }
   return [...ids];
 }
 
@@ -197,7 +208,7 @@ function wslUsageHomes(deps = {}) {
     } catch (_) { /* distro has no /home or it is unreadable */ }
     candidates.push(`\\\\wsl$\\${distro}\\root`);
     for (const home of candidates) {
-      if (homeHasData(home, existsSync).length > 0) homes.push(home);
+      if (homeHasData(home, existsSync, readdirSync).length > 0) homes.push(home);
     }
   }
   return homes;
@@ -216,6 +227,7 @@ async function collectWslUsage(options = {}, deps = {}) {
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
   const existsSync = deps.existsSync || fs.existsSync;
+  const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
   if (!trackedClients) return { bundle, detected: [] };
@@ -226,7 +238,7 @@ async function collectWslUsage(options = {}, deps = {}) {
     // Attribution: every marker hit in this home counts as "detected", even if
     // clientsForHomeScan drops it from the scan (e.g. a zed-only home with no
     // threads.db) — detection is marker-based, independent of whether we scan.
-    const homeDataClients = homeHasData(home, existsSync);
+    const homeDataClients = homeHasData(home, existsSync, readdirSync);
     for (const id of homeDataClients) {
       if (tracked.has(id)) detected.add(id);
     }

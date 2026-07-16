@@ -87,11 +87,12 @@
     return order.join(',');
   }
 
-  function visibleViewOrder({ views, orderValue, hiddenValue, availableIds } = {}) {
+  function visibleViewOrder({ views, orderValue, hiddenValue, availableIds, includeIds } = {}) {
     const ordered = normalizeViewDisplayOrder(orderValue, views);
     const available = new Set((availableIds || ordered).map(normalizeId).filter(Boolean));
     const hidden = new Set(normalizeHiddenViews(hiddenValue, views).split(',').filter(Boolean));
-    const visible = ordered.filter((id) => available.has(id) && !hidden.has(id));
+    const included = new Set((includeIds || []).map(normalizeId).filter(Boolean));
+    const visible = ordered.filter((id) => available.has(id) && (!hidden.has(id) || included.has(id)));
     if (visible.length > 0) return visible;
     return ordered.filter((id) => available.has(id)).slice(0, 1);
   }

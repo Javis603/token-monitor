@@ -2,6 +2,8 @@
 
 const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
+const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
   'xai', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama'
@@ -83,6 +85,7 @@ const LIMIT_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
@@ -183,6 +186,8 @@ const SERVICE_STATUS_PLACEHOLDERS = [
   { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' }
 ];
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
+const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';
+const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/choose`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'accounts', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
@@ -197,9 +202,14 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 }
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistoryPreviewKey: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+state.appUpdateNotesPresentedVersion = '';
+state.periodMotionActive = false;
+state.animateBarsFromZero = false;
+state.animateChartsOnRender = true;
+let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
 let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
@@ -227,6 +237,7 @@ Object.assign(els, {
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
   sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
+  reduceMotionInput: document.getElementById('reduceMotionInput'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -241,14 +252,27 @@ Object.assign(els, {
   downloadTokscaleButton: document.getElementById('downloadTokscaleButton'),
   resetTokscaleButton: document.getElementById('resetTokscaleButton'),
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
+  aboutVersion: document.getElementById('aboutVersion'),
+  openRepositoryButton: document.getElementById('openRepositoryButton'),
+  reportIssueButton: document.getElementById('reportIssueButton'),
   appUpdatePill: document.getElementById('appUpdatePill'),
   appUpdatePillAction: document.getElementById('appUpdatePillAction'),
   appUpdatePillLabel: document.getElementById('appUpdatePillLabel'),
   appUpdatePillDismiss: document.getElementById('appUpdatePillDismiss'),
+  appUpdatePopover: document.getElementById('appUpdatePopover'),
+  appUpdatePopoverTitle: document.getElementById('appUpdatePopoverTitle'),
+  appUpdatePopoverBody: document.getElementById('appUpdatePopoverBody'),
+  appUpdatePopoverAction: document.getElementById('appUpdatePopoverAction'),
+  appUpdatePopoverRelease: document.getElementById('appUpdatePopoverRelease'),
+  appUpdatePopoverClose: document.getElementById('appUpdatePopoverClose'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
   appUpdateLatest: document.getElementById('appUpdateLatest'),
   appUpdateCheckButton: document.getElementById('appUpdateCheckButton'),
   appUpdateViewReleaseButton: document.getElementById('appUpdateViewReleaseButton'),
+  appUpdateNotes: document.getElementById('appUpdateNotes'),
+  appUpdateNotesTitle: document.getElementById('appUpdateNotesTitle'),
+  appUpdateNotesBody: document.getElementById('appUpdateNotesBody'),
+  appUpdateReleaseNotesButton: document.getElementById('appUpdateReleaseNotesButton'),
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
@@ -626,24 +650,116 @@ function appUpdateActionMode(s) {
   if (s.installSupported) return 'download';
   return s.latest?.htmlUrl ? 'release' : '';
 }
+function setAppUpdatePillDisclosure(available) {
+  const action = els.appUpdatePillAction;
+  if (available) {
+    action.setAttribute('aria-haspopup', 'dialog');
+    action.setAttribute('aria-controls', 'appUpdatePopover');
+    action.setAttribute('aria-expanded', String(els.appUpdatePopover.matches(':popover-open')));
+    return;
+  }
+  action.removeAttribute('aria-haspopup');
+  action.removeAttribute('aria-controls');
+  action.removeAttribute('aria-expanded');
+}
 function renderAppUpdatePill() {
   const s = state.appUpdate;
   const pill = els.appUpdatePill;
   if (!pill) return;
   const mode = appUpdateActionMode(s);
   const version = s?.latest?.version || s?.installVersion || '';
-  if (!s || !mode || !version) {
+  if (!s || !mode || !version || !s.showUpdateNotice) {
     pill.classList.add('hidden');
     pill.setAttribute('title', '');
     els.appUpdatePillLabel.textContent = '';
+    setAppUpdatePillDisclosure(false);
     return;
   }
+  const hasReleaseNotes = mode !== 'install' && releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
+  setAppUpdatePillDisclosure(hasReleaseNotes);
   pill.classList.remove('hidden');
+  els.appUpdatePillDismiss.classList.toggle('hidden', mode === 'install' || s.installBusy);
   pill.setAttribute('title', mode === 'install' ? t('settings.appUpdate.ready') : (s.latest?.name || `v${version}`));
   if (s.installPhase === 'downloading' && Number.isFinite(s.installProgress)) {
     els.appUpdatePillLabel.textContent = `${Math.round(s.installProgress)}%`;
   } else {
-    els.appUpdatePillLabel.textContent = `${mode === 'install' ? '↻' : '↑'} v${version}`;
+    els.appUpdatePillLabel.textContent = mode === 'install'
+      ? `↻ ${t('settings.appUpdate.restart')}`
+      : `↑ v${version}`;
+  }
+}
+function releaseNoteGroupsForCurrentLocale(latest) {
+  const notes = latest?.releaseNotes;
+  if (!notes || typeof notes !== 'object') return [];
+  const preferred = currentLocale().startsWith('zh') ? notes.zh : notes.en;
+  if (Array.isArray(preferred) && preferred.length > 0) return preferred;
+  if (Array.isArray(notes.en) && notes.en.length > 0) return notes.en;
+  return Array.isArray(notes.zh) ? notes.zh : [];
+}
+function buildAppUpdateNoteGroupNodes(groups) {
+  return groups.map((group) => {
+    const section = document.createElement('section');
+    section.className = 'app-update-note-group';
+    const title = document.createElement('div');
+    title.className = 'app-update-note-title';
+    title.textContent = String(group?.title || '');
+    const list = document.createElement('ul');
+    for (const item of Array.isArray(group?.items) ? group.items : []) {
+      const row = document.createElement('li');
+      row.textContent = String(item || '');
+      list.append(row);
+    }
+    section.append(title, list);
+    return section;
+  });
+}
+function renderAppUpdatePopover(s) {
+  const version = s?.latest?.version || '';
+  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
+  const mode = appUpdateActionMode(s);
+  if (!version || groups.length === 0 || !mode) {
+    if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
+    els.appUpdatePopoverTitle.textContent = '';
+    els.appUpdatePopoverBody.replaceChildren();
+    return false;
+  }
+  els.appUpdatePopoverTitle.textContent = t('settings.appUpdate.whatsNew', { version });
+  els.appUpdatePopoverBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
+  els.appUpdatePopoverAction.textContent = mode === 'install'
+    ? t('settings.appUpdate.restart')
+    : mode === 'download'
+      ? t('settings.appUpdate.download')
+      : t('settings.appUpdate.viewRelease');
+  els.appUpdatePopoverAction.disabled = Boolean(s.installBusy);
+  els.appUpdatePopoverRelease.classList.toggle('hidden', !s.latest?.htmlUrl);
+  return true;
+}
+function positionAppUpdatePopover() {
+  const rect = els.appUpdatePill.getBoundingClientRect();
+  const width = Math.min(320, window.innerWidth - 24);
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width));
+  els.appUpdatePopover.style.width = `${width}px`;
+  els.appUpdatePopover.style.left = `${left}px`;
+  els.appUpdatePopover.style.bottom = `${Math.max(12, window.innerHeight - rect.top + 8)}px`;
+}
+function renderAppUpdateNotes(s) {
+  const version = s?.latest?.version || '';
+  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
+  const visible = Boolean(version && groups.length > 0);
+  els.appUpdateNotes.classList.toggle('hidden', !visible);
+  if (!visible) {
+    els.appUpdateNotes.open = false;
+    els.appUpdateNotesTitle.textContent = '';
+    els.appUpdateNotesBody.replaceChildren();
+    return;
+  }
+
+  els.appUpdateNotesTitle.textContent = t('settings.appUpdate.whatsNew', { version });
+  els.appUpdateNotesBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
+  els.appUpdateReleaseNotesButton.classList.toggle('hidden', !s.latest?.htmlUrl);
+  if (s.hasUpdate && state.appUpdateNotesPresentedVersion !== version) {
+    els.appUpdateNotes.open = true;
+    state.appUpdateNotesPresentedVersion = version;
   }
 }
 function renderSettingsAppUpdateRow() {
@@ -656,6 +772,7 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateViewReleaseButton.classList.add('hidden');
     els.appUpdateMessage.textContent = '';
     els.appUpdateMessage.classList.remove('error');
+    renderAppUpdateNotes(null);
     return;
   }
   els.appUpdateInstalled.textContent = `v${s.currentVersion}`;
@@ -678,6 +795,7 @@ function renderSettingsAppUpdateRow() {
   }
   els.appUpdateCheckButton.disabled = Boolean(s.checking || s.installBusy);
   els.appUpdateCheckButton.textContent = s.checking ? t('settings.appUpdate.checking') : t('settings.appUpdate.check');
+  renderAppUpdateNotes(s);
   if (s.installPhase === 'downloading') {
     const percent = Number.isFinite(s.installProgress) ? Math.round(s.installProgress) : 0;
     els.appUpdateMessage.textContent = t('settings.appUpdate.downloading', { percent });
@@ -856,8 +974,13 @@ function cancelNumberAnimation() {
   if (numberAnimHandle) { cancelAnimationFrame(numberAnimHandle); numberAnimHandle = 0; }
 }
 
-function animateNumber(el, from, to, duration = 2200, onDone = null) {
+function animateNumber(el, from, to, duration = 1000, onDone = null) {
   cancelNumberAnimation();
+  if (prefersReducedMotion()) {
+    el.textContent = formatNumber(to);
+    if (typeof onDone === 'function') onDone();
+    return;
+  }
   const start = performance.now();
   const delta = to - from;
   function frame(now) {
@@ -871,6 +994,227 @@ function animateNumber(el, from, to, duration = 2200, onDone = null) {
     }
   }
   numberAnimHandle = requestAnimationFrame(frame);
+}
+
+const rowNumberAnimationHandles = new Map();
+
+function prefersReducedMotion() {
+  return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
+}
+
+function settleMotionAnimations() {
+  cancelNumberAnimation();
+  els.totalTokens.textContent = formatNumber(state.currentTotal);
+  updateTotalCompact(state.currentTotal);
+  for (const [el, handle] of rowNumberAnimationHandles) {
+    cancelAnimationFrame(handle);
+    const target = Number(el.dataset.motionTarget || el.dataset.motionValue || 0);
+    el.textContent = formatNumber(target);
+    el.dataset.motionValue = String(target);
+    delete el.dataset.motionTarget;
+  }
+  rowNumberAnimationHandles.clear();
+  for (const animation of document.getAnimations?.() || []) {
+    try { animation.finish(); } catch (_) { animation.cancel(); }
+  }
+}
+
+function applyReduceMotionPreference(value) {
+  const preference = motionPreferenceApi.normalize(value);
+  document.documentElement.dataset.reduceMotion = preference;
+  if (motionPreferenceApi.shouldReduceMotion(preference, reducedMotionMedia?.matches)) settleMotionAnimations();
+  return preference;
+}
+
+function captureBreakdownMotion() {
+  const snapshot = new Map();
+  for (const row of els.breakdown?.querySelectorAll('.row[data-key]') || []) {
+    const rect = row.getBoundingClientRect();
+    const fill = row.querySelector('.bar-fill');
+    const trackWidth = fill?.parentElement?.getBoundingClientRect().width || 0;
+    const fillWidth = fill?.getBoundingClientRect().width || 0;
+    snapshot.set(row.dataset.key, {
+      top: rect.top,
+      value: Number(row.querySelector('.row-value')?.dataset.motionValue || row.dataset.motionValue || 0),
+      barScale: trackWidth > 0 ? Math.max(0, Math.min(1, fillWidth / trackWidth)) : 0
+    });
+  }
+  return snapshot;
+}
+
+function animateRowNumber(el, from, to, duration = 420) {
+  const previousHandle = rowNumberAnimationHandles.get(el);
+  if (previousHandle) cancelAnimationFrame(previousHandle);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to || prefersReducedMotion()) {
+    el.textContent = formatNumber(to);
+    el.dataset.motionValue = String(Number(to) || 0);
+    delete el.dataset.motionTarget;
+    rowNumberAnimationHandles.delete(el);
+    return;
+  }
+  const startedAt = performance.now();
+  const delta = to - from;
+  el.textContent = formatNumber(from);
+  el.dataset.motionValue = String(from);
+  el.dataset.motionTarget = String(to);
+  function frame(now) {
+    if (prefersReducedMotion()) {
+      el.textContent = formatNumber(to);
+      el.dataset.motionValue = String(Number(to) || 0);
+      delete el.dataset.motionTarget;
+      rowNumberAnimationHandles.delete(el);
+      return;
+    }
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const current = from + delta * easeOutQuart(progress);
+    el.textContent = formatNumber(current);
+    el.dataset.motionValue = String(current);
+    if (progress < 1) {
+      rowNumberAnimationHandles.set(el, requestAnimationFrame(frame));
+    } else {
+      delete el.dataset.motionTarget;
+      rowNumberAnimationHandles.delete(el);
+    }
+  }
+  rowNumberAnimationHandles.set(el, requestAnimationFrame(frame));
+}
+
+function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
+  if (prefersReducedMotion()) return;
+  let enteringIndex = 0;
+  for (const row of els.breakdown?.querySelectorAll('.row[data-key]') || []) {
+    const previous = snapshot.get(row.dataset.key);
+    const value = Number(row.dataset.motionValue || 0);
+    const fill = row.querySelector('.bar-fill');
+    const targetScale = Math.max(0, Math.min(1, Number(fill?.style.getPropertyValue('--bar-scale')) || 0));
+    if (previous) {
+      const deltaY = previous.top - row.getBoundingClientRect().top;
+      if (Math.abs(deltaY) > 0.5) {
+        row.animate([
+          { transform: `translate3d(0, ${deltaY}px, 0)` },
+          { transform: 'translate3d(0, 0, 0)' }
+        ], { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+      }
+      animateBarBetween(fill, previous.barScale, targetScale, 0, duration);
+      animateRowNumber(row.querySelector('.row-value'), previous.value, value, duration);
+      continue;
+    }
+    row.animate([
+      { opacity: 0, transform: 'translate3d(0, 7px, 0)' },
+      { opacity: 1, transform: 'translate3d(0, 0, 0)' }
+    ], {
+      duration: 240,
+      delay: Math.min(enteringIndex, 6) * 18,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'backwards'
+    });
+    const delay = Math.min(enteringIndex, 6) * 18;
+    animateBarBetween(fill, 0, targetScale, delay, Math.max(1, duration - delay));
+    animateRowNumber(row.querySelector('.row-value'), 0, value, duration);
+    enteringIndex += 1;
+  }
+}
+
+function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) {
+  if (!fill?.animate || Math.abs(toScale - fromScale) < 0.001) return;
+  for (const animation of fill.getAnimations()) animation.cancel();
+  fill.animate([
+    { transform: `scaleX(${fromScale})` },
+    { transform: `scaleX(${toScale})` }
+  ], {
+    duration,
+    delay,
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    fill: 'backwards'
+  });
+}
+
+function captureTrendBarMotion() {
+  const snapshot = new Map();
+  for (const bar of els.trendsPanel?.querySelectorAll('.spark-bar[data-motion-key]') || []) {
+    snapshot.set(bar.dataset.motionKey, { height: bar.getBoundingClientRect().height });
+  }
+  return snapshot;
+}
+
+function animateTrendBarsFrom(snapshot, { fromZero = false } = {}) {
+  if (prefersReducedMotion()) return;
+  const bars = Array.from(els.trendsPanel?.querySelectorAll('.spark-bar[data-motion-key]') || []);
+  bars.forEach((bar, index) => {
+    const previous = snapshot.get(bar.dataset.motionKey);
+    const targetHeight = bar.getBoundingClientRect().height;
+    const fromScale = fromZero || !previous
+      ? 0
+      : targetHeight > 0 ? previous.height / targetHeight : 1;
+    if (Math.abs(fromScale - 1) < 0.001) return;
+    bar.animate([
+      { transform: `scaleY(${fromScale})` },
+      { transform: 'scaleY(1)' }
+    ], {
+      duration: 420,
+      delay: previous && !fromZero ? 0 : Math.min(index, 14) * 14,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'backwards'
+    });
+  });
+}
+
+const HOME_HISTORY_MOTION_MS = 920;
+const HOME_HEAT_CELL_MOTION_MS = 360;
+
+function animateHomeHistoryVisuals(activityScroll, activityCanvas, trendChart) {
+  if (!state.animateChartsOnRender) return;
+  state.animateChartsOnRender = false;
+  if (prefersReducedMotion()) return;
+
+  const heatCells = Array.from(activityCanvas?.querySelectorAll('.heat-base-layer .heat') || []);
+  const viewport = activityScroll?.getBoundingClientRect();
+  const visibleCells = heatCells.map((cell, index) => ({ cell, column: Math.floor(index / 7), rect: cell.getBoundingClientRect() }))
+    .filter(({ rect }) => viewport && rect.right > viewport.left && rect.left < viewport.right);
+  const firstVisibleColumn = visibleCells.length ? visibleCells[0].column : 0;
+  const lastVisibleColumn = visibleCells.length ? visibleCells[visibleCells.length - 1].column : firstVisibleColumn;
+  const heatColumnDelay = (HOME_HISTORY_MOTION_MS - HOME_HEAT_CELL_MOTION_MS) / Math.max(1, lastVisibleColumn - firstVisibleColumn);
+  visibleCells.forEach(({ cell, column }) => {
+    cell.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: HOME_HEAT_CELL_MOTION_MS,
+      delay: (column - firstVisibleColumn) * heatColumnDelay,
+      easing: 'ease',
+      fill: 'backwards'
+    });
+  });
+
+  const line = trendChart?.querySelector('.area-line-stroke');
+  const fill = trendChart?.querySelector('.area-line-fill');
+  const length = line?.getTotalLength?.() || 0;
+  if (length > 0) {
+    line.animate([
+      { strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
+      { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }
+    ], {
+      duration: HOME_HISTORY_MOTION_MS,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'backwards'
+    });
+  }
+  fill?.animate([
+    { clipPath: 'inset(0 100% 0 0)' },
+    { clipPath: 'inset(0 0 0 0)' }
+  ], {
+    duration: HOME_HISTORY_MOTION_MS,
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    fill: 'backwards'
+  });
+}
+
+function applyBarScale(fill, scale) {
+  const safeScale = Math.max(0, Math.min(1, Number(scale) || 0));
+  fill.style.setProperty('--bar-scale', String(safeScale));
+  if (!state.animateBarsFromZero || prefersReducedMotion() || !fill.animate) return;
+  for (const animation of fill.getAnimations()) animation.cancel();
+  fill.animate([
+    { transform: 'scaleX(0)' },
+    { transform: `scaleX(${safeScale})` }
+  ], { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
 }
 
 function rowWidth(value, max) {
@@ -922,11 +1266,14 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
   const detailEl = row.querySelector('.row-detail');
   detailEl.textContent = detail || '';
   detailEl.classList.toggle('hidden', !detail);
-  row.querySelector('.row-value').textContent = formatNumber(value);
+  const valueEl = row.querySelector('.row-value');
+  valueEl.textContent = formatNumber(value);
+  valueEl.dataset.motionValue = String(Number(value) || 0);
+  row.dataset.motionValue = String(Number(value) || 0);
   row.querySelector('.row-cost').textContent = formatCost(cost || 0);
   const fill = row.querySelector('.bar-fill');
   fill.style.background = barBackground || color;
-  fill.style.width = `${width}%`;
+  applyBarScale(fill, width / 100);
 
   const accordionInner = row.querySelector('.row-accordion-inner');
   if (Array.isArray(accordionRows) && accordionRows.length > 0) {
@@ -1023,6 +1370,9 @@ function renderRows(rows, { showProjectIncompleteHint = false } = {}) {
     return;
   }
   const max = Math.max(1, ...rows.map((row) => row.value));
+  const liveMotionSnapshot = !state.periodMotionActive && !state.animateBarsFromZero
+    ? captureBreakdownMotion()
+    : null;
   const hintText = showProjectIncompleteHint ? t('projects.incomplete') : '';
   const signature = JSON.stringify([state.breakdown, hintText, rows.map((row) => row.key)]);
   const children = Array.from(els.breakdown.children);
@@ -1047,6 +1397,7 @@ function renderRows(rows, { showProjectIncompleteHint = false } = {}) {
     const row = current.get(rowData.key);
     if (row) updateRow(row, { ...rowData, max });
   }
+  if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
 
 function deviceLabel(device) {
@@ -1162,16 +1513,20 @@ function visibleBreakdownOrder() {
     views: VIEW_DISPLAY_OPTIONS,
     orderValue: effectiveViewDisplayOrderValue(),
     hiddenValue: state.settings?.hiddenViews,
-    availableIds: availableBreakdownIds()
+    availableIds: availableBreakdownIds(),
+    includeIds: directBreakdownOverride ? [directBreakdownOverride] : []
   });
 }
 
 function ensureBreakdownVisible() {
+  const availableIds = availableBreakdownIds();
+  if (directBreakdownOverride === state.breakdown && availableIds.includes(state.breakdown)) return;
+  directBreakdownOverride = null;
   const next = viewDisplayPreferencesApi.preferredViewId({
     views: VIEW_DISPLAY_OPTIONS,
     orderValue: effectiveViewDisplayOrderValue(),
     hiddenValue: state.settings?.hiddenViews,
-    availableIds: availableBreakdownIds(),
+    availableIds,
     currentId: state.breakdown
   });
   if (next !== state.breakdown) setBreakdown(next);
@@ -1502,6 +1857,20 @@ function mimoTokenPlanWindowFromBalance(balance) {
   };
 }
 
+function limitMeterNode(color, percent, tone = 1) {
+  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+  const meter = document.createElement('div');
+  meter.className = 'limit-meter';
+  meter.style.background = colorWithAlpha(color, 0.16);
+  const fill = document.createElement('div');
+  fill.className = 'limit-meter-fill';
+  applyBarScale(fill, safePercent / 100);
+  fill.style.background = color;
+  fill.style.opacity = tone;
+  meter.append(fill);
+  return meter;
+}
+
 function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
   const remaining = Number(window?.remainingPercent);
   const used = Number(window?.usedPercent);
@@ -1512,7 +1881,6 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   // windows honour the used-mode flip.
   const showUsed = Boolean(state.settings?.showLimitUsed) && valueOverride == null;
   const fillPercent = limitFillPercent(remaining, used, showUsed);
-  const safePercent = Math.max(0, Math.min(100, fillPercent));
   const item = document.createElement('div');
   item.className = 'limit-window';
   const text = document.createElement('div');
@@ -1522,15 +1890,7 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   const value = document.createElement('span');
   value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent, showUsed);
   text.append(name, value);
-  const meter = document.createElement('div');
-  meter.className = 'limit-meter';
-  meter.style.background = colorWithAlpha(color, 0.16);
-  const fill = document.createElement('div');
-  fill.className = 'limit-meter-fill';
-  fill.style.width = `${safePercent}%`;
-  fill.style.background = color;
-  fill.style.opacity = tone;
-  meter.append(fill);
+  const meter = limitMeterNode(color, fillPercent, tone);
   const reset = document.createElement('div');
   reset.className = 'limit-reset';
   const resetText = formatReset(window?.resetsAt) || window?.resetDescription || '';
@@ -1580,24 +1940,11 @@ function renderLimitProviderMark(id, color) {
 
 function codexSwitchAccountForProvider(provider) {
   if (!provider || provider.provider !== 'codex') return null;
-  const accountKey = String(provider.accountKey || '').trim();
-  const email = String(provider.accountEmail || '').trim().toLowerCase();
-  if (!accountKey && !email) return null;
+  if (!provider.accountKey && !provider.accountEmail) return null;
   return (state.settings?.codexManagedAccounts || []).find((account) => {
     if (account.enabled === false) return false;
-    if (accountKey && String(account.accountKey || '').trim() === accountKey) return true;
-    return Boolean(email && String(account.email || '').trim().toLowerCase() === email);
+    return accountIdentityApi.codexAccountMatchesProvider(account, provider);
   }) || null;
-}
-
-function codexAccountMatchesProvider(account, provider) {
-  if (!account || !provider || provider.provider !== 'codex') return false;
-  const accountKey = String(account.accountKey || '').trim();
-  const providerKey = String(provider.accountKey || '').trim();
-  if (accountKey && providerKey && accountKey === providerKey) return true;
-  const accountEmail = String(account.email || account.accountEmail || '').trim().toLowerCase();
-  const providerEmail = String(provider.accountEmail || '').trim().toLowerCase();
-  return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
 }
 
 function codexProviderMatchesProvider(left, right) {
@@ -1611,7 +1958,7 @@ function codexProviderMatchesProvider(left, right) {
 }
 
 function codexActiveAccountMatchesProvider(provider) {
-  return codexAccountMatchesProvider(state.codexActiveAccount, provider);
+  return accountIdentityApi.codexAccountMatchesProvider(state.codexActiveAccount, provider);
 }
 
 function codexAccountsShareIdentity(left, right) {
@@ -1634,9 +1981,7 @@ function codexAccountsShareIdentity(left, right) {
 // without per-device rows fall back to the aggregate (localDeviceLimitsProviders
 // returns null there), mirroring localProviderStatus().
 function localLiveCodexProvider() {
-  const localProviders = localDeviceLimitsProviders();
-  const providers = localProviders !== null ? localProviders : (state.stats?.limits?.providers || []);
-  return providers.find((provider) => limitProviderPresentationApi.isCodexLiveAccount(provider)) || null;
+  return accountIdentityApi.localLiveCodexProvider(state.stats, state.settings?.deviceId || '');
 }
 
 function codexActiveAccountFromStats() {
@@ -2140,20 +2485,9 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
   return row;
 }
 
-function maskEmailAddressForDisplay(value) {
-  const email = String(value || '').trim();
-  const at = email.indexOf('@');
-  if (at <= 0 || at === email.length - 1) return email;
-  const local = email.slice(0, at);
-  const domain = email.slice(at + 1);
-  const first = local[0] || '';
-  const last = local.length > 1 ? local[local.length - 1] : '';
-  return `${first}***${last}@${domain}`;
-}
-
 function codexAccountTitle(provider, index) {
   const email = String(provider?.accountEmail || '').trim();
-  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddressForDisplay(email) : email;
+  if (email) return state.settings?.maskLimitAccountEmails ? accountIdentityApi.maskEmailAddress(email) : email;
   // Never fall back to the plan label here — "Plus" as a title reads like an
   // account name. The plan still shows on the right via limitProviderPlan().
   return `Account ${index + 1}`;
@@ -2184,7 +2518,7 @@ function renderCodexAccountGroup(label, providers, color) {
 
 function mimoAccountTitle(provider, index) {
   const email = String(provider?.accountEmail || '').trim();
-  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddressForDisplay(email) : email;
+  if (email) return state.settings?.maskLimitAccountEmails ? accountIdentityApi.maskEmailAddress(email) : email;
   return `Account ${index + 1}`;
 }
 
@@ -2564,7 +2898,7 @@ function exchangeNode(row, max) {
   wrap.querySelector('.detail-ex-sub').textContent = row.subtitle;
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
   wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost);
-  wrap.querySelector('.bar-fill').style.width = `${rowWidth(row.value, max)}%`;
+  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
   const turnsEl = wrap.querySelector('.detail-turns');
   for (const turn of row.turns) turnsEl.append(turnNode(turn));
@@ -2600,6 +2934,7 @@ let contentReadySignaled = false;
 
 function renderTrends() {
   const charts = window.TokenMonitorUsageCharts;
+  const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
   const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
   const { points, metric, labelKey } = charts.selectPreviewSeries(preview, state.period);
@@ -2634,6 +2969,13 @@ function renderTrends() {
     + `<div class="trends-spark" role="button" tabindex="0" title="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
     + `<div class="trends-stats">${statsHtml}</div>`;
+  const bars = Array.from(els.trendsPanel.querySelectorAll('.spark-bar'));
+  bars.forEach((bar, index) => {
+    bar.dataset.motionKey = String(finalPoints[index]?.[labelKey] || index);
+  });
+  const fromZero = state.animateChartsOnRender;
+  animateTrendBarsFrom(previousBars, { fromZero });
+  if (fromZero) state.animateChartsOnRender = false;
 }
 
 function viewLabelById(id) {
@@ -2665,6 +3007,25 @@ function openTrendSettings() {
   requestAnimationFrame(() => {
     document.getElementById('trendSettingsContainer')?.scrollIntoView({ block: 'nearest' });
   });
+}
+
+function openSettingsPanel() {
+  if (!els.settingsPanel) return;
+  if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  els.settingsPanel.classList.remove('hidden');
+  els.shell.classList.add('settings-open');
+  els.shell.style.transform = 'translateZ(0)';
+  requestAnimationFrame(() => { els.shell.style.transform = ''; });
+}
+
+function openViewFromTray(viewId) {
+  if (!availableBreakdownIds().includes(viewId)) return;
+  if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  stopWindowShortcutRecording();
+  els.settingsPanel?.classList.add('hidden');
+  els.shell.classList.remove('settings-open');
+  state.openSession = null;
+  renderBreakdownChange(viewId, { allowHidden: true });
 }
 
 async function loadHomeHistory() {
@@ -2780,7 +3141,8 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
       return;
     }
     state.viewSwitcherOpen = false;
-    if (setBreakdown(nextBreakdown(state.breakdown))) render();
+    updateViewSwitcherOpenState();
+    renderBreakdownChange(nextBreakdown(state.breakdown));
   });
   current.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
@@ -2841,8 +3203,9 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
     item.append(itemLabel);
     item.addEventListener('click', () => {
       state.viewSwitcherOpen = false;
-      if (setBreakdown(id)) render();
-      else renderViewSwitcher({ focusDisclosure: true });
+      updateViewSwitcherOpenState();
+      if (id === state.breakdown) renderViewSwitcher({ focusDisclosure: true });
+      else renderBreakdownChange(id);
     });
     menu.append(item);
   }
@@ -2880,13 +3243,13 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   module.setAttribute('aria-label', title);
   module.addEventListener('click', (event) => {
     if (event.target.closest('.home-activity-scroll')) return;
-    if (setBreakdown(viewId)) render();
+    renderBreakdownChange(viewId);
   });
   module.addEventListener('keydown', (event) => {
     if (event.target !== module) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    if (setBreakdown(viewId)) render();
+    renderBreakdownChange(viewId);
   });
   const head = document.createElement('div');
   head.className = 'home-module-head';
@@ -2985,15 +3348,26 @@ function renderHomeLimitModule() {
       label.textContent = homeLimitWindowLabel(window);
       const value = document.createElement('span');
       value.className = 'home-list-value';
-      value.textContent = window.value || formatHomeLimitWindowValue(window, Boolean(state.settings?.showLimitUsed));
+      const showUsed = Boolean(state.settings?.showLimitUsed);
+      value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
+      if (state.settings?.showHomeLimitBars === true && window.remainingPercent != null) {
+        const remainingPercent = Math.max(0, Math.min(100, Number(window.remainingPercent) || 0));
+        if (remainingPercent < 20) {
+          value.classList.add('home-limit-value-critical');
+        } else if (remainingPercent < 50) {
+          value.classList.add('home-limit-value-low');
+          value.style.setProperty('--home-limit-accent', row.color);
+        }
+      }
       line.append(label, value);
+      metric.append(line);
       const resetAt = formatReset(window.resetsAt);
       const resetText = document.createElement('span');
       resetText.className = 'home-limit-reset';
       resetText.textContent = resetAt || (window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
         : '\u00a0');
-      metric.append(line, resetText);
+      metric.append(resetText);
       windows.append(metric);
     }
     item.append(account, windows);
@@ -3138,8 +3512,17 @@ function applyHomeActivityScroll(scroller) {
   scroller.classList.toggle('is-scrolled', target > 2);
 }
 
-function setupHomeActivityScroller(scroller) {
+function setupHomeActivityScroller(scroller, onReady = null) {
   let drag = null;
+  let readySignaled = false;
+  const applySettledLayout = () => {
+    applyHomeActivityScroll(scroller);
+    if (readySignaled || typeof onReady !== 'function') return;
+    const svg = scroller.querySelector('.dash-heatmap');
+    if (scroller.clientWidth <= 0 || !svg || svg.getBoundingClientRect().width <= 0) return;
+    readySignaled = true;
+    onReady();
+  };
   scroller.addEventListener('scroll', () => {
     scroller.classList.toggle('is-scrolled', scroller.scrollLeft > 2);
     const record = homeOverviewApi.homeActivityScrollRecord({
@@ -3180,8 +3563,10 @@ function setupHomeActivityScroller(scroller) {
   // the panel becomes visible / the window resizes, so the measurement is always real.
   state.homeActivityResizeObserver?.disconnect();
   if (typeof ResizeObserver === 'function') {
-    state.homeActivityResizeObserver = new ResizeObserver(() => applyHomeActivityScroll(scroller));
+    state.homeActivityResizeObserver = new ResizeObserver(applySettledLayout);
     state.homeActivityResizeObserver.observe(scroller);
+  } else if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => requestAnimationFrame(applySettledLayout));
   }
   applyHomeActivityScroll(scroller);
 }
@@ -3393,8 +3778,6 @@ function renderHomeTrendsModule() {
     spotlightRadius: 82
   });
   activityScroll.append(activityCanvas);
-  setupHomeActivityScroller(activityScroll);
-  setupHomeActivityHover(activityScroll);
   const linePoints = charts.clampDaily(points, 45);
   const summary = homeOverviewApi.homeTrendSummary(linePoints);
   const trendHead = document.createElement('div');
@@ -3421,6 +3804,8 @@ function renderHomeTrendsModule() {
     dates.append(label);
   }
   body.append(activityScroll, trendHead, plot, dates);
+  setupHomeActivityScroller(activityScroll, () => animateHomeHistoryVisuals(activityScroll, activityCanvas, chart));
+  setupHomeActivityHover(activityScroll);
   return module;
 }
 
@@ -3488,7 +3873,7 @@ function render() {
     const widest = formatNumber(nextTotal).length >= formatNumber(state.currentTotal).length ? nextTotal : state.currentTotal;
     els.totalTokens.textContent = formatNumber(widest);
     updateTotalCompact(nextTotal);
-    animateNumber(els.totalTokens, state.currentTotal, nextTotal, 2200, fitTotalNumber);
+    animateNumber(els.totalTokens, state.currentTotal, nextTotal, state.periodMotionActive ? 800 : 1000, fitTotalNumber);
     pulseLiveDot();
   } else {
     cancelNumberAnimation();
@@ -3748,8 +4133,9 @@ function setPeriod(period) {
   return true;
 }
 
-function setBreakdown(breakdown) {
+function setBreakdown(breakdown, options = {}) {
   const next = normalizeInitialViewValue(breakdown, viewBreakdownValues, state.breakdown);
+  directBreakdownOverride = options.allowHidden === true ? next : null;
   if (next === state.breakdown) {
     publishViewState();
     return false;
@@ -3757,6 +4143,23 @@ function setBreakdown(breakdown) {
   state.breakdown = next;
   state.rowSignature = '';
   publishViewState();
+  return true;
+}
+
+function renderBreakdownChange(breakdown, options = {}) {
+  if (!setBreakdown(breakdown, options)) return false;
+  state.animateBarsFromZero = true;
+  state.animateChartsOnRender = true;
+  let renderSucceeded = false;
+  try {
+    render();
+    renderSucceeded = true;
+  } finally {
+    state.animateBarsFromZero = false;
+    // Home consumes this flag asynchronously after ResizeObserver confirms layout.
+    // Clear it only after a failed render so that deferred entry motion still runs.
+    if (!renderSucceeded) state.animateChartsOnRender = false;
+  }
   return true;
 }
 
@@ -3793,6 +4196,7 @@ function applyAppearanceSettings(settings) {
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.style.setProperty('--highlight-alpha', (0.045 + depth * 0.06).toFixed(3));
+  applyReduceMotionPreference(settings?.reduceMotion);
   // Only full settings objects carry themeColors; glass/zoom preview patches
   // omit it, so we must not wipe theme overrides mid-slider-drag.
   if (settings && 'themeColors' in settings) applyThemeColors(settings.themeColors);
@@ -4401,6 +4805,7 @@ function handleFloatingBubblePointerUp(event) {
 function appearancePatchFromControls() {
   return {
     systemGlass: Boolean(els.systemGlassInput.checked),
+    reduceMotion: els.reduceMotionInput?.value || 'system',
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
@@ -4536,8 +4941,13 @@ async function refreshHubInfo() {
 }
 
 function syncPeriodTabs() {
-  for (const tab of document.querySelectorAll('.tab')) {
-    tab.classList.toggle('active', tab.dataset.period === state.period);
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.period === state.period));
+  document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
+  for (const tab of tabs) {
+    const active = tab.dataset.period === state.period;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', String(active));
   }
 }
 
@@ -4616,6 +5026,8 @@ function syncSettingsForm() {
   }
   renderWslPanel();
   els.systemGlassInput.checked = state.settings.systemGlass !== false;
+  const reduceMotion = motionPreferenceApi.normalize(state.settings.reduceMotion);
+  if (els.reduceMotionInput) els.reduceMotionInput.value = reduceMotion;
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
@@ -5070,6 +5482,15 @@ function renderHomeLimitProviderList() {
     .orderedLimitProviders(LIMIT_PROVIDERS, homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
   const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
+  const statusLabel = document.createElement('label');
+  statusLabel.className = 'checkbox-label home-limit-status-setting';
+  const statusInput = document.createElement('input');
+  statusInput.type = 'checkbox';
+  statusInput.checked = state.settings?.showHomeLimitBars === true;
+  const statusText = document.createElement('span');
+  statusText.textContent = t('settings.home.showLimitBars');
+  statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
+  statusLabel.append(statusInput, statusText);
   const header = document.createElement('div');
   header.className = 'settings-note-row home-limit-provider-header';
   const note = document.createElement('p');
@@ -5098,7 +5519,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(header);
+  wrap.append(statusLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -5923,6 +6344,7 @@ window.addEventListener('blur', () => {
 
 async function init() {
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
   applyEffectiveCurrencyRates();
 
@@ -5933,6 +6355,7 @@ async function init() {
     state.appUpdate = payload;
     renderAppUpdatePill();
     renderSettingsAppUpdateRow();
+    if (els.appUpdatePopover.matches(':popover-open')) renderAppUpdatePopover(payload);
   });
   if (state.appInfo?.loginItemSupported) {
     state.settings.startAtLogin = Boolean(state.appInfo.loginItemOpenAtLogin);
@@ -5959,12 +6382,15 @@ async function init() {
 
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {
-    setPeriod(tab.dataset.period);
+    const snapshot = captureBreakdownMotion();
+    if (!setPeriod(tab.dataset.period)) return;
     syncPeriodTabs();
     if (state.openSession) openSessionDetail(state.openSession);
-    state.currentTotal = 0;
     state.rowSignature = '';
+    state.periodMotionActive = true;
     render();
+    state.periodMotionActive = false;
+    animateBreakdownFrom(snapshot, { duration: 800 });
   });
 }
 
@@ -6193,6 +6619,10 @@ function setupThemeAccordion(group, toggle, details) {
 setupThemeAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
 setupThemeAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
 els.systemGlassInput.addEventListener('change', saveAppearanceFromControls);
+els.reduceMotionInput?.addEventListener('change', async () => {
+  state.settings.reduceMotion = applyReduceMotionPreference(els.reduceMotionInput.value);
+  await saveAppearanceFromControls();
+});
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
 els.toolIconsInput.addEventListener('change', saveAppearanceFromControls);
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
@@ -6242,6 +6672,8 @@ els.checkTokscaleButton?.addEventListener('click', checkTokscaleNpm);
 els.downloadTokscaleButton?.addEventListener('click', downloadTokscaleFromNpm);
 els.resetTokscaleButton?.addEventListener('click', resetTokscaleToBundled);
 els.openTokscaleLinkButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://github.com/junhoyeo/tokscale'));
+els.openRepositoryButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL));
+els.reportIssueButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_ISSUES_URL));
 els.refreshButton.addEventListener('click', () => {
   if (state.breakdown === 'status') refreshStatusViewManually().catch(() => {});
   else refreshStats({ force: true, feedback: true });
@@ -6289,14 +6721,56 @@ async function runAppUpdateAction() {
 }
 
 els.appUpdatePillAction.addEventListener('click', async () => {
-  await runAppUpdateAction();
+  if (appUpdateActionMode(state.appUpdate) === 'install') {
+    await runAppUpdateAction();
+    return;
+  }
+  if (!renderAppUpdatePopover(state.appUpdate) || typeof els.appUpdatePopover.showPopover !== 'function') {
+    await runAppUpdateAction();
+    return;
+  }
+  positionAppUpdatePopover();
+  els.appUpdatePopover.showPopover();
+  els.appUpdatePopoverAction.focus();
 });
 
 els.appUpdatePillDismiss.addEventListener('click', async () => {
   const version = state.appUpdate?.latest?.version;
   if (!version) return;
   state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);
+  if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
   renderAppUpdatePill();
+});
+
+els.appUpdatePopoverClose.addEventListener('click', () => {
+  els.appUpdatePopover.hidePopover();
+});
+
+els.appUpdatePopover.addEventListener('toggle', (event) => {
+  const open = event.newState === 'open';
+  if (els.appUpdatePillAction.hasAttribute('aria-haspopup')) {
+    els.appUpdatePillAction.setAttribute('aria-expanded', String(open));
+  }
+  if (!open) {
+    const active = document.activeElement;
+    if (active === document.body || active === els.appUpdatePopover || els.appUpdatePopover.contains(active)) {
+      els.appUpdatePillAction.focus();
+    }
+  }
+});
+
+els.appUpdatePopoverAction.addEventListener('click', async () => {
+  els.appUpdatePopover.hidePopover();
+  await runAppUpdateAction();
+});
+
+els.appUpdatePopoverRelease.addEventListener('click', async () => {
+  const url = state.appUpdate?.latest?.htmlUrl;
+  if (url) await window.tokenMonitor.openExternal(url);
+});
+
+window.addEventListener('resize', () => {
+  if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
 });
 
 els.appUpdateCheckButton.addEventListener('click', async () => {
@@ -6309,6 +6783,11 @@ els.appUpdateViewReleaseButton.addEventListener('click', async () => {
   await runAppUpdateAction();
 });
 
+els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
+  const url = state.appUpdate?.latest?.htmlUrl;
+  if (url) await window.tokenMonitor.openExternal(url);
+});
+
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   state.settings = next;
@@ -6316,6 +6795,14 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   syncSettingsForm();
   maybeUpdateBarsIcon();
 });
+
+reducedMotionMedia?.addEventListener?.('change', () => {
+  if (motionPreferenceApi.normalize(state.settings?.reduceMotion) !== 'system') return;
+  applyReduceMotionPreference('system');
+});
+
+window.tokenMonitor.onOpenSettings?.(openSettingsPanel);
+window.tokenMonitor.onOpenView?.(openViewFromTray);
 
 window.tokenMonitor.onFloatingBubbleState?.((payload) => {
   applyFloatingBubbleState(payload);
@@ -6805,13 +7292,10 @@ async function refreshCodexAccounts() {
 // Linked. Only legacy/non-aggregated stats without a `devices` array may fall
 // back to the aggregate; once raw device rows are present they are authoritative.
 function localDeviceLimitsProviders() {
-  const devices = state.stats?.devices;
-  if (!Array.isArray(devices)) return null;
-  const localId = state.settings?.deviceId || '';
-  const local = localId
-    ? devices.find((device) => device.deviceId === localId)
-    : (devices.length === 1 ? devices[0] : null);
-  return local?.limits?.providers || [];
+  return accountIdentityApi.localDeviceLimitsProviders(
+    state.stats,
+    state.settings?.deviceId || ''
+  );
 }
 
 function localProviderStatus(name) {

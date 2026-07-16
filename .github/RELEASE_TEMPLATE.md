@@ -4,25 +4,26 @@
 
 ## What's changed
 
+<!-- app-update-notes:en:start -->
 ### Added
-- **Projects view:** Disabled by default; enable it under **Settings → Main Screen → Enable project tracking** to track Claude Code, Codex, and OpenCode token usage and costs by workspace, with cross-device rollups and no raw workspace paths sent to the hub. (#122, #138, #144)
-- **Shareable theme codes:** Copy or import a `TM1` theme code to share appearance settings. (#130)
-- **Windows app updates:** Windows installer builds can now download and install updates from inside Token Monitor; portable builds continue to update manually. (#136)
+- **Low-limit highlights:** Added an optional Home setting that highlights remaining AI tool limits below 50% and marks critical limits below 20%. (#161)
+- **Reduce Motion:** Added a three-state preference under Appearance. System follows the OS setting, On reduces animations, and Off keeps animations enabled across the main widget and Usage Dashboard. (#167)
 
 ### Improved
-- **Codex reset counts:** Upcoming reset expirations now appear as a timeline, and a lone quota window expands to the full card width. (#135)
-- **Appearance settings:** Vendor Colors now have their own section for easier customization.
+- **Usage animations:** Live token totals and breakdown values now transition smoothly, while bars, activity heatmaps, trend lines, and Dashboard bar/K-line charts animate data and period changes. Page navigation stays immediate. (#163, #166)
+- **Update release notes:** Improved the contrast and readability of the release notes popover. (#162)
 
 ### Fixed
-- **Session details:** The `TOTAL` session view is available again in sync and host modes. (#131)
-- **AI Tool Limits:** Tray limit bars now fall back to weekly windows when a provider has no session window, and MiMo no longer shows Token Plan for inactive or free accounts. (#137, #142)
+- **App updates:** Dismissed updates remain available through manual checks and Settings, while downloaded updates expose the restart action instead of staying hidden. (#158)
+- **Claude limits:** Fall back to the Claude CLI when OAuth credentials cannot be found, so limits continue to load for signed-in CLI sessions. (#159)
+<!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.27.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.27.0/Token-Monitor-0.27.0-arm64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.27.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.27.0/Token-Monitor-Setup-0.27.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.27.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.27.0/Token-Monitor-0.27.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.27.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.27.0/Token-Monitor-0.27.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.29.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.29.0/Token-Monitor-0.29.0-arm64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.29.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.29.0/Token-Monitor-Setup-0.29.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.29.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.29.0/Token-Monitor-0.29.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.29.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.29.0/Token-Monitor-0.29.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -60,25 +61,26 @@ open-source: https://github.com/junhoyeo/tokscale
 
 ## 更新内容
 
+<!-- app-update-notes:zh:start -->
 ### 新增
-- **项目视图：** 此功能默认关闭，可前往 **设置 → 主界面 → 启用项目追踪** 开启，按工作区追踪 Claude Code、Codex 与 OpenCode 的 Token 用量和费用；支持跨设备汇总，且不会向 Hub 发送原始工作区路径。（#122、#138、#144）
-- **主题分享码：** 可复制或导入 `TM1` 主题码，分享外观设置。（#130）
-- **Windows 应用更新：** Windows 安装版现可在 Token Monitor 内下载并安装更新；便携版仍需手动更新。（#136）
+- **低额度提示：** 新增可选主页设置，在 AI 工具剩余额度低于 50% 时高亮，并在低于 20% 时标记为紧急。（#161）
+- **减少动态效果：** 外观中新增「系统／开启／关闭」三态设置。系统跟随操作系统，开启减少动画，关闭保留动画，并统一应用于主窗口与使用仪表板。（#167）
 
 ### 改进
-- **Codex 重置次数：** 即将到期的重置次数现以时间线显示；仅有一个额度窗口时也会扩展至卡片全宽。（#135）
-- **外观设置：** 厂商色现有独立设置区，更方便自定义。
+- **用量动画：** 实时 Token 总计与明细数值现在会平滑过渡；柱形图、活动热力图、趋势线以及仪表盘的柱形图和 K 线图会呈现数据与周期变化。页面切换仍保持即时。（#163、#166）
+- **更新说明：** 提升了更新说明弹窗的对比度和可读性。（#162）
 
 ### 修复
-- **会话明细：** 同步与主机模式现已恢复 `TOTAL` 会话视图。（#131）
-- **AI 工具额度：** 当服务商没有会话窗口时，托盘额度条现会改用每周窗口；MiMo 的未订阅或免费账号也不再误显示 Token Plan。（#137、#142）
+- **应用更新：** 已忽略的更新仍可通过手动检查和设置页面操作；下载完成后会显示重启操作，不再被忽略状态隐藏。（#158）
+- **Claude 额度：** 未找到 OAuth 凭据时自动回退到 Claude CLI，使已登录的 CLI 会话仍能读取额度。（#159）
+<!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.27.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.27.0/Token-Monitor-0.27.0-arm64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.27.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.27.0/Token-Monitor-Setup-0.27.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.27.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.27.0/Token-Monitor-0.27.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.27.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.27.0/Token-Monitor-0.27.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.29.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.29.0/Token-Monitor-0.29.0-arm64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.29.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.29.0/Token-Monitor-Setup-0.29.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.29.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.29.0/Token-Monitor-0.29.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.29.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.29.0/Token-Monitor-0.29.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>

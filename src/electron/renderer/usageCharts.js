@@ -426,7 +426,8 @@
       const title = tip ? `<title>${escapeXml(tip)}</title>` : '';
       const hover = `<rect data-i="${bar.index}" x="${svgRound(bar.x)}" y="${svgRound(p.y)}" width="${svgRound(bar.width)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
       const label = axisText(o.axisLabel(bar, bar.index, model.bars), bar.x + bar.width / 2, model.height - 4);
-      return drawn + hover + label;
+      const stack = `<g class="bar-stack" data-motion-key="${encodeURIComponent(String(bar.label))}">${drawn}</g>`;
+      return stack + hover + label;
     }).join('');
     const baseline = `<line class="axis-base" x1="${svgRound(p.x)}" y1="${svgRound(p.y + p.h)}" x2="${svgRound(p.x + p.w)}" y2="${svgRound(p.y + p.h)}"></line>`;
     return `<svg class="dash-chart" viewBox="0 0 ${model.width} ${model.height}" width="100%" height="100%">${grid}${baseline}${parts}</svg>`;
@@ -438,19 +439,23 @@
     const grid = yAxisSvg(p, model.maxVal, o.yTicks, o.formatTick);
     const parts = (model.candles || []).map((c, i) => {
       const cls = c.up ? 'candle-up' : 'candle-down';
-      const wick = `<line class="candle-wick ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(c.yHigh)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yLow)}"></line>`;
-      const body = `<rect class="candle-body ${cls}" x="${svgRound(c.x)}" y="${svgRound(c.bodyY)}" width="${svgRound(c.width)}" height="${svgRound(Math.max(1, c.bodyHeight))}" rx="1"></rect>`;
+      const bodyHeight = Math.max(1, c.bodyHeight);
+      const bodyMid = c.bodyY + bodyHeight / 2;
+      const wick = `<line class="candle-wick candle-wick-high ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yHigh)}"></line>`
+        + `<line class="candle-wick candle-wick-low ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yLow)}"></line>`;
+      const body = `<rect class="candle-body ${cls}" x="${svgRound(c.x)}" y="${svgRound(c.bodyY)}" width="${svgRound(c.width)}" height="${svgRound(bodyHeight)}" rx="1"></rect>`;
       const tip = o.titleOf(c);
       const title = tip ? `<title>${escapeXml(tip)}</title>` : '';
       const hover = `<rect data-i="${i}" x="${svgRound(c.x)}" y="${svgRound(p.y)}" width="${svgRound(c.width)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
       const label = axisText(o.axisLabel(c, i, model.candles), c.wickX, model.height - 4);
-      return wick + body + hover + label;
+      const candle = `<g class="candle-stack" data-motion-key="${encodeURIComponent(String(c.key))}">${wick}${body}</g>`;
+      return candle + hover + label;
     }).join('');
     return `<svg class="dash-chart" viewBox="0 0 ${model.width} ${model.height}" width="100%" height="100%">${grid}${parts}</svg>`;
   }
 
   function heatmapSvg(model, options) {
-    const o = Object.assign({ titleOf: () => '', monthLabel: (m) => m.label, radius: 3, glowFilterId: '', spotlightId: '', spotlightRadius: 86 }, options || {});
+    const o = Object.assign({ titleOf: () => '', monthLabel: (m) => m.label, radius: 3, glowFilterId: '', spotlightId: '', spotlightRadius: 86, initialHidden: false }, options || {});
     const botPad = 16;
     const pitch = (model.cell || 11) + (model.gap || 2);
     const glowFilterId = String(o.glowFilterId || '');
@@ -466,7 +471,8 @@
       defsParts.push(`<radialGradient id="${escapeXml(spotlightGradientId)}" gradientUnits="userSpaceOnUse" cx="-200" cy="-200" r="${radius}"><stop offset="0" stop-color="white" stop-opacity="1"></stop><stop offset="0.35" stop-color="white" stop-opacity="0.62"></stop><stop offset="0.75" stop-color="white" stop-opacity="0"></stop></radialGradient><mask id="${escapeXml(spotlightMaskId)}"><rect x="0" y="0" width="${svgRound(model.width)}" height="${svgRound(model.height)}" fill="url(#${escapeXml(spotlightGradientId)})"></rect></mask>`);
     }
     const defs = defsParts.length ? `<defs>${defsParts.join('')}</defs>` : '';
-    const cellAttrs = (c) => `class="heat lvl-${c.intensity}" data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"`;
+    const initialVisibility = o.initialHidden ? ' data-motion-hidden="true" opacity="0"' : '';
+    const cellAttrs = (c) => `class="heat lvl-${c.intensity}" data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"${initialVisibility}`;
     const cells = (model.cells || []).map((c) =>
       `<rect ${cellAttrs(c)}>${o.titleOf(c) ? `<title>${escapeXml(o.titleOf(c))}</title>` : ''}</rect>`
     ).join('');

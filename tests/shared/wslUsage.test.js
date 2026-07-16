@@ -37,6 +37,13 @@ test('homeHasData maps Proma agent sessions to proma', () => {
   assert.deepEqual(ids, ['proma']);
 });
 
+test('homeHasData maps VS Code Copilot workspace storage to copilot', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const workspaceRoot = `${home}\\.config\\Code\\User\\workspaceStorage`;
+  const present = new Set([`${workspaceRoot}\\abc\\chatSessions`]);
+  assert.deepEqual(homeHasData(home, (p) => present.has(p), (p) => p === workspaceRoot ? ['abc'] : []), ['copilot']);
+});
+
 test('homeHasData returns empty array when no markers present', () => {
   const ids = homeHasData('\\\\wsl$\\Ubuntu\\home\\u', () => false);
   assert.deepEqual(ids, []);
@@ -153,6 +160,22 @@ test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, kilo
   assert.deepEqual(homesFor('.config/kiro/User/globalStorage/kiro.kiroagent'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.codebuddy/projects'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.workbuddy'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+});
+
+test('wslUsageHomes keeps a home whose only data is VS Code Copilot Chat', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const workspaceRoot = `${home}\\.config\\Code\\User\\workspaceStorage`;
+  const homes = wslUsageHomes({
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: (dir) => {
+      if (dir === '\\\\wsl$\\Ubuntu\\home') return ['alice'];
+      if (dir === workspaceRoot) return ['abc'];
+      throw new Error('unreadable');
+    },
+    existsSync: (p) => p === `${workspaceRoot}\\abc\\chatSessions`
+  });
+  assert.deepEqual(homes, [home]);
 });
 
 // Antigravity CLI (`agy`) stores conversations as SQLite under

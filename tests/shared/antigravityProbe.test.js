@@ -41,7 +41,7 @@ test('parseProcessLine tags the IDE language server as kind=ide', () => {
 });
 
 test('parseProcessLine matches the agy CLI without a csrf token (kind=cli)', () => {
-  const line = '60123 /Users/javis/.antigravity/bin/agy language-server --stdio';
+  const line = '60123 /Users/example/.antigravity/bin/agy language-server --stdio';
   const info = probe._parseProcessLine(line);
   assert.equal(info.pid, 60123);
   assert.equal(info.kind, 'cli');
@@ -109,7 +109,7 @@ test('detectProcessInfo (posix) throws unavailable when LS present but no csrf',
 test('detectProcessInfo (posix) returns the agy CLI language server with an empty token', async () => {
   const stdout = [
     '111 /bin/bash --login',
-    '60123 /Users/javis/.antigravity/bin/agy language-server --stdio'
+    '60123 /Users/example/.antigravity/bin/agy language-server --stdio'
   ].join('\n');
   const info = await probe.detectProcessInfo({ platform: 'darwin', spawn: fakeSpawn(stdout) });
   assert.equal(info.pid, 60123);

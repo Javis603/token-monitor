@@ -1,28 +1,20 @@
-# GitHub Copilot token tracking
+# GitHub Copilot CLI token tracking
 
-Token Monitor reads OpenTelemetry JSONL files from `~/.copilot/otel/` through Tokscale. This supports both the standalone GitHub Copilot CLI and VS Code Copilot Chat. OTel begins recording only after it is enabled, so earlier interactions are not backfilled.
+Token Monitor automatically detects VS Code Copilot Chat usage from VS Code's local session data through Tokscale 4.5.2 or later. No VS Code settings or OpenTelemetry exporter are required.
 
-## VS Code Copilot Chat
+The standalone GitHub Copilot CLI still needs its OpenTelemetry file exporter enabled. Token Monitor reads those JSONL files from `~/.copilot/otel/` through Tokscale. OTel begins recording only after it is enabled, so earlier CLI interactions are not backfilled.
 
-Use VS Code 1.119 or later. Create the output folder, then open **Preferences: Open User Settings (JSON)** and add the following settings. Replace the example with an absolute path on your machine.
+## Migrating from the previous VS Code setup
 
-```bash
-mkdir -p ~/.copilot/otel
-```
+If you previously followed this guide for VS Code Copilot Chat, remove these settings from VS Code's `settings.json`:
 
-```json
-{
-  "github.copilot.chat.otel.enabled": true,
-  "github.copilot.chat.otel.exporterType": "file",
-  "github.copilot.chat.otel.outfile": "/Users/you/.copilot/otel/copilot-chat-otel.jsonl"
-}
-```
+- `github.copilot.chat.otel.enabled`
+- `github.copilot.chat.otel.exporterType`
+- `github.copilot.chat.otel.outfile`
 
-On Windows, use an absolute Windows path such as `C:\\Users\\you\\.copilot\\otel\\copilot-chat-otel.jsonl`.
+Move any VS Code-generated Copilot Chat OTel file out of `~/.copilot/otel/` after backing it up. Leaving both the old VS Code OTel export and the built-in VS Code session source enabled can overlap. Copilot CLI OTel files can remain in that directory.
 
-Reload the VS Code window, then send a new message in Copilot Chat. A `.jsonl` file should appear in `~/.copilot/otel/`, and Token Monitor will pick it up on its next refresh.
-
-## Copilot CLI
+## Setup
 
 Copilot CLI does not write an OTel file by default. Set the file exporter before starting the CLI. The timestamped filename keeps each session in a separate file instead of growing one OTel log indefinitely.
 
@@ -47,9 +39,8 @@ copilot
 
 ## Privacy
 
-Do not enable `github.copilot.chat.otel.captureContent` unless you intentionally want prompts, responses, and tool content written to disk. It is disabled by default; Token Monitor needs only the token metadata.
+Token Monitor needs only token metadata. Do not enable optional OTel content-capture settings unless you intentionally want prompts, responses, or tool content written to disk.
 
 ## References
 
-- [Monitor agent usage with OpenTelemetry](https://code.visualstudio.com/docs/agents/guides/monitoring-agents)
 - [GitHub Copilot CLI OpenTelemetry monitoring](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)

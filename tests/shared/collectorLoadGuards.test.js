@@ -154,14 +154,60 @@ test('watchPathsForClients includes Kimi, Qwen, and Grok Build local roots', () 
   }
 });
 
-test('watchPathsForClients includes the GitHub Copilot CLI otel root', () => {
-  const tmp = withTmpHome([path.join('.copilot', 'otel')]);
+test('watchPathsForClients includes GitHub Copilot CLI and VS Code chat roots', () => {
+  const tmp = withTmpHome([
+    path.join('.copilot', 'otel'),
+    path.join('Library', 'Application Support', 'Code', 'User', 'workspaceStorage')
+  ]);
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
     const dirs = watchPathsForClients('copilot');
     assert.ok(dirs.includes(path.join(tmp, '.copilot', 'otel')));
+    assert.ok(dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage')));
+    assert.deepEqual(clientDataDirPresence('copilot'), { copilot: true });
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher prunes unrelated VS Code workspace state but keeps Copilot chats', () => {
+  const tmp = withTmpHome([
+    path.join('Library', 'Application Support', 'Code', 'User', 'workspaceStorage', 'abc', 'chatSessions')
+  ]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const root = path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage');
+    const ignored = watchIgnoreMatcher('copilot');
+    assert.equal(ignored(root), false);
+    assert.equal(ignored(path.join(root, 'abc')), false);
+    assert.equal(ignored(path.join(root, 'abc', 'chatSessions')), false);
+    assert.equal(ignored(path.join(root, 'abc', 'chatSessions', 'session.jsonl')), false);
+    assert.equal(ignored(path.join(root, 'abc', 'workspace.json')), false);
+    assert.equal(ignored(path.join(root, 'abc', 'state.vscdb')), true);
+    assert.equal(ignored(path.join(root, 'abc', 'other', 'cache.bin')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('clientDataDirPresence requires an actual VS Code Copilot chat source', () => {
+  const tmp = withTmpHome([
+    path.join('Library', 'Application Support', 'Code', 'User', 'workspaceStorage', 'plain-workspace')
+  ]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientDataDirPresence } = freshCollector();
+    assert.deepEqual(clientDataDirPresence('copilot'), { copilot: false });
+    fs.mkdirSync(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage', 'copilot-workspace', 'chatSessions'), { recursive: true });
     assert.deepEqual(clientDataDirPresence('copilot'), { copilot: true });
   } finally {
     os.homedir = originalHomedir;

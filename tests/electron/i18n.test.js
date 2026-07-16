@@ -50,7 +50,7 @@ test('translate falls back to English and interpolates values', () => {
   assert.equal(translate('zh-TW', 'missing.key'), 'missing.key');
 });
 
-test('every bundled locale defines every English settings key', () => {
+test('every bundled locale defines every English key', () => {
   const englishKeys = Object.keys(MESSAGES.en).sort();
   for (const locale of Object.keys(MESSAGES).filter((code) => code !== 'en')) {
     const missing = englishKeys.filter((key) => MESSAGES[locale][key] === undefined);
