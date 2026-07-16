@@ -4,10 +4,6 @@
 
 The screenshot above is the feature running inside Token Monitor's normal Electron widget. All account names, masked identities, device names, tasks, usage, and quota values shown in it are synthetic demonstration data from an isolated local Hub.
 
-The same Hub also exposes an optional browser management page:
-
-![Optional multi-device account occupancy Hub dashboard](../.github/assets/occupancy-dashboard.png)
-
 ## Product definition
 
 This feature is a local-first, multi-device account operations view for people who use several AI providers and several accounts on each provider. Every participating Token Monitor device reports which AI agent task it is currently running and which configured account it is using. The existing Hub combines those reports with the freshest per-account quota snapshot available from participating devices.
