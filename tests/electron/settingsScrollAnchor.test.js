@@ -38,7 +38,7 @@ function scrollAnchorHarness({ reducedMotion = false, settingsSections = {} } = 
     }
   };
   vm.runInNewContext(
-    `${app.slice(start, end)}\nglobalThis.scrollAnchorApi = { anchorSettingsScroll, cancelSettingsScrollAnchor, shouldAnchorSettingsScroll };`,
+    `${app.slice(start, end)}\nglobalThis.scrollAnchorApi = { anchorSettingsScroll, cancelSettingsScrollAnchor, cancelSettingsScrollAnchorOnKeydown, shouldAnchorSettingsScroll };`,
     context
   );
   return { api: context.scrollAnchorApi, cancelled, frames, panel };
@@ -88,4 +88,21 @@ test('manual interaction can cancel an active settings scroll anchor', () => {
 
   assert.deepEqual(cancelled, [1]);
   assert.equal(frames.size, 0);
+});
+
+test('keyboard scroll and focus-navigation keys cancel an active settings scroll anchor', () => {
+  for (const key of ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab']) {
+    const { api, cancelled, frames } = scrollAnchorHarness();
+    api.anchorSettingsScroll(anchor(), () => {});
+    api.cancelSettingsScrollAnchorOnKeydown({ key });
+    assert.deepEqual(cancelled, [1], `${key} should cancel the active frame`);
+    assert.equal(frames.size, 0);
+  }
+
+  const { api, cancelled, frames } = scrollAnchorHarness();
+  api.anchorSettingsScroll(anchor(), () => {});
+  api.cancelSettingsScrollAnchorOnKeydown({ key: 'a' });
+  assert.deepEqual(cancelled, []);
+  assert.deepEqual([...frames.keys()], [1]);
+  assert.match(app, /settingsPanel\?\.addEventListener\('keydown', cancelSettingsScrollAnchorOnKeydown\)/);
 });

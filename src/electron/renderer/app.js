@@ -416,12 +416,17 @@ function setSettingsSectionExpanded(section, expanded) {
 // header to its on-screen position for the duration of the 250ms accordion
 // transition (rAF-corrected each frame; a single pass when motion is off).
 const SETTINGS_SCROLL_ANCHOR_MS = 360;
+const SETTINGS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab']);
 let settingsScrollAnchorFrame = null;
 
 function cancelSettingsScrollAnchor() {
   if (settingsScrollAnchorFrame === null) return;
   cancelAnimationFrame(settingsScrollAnchorFrame);
   settingsScrollAnchorFrame = null;
+}
+
+function cancelSettingsScrollAnchorOnKeydown(event) {
+  if (SETTINGS_SCROLL_KEYS.has(event.key)) cancelSettingsScrollAnchor();
 }
 
 function shouldAnchorSettingsScroll(section, expanding) {
@@ -463,6 +468,7 @@ function setupSettingsSections() {
   }
   els.settingsPanel?.addEventListener('pointerdown', cancelSettingsScrollAnchor, { passive: true });
   els.settingsPanel?.addEventListener('wheel', cancelSettingsScrollAnchor, { passive: true });
+  els.settingsPanel?.addEventListener('keydown', cancelSettingsScrollAnchorOnKeydown);
 }
 
 function refreshIntervalLabel(value) {
