@@ -206,6 +206,7 @@ Returns aggregate stats for the widget.
 
 Response includes:
 
+- `staleAfterMs`, the effective Hub threshold used to recompute device and provider freshness
 - `periods.today`
 - `periods.month`
 - `periods.allTime`
@@ -215,7 +216,7 @@ Response includes:
 - `projectsIncomplete` plus the corresponding `devices[].allTimeProjectsOmitted`, `devices[].allTimeProjectsIncomplete`, or `devices[].projectsEnabled` diagnostic
 - `historyPreview.daily[].activeTimeMs`, `historyPreview.monthly[].activeTimeMs`, and `historyPreview.summary.activeTimeMs` when tokscale graph exposes session active-time metrics
 - `limits.providers` aggregated by provider account
-- `devices`
+- `devices`, including each device's normalized `periods`, `limits`, `receivedAt`, optional `syncUploadIntervalMs`, and optional `periodWindows`
 - stale status for devices that have not reported recently
 
 If multiple devices report the same provider account, the hub keeps the freshest valid limits status for that account. Public Worker stats omit account identifiers.

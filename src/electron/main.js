@@ -118,6 +118,7 @@ const {
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { classifyStreamFailure } = require('./syncConnection');
+const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
 const {
@@ -1599,6 +1600,7 @@ let streamConnected = false;
 let streamFailure = null;
 let syncCollectorHandle = null;
 let lastCollectedDevice = null;
+let latestHubStats = null;
 let tray = null;
 let latestStats = null;
 let trayRefreshInFlight = false;
@@ -1807,6 +1809,11 @@ function startSyncCollector() {
         syncUploadIntervalMs: syncUploadIntervalMs()
       };
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+      if (displayStats) {
+        updateDiscordRpc(displayStats, settings.currency);
+        sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
+      }
       try {
         await syncUploadScheduler.enqueue(visibleSummary);
       } catch (error) {
@@ -2188,8 +2195,9 @@ function parseSseChunk(chunk) {
   try { return { event, data: JSON.parse(dataLines.join('\n')) }; } catch (_) { return null; }
 }
 
-async function startStatsStream() {
+async function startStatsStream(options = {}) {
   stopStatsStream();
+  if (options.resetSnapshot) latestHubStats = null;
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   mode = 'sync';
@@ -2218,9 +2226,14 @@ async function startStatsStream() {
       while ((idx = buffer.indexOf('\n\n')) !== -1) {
         const chunk = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 2);
-        const parsed = parseSseChunk(chunk);
+        let parsed = parseSseChunk(chunk);
         if (parsed) {
-          if (parsed.event === 'stats' && parsed.data?.stats) updateDiscordRpc(parsed.data.stats, settings.currency);
+          if (parsed.event === 'stats' && parsed.data?.stats) {
+            latestHubStats = parsed.data.stats;
+            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+            parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
+            updateDiscordRpc(displayStats, settings.currency);
+          }
           sendPush(parsed);
         }
       }
@@ -2724,7 +2737,7 @@ function startMode() {
     }
     await stopEmbeddedHub();
     if (effectiveHubConfig().url) {
-      startStatsStream();
+      startStatsStream({ resetSnapshot: true });
       startSyncCollector();
     } else {
       startLocalCollector();
@@ -2826,7 +2839,8 @@ async function fetchStats(options = {}) {
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  return injectLocalDeviceStatus(await response.json());
+  latestHubStats = await response.json();
+  return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
 }
 
 function managedPricingSidecarPath() {

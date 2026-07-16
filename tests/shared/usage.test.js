@@ -1002,6 +1002,7 @@ test('aggregateDevices drops today usage once a device today window has ended', 
   const aggregate = aggregateDevices([staleSnapshotDevice()], 10 * 60 * 1000, Date.parse('2026-06-26T05:00:00.000Z'));
   assert.equal(aggregate.periods.today.totalTokens, 0);
   assert.equal(aggregate.periods.today.clients.codex, undefined);
+  assert.deepEqual(aggregate.devices[0].periodWindows, staleSnapshotDevice().periodWindows);
 });
 
 test('aggregateDevices keeps allTime from a device whose today window has ended', () => {

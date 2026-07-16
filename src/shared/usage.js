@@ -924,6 +924,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsIncomplete') ? { allTimeProjectsIncomplete: normalized.allTimeProjectsIncomplete } : {}),
       ...(hasOwn(normalized, 'syncUploadIntervalMs') ? { syncUploadIntervalMs: normalized.syncUploadIntervalMs } : {}),
+      ...(hasOwn(normalized, 'periodWindows') ? { periodWindows: normalized.periodWindows } : {}),
       periods: normalized.periods,
       limits: normalized.limits
     });

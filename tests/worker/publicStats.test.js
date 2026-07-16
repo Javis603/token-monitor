@@ -22,3 +22,14 @@ test('public stats periods strip every project identity field', async () => {
   assert.doesNotMatch(json, /Private-Client/);
   assert.doesNotMatch(json, /private-client/);
 });
+
+test('Worker authenticated stats expose the effective staleness threshold', async () => {
+  const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const hub = new worker.HubDO({
+    storage: { async list() { return new Map(); } }
+  }, { STALE_AFTER_MS: '7654321' });
+
+  const stats = await hub.getStats();
+
+  assert.equal(stats.staleAfterMs, 7654321);
+});
