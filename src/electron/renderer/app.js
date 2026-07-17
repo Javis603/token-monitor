@@ -4187,6 +4187,7 @@ async function refreshStats(options = {}) {
       // a retry budget that an earlier outage may have exhausted.
       clearTimeout(state.homeHistoryRetryTimer);
       state.homeHistoryRetryTimer = null;
+      state.homeHistoryLoadedSignature = '';
       state.homeHistoryRetrySignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';

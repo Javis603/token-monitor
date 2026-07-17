@@ -32,6 +32,7 @@ test('a forced history refresh restores the Home full-history retry budget', () 
   assert.ok(refreshStats, 'refreshStats exists');
   const body = refreshStats[1];
   assert.match(body, /options\.forceHistory === true/);
+  assert.match(body, /homeHistoryLoadedSignature = ''/);
   assert.match(body, /homeHistoryRetrySignature = ''/);
   assert.match(body, /homeHistoryRetries = 0/);
   assert.match(body, /homeHistorySignature = ''/);
