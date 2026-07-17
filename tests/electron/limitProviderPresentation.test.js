@@ -347,6 +347,8 @@ test('tray primary-limit modes use the shared provider-aware resolver', () => {
   assert.match(renderBars, /secondaryWindow/);
   assert.doesNotMatch(renderBars, /\.find\(\(w\) => w\.kind/);
   assert.match(renderAllSessions, /trayBarsLayout\(height, \{ contentOnly: true \}\)/);
+  assert.match(renderAllSessions, /function renderAllSessionsIcon\(stats, height = 44, configOrder, colors = \{\}, options = \{\}\)/);
+  assert.match(renderAllSessions, /picks\.length === 1\) return renderBarsIcon\(stats, height, \(\) => picks\[0\], colors, options\)/);
 });
 
 test('limit percent tray mode renders provider icons into a generated tray image', () => {

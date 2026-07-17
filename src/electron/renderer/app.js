@@ -7030,14 +7030,14 @@ function pickConfiguredSessionProviders(stats, configOrder) {
   });
 }
 
-function renderAllSessionsIcon(stats, height = 44, configOrder, colors = {}) {
+function renderAllSessionsIcon(stats, height = 44, configOrder, colors = {}, options = {}) {
   const trackColor = colors.track || 'rgba(0, 0, 0, 0.32)';
   const fillColor = colors.fill || 'rgba(0, 0, 0, 1)';
   const picks = pickConfiguredSessionProviders(stats, configOrder);
   if (picks.length === 0) return null;
   // With one tool, preserve its canonical pair; a lone weekly/billing window is
   // promoted to the top lane and the lower lane remains an empty track.
-  if (picks.length === 1) return renderBarsIcon(stats, height, () => picks[0], colors);
+  if (picks.length === 1) return renderBarsIcon(stats, height, () => picks[0], colors, options);
 
   const { trayBarFillWidth, trayBarsLayout } = window.TokenMonitorTrayBars;
   const layout = trayBarsLayout(height, { contentOnly: true });
