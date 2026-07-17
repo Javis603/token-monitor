@@ -54,6 +54,38 @@ function row({
   });
 }
 
+test('normalizedModelId lowercases model ids so casing does not split buckets', () => {
+  const a = row({ turnId: 't1', model: 'minimax/MiniMax-M3', input: 10, source: 'legacy' });
+  const b = row({ turnId: 't2', model: 'minimax/minimax-m3', input: 5, source: 'legacy' });
+  const usage = extractUsageFromTokscale(buildTokscaleJson({}, { rows: [a, b] }));
+  assert.equal(Object.keys(usage.models).length, 1);
+  assert.equal(usage.models['minimax/minimax-m3'], 15);
+});
+
+test('dedupeUsageRows re-normalizes prebuilt rows so missing source still applies legacy-wins', () => {
+  // Simulate a pre-normalized legacy row that only has field aliases (no source).
+  const legacyLike = {
+    sessionId: 's1',
+    turnId: 'shared',
+    model: 'minimax/M3',
+    createdAt: localMs(2026, 6, 9, 12, 0),
+    input: 100,
+    output: 0,
+    reasoning: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+    source: 'legacy',
+    rowKey: 'prebuilt-legacy'
+  };
+  const runtime = row({ turnId: 'shared', input: 999, source: 'runtime' });
+  const deduped = dedupeUsageRows([legacyLike, runtime]);
+  assert.equal(deduped.length, 1);
+  assert.equal(deduped[0].source, 'legacy');
+  assert.equal(deduped[0].model, 'minimax/m3');
+  assert.equal(deduped[0].input, 100);
+});
+
 test('normalizeUsageRow maps MiniMax token_usage columns and ignores reasoning in total', () => {
   const normalized = normalizeUsageRow({
     id: 42,

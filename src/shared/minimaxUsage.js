@@ -14,33 +14,19 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const {
+  numberValue,
+  timestampMs,
+  normalizedModelId,
+  localDateKey,
+  windowStartMs,
+  localPeriodBounds
+} = require('./localUsageHelpers');
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 
 const CLIENT_ID = 'minimax';
-
-function numberValue(value) {
-  const n = Number(value || 0);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function timestampMs(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value > 0 && value < 1e12 ? value * 1000 : value;
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) return numeric > 0 && numeric < 1e12 ? numeric * 1000 : numeric;
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? 0 : parsed;
-  }
-  return 0;
-}
-
-function normalizedModelId(value) {
-  return String(value || '').trim() || 'unknown';
-}
 
 function resolveMinimaxHome(options = {}) {
   const env = options.env || process.env;
@@ -136,9 +122,11 @@ function normalizeUsageRow(raw = {}) {
  * 3. Exact rowKey duplicates (true clones) are kept once.
  */
 function dedupeUsageRows(rows) {
+  // Always re-run normalizeUsageRow so injected/pre-built rows get canonical
+  // source + lowercased model ids (legacy-wins and aggregation stay correct).
   const normalized = [];
   for (const row of rows || []) {
-    const n = row && row.rowKey ? row : normalizeUsageRow(row);
+    const n = normalizeUsageRow(row);
     if (n) normalized.push(n);
   }
 
@@ -206,7 +194,7 @@ function readRowsFromDbPath(dbPath, tableName, sourceTag, sqliteMod) {
  */
 function collectMinimaxRows(options = {}) {
   if (Array.isArray(options.rows)) {
-    return dedupeUsageRows(options.rows.map((row) => (row && row.dedupeKey ? row : normalizeUsageRow(row))));
+    return dedupeUsageRows(options.rows);
   }
   const sqliteMod = options.sqlite !== undefined ? options.sqlite : sqlite;
   if (!sqliteMod) return [];
@@ -215,19 +203,6 @@ function collectMinimaxRows(options = {}) {
   const runtimeRows = readRowsFromDbPath(runtimeDbPath(homeDir), 'local_runtime_token_usage', 'runtime', sqliteMod);
   // Within each store keep multi-step rows; cross-store legacy wins by turn_id.
   return dedupeUsageRows([...legacyRows, ...runtimeRows]);
-}
-
-function windowStartMs(windows) {
-  return Math.max(0, timestampMs(windows.todayStart), timestampMs(windows.monthStart), timestampMs(windows.allTimeSince));
-}
-
-function localDateKey(timestamp) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -329,7 +304,7 @@ function buildMinimaxHistoryGraph(options = {}) {
       day = { date, clients: [] };
       byDate.set(date, day);
     }
-    const modelId = String(row.model || 'unknown').toLowerCase();
+    const modelId = normalizedModelId(row.model);
     let client = day.clients.find((entry) => entry.modelId === modelId);
     if (!client) {
       client = {
@@ -353,11 +328,9 @@ function buildMinimaxHistoryGraph(options = {}) {
 }
 
 function buildMinimaxPeriods(options = {}) {
-  const now = options.now ? new Date(options.now) : new Date();
+  const { todayStart, monthStart } = localPeriodBounds(options.now);
   const rows = Array.isArray(options.rows) ? dedupeUsageRows(options.rows) : collectMinimaxRows(options);
   const buildOptions = { rows, sqlite: options.sqlite, homeDir: options.homeDir, env: options.env };
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
   return {
     today: buildTokscaleJson({ todayStart }, buildOptions),
     month: buildTokscaleJson({ monthStart }, buildOptions),

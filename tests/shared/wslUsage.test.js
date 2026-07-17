@@ -37,6 +37,13 @@ test('homeHasData maps Proma agent sessions to proma', () => {
   assert.deepEqual(ids, ['proma']);
 });
 
+test('homeHasData maps MiniMax data root to minimax', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.minimax\\sqlite.db`]);
+  const ids = homeHasData(home, (p) => present.has(p));
+  assert.deepEqual(ids, ['minimax']);
+});
+
 test('homeHasData maps VS Code Copilot workspace storage to copilot', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const workspaceRoot = `${home}\\.config\\Code\\User\\workspaceStorage`;
@@ -397,6 +404,41 @@ test('collectWslUsage parses Proma-only WSL homes without calling tokscale', asy
   assert.equal(bundle.today.clients.proma, 10);
   assert.equal(bundle.month.clients.proma, 20);
   assert.equal(bundle.allTime.clients.proma, 30);
+});
+
+test('collectWslUsage parses MiniMax-only WSL homes without calling tokscale', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const now = new Date('2026-07-10T08:00:00.000Z');
+  let minimaxOptions = null;
+  const { bundle, detected } = await collectWslUsage(
+    {
+      clients: '',
+      trackedClients: 'minimax',
+      allTimeSince: '2025-01-01',
+      commandTimeoutMs: 1000,
+      now,
+      buildMinimaxPeriods: (options) => {
+        minimaxOptions = options;
+        return {
+          today: { entries: [{ client: 'minimax', model: 'minimax/m3', input: 7, output: 3 }] },
+          month: { entries: [{ client: 'minimax', model: 'minimax/m3', input: 15 }] },
+          allTime: { entries: [{ client: 'minimax', model: 'minimax/m3', input: 40 }] }
+        };
+      }
+    },
+    {
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: () => ['u'],
+      existsSync: (p) => p === `${home}\\.minimax` || p === `${home}\\.minimax\\sqlite.db`
+    }
+  );
+  assert.deepEqual(detected, ['minimax']);
+  assert.equal(minimaxOptions.homeDir, `${home}\\.minimax`);
+  assert.equal(minimaxOptions.now, now);
+  assert.equal(bundle.today.clients.minimax, 10);
+  assert.equal(bundle.month.clients.minimax, 15);
+  assert.equal(bundle.allTime.clients.minimax, 40);
 });
 
 test('collectWslUsage applies the cached Proma price to WSL rows', async () => {

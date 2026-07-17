@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildMinimaxPeriods, collectMinimaxRows } = require('./minimaxUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -44,7 +45,10 @@ const WSL_DATA_MARKERS = [
   '.config/kiro/User/globalStorage/kiro.kiroagent',
   '.codebuddy/projects',
   '.workbuddy',
-  '.proma/agent-sessions'
+  '.proma/agent-sessions',
+  '.minimax',
+  '.minimax/sqlite.db',
+  '.minimax/v2/sqlite/runtime-state.sqlite'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -84,7 +88,10 @@ const MARKER_CLIENTS = {
   '.config/kiro/User/globalStorage/kiro.kiroagent': 'kiro',
   '.codebuddy/projects': 'codebuddy',
   '.workbuddy': 'workbuddy',
-  '.proma/agent-sessions': 'proma'
+  '.proma/agent-sessions': 'proma',
+  '.minimax': 'minimax',
+  '.minimax/sqlite.db': 'minimax',
+  '.minimax/v2/sqlite/runtime-state.sqlite': 'minimax'
 };
 
 // Clients whose tokscale `--home` scan can fall back to a HOST-native database
@@ -226,6 +233,8 @@ async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
+  const buildMinimax = options.buildMinimaxPeriods || buildMinimaxPeriods;
+  const collectMinimax = options.collectMinimaxRows || collectMinimaxRows;
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
@@ -266,6 +275,26 @@ async function collectWslUsage(options = {}, deps = {}) {
         bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
       } catch (error) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
+      }
+    }
+    // MiniMax Code is also parse-local (not a tokscale client). Isolate the
+    // WSL home's ~/.minimax so host MiniMax usage is not double-counted.
+    if (tracked.has('minimax') && homeDataClients.includes('minimax')) {
+      try {
+        const minimaxOptions = {
+          now,
+          allTimeSince,
+          homeDir: wslHomePath(home, '.minimax')
+        };
+        if (typeof collectMinimax === 'function') {
+          minimaxOptions.rows = collectMinimax(minimaxOptions);
+        }
+        const minimax = buildMinimax(minimaxOptions);
+        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(minimax.today));
+        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(minimax.month));
+        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(minimax.allTime));
+      } catch (error) {
+        if (typeof logger === 'function') logger(`wsl MiniMax usage parse failed for ${home}: ${error.message}`);
       }
     }
     // Pass the requested clients through, dropping only a host-fallback-gated

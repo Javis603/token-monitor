@@ -14,33 +14,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { createHash } = require('node:crypto');
+const {
+  numberValue,
+  timestampMs,
+  normalizedModelId,
+  localDateKey,
+  localPeriodBounds
+} = require('./localUsageHelpers');
 
 const PROMA_ROOT = path.join(os.homedir(), '.proma', 'agent-sessions');
 
-function numberValue(value) {
-  const n = Number(value || 0);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function timestampMs(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value > 0 && value < 1e12 ? value * 1000 : value;
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) return numeric > 0 && numeric < 1e12 ? numeric * 1000 : numeric;
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? 0 : parsed;
-  }
-  return 0;
-}
-
 function rowTotal(row) {
   return row.input + row.output + row.cacheRead + row.cacheWrite;
-}
-
-function normalizedModelId(value) {
-  return String(value || '').trim().toLowerCase();
 }
 
 // Cost is an estimate from a model-price catalog, never a provider invoice.
@@ -262,15 +247,6 @@ function buildTokscaleJson(windows = {}, options = {}) {
   };
 }
 
-function localDateKey(timestamp) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 // Return raw graph-compatible contributions so collector.js can merge this
 // local adapter with tokscale's graph output through the shared history core.
 function buildPromaHistoryGraph(options = {}) {
@@ -314,11 +290,9 @@ function buildPromaHistoryGraph(options = {}) {
  * @param {{ now?: Date | number | string, allTimeSince?: number | string, roots?: string[] }} options
  */
 function buildPromaPeriods(options = {}) {
-  const now = options.now ? new Date(options.now) : new Date();
+  const { todayStart, monthStart } = localPeriodBounds(options.now);
   const rows = Array.isArray(options.rows) ? options.rows : collectPromaRows(options);
   const buildOptions = { rows, pricingByModel: options.pricingByModel };
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
 
   return {
     today: buildTokscaleJson({ todayStart }, buildOptions),
