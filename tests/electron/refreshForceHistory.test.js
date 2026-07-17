@@ -27,6 +27,16 @@ test('only the manual refresh button drags history along with force (#177)', () 
   assert.match(withHistory[0], /feedback: true/);
 });
 
+test('a forced history refresh restores the Home full-history retry budget', () => {
+  const refreshStats = rendererSource.match(/async function refreshStats\(options = \{\}\) \{([\s\S]*?)\n\}\n\nasync function refreshStatusViewManually/);
+  assert.ok(refreshStats, 'refreshStats exists');
+  const body = refreshStats[1];
+  assert.match(body, /options\.forceHistory === true/);
+  assert.match(body, /homeHistoryRetrySignature = ''/);
+  assert.match(body, /homeHistoryRetries = 0/);
+  assert.match(body, /homeHistorySignature = ''/);
+});
+
 test('fetchStats reads forceHistory independently of force', () => {
   const fetchStats = mainSource.match(/async function fetchStats\(options = \{\}\) \{([\s\S]*?)\n {2}if \(mode === 'local'\)/);
   assert.ok(fetchStats, 'fetchStats exists');

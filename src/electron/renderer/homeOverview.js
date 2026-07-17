@@ -350,6 +350,18 @@
     return Number(retries || 0) < Number(maxRetries || 0);
   }
 
+  // Keep the result of this request separate from any older full history still used
+  // for display. A rejected request must not look successful merely because the
+  // previous snapshot had days, and a raced empty result must not replace useful
+  // stale data while the live preview proves history still exists.
+  function homeHistoryFetchOutcome({ resolved, history, previewHasDays } = {}) {
+    const loadedDays = Boolean(resolved) && historyHasDays(history);
+    return {
+      loadedDays,
+      accepted: Boolean(resolved) && (loadedDays || !previewHasDays)
+    };
+  }
+
   function homeActivityWheelRoute(event) {
     if (event?.shiftKey) return 'activity-horizontal';
     const deltaX = Math.abs(Number(event?.deltaX || 0));
@@ -397,6 +409,7 @@
     homeHistorySignature,
     shouldFetchHomeHistory,
     shouldRetryHomeHistory,
+    homeHistoryFetchOutcome,
     homeActivityHeatmapLayout,
     homeActivityWheelRoute,
     homeActivityScrollTarget,

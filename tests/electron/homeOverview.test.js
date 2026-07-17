@@ -21,7 +21,8 @@ const {
   historyPreviewKey,
   homeHistorySignature,
   shouldFetchHomeHistory,
-  shouldRetryHomeHistory
+  shouldRetryHomeHistory,
+  homeHistoryFetchOutcome
 } = require('../../src/electron/renderer/homeOverview');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
@@ -500,6 +501,8 @@ test('loadHomeHistory wires the bounded retry through a timer, not a render', ()
   assert.match(body, /shouldRetryHomeHistory\(/, 'retry decision is delegated to the guarded predicate');
   assert.match(body, /setTimeout\(/, 'the retry is timer-driven so it cannot re-enter on every render');
   assert.match(body, /homeHistoryRetries \+= 1/, 'the retry counter advances toward the cap');
+  assert.match(body, /homeHistoryRetrySignature !== requestSignature[\s\S]*?homeHistoryRetries = 0/, 'a new signature receives a fresh retry budget');
+  assert.match(body, /homeHistoryLoadedSignature === requestSignature/, 'stale display history cannot suppress a retry');
 });
 
 test('historyPreviewKey is empty for no days and changes as the daily tail moves', () => {
@@ -587,6 +590,37 @@ test('shouldRetryHomeHistory never retries a genuinely zero-usage account (#39)'
   // No preview days means there is nothing to load, so retrying would just poll — and
   // could reintroduce the render→fetch loop. Suppress it regardless of the counter.
   assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: false, retries: 0, maxRetries: 3 }), false);
+});
+
+test('homeHistoryFetchOutcome does not mistake stale display history for a successful request', () => {
+  // The rejected request produced no value. Passing the old snapshot here proves
+  // that it cannot make this attempt look loaded merely because it still has days.
+  assert.deepEqual(homeHistoryFetchOutcome({
+    resolved: false,
+    history: historyWithDays,
+    previewHasDays: true
+  }), { loadedDays: false, accepted: false });
+});
+
+test('homeHistoryFetchOutcome preserves stale history across a raced empty result', () => {
+  assert.deepEqual(homeHistoryFetchOutcome({
+    resolved: true,
+    history: emptyHistory,
+    previewHasDays: true
+  }), { loadedDays: false, accepted: false });
+  assert.deepEqual(homeHistoryFetchOutcome({
+    resolved: true,
+    history: historyWithDays,
+    previewHasDays: true
+  }), { loadedDays: true, accepted: true });
+});
+
+test('homeHistoryFetchOutcome accepts an empty result for a zero-usage account', () => {
+  assert.deepEqual(homeHistoryFetchOutcome({
+    resolved: true,
+    history: emptyHistory,
+    previewHasDays: false
+  }), { loadedDays: false, accepted: true });
 });
 
 test('shouldFetchHomeHistory never polls a zero-usage account', () => {
