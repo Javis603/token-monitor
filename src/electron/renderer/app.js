@@ -4246,6 +4246,8 @@ function applyAppearanceSettings(settings) {
   const opacity = clamp(settings?.glassOpacity ?? 68, 0, 100) / 100;
   const depth = clamp(settings?.glassBlur ?? 32, 0, 100) / 100;
   document.documentElement.style.setProperty('--glass-alpha', opacity.toFixed(2));
+  document.documentElement.style.setProperty('--bubble-alpha', (0.62 + opacity * 0.22).toFixed(2));
+  document.documentElement.style.setProperty('--bubble-blur', settings?.systemGlass === false ? '0px' : `${Math.round(10 + depth * 24)}px`);
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
@@ -4687,7 +4689,10 @@ function renderFloatingBubbleContent() {
   const mode = state.settings?.floatingBubbleContent || 'icon';
   if (window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) {
     const dataUrl = state.stats
-      ? trayDataUrlForMode(mode, 44, BUBBLE_BARS_COLORS, { contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions' })
+      ? trayDataUrlForMode(mode, 44, BUBBLE_BARS_COLORS, {
+          contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
+          providerBackdrop: true
+        })
       : null;
     if (dataUrl) {
       el.classList.add('bars');
@@ -6968,7 +6973,16 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 const trayProviderImages = {};
 const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
 
-function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors = {}) {
+function drawProviderImage(ctx, image, x, y, size, backdrop = false) {
+  if (backdrop) {
+    roundedRectPath(ctx, x, y, size, size, Math.max(2, Math.round(size * 0.24)));
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fill();
+  }
+  ctx.drawImage(image, x, y, size, size);
+}
+
+function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors = {}, options = {}) {
   const trackColor = colors.track || 'rgba(0, 0, 0, 0.32)';
   const fillColor = colors.fill || 'rgba(0, 0, 0, 1)';
   const selection = picker(stats);
@@ -6985,7 +6999,7 @@ function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors =
   ctx.clearRect(0, 0, layout.width, layout.height);
 
   if (providerImage) {
-    ctx.drawImage(providerImage, layout.padX, layout.iconY, layout.iconSize, layout.iconSize);
+    drawProviderImage(ctx, providerImage, layout.padX, layout.iconY, layout.iconSize, options.providerBackdrop === true);
   }
 
   function drawBar(y, percent) {
@@ -7112,7 +7126,7 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
   const centerY = height / 2;
   entries.forEach((entry, index) => {
     if (entry.image) {
-      ctx.drawImage(entry.image, x, layout.iconY, iconSize, iconSize);
+      drawProviderImage(ctx, entry.image, x, layout.iconY, iconSize, options.providerBackdrop === true);
       x += iconSize + gap;
     }
     ctx.fillText(entry.text, x, centerY + 1);
@@ -7128,7 +7142,7 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
 function barsDataUrlForMode(mode, size = 44, colors, options = {}) {
   if (mode === 'barsAllSessions') return renderAllSessionsIcon(state.stats, size, configuredLimitProviderOrder(), colors, options);
   const pickers = { barsSession: pickWorstSessionProvider, barsWeekly: pickWorstWeeklyProvider };
-  return renderBarsIcon(state.stats, size, pickers[mode] || pickWorstProvider, colors);
+  return renderBarsIcon(state.stats, size, pickers[mode] || pickWorstProvider, colors, options);
 }
 
 function trayDataUrlForMode(mode, size = 44, colors, options = {}) {

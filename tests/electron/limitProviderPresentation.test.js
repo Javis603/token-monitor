@@ -353,6 +353,7 @@ test('limit percent tray mode renders provider icons into a generated tray image
   const app = readRendererFile('app.js');
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const renderLimitSessionsIcon = functionBody(app, 'renderLimitSessionsIcon', 'barsDataUrlForMode');
+  const drawProviderImage = functionBody(app, 'drawProviderImage', 'renderBarsIcon');
   const maybeUpdateBarsIcon = functionBody(app, 'maybeUpdateBarsIcon', 'loadImage');
   const updateTrayDisplay = functionBody(main, 'updateTrayDisplay', 'sendStatus');
 
@@ -363,6 +364,10 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /primaryWindow/);
   assert.match(renderLimitSessionsIcon, /secondaryWindow/);
   assert.match(renderLimitSessionsIcon, /trayProviderImages\[pick\.providerRecord\.provider\]/);
+  assert.match(renderLimitSessionsIcon, /drawProviderImage\(ctx, entry\.image/);
+  assert.match(drawProviderImage, /rgba\(255, 255, 255, 0\.9\)/);
+  assert.match(drawProviderImage, /roundedRectPath\(ctx, x, y, size, size/);
+  assert.match(app, /providerBackdrop:\s*true/);
   assert.match(renderLimitSessionsIcon, /`500 \$\{fontSize\}px/);
   assert.match(renderLimitSessionsIcon, /formatPercent\(limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);

@@ -26,6 +26,7 @@ const windowsDisplay = {
   workArea: { x: 0, y: 0, width: 1840, height: 1040 }
 };
 const stylesPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'styles.css');
+const appPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js');
 const indexPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'index.html');
 const bootPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'floatingBubbleBoot.js');
 
@@ -378,6 +379,7 @@ test('dragFloatingBubbleBounds anchors the mini-window to the OS cursor point', 
 
 test('floating bubble collapsed styles fill the mini window with app glass styling', () => {
   const css = fs.readFileSync(stylesPath, 'utf8');
+  const app = fs.readFileSync(appPath, 'utf8');
   const html = fs.readFileSync(indexPath, 'utf8');
   const boot = fs.readFileSync(bootPath, 'utf8');
   assert.ok(html.indexOf('floatingBubbleBoot.js') < html.indexOf('styles.css'));
@@ -390,12 +392,16 @@ test('floating bubble collapsed styles fill the mini window with app glass styli
   assert.match(css, /html\.floating-bubble-collapsed-right,\s*body\.floating-bubble-collapsed-right/);
   const collapsedBlock = cssBlock(css, 'html\\.floating-bubble-collapsed-left,\\s*body\\.floating-bubble-collapsed-left,\\s*html\\.floating-bubble-collapsed-right,\\s*body\\.floating-bubble-collapsed-right');
   const tabBlock = cssBlock(css, '\\.floating-bubble-tab');
-  assert.match(collapsedBlock, /rgb\(var\(--glass-rgb\)\);/);
+  assert.match(collapsedBlock, /background:\s*transparent;/);
   assert.match(tabBlock, /appearance:\s*none;/);
-  assert.match(tabBlock, /border:\s*0;/);
-  assert.match(tabBlock, /background:\s*transparent;/);
-  assert.match(tabBlock, /box-shadow:\s*none;/);
-  assert.match(tabBlock, /backdrop-filter:\s*none;/);
+  assert.match(tabBlock, /border:\s*1px solid rgba\(255, 255, 255, 0\.2\);/);
+  assert.match(tabBlock, /background:\s*rgba\(15, 18, 24, var\(--bubble-alpha\)\);/);
+  assert.match(tabBlock, /color:\s*#f7f9fb;/);
+  assert.match(tabBlock, /backdrop-filter:\s*blur\(var\(--bubble-blur\)\) saturate\(130%\);/);
+  assert.match(css, /--bubble-alpha:\s*0\.78;/);
+  assert.match(css, /--bubble-blur:\s*18px;/);
+  assert.match(app, /--bubble-alpha', \(0\.62 \+ opacity \* 0\.22\)\.toFixed\(2\)/);
+  assert.match(app, /--bubble-blur', settings\?\.systemGlass === false \? '0px'/);
   assert.match(css, /html\.floating-bubble-collapsed-left body \.shell,\s*html\.floating-bubble-collapsed-right body \.shell/);
   assert.match(css, /html\.floating-bubble-collapsed-left body \.floating-bubble-tab/);
   assert.match(css, /html\.floating-bubble-collapsed-left,\s*body\.floating-bubble-collapsed-left\s*\{[\s\S]*border-radius:\s*0;/);

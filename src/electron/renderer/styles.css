@@ -11,6 +11,8 @@
   --panel-rgb: 16, 21, 30;
   --sunken-rgb: 4, 8, 13;
   --glass-alpha: 0.68;
+  --bubble-alpha: 0.78;
+  --bubble-blur: 18px;
   --line-alpha: 0.138;
   --line-strong-alpha: 0.238;
   --control-alpha: 0.049;
@@ -119,14 +121,15 @@ html.is-mac-legacy .shell {
   width: 100%;
   height: 100%;
   padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--green);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(15, 18, 24, var(--bubble-alpha));
+  color: #f7f9fb;
   cursor: grab;
-  box-shadow: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 0 0 1px rgba(0, 0, 0, 0.16);
   outline: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+  -webkit-backdrop-filter: blur(var(--bubble-blur)) saturate(130%);
+  backdrop-filter: blur(var(--bubble-blur)) saturate(130%);
 }
 .floating-bubble-tab span {
   display: block;
@@ -150,11 +153,7 @@ html.floating-bubble-collapsed-left,
 body.floating-bubble-collapsed-left,
 html.floating-bubble-collapsed-right,
 body.floating-bubble-collapsed-right {
-  background:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), var(--highlight-alpha)), rgba(var(--overlay-rgb), 0.022)),
-    linear-gradient(135deg, rgba(var(--overlay-rgb), 0.035), rgba(0, 0, 0, 0.09)),
-    var(--glass),
-    rgb(var(--glass-rgb));
+  background: transparent;
 }
 html.floating-bubble-collapsed-left,
 body.floating-bubble-collapsed-left {
