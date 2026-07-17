@@ -51,7 +51,7 @@ test('composeLocalSyncStats replaces the hub copy of the local device without do
   const result = composeLocalSyncStats(hubStats, device('local', 120, {
     updatedAt: '2026-07-16T00:02:00.000Z',
     receivedAt: '2026-07-16T00:02:00.000Z'
-  }));
+  }), { nowMs: Date.parse('2026-07-16T00:02:00.000Z') });
 
   assert.equal(result.periods.today.totalTokens, 170);
   assert.equal(result.devices.length, 2);
@@ -66,7 +66,7 @@ test('composeLocalSyncStats replaces the hub copy of the local device without do
 });
 
 test('composeLocalSyncStats can render a local device before the first hub snapshot', () => {
-  const result = composeLocalSyncStats(null, device('local', 25));
+  const result = composeLocalSyncStats(null, device('local', 25), { nowMs: Date.parse('2026-07-16T00:00:00.000Z') });
 
   assert.equal(result.periods.today.totalTokens, 25);
   assert.equal(result.devices.length, 1);
