@@ -17,6 +17,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
+const { createOutboundFetch } = require('./outboundFetch');
 
 const GROK_WEB_BILLING_GRPC_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
 const GROK_LEGACY_BILLING_URL = 'https://cli-chat-proxy.grok.com/v1/billing';
@@ -477,12 +478,31 @@ function unauthorizedGrokProvider(updatedAt, source = 'web', sourceDetail = '') 
   });
 }
 
-async function fetchGrokWebGrpcBilling(credential, deps = {}) {
+function resolveGrokFetch(deps = {}) {
+  if (typeof deps.fetch === 'function') return deps.fetch;
+  return createOutboundFetch(deps.env || process.env);
+}
+
+function isRetryableNetworkError(error) {
+  if (!error || error.status === 'unauthorized') return false;
+  const code = String(error.code || error.cause?.code || '');
+  const message = String(error.message || error.cause?.message || error || '').toLowerCase();
+  return code === 'ECONNRESET'
+    || code === 'ECONNREFUSED'
+    || code === 'ETIMEDOUT'
+    || code === 'UND_ERR_CONNECT_TIMEOUT'
+    || code === 'UND_ERR_SOCKET'
+    || message.includes('fetch failed')
+    || message.includes('socket disconnected')
+    || message.includes('connect timeout');
+}
+
+async function fetchGrokWebGrpcBillingOnce(credential, deps = {}) {
   const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const fetchFn = deps.fetch || fetch;
+    const fetchFn = resolveGrokFetch(deps);
     const response = await fetchFn(GROK_WEB_BILLING_GRPC_URL, {
       method: 'POST',
       headers: {
@@ -516,12 +536,23 @@ async function fetchGrokWebGrpcBilling(credential, deps = {}) {
   }
 }
 
+// Local proxies occasionally reset the first CONNECT; one silent retry is enough
+// to keep the Grok meter green without lengthening the happy path much.
+async function fetchGrokWebGrpcBilling(credential, deps = {}) {
+  try {
+    return await fetchGrokWebGrpcBillingOnce(credential, deps);
+  } catch (error) {
+    if (!isRetryableNetworkError(error)) throw error;
+    return fetchGrokWebGrpcBillingOnce(credential, deps);
+  }
+}
+
 async function fetchGrokLegacyJsonBilling(credential, deps = {}) {
   const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const fetchFn = deps.fetch || fetch;
+    const fetchFn = resolveGrokFetch(deps);
     const response = await fetchFn(GROK_LEGACY_BILLING_URL, {
       headers: {
         Authorization: `Bearer ${credential.token}`,
@@ -656,5 +687,6 @@ module.exports = {
   fetchGrokRpcBilling,
   fetchGrokWebGrpcBilling,
   fetchGrokLegacyJsonBilling,
-  fetchGrokLimits
+  fetchGrokLimits,
+  isRetryableNetworkError
 };
