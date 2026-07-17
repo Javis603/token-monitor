@@ -305,14 +305,20 @@
   }
 
   // Identity of the history the held snapshot was fetched for. Mirrors main's
-  // statsHistoryRevision: prefer the real revision, fall back to the preview tail
-  // for an older hub that predates revisions. The revision only moves when the
-  // collector actually produces a different history (carry-forward keeps it stable
-  // between the gated history ticks), so keying refetches on it costs no extra
+  // statsHistoryRevision so Home invalidates on exactly the changes the standalone
+  // dashboard does: prefer the real revision, and for an older hub that predates
+  // revisions fall back to the WHOLE preview, not just its daily tail — a tail key
+  // (`length:lastDate:lastTokens`) misses a change to a non-tail day, a cost, an
+  // active-time, or a monthly total, so a backfill of an earlier day would never
+  // reach Home. Empty preview still collapses to '' so a genuinely zero-usage
+  // account is never polled (#39). The revision only moves when the collector
+  // actually produces a different history (carry-forward keeps it stable between
+  // the gated history ticks), so keying refetches on it costs no extra
   // `tokscale graph` runs.
   function homeHistorySignature(stats) {
     const revision = String(stats?.historyRevision || '').trim();
-    return revision || historyPreviewKey(stats?.historyPreview);
+    if (revision) return revision;
+    return stats?.historyPreview?.daily?.length ? JSON.stringify(stats.historyPreview) : '';
   }
 
   // Whether loadHomeHistory should (re)fetch the full history. Home used to freeze

@@ -500,15 +500,29 @@ test('historyPreviewKey is empty for no days and changes as the daily tail moves
   assert.notEqual(historyPreviewKey({ daily: [{ date: '2026-06-02', tokens: 99 }] }), key);
 });
 
-test('homeHistorySignature prefers the revision and falls back to the preview tail', () => {
+test('homeHistorySignature prefers the revision and falls back to the whole preview', () => {
   assert.equal(homeHistorySignature({ historyRevision: 'abc123', historyPreview: historyWithDays }), 'abc123');
-  // An older hub that predates revisions still has to be able to move the signature.
+  // An older hub that predates revisions falls back to the full preview, mirroring
+  // main's statsHistoryRevision, so any field change moves the signature.
   assert.equal(
     homeHistorySignature({ historyPreview: historyWithDays }),
-    historyPreviewKey(historyWithDays)
+    JSON.stringify(historyWithDays)
   );
   assert.equal(homeHistorySignature(null), '');
   assert.equal(homeHistorySignature({ historyRevision: '   ' , historyPreview: emptyHistory }), '');
+});
+
+test('homeHistorySignature (revision-less) moves on a non-tail change the tail key would miss', () => {
+  // The daily tail (length:lastDate:lastTokens) is identical across these, but an
+  // earlier day's cost/tokens and a monthly total differ — a backfill of an older
+  // day. Home must still invalidate, which the tail key could not detect.
+  const base = { daily: [{ date: '2026-06-01', tokens: 0, cost: 0 }, { date: '2026-06-02', tokens: 10, cost: 1 }], monthly: [{ month: '2026-06', tokens: 10 }], summary: {} };
+  const backfilled = { daily: [{ date: '2026-06-01', tokens: 500, cost: 5 }, { date: '2026-06-02', tokens: 10, cost: 1 }], monthly: [{ month: '2026-06', tokens: 510 }], summary: {} };
+  assert.equal(historyPreviewKey(base), historyPreviewKey(backfilled)); // tail key is blind to it
+  assert.notEqual(
+    homeHistorySignature({ historyPreview: base }),
+    homeHistorySignature({ historyPreview: backfilled })
+  );
 });
 
 test('shouldFetchHomeHistory fetches on the first request', () => {

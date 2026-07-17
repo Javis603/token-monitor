@@ -3095,9 +3095,11 @@ async function loadHomeHistory() {
   try {
     // Only ever one fetch in flight (homeHistoryBusy), so the response is the freshest
     // history at invoke time and can be taken as-is — no older reply can land on top of
-    // a newer one. If the collector produced a newer history while this was in flight,
-    // the signature recorded above no longer matches state.stats, so the re-render below
-    // re-enters here and pulls it; a mid-fetch change is never left stranded.
+    // a newer one. The signature is recorded before the await on purpose: it stops a
+    // failed or empty fetch from re-triggering on the very next render (renderHome runs
+    // loadHomeHistory every render), which is the #39 spin loop. Recovery is by the next
+    // signature move instead — a newer history arriving mid-fetch, or any later stats
+    // change, no longer matches, so the re-render below re-enters and pulls it.
     state.homeHistory = await window.tokenMonitor.getDashboardHistory();
   } catch (error) {
     console.log(`[home] history failed: ${error.message}`);
