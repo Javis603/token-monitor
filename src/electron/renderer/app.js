@@ -201,7 +201,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.appUpdateNotesPresentedVersion = '';
 state.periodMotionActive = false;
 state.animateBarsFromZero = false;
@@ -3082,6 +3082,9 @@ function openViewFromTray(viewId) {
   renderBreakdownChange(viewId, { allowHidden: true });
 }
 
+const HOME_HISTORY_MAX_RETRIES = 3;
+const HOME_HISTORY_RETRY_MS = 4000;
+
 async function loadHomeHistory() {
   if (state.homeHistoryBusy || !window.tokenMonitor.getDashboardHistory) return;
   if (!homeOverviewApi.shouldFetchHomeHistory({
@@ -3089,22 +3092,45 @@ async function loadHomeHistory() {
     stats: state.stats,
     lastSignature: state.homeHistorySignature
   })) return;
+  // The signature is recorded before the await on purpose: it stops a failed or empty
+  // fetch from re-firing on the very next render (renderHome runs loadHomeHistory every
+  // render), which is the #39 spin loop. A transient failure or a raced empty result is
+  // recovered by the bounded timer-driven retry in the finally block instead, not by
+  // render — so Home is not stranded on the 30-day preview until the history genuinely
+  // changes, which for an account with history but no current activity might be never.
+  const previewHadDays = homeOverviewApi.historyHasDays(state.stats?.historyPreview);
   state.homeHistoryRequested = true;
   state.homeHistorySignature = homeOverviewApi.homeHistorySignature(state.stats);
   state.homeHistoryBusy = true;
   try {
     // Only ever one fetch in flight (homeHistoryBusy), so the response is the freshest
     // history at invoke time and can be taken as-is — no older reply can land on top of
-    // a newer one. The signature is recorded before the await on purpose: it stops a
-    // failed or empty fetch from re-triggering on the very next render (renderHome runs
-    // loadHomeHistory every render), which is the #39 spin loop. Recovery is by the next
-    // signature move instead — a newer history arriving mid-fetch, or any later stats
-    // change, no longer matches, so the re-render below re-enters and pulls it.
+    // a newer one.
     state.homeHistory = await window.tokenMonitor.getDashboardHistory();
   } catch (error) {
     console.log(`[home] history failed: ${error.message}`);
   } finally {
     state.homeHistoryBusy = false;
+    const loadedDays = homeOverviewApi.historyHasDays(state.homeHistory);
+    if (loadedDays) {
+      state.homeHistoryRetries = 0;
+    } else if (homeOverviewApi.shouldRetryHomeHistory({
+      loadedDays,
+      previewHasDays: previewHadDays,
+      retries: state.homeHistoryRetries,
+      maxRetries: HOME_HISTORY_MAX_RETRIES
+    })) {
+      state.homeHistoryRetries += 1;
+      clearTimeout(state.homeHistoryRetryTimer);
+      state.homeHistoryRetryTimer = setTimeout(() => {
+        state.homeHistoryRetryTimer = null;
+        // Skip if a later success already populated Home in the meantime.
+        if (!homeOverviewApi.historyHasDays(state.homeHistory)) {
+          state.homeHistorySignature = '';
+          void loadHomeHistory();
+        }
+      }, HOME_HISTORY_RETRY_MS);
+    }
     if (state.breakdown === 'home') render();
   }
 }

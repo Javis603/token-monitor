@@ -20,7 +20,8 @@ const {
   patchDailyToday,
   historyPreviewKey,
   homeHistorySignature,
-  shouldFetchHomeHistory
+  shouldFetchHomeHistory,
+  shouldRetryHomeHistory
 } = require('../../src/electron/renderer/homeOverview');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
@@ -491,6 +492,16 @@ test('renderHomeTrendsModule patches the activity today cell with the live perio
   assert.match(match[1], /patchDailyToday\([\s\S]*?totalTokens/);
 });
 
+test('loadHomeHistory wires the bounded retry through a timer, not a render', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const match = rendererSource.match(/async function loadHomeHistory\(\) \{([\s\S]*?)\n\}/);
+  assert.ok(match, 'loadHomeHistory exists');
+  const body = match[1];
+  assert.match(body, /shouldRetryHomeHistory\(/, 'retry decision is delegated to the guarded predicate');
+  assert.match(body, /setTimeout\(/, 'the retry is timer-driven so it cannot re-enter on every render');
+  assert.match(body, /homeHistoryRetries \+= 1/, 'the retry counter advances toward the cap');
+});
+
 test('historyPreviewKey is empty for no days and changes as the daily tail moves', () => {
   assert.equal(historyPreviewKey(null), '');
   assert.equal(historyPreviewKey(emptyHistory), '');
@@ -558,6 +569,24 @@ test('shouldFetchHomeHistory refetches once the collector produces a newer histo
     stats: { historyPreview: { daily: [{ date: '2026-06-02', tokens: 42 }] } },
     lastSignature: historyPreviewKey(historyWithDays)
   }), true);
+});
+
+test('shouldRetryHomeHistory retries a failed first load when the preview has days', () => {
+  // Account has history but no current activity, so its revision never moves; a
+  // transient first-load failure must still recover without waiting for a real change.
+  assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: true, retries: 0, maxRetries: 3 }), true);
+  assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: true, retries: 2, maxRetries: 3 }), true);
+});
+
+test('shouldRetryHomeHistory stops at the cap and after a success', () => {
+  assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: true, retries: 3, maxRetries: 3 }), false);
+  assert.equal(shouldRetryHomeHistory({ loadedDays: true, previewHasDays: true, retries: 0, maxRetries: 3 }), false);
+});
+
+test('shouldRetryHomeHistory never retries a genuinely zero-usage account (#39)', () => {
+  // No preview days means there is nothing to load, so retrying would just poll — and
+  // could reintroduce the render→fetch loop. Suppress it regardless of the counter.
+  assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: false, retries: 0, maxRetries: 3 }), false);
 });
 
 test('shouldFetchHomeHistory never polls a zero-usage account', () => {

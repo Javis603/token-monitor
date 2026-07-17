@@ -335,6 +335,21 @@
     return signature !== lastSignature;
   }
 
+  // After a fetch settles, whether loadHomeHistory should schedule a bounded retry.
+  // The signature is recorded before the fetch to keep a failed attempt from
+  // re-firing every render (the #39 spin), which means a transient failure or a
+  // raced empty result would otherwise strand Home on the 30-day preview until the
+  // history genuinely changes or the app restarts — a real gap for an account with
+  // history but no current activity, since its revision never moves. So: if the
+  // fetch produced no days but the live preview says days exist, retry up to a cap.
+  // A genuinely zero-usage account (no preview days) is never retried, so this cannot
+  // reintroduce the render→fetch loop.
+  function shouldRetryHomeHistory({ loadedDays, previewHasDays, retries, maxRetries } = {}) {
+    if (loadedDays) return false;
+    if (!previewHasDays) return false;
+    return Number(retries || 0) < Number(maxRetries || 0);
+  }
+
   function homeActivityWheelRoute(event) {
     if (event?.shiftKey) return 'activity-horizontal';
     const deltaX = Math.abs(Number(event?.deltaX || 0));
@@ -378,8 +393,10 @@
     pickHomeHistory,
     patchDailyToday,
     historyPreviewKey,
+    historyHasDays,
     homeHistorySignature,
     shouldFetchHomeHistory,
+    shouldRetryHomeHistory,
     homeActivityHeatmapLayout,
     homeActivityWheelRoute,
     homeActivityScrollTarget,
