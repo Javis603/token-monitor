@@ -189,6 +189,20 @@ Mode B — Sync (opt-in, multi-device)
 
 The widget chooses local vs sync mode based on Settings → Multi-device Sync. The hub itself can run as a separate `npm run hub` process, a Cloudflare Worker, or directly inside one of the widgets (Host mode). In sync mode the hub pushes aggregated stats to every connected widget over Server-Sent Events, so updates on one device appear on the others within a few seconds.
 
+## Session data retention
+
+The activity heatmap and trends dashboard are built from the session files each tool still keeps on disk. **Claude Code prunes its own transcripts after 30 days by default** (`cleanupPeriodDays`), so its share of any older day drops out of those views — a day spent only in Claude Code fades to empty, while a day you also used other tools keeps their contribution. Today/Month/All-time totals hold up better: **Preserve deleted session usage** (Settings → Collection) keeps the period totals of sessions a tool removes, though it cannot rebuild the daily history the heatmap draws.
+
+To keep the heatmap's full rolling year, raise Claude Code's retention in `~/.claude/settings.json` before the window passes:
+
+```json
+{
+  "cleanupPeriodDays": 370
+}
+```
+
+370 matches the heatmap's window; a larger value keeps more, at the cost of transcripts living on disk for as long as you set. tokscale's [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) table covers the other tools' defaults and config paths.
+
 ## Settings
 
 ### Widget (GUI)

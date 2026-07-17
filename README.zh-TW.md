@@ -189,6 +189,20 @@ npm run pack       # 未封裝的 app 目錄（無安裝檔），方便本機快
 
 小工具會根據 設定 → 多裝置同步 決定走本地或同步模式。hub 本身可以是獨立的 `npm run hub` 程序、Cloudflare Worker，或直接跑在某一個小工具裡（Host 模式）。同步模式下，hub 透過 Server-Sent Events 把彙總後的統計推送給每個連線中的小工具，所以一台裝置上的更新會在數秒內出現在其他裝置上。
 
+## 會話資料保留期
+
+活動熱力圖與趨勢儀錶板，是由各工具仍留在磁碟上的會話檔建構的。**Claude Code 預設會清除 30 天前的 transcript**（`cleanupPeriodDays`），所以它在更早日期的那份貢獻會從這些畫面上消失——只用過 Claude Code 的那天會淡成空白，而當天若也用了其他工具，那些工具的貢獻仍會留著。今日／本月／全部的總量則影響較小：**保留已刪除會話用量**（設定 → 採集）會保住被工具刪除的會話的期間總量，但它無法重建熱力圖所依據的每日歷史。
+
+若要保住熱力圖完整的滾動年份，請在時限過去之前，於 `~/.claude/settings.json` 調高 Claude Code 的保留期：
+
+```json
+{
+  "cleanupPeriodDays": 370
+}
+```
+
+370 對應熱力圖的窗口；設更大能留更多，代價是 transcript 會依你設定的期限一直留在磁碟上。其他工具的預設值與設定檔路徑，請見 tokscale 的 [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) 表。
+
 ## 設定
 
 ### 小工具（GUI）
