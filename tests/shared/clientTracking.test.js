@@ -42,7 +42,8 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
 });
 
 test('default tracked clients are accepted by bundled tokscale', () => {
-  const locallyParsedClients = new Set(['proma']);
+  // Parse-local clients (no tokscale --client value): proma + minimax (MiniMax Code).
+  const locallyParsedClients = new Set(['proma', 'minimax']);
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
@@ -51,6 +52,11 @@ test('default tracked clients are accepted by bundled tokscale', () => {
   const supported = new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
   const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => !supported.has(client) && !locallyParsedClients.has(client));
   assert.deepEqual(unsupported, []);
+});
+
+test('minimax is default-tracked as a parse-local client', () => {
+  assert.ok(DEFAULT_CLIENTS.split(',').includes('minimax'), 'minimax should be tracked by default');
+  assert.ok(KNOWN_CLIENTS.split(',').includes('minimax'), 'minimax must be a known client');
 });
 
 test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () => {

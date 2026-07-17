@@ -323,11 +323,17 @@ test('watchPathsForClients watches the Hermes home dir so new state.db sidecars 
 
 test('watchIgnoreMatcher prunes the Hermes runtime but keeps the state.db family and the watch root', () => {
   const tmp = withTmpHome([path.join('.hermes', 'hermes-agent', 'node_modules')]);
+  // Seed a root state.db so resolveHermesHome prefers ~/.hermes over a real
+  // %LOCALAPPDATA%\hermes install on the developer machine (Windows).
+  fs.writeFileSync(path.join(tmp, '.hermes', 'state.db'), '');
   const originalHomedir = os.homedir;
   const previousHermesHome = process.env.HERMES_HOME;
+  const previousLocalAppData = process.env.LOCALAPPDATA;
   os.homedir = () => tmp;
   try {
     delete process.env.HERMES_HOME;
+    // Isolate from the host's native Hermes install under %LOCALAPPDATA%.
+    process.env.LOCALAPPDATA = path.join(tmp, 'AppData', 'Local');
     const { watchIgnoreMatcher } = freshCollector();
     const ignored = watchIgnoreMatcher('claude,hermes');
     const hermes = path.join(tmp, '.hermes');
@@ -347,6 +353,52 @@ test('watchIgnoreMatcher prunes the Hermes runtime but keeps the state.db family
     os.homedir = originalHomedir;
     if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
     else process.env.HERMES_HOME = previousHermesHome;
+    if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = previousLocalAppData;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher prunes MiniMax sessions/agents but keeps usage SQLite files', () => {
+  const tmp = withTmpHome([
+    path.join('.minimax', 'sessions', 'mvs_abc'),
+    path.join('.minimax', 'agents', 'mavis'),
+    path.join('.minimax', 'v2', 'sqlite')
+  ]);
+  fs.writeFileSync(path.join(tmp, '.minimax', 'sqlite.db'), '');
+  fs.writeFileSync(path.join(tmp, '.minimax', 'v2', 'sqlite', 'runtime-state.sqlite'), '');
+  const originalHomedir = os.homedir;
+  const previousMinimaxHome = process.env.MINIMAX_HOME;
+  const previousMavisHome = process.env.MAVIS_HOME;
+  os.homedir = () => tmp;
+  try {
+    delete process.env.MINIMAX_HOME;
+    delete process.env.MAVIS_HOME;
+    const { watchIgnoreMatcher, watchPathsForClients } = freshCollector();
+    const paths = watchPathsForClients('minimax');
+    const minimaxHome = path.join(tmp, '.minimax');
+    assert.ok(paths.includes(minimaxHome));
+    assert.ok(paths.includes(path.join(minimaxHome, 'v2', 'sqlite')));
+    const ignored = watchIgnoreMatcher('minimax');
+    assert.equal(typeof ignored, 'function');
+    // Watch roots + usage DB family stay visible.
+    assert.equal(ignored(minimaxHome), false);
+    assert.equal(ignored(path.join(minimaxHome, 'sqlite.db')), false);
+    assert.equal(ignored(path.join(minimaxHome, 'sqlite.db-wal')), false);
+    assert.equal(ignored(path.join(minimaxHome, 'v2')), false);
+    assert.equal(ignored(path.join(minimaxHome, 'v2', 'sqlite')), false);
+    assert.equal(ignored(path.join(minimaxHome, 'v2', 'sqlite', 'runtime-state.sqlite')), false);
+    // Conversation / agent trees are pruned (not polled, not opened).
+    assert.equal(ignored(path.join(minimaxHome, 'sessions')), true);
+    assert.equal(ignored(path.join(minimaxHome, 'sessions', 'mvs_abc')), true);
+    assert.equal(ignored(path.join(minimaxHome, 'agents', 'mavis')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousMinimaxHome === undefined) delete process.env.MINIMAX_HOME;
+    else process.env.MINIMAX_HOME = previousMinimaxHome;
+    if (previousMavisHome === undefined) delete process.env.MAVIS_HOME;
+    else process.env.MAVIS_HOME = previousMavisHome;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

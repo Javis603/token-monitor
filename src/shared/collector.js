@@ -20,7 +20,11 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildMinimaxHistoryGraph, buildMinimaxPeriods, collectMinimaxRows } = require('./minimaxUsage');
 const { hashKey } = require('./hashKey');
+
+// Clients parsed from local stores (not accepted by tokscale --client).
+const LOCALLY_PARSED_CLIENTS = new Set(['proma', 'minimax']);
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...
@@ -557,6 +561,7 @@ async function collectHistoryOnce(options) {
     }
   }
   if (options.promaGraph) histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
+  if (options.minimaxGraph) histories.push(normalizeHistory(parseGraphResult(options.minimaxGraph), { capDays, todayKey }));
   if (histories.length === 0) return null;
   const history = histories.length === 1 ? histories[0] : mergeHistories(histories, { todayKey });
   return history.daily.length || history.monthly.length ? history : null;
@@ -594,11 +599,14 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses }
   );
-  // tokscale doesn't know about Proma yet — filter it out of the subprocess
-  // calls so --client doesn't reject an unknown value. Proma is parsed
-  // separately below and merged back in.
-  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',') : normalizedClients;
+  // tokscale doesn't know about parse-local clients (Proma, MiniMax Code) —
+  // filter them out of the subprocess so --client doesn't reject unknown values.
+  // They are parsed separately below and merged back in.
+  const tokscaleClients = normalizedClients
+    ? normalizedClients.split(',').filter((c) => !LOCALLY_PARSED_CLIENTS.has(c)).join(',')
+    : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
+  const includesMinimax = normalizedClients.split(',').includes('minimax');
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
@@ -607,6 +615,8 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
+  let minimaxPeriods = null;
+  let minimaxRows = null;
   if (normalizedClients) {
     await maybeSyncCursor(tokscaleClients, options.logger);
     await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
@@ -628,6 +638,28 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
       }
     }
+    if (includesMinimax) {
+      try {
+        minimaxRows = collectMinimaxRows({
+          homeDir: options.minimaxHomeDir,
+          env: options.env,
+          rows: options.minimaxRows,
+          sqlite: options.minimaxSqlite
+        });
+        const minimaxJson = buildMinimaxPeriods({
+          now: collectedAt,
+          allTimeSince,
+          rows: minimaxRows
+        });
+        minimaxPeriods = {
+          today: extractUsageFromTokscale(minimaxJson.today),
+          month: extractUsageFromTokscale(minimaxJson.month),
+          allTime: extractUsageFromTokscale(minimaxJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`minimax parse failed: ${err.message}`);
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -637,9 +669,10 @@ async function collectUsageOnce(options) {
         today = extractUsageFromTokscale(todayJson);
       }
       // The persisted anchor contains every Windows-side client, including
-      // locally parsed Proma. Include its fresh today usage before deriving
+      // locally parsed clients. Include their fresh today usage before deriving
       // broader windows so base + (fresh today - anchor today) stays exact.
       if (promaPeriods) today = mergePeriods(today, promaPeriods.today);
+      if (minimaxPeriods) today = mergePeriods(today, minimaxPeriods.today);
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
     } else if (tokscaleClients) {
@@ -674,6 +707,11 @@ async function collectUsageOnce(options) {
       today = mergePeriods(today, promaPeriods.today);
       month = mergePeriods(month, promaPeriods.month);
       allTime = mergePeriods(allTime, promaPeriods.allTime);
+    }
+    if (minimaxPeriods && !anchorUsed) {
+      today = mergePeriods(today, minimaxPeriods.today);
+      month = mergePeriods(month, minimaxPeriods.month);
+      allTime = mergePeriods(allTime, minimaxPeriods.allTime);
     }
   }
 
@@ -789,6 +827,16 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+      minimaxGraph: includesMinimax
+        ? buildMinimaxHistoryGraph({
+          rows: minimaxRows || collectMinimaxRows({
+            homeDir: options.minimaxHomeDir,
+            env: options.env,
+            rows: options.minimaxRows,
+            sqlite: options.minimaxSqlite
+          })
+        })
+        : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -894,6 +942,15 @@ function clientWatchCandidates(clientsCsv) {
   add('workbuddy', path.join(home, '.workbuddy', 'projects'));
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', path.join(home, '.proma', 'agent-sessions'));
+  // MiniMax Code — usage DBs under ~/.minimax (or MINIMAX_HOME / MAVIS_HOME).
+  // Watch the home + v2/sqlite so sqlite.db and runtime-state.sqlite refresh in
+  // seconds; watchIgnoreMatcher prunes sessions/agents/logs so we never poll
+  // conversation trees (privacy + CPU).
+  {
+    const minimaxHome = String(process.env.MINIMAX_HOME || process.env.MAVIS_HOME || '').trim()
+      || path.join(home, '.minimax');
+    add('minimax', minimaxHome, path.join(minimaxHome, 'v2', 'sqlite'));
+  }
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
@@ -974,15 +1031,36 @@ function watchPathsForClients(clientsCsv) {
 // never recurses into an ignored dir (so the runaway poll is gone), yet a
 // newly created state.db-wal is still seen on the next top-level readdir.
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
+// MiniMax Code only needs the usage SQLite files (+ WAL/SHM). Everything else
+// under ~/.minimax (sessions, agents, scratchpads, logs) is ignored.
+const MINIMAX_DB_FILES = new Set([
+  'sqlite.db',
+  'sqlite.db-wal',
+  'sqlite.db-shm',
+  'runtime-state.sqlite',
+  'runtime-state.sqlite-wal',
+  'runtime-state.sqlite-shm'
+]);
+
+function minimaxPathAllowed(resolved, root) {
+  if (resolved === root) return true;
+  if (!resolved.startsWith(root + path.sep)) return false;
+  if (MINIMAX_DB_FILES.has(path.basename(resolved))) return true;
+  // Keep the short intermediate dirs so chokidar can readdir into the db folder.
+  const rel = path.relative(root, resolved);
+  return rel === 'v2' || rel === path.join('v2', 'sqlite');
+}
 
 function watchIgnoreMatcher(clientsCsv) {
   const candidates = clientWatchCandidates(clientsCsv);
   const hermesRoots = (candidates.hermes || []).map((dir) => path.resolve(dir));
   const hermesRootSet = new Set(hermesRoots);
+  const minimaxRoots = (candidates.minimax || []).map((dir) => path.resolve(dir));
+  const minimaxRootSet = new Set(minimaxRoots);
   const copilotRoots = (candidates.copilot || [])
     .filter((dir) => path.basename(dir) === 'workspaceStorage')
     .map((dir) => path.resolve(dir));
-  if (hermesRoots.length === 0 && copilotRoots.length === 0) return undefined;
+  if (hermesRoots.length === 0 && copilotRoots.length === 0 && minimaxRoots.length === 0) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
     // Every explicit watch root stays watched — the home dir AND each profile
@@ -993,6 +1071,12 @@ function watchIgnoreMatcher(clientsCsv) {
     for (const root of hermesRoots) {
       if (resolved.startsWith(root + path.sep)) return !HERMES_DB_FILES.has(path.basename(resolved));
     }
+    if (minimaxRootSet.has(resolved)) return false;
+    for (const root of minimaxRoots) {
+      if (resolved === root || resolved.startsWith(root + path.sep)) {
+        return !minimaxPathAllowed(resolved, root);
+      }
+    }
     for (const root of copilotRoots) {
       if (resolved === root) return false;
       if (!resolved.startsWith(root + path.sep)) continue;
@@ -1002,7 +1086,7 @@ function watchIgnoreMatcher(clientsCsv) {
       if (parts.length === 2 && parts[1] === 'workspace.json') return false;
       return true;
     }
-    return false; // paths outside the bounded Hermes/Copilot roots are never ignored
+    return false; // paths outside the bounded Hermes/MiniMax/Copilot roots are never ignored
   };
 }
 
@@ -1338,6 +1422,7 @@ module.exports = {
   projectPathFromJsonl,
   collectHistoryOnce,
   collectUsageOnce,
+  LOCALLY_PARSED_CLIENTS,
   clientDataDirPresence,
   computePeriodWindows,
   configFingerprint,
