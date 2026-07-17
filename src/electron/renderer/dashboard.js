@@ -249,7 +249,9 @@ function formatCostCompact(usd) {
 }
 function shortDate(key) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key)); return m ? `${Number(m[2])}/${Number(m[3])}` : String(key); }
 function axisEvery(list) { return Math.max(1, Math.ceil(list.length / 9)); }
-function todayKey() { return new Date().toISOString().slice(0, 10); }
+// Local, not UTC: the heatmap's day cells are local-day scoped, so a UTC "today"
+// shifted the whole rolling year by a day for non-UTC users (#177).
+function todayKey() { return charts.localDayKey(); }
 function daysBetween(a, b) {
   return Math.round((Date.parse(`${String(b).slice(0, 10)}T00:00:00Z`) - Date.parse(`${String(a).slice(0, 10)}T00:00:00Z`)) / 86400000);
 }

@@ -304,17 +304,29 @@
     return `${daily.length}:${last.date || ''}:${last.tokens || 0}`;
   }
 
-  // Whether loadHomeHistory should (re)fetch the full history. The first fetch can
-  // race the local collector at cold start and return empty; don't let that stick —
-  // refetch once the stats preview confirms history exists, but only when the preview
-  // has actually changed since the last attempt (so one bad fetch can't loop), stop
-  // once we hold the full data, and never poll a genuinely zero-usage account (#39).
-  function shouldFetchHomeHistory({ homeHistory, requested, preview, lastPreviewKey } = {}) {
-    if (historyHasDays(homeHistory)) return false;
+  // Identity of the history the held snapshot was fetched for. Mirrors main's
+  // statsHistoryRevision: prefer the real revision, fall back to the preview tail
+  // for an older hub that predates revisions. The revision only moves when the
+  // collector actually produces a different history (carry-forward keeps it stable
+  // between the gated history ticks), so keying refetches on it costs no extra
+  // `tokscale graph` runs.
+  function homeHistorySignature(stats) {
+    const revision = String(stats?.historyRevision || '').trim();
+    return revision || historyPreviewKey(stats?.historyPreview);
+  }
+
+  // Whether loadHomeHistory should (re)fetch the full history. Home used to freeze
+  // the first non-empty result for the whole renderer session, so a snapshot taken
+  // before midnight kept showing yesterday at its startup value (0 for a day that
+  // had not happened yet) until the app restarted (#177). Refetch whenever the
+  // history signature moves; a failed/empty fetch leaves the recorded signature
+  // untouched, so it still can't spin the render→fetch loop, and a genuinely
+  // zero-usage account with nothing to fetch is still never polled (#39).
+  function shouldFetchHomeHistory({ requested, stats, lastSignature } = {}) {
     if (!requested) return true;
-    const key = historyPreviewKey(preview);
-    if (!key) return false;
-    return key !== lastPreviewKey;
+    const signature = homeHistorySignature(stats);
+    if (!signature) return false;
+    return signature !== lastSignature;
   }
 
   function homeActivityWheelRoute(event) {
@@ -360,6 +372,7 @@
     pickHomeHistory,
     patchDailyToday,
     historyPreviewKey,
+    homeHistorySignature,
     shouldFetchHomeHistory,
     homeActivityHeatmapLayout,
     homeActivityWheelRoute,

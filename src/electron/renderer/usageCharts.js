@@ -16,6 +16,23 @@
     return total;
   }
 
+  // Wall-clock "today" as a LOCAL day key. Day cells and the live period totals
+  // patched into them are both local-day scoped (the collector keys periods with
+  // localTodayKey), so reading today off toISOString() — which is UTC — pasted the
+  // local today's tokens onto the UTC day: at UTC+8 that is the *previous* day's
+  // cell between 00:00 and 07:59 local, blanking yesterday every morning (#177).
+  // Built from the local getters rather than a locale-formatted string so the key
+  // stays YYYY-MM-DD regardless of the user's locale.
+  function localDayKey(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // Day keys are compared and stepped as plain calendar strings, so the arithmetic
+  // below stays UTC-anchored on purpose: it operates on an already-correct key and
+  // never reads the wall clock.
   function addDaysUTC(key, delta) {
     return new Date(Date.parse(`${key}T00:00:00Z`) + delta * 86400000).toISOString().slice(0, 10);
   }
@@ -186,7 +203,7 @@
   }
 
   function rollingYearHeatmap(daily, options) {
-    const o = Object.assign({ endDate: new Date().toISOString().slice(0, 10), cell: 8, gap: 3 }, options || {});
+    const o = Object.assign({ endDate: localDayKey(), cell: 8, gap: 3 }, options || {});
     const endDate = String(o.endDate).slice(0, 10);
     const end = new Date(`${endDate}T00:00:00Z`);
     const startDate = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
@@ -543,7 +560,7 @@
   }
 
   return {
-    weekStartKey, dailyBarsChart, candleChart, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
+    localDayKey, weekStartKey, dailyBarsChart, candleChart, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,

@@ -19,6 +19,7 @@ const {
   pickHomeHistory,
   patchDailyToday,
   historyPreviewKey,
+  homeHistorySignature,
   shouldFetchHomeHistory
 } = require('../../src/electron/renderer/homeOverview');
 
@@ -499,41 +500,54 @@ test('historyPreviewKey is empty for no days and changes as the daily tail moves
   assert.notEqual(historyPreviewKey({ daily: [{ date: '2026-06-02', tokens: 99 }] }), key);
 });
 
+test('homeHistorySignature prefers the revision and falls back to the preview tail', () => {
+  assert.equal(homeHistorySignature({ historyRevision: 'abc123', historyPreview: historyWithDays }), 'abc123');
+  // An older hub that predates revisions still has to be able to move the signature.
+  assert.equal(
+    homeHistorySignature({ historyPreview: historyWithDays }),
+    historyPreviewKey(historyWithDays)
+  );
+  assert.equal(homeHistorySignature(null), '');
+  assert.equal(homeHistorySignature({ historyRevision: '   ' , historyPreview: emptyHistory }), '');
+});
+
 test('shouldFetchHomeHistory fetches on the first request', () => {
-  assert.equal(shouldFetchHomeHistory({ homeHistory: null, requested: false, preview: null }), true);
+  assert.equal(shouldFetchHomeHistory({ requested: false, stats: null }), true);
 });
 
 test('shouldFetchHomeHistory refetches when an empty result raced the collector', () => {
-  // Requested once during the race (preview was empty → lastPreviewKey ''), but the
-  // preview now shows history exists — fetch again instead of sticking on the empty result.
+  // Requested once during the race (no stats yet → lastSignature ''), but stats now
+  // show history exists — fetch again instead of sticking on the empty result.
   assert.equal(shouldFetchHomeHistory({
-    homeHistory: emptyHistory, requested: true, preview: historyWithDays, lastPreviewKey: ''
+    requested: true, stats: { historyRevision: 'rev-1' }, lastSignature: ''
   }), true);
 });
 
-test('shouldFetchHomeHistory does not refetch against the preview it already tried', () => {
+test('shouldFetchHomeHistory does not refetch against the history it already tried', () => {
   // A failed/empty full-history fetch must not loop: loadHomeHistory's finally always
-  // re-renders Home, so refetching the same preview state would spin the IPC path.
-  const key = historyPreviewKey(historyWithDays);
+  // re-renders Home, so refetching the same history state would spin the IPC path.
   assert.equal(shouldFetchHomeHistory({
-    homeHistory: emptyHistory, requested: true, preview: historyWithDays, lastPreviewKey: key
+    requested: true, stats: { historyRevision: 'rev-1' }, lastSignature: 'rev-1'
   }), false);
 });
 
-test('shouldFetchHomeHistory retries once the preview changes after a failed attempt', () => {
-  const staleKey = historyPreviewKey(historyWithDays);
-  const newerPreview = { daily: [{ date: '2026-06-02', tokens: 42 }] };
+test('shouldFetchHomeHistory refetches once the collector produces a newer history (#177)', () => {
+  // Home used to freeze the first non-empty snapshot for the whole renderer session, so
+  // a snapshot taken before midnight kept rendering yesterday at its startup value until
+  // the app was restarted. Holding data must not block a refetch any more.
   assert.equal(shouldFetchHomeHistory({
-    homeHistory: emptyHistory, requested: true, preview: newerPreview, lastPreviewKey: staleKey
+    requested: true, stats: { historyRevision: 'rev-2' }, lastSignature: 'rev-1'
+  }), true);
+  // Same for a revision-less hub, via the preview tail fallback.
+  assert.equal(shouldFetchHomeHistory({
+    requested: true,
+    stats: { historyPreview: { daily: [{ date: '2026-06-02', tokens: 42 }] } },
+    lastSignature: historyPreviewKey(historyWithDays)
   }), true);
 });
 
-test('shouldFetchHomeHistory stops once the full history is held', () => {
-  assert.equal(shouldFetchHomeHistory({ homeHistory: historyWithDays, requested: true, preview: historyWithDays }), false);
-});
-
 test('shouldFetchHomeHistory never polls a zero-usage account', () => {
-  // Requested once, still no preview data — nothing to fetch, so don't poll on every render.
-  assert.equal(shouldFetchHomeHistory({ homeHistory: emptyHistory, requested: true, preview: emptyHistory }), false);
-  assert.equal(shouldFetchHomeHistory({ homeHistory: null, requested: true, preview: null }), false);
+  // Requested once, still nothing to identify a history by — don't poll on every render.
+  assert.equal(shouldFetchHomeHistory({ requested: true, stats: { historyPreview: emptyHistory } }), false);
+  assert.equal(shouldFetchHomeHistory({ requested: true, stats: null }), false);
 });

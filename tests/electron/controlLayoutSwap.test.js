@@ -157,7 +157,9 @@ test('refresh button exposes busy, success, and error feedback states', () => {
   assert.match(body, /setRefreshButtonState\('refreshing'/, 'feedback refresh starts button feedback immediately');
   assert.match(body, /settleRefreshButtonState\('refreshed'/, 'feedback refresh shows success feedback');
   assert.match(body, /settleRefreshButtonState\('error'/, 'feedback refresh shows error feedback');
-  assert.match(app, /refreshStats\(\{ force: true, feedback: true \}\)/, 'Reload click opts into button feedback');
+  // Intent is the feedback opt-in, not the exact flag list (the Reload click also
+  // forces a history rescan — see refreshForceHistory.test.js).
+  assert.match(app, /refreshStats\(\{[^}]*feedback: true[^}]*\}\)/, 'Reload click opts into button feedback');
 
   assert.doesNotMatch(cssRule(css, '.refresh-button.is-refreshing'), /cursor:\s*progress/, 'loading state should not alter the pointer cursor');
   assert.equal(declaration(cssRule(css, '.refresh-button:disabled'), 'cursor'), 'default', 'disabled refresh keeps the normal arrow cursor');

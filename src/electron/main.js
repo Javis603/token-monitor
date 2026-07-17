@@ -2823,7 +2823,11 @@ async function writeExportTo(dir, periods, options = {}) {
 
 async function fetchStats(options = {}) {
   const force = Boolean(options?.force);
-  const tickOptions = force ? { forceLimits: true } : {};
+  // forceHistory stays independent of `force` on purpose: tool settings, account
+  // sign-ins and limits actions all refresh with { force: true }, so folding the
+  // history rescan into it would spawn the expensive `tokscale graph` on each one.
+  // Only the manual refresh button opts in.
+  const tickOptions = force ? { forceLimits: true, forceHistory: Boolean(options?.forceHistory) } : {};
   if (mode === 'local') {
     if (force && localCollectorHandle) await localCollectorHandle.tick('manual', tickOptions);
     if (localStats) return localStats;
