@@ -216,16 +216,16 @@ agent와 hub에는 UI가 없습니다. 프로젝트 루트 `.env`(`.env.example`
 TOKEN_MONITOR_HUB_URL=               # 동기화 필수 — Worker URL 또는 http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # hub와 동일한 secret
 TOKEN_MONITOR_DEVICE_ID=             # 선택 — 기본값 호스트명
+TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # 선택 — 0/실시간, 600000/10분, 1200000/20분, 1800000/30분
 TOKEN_MONITOR_CLIENTS=               # 선택 — 기본값 전체 도구; 비우면 추적 안 함
 TOKEN_MONITOR_PROJECTS_ENABLED=      # 선택 — 기본 꺼짐; 1이면 프로젝트 메타데이터 수집
 TOKEN_MONITOR_HISTORY_ENABLED=       # 선택 — 기본 켜짐; 0이면 추세 기록 생략
+TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # 선택 — 기본 켜짐; 0이면 보관된 세션 사용량 유지 중지
 TOKEN_MONITOR_LIMITS_ENABLED=        # 선택 — 기본 켜짐; 0이면 CLI 프로브 생략
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # 선택 — claude,codex,cursor,antigravity,opencode,deepseek,minimax,mimo,grok,copilot,kiro,zai,zaiteam,volcengine,qoder,kimi,ollama
 ```
 
-위젯은 같은 env를 첫 실행 기본값으로 읽은 뒤 GUI 설정으로 덮어씁니다.
-
-CLI 플래그(`--hub=`, `--secret=`, `--device=`, `--clients=`, `--history=`, `--limits=`, `--limitProviders=`)는 env보다 우선합니다.
+전체 목록은 `.env.example`을 참조하세요. 위젯은 env를 첫 실행 기본값으로 사용하며, agent와 hub에서는 CLI 플래그가 우선합니다.
 
 일회 실행 예:
 

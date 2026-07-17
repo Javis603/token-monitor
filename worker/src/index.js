@@ -77,6 +77,7 @@ export class HubDO {
   async getStats() {
     const devices = await this.listDevices();
     const stats = aggregateDevices(devices, this.staleAfterMs);
+    stats.staleAfterMs = this.staleAfterMs;
     const history = aggregateHistory(devices);
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);

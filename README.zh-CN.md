@@ -216,16 +216,16 @@ npm run pack       # 未打包的 app 目录（无安装包），方便本机快
 TOKEN_MONITOR_HUB_URL=               # 同步模式必填——Worker URL 或 http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # 共用 secret，必须与 hub 一致
 TOKEN_MONITOR_DEVICE_ID=             # 可选——默认为主机名
+TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # 可选——0／实时、600000／10 分钟、1200000／20 分钟、1800000／30 分钟
 TOKEN_MONITOR_CLIENTS=               # 可选——默认为所有支持的工具；设为空表示不追踪
 TOKEN_MONITOR_PROJECTS_ENABLED=      # 可选——默认关闭；设为 1 可收集项目元数据
 TOKEN_MONITOR_HISTORY_ENABLED=       # 可选——默认启用；设为 0 可跳过收集趋势历史
+TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # 可选——默认启用；设为 0 可停止保留已归档的会话用量
 TOKEN_MONITOR_LIMITS_ENABLED=        # 可选——默认启用；设为 0 可跳过 CLI 探测
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # 可选——默认为所有支持的提供方（claude、codex、cursor、antigravity、opencode、deepseek、minimax、mimo、grok、copilot、kiro、zai、zaiteam、volcengine、qoder、kimi、ollama）
 ```
 
-小部件会把同样的环境变量读作首次启动的默认值，之后改由 GUI 设置接管。
-
-每个值也都可以通过 CLI 参数传入（`--hub=`、`--secret=`、`--device=`、`--clients=`、`--history=`、`--limits=`、`--limitProviders=`）——参数优先于环境变量。较少用的调整项（`TOKEN_MONITOR_INTERVAL_MS`、`TOKEN_MONITOR_PORT`、`TOKEN_MONITOR_STALE_AFTER_MS`、`TOKEN_MONITOR_HISTORY_INTERVAL_MS`、`TOKEN_MONITOR_LIMITS_REFRESH_MS`、…）一样可通过环境变量／参数配置，但为减少噪音不放进 `.env.example`。
+完整列表请参阅 `.env.example`。小部件会将环境变量作为首次启动的默认值；代理和 hub 则以 CLI 参数优先。
 
 一次性执行示例:
 

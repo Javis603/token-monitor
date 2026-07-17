@@ -216,6 +216,7 @@ The agent and hub have no UI. Configure them with a `.env` file at the project r
 TOKEN_MONITOR_HUB_URL=               # required for sync mode — Worker URL or http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # shared secret, must match the hub
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
+TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10m, 1200000/20m, 1800000/30m
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; set empty to disable tracking
 TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults to disabled; set to 1 to collect project metadata
 TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults to enabled; set to 0 to skip collecting Trends history
@@ -224,9 +225,7 @@ TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults to enabled; set to 
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported (claude, codex, cursor, antigravity, opencode, deepseek, minimax, mimo, grok, copilot, kiro, zai, zaiteam, volcengine, qoder, kimi, ollama)
 ```
 
-The widget reads the same env vars as first-run defaults, then takes over with its own GUI-managed settings.
-
-Every value can also be passed as a CLI flag (`--hub=`, `--secret=`, `--device=`, `--clients=`, `--projects=`, `--history=`, `--limits=`, `--limitProviders=`) — flags win over env. Less-common knobs (`TOKEN_MONITOR_INTERVAL_MS`, `TOKEN_MONITOR_PORT`, `TOKEN_MONITOR_STALE_AFTER_MS`, `TOKEN_MONITOR_HISTORY_INTERVAL_MS`, `TOKEN_MONITOR_LIMITS_REFRESH_MS`, …) are also accepted via env / flag but kept out of `.env.example` to reduce noise.
+See `.env.example` for the full list. The widget uses env values as first-run defaults; CLI flags take precedence for the agent and hub.
 
 Example one-off run:
 

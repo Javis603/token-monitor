@@ -216,16 +216,16 @@ agent と hub には UI がありません。プロジェクトルートの `.en
 TOKEN_MONITOR_HUB_URL=               # 同期に必須 — Worker URL または http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # hub と同じ secret
 TOKEN_MONITOR_DEVICE_ID=             # 任意 — デフォルトはホスト名
+TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # 任意 — 0／ライブ、600000／10分、1200000／20分、1800000／30分
 TOKEN_MONITOR_CLIENTS=               # 任意 — デフォルトは全ツール；空にすると追跡無効
 TOKEN_MONITOR_PROJECTS_ENABLED=      # 任意 — デフォルトは無効；1 でプロジェクトメタデータを収集
 TOKEN_MONITOR_HISTORY_ENABLED=       # 任意 — デフォルトは有効；0 でトレンド履歴をスキップ
+TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # 任意 — デフォルトは有効；0 でアーカイブ済みセッション使用量の保持を停止
 TOKEN_MONITOR_LIMITS_ENABLED=        # 任意 — デフォルトは有効；0 で CLI プローブをスキップ
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # 任意 — claude,codex,cursor,antigravity,opencode,deepseek,minimax,mimo,grok,copilot,kiro,zai,zaiteam,volcengine,qoder,kimi,ollama
 ```
 
-ウィジェットは同じ env を初回実行のデフォルトとして読み込み、その後 GUI 設定で上書きします。
-
-CLI フラグ（`--hub=`、`--secret=`、`--device=`、`--clients=`、`--history=`、`--limits=`、`--limitProviders=`）は env より優先されます。
+完全な一覧は `.env.example` を参照してください。ウィジェットは env を初回起動時のデフォルトとして使用し、agent と hub では CLI フラグが優先されます。
 
 一回限りの実行例:
 

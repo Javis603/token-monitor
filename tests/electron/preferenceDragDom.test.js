@@ -208,7 +208,7 @@ test('main section holds views; appearance is its own section; window holds beha
 
   const windowGroup = windowSection.match(/<div class="settings-subgroup settings-window-group">[\s\S]*?<div class="settings-subgroup settings-presence-group">/)?.[0] || '';
   assert.match(windowGroup, /id="windowBehaviorInput"/);
-  assert.match(windowGroup, /id="windowToggleShortcutRecordButton"/);
+  assert.match(windowGroup, /id="windowToggleShortcutValue"/);
   assert.doesNotMatch(windowGroup, /settings\.display\.windowTitle/);
   assert.doesNotMatch(windowGroup, /<div class="settings-group-header"><span data-i18n="settings\.display\.windowTitle">/);
   assert.doesNotMatch(windowGroup, /id="floatingBubbleInput"/);
@@ -363,7 +363,7 @@ test('sync section icon uses a local sync asset instead of a hand-drawn refresh 
 
 test('startup setting stays visible when login items are unsupported', () => {
   const html = readRendererFile('index.html');
-  const startupGroup = html.match(/<div id="startupGroup"[\s\S]*?<p id="startupNote"/)?.[0] || '';
+  const startupGroup = html.match(/<div id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/label>/)?.[0] || '';
   assert.match(startupGroup, /id="startAtLoginInput"/);
 
   const app = readRendererFile('app.js');
@@ -381,7 +381,7 @@ test('expanded settings sections keep content full width', () => {
   const innerRule = cssRule(css, '.settings-section-details-inner');
   const firstChildRule = cssRule(css, '.settings-section-details-inner > :first-child');
   const lastChildRule = cssRule(css, '.settings-section-details-inner > :last-child');
-  assert.match(innerRule, /padding-left:\s*4px/);
+  assert.match(innerRule, /padding:\s*2px 11px 0/);
   assert.match(firstChildRule, /padding-top:\s*2px/);
   assert.match(lastChildRule, /padding-bottom:\s*10px/);
   assert.doesNotMatch(detailsRule, /padding:\s*[^;]*\s24px\b/);

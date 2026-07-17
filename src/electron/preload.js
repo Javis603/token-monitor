@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('dashboard:historyChanged', listener);
   },
   dashboard: {
+    ready: () => ipcRenderer.send('dashboard:ready'),
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
   },

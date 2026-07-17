@@ -10,6 +10,7 @@ const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFil
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
+const motionPreferenceApi = require('./motionPreference');
 
 // Install EPIPE suppression before anything that might log. Without this,
 // a closed parent pipe turns the next log call into an unhandled 'error'
@@ -58,8 +59,10 @@ const {
 const {
   appUpdateInstallSupport,
   checkLatestRelease,
+  deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
   GITHUB_REPO,
+  mergeLatestReleaseMetadata,
   shouldSkipAppUpdateCheck
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
@@ -117,6 +120,8 @@ const {
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { classifyStreamFailure } = require('./syncConnection');
+const { composeLocalSyncStats } = require('./syncDisplayStats');
+const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
 const {
   normalizeWindowToggleShortcut,
@@ -147,7 +152,7 @@ if (!app.isPackaged) loadDotEnv();
 const APP_NAME = 'Token Monitor';
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
-const DEFAULT_WINDOW = { width: 360, height: 500 };
+const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
 const CSP_HEADER = [
@@ -208,6 +213,7 @@ function defaultSettings() {
     glassOpacity: 68,
     glassBlur: 32,
     systemGlass: true,
+    reduceMotion: 'system',
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
@@ -230,6 +236,7 @@ function defaultSettings() {
     hiddenViews: defaultViewDisplayPreferences().hiddenViews,
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
+    showHomeLimitBars: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false),
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
@@ -240,6 +247,7 @@ function defaultSettings() {
     exportIntervalMs: 60 * 1000,
     collectionMode: 'live',
     collectionIntervalMs: 5 * 60 * 1000,
+    syncUploadIntervalMs: normalizeSyncUploadIntervalMs(process.env.TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS),
     serviceProviderDisplayOrder: '',
     hiddenServiceProviders: '',
     serviceStatusRefreshMs: 60000,
@@ -313,6 +321,10 @@ function collectorIntervalMs() {
 
 function collectorWatchEnabled() {
   return normalizeCollectionMode(settings?.collectionMode) === 'live';
+}
+
+function syncUploadIntervalMs() {
+  return normalizeSyncUploadIntervalMs(settings?.syncUploadIntervalMs);
 }
 
 function defaultLimitProviders() {
@@ -1343,6 +1355,7 @@ function readSettings() {
     if (saved.hiddenHomeModules !== undefined) {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
+    merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
@@ -1363,6 +1376,8 @@ function readSettings() {
     }
     merged.collectionMode = normalizeCollectionMode(merged.collectionMode);
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
+    merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
+    merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     if (saved.serviceProviderDisplayOrder !== undefined) {
       merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
     }
@@ -1589,6 +1604,7 @@ let streamConnected = false;
 let streamFailure = null;
 let syncCollectorHandle = null;
 let lastCollectedDevice = null;
+let latestHubStats = null;
 let tray = null;
 let latestStats = null;
 let trayRefreshInFlight = false;
@@ -1747,7 +1763,12 @@ function stopSyncCollector() {
 function startSyncCollector() {
   stopSyncCollector();
   if (!effectiveHubConfig().url) return;
-  syncCollectorHandle = startCollector({
+  const syncUploadScheduler = createSyncUploadScheduler({
+    intervalMs: syncUploadIntervalMs(),
+    upload: postToHub,
+    onError: (error) => console.log(`[sync-collector] post failed: ${error.message}`)
+  });
+  const collectorHandle = startCollector({
     clients: clientsCsvForSetting(settings.clients),
     allTimeSince: settings.allTimeSince || '2024-01-01',
     commandTimeoutMs: 120 * 1000,
@@ -1787,10 +1808,18 @@ function startSyncCollector() {
     mimoManagedAccounts: mimoManagedAccountsForCollector(),
     onUpdate: async (summary) => {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
-      const visibleSummary = summaryWithArchivedClientUsage(summary);
+      const visibleSummary = {
+        ...summaryWithArchivedClientUsage(summary),
+        syncUploadIntervalMs: syncUploadIntervalMs()
+      };
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+      if (displayStats) {
+        updateDiscordRpc(displayStats, settings.currency);
+        sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
+      }
       try {
-        await postToHub(visibleSummary);
+        await syncUploadScheduler.enqueue(visibleSummary);
       } catch (error) {
         console.log(`[sync-collector] post failed: ${error.message}`);
       }
@@ -1798,6 +1827,13 @@ function startSyncCollector() {
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`),
     logger: (msg) => console.log(`[sync-collector] ${msg}`)
   });
+  syncCollectorHandle = {
+    stop() {
+      syncUploadScheduler.stop();
+      collectorHandle.stop();
+    },
+    tick: collectorHandle.tick
+  };
 }
 
 // Host mode: this device's own usage goes straight into the embedded hub's store
@@ -2163,8 +2199,9 @@ function parseSseChunk(chunk) {
   try { return { event, data: JSON.parse(dataLines.join('\n')) }; } catch (_) { return null; }
 }
 
-async function startStatsStream() {
+async function startStatsStream(options = {}) {
   stopStatsStream();
+  if (options.resetSnapshot) latestHubStats = null;
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   mode = 'sync';
@@ -2193,9 +2230,14 @@ async function startStatsStream() {
       while ((idx = buffer.indexOf('\n\n')) !== -1) {
         const chunk = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 2);
-        const parsed = parseSseChunk(chunk);
+        let parsed = parseSseChunk(chunk);
         if (parsed) {
-          if (parsed.event === 'stats' && parsed.data?.stats) updateDiscordRpc(parsed.data.stats, settings.currency);
+          if (parsed.event === 'stats' && parsed.data?.stats) {
+            latestHubStats = parsed.data.stats;
+            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+            parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
+            updateDiscordRpc(displayStats, settings.currency);
+          }
           sendPush(parsed);
         }
       }
@@ -2699,7 +2741,7 @@ function startMode() {
     }
     await stopEmbeddedHub();
     if (effectiveHubConfig().url) {
-      startStatsStream();
+      startStatsStream({ resetSnapshot: true });
       startSyncCollector();
     } else {
       startLocalCollector();
@@ -2801,7 +2843,8 @@ async function fetchStats(options = {}) {
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  return injectLocalDeviceStatus(await response.json());
+  latestHubStats = await response.json();
+  return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
 }
 
 function managedPricingSidecarPath() {
@@ -2879,6 +2922,7 @@ async function downloadTokscaleFromNpm() {
 }
 
 let appUpdateCheckInFlight = false;
+let appUpdateCheckPromise = null;
 let appUpdateLastError = null;
 let appUpdateBackgroundTimer = null;
 let appUpdateNativeBusy = false;
@@ -2903,6 +2947,18 @@ function latestFromUpdaterInfo(info) {
   };
 }
 
+function rememberLatestAppUpdate(latest, checkedAt = new Date().toISOString()) {
+  if (!latest) return null;
+  const merged = mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest);
+  settings.appUpdate = {
+    ...(settings.appUpdate || {}),
+    lastCheckedAt: checkedAt,
+    lastKnownLatest: merged
+  };
+  saveSettings();
+  return merged;
+}
+
 function setNativeAppUpdateState(patch = {}) {
   appUpdateNativeState = { ...appUpdateNativeState, ...patch };
   sendAppUpdatePush();
@@ -2918,28 +2974,12 @@ function configureNativeAppUpdater() {
     setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
   });
   autoUpdater.on('update-available', (info) => {
-    const latest = latestFromUpdaterInfo(info);
-    if (latest) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: new Date().toISOString(),
-        lastKnownLatest: latest
-      };
-      saveSettings();
-    }
+    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
     setNativeAppUpdateState({ phase: 'available', version: latest?.version || info?.version || null, progress: null, error: null });
   });
   autoUpdater.on('update-not-available', (info) => {
     appUpdateNativeBusy = false;
-    const latest = latestFromUpdaterInfo(info);
-    if (latest) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: new Date().toISOString(),
-        lastKnownLatest: latest
-      };
-      saveSettings();
-    }
+    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
     setNativeAppUpdateState({ phase: 'idle', version: latest?.version || null, progress: null, error: null });
   });
   autoUpdater.on('download-progress', (progress) => {
@@ -2966,14 +3006,18 @@ function deriveAppUpdateState() {
   const latest = block.lastKnownLatest || null;
   const dismissedVersion = block.dismissedVersion || null;
   const installSupport = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
-  let hasUpdate = false;
-  if (latest && semver.valid(latest.version) && semver.valid(currentVersion)) {
-    hasUpdate = semver.gt(latest.version, currentVersion) && latest.version !== dismissedVersion;
-  }
+  const availability = deriveAppUpdateAvailability({
+    currentVersion,
+    latest,
+    dismissedVersion,
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version
+  });
   return {
     currentVersion,
     latest,
-    hasUpdate,
+    hasUpdate: availability.hasUpdate,
+    showUpdateNotice: availability.showUpdateNotice,
     dismissedVersion,
     lastCheckedAt: block.lastCheckedAt || null,
     checking: appUpdateCheckInFlight,
@@ -2984,13 +3028,20 @@ function deriveAppUpdateState() {
     installProgress: appUpdateNativeState.progress,
     installVersion: appUpdateNativeState.version,
     installError: appUpdateNativeState.error,
-    downloaded: downloadedAppUpdateMatchesLatest({
-      phase: appUpdateNativeState.phase,
-      downloadedVersion: appUpdateNativeState.version,
-      latest
-    }),
+    downloaded: availability.downloaded,
     installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
   };
+}
+
+function restoreDismissedAppUpdate(version) {
+  const block = settings?.appUpdate || {};
+  if (!version || block.dismissedVersion !== version) return false;
+  settings.appUpdate = {
+    ...block,
+    dismissedVersion: null
+  };
+  saveSettings();
+  return true;
 }
 
 function sendAppUpdatePush() {
@@ -2999,7 +3050,20 @@ function sendAppUpdatePush() {
 }
 
 async function runAppUpdateCheck({ force = false } = {}) {
-  if (appUpdateCheckInFlight) return deriveAppUpdateState();
+  if (appUpdateCheckPromise) {
+    if (force) sendAppUpdatePush();
+    const activeResult = await appUpdateCheckPromise;
+    if (force) {
+      if (activeResult?.ok) {
+        if (activeResult.newer) restoreDismissedAppUpdate(activeResult.latest?.version);
+        appUpdateLastError = null;
+      } else {
+        appUpdateLastError = activeResult?.error || 'Update check failed';
+      }
+      sendAppUpdatePush();
+    }
+    return deriveAppUpdateState();
+  }
   const block = settings?.appUpdate || {};
   if (shouldSkipAppUpdateCheck({
     force,
@@ -3010,29 +3074,37 @@ async function runAppUpdateCheck({ force = false } = {}) {
   })) {
     return deriveAppUpdateState();
   }
-  appUpdateCheckInFlight = true;
-  appUpdateLastError = null;
-  if (force) sendAppUpdatePush();
-  try {
-    const result = await checkLatestRelease(app.getVersion());
-    if (result.ok) {
-      settings.appUpdate = {
-        ...(settings.appUpdate || {}),
-        lastCheckedAt: result.checkedAt,
-        lastKnownLatest: result.latest
-      };
-      saveSettings();
-      appUpdateLastError = null;
-    } else {
-      appUpdateLastError = force ? (result.error || 'Update check failed') : null;
-      if (!force) console.warn('App update check failed:', result.error);
+  const checkTask = (async () => {
+    appUpdateCheckInFlight = true;
+    appUpdateLastError = null;
+    if (force) sendAppUpdatePush();
+    let result;
+    try {
+      result = await checkLatestRelease(app.getVersion());
+      if (result.ok) {
+        rememberLatestAppUpdate(result.latest, result.checkedAt);
+        if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
+        appUpdateLastError = null;
+      } else {
+        appUpdateLastError = force ? (result.error || 'Update check failed') : null;
+        if (!force) console.warn('App update check failed:', result.error);
+      }
+    } catch (error) {
+      const message = error.message || String(error);
+      appUpdateLastError = force ? message : null;
+      if (!force) console.warn('App update check threw:', error);
+      return { ok: false, newer: false, latest: null, error: message };
+    } finally {
+      appUpdateCheckInFlight = false;
+      sendAppUpdatePush();
     }
-  } catch (error) {
-    appUpdateLastError = force ? (error.message || String(error)) : null;
-    if (!force) console.warn('App update check threw:', error);
+    return result;
+  })();
+  appUpdateCheckPromise = checkTask;
+  try {
+    await checkTask;
   } finally {
-    appUpdateCheckInFlight = false;
-    sendAppUpdatePush();
+    if (appUpdateCheckPromise === checkTask) appUpdateCheckPromise = null;
   }
   return deriveAppUpdateState();
 }
@@ -3071,6 +3143,7 @@ async function downloadAndPrepareAppUpdate() {
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
+  restoreDismissedAppUpdate(latest?.version);
   configureNativeAppUpdater();
   appUpdateNativeBusy = true;
   setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
@@ -3302,12 +3375,18 @@ function replaceMainWindow(bounds, options = {}) {
   });
 }
 
+function discardFailedDashboardWindow(win, reason) {
+  if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+  console.log(`[dashboard] ${reason}`);
+  win.destroy();
+}
+
 function createDashboardWindow() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     // Reload so a reopened window always picks up the latest renderer + fresh history,
     // instead of showing whatever was loaded when it first opened.
+    dashboardWindow.hide();
     dashboardWindow.webContents.reload();
-    dashboardWindow.focus();
     return dashboardWindow;
   }
   const glass = nativeBlurEnabled();
@@ -3340,10 +3419,22 @@ function createDashboardWindow() {
     event.preventDefault();
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
-  win.once('ready-to-show', () => win.show());
+  // Only dashboard:ready may reveal a healthy window. Slow hub history must not
+  // race a wall-clock fallback and expose the unprepared heatmap. Actual load or
+  // renderer failures discard the hidden window so the next open starts cleanly.
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // ERR_ABORTED is expected during reloads.
+    discardFailedDashboardWindow(win, `load failed: ${errorDescription}`);
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    discardFailedDashboardWindow(win, `renderer stopped: ${details.reason}`);
+  });
+  win.on('unresponsive', () => {
+    if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
+  });
   win.on('closed', () => { dashboardWindow = null; });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
-    .catch((error) => console.log(`[dashboard] load failed: ${error.message}`));
+    .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
 }
 
@@ -3365,9 +3456,18 @@ async function getDashboardHistory() {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return aggregateHistory([]);
   const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
-  const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
-  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  return response.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -3475,6 +3575,7 @@ app.whenReady().then(() => {
     const previousWslScanEnabled = settings.wslScanEnabled;
     const previousCollectionMode = settings.collectionMode;
     const previousCollectionIntervalMs = settings.collectionIntervalMs;
+    const previousSyncUploadIntervalMs = settings.syncUploadIntervalMs;
     const previousDeepSeekApiKey = settings.deepseekApiKey;
     const previousMinimaxApiKey = settings.minimaxApiKey;
     const previousCopilotApiToken = settings.copilotApiToken;
@@ -3523,6 +3624,7 @@ app.whenReady().then(() => {
     if (patch.ollamaCookie !== undefined) normalizedPatch.ollamaCookie = normalizeOllamaCookie(patch.ollamaCookie);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
+    if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     settings = normalizeWindowBehaviorSettings({
       ...settings,
       ...normalizedPatch,
@@ -3535,6 +3637,7 @@ app.whenReady().then(() => {
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
       systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
+      reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
@@ -3551,6 +3654,7 @@ app.whenReady().then(() => {
       hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
+      showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
@@ -3560,6 +3664,7 @@ app.whenReady().then(() => {
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
+      syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),
       serviceProviderDisplayOrder: patch.serviceProviderDisplayOrder !== undefined ? String(patch.serviceProviderDisplayOrder || '') : (settings.serviceProviderDisplayOrder || ''),
       hiddenServiceProviders: patch.hiddenServiceProviders !== undefined ? String(patch.hiddenServiceProviders || '') : (settings.hiddenServiceProviders || ''),
       serviceStatusRefreshMs: normalizeServiceStatusRefreshMs(patch.serviceStatusRefreshMs ?? settings.serviceStatusRefreshMs),
@@ -3645,6 +3750,7 @@ app.whenReady().then(() => {
       settings.wslScanEnabled !== previousWslScanEnabled ||
       settings.collectionMode !== previousCollectionMode ||
       settings.collectionIntervalMs !== previousCollectionIntervalMs ||
+      (settings.hubMode === 'client' && settings.syncUploadIntervalMs !== previousSyncUploadIntervalMs) ||
       settings.deepseekApiKey !== previousDeepSeekApiKey ||
       settings.minimaxApiKey !== previousMinimaxApiKey ||
       settings.copilotApiToken !== previousCopilotApiToken ||
@@ -4191,6 +4297,13 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', () => getDashboardHistory());
+  ipcMain.on('dashboard:ready', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

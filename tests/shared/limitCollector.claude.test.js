@@ -59,6 +59,39 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
   assert.equal(provider.windows[1].usedPercent, 20);
 });
 
+test('Claude limits fall back to CLI usage when OAuth credentials are not discoverable', async () => {
+  let cliCalls = 0;
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'darwin',
+    now: () => Date.parse('2026-07-15T00:00:00Z'),
+    claudeCredentialPath: '/tmp/missing-claude-credentials.json',
+    stat: async () => {
+      const error = new Error('missing');
+      error.code = 'ENOENT';
+      throw error;
+    },
+    readMacKeychain: false,
+    runClaudeUsageCli: async () => {
+      cliCalls += 1;
+      return [
+        'Current session',
+        '95% left',
+        'Resets 6pm',
+        'Current week',
+        '80% left',
+        'Resets Jul 22'
+      ].join('\n');
+    }
+  });
+
+  assert.equal(cliCalls, 1);
+  assert.equal(provider.provider, 'claude');
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'cli');
+  assert.equal(provider.windows[0].usedPercent, 5);
+  assert.equal(provider.windows[1].usedPercent, 20);
+});
+
 test('Claude limits read Windows Credential Manager credentials when credential files are absent', async () => {
   const provider = await fetchClaudeLimits({}, {
     platform: 'win32',

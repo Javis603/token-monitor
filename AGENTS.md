@@ -50,7 +50,7 @@ When both a widget and the headless agent run on the same machine, the widget's 
 
 Two stores, but only one config file on disk:
 
-1. **`.env` at project root** — read by `loadDotEnv()` in `src/shared/config.js` at the top of every entry file. Only assigns keys that aren't already in `process.env`, so real env vars (systemd / launchd / Docker) still win. The user-facing surface is just four keys (`TOKEN_MONITOR_HUB_URL`, `TOKEN_MONITOR_SECRET`, `TOKEN_MONITOR_DEVICE_ID`, `TOKEN_MONITOR_CLIENTS`); the rest (`TOKEN_MONITOR_INTERVAL_MS`, `TOKEN_MONITOR_PORT`, `TOKEN_MONITOR_STALE_AFTER_MS`, limit knobs, …) are accepted but kept out of `.env.example` to reduce noise.
+1. **`.env` at project root** — read by `loadDotEnv()` in `src/shared/config.js` at the top of every entry file. Only assigns keys that aren't already in `process.env`, so real env vars (systemd / launchd / Docker) still win. `.env.example` documents the operator-facing settings intended for direct configuration, including connection/device settings, feature toggles, and provider credentials. Lower-level runtime knobs may still be accepted without being listed there; treat additions or removals from the documented env surface as compatibility changes and keep `.env.example` aligned with the code.
 2. **Widget GUI** — Electron `userData/settings.json`. `readSettings()` merges `{ ...defaults, ...saved }`; `defaultSettings()` pulls initial values from `process.env` (i.e. from `.env`), so a fresh widget install picks up `.env`, but any GUI change is final.
 
 Per-setting precedence for the agent and hub: `CLI flag → env var (real or .env) → built-in default`. There is no JSON config file anymore — `config.local.json` was removed.

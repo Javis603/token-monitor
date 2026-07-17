@@ -7,6 +7,7 @@ const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { coerceHistory, mergeHistories } = require('./history');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
+const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
 // Additive components for a token total. `reasoning` is deliberately excluded: OpenAI/Codex report
 // reasoning_output_tokens WITHIN output_tokens (tokscale's `output` already includes it and exposes
@@ -633,6 +634,7 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'projectsEnabled')) normalized.projectsEnabled = record.projectsEnabled !== false;
   if (hasOwn(record, 'allTimeProjectsOmitted')) normalized.allTimeProjectsOmitted = record.allTimeProjectsOmitted === true;
   if (hasOwn(record, 'allTimeProjectsIncomplete')) normalized.allTimeProjectsIncomplete = record.allTimeProjectsIncomplete === true;
+  if (hasOwn(record, 'syncUploadIntervalMs')) normalized.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(record.syncUploadIntervalMs);
   if (hasOwn(record, 'history')) normalized.history = coerceHistory(record.history);
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
@@ -788,6 +790,9 @@ function mergeDeviceRecord(existing, incoming) {
     if (hasOwn(normalizedExisting, 'projectsEnabled')) normalizedIncoming.projectsEnabled = normalizedExisting.projectsEnabled;
     if (hasOwn(normalizedExisting, 'allTimeProjectsOmitted')) normalizedIncoming.allTimeProjectsOmitted = normalizedExisting.allTimeProjectsOmitted;
     if (hasOwn(normalizedExisting, 'allTimeProjectsIncomplete')) normalizedIncoming.allTimeProjectsIncomplete = normalizedExisting.allTimeProjectsIncomplete;
+    if (!hasOwn(normalizedIncoming, 'syncUploadIntervalMs') && hasOwn(normalizedExisting, 'syncUploadIntervalMs')) {
+      normalizedIncoming.syncUploadIntervalMs = normalizedExisting.syncUploadIntervalMs;
+    }
   }
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
@@ -903,7 +908,8 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
   for (const record of devices) {
     const normalized = normalizeDeviceRecord(record);
     const ageMs = now - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
-    const stale = Number.isFinite(ageMs) && staleAfterMs > 0 ? ageMs > staleAfterMs : false;
+    const deviceStaleAfterMs = staleAfterMsForSyncUpload(normalized.syncUploadIntervalMs, staleAfterMs);
+    const stale = Number.isFinite(ageMs) && deviceStaleAfterMs > 0 ? ageMs > deviceStaleAfterMs : false;
     aggregate.devices.push({
       deviceId: normalized.deviceId,
       hostname: normalized.hostname,
@@ -920,6 +926,8 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       ...(hasOwn(normalized, 'projectsEnabled') ? { projectsEnabled: normalized.projectsEnabled } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsIncomplete') ? { allTimeProjectsIncomplete: normalized.allTimeProjectsIncomplete } : {}),
+      ...(hasOwn(normalized, 'syncUploadIntervalMs') ? { syncUploadIntervalMs: normalized.syncUploadIntervalMs } : {}),
+      ...(hasOwn(normalized, 'periodWindows') ? { periodWindows: normalized.periodWindows } : {}),
       periods: normalized.periods,
       limits: normalized.limits
     });

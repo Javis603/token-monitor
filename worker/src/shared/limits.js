@@ -3,6 +3,8 @@
 
 'use strict';
 
+const { staleAfterMsForSyncUpload } = require('./syncUploadInterval');
+
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
 const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama']);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
@@ -319,7 +321,10 @@ function isProviderStale(provider, summary, device, staleAfterMs, nowMs) {
   if (device?.stale) return true;
   const updatedAt = timestampMs(provider.updatedAt || summary.updatedAt);
   if (!updatedAt) return false;
-  const threshold = Math.max(normalizeRefreshMs(summary.refreshMs) * 2, Number(staleAfterMs || 0));
+  const threshold = Math.max(
+    normalizeRefreshMs(summary.refreshMs) * 2,
+    staleAfterMsForSyncUpload(device?.syncUploadIntervalMs, staleAfterMs)
+  );
   return threshold > 0 ? nowMs - updatedAt > threshold : false;
 }
 

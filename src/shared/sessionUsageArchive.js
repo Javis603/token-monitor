@@ -255,12 +255,17 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   const normalizedArchive = normalizeSessionUsageArchive(archive);
   const now = toDate(options.now);
   const next = clone(summary);
+  const targetPeriods = new Map();
+  const targetFor = (periodName) => {
+    if (!targetPeriods.has(periodName)) targetPeriods.set(periodName, targetPeriod(next, periodName));
+    return targetPeriods.get(periodName);
+  };
 
   for (const entry of Object.values(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
       if (!session || !hasSessionUsage(session) || !shouldApplyPeriod(periodName, entry, now)) continue;
-      addArchivedSession(targetPeriod(next, periodName), session);
+      addArchivedSession(targetFor(periodName), session);
     }
   }
 

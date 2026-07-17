@@ -10,6 +10,16 @@ test('syncPayload preserves nullish inputs', () => {
   assert.equal(syncPayload(undefined), undefined);
 });
 
+test('syncPayload preserves the upload interval used by hub staleness checks', () => {
+  const payload = syncPayload({
+    deviceId: 'dev-a',
+    syncUploadIntervalMs: 20 * 60 * 1000,
+    limits: { providers: [] }
+  });
+
+  assert.equal(payload.syncUploadIntervalMs, 20 * 60 * 1000);
+});
+
 test('syncPayload bounds uploads by omitting all-time sessions', () => {
   const summary = {
     deviceId: 'dev-a',

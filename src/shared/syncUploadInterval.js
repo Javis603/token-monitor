@@ -1,0 +1,35 @@
+'use strict';
+
+const SYNC_UPLOAD_INTERVAL_OPTIONS = Object.freeze([
+  0,
+  10 * 60 * 1000,
+  20 * 60 * 1000,
+  30 * 60 * 1000
+]);
+const DEFAULT_SYNC_UPLOAD_INTERVAL_MS = 0;
+
+function normalizeSyncUploadIntervalMs(value, fallback = DEFAULT_SYNC_UPLOAD_INTERVAL_MS) {
+  const numeric = Number(value);
+  if (SYNC_UPLOAD_INTERVAL_OPTIONS.includes(numeric)) return numeric;
+  const fallbackNumeric = Number(fallback);
+  return SYNC_UPLOAD_INTERVAL_OPTIONS.includes(fallbackNumeric)
+    ? fallbackNumeric
+    : DEFAULT_SYNC_UPLOAD_INTERVAL_MS;
+}
+
+function staleAfterMsForSyncUpload(value, staleAfterMs = 0) {
+  const numericStaleAfterMs = Number(staleAfterMs);
+  const baseStaleAfterMs = Number.isFinite(numericStaleAfterMs) && numericStaleAfterMs > 0
+    ? numericStaleAfterMs
+    : 0;
+  if (baseStaleAfterMs <= 0) return 0;
+  const intervalMs = normalizeSyncUploadIntervalMs(value);
+  return intervalMs > 0 ? Math.max(baseStaleAfterMs, intervalMs * 2) : baseStaleAfterMs;
+}
+
+module.exports = {
+  DEFAULT_SYNC_UPLOAD_INTERVAL_MS,
+  SYNC_UPLOAD_INTERVAL_OPTIONS,
+  normalizeSyncUploadIntervalMs,
+  staleAfterMsForSyncUpload
+};

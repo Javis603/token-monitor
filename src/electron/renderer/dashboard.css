@@ -73,10 +73,11 @@ body.flat { background: rgb(var(--glass-rgb)); }
 .grid-line { stroke: rgba(var(--line-rgb), 0.07); stroke-width: 1; }
 .axis-label, .heat-month { fill: rgba(var(--line-rgb), 0.5); font-size: 10px; }
 .bar-seg { transition: opacity 0.1s ease; }
+.bar-stack { transform-box: fill-box; transform-origin: center bottom; }
 .bar-hover { fill: transparent; pointer-events: all; cursor: default; }
 .bar-hover:hover { fill: rgba(var(--overlay-rgb), 0.08); }
 .candle-wick { stroke-width: 1.5; }
-.candle-body { stroke: none; }
+.candle-body { stroke: none; transform-box: fill-box; transform-origin: center center; }
 .candle-up { stroke: #4ec77f; fill: #4ec77f; }
 .candle-down { stroke: #f06a7b; fill: #f06a7b; }
 
@@ -90,6 +91,7 @@ body.flat { background: rgb(var(--glass-rgb)); }
 .dash-legend-pct { font-variant-numeric: tabular-nums; opacity: 0.55; min-width: 50px; text-align: right; }
 
 .dash-heatmap-wrap { flex: none; overflow-x: auto; }
+.dash-heatmap-wrap.is-motion-pending .heat-base-layer .heat { opacity: 0; }
 .heat { stroke: none; stroke-width: 0; }
 .heat.lvl-0 { fill: rgba(var(--overlay-rgb), 0.03); }
 .heat.lvl-1 { fill: rgba(90, 170, 255, 0.18); }
@@ -109,7 +111,7 @@ body.flat { background: rgb(var(--glass-rgb)); }
 .dash-bd-row { display: flex; align-items: center; gap: 12px; font-size: 12px; padding: 2px 0; }
 .dash-bd-name { flex: none; width: 110px; display: flex; align-items: center; gap: 8px; opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dash-bd-bar-bg { flex: 1; height: 4px; background: rgba(var(--overlay-rgb), 0.06); border-radius: 2px; overflow: hidden; }
-.dash-bd-bar-fill { height: 100%; border-radius: 2px; }
+.dash-bd-bar-fill { width: 100%; height: 100%; border-radius: 2px; transform: scaleX(var(--bar-scale, 0)); transform-origin: left center; }
 .dash-bd-val { flex: none; font-variant-numeric: tabular-nums; opacity: 0.8; text-align: right; }
 .dash-bd-pct { flex: none; width: 42px; font-variant-numeric: tabular-nums; opacity: 0.55; text-align: right; }
 
@@ -125,3 +127,8 @@ body.flat { background: rgb(var(--glass-rgb)); }
    still work when there's no history. */
 .dash-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 13px; pointer-events: none; }
 .dash-empty.hidden { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .range-btn,
+  :root:not([data-reduce-motion="off"]) .bar-seg { transition: none; }
+}

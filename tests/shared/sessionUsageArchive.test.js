@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 
 let archiveApi = {};
@@ -392,4 +393,35 @@ test('allocates tied model remainders independently of map property order', () =
   assert.deepEqual(forward.modelCacheReads, reverse.modelCacheReads);
   assert.deepEqual(forward.modelCacheWrites, reverse.modelCacheWrites);
   assert.deepEqual(forward.modelOutputs, reverse.modelOutputs);
+});
+
+test('reapplies a large session archive without repeatedly normalizing growing periods', () => {
+  const archive = { version: 1, sessions: {} };
+  for (let index = 0; index < 2000; index += 1) {
+    const sessionId = `session-${index}`;
+    archive.sessions[`codex:${sessionId}`] = {
+      client: 'codex',
+      sessionId,
+      capturedAt: '2026-07-15T00:00:00.000Z',
+      periods: {
+        allTime: {
+          client: 'codex',
+          sessionId,
+          totalTokens: index + 1,
+          cacheReadTokens: index,
+          outputTokens: 2,
+          models: { 'gpt-5': index + 1 }
+        }
+      }
+    };
+  }
+
+  const startedAt = performance.now();
+  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive, {
+    now: new Date('2026-07-15T00:00:00.000Z')
+  });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(Object.keys(visible.allTime.sessions).length, 2000);
+  assert.ok(elapsedMs < 250, `large archive apply took ${elapsedMs.toFixed(1)}ms`);
 });

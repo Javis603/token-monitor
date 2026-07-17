@@ -216,16 +216,16 @@ npm run pack       # 未封裝的 app 目錄（無安裝檔），方便本機快
 TOKEN_MONITOR_HUB_URL=               # 同步模式必填——Worker URL 或 http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # 共用 secret，必須與 hub 一致
 TOKEN_MONITOR_DEVICE_ID=             # 選填——預設為主機名稱
+TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # 選填——0／即時、600000／10 分鐘、1200000／20 分鐘、1800000／30 分鐘
 TOKEN_MONITOR_CLIENTS=               # 選填——預設為所有支援的工具；設為空表示不追蹤
 TOKEN_MONITOR_PROJECTS_ENABLED=      # 選填——預設關閉；設為 1 可收集專案中繼資料
 TOKEN_MONITOR_HISTORY_ENABLED=       # 選填——預設啟用；設為 0 可跳過收集趨勢歷史
+TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # 選填——預設啟用；設為 0 可停止保留封存的會話用量
 TOKEN_MONITOR_LIMITS_ENABLED=        # 選填——預設啟用；設為 0 可跳過 CLI 探測
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # 選填——預設為所有支援的供應商（claude、codex、cursor、antigravity、opencode、deepseek、minimax、mimo、grok、copilot、kiro、zai、zaiteam、volcengine、qoder、kimi、ollama）
 ```
 
-小工具會把同樣的環境變數讀作首次啟動的預設值，之後改由 GUI 設定接手。
-
-每個值也都可以用 CLI 旗標傳入（`--hub=`、`--secret=`、`--device=`、`--clients=`、`--history=`、`--limits=`、`--limitProviders=`）——旗標優先於環境變數。較少用的調整項（`TOKEN_MONITOR_INTERVAL_MS`、`TOKEN_MONITOR_PORT`、`TOKEN_MONITOR_STALE_AFTER_MS`、`TOKEN_MONITOR_HISTORY_INTERVAL_MS`、`TOKEN_MONITOR_LIMITS_REFRESH_MS`、…）一樣可透過環境變數／旗標設定，但為了減少雜訊，不放進 `.env.example`。
+完整清單請見 `.env.example`。小工具會把環境變數讀作首次啟動的預設值；代理與 hub 則以 CLI 旗標優先。
 
 一次性執行範例：
 

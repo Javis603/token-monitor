@@ -340,36 +340,31 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .icon-button:hover, .refresh-button:hover, .mode-button:hover, .settings-actions button:hover, .shortcut-recorder button:hover { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), 0.072); }
 .icon-button.active { border-color: rgba(var(--accent-rgb), 0.58); color: var(--green); background: rgba(var(--accent-rgb), 0.08); }
+/* The settings panel is a plain view on the widget glass (like the main
+   breakdown), not a recessed slab: the section cards carry all the surface
+   chrome themselves — a panel background would double-frame them. */
 .settings-panel {
   position: relative;
   z-index: 1;
   display: grid;
-  gap: 14px;
+  gap: 0;
   min-width: 0;
   max-height: calc(100vh - 72px);
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(var(--panel-rgb), 0.72);
-  -webkit-backdrop-filter: blur(22px);
-  backdrop-filter: blur(22px);
+  padding: 2px 0 4px;
   opacity: 1;
   overflow: hidden auto;
   scrollbar-width: none;
   transform: translateY(0);
-  transition: max-height 140ms ease, opacity 120ms ease, padding 140ms ease, border-color 140ms ease, transform 140ms ease;
+  transition: max-height 140ms ease, opacity 120ms ease, padding 140ms ease, transform 140ms ease;
 }
 .settings-panel::-webkit-scrollbar { width: 0; height: 0; }
 .settings-panel.hidden {
   max-height: 0;
   padding-top: 0;
   padding-bottom: 0;
-  border-color: transparent;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 .settings-panel label, .settings-field { display: grid; min-width: 0; gap: 4px; color: var(--muted); font-size: 11px; }
 .settings-field-label { min-width: 0; }
@@ -378,10 +373,57 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-height: 30px;
+  color: var(--text);
 }
-.settings-panel .checkbox-label input {
-  width: auto;
-  accent-color: var(--green);
+.settings-panel .checkbox-label > input[type="checkbox"] { order: 2; }
+/* iOS-style switch, drawn on the native checkbox so keyboard/a11y stay intact.
+   Scoped to .checkbox-label rows: compact list checkboxes (.client-checkbox,
+   .tool-preference-toggle) keep their native accent-color look. */
+.settings-panel .checkbox-label > input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  border: 1px solid rgba(var(--line-rgb), 0.16);
+  border-radius: 999px;
+  background: rgba(var(--sunken-rgb), 0.55);
+  cursor: pointer;
+  transition: background 180ms ease, border-color 180ms ease;
+}
+.settings-panel .checkbox-label > input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms ease;
+}
+.settings-panel .checkbox-label > input[type="checkbox"]:checked {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.88);
+}
+.settings-panel .checkbox-label > input[type="checkbox"]:checked::before {
+  transform: translateX(14px);
+  background: rgb(var(--panel-rgb));
+}
+.settings-panel .checkbox-label > input[type="checkbox"]:focus-visible {
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 2px;
+}
+/* Disabled switch (e.g. Tray-only mode while the tray icon is off): dim it and
+   drop the pointer so it doesn't read as an available control. */
+.settings-panel .checkbox-label > input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .settings-group { display: grid; min-width: 0; gap: 8px; }
 .settings-group.hidden, .settings-subgroup.hidden, .settings-actions button.hidden { display: none; }
@@ -389,7 +431,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   grid-template-columns: minmax(0, 1fr);
 }
 .session-archive-settings { display: grid; gap: 6px; }
-.session-archive-settings .session-archive-toggle { justify-content: flex-start; gap: 8px; color: var(--text); }
+.session-archive-settings .session-archive-toggle { color: var(--text); }
 .session-archive-footer {
   display: flex;
   align-items: center;
@@ -420,7 +462,6 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .session-archive-clear:disabled { opacity: 0.38; cursor: default; }
 .settings-wsl-block { display: grid; gap: 6px; min-width: 0; }
 .settings-wsl-block.hidden { display: none; }
-.settings-wsl-block .wsl-scan-toggle { justify-content: flex-start; gap: 8px; }
 .wsl-panel { display: grid; gap: 4px; margin-top: 4px; }
 .settings-export-block { display: grid; gap: 8px; min-width: 0; }
 /* Give the section description room under the header so the two small-text lines don't merge. */
@@ -429,7 +470,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
    standard subgroup top-rule to it — closes the Data export section off from 自訂模型單價. */
 .settings-export-block + .settings-group { padding-top: 9px; border-top: 1px solid rgba(var(--line-rgb), 0.075); }
 .export-auto-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-.export-auto-head .export-auto-toggle { justify-content: flex-start; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.export-auto-head .export-auto-toggle { flex: 1 1 auto; min-width: 0; }
 .export-status-pill { flex: 0 0 auto; }
 .export-status-pill.hidden { display: none; }
 .export-status-pill.is-active { color: var(--green); border-color: rgba(var(--accent-rgb), 0.5); background: rgba(var(--accent-rgb), 0.08); }
@@ -446,15 +487,113 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .wsl-panel-title { font-size: 11px; color: var(--muted); }
 .wsl-panel-name { font-size: 11px; }
 .wsl-panel-row { padding-left: 10px; }
+/* Modern settings row: text (title + optional desc) left, control right. */
+.settings-panel label.settings-item,
+.settings-panel .settings-item {
+  display: flex;
+  flex-wrap: wrap; /* row line 1 = title + control; a description wraps to a full-width line 2 */
+  align-items: center;
+  gap: 3px 12px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 0;
+  color: var(--text);
+  font-size: 11px;
+}
+.settings-item + .settings-item {
+  border-top: 1px solid rgba(var(--line-rgb), 0.06);
+}
+.settings-panel .settings-item.hidden { display: none; }
+.settings-item-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.settings-item-title { color: var(--text); }
+.settings-item-desc,
+p.settings-note.settings-item-desc,
+span.settings-note.settings-item-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+.settings-item > .settings-item-desc {
+  flex-basis: 100%;
+  min-width: 0;
+  padding-bottom: 2px;
+  order: 3; /* after the checkbox-label input (order: 2) so the control stays on the title line */
+}
+.settings-item > .settings-item-desc:empty { display: none; }
+.settings-item-value {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.settings-item-value strong { color: var(--text); font-weight: 600; }
+/* .settings-panel prefix outweighs the panel-wide `select { width: 100% }` default */
+.settings-panel .settings-item > select {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 58%;
+}
+/* Inline text options (Codex-style): plain labels, the active one gets a soft pill. */
+.inline-options { display: inline-flex; align-items: center; gap: 2px; }
+.settings-panel .inline-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.settings-panel .inline-option:hover { color: var(--text); }
+.settings-panel .inline-option input[type="radio"] {
+  position: absolute;
+  width: 0;
+  height: 0;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.settings-panel .inline-option:has(input:checked) { background: rgba(var(--overlay-rgb), 0.12); color: var(--text); }
+.settings-panel .inline-option:has(input:focus-visible) { outline: 1px solid rgba(var(--accent-rgb), 0.72); }
 .settings-group-header { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 11px; }
-.settings-group-header span:last-child:not(:first-child) { font-size: 9px; opacity: 0.72; }
+.settings-group-header:not(.cursor-settings-toggle) {
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+.settings-group-header span:last-child:not(:first-child) { font-size: 9px; opacity: 0.72; letter-spacing: normal; text-transform: none; }
+/* The sections form ONE continuous inset-grouped card (iOS Settings root
+   list): segments share side borders, hairlines separate them, only the
+   first/last segment round their outer corners. */
 .settings-collapsible-group {
   gap: 0;
-  padding-bottom: 2px;
-  border-bottom: 1px solid rgba(var(--line-rgb), 0.09);
+  min-width: 0;
+  border: 1px solid rgba(var(--line-rgb), 0.10);
+  border-radius: 0;
+  background: rgba(var(--panel-rgb), 0.35);
+  /* clip, not hidden: the settings panel is a max-height-constrained grid, and
+     overflow:hidden would zero this item's automatic minimum size, letting the
+     grid squash every card. clip rounds the corners without becoming a scroll
+     container, so intrinsic sizing (and the panel's own scrolling) survive. */
+  overflow: clip;
+  transition: background 140ms ease;
 }
-.settings-collapsible-group:last-child {
-  border-bottom: 0;
+.settings-collapsible-group + .settings-collapsible-group {
+  border-top: 0;
+  box-shadow: inset 0 1px 0 rgba(var(--line-rgb), 0.07);
+}
+.settings-collapsible-group:first-child { border-radius: 12px 12px 0 0; }
+.settings-collapsible-group:last-child { border-radius: 0 0 12px 12px; }
+.settings-collapsible-group.expanded {
+  background: rgba(var(--panel-rgb), 0.55);
 }
 .settings-section-toggle {
   display: grid;
@@ -463,15 +602,18 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 10px;
   width: 100%;
   min-width: 0;
-  min-height: 34px;
-  padding: 5px 4px;
+  min-height: 40px;
+  padding: 9px 11px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+.settings-collapsible-group.expanded > .settings-section-toggle {
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.08);
 }
 .settings-section-toggle:hover,
 .settings-section-toggle:focus-visible {
@@ -593,9 +735,16 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-section-details-inner {
   display: grid;
   min-width: 0;
-  gap: 10px;
-  padding-left: 4px;
+  gap: 0;
+  padding: 2px 11px 0;
 }
+.settings-section-details-inner > * + * {
+  margin-top: 10px;
+}
+/* Consecutive list rows glue into one hairline-separated list (iOS grouped list). */
+.settings-panel .settings-item + .settings-item { margin-top: 0; }
+/* A tiny uppercase group header hugs the rows it introduces. */
+.settings-subgroup > .settings-group-header:not(.cursor-settings-toggle) + * { margin-top: 4px; }
 .settings-section-details-inner > :first-child {
   padding-top: 2px;
 }
@@ -615,8 +764,11 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .presence-feature { display: grid; min-width: 0; gap: 8px; }
 .presence-feature + .presence-feature {
-  padding-top: 10px;
-  border-top: 1px solid rgba(var(--line-rgb), 0.09);
+  margin-top: 0; /* features read as consecutive rows of one list */
+  border-top: 1px solid rgba(var(--line-rgb), 0.06);
+}
+.presence-feature > * + * {
+  margin-top: 2px;
 }
 .presence-feature-body {
   min-width: 0;
@@ -626,7 +778,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .presence-feature-body > .accordion-animation-inner {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: 0;
+}
+.presence-feature-body > .accordion-animation-inner > * + * {
+  margin-top: 4px;
 }
 .settings-collapsible-group.expanded > .settings-section-toggle .settings-section-disclosure {
   transform: rotate(180deg);
@@ -635,13 +790,18 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   position: relative;
   flex: 0 0 auto;
   display: inline-block;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   background-color: currentColor;
-  color: var(--green);
-  opacity: 0.9;
+  color: var(--muted);
+  opacity: 0.85;
+  transition: color 140ms ease, opacity 140ms ease;
   -webkit-mask: var(--settings-section-icon-url) center / contain no-repeat;
   mask: var(--settings-section-icon-url) center / contain no-repeat;
+}
+.settings-collapsible-group.expanded .settings-section-icon {
+  color: var(--green);
+  opacity: 1;
 }
 .settings-section-icon-general { --settings-section-icon-url: url("icons/settings/general.svg"); }
 .settings-section-icon-main { --settings-section-icon-url: url("icons/settings/main.svg"); }
@@ -694,6 +854,15 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A status pill can sit inline right after a row title (e.g. the auto-export
+   "running" pill) instead of stacking onto its own line below. */
+.settings-item-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.settings-item-heading > .cursor-status-pill { flex: 0 1 auto; }
 .cursor-disclosure-icon {
   flex: 0 0 auto;
   display: inline-grid;
@@ -842,6 +1011,49 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #codexLoginStatus.hidden { display: none; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
+.app-update-notes {
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.075);
+  color: var(--muted);
+  font-size: 10px;
+}
+.app-update-notes.hidden { display: none; }
+.app-update-notes summary {
+  width: max-content;
+  max-width: 100%;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  user-select: none;
+}
+.app-update-notes summary::marker { color: var(--muted); }
+.app-update-notes summary:focus-visible {
+  border-radius: 3px;
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 3px;
+}
+.app-update-notes-body {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+.app-update-note-title {
+  color: var(--text);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.app-update-note-group ul {
+  margin: 3px 0 0;
+  padding-left: 17px;
+  line-height: 1.45;
+}
+.app-update-note-group li + li { margin-top: 3px; }
+.app-update-notes .inline-link { margin-top: 7px; font-size: 10px; }
+.app-update-notes .inline-link.hidden { display: none; }
 .inline-link {
   padding: 0;
   border: 0;
@@ -851,6 +1063,13 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   font-size: inherit;
 }
 .inline-link:hover { color: var(--text); }
+.about-settings-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+.about-settings-links .inline-link { font-size: 10px; }
 .hub-mode-options {
   display: grid;
   min-width: 0;
@@ -863,11 +1082,12 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 8px;
   min-width: 0;
   width: 100%;
-  padding: 7px 8px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  padding: 8px 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.10);
+  border-radius: 10px;
   background: rgba(var(--overlay-rgb), var(--control-alpha));
   cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
 }
 .settings-panel .hub-mode-option:hover { border-color: var(--line-strong); }
 .settings-panel .hub-mode-option input[type="radio"] {
@@ -877,8 +1097,8 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   accent-color: var(--green);
 }
 .settings-panel .hub-mode-option:has(input:checked) {
-  border-color: rgba(115, 189, 245, 0.62);
-  background: rgba(115, 189, 245, 0.07);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.07);
 }
 .hub-mode-text { display: grid; gap: 1px; min-width: 0; }
 .hub-mode-text strong { color: var(--text); font-size: 11px; font-weight: 500; }
@@ -891,10 +1111,14 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 #secretPasteButton { font-size: 17px; }
 .shortcut-recorder {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   min-width: 0;
 }
+/* As a settings-item row the recorder hugs the right edge; the value pill hugs its text.
+   The value is itself the record button: click it, then press the shortcut. */
+.settings-shortcut-item > .shortcut-recorder { flex: 0 1 auto; }
+.settings-shortcut-item .shortcut-value { min-width: 44px; justify-content: center; }
 .shortcut-value {
   display: flex;
   align-items: center;
@@ -970,39 +1194,11 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
-.currency-rate-row { display: grid; gap: 8px; min-width: 0; }
+.currency-rate-row { display: grid; gap: 4px; min-width: 0; }
 .currency-rate-row.hidden, .currency-rate-manual-field.hidden { display: none; }
-.currency-rate-mode {
-  display: inline-flex;
-  width: max-content;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(var(--sunken-rgb), 0.48);
-}
-.settings-panel .rate-mode-option {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 16px;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.settings-panel .rate-mode-option:hover { color: var(--text); }
-.settings-panel .rate-mode-option input[type="radio"] {
-  position: absolute;
-  width: 0;
-  height: 0;
-  margin: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-.settings-panel .rate-mode-option:has(input:checked) { background: rgba(var(--blue-rgb), 0.16); color: var(--text); }
-.currency-rate-manual-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */
+.settings-subgroup > .settings-item + .currency-rate-row { margin-top: 0; }
+.currency-rate-manual-field { display: flex; align-items: center; gap: 8px; min-width: 0; padding-bottom: 2px; }
 .currency-rate-prefix { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
 .settings-panel .currency-rate-manual-field input { flex: 1 1 0; width: 0; min-width: 0; font-size: 11px; }
 .settings-note.currency-rate-status { font-variant-numeric: tabular-nums; }
@@ -1030,11 +1226,11 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .tokscale-lines small { color: var(--muted); font-size: 9px; }
 .tokscale-message {
-  min-height: 12px;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.35;
 }
+.tokscale-message:empty { display: none; } /* don't reserve a blank line while there's no status */
 .tokscale-message.error { color: var(--red); }
 .tokscale-message.success { color: var(--green); }
 .settings-panel .client-checkboxes {
@@ -1083,6 +1279,20 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+/* When the note-row's left cell is an accordion toggle (Vendor Colors), the
+   toggle owns the whole row so its disclosure caret lands at the true right
+   edge; the group-level reset then tucks in just left of the caret instead of
+   pushing it inward and reading as a detached, floating button. */
+.settings-note-row:has(> .cursor-settings-toggle) {
+  display: block;
+  position: relative;
+}
+.settings-note-row:has(> .cursor-settings-toggle) > .tool-header-actions {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
 }
 .tool-header-actions {
   display: flex;
@@ -1450,6 +1660,17 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .reset-appearance-button:hover { border-color: var(--line-strong); color: var(--text); }
 .slider-label { display: flex; align-items: center; justify-content: space-between; }
 .reset-inline { width: 18px; height: 18px; font-size: 10px; line-height: 1; }
+/* Slider rows: title (+ reset) left, track with value fill right, numeric readout at the edge */
+.settings-slider-item .slider-label { justify-content: flex-start; gap: 6px; }
+.settings-panel .settings-slider-item input[type="range"] { flex: 0 0 42%; width: 42%; }
+.slider-value {
+  flex: 0 0 auto;
+  min-width: 24px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Appearance: interface theme presets + colour pickers */
 .theme-preset-chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1518,16 +1739,50 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   color: var(--text);
   outline: none;
 }
-.settings-panel select { appearance: none; cursor: pointer; }
+.settings-panel select {
+  appearance: none;
+  cursor: pointer;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: rgba(var(--overlay-rgb), 0.05);
+}
+.settings-panel select:hover { border-color: var(--line-strong); }
+/* Chromium delegates an open <select> popup to a platform-specific surface.
+   Windows can give that popup a light system background while retaining our
+   light text, so make only the popup options opaque. The closed control keeps
+   the same light glass treatment as macOS instead of reverting to a heavy
+   native field. */
+html.is-windows .settings-panel select option {
+  background-color: rgb(var(--panel-rgb));
+  color: var(--text);
+}
 .settings-panel input[type="range"] {
-  height: 22px;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 20px;
   padding: 0;
-  accent-color: var(--green);
+  border: 0;
   background: transparent;
+}
+.settings-panel input[type="range"]::-webkit-slider-runnable-track {
+  /* One thin line with a single continuous faint→full accent gradient across the
+     whole track (macOS-style); the thumb rides on it as the position indicator. */
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(to right, rgba(var(--accent-rgb), 0.22), rgb(var(--accent-rgb)));
+}
+.settings-panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -5.5px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 .settings-panel input:focus { border-color: rgba(115, 189, 245, 0.72); }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.settings-actions button { min-height: 30px; padding: 0 10px; font-size: 11px; white-space: nowrap; }
+.settings-actions button { min-height: 30px; padding: 0 10px; border-radius: 8px; font-size: 11px; white-space: nowrap; }
 .refresh-button {
   display: inline-flex;
   align-items: center;
@@ -1588,12 +1843,13 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.1), 0 0 12px rgba(255, 99, 99, 0.14);
 }
 @media (prefers-reduced-motion: reduce) {
-  .refresh-button,
-  .refresh-button-icon {
+  :root:not([data-reduce-motion="off"]) .refresh-button,
+  :root:not([data-reduce-motion="off"]) .refresh-button-icon {
     transition-duration: 0.01ms;
   }
 }
 .tabs {
+  --period-index: 0;
   position: relative;
   z-index: 1;
   display: grid;
@@ -1608,7 +1864,24 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
 }
+.tab-indicator {
+  position: absolute;
+  z-index: 0;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 10px) / 3);
+  border: 1px solid rgba(var(--line-rgb), 0.13);
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), 0.06);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.075);
+  pointer-events: none;
+  transform: translate3d(calc(var(--period-index) * (100% + 2px)), 0, 0);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
 .tab {
+  position: relative;
+  z-index: 1;
   height: 22px;
   border-color: transparent;
   border-radius: 6px;
@@ -1619,10 +1892,10 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .tab:hover { color: var(--text); }
 .tab.active {
-  border-color: rgba(var(--line-rgb), 0.13);
+  border-color: transparent;
   color: var(--green);
-  background: rgba(var(--overlay-rgb), 0.06);
-  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.075);
+  background: transparent;
+  box-shadow: none;
 }
 .total-panel {
   position: relative;
@@ -1796,7 +2069,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 6px;
 }
 .home-module-limits .home-module-body {
-  gap: 10px;
+  gap: 12px;
 }
 .home-list-row {
   display: grid;
@@ -1904,7 +2177,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .home-limit-account {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 8px;
 }
 .home-limit-account-head {
   display: grid;
@@ -1916,7 +2189,7 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .home-limit-windows {
   display: grid;
   min-width: 0;
-  margin-left: 18px;
+  margin-left: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
@@ -1927,18 +2200,37 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .home-limit-window {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 4px;
 }
 .home-limit-window-line {
   display: flex;
   min-width: 0;
   align-items: baseline;
   justify-content: space-between;
-  gap: 5px;
+  gap: 4px;
 }
 .home-limit-window .home-list-value {
   font-size: 10px;
   line-height: 1.1;
+}
+.home-limit-value-low {
+  color: var(--home-limit-accent, var(--yellow));
+}
+.home-limit-value-critical {
+  position: relative;
+  padding-left: 8px;
+  color: var(--red);
+}
+.home-limit-value-critical::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+  transform: translateY(-50%);
 }
 .home-limit-window-label {
   overflow: hidden;
@@ -2365,7 +2657,15 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
 .row-value { color: var(--text); white-space: nowrap; }
 .row-cost { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .bar { width: 100%; height: 6px; overflow: hidden; border-radius: 3px; background: rgba(var(--sunken-rgb), 0.46); box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.04); }
-.bar-fill { height: 100%; width: 0; border-radius: 3px; background: var(--blue); transition: width 450ms ease; }
+.bar-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--blue);
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
 .row.stale .row-name, .row.stale .row-value, .row.stale .row-cost { color: var(--muted); }
 .home-device-badge,
 .row.local .row-name::after {
@@ -2753,10 +3053,10 @@ html.is-windows .limit-live-badge {
   color: var(--red);
 }
 @media (prefers-reduced-motion: reduce) {
-  .limit-account-switch-zone .limit-name-title,
-  .limit-account-active-zone .limit-name-title,
-  .limit-account-active-popover,
-  .limit-account-switch-popover {
+  :root:not([data-reduce-motion="off"]) .limit-account-switch-zone .limit-name-title,
+  :root:not([data-reduce-motion="off"]) .limit-account-active-zone .limit-name-title,
+  :root:not([data-reduce-motion="off"]) .limit-account-active-popover,
+  :root:not([data-reduce-motion="off"]) .limit-account-switch-popover {
     transition: none;
   }
 }
@@ -2788,11 +3088,21 @@ html.is-windows .limit-live-badge {
   background: rgba(var(--sunken-rgb), 0.44);
 }
 .limit-meter-fill {
-  width: 0;
+  width: 100%;
   height: 100%;
   border-radius: 3px;
-  transition: width 420ms ease;
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .bar-fill,
+  :root:not([data-reduce-motion="off"]) .limit-meter-fill,
+  :root:not([data-reduce-motion="off"]) .tab-indicator {
+    transition: none;
+  }
+}
+
 .limit-reset {
   min-height: 11px;
   overflow: hidden;
@@ -2957,7 +3267,7 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
-  .limit-reset-credits-tooltip {
+  :root:not([data-reduce-motion="off"]) .limit-reset-credits-tooltip {
     transition: none;
   }
 }
@@ -3141,7 +3451,7 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
-  .view-switcher-menu {
+  :root:not([data-reduce-motion="off"]) .view-switcher-menu {
     filter: none;
     transition-duration: 0.01ms;
   }
@@ -3204,6 +3514,96 @@ html.is-windows .limit-live-badge {
   cursor: pointer;
 }
 .update-pill-dismiss:hover { opacity: 1; }
+.update-pill-dismiss.hidden { display: none; }
+.app-update-popover {
+  inset: auto;
+  margin: 0;
+  max-height: min(360px, calc(100vh - 64px));
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
+    rgba(var(--glass-rgb), 0.76);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
+  -webkit-backdrop-filter: blur(28px) saturate(115%);
+  backdrop-filter: blur(28px) saturate(115%);
+  color: var(--muted);
+  font-size: 10px;
+  opacity: 0;
+  transform: translateY(5px) scale(0.985);
+  transition: opacity 140ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1), overlay 140ms allow-discrete, display 140ms allow-discrete;
+}
+.app-update-popover:popover-open { opacity: 1; transform: none; }
+@starting-style {
+  .app-update-popover:popover-open { opacity: 0; transform: translateY(5px) scale(0.985); }
+}
+.app-update-popover::backdrop { background: transparent; }
+.app-update-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.app-update-popover-header strong { color: var(--text); font-size: 11px; line-height: 1.35; }
+.app-update-popover-close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.app-update-popover-close:hover { background: rgba(var(--overlay-rgb), 0.07); color: var(--text); }
+.app-update-popover button:focus-visible {
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 2px;
+}
+.app-update-popover .app-update-notes-body { max-height: 230px; overflow: auto; }
+.app-update-popover-actions { display: flex; align-items: center; gap: 10px; margin-top: 11px; }
+.app-update-popover-primary {
+  min-height: 27px;
+  padding: 0 10px;
+  border: 1px solid rgba(115, 189, 245, 0.46);
+  border-radius: 6px;
+  background: rgba(115, 189, 245, 0.14);
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+}
+.app-update-popover-primary:hover { background: rgba(115, 189, 245, 0.22); }
+.app-update-popover-primary:disabled { cursor: default; opacity: 0.5; }
+.app-update-popover .inline-link { font-size: 10px; }
+.app-update-popover .inline-link.hidden { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .app-update-popover { transition-duration: 0.01ms; }
+
+  :root:not([data-reduce-motion="off"]) *,
+  :root:not([data-reduce-motion="off"]) *::before,
+  :root:not([data-reduce-motion="off"]) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+:root[data-reduce-motion="on"] *,
+:root[data-reduce-motion="on"] *::before,
+:root[data-reduce-motion="on"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-delay: 0s !important;
+  transition-duration: 0.01ms !important;
+}
 
 /* Progressive collapse as the window gets shorter. Width is intentionally not a */
 /* trigger — a narrow but tall window is a valid sidebar layout. Sections drop */
@@ -3443,6 +3843,9 @@ html.is-windows .limit-live-badge {
   border-left: 1px solid rgba(var(--line-rgb), 0.14);
 }
 .home-limit-provider-header { margin-bottom: 1px; }
+.home-limit-status-setting {
+  min-height: 24px;
+}
 .home-limit-provider-row {
   grid-template-columns: minmax(0, 1fr) repeat(2, 22px);
 }
@@ -3481,7 +3884,12 @@ html.is-windows .limit-live-badge {
 .trends-spark { flex: 1 1 auto; min-height: 0; display: flex; cursor: pointer; border-radius: 8px; padding: 6px 4px; transition: background 0.12s ease; }
 .trends-spark:hover { background: rgba(var(--overlay-rgb), 0.05); }
 .trends-spark .sparkline { width: 100%; height: 100%; display: block; }
-.trends-spark .spark-bar { fill: #6ab4f0; opacity: 0.5; }
+.trends-spark .spark-bar {
+  fill: #6ab4f0;
+  opacity: 0.5;
+  transform-box: fill-box;
+  transform-origin: bottom center;
+}
 .trends-spark .spark-bar--last { opacity: 1; }
 .trends-axis { flex: none; display: flex; justify-content: space-between; padding: 0 4px; font-size: 10px; opacity: 0.45; font-variant-numeric: tabular-nums; }
 .trends-stats { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

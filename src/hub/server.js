@@ -40,6 +40,7 @@ function createHub({
 
   function getStats() {
     const stats = aggregateDevices(Object.values(store.devices), staleAfterMs);
+    stats.staleAfterMs = staleAfterMs;
     const history = aggregateHistory(Object.values(store.devices));
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
