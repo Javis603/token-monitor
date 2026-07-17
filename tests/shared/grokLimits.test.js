@@ -444,11 +444,13 @@ test('fetchGrokLimits returns notConfigured when no credential is available', as
   assert.deepEqual(r.windows, []);
 });
 
-test('fetchGrokLimits keeps legacy cli-chat-proxy JSON billing as final fallback', async () => {
+test('fetchGrokLimits accepts legacy JSON only when it is a weekly unified window', async () => {
+  // ~7 day period → Weekly; still a valid final fallback when web gRPC is down.
   const body = {
     config: {
       monthlyLimit: 100,
       used: 67,
+      billingPeriodStart: '2026-06-24T00:00:00Z',
       billingPeriodEnd: '2026-07-01T00:00:00Z'
     }
   };
@@ -477,10 +479,59 @@ test('fetchGrokLimits keeps legacy cli-chat-proxy JSON billing as final fallback
   assert.match(r.accountKey, /^sha256:/);
   assert.equal(capturedAuth, 'Bearer eyJsecret.signature');
   assert.equal(r.windows.length, 1);
-  assert.equal(r.windows[0].label, 'Monthly');
+  assert.equal(r.windows[0].label, 'Weekly');
   assert.equal(r.windows[0].usedPercent, 67);
   assert.equal(r.windows[0].resetsAt, '2026-07-01T00:00:00.000Z');
   assert.ok(!JSON.stringify(r).includes('eyJsecret'));
+});
+
+test('fetchGrokLimits rejects legacy monthly Build allotment (avoids Weekly/Monthly flicker)', async () => {
+  // Live cli-chat-proxy still returns month-span billingPeriod* + monthlyLimit —
+  // a different meter from GetGrokCreditsConfig weekly %. Do not surface it.
+  const body = {
+    config: {
+      monthlyLimit: { val: 15000 },
+      used: { val: 8053 },
+      billingPeriodStart: '2026-07-01T00:00:00+00:00',
+      billingPeriodEnd: '2026-08-01T00:00:00+00:00'
+    }
+  };
+  const r = await fetchGrokLimits(
+    { grokBearerToken: 'eyJsecret.signature' },
+    {
+      env: {},
+      now: () => 1_716_350_000_000,
+      fetch: async (url) => {
+        if (url === GROK_WEB_BILLING_GRPC_URL) {
+          return { status: 503, ok: false, arrayBuffer: async () => arrayBufferFrom(Buffer.alloc(0)) };
+        }
+        return { status: 200, ok: true, json: async () => body };
+      }
+    }
+  );
+  assert.equal(r.status, 'unavailable');
+  assert.deepEqual(r.windows, []);
+  // Do not surface the deprecated monthly Build % as a meter.
+});
+
+test('parseGrokBilling prefers creditUsagePercent + currentPeriod when present', () => {
+  const windows = parseGrokBilling({
+    config: {
+      creditUsagePercent: 16.5,
+      currentPeriod: {
+        type: 'USAGE_PERIOD_TYPE_WEEKLY',
+        start: '2026-07-14T02:07:01Z',
+        end: '2026-07-21T02:07:01Z'
+      },
+      // Deprecated fields that would compute a different % if preferred first.
+      monthlyLimit: { val: 15000 },
+      used: { val: 8053 }
+    }
+  });
+  assert.equal(windows.length, 1);
+  assert.equal(windows[0].label, 'Weekly');
+  assert.equal(windows[0].usedPercent, 16.5);
+  assert.equal(windows[0].resetsAt, '2026-07-21T02:07:01.000Z');
 });
 
 test('fetchGrokLimits maps HTTP 401 to unauthorized', async () => {

@@ -134,6 +134,22 @@ function billingWindowLabel(minutes) {
   return 'Billing';
 }
 
+// SuperGrok unified credits are a ~weekly pool (GetGrokCreditsConfig). The
+// legacy cli-chat-proxy JSON still returns the deprecated *monthly* Build
+// allotment (different numerator/denominator), which made the UI flicker
+// between Weekly ~15% and Monthly ~50% whenever the web path blipped.
+// Accept legacy only when it already looks like a unified weekly window.
+function isUnifiedCreditWindow(windows) {
+  const window = Array.isArray(windows) ? windows[0] : null;
+  if (!window || typeof window !== 'object') return false;
+  if (!Number.isFinite(window.usedPercent)) return false;
+  if (window.label === 'Weekly') return true;
+  const minutes = Number(window.windowMinutes);
+  if (!Number.isFinite(minutes) || minutes <= 0) return false;
+  const days = minutes / (24 * 60);
+  return days >= 4 && days <= 12;
+}
+
 // Build a single window spec from a (used, limit) pair. Returns null when
 // limit is missing/zero or used is unknown.
 function buildWindow(label, used, limit, resetsAt, windowMinutes = null) {
@@ -148,11 +164,9 @@ function buildWindow(label, used, limit, resetsAt, windowMinutes = null) {
   };
 }
 
-// Parse the JSON body returned by GET /v1/billing into the single monthly
-// quota window. The API also returns on-demand usage, but token-monitor's
-// "Session / Weekly" UI model doesn't have a clean place for an auxiliary
-// "On-demand" meter alongside "Monthly", so ours collapses to the primary
-// subscription window.
+// Parse JSON billing (RPC `x.ai/billing` or legacy GET /v1/billing) into one
+// quota window. Prefer newer unified-credits fields when present; fall back to
+// deprecated monthlyLimit/used + billingPeriod*.
 function parseGrokBilling(body) {
   const root = body && typeof body === 'object' ? body : null;
   const config = root && root.config && typeof root.config === 'object' ? root.config : root;
@@ -161,6 +175,27 @@ function parseGrokBilling(body) {
     err.status = 'unavailable';
     throw err;
   }
+
+  // Newer credits-config shape (creditUsagePercent + currentPeriod).
+  const creditPercent = numberOrNull(
+    config.creditUsagePercent ?? config.credit_usage_percent
+  );
+  const currentPeriod = config.currentPeriod && typeof config.currentPeriod === 'object'
+    ? config.currentPeriod
+    : (config.current_period && typeof config.current_period === 'object' ? config.current_period : null);
+  if (creditPercent !== null) {
+    const periodStart = currentPeriod?.start ?? currentPeriod?.billingPeriodStart;
+    const periodEnd = currentPeriod?.end ?? currentPeriod?.billingPeriodEnd;
+    const resetAt = normalizeIsoReset(periodEnd);
+    const windowMinutes = windowMinutesFromBillingCycle(periodStart, periodEnd);
+    const label = billingWindowLabel(windowMinutes);
+    const periodType = String(currentPeriod?.type || currentPeriod?.period_type || currentPeriod?.periodType || '').toUpperCase();
+    const forcedLabel = periodType.includes('WEEK') ? 'Weekly' : periodType.includes('MONTH') ? 'Monthly' : label;
+    // Percent is already 0–100 usage; model as used/limit against 100.
+    const window = buildWindow(forcedLabel, creditPercent, 100, resetAt, windowMinutes);
+    if (window) return [window];
+  }
+
   const monthlyLimit = numberOrNull(config.monthlyLimit);
   const usage = config.usage && typeof config.usage === 'object' ? config.usage : null;
   const used = numberOrNull(config.used ?? config.totalUsed ?? usage?.totalUsed ?? usage?.includedUsed);
@@ -625,6 +660,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
     });
   }
   let windows;
+  let sourceDetail = 'credits-config';
   try {
     windows = await (deps.fetchWebGrpcBilling || fetchGrokWebGrpcBilling)(credential, deps);
   } catch (webError) {
@@ -639,6 +675,22 @@ async function fetchGrokLimits(options = {}, deps = {}) {
     }
     try {
       windows = await (deps.fetchLegacyJsonBilling || fetchGrokLegacyJsonBilling)(credential, deps);
+      sourceDetail = 'legacy-json';
+      // Reject the deprecated monthly Build allotment so a flaky web path does
+      // not swap the meter to a different % / Monthly label.
+      if (!isUnifiedCreditWindow(windows)) {
+        return normalizeLimitProvider({
+          provider: 'grok',
+          accountKey: hashKey('grok', credential.token),
+          accountLabel: 'SuperGrok',
+          accountEmail: credential.email || '',
+          source: 'web',
+          sourceDetail: 'legacy-json-rejected-monthly',
+          status: 'unavailable',
+          updatedAt,
+          windows: []
+        });
+      }
     } catch (legacyError) {
       return normalizeLimitProvider({
         provider: 'grok',
@@ -657,6 +709,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
       accountLabel: 'SuperGrok',
       accountEmail: credential.email || '',
       source: 'web',
+      sourceDetail,
       status: 'ok',
       updatedAt,
       windows
@@ -688,5 +741,7 @@ module.exports = {
   fetchGrokWebGrpcBilling,
   fetchGrokLegacyJsonBilling,
   fetchGrokLimits,
-  isRetryableNetworkError
+  isRetryableNetworkError,
+  isUnifiedCreditWindow,
+  billingWindowLabel
 };
