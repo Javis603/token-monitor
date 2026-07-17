@@ -419,6 +419,12 @@ body.floating-bubble-collapsed-right .floating-bubble-tab {
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 2px;
 }
+/* Disabled switch (e.g. Tray-only mode while the tray icon is off): dim it and
+   drop the pointer so it doesn't read as an available control. */
+.settings-panel .checkbox-label > input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .settings-group { display: grid; min-width: 0; gap: 8px; }
 .settings-group.hidden, .settings-subgroup.hidden, .settings-actions button.hidden { display: none; }
 .settings-collection-cadence {
