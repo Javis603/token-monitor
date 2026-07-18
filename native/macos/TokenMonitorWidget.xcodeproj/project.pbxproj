@@ -1,0 +1,380 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* TokenMonitorWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* TokenMonitorWidget.swift */; };
+		100000000000000000000002 /* TokenMonitorWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* TokenMonitorWidgetBundle.swift */; };
+		100000000000000000000003 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* WidgetSnapshot.swift */; };
+		100000000000000000000004 /* WidgetTimelineProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* WidgetTimelineProvider.swift */; };
+		100000000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* Assets.xcassets */; };
+		100000000000000000000006 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* WidgetKit.framework */; };
+		100000000000000000000007 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* SwiftUI.framework */; };
+		100000000000000000000008 /* WidgetSnapshotDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* WidgetSnapshotDecodingTests.swift */; };
+		100000000000000000000009 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* WidgetSnapshot.swift */; };
+		10000000000000000000000A /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* XCTest.framework */; };
+		10000000000000000000000B /* WidgetConfigurationIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* WidgetConfigurationIntent.swift */; };
+		10000000000000000000000C /* WidgetViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* WidgetViewModel.swift */; };
+		10000000000000000000000D /* WidgetConfigurationIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* WidgetConfigurationIntent.swift */; };
+		10000000000000000000000E /* WidgetViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* WidgetViewModel.swift */; };
+		10000000000000000000000F /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* Localizable.xcstrings */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* TokenMonitorWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidget.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* TokenMonitorWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetBundle.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* WidgetTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetTimelineProvider.swift; sourceTree = "<group>"; };
+		200000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		200000000000000000000006 /* TokenMonitorWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TokenMonitorWidget.entitlements; sourceTree = "<group>"; };
+		200000000000000000000007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		200000000000000000000008 /* WidgetSnapshotDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotDecodingTests.swift; sourceTree = "<group>"; };
+		200000000000000000000009 /* TokenMonitorWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TokenMonitorWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		20000000000000000000000A /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		20000000000000000000000B /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		20000000000000000000000C /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		20000000000000000000000D /* TokenMonitorWidgetTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TokenMonitorWidgetTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		20000000000000000000000E /* WidgetConfigurationIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfigurationIntent.swift; sourceTree = "<group>"; };
+		20000000000000000000000F /* WidgetViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetViewModel.swift; sourceTree = "<group>"; };
+		200000000000000000000010 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		300000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000006 /* WidgetKit.framework in Frameworks */,
+				100000000000000000000007 /* SwiftUI.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		300000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000000A /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		400000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				400000000000000000000002 /* TokenMonitorWidget */,
+				400000000000000000000003 /* TokenMonitorWidgetTests */,
+				400000000000000000000004 /* Frameworks */,
+				400000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		400000000000000000000002 /* TokenMonitorWidget */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* TokenMonitorWidget.swift */,
+				200000000000000000000002 /* TokenMonitorWidgetBundle.swift */,
+				200000000000000000000003 /* WidgetSnapshot.swift */,
+				200000000000000000000004 /* WidgetTimelineProvider.swift */,
+				20000000000000000000000E /* WidgetConfigurationIntent.swift */,
+				20000000000000000000000F /* WidgetViewModel.swift */,
+				200000000000000000000010 /* Localizable.xcstrings */,
+				200000000000000000000007 /* Assets.xcassets */,
+				200000000000000000000005 /* Info.plist */,
+				200000000000000000000006 /* TokenMonitorWidget.entitlements */,
+			);
+			path = TokenMonitorWidget;
+			sourceTree = "<group>";
+		};
+		400000000000000000000003 /* TokenMonitorWidgetTests */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000008 /* WidgetSnapshotDecodingTests.swift */,
+			);
+			path = TokenMonitorWidgetTests;
+			sourceTree = "<group>";
+		};
+		400000000000000000000004 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000000A /* WidgetKit.framework */,
+				20000000000000000000000B /* SwiftUI.framework */,
+				20000000000000000000000C /* XCTest.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		400000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000009 /* TokenMonitorWidget.appex */,
+				20000000000000000000000D /* TokenMonitorWidgetTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* TokenMonitorWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 600000000000000000000001 /* Build configuration list for PBXNativeTarget "TokenMonitorWidget" */;
+			buildPhases = (
+				300000000000000000000003 /* Sources */,
+				300000000000000000000001 /* Frameworks */,
+				300000000000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TokenMonitorWidget;
+			productName = TokenMonitorWidget;
+			productReference = 200000000000000000000009 /* TokenMonitorWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		500000000000000000000002 /* TokenMonitorWidgetTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 600000000000000000000002 /* Build configuration list for PBXNativeTarget "TokenMonitorWidgetTests" */;
+			buildPhases = (
+				300000000000000000000004 /* Sources */,
+				300000000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TokenMonitorWidgetTests;
+			productName = TokenMonitorWidgetTests;
+			productReference = 20000000000000000000000D /* TokenMonitorWidgetTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		700000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					500000000000000000000001 = { CreatedOnToolsVersion = 26.0; };
+					500000000000000000000002 = { CreatedOnToolsVersion = 26.0; };
+				};
+			};
+			buildConfigurationList = 600000000000000000000003 /* Build configuration list for PBXProject "TokenMonitorWidget" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 400000000000000000000001;
+			productRefGroup = 400000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				500000000000000000000001 /* TokenMonitorWidget */,
+				500000000000000000000002 /* TokenMonitorWidgetTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		300000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000005 /* Assets.xcassets in Resources */,
+				10000000000000000000000F /* Localizable.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		300000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000001 /* TokenMonitorWidget.swift in Sources */,
+				100000000000000000000002 /* TokenMonitorWidgetBundle.swift in Sources */,
+				100000000000000000000003 /* WidgetSnapshot.swift in Sources */,
+				100000000000000000000004 /* WidgetTimelineProvider.swift in Sources */,
+				10000000000000000000000B /* WidgetConfigurationIntent.swift in Sources */,
+				10000000000000000000000C /* WidgetViewModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		300000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000008 /* WidgetSnapshotDecodingTests.swift in Sources */,
+				100000000000000000000009 /* WidgetSnapshot.swift in Sources */,
+				10000000000000000000000D /* WidgetConfigurationIntent.swift in Sources */,
+				10000000000000000000000E /* WidgetViewModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		800000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TokenMonitorWidget/TokenMonitorWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(TOKEN_MONITOR_PACKAGE_VERSION)";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TokenMonitorWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = "$(TOKEN_MONITOR_PACKAGE_VERSION)";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(TOKEN_MONITOR_WIDGET_BUNDLE_ID)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+				TOKEN_MONITOR_APP_GROUP = group.com.example.tokenmonitor;
+				TOKEN_MONITOR_PACKAGE_VERSION = 0.0.0;
+				TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP = 1970-01-01T00:00:00Z;
+				TOKEN_MONITOR_WIDGET_URL_SCHEME = "token-monitor";
+				TOKEN_MONITOR_WIDGET_BUNDLE_ID = com.javis.tokenmonitor.widget;
+				TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;
+				TOKEN_MONITOR_WIDGET_KIND = com.tokenmonitor.dashboard;
+			};
+			name = Debug;
+		};
+		800000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TokenMonitorWidget/TokenMonitorWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(TOKEN_MONITOR_PACKAGE_VERSION)";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TokenMonitorWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = "$(TOKEN_MONITOR_PACKAGE_VERSION)";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(TOKEN_MONITOR_WIDGET_BUNDLE_ID)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+				TOKEN_MONITOR_APP_GROUP = group.com.example.tokenmonitor;
+				TOKEN_MONITOR_PACKAGE_VERSION = 0.0.0;
+				TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP = 1970-01-01T00:00:00Z;
+				TOKEN_MONITOR_WIDGET_URL_SCHEME = "token-monitor";
+				TOKEN_MONITOR_WIDGET_BUNDLE_ID = com.javis.tokenmonitor.widget;
+				TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;
+				TOKEN_MONITOR_WIDGET_KIND = com.tokenmonitor.dashboard;
+			};
+			name = Release;
+		};
+		800000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.widget.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		800000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.widget.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		800000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		800000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		600000000000000000000001 /* Build configuration list for PBXNativeTarget "TokenMonitorWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				800000000000000000000001 /* Debug */,
+				800000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		600000000000000000000002 /* Build configuration list for PBXNativeTarget "TokenMonitorWidgetTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				800000000000000000000003 /* Debug */,
+				800000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		600000000000000000000003 /* Build configuration list for PBXProject "TokenMonitorWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				800000000000000000000005 /* Debug */,
+				800000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 700000000000000000000001 /* Project object */;
+}
