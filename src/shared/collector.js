@@ -380,6 +380,9 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const metadata = deps.metadataCache || new Map();
   const resolvedSessionKeys = deps.resolvedSessionKeys || new Set();
   const attemptedSessionKeys = deps.attemptedSessionKeys || new Set();
+  // Timestamps are always backfilled (the session view sorts by recency); project
+  // identity is the part gated by the Projects opt-out (issue #182).
+  const resolveProjects = deps.resolveProjects !== false;
   const byClient = new Map();
   for (const ref of refs.values()) {
     const key = `${ref.client}:${ref.sessionId}`;
@@ -392,7 +395,7 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const applyFile = (client, sessionId, filePath) => {
     const startedAt = timestampFromSessionId(sessionId);
     const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
-    const identity = projectIdentity(projectPathFromJsonl(filePath));
+    const identity = resolveProjects ? projectIdentity(projectPathFromJsonl(filePath)) : {};
     const key = `${client}:${sessionId}`;
     metadata.set(key, { startedAt, lastUsedAt, ...identity });
     if (identity.projectId) resolvedSessionKeys.add(key);
@@ -407,7 +410,7 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     for (const [sessionId, meta] of readOpencodeMeta(opencodeIds)) {
       const startedAt = meta.startedAt || '';
       const lastUsedAt = meta.lastUsedAt || startedAt;
-      const identity = projectIdentity(meta.projectPath);
+      const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
       const key = `opencode:${sessionId}`;
       if (startedAt || lastUsedAt || identity.projectId) metadata.set(key, { startedAt, lastUsedAt, ...identity });
       if (identity.projectId) resolvedSessionKeys.add(key);
@@ -592,7 +595,7 @@ async function collectUsageOnce(options) {
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionTimestamps(
     periods,
     options.homeDir || os.homedir(),
-    { ...localSessionMetadataDeps, retryMisses }
+    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
   // tokscale doesn't know about Proma yet — filter it out of the subprocess
   // calls so --client doesn't reject an unknown value. Proma is parsed
@@ -647,28 +650,30 @@ async function collectUsageOnce(options) {
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
       today = extractUsageFromTokscale(todayJson);
-      if (projectsEnabled && typeof options.onProgress === 'function') decorateLocalPeriods({ today });
+      if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
       const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
       month = extractUsageFromTokscale(monthJson);
-      if (projectsEnabled && typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
+      if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
-    if (projectsEnabled) {
-      if (anchorUsed) {
-        // Watch tick: `today` is a fresh scan and must be decorated, but month/
-        // allTime are derived from the last full-scan anchor and already carry each
-        // session's project label + timestamps through applyPeriodDelta. Decorating
-        // them again would re-stat every historical session file every few seconds
-        // (the perceived UI stutter). Decorate only today, then propagate its freshly
-        // resolved identities onto sessions that started today (absent from the anchor).
-        decorateLocalPeriods({ today }, { retryMisses: true });
-        propagateTodayProjects(today, [month, allTime]);
-      } else {
-        decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
-      }
+    // Always decorate: session timestamps drive the recency sort regardless of the
+    // Projects opt-out (issue #182). decorateLocalPeriods gates only project identity
+    // on projectsEnabled, so opting out still costs the timestamp backfill and nothing
+    // more.
+    if (anchorUsed) {
+      // Watch tick: `today` is a fresh scan and must be decorated, but month/
+      // allTime are derived from the last full-scan anchor and already carry each
+      // session's project label + timestamps through applyPeriodDelta. Decorating
+      // them again would re-stat every historical session file every few seconds
+      // (the perceived UI stutter). Decorate only today, then propagate its freshly
+      // resolved identities onto sessions that started today (absent from the anchor).
+      decorateLocalPeriods({ today }, { retryMisses: true });
+      propagateTodayProjects(today, [month, allTime]);
+    } else {
+      decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
     if (promaPeriods && !anchorUsed) {
       today = mergePeriods(today, promaPeriods.today);
@@ -706,7 +711,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: projectsEnabled ? (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true }) : undefined
+        decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -726,7 +731,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: projectsEnabled ? (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true }) : undefined
+        decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
