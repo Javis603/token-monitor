@@ -83,24 +83,25 @@ test('capture replaces the whole observation when usage grows and refreshes equa
   assert.deepEqual(stored, { client: 'claude', modelId: 'opus', tokens: 120, cost: 5.2, messages: 6 });
 });
 
-test('capture caps retained daily observations to the rolling window', () => {
+test('capture keeps all observed past days beyond the presentation window', () => {
   const archive = captureDailyHistoryArchive({}, [
-    graph('2026-07-16', [client('claude', 'opus', 10, 1, 1)]),
+    graph('2024-01-01', [client('claude', 'opus', 10, 1, 1)]),
     graph('2026-07-17', [client('claude', 'opus', 20, 2, 2)]),
-    graph('2026-07-18', [client('claude', 'opus', 30, 3, 3)])
+    graph('2026-07-18', [client('claude', 'opus', 30, 3, 3)]),
+    graph('2026-07-19', [client('claude', 'opus', 40, 4, 4)])
   ], { todayKey: '2026-07-18', capDays: 2 });
-  assert.deepEqual(Object.keys(archive.days).sort(), ['2026-07-17', '2026-07-18']);
+  assert.deepEqual(Object.keys(archive.days).sort(), ['2024-01-01', '2026-07-17', '2026-07-18']);
 });
 
-test('graph reconstruction keeps current data outside the durable rolling window', () => {
-  const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
-    client('claude', 'opus', 100, 4, 5)
-  ]), { todayKey: '2026-07-18', capDays: 2 });
-  const combined = graphFromDailyHistoryArchive(graph('2026-06-01', [
-    client('codex', 'gpt', 25, 1, 2)
-  ]), archive, { todayKey: '2026-07-18', capDays: 2 });
+test('graph reconstruction exposes the rolling daily window but keeps older rollups', () => {
+  const archive = captureDailyHistoryArchive({}, [
+    graph('2025-06-01', [client('codex', 'gpt', 25, 1, 2)]),
+    graph('2026-07-18', [client('claude', 'opus', 100, 4, 5)])
+  ], { todayKey: '2026-07-18' });
+  const combined = graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' });
   const normalized = historyFrom(combined);
-  assert.deepEqual(normalized.daily.map((day) => day.date), ['2026-06-01', '2026-07-18']);
+  assert.deepEqual(normalized.daily.map((day) => day.date), ['2026-07-18']);
+  assert.deepEqual(normalized.monthly.map((month) => month.month), ['2025-06', '2026-07']);
   assert.equal(normalized.summary.totalTokens, 125);
 });
 

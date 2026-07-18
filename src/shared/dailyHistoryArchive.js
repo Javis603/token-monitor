@@ -7,14 +7,7 @@ const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { num, sumTokens } = require('./history');
 
 const ARCHIVE_VERSION = 1;
-const DEFAULT_CAP_DAYS = 370;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function dayKeyAddDays(key, delta) {
-  const parsed = Date.parse(`${key}T00:00:00Z`);
-  if (!Number.isFinite(parsed)) return '';
-  return new Date(parsed + delta * 86400000).toISOString().slice(0, 10);
-}
 
 function observationKey(value) {
   return JSON.stringify([
@@ -127,12 +120,11 @@ function shouldReplaceObservation(previous, incoming) {
 function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   const archive = normalizeDailyHistoryArchive(existingArchive);
   const todayKey = String(options.todayKey || '').slice(0, 10);
-  const capDays = Number.isFinite(options.capDays) ? Math.max(0, Math.floor(options.capDays)) : DEFAULT_CAP_DAYS;
-  const startKey = DAY_KEY_RE.test(todayKey) && capDays > 0 ? dayKeyAddDays(todayKey, -(capDays - 1)) : '';
+  const hasTodayKey = DAY_KEY_RE.test(todayKey);
   const incomingDays = observationsFromGraphs(graphs);
 
   for (const [date, incoming] of incomingDays) {
-    if (startKey && (date < startKey || date > todayKey)) continue;
+    if (hasTodayKey && date > todayKey) continue;
     const previous = archive.days[date] || { date, activeTimeMs: 0, observations: {} };
     const next = {
       date,
@@ -148,9 +140,12 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
     if (normalized) archive.days[date] = normalized;
   }
 
-  if (startKey) {
+  // Presentation and sync windows are intentionally applied later by
+  // normalizeHistory(). The local archive keeps every observed past day so a
+  // future year selector can read it without depending on source transcripts.
+  if (hasTodayKey) {
     for (const date of Object.keys(archive.days)) {
-      if (date < startKey || date > todayKey) delete archive.days[date];
+      if (date > todayKey) delete archive.days[date];
     }
   }
   return archive;
@@ -174,11 +169,10 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   const currentDays = observationsFromGraphs(graphs);
   const normalizedArchive = normalizeDailyHistoryArchive(archive);
   const todayKey = String(options.todayKey || '').slice(0, 10);
-  const capDays = Number.isFinite(options.capDays) ? Math.max(0, Math.floor(options.capDays)) : DEFAULT_CAP_DAYS;
-  const startKey = DAY_KEY_RE.test(todayKey) && capDays > 0 ? dayKeyAddDays(todayKey, -(capDays - 1)) : '';
+  const hasTodayKey = DAY_KEY_RE.test(todayKey);
 
   for (const [date, day] of Object.entries(normalizedArchive.days)) {
-    if (startKey && (date < startKey || date > todayKey)) continue;
+    if (hasTodayKey && date > todayKey) continue;
     currentDays.set(date, day);
   }
 

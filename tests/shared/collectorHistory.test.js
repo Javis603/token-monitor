@@ -77,6 +77,32 @@ test('collectHistoryOnce retains a prior client observation when a later graph l
   assert.equal(restored.daily[0].perClient.codex.tokens, 60);
 });
 
+test('collectHistoryOnce stores older days locally while capping daily output', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-full-daily-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const history = await collectHistoryOnce({
+    clients: 'claude',
+    todayKey: '2026-07-18',
+    capDays: 370,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath },
+    runGraph: async () => ({ contributions: [
+      { date: '2025-06-01', clients: [
+        { client: 'claude', modelId: 'opus', tokens: { input: 25 }, cost: 1, messages: 2 }
+      ] },
+      { date: '2026-07-17', clients: [
+        { client: 'claude', modelId: 'opus', tokens: { input: 100 }, cost: 4, messages: 5 }
+      ] }
+    ] })
+  });
+  const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+  assert.deepEqual(Object.keys(stored.days).sort(), ['2025-06-01', '2026-07-17']);
+  assert.deepEqual(history.daily.map((day) => day.date), ['2026-07-17']);
+  assert.deepEqual(history.monthly.map((month) => month.month), ['2025-06', '2026-07']);
+  assert.equal(history.summary.totalTokens, 125);
+});
+
 test('collectHistoryOnce falls back to the current graph when archive persistence fails', async () => {
   const messages = [];
   const history = await collectHistoryOnce({
