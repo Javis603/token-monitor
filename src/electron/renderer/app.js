@@ -4282,6 +4282,7 @@ function applyAppearanceSettings(settings) {
 
 const themePresetsApi = window.TokenMonitorThemePresets;
 let themeCodeFeedbackGeneration = 0;
+let appliedThemeOverrides = {};
 // Snapshot of the canonical brand colours, taken before any override is
 // applied. clientColors is mutated in place (other modules hold the same
 // reference), so this is the source of truth for "reset to brand".
@@ -4310,11 +4311,13 @@ function matchingThemePresetId(overrides) {
 }
 
 function applyThemeColors(overrides) {
+  appliedThemeOverrides = themePresetsApi.normalizeOverrides(overrides, themePresetsApi.INTERFACE_COLOR_KEYS);
   const root = document.documentElement.style;
-  for (const { name, value } of themePresetsApi.themeCssVarEntries(overrides)) {
+  for (const { name, value } of themePresetsApi.themeCssVarEntries(appliedThemeOverrides)) {
     if (value) root.setProperty(name, value);
     else root.removeProperty(name);
   }
+  renderFloatingBubbleContent();
 }
 
 function applyVendorColorOverrides(overrides) {
@@ -4324,8 +4327,7 @@ function applyVendorColorOverrides(overrides) {
 
 // Current resolved palette value for an interface colour key.
 function resolvedThemeColor(key) {
-  const clean = themePresetsApi.normalizeOverrides(state.settings?.themeColors, themePresetsApi.INTERFACE_COLOR_KEYS);
-  return clean[key] || themePresetsApi.DEFAULT_THEME[key];
+  return appliedThemeOverrides[key] || themePresetsApi.DEFAULT_THEME[key];
 }
 
 function buildAppearanceColorControls() {

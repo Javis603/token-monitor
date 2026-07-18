@@ -373,6 +373,9 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(app, /providerContrastHalo:\s*true/);
   assert.match(app, /function floatingBubbleGeneratedColors\(\)/);
   assert.match(app, /resolvedThemeColor\('text'\)/);
+  assert.match(app, /appliedThemeOverrides = themePresetsApi\.normalizeOverrides\(overrides/);
+  assert.match(app, /function applyThemeColors\(overrides\)[\s\S]*renderFloatingBubbleContent\(\);/);
+  assert.match(app, /function resolvedThemeColor\(key\)[\s\S]*appliedThemeOverrides\[key\]/);
   assert.match(renderLimitSessionsIcon, /`500 \$\{fontSize\}px/);
   assert.match(renderLimitSessionsIcon, /formatPercent\(limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);
