@@ -249,15 +249,7 @@ npm run agent -- --clients=claude,codex,opencode --once
 
 ## 프라이버시
 
-hub와 agent는 요약 필드만 전송합니다.
-
-- 기기 id, 호스트명, 플랫폼
-- 기간별 총 토큰 (오늘 / 이번 달 / 전체)
-- 비용 합계 (`tokscale`이 비용을 반환할 때)
-- 클라이언트·모델별 분류
-- AI 도구 한도 사용 시 정규화된 Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/MiMo/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi/Ollama 한도 상태
-
-원본 AI 로그, 프롬프트, 소스 코드, 대화 내용, OAuth·토큰·이메일·제공자 원본 응답은 전송하지 않습니다. `.env`, `data/`, `node_modules/`는 gitignore됩니다.
+Token Monitor는 사용 로그를 로컬에서 처리하며 프로젝트 관리자에게 분석 또는 원격 측정 데이터를 보내지 않습니다. 네트워크 접근은 문서화되었거나 사용자가 활성화한 기능에만 사용됩니다. 업데이트, 제공자 연동, Discord Rich Presence 및 선택적 다중 기기 동기화에서 사용하는 데이터는 [개인정보 처리방침](docs/privacy.md)을 참고하세요.
 
 ## 요구 사항
 
@@ -283,7 +275,7 @@ Issue와 PR을 환영합니다. 프로젝트 규약, 아키텍처 노트, 명령
 
 - [tokscale](https://github.com/junhoyeo/tokscale) — 로그 파싱 및 토큰 집계
 - [CodexBar](https://github.com/steipete/CodexBar) — AI 도구 한도 연구
-- [SignPath Foundation](https://signpath.org/) — 무료 Windows 코드 서명 인증서 제공. 자세한 내용은 [코드 서명 정책](docs/code-signing.md) 참고
+- **[코드 서명 정책](docs/code-signing.md):** 무료 코드 서명은 [SignPath.io](https://signpath.io/)에서 제공하고 인증서는 [SignPath Foundation](https://signpath.org/)에서 제공합니다.
 
 ## 라이선스
 

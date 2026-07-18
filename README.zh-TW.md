@@ -249,15 +249,7 @@ npm run agent -- --clients=claude,codex,opencode --once
 
 ## 隱私
 
-hub 與代理只傳輸摘要欄位：
-
-- 裝置 id、主機名稱、平台
-- 每個時段的 Token 總數（今日 / 本月 / 全部）
-- 成本總額（若 `tokscale` 回傳成本資料）
-- 依客戶端與模型的分項統計
-- 啟用 AI 工具額度時，正規化後的 Claude Code／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／MiMo／GitHub Copilot／Kiro／GLM／Volcengine／Qoder／Kimi／Ollama 額度狀態
-
-完全不會傳輸原始 AI 紀錄、提示詞、原始碼或對話內容。也不會傳輸 OAuth 憑證、存取權杖、刷新權杖、電子郵件或供應商原始回應。`.env`、`data/`、`node_modules/` 已加入 gitignore。
+Token Monitor 會在本機處理使用紀錄，不會向專案維護者傳送分析或遙測資料。網路存取僅用於文件中說明或由使用者啟用的功能；更新、供應商整合、Discord Rich Presence 與可選多裝置同步所使用的資料，請參閱[隱私權政策](docs/privacy.md)。
 
 ## 系統需求
 
@@ -283,7 +275,7 @@ hub 與代理只傳輸摘要欄位：
 
 - [tokscale](https://github.com/junhoyeo/tokscale) 提供紀錄解析與 Token 計算。
 - [CodexBar](https://github.com/steipete/CodexBar) 提供 AI 工具額度的研究參考。
-- [SignPath Foundation](https://signpath.org/) 提供免費的 Windows 程式碼簽章憑證——詳見我們的[程式碼簽章政策](docs/code-signing.md)。
+- **[程式碼簽章政策](docs/code-signing.md)：** 免費程式碼簽章由 [SignPath.io](https://signpath.io/) 提供，憑證由 [SignPath Foundation](https://signpath.org/) 提供。
 
 ## 授權
 

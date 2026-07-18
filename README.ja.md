@@ -249,15 +249,7 @@ npm run agent -- --clients=claude,codex,opencode --once
 
 ## プライバシー
 
-hub と agent はサマリーフィールドのみを送信します。
-
-- デバイス id、ホスト名、プラットフォーム
-- 期間別の総トークン（本日 / 今月 / 全期間）
-- コスト合計（`tokscale` がコストを返す場合）
-- クライアント・モデル別の内訳
-- AI ツール制限有効時の正規化された Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/MiMo/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi/Ollama 制限ステータス
-
-生の AI ログ、プロンプト、ソースコード、会話内容、OAuth・トークン・メール・プロバイダー生レスポンスは送信しません。`.env`、`data/`、`node_modules/` は gitignore されます。
+Token Monitor は使用ログをローカルで処理し、プロジェクトのメンテナーに分析データやテレメトリを送信しません。ネットワークアクセスは、文書化された機能またはユーザーが有効にした機能に限られます。アップデート、プロバイダー連携、Discord Rich Presence、任意のマルチデバイス同期で使用されるデータについては、[プライバシーポリシー](docs/privacy.md)を参照してください。
 
 ## 要件
 
@@ -283,7 +275,7 @@ Issue や PR を歓迎します。プロジェクトの規約、アーキテク�
 
 - [tokscale](https://github.com/junhoyeo/tokscale) — ログ解析とトークン集計
 - [CodexBar](https://github.com/steipete/CodexBar) — AI ツール制限の調査
-- [SignPath Foundation](https://signpath.org/) — Windows 用の無償コード署名証明書。詳細は[コード署名ポリシー](docs/code-signing.md)を参照
+- **[コード署名ポリシー](docs/code-signing.md)：** 無償のコード署名は [SignPath.io](https://signpath.io/) が提供し、証明書は [SignPath Foundation](https://signpath.org/) が提供します。
 
 ## ライセンス
 

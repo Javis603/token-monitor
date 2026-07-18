@@ -249,33 +249,7 @@ npm run agent -- --clients=claude,codex,opencode --once
 
 ## Privacy
 
-Token Monitor processes usage logs locally and does not include analytics or
-telemetry that reports usage to the project maintainer. It makes outbound
-requests only for product features described in the app or documentation:
-
-- packaged builds automatically check GitHub Releases for updates
-- exchange-rate and public service-status views fetch their public data sources
-- enabled AI Tool Limits providers contact that provider's API; credentials are
-  sent only to the corresponding provider
-- multi-device sync sends summary data to the hub URL configured by the operator
-
-Those services process requests under their own privacy policies, including the
-[GitHub Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)
-for update checks. Review the applicable provider's privacy policy before
-enabling provider-backed account or quota checks.
-
-The hub and agent only transmit summary fields:
-
-- device id, hostname, platform
-- total tokens per period (today / month / all-time)
-- cost totals (when `tokscale` returns cost data)
-- per-client and per-model breakdowns
-- normalized Claude Code/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/MiMo/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi/Ollama limit status when AI Tool Limits is enabled
-
-They do not transmit raw AI logs, prompts, source code, or conversation
-content. They also do not transmit OAuth credentials, access tokens, refresh
-tokens, emails, or raw provider responses. `.env`, `data/`, and `node_modules/`
-are gitignored.
+Token Monitor processes usage logs locally and sends no analytics or telemetry to the project maintainer. Network access occurs only for documented or user-enabled features. See the [privacy policy](docs/privacy.md) for the data used by updates, provider integrations, Discord Rich Presence, and optional multi-device sync.
 
 ## Requirements
 
@@ -301,7 +275,7 @@ Issues and PRs are welcome. Project conventions, architecture notes, and the com
 
 - [tokscale](https://github.com/junhoyeo/tokscale) for log parsing and token accounting.
 - [CodexBar](https://github.com/steipete/CodexBar) for AI Tool Limits research.
-- [SignPath Foundation](https://signpath.org/) for the free Windows code-signing certificate — see our [code signing policy](docs/code-signing.md).
+- **[Code signing policy](docs/code-signing.md):** Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
 ## License
 
