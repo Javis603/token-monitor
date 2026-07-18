@@ -7,16 +7,15 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
 const { resolveProxyUrl } = require('../../src/shared/outboundFetch');
-const { fetchGrokLimits, grokCredential } = require('../../src/shared/grokLimits');
+const { fetchGrokLimits, grokCredential, resolveGrokHome } = require('../../src/shared/grokLimits');
 
 function hasLiveGrokAuth() {
   try {
-    const p = path.join(os.homedir(), '.grok', 'auth.json');
+    const p = path.join(resolveGrokHome(process.env), 'auth.json');
     if (!fs.existsSync(p)) return false;
     const doc = JSON.parse(fs.readFileSync(p, 'utf8'));
     return Object.values(doc || {}).some((v) => v && typeof v.key === 'string' && v.key.trim());
