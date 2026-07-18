@@ -29,18 +29,127 @@ function renderArtifactName(template, version) {
   return rendered;
 }
 
-function expectedWindowsArtifacts(packageJsonPath) {
+function signingPackageMetadata(packageJsonPath) {
   const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
   const version = pkg.version;
   if (typeof version !== 'string' || !/^[0-9A-Za-z][0-9A-Za-z.+-]*$/.test(version)) {
     throw new Error(`Unsupported package version for signing: ${String(version)}`);
   }
+  const productName = pkg.productName;
+  if (
+    typeof productName !== 'string' ||
+    !productName ||
+    path.posix.basename(productName) !== productName ||
+    path.win32.basename(productName) !== productName ||
+    /[\r\n]/.test(productName)
+  ) {
+    throw new Error(`Unsupported productName for signing: ${String(productName)}`);
+  }
+  return { pkg, version, productName };
+}
+
+function expectedWindowsApplication(packageJsonPath) {
+  const { version, productName } = signingPackageMetadata(packageJsonPath);
+  return {
+    version,
+    productName,
+    application: `${productName}.exe`
+  };
+}
+
+function expectedWindowsArtifacts(packageJsonPath) {
+  const { pkg, version } = signingPackageMetadata(packageJsonPath);
   const installer = renderArtifactName(pkg.build?.nsis?.artifactName || '', version);
   const portable = renderArtifactName(pkg.build?.portable?.artifactName || '', version);
   if (!installer || !portable || installer === portable) {
     throw new Error('package.json must define distinct NSIS and portable Windows artifact names');
   }
   return { version, installer, portable };
+}
+
+function windowsAppUpdateConfig(packageJsonPath) {
+  const { pkg, version } = signingPackageMetadata(packageJsonPath);
+  const build = pkg.build;
+  const win = build?.win;
+  if (Object.hasOwn(win || {}, 'publish')) {
+    throw new Error(
+      'Windows prepackaged builds do not support a build.win.publish override; ' +
+        'keep the updater provider in build.publish'
+    );
+  }
+
+  // electron-builder resolves and embeds the first publish provider during
+  // afterPack. --prepackaged skips that hook, so this writer intentionally
+  // supports only the exact release configuration below. Fail closed when the
+  // publish surface changes instead of silently emitting stale updater data.
+  if (!Array.isArray(build?.publish) || build.publish.length !== 1) {
+    throw new Error('Windows prepackaged builds require exactly one publish provider');
+  }
+  const publish = build.publish[0];
+  const publishKeys =
+    publish && typeof publish === 'object' && !Array.isArray(publish)
+      ? Object.keys(publish).sort()
+      : [];
+  const supportedPublishKeys = ['owner', 'provider', 'repo'];
+  if (JSON.stringify(publishKeys) !== JSON.stringify(supportedPublishKeys)) {
+    throw new Error(
+      'Windows prepackaged builds support exactly the GitHub publish fields ' +
+        `${supportedPublishKeys.join(', ')}; found ${publishKeys.join(', ') || 'none'}`
+    );
+  }
+  if (
+    publish.provider !== 'github' ||
+    typeof publish.owner !== 'string' ||
+    !publish.owner ||
+    typeof publish.repo !== 'string' ||
+    !publish.repo
+  ) {
+    throw new Error('Windows prepackaged builds require a GitHub publish owner and repo');
+  }
+  const versionWithoutBuildMetadata = version.split('+', 1)[0];
+  if (versionWithoutBuildMetadata.includes('-')) {
+    throw new Error(
+      'Windows prepackaged builds do not support prerelease update channels; ' +
+        'keep this writer aligned with electron-builder before publishing a prerelease'
+    );
+  }
+  const packageName = pkg.name;
+  if (typeof packageName !== 'string' || !/^[A-Za-z0-9._-]+$/.test(packageName)) {
+    throw new Error(`Unsupported package name for updater cache: ${String(packageName)}`);
+  }
+  const publisherName = win?.signtoolOptions?.publisherName;
+  if (win?.verifyUpdateCodeSignature !== true || typeof publisherName !== 'string' || !publisherName) {
+    throw new Error(
+      'Windows prepackaged builds must explicitly verify the expected code-signing publisher'
+    );
+  }
+
+  const yamlString = (value) => JSON.stringify(value);
+  return [
+    `owner: ${yamlString(publish.owner)}`,
+    `repo: ${yamlString(publish.repo)}`,
+    `provider: ${yamlString(publish.provider)}`,
+    `updaterCacheDirName: ${yamlString(`${packageName.toLowerCase()}-updater`)}`,
+    'publisherName:',
+    `  - ${yamlString(publisherName)}`,
+    ''
+  ].join('\n');
+}
+
+function writeWindowsAppUpdateConfig({ appDir, packageJsonPath }) {
+  const names = expectedWindowsApplication(packageJsonPath);
+  const applicationPath = path.join(appDir, names.application);
+  if (!fs.lstatSync(applicationPath, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`Expected unpacked application executable is missing: ${applicationPath}`);
+  }
+  const updateConfigPath = path.join(appDir, 'resources', 'app-update.yml');
+  fs.mkdirSync(path.dirname(updateConfigPath), { recursive: true });
+  fs.writeFileSync(updateConfigPath, windowsAppUpdateConfig(packageJsonPath));
+  return { ...names, updateConfigPath };
+}
+
+function applicationSigningInputPath(names) {
+  return path.posix.join('application', names.application);
 }
 
 function signingInputPaths(names) {
@@ -64,6 +173,22 @@ function assertExactTopLevelWindowsArtifacts(distDir, names) {
         (actual.length ? actual.join(', ') : 'no executable files')
     );
   }
+}
+
+function prepareUnsignedWindowsApplication({ appDir, inputDir, packageJsonPath }) {
+  const names = expectedWindowsApplication(packageJsonPath);
+  const relativePath = applicationSigningInputPath(names);
+  const source = path.join(appDir, names.application);
+  if (!fs.lstatSync(source, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`Expected unpacked application executable is missing: ${source}`);
+  }
+
+  fs.rmSync(inputDir, { recursive: true, force: true });
+  const destination = path.join(inputDir, ...relativePath.split('/'));
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination);
+
+  return { ...names, relativePath };
 }
 
 function prepareUnsignedWindowsArtifacts({ distDir, inputDir, packageJsonPath }) {
@@ -170,6 +295,25 @@ function listExeFiles(rootDir, relativeDir = '') {
   });
 }
 
+function applySignedWindowsApplication({ appDir, signedDir, packageJsonPath }) {
+  const names = expectedWindowsApplication(packageJsonPath);
+  const relativePath = applicationSigningInputPath(names);
+  const actualExePaths = listExeFiles(signedDir).sort();
+  if (JSON.stringify(actualExePaths) !== JSON.stringify([relativePath])) {
+    throw new Error(
+      `Signed application artifact must contain exactly ${relativePath}; found ` +
+        (actualExePaths.length ? actualExePaths.join(', ') : 'no executable files')
+    );
+  }
+
+  const destination = path.join(appDir, names.application);
+  if (!fs.lstatSync(destination, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`Expected unpacked application executable is missing: ${destination}`);
+  }
+  fs.copyFileSync(path.join(signedDir, ...relativePath.split('/')), destination);
+  return { ...names, relativePath };
+}
+
 async function applySignedWindowsArtifacts({ distDir, signedDir, packageJsonPath }) {
   const names = expectedWindowsArtifacts(packageJsonPath);
   const relativePaths = signingInputPaths(names);
@@ -223,30 +367,73 @@ async function applySignedWindowsArtifacts({ distDir, signedDir, packageJsonPath
 }
 
 if (require.main === module) {
-  const [, , command, distDirArg, signingDirArg, packageJsonPathArg = 'package.json'] = process.argv;
-  if (!['prepare', 'apply'].includes(command) || !distDirArg || !signingDirArg) {
+  const [, , command, sourceDirArg, signingDirArg, packageJsonPathArg = 'package.json'] = process.argv;
+  const commands = [
+    'write-update-config',
+    'prepare-application',
+    'apply-application',
+    'prepare-artifacts',
+    'apply-artifacts'
+  ];
+  const signingDirRequired = command !== 'write-update-config';
+  if (
+    !commands.includes(command) ||
+    !sourceDirArg ||
+    (signingDirRequired && !signingDirArg)
+  ) {
     console.error(
-      'Usage: node signpath-windows-artifacts.js <prepare|apply> <distDir> <signingDir> [packageJson]'
+      'Usage: node signpath-windows-artifacts.js ' +
+        '<write-update-config|prepare-application|apply-application|' +
+        'prepare-artifacts|apply-artifacts> <appOrDistDir> [signingDir] [packageJson]'
     );
     process.exitCode = 1;
   } else {
-    const options = {
-      distDir: path.resolve(distDirArg),
-      packageJsonPath: path.resolve(packageJsonPathArg)
+    const packageJsonPath = path.resolve(packageJsonPathArg);
+    const sourceDir = path.resolve(sourceDirArg);
+    const signingDir = signingDirArg ? path.resolve(signingDirArg) : null;
+    const operations = {
+      'write-update-config': () =>
+        writeWindowsAppUpdateConfig({ appDir: sourceDir, packageJsonPath }),
+      'prepare-application': () =>
+        prepareUnsignedWindowsApplication({
+          appDir: sourceDir,
+          inputDir: signingDir,
+          packageJsonPath
+        }),
+      'apply-application': () =>
+        applySignedWindowsApplication({
+          appDir: sourceDir,
+          signedDir: signingDir,
+          packageJsonPath
+        }),
+      'prepare-artifacts': () =>
+        prepareUnsignedWindowsArtifacts({
+          distDir: sourceDir,
+          inputDir: signingDir,
+          packageJsonPath
+        }),
+      'apply-artifacts': () =>
+        applySignedWindowsArtifacts({
+          distDir: sourceDir,
+          signedDir: signingDir,
+          packageJsonPath
+        })
     };
-    const operation =
-      command === 'prepare'
-        ? Promise.resolve(
-            prepareUnsignedWindowsArtifacts({ ...options, inputDir: path.resolve(signingDirArg) })
-          )
-        : applySignedWindowsArtifacts({ ...options, signedDir: path.resolve(signingDirArg) });
+    const operation = Promise.resolve().then(operations[command]);
 
     operation
       .then((result) => {
-        if (command === 'prepare') {
+        if (command === 'write-update-config') {
+          console.log(`Wrote ${result.updateConfigPath}`);
+        } else if (command === 'prepare-application') {
+          console.log(`version=${result.version}`);
+          console.log(`application=${result.application}`);
+        } else if (command === 'prepare-artifacts') {
           console.log(`version=${result.version}`);
           console.log(`installer=${result.installer}`);
           console.log(`portable=${result.portable}`);
+        } else if (command === 'apply-application') {
+          console.log(`Applied signed ${result.application} to the unpacked application`);
         } else {
           console.log(
             `Applied signed ${result.installer} and ${result.portable}; updated ${result.patchedYmlFiles.join(', ')}`
@@ -261,11 +448,17 @@ if (require.main === module) {
 }
 
 module.exports = {
+  expectedWindowsApplication,
   expectedWindowsArtifacts,
+  windowsAppUpdateConfig,
+  writeWindowsAppUpdateConfig,
+  applicationSigningInputPath,
   signingInputPaths,
   assertExactTopLevelWindowsArtifacts,
+  prepareUnsignedWindowsApplication,
   prepareUnsignedWindowsArtifacts,
   patchLatestYamlForSignedFile,
   listExeFiles,
+  applySignedWindowsApplication,
   applySignedWindowsArtifacts
 };

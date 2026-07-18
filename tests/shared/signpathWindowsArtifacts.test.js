@@ -8,13 +8,19 @@ const test = require('node:test');
 const zlib = require('node:zlib');
 
 const {
+  expectedWindowsApplication,
   expectedWindowsArtifacts,
+  windowsAppUpdateConfig,
+  writeWindowsAppUpdateConfig,
+  prepareUnsignedWindowsApplication,
   prepareUnsignedWindowsArtifacts,
   patchLatestYamlForSignedFile,
+  applySignedWindowsApplication,
   applySignedWindowsArtifacts
 } = require('../../scripts/signpath-windows-artifacts');
 
 const VERSION = '0.30.0';
+const APPLICATION = 'Token Monitor.exe';
 const INSTALLER = `Token-Monitor-Setup-${VERSION}.exe`;
 const PORTABLE = `Token-Monitor-${VERSION}.exe`;
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -44,17 +50,21 @@ function openingTagAttributes(xml, tagName) {
   return tags;
 }
 
-test('SignPath configuration restricts every signed PE to the release product metadata', () => {
+test('SignPath configurations restrict every signed PE to the release product metadata', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf8'));
-  const xml = fs.readFileSync(
+  const artifactXml = fs.readFileSync(
     path.join(PROJECT_ROOT, '.github', 'signpath', 'artifact-configuration.xml'),
     'utf8'
   );
+  const applicationXml = fs.readFileSync(
+    path.join(PROJECT_ROOT, '.github', 'signpath', 'application-artifact-configuration.xml'),
+    'utf8'
+  );
 
-  assert.deepEqual(openingTagAttributes(xml, 'parameter'), [
+  assert.deepEqual(openingTagAttributes(artifactXml, 'parameter'), [
     { name: 'version', required: 'true' }
   ]);
-  assert.deepEqual(openingTagAttributes(xml, 'pe-file'), [
+  assert.deepEqual(openingTagAttributes(artifactXml, 'pe-file'), [
     {
       path: 'installer/Token-Monitor-Setup-${version}.exe',
       'product-name': pkg.productName,
@@ -66,6 +76,37 @@ test('SignPath configuration restricts every signed PE to the release product me
       'product-version': '${version}'
     }
   ]);
+  assert.deepEqual(openingTagAttributes(applicationXml, 'parameter'), [
+    { name: 'version', required: 'true' }
+  ]);
+  assert.deepEqual(openingTagAttributes(applicationXml, 'pe-file'), [
+    {
+      path: `application/${pkg.productName}.exe`,
+      'product-name': pkg.productName,
+      'product-version': '${version}'
+    }
+  ]);
+  assert.equal(pkg.build.win.verifyUpdateCodeSignature, true);
+  assert.equal(pkg.build.win.signtoolOptions.publisherName, 'SignPath Foundation');
+});
+
+test('release workflow signs the application before packaging and signs public artifacts last', () => {
+  const workflow = fs.readFileSync(
+    path.join(PROJECT_ROOT, '.github', 'workflows', 'release.yml'),
+    'utf8'
+  );
+  const unpacked = workflow.indexOf('npm run dist:win:dir');
+  const signApplication = workflow.indexOf('artifact-configuration-slug: application');
+  const prepackaged = workflow.indexOf('npm run dist:win:prepackaged');
+  const signArtifacts = workflow.indexOf('artifact-configuration-slug: initial');
+  const rebuildBlockmap = workflow.indexOf('node scripts/signpath-windows-artifacts.js apply-artifacts');
+
+  assert.ok(unpacked >= 0);
+  assert.match(workflow, /path: \$\{\{ runner\.temp \}\}\/signpath-application-input\s/);
+  assert.ok(unpacked < signApplication);
+  assert.ok(signApplication < prepackaged);
+  assert.ok(prepackaged < signArtifacts);
+  assert.ok(signArtifacts < rebuildBlockmap);
 });
 
 function makeFixture(t) {
@@ -73,20 +114,40 @@ function makeFixture(t) {
   const distDir = path.join(root, 'dist');
   const inputDir = path.join(root, 'input');
   const signedDir = path.join(root, 'signed');
+  const appDir = path.join(distDir, 'win-unpacked');
   const packageJsonPath = path.join(root, 'package.json');
-  fs.mkdirSync(distDir);
+  fs.mkdirSync(appDir, { recursive: true });
   fs.writeFileSync(
     packageJsonPath,
     JSON.stringify({
+      name: 'token-monitor',
       version: VERSION,
+      productName: 'Token Monitor',
       build: {
+        win: {
+          verifyUpdateCodeSignature: true,
+          signtoolOptions: { publisherName: 'SignPath Foundation' }
+        },
         nsis: { artifactName: 'Token-Monitor-Setup-${version}.${ext}' },
-        portable: { artifactName: 'Token-Monitor-${version}.${ext}' }
+        portable: { artifactName: 'Token-Monitor-${version}.${ext}' },
+        publish: [{ provider: 'github', owner: 'Javis603', repo: 'token-monitor' }]
       }
     })
   );
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  return { root, distDir, inputDir, signedDir, packageJsonPath };
+  return { root, distDir, inputDir, signedDir, appDir, packageJsonPath };
+}
+
+function writeUnsignedApplication(fixture) {
+  fs.writeFileSync(path.join(fixture.appDir, APPLICATION), 'unsigned-application');
+}
+
+function writeSignedApplication(fixture) {
+  fs.mkdirSync(path.join(fixture.signedDir, 'application'), { recursive: true });
+  fs.writeFileSync(
+    path.join(fixture.signedDir, 'application', APPLICATION),
+    'signed-application-bytes'
+  );
 }
 
 function writeUnsignedArtifacts(fixture) {
@@ -112,6 +173,93 @@ test('expectedWindowsArtifacts resolves the public installer and portable names 
   });
 });
 
+test('expectedWindowsApplication resolves the branded executable from package.json', (t) => {
+  const fixture = makeFixture(t);
+  assert.deepEqual(expectedWindowsApplication(fixture.packageJsonPath), {
+    version: VERSION,
+    productName: 'Token Monitor',
+    application: APPLICATION
+  });
+});
+
+test('writes the updater config skipped by electron-builder prepackaged mode', (t) => {
+  const fixture = makeFixture(t);
+  writeUnsignedApplication(fixture);
+  const expected = [
+    'owner: "Javis603"',
+    'repo: "token-monitor"',
+    'provider: "github"',
+    'updaterCacheDirName: "token-monitor-updater"',
+    'publisherName:',
+    '  - "SignPath Foundation"',
+    ''
+  ].join('\n');
+
+  assert.equal(windowsAppUpdateConfig(fixture.packageJsonPath), expected);
+  const result = writeWindowsAppUpdateConfig(fixture);
+  assert.equal(fs.readFileSync(result.updateConfigPath, 'utf8'), expected);
+});
+
+test('refuses to write an updater config without publisher verification', (t) => {
+  const fixture = makeFixture(t);
+  const pkg = JSON.parse(fs.readFileSync(fixture.packageJsonPath, 'utf8'));
+  pkg.build.win.verifyUpdateCodeSignature = false;
+  fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
+
+  assert.throws(
+    () => windowsAppUpdateConfig(fixture.packageJsonPath),
+    /must explicitly verify the expected code-signing publisher/
+  );
+});
+
+test('refuses updater publish configurations with multiple providers', (t) => {
+  const fixture = makeFixture(t);
+  const pkg = JSON.parse(fs.readFileSync(fixture.packageJsonPath, 'utf8'));
+  pkg.build.publish.push({ provider: 'generic', url: 'https://example.test/updates' });
+  fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
+
+  assert.throws(
+    () => windowsAppUpdateConfig(fixture.packageJsonPath),
+    /require exactly one publish provider/
+  );
+});
+
+test('refuses updater publish fields the prepackaged writer does not preserve', (t) => {
+  const fixture = makeFixture(t);
+  const pkg = JSON.parse(fs.readFileSync(fixture.packageJsonPath, 'utf8'));
+  pkg.build.publish[0].channel = 'beta';
+  fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
+
+  assert.throws(
+    () => windowsAppUpdateConfig(fixture.packageJsonPath),
+    /support exactly the GitHub publish fields owner, provider, repo/
+  );
+});
+
+test('refuses a platform publish override the prepackaged writer would ignore', (t) => {
+  const fixture = makeFixture(t);
+  const pkg = JSON.parse(fs.readFileSync(fixture.packageJsonPath, 'utf8'));
+  pkg.build.win.publish = [{ provider: 'generic', url: 'https://example.test/updates' }];
+  fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
+
+  assert.throws(
+    () => windowsAppUpdateConfig(fixture.packageJsonPath),
+    /do not support a build\.win\.publish override/
+  );
+});
+
+test('refuses prerelease versions whose update channel electron-builder would derive', (t) => {
+  const fixture = makeFixture(t);
+  const pkg = JSON.parse(fs.readFileSync(fixture.packageJsonPath, 'utf8'));
+  pkg.version = '0.31.0-beta.1';
+  fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
+
+  assert.throws(
+    () => windowsAppUpdateConfig(fixture.packageJsonPath),
+    /do not support prerelease update channels/
+  );
+});
+
 test('expectedWindowsArtifacts rejects unsafe output names and output-parameter versions', (t) => {
   const fixture = makeFixture(t);
   const pkg = JSON.parse(fs.readFileSync(fixture.packageJsonPath, 'utf8'));
@@ -123,6 +271,64 @@ test('expectedWindowsArtifacts rejects unsafe output names and output-parameter 
   pkg.build.portable.artifactName = '..\\Token-Monitor-${version}.${ext}';
   fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
   assert.throws(() => expectedWindowsArtifacts(fixture.packageJsonPath), /Unsupported Windows artifactName/);
+});
+
+test('expectedWindowsApplication rejects an unsafe product name', (t) => {
+  const fixture = makeFixture(t);
+  const pkg = JSON.parse(fs.readFileSync(fixture.packageJsonPath, 'utf8'));
+  pkg.productName = '..\\Token Monitor';
+  fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
+  assert.throws(() => expectedWindowsApplication(fixture.packageJsonPath), /Unsupported productName/);
+});
+
+test('prepareUnsignedWindowsApplication creates an exact application signing input', (t) => {
+  const fixture = makeFixture(t);
+  writeUnsignedApplication(fixture);
+  fs.mkdirSync(fixture.inputDir);
+  fs.writeFileSync(path.join(fixture.inputDir, 'stale.exe'), 'stale');
+
+  const result = prepareUnsignedWindowsApplication(fixture);
+
+  assert.equal(result.relativePath, `application/${APPLICATION}`);
+  assert.deepEqual(fs.readdirSync(fixture.inputDir), ['application']);
+  assert.equal(
+    fs.readFileSync(path.join(fixture.inputDir, 'application', APPLICATION), 'utf8'),
+    'unsigned-application'
+  );
+});
+
+test('prepareUnsignedWindowsApplication fails when the branded executable is absent', (t) => {
+  const fixture = makeFixture(t);
+  assert.throws(
+    () => prepareUnsignedWindowsApplication(fixture),
+    /Expected unpacked application executable is missing/
+  );
+});
+
+test('applySignedWindowsApplication replaces only the branded executable', (t) => {
+  const fixture = makeFixture(t);
+  writeUnsignedApplication(fixture);
+  writeSignedApplication(fixture);
+
+  applySignedWindowsApplication(fixture);
+
+  assert.equal(
+    fs.readFileSync(path.join(fixture.appDir, APPLICATION), 'utf8'),
+    'signed-application-bytes'
+  );
+});
+
+test('applySignedWindowsApplication rejects missing or extra signed executables', (t) => {
+  const fixture = makeFixture(t);
+  writeUnsignedApplication(fixture);
+  writeSignedApplication(fixture);
+  fs.writeFileSync(path.join(fixture.signedDir, 'unexpected.exe'), 'unexpected');
+
+  assert.throws(() => applySignedWindowsApplication(fixture), /must contain exactly/);
+  assert.equal(
+    fs.readFileSync(path.join(fixture.appDir, APPLICATION), 'utf8'),
+    'unsigned-application'
+  );
 });
 
 test('prepareUnsignedWindowsArtifacts creates a strict two-directory signing input', (t) => {

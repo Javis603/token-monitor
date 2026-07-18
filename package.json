@@ -17,10 +17,14 @@
     "prepack": "npm run icons",
     "predist:mac": "npm run icons",
     "predist:win": "npm run icons",
+    "predist:win:dir": "npm run icons",
+    "predist:win:prepackaged": "npm run icons",
     "predist:linux": "npm run icons",
     "pack": "electron-builder --dir",
     "dist:mac": "electron-builder --mac --arm64 --publish never",
     "dist:win": "electron-builder --win --x64 --publish never",
+    "dist:win:dir": "electron-builder --win dir --x64 --publish never",
+    "dist:win:prepackaged": "electron-builder --prepackaged dist/win-unpacked --win nsis portable --x64 --publish never",
     "dist:linux": "electron-builder --linux --x64 --publish never",
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "lint": "eslint .",
@@ -83,7 +87,11 @@
           ]
         }
       ],
-      "icon": "build/icons/icon.ico"
+      "icon": "build/icons/icon.ico",
+      "verifyUpdateCodeSignature": true,
+      "signtoolOptions": {
+        "publisherName": "SignPath Foundation"
+      }
     },
     "linux": {
       "artifactName": "Token-Monitor-${version}.${ext}",
