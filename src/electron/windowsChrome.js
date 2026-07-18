@@ -53,8 +53,8 @@ function setUintAttribute(api, hwnd, attribute, value) {
   api.DwmSetWindowAttribute(hwnd, attribute, buf, 4);
 }
 
-// `round` is skipped for the docked floating bubble, whose inner edge must stay
-// square against the screen edge.
+// The collapsed floating bubble can be dragged anywhere, so it keeps the same
+// anti-aliased DWM rounding as the expanded widget.
 function applyWindowsChrome(win, { round = false } = {}) {
   if (process.platform !== 'win32') return;
   if (!win || win.isDestroyed?.()) return;

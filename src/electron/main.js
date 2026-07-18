@@ -1562,7 +1562,7 @@ function applyWindowSettings() {
 }
 
 function nativeBlurEnabled(source = settings) {
-  return floatingBubbleNativeGlassEnabled(source, floatingBubbleState, process.platform);
+  return floatingBubbleNativeGlassEnabled(source);
 }
 
 function keepNativeBlurActive() {
@@ -3292,7 +3292,7 @@ function createWindow(boundsOverride, options = {}) {
   });
   mainWindow = win;
   mainWindowChrome = { collapsedFloatingBubble };
-  applyWindowsChrome(win, { round: !collapsedFloatingBubble });
+  applyWindowsChrome(win, { round: true });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -3332,11 +3332,14 @@ function createWindow(boundsOverride, options = {}) {
   loadWindowFile(win, {
     waitForContent: options.waitForContent === true,
     inactive: options.inactive === true,
-    query: floatingBubbleInitialRendererQuery(floatingBubbleState, {
-      collapsedWindow: collapsedFloatingBubble,
-      suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
-      viewState: rendererViewState
-    })
+    query: {
+      ...floatingBubbleInitialRendererQuery(floatingBubbleState, {
+        collapsedWindow: collapsedFloatingBubble,
+        suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
+        viewState: rendererViewState
+      }),
+      ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {})
+    }
   });
 }
 

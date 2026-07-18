@@ -18,9 +18,8 @@ function canUseFloatingBubble(settings = {}) {
     settings.windowBehavior !== 'desktop';
 }
 
-function floatingBubbleNativeGlassEnabled(settings = {}, state = {}, platform = process.platform) {
-  if (platform === 'win32' && state?.collapsed === true) return false;
-  return settings?.systemGlass !== false && state?.collapsed !== true;
+function floatingBubbleNativeGlassEnabled(settings = {}) {
+  return settings?.systemGlass !== false;
 }
 
 function floatingBubbleCollapsedArea(display, platform = process.platform) {
@@ -36,7 +35,7 @@ function floatingBubbleWindowChrome(platform = process.platform, collapsed = fal
   if (platform !== 'win32' || collapsed !== true) return {};
   return {
     hasShadow: false,
-    roundedCorners: false,
+    roundedCorners: true,
     thickFrame: false
   };
 }

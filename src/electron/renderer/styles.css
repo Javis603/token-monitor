@@ -11,13 +11,17 @@
   --panel-rgb: 16, 21, 30;
   --sunken-rgb: 4, 8, 13;
   --glass-alpha: 0.68;
-  --bubble-alpha: 0.78;
-  --bubble-blur: 18px;
   --line-alpha: 0.138;
   --line-strong-alpha: 0.238;
   --control-alpha: 0.049;
   --highlight-alpha: 0.07;
   --glass: rgba(var(--glass-rgb), var(--glass-alpha));
+  --glass-surface:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), var(--highlight-alpha)), rgba(var(--overlay-rgb), 0.022)),
+    linear-gradient(135deg, rgba(var(--overlay-rgb), 0.035), rgba(0, 0, 0, 0.09)),
+    var(--glass);
+  --glass-filter: blur(32px) saturate(115%);
+  --floating-bubble-radius: 17px;
   --glass-strong: rgba(31, 35, 41, 0.56);
   --glass-soft: rgba(var(--overlay-rgb), 0.05);
   --line: rgba(var(--line-rgb), var(--line-alpha));
@@ -73,13 +77,10 @@ input, textarea, [contenteditable="true"] {
   border: 1px solid var(--line-strong);
   border-radius: 14px;
   clip-path: inset(0 round 14px);
-  background:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), var(--highlight-alpha)), rgba(var(--overlay-rgb), 0.022)),
-    linear-gradient(135deg, rgba(var(--overlay-rgb), 0.035), rgba(0, 0, 0, 0.09)),
-    var(--glass);
+  background: var(--glass-surface);
   box-shadow: 0 22px 55px var(--shadow), inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
-  -webkit-backdrop-filter: blur(32px) saturate(115%);
-  backdrop-filter: blur(32px) saturate(115%);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
 }
 html.is-windows, html.is-windows body {
   border-radius: 8px;
@@ -121,15 +122,23 @@ html.is-mac-legacy .shell {
   width: 100%;
   height: 100%;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(15, 18, 24, var(--bubble-alpha));
-  color: #f7f9fb;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--floating-bubble-radius);
+  background: var(--glass-surface);
+  color: var(--number);
   cursor: grab;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 0 0 1px rgba(0, 0, 0, 0.16);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
   outline: none;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
-  -webkit-backdrop-filter: blur(var(--bubble-blur)) saturate(130%);
-  backdrop-filter: blur(var(--bubble-blur)) saturate(130%);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
+.system-glass-disabled .floating-bubble-tab {
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .floating-bubble-tab span {
   display: block;
@@ -157,11 +166,11 @@ body.floating-bubble-collapsed-right {
 }
 html.floating-bubble-collapsed-left,
 body.floating-bubble-collapsed-left {
-  border-radius: 0;
+  border-radius: var(--floating-bubble-radius);
 }
 html.floating-bubble-collapsed-right,
 body.floating-bubble-collapsed-right {
-  border-radius: 0;
+  border-radius: var(--floating-bubble-radius);
 }
 html.floating-bubble-collapsed-left body .shell,
 html.floating-bubble-collapsed-right body .shell,
@@ -173,12 +182,22 @@ body.floating-bubble-collapsed-right .shell {
 html.floating-bubble-collapsed-left body .floating-bubble-tab,
 body.floating-bubble-collapsed-left .floating-bubble-tab {
   display: flex;
-  border-radius: 0;
+  border-radius: var(--floating-bubble-radius);
 }
 html.floating-bubble-collapsed-right body .floating-bubble-tab,
 body.floating-bubble-collapsed-right .floating-bubble-tab {
   display: flex;
-  border-radius: 0;
+  border-radius: var(--floating-bubble-radius);
+}
+html.is-windows.floating-bubble-collapsed-left,
+html.is-windows.floating-bubble-collapsed-right,
+html.is-windows body.floating-bubble-collapsed-left,
+html.is-windows body.floating-bubble-collapsed-right,
+html.is-windows.floating-bubble-collapsed-left body .floating-bubble-tab,
+html.is-windows.floating-bubble-collapsed-right body .floating-bubble-tab,
+body.is-windows.floating-bubble-collapsed-left .floating-bubble-tab,
+body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
+  border-radius: 8px;
 }
 .floating-bubble-tab:hover {
   color: var(--text);

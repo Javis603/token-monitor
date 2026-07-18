@@ -367,9 +367,12 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /secondaryWindow/);
   assert.match(renderLimitSessionsIcon, /trayProviderImages\[pick\.providerRecord\.provider\]/);
   assert.match(renderLimitSessionsIcon, /drawProviderImage\(ctx, entry\.image/);
-  assert.match(drawProviderImage, /rgba\(255, 255, 255, 0\.9\)/);
-  assert.match(drawProviderImage, /roundedRectPath\(ctx, x, y, size, size/);
-  assert.match(app, /providerBackdrop:\s*true/);
+  assert.match(drawProviderImage, /shadowColor/);
+  assert.match(drawProviderImage, /shadowBlur/);
+  assert.doesNotMatch(drawProviderImage, /fillRect|\.fill\(/);
+  assert.match(app, /providerContrastHalo:\s*true/);
+  assert.match(app, /function floatingBubbleGeneratedColors\(\)/);
+  assert.match(app, /resolvedThemeColor\('text'\)/);
   assert.match(renderLimitSessionsIcon, /`500 \$\{fontSize\}px/);
   assert.match(renderLimitSessionsIcon, /formatPercent\(limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);

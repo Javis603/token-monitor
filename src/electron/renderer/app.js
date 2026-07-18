@@ -4245,13 +4245,13 @@ function applyControlLayout(settingsInTitlebar) {
 function applyAppearanceSettings(settings) {
   const opacity = clamp(settings?.glassOpacity ?? 68, 0, 100) / 100;
   const depth = clamp(settings?.glassBlur ?? 32, 0, 100) / 100;
+  const systemGlassDisabled = settings?.systemGlass === false;
   document.documentElement.style.setProperty('--glass-alpha', opacity.toFixed(2));
-  document.documentElement.style.setProperty('--bubble-alpha', (0.62 + opacity * 0.22).toFixed(2));
-  document.documentElement.style.setProperty('--bubble-blur', settings?.systemGlass === false ? '0px' : `${Math.round(10 + depth * 24)}px`);
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.style.setProperty('--highlight-alpha', (0.045 + depth * 0.06).toFixed(3));
+  document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
   applyReduceMotionPreference(settings?.reduceMotion);
   // Only full settings objects carry themeColors; glass/zoom preview patches
   // omit it, so we must not wipe theme overrides mid-slider-drag.
@@ -4677,11 +4677,19 @@ function normalizeWindowToggleShortcutValue(value) {
   return windowShortcutApi.normalizeWindowToggleShortcut(value);
 }
 
-const BUBBLE_CONTENT_MIN_W = 18;
+const BUBBLE_CONTENT_MIN_W = 34;
 const BUBBLE_CONTENT_HEIGHT = 34;
 const BUBBLE_CONTENT_PAD_X = 10;
-// The tray bars are black (a macOS menu-bar template); on the bubble's dark glass they need light ink.
-const BUBBLE_BARS_COLORS = { track: 'rgba(255, 255, 255, 0.22)', fill: 'rgba(255, 255, 255, 0.92)' };
+
+function floatingBubbleGeneratedColors() {
+  const text = resolvedThemeColor('text');
+  const rgb = themePresetsApi.hexToRgbTriplet(text);
+  return {
+    track: `rgba(${rgb}, 0.22)`,
+    fill: `rgba(${rgb}, 0.92)`,
+    text: `rgba(${rgb}, 0.92)`
+  };
+}
 
 function renderFloatingBubbleContent() {
   const el = els.floatingBubbleContent;
@@ -4689,9 +4697,9 @@ function renderFloatingBubbleContent() {
   const mode = state.settings?.floatingBubbleContent || 'icon';
   if (window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) {
     const dataUrl = state.stats
-      ? trayDataUrlForMode(mode, 44, BUBBLE_BARS_COLORS, {
+      ? trayDataUrlForMode(mode, 44, floatingBubbleGeneratedColors(), {
           contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
-          providerBackdrop: true
+          providerContrastHalo: true
         })
       : null;
     if (dataUrl) {
@@ -6973,11 +6981,14 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 const trayProviderImages = {};
 const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
 
-function drawProviderImage(ctx, image, x, y, size, backdrop = false) {
-  if (backdrop) {
-    roundedRectPath(ctx, x, y, size, size, Math.max(2, Math.round(size * 0.24)));
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.fill();
+function drawProviderImage(ctx, image, x, y, size, contrastHalo = false) {
+  if (contrastHalo) {
+    const lightSurface = themePresetsApi.isLightHex(resolvedThemeColor('bg'));
+    ctx.save();
+    ctx.shadowColor = lightSurface ? 'rgba(0, 0, 0, 0.58)' : 'rgba(255, 255, 255, 0.82)';
+    ctx.shadowBlur = Math.max(2, Math.round(size * 0.1));
+    ctx.drawImage(image, x, y, size, size);
+    ctx.restore();
   }
   ctx.drawImage(image, x, y, size, size);
 }
@@ -6999,7 +7010,7 @@ function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors =
   ctx.clearRect(0, 0, layout.width, layout.height);
 
   if (providerImage) {
-    drawProviderImage(ctx, providerImage, layout.padX, layout.iconY, layout.iconSize, options.providerBackdrop === true);
+    drawProviderImage(ctx, providerImage, layout.padX, layout.iconY, layout.iconSize, options.providerContrastHalo === true);
   }
 
   function drawBar(y, percent) {
@@ -7126,7 +7137,7 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
   const centerY = height / 2;
   entries.forEach((entry, index) => {
     if (entry.image) {
-      drawProviderImage(ctx, entry.image, x, layout.iconY, iconSize, options.providerBackdrop === true);
+      drawProviderImage(ctx, entry.image, x, layout.iconY, iconSize, options.providerContrastHalo === true);
       x += iconSize + gap;
     }
     ctx.fillText(entry.text, x, centerY + 1);
