@@ -86,6 +86,7 @@ const {
   sessionUsageArchiveDate,
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
+const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups, carryDeviceHistory } = require('../shared/usage');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
@@ -1777,6 +1778,7 @@ function startSyncCollector() {
     agentRuntime: 'electron-widget',
     intervalMs: collectorIntervalMs(),
     historyEnabled: settings.historyEnabled !== false,
+    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
@@ -1850,6 +1852,7 @@ function startHostCollector() {
     agentRuntime: 'electron-widget',
     intervalMs: collectorIntervalMs(),
     historyEnabled: settings.historyEnabled !== false,
+    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
@@ -2086,6 +2089,7 @@ function startLocalCollector() {
     agentRuntime: 'electron-widget',
     intervalMs: collectorIntervalMs(),
     historyEnabled: settings.historyEnabled !== false,
+    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
@@ -3547,6 +3551,7 @@ app.whenReady().then(() => {
     if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
     try {
       clearSessionUsageArchive();
+      clearDailyHistoryArchive();
       sessionUsageArchive = normalizeSessionUsageArchive({});
       return { ok: true };
     } catch (error) {

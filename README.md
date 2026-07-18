@@ -191,7 +191,7 @@ The widget chooses local vs sync mode based on Settings → Multi-device Sync. T
 
 ## Session data retention
 
-The activity heatmap and trends dashboard are built from the session files each tool still keeps on disk. **Claude Code prunes its own transcripts after 30 days by default** (`cleanupPeriodDays`), so its share of any older day drops out of those views — a day spent only in Claude Code fades to empty, while a day you also used other tools keeps their contribution. Today/Month/All-time totals hold up better: **Preserve deleted session usage** (Settings → Collection) keeps the period totals of sessions a tool removes, though it cannot rebuild the daily history the heatmap draws.
+The activity heatmap and trends dashboard are built from the session files each tool still keeps on disk. **Claude Code prunes its own transcripts after 30 days by default** (`cleanupPeriodDays`). With **Preserve deleted session usage** enabled (Settings → Collection), Token Monitor retains the daily client/model observations it has already seen for the heatmap's rolling 370-day window, alongside Today/Month/All-time session totals. Later source cleanup therefore no longer erases an observed day, but data deleted before Token Monitor first observed it cannot be recovered by this archive.
 
 To keep the heatmap's full rolling year, raise Claude Code's retention in `~/.claude/settings.json` before the window passes:
 

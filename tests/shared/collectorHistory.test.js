@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -44,6 +47,51 @@ test('collectHistoryOnce returns null when there are no clients', async () => {
   const history = await collectHistoryOnce({ clients: '', runGraph: async () => { called = true; return SAMPLE_GRAPH; } });
   assert.equal(history, null);
   assert.equal(called, false);
+});
+
+test('collectHistoryOnce retains a prior client observation when a later graph loses it', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-daily-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const options = {
+    clients: 'claude,codex',
+    todayKey: '2026-06-07',
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath }
+  };
+  await collectHistoryOnce({
+    ...options,
+    runGraph: async () => ({ contributions: [{ date: '2026-06-06', clients: [
+      { client: 'claude', modelId: 'opus', tokens: { input: 100 }, cost: 4, messages: 5 },
+      { client: 'codex', modelId: 'gpt', tokens: { input: 50 }, cost: 2, messages: 3 }
+    ] }] })
+  });
+  const restored = await collectHistoryOnce({
+    ...options,
+    runGraph: async () => ({ contributions: [{ date: '2026-06-06', clients: [
+      { client: 'codex', modelId: 'gpt', tokens: { input: 60 }, cost: 2.5, messages: 4 }
+    ] }] })
+  });
+  assert.equal(restored.daily[0].tokens, 160);
+  assert.equal(restored.daily[0].perClient.claude.tokens, 100);
+  assert.equal(restored.daily[0].perClient.codex.tokens, 60);
+});
+
+test('collectHistoryOnce falls back to the current graph when archive persistence fails', async () => {
+  const messages = [];
+  const history = await collectHistoryOnce({
+    clients: 'claude',
+    todayKey: '2026-06-07',
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: {
+      readJson: () => ({}),
+      writeJsonAtomic: () => { throw new Error('disk full'); }
+    },
+    logger: (message) => messages.push(message),
+    runGraph: async () => SAMPLE_GRAPH
+  });
+  assert.equal(history.daily[0].tokens, 30);
+  assert.match(messages.at(-1), /daily history archive failed: disk full/);
 });
 
 test('collectHistoryOnce merges Proma history with tokscale graph history', async () => {
@@ -94,6 +142,17 @@ test('collectUsageOnce sends explicit null history when history collection is di
     limitsEnabled: false
   });
   assert.equal(summary.history, null);
+});
+
+test('collectUsageOnce omits history entirely on a non-history tick', async () => {
+  const summary = await collectUsageOnce({
+    clients: '',
+    deviceId: 'device-a',
+    historyEnabled: true,
+    includeHistory: false,
+    limitsEnabled: false
+  });
+  assert.equal(Object.hasOwn(summary, 'history'), false);
 });
 
 test('collectUsageOnce includes Proma history without starting tokscale graph', async () => {

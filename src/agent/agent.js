@@ -39,7 +39,24 @@ const opencodeCookie = String(process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '').t
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
 
-const collectorOptions = { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent', projectsEnabled, historyEnabled, historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS), limitsEnabled, limitProviders, limitsRefreshMs, wslScanEnabled, opencodeCookie };
+const collectorOptions = {
+  clients,
+  allTimeSince,
+  commandTimeoutMs,
+  deviceId,
+  agentVersion: appVersion(),
+  agentRuntime: 'headless-agent',
+  projectsEnabled,
+  historyEnabled,
+  historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
+  dailyHistoryArchiveEnabled: sessionUsageArchiveEnabled,
+  dailyHistoryArchiveWriteEnabled: !dryRun,
+  limitsEnabled,
+  limitProviders,
+  limitsRefreshMs,
+  wslScanEnabled,
+  opencodeCookie
+};
 let sessionUsageArchive;
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {

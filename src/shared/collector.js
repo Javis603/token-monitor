@@ -15,6 +15,7 @@ const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale, mergePeriods } 
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
 const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
+const { retainDailyHistory } = require('./dailyHistoryArchive');
 const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
@@ -548,18 +549,37 @@ async function collectHistoryOnce(options) {
   const clients = normalizeClientsCsv(options.clients);
   if (options.historyEnabled === false) return null;
   const histories = [];
+  const rawGraphs = [];
   const runGraph = options.runGraph || runTokscaleGraph;
   const capDays = Number.isFinite(options.capDays) ? options.capDays : HISTORY_CAP_DAYS;
   const todayKey = options.todayKey || localTodayKey();
   if (clients) {
     try {
       const graphJson = await runGraph({ clients, commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS });
+      rawGraphs.push(graphJson);
       histories.push(normalizeHistory(parseGraphResult(graphJson), { capDays, todayKey }));
     } catch (error) {
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
   }
-  if (options.promaGraph) histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
+  if (options.promaGraph) {
+    rawGraphs.push(options.promaGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
+  }
+  if (options.dailyHistoryArchiveEnabled) {
+    try {
+      const retainedGraph = retainDailyHistory(rawGraphs, {
+        ...(options.dailyHistoryArchiveOptions || {}),
+        todayKey,
+        capDays,
+        writeEnabled: options.dailyHistoryArchiveWriteEnabled !== false
+      });
+      const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
+      return retained.daily.length || retained.monthly.length ? retained : null;
+    } catch (error) {
+      if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
+    }
+  }
   if (histories.length === 0) return null;
   const history = histories.length === 1 ? histories[0] : mergeHistories(histories, { todayKey });
   return history.daily.length || history.monthly.length ? history : null;
@@ -799,6 +819,9 @@ async function collectUsageOnce(options) {
       capDays: options.historyCapDays,
       todayKey: localTodayKey(collectedAt),
       runGraph: options.runGraph,
+      dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
+      dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
+      dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
       logger: options.logger
     });
     if (history) summary.history = history;
