@@ -304,9 +304,11 @@ function coerceHistory(raw) {
   };
 }
 
+const HISTORY_PREVIEW_DAILY_DAYS = 26 * 7;
+
 // Trim a full History to a compact, per-client-free payload for /api/stats.
 function historyPreview(history, options = {}) {
-  const dailyDays = Number.isFinite(options.dailyDays) ? options.dailyDays : 30;
+  const dailyDays = Number.isFinite(options.dailyDays) ? options.dailyDays : HISTORY_PREVIEW_DAILY_DAYS;
   const monthlyMonths = Number.isFinite(options.monthlyMonths) ? options.monthlyMonths : 12;
   const h = coerceHistory(history);
   const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs) }));
@@ -340,6 +342,7 @@ function historyRevision(history) {
 }
 
 module.exports = {
+  HISTORY_PREVIEW_DAILY_DAYS,
   num, sumTokens, parseGraphResult, computeIntensities,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision

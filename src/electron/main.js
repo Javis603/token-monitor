@@ -126,6 +126,9 @@ const {
 const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
+const { resolveMacWidgetSnapshotPath, updateMacWidgetSnapshot } = require('./macWidgetBridge');
+const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
+const { DEFAULT_WIDGET_KIND, requestMacWidgetReload } = require('./macWidgetReloader');
 const linuxAutostart = require('./linuxAutostart');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
@@ -258,6 +261,16 @@ function normalizeHomeLimitAccountCount(value) {
   if (!Number.isFinite(count)) return HOME_LIMIT_ACCOUNT_COUNT_DEFAULT;
   return Math.max(1, Math.min(HOME_LIMIT_ACCOUNT_COUNT_MAX, count));
 }
+
+let pendingMacWidgetOpen = null;
+app.on('open-url', (event, url) => {
+  const urlScheme = macWidgetConfiguration()?.urlScheme || 'token-monitor';
+  const destination = parseMacWidgetDeepLink(url, urlScheme);
+  if (!destination) return;
+  event.preventDefault();
+  pendingMacWidgetOpen = destination;
+  if (app.isReady()) setImmediate(openMainWindowFromWidget);
+});
 
 function defaultSettings() {
   const envHubUrl = process.env.TOKEN_MONITOR_HUB_URL || '';
@@ -2218,6 +2231,9 @@ let lastCollectedDevice = null;
 let latestHubStats = null;
 let tray = null;
 let latestStats = null;
+let pendingMacWidgetStats = null;
+let macWidgetWriteInFlight = false;
+let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
@@ -2581,11 +2597,97 @@ function injectLocalDeviceStatus(stats) {
   return stats;
 }
 
+function macWidgetConfiguration() {
+  if (process.platform !== 'darwin') return null;
+  if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
+
+  let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
+  let urlScheme = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || 'token-monitor').trim();
+  let snapshotFileName = 'snapshot.json';
+  let widgetKind = DEFAULT_WIDGET_KIND;
+  const configCandidates = [
+    path.join(process.resourcesPath, 'token-monitor-widget.json'),
+    path.resolve(__dirname, '..', '..', 'build', 'macos-widget', 'widget-config.json')
+  ];
+  if (!appGroup) {
+    for (const configPath of configCandidates) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        appGroup = String(config.appGroup || '').trim();
+        urlScheme = String(config.urlScheme || urlScheme).trim();
+        widgetKind = String(config.widgetKind || widgetKind).trim();
+        snapshotFileName = String(config.snapshotFileName || snapshotFileName).trim();
+        if (appGroup) break;
+      } catch (_) {}
+    }
+  }
+  const snapshotPath = resolveMacWidgetSnapshotPath({
+    appGroup,
+    home: app.getPath('home'),
+    snapshotFileName
+  });
+  if (!snapshotPath) {
+    cachedMacWidgetConfiguration = null;
+    return cachedMacWidgetConfiguration;
+  }
+  cachedMacWidgetConfiguration = {
+    appGroup,
+    snapshotPath,
+    widgetKind,
+    urlScheme: /^[A-Za-z][A-Za-z0-9+.-]*$/.test(urlScheme) ? urlScheme : 'token-monitor'
+  };
+  return cachedMacWidgetConfiguration;
+}
+
+function scheduleMacWidgetSnapshot(stats) {
+  if (process.platform !== 'darwin' || !stats) return;
+  pendingMacWidgetStats = stats;
+  if (macWidgetWriteInFlight) return;
+  macWidgetWriteInFlight = true;
+  setImmediate(async () => {
+    try {
+      while (pendingMacWidgetStats) {
+        const nextStats = pendingMacWidgetStats;
+        pendingMacWidgetStats = null;
+        const config = macWidgetConfiguration();
+        if (!config) break;
+        const result = await updateMacWidgetSnapshot(nextStats, {
+          snapshotPath: config.snapshotPath,
+          snapshotOptions: {
+            presentation: {
+              defaultPeriod: settings?.lastViewState?.period,
+              currencyCode: settings?.currency,
+              currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
+              compactNumbers: settings?.showCompactTotalTokens !== false,
+              showCost: true,
+              locale: settings?.language,
+              theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
+            }
+          },
+          logger: (message) => console.warn(message)
+        });
+        if (result.ok && result.changed !== false) {
+          requestMacWidgetReload({
+            widgetKind: config.widgetKind,
+            logger: (message) => console.warn(message)
+          });
+        }
+      }
+    } catch (error) {
+      console.warn(`[mac-widget] update failed: ${error?.message || error}`);
+    } finally {
+      macWidgetWriteInFlight = false;
+      if (pendingMacWidgetStats) scheduleMacWidgetSnapshot(pendingMacWidgetStats);
+    }
+  });
+}
+
 function sendPush(payload) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    scheduleMacWidgetSnapshot(latestStats);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
@@ -2812,6 +2914,27 @@ function showPopover() {
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
   setTimeout(() => { suppressNextBlurHide = false; }, 250);
+}
+
+function openMainWindowFromWidget() {
+  if (!app.isReady() || !mainWindow || mainWindow.isDestroyed()) return;
+  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
+  pendingMacWidgetOpen = null;
+  updateRendererViewState({ breakdown: destination.view });
+  const sendDestination = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (destination.settings) mainWindow.webContents.send('settings:open');
+    else mainWindow.webContents.send('view:open', destination.view);
+  };
+  if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendDestination);
+  else sendDestination();
+  if (settings?.trayMode && tray) {
+    showPopover();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 function hidePopover() {
@@ -4176,6 +4299,7 @@ app.whenReady().then(() => {
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   ensureTray();
+  if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
   startMode();
