@@ -88,7 +88,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 - **자체 호스트 동기화** — 위젯 내 hub, Node CLI hub, Cloudflare Worker
 - **iOS 위젯** — Worker hub + Widgy, Scriptable
 - **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
-- **프라이버시 우선** — 요약 숫자만 기기 밖으로 나감
+- **프라이버시 우선** — 프롬프트, 응답, 소스 코드, 파일 내용은 모두 기기에만 보관
 
 | 한도 보기 | 기기 보기 | 모델 보기 |
 |:---:|:---:|:---:|

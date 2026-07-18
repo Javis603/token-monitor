@@ -88,7 +88,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Self-hosted sync backend** (in-widget hub, Node CLI hub, or Cloudflare Worker)
 - **iOS widget support** via Widgy and Scriptable through the Worker hub
 - **Discord Rich Presence** to broadcast today's tokens, cost, and top client (opt-in)
-- **Privacy-first:** only summary numbers ever leave your machine
+- **Privacy-first:** prompts, responses, source code, and file contents stay on your machine
 
 | Limits View | Devices View | Models View |
 |:---:|:---:|:---:|

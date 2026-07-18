@@ -88,7 +88,7 @@ Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分�
 - **自架同步後端**：小工具內 hub、Node CLI hub 或 Cloudflare Worker
 - **iOS 小工具支援**：透過 Worker hub 搭配 Widgy、Scriptable
 - **Discord Rich Presence**：將今日 Token、花費與主要工具廣播到你的 Discord 個人檔案（需手動開啟）
-- **隱私優先**：只有摘要數字會離開你的機器
+- **隱私優先**：提示詞、回應、原始碼與檔案內容都留在你的機器上
 
 | 額度檢視 | 裝置檢視 | 模型檢視 |
 |:---:|:---:|:---:|
