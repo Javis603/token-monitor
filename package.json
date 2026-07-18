@@ -12,7 +12,10 @@
     "widget": "electron .",
     "dev": "electron .",
     "test": "node --test \"tests/**/*.test.js\"",
+    "build:mac-widget": "node scripts/build-macos-widget.js",
     "sync:worker": "node scripts/sync-worker-shared.js",
+    "predist:mac": "TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 npm run build:mac-widget",
+    "predist:mac:x64": "TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 npm run build:mac-widget",
     "pack": "electron-builder --dir",
     "dist:mac": "electron-builder --mac --arm64 --publish never",
     "dist:mac:x64": "electron-builder --mac --x64 --publish never",
@@ -50,10 +53,37 @@
         "zip"
       ],
       "forceCodeSigning": true,
+      "minimumSystemVersion": "14.0",
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.png",
+      "entitlements": "build/macos-widget/TokenMonitor.entitlements",
+      "sign": "scripts/sign-macos-with-widget.js",
+      "extraFiles": [
+        {
+          "from": "build/macos-widget/TokenMonitorWidget.appex",
+          "to": "PlugIns/TokenMonitorWidget.appex"
+        }
+      ],
+      "extraResources": [
+        {
+          "from": "build/macos-widget/widget-config.json",
+          "to": "token-monitor-widget.json"
+        },
+        {
+          "from": "build/macos-widget/TokenMonitorWidgetReloader",
+          "to": "TokenMonitorWidgetReloader"
+        }
+      ],
       "extendInfo": {
-        "LSUIElement": true
+        "LSUIElement": true,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "com.javis.tokenmonitor.widget",
+            "CFBundleURLSchemes": [
+              "token-monitor"
+            ]
+          }
+        ]
       }
     },
     "win": {
