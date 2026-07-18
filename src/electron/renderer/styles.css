@@ -556,6 +556,11 @@ span.settings-note.settings-item-desc {
   width: auto;
   max-width: 58%;
 }
+.settings-panel .settings-item > input[type="number"] {
+  flex: 0 0 64px;
+  width: 64px;
+  text-align: right;
+}
 /* Inline text options (Codex-style): plain labels, the active one gets a soft pill. */
 .inline-options { display: inline-flex; align-items: center; gap: 2px; }
 .settings-panel .inline-option {

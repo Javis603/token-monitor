@@ -3397,7 +3397,7 @@ function homeLimitRows() {
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
     colors: clientColors,
-    limit: 3,
+    limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
@@ -5629,6 +5629,26 @@ function renderHomeLimitProviderList() {
   statusText.textContent = t('settings.home.showLimitBars');
   statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
   statusLabel.append(statusInput, statusText);
+  const countLabel = document.createElement('label');
+  countLabel.className = 'settings-item home-limit-account-count-setting';
+  const countText = document.createElement('span');
+  countText.className = 'settings-item-text';
+  const countTitle = document.createElement('span');
+  countTitle.className = 'settings-item-title';
+  countTitle.textContent = t('settings.home.limitAccountCount');
+  countText.append(countTitle);
+  const countInput = document.createElement('input');
+  countInput.type = 'number';
+  countInput.min = '1';
+  countInput.max = '12';
+  countInput.step = '1';
+  countInput.inputMode = 'numeric';
+  countInput.value = String(state.settings?.homeLimitAccountCount ?? 3);
+  countInput.addEventListener('change', async () => {
+    await saveSettings({ homeLimitAccountCount: Number(countInput.value) });
+    renderHomeIfVisible();
+  });
+  countLabel.append(countText, countInput);
   const header = document.createElement('div');
   header.className = 'settings-note-row home-limit-provider-header';
   const note = document.createElement('p');
@@ -5657,7 +5677,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(statusLabel, header);
+  wrap.append(statusLabel, countLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
