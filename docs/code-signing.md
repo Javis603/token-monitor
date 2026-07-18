@@ -32,7 +32,7 @@ Every signing request must originate from this repository's GitHub Actions workf
 
 The workflow submits both Windows executables together in one version-restricted archive. SignPath requires exactly one installer and one portable executable. CI then rejects missing or unexpected executables, regenerates the installer's differential-update metadata from the signed bytes, and verifies both Authenticode signatures before publishing.
 
-The version-controlled SignPath artifact configuration is [`.signpath/artifact-configuration.xml`](../.signpath/artifact-configuration.xml). Its structure and the `initial` configuration in SignPath must remain identical.
+The version-controlled SignPath artifact configuration is [`.github/signpath/artifact-configuration.xml`](../.github/signpath/artifact-configuration.xml). Its structure and the `initial` configuration in SignPath must remain identical.
 
 ## Team roles
 

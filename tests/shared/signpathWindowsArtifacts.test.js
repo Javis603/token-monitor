@@ -17,6 +17,7 @@ const {
 const VERSION = '0.30.0';
 const INSTALLER = `Token-Monitor-Setup-${VERSION}.exe`;
 const PORTABLE = `Token-Monitor-${VERSION}.exe`;
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const SAMPLE_YAML = [
   `version: ${VERSION}`,
   'files:',
@@ -29,6 +30,43 @@ const SAMPLE_YAML = [
   "releaseDate: '2026-07-18T00:00:00.000Z'",
   ''
 ].join('\n');
+
+function openingTagAttributes(xml, tagName) {
+  const tags = [];
+  const tagPattern = new RegExp(`<${tagName}\\b([^>]*)>`, 'g');
+  for (const tagMatch of xml.matchAll(tagPattern)) {
+    const attributes = {};
+    for (const attributeMatch of tagMatch[1].matchAll(/([\w-]+)="([^"]*)"/g)) {
+      attributes[attributeMatch[1]] = attributeMatch[2];
+    }
+    tags.push(attributes);
+  }
+  return tags;
+}
+
+test('SignPath configuration restricts every signed PE to the release product metadata', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf8'));
+  const xml = fs.readFileSync(
+    path.join(PROJECT_ROOT, '.github', 'signpath', 'artifact-configuration.xml'),
+    'utf8'
+  );
+
+  assert.deepEqual(openingTagAttributes(xml, 'parameter'), [
+    { name: 'version', required: 'true' }
+  ]);
+  assert.deepEqual(openingTagAttributes(xml, 'pe-file'), [
+    {
+      path: 'installer/Token-Monitor-Setup-${version}.exe',
+      'product-name': pkg.productName,
+      'product-version': '${version}'
+    },
+    {
+      path: 'portable/Token-Monitor-${version}.exe',
+      'product-name': pkg.productName,
+      'product-version': '${version}'
+    }
+  ]);
+});
 
 function makeFixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-signpath-'));
