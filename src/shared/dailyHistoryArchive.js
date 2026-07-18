@@ -231,7 +231,13 @@ function clearDailyHistoryArchive(options = {}) {
 function retainDailyHistory(graphs, options = {}) {
   const previous = readDailyHistoryArchive(options);
   const next = captureDailyHistoryArchive(previous, graphs, options);
-  if (options.writeEnabled !== false && !isDeepStrictEqual(previous, next)) {
+  // Ownership can change while a graph scan is running (for example, a
+  // headless agent starts after Electron's collector tick begins). Resolve a
+  // lazy guard immediately before the write instead of freezing it at startup.
+  const writeEnabled = typeof options.writeEnabled === 'function'
+    ? options.writeEnabled() !== false
+    : options.writeEnabled !== false;
+  if (writeEnabled && !isDeepStrictEqual(previous, next)) {
     writeDailyHistoryArchive(next, options);
   }
   return graphFromDailyHistoryArchive(graphs, next, options);

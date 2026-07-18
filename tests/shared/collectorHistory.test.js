@@ -120,6 +120,24 @@ test('collectHistoryOnce falls back to the current graph when archive persistenc
   assert.match(messages.at(-1), /daily history archive failed: disk full/);
 });
 
+test('collectHistoryOnce preserves a lazy archive ownership guard until write time', async () => {
+  let canWrite = true;
+  let writes = 0;
+  const history = await collectHistoryOnce({
+    clients: 'claude',
+    todayKey: '2026-06-07',
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveWriteEnabled: () => canWrite,
+    dailyHistoryArchiveOptions: {
+      readJson: () => { canWrite = false; return {}; },
+      writeJsonAtomic: () => { writes += 1; }
+    },
+    runGraph: async () => SAMPLE_GRAPH
+  });
+  assert.equal(writes, 0);
+  assert.equal(history.daily[0].tokens, 30);
+});
+
 test('collectHistoryOnce merges Proma history with tokscale graph history', async () => {
   const promaGraph = {
     contributions: [{ date: '2026-06-07', clients: [

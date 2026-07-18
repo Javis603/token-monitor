@@ -572,7 +572,7 @@ async function collectHistoryOnce(options) {
         ...(options.dailyHistoryArchiveOptions || {}),
         todayKey,
         capDays,
-        writeEnabled: options.dailyHistoryArchiveWriteEnabled !== false
+        writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
       const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
       return retained.daily.length || retained.monthly.length ? retained : null;

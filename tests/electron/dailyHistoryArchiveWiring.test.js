@@ -14,6 +14,11 @@ test('every Electron collector mode follows the retained-session setting for dai
   assert.equal(matches.length, 3);
 });
 
+test('every Electron collector mode yields daily-history writes to an external agent', () => {
+  const matches = main.match(/dailyHistoryArchiveWriteEnabled:\s*\(\) => !isExternalAgentActive\(\)/g) || [];
+  assert.equal(matches.length, 3);
+});
+
 test('clearing retained session usage also clears retained daily history', () => {
   assert.match(main, /clearSessionUsageArchive\(\);\s*clearDailyHistoryArchive\(\);/);
 });
@@ -21,4 +26,12 @@ test('clearing retained session usage also clears retained daily history', () =>
 test('the headless agent retains daily history without mutating storage in dry-run mode', () => {
   assert.match(agent, /dailyHistoryArchiveEnabled:\s*sessionUsageArchiveEnabled/);
   assert.match(agent, /dailyHistoryArchiveWriteEnabled:\s*!dryRun/);
+});
+
+test('a non-dry-run one-shot agent claims archive ownership before collecting', () => {
+  const ownership = agent.indexOf('if (!dryRun) registerPidFile();');
+  const oneShot = agent.indexOf('if (once) {');
+  assert.ok(ownership >= 0);
+  assert.ok(oneShot >= 0);
+  assert.ok(ownership < oneShot);
 });

@@ -120,6 +120,52 @@ test('retainDailyHistory persists only changes and can serve the archive when a 
   assert.equal(restored.daily[0].tokens, 100);
 });
 
+test('widget stays read-only while a headless agent owns the shared archive', () => {
+  let stored = {};
+  let writes = 0;
+  const storage = {
+    todayKey: '2026-07-18',
+    readJson: () => stored,
+    writeJsonAtomic: (_path, value) => { stored = value; writes += 1; }
+  };
+
+  retainDailyHistory(graph('2026-07-17', [
+    client('claude', 'opus', 100, 4, 5)
+  ]), { ...storage, writeEnabled: true });
+
+  const widgetGraph = retainDailyHistory(graph('2026-07-17', [
+    client('codex', 'gpt', 50, 2, 3)
+  ]), { ...storage, writeEnabled: () => false });
+  const widgetHistory = historyFrom(widgetGraph);
+
+  assert.equal(writes, 1);
+  assert.deepEqual(Object.values(stored.days['2026-07-17'].observations).map((item) => item.client), ['claude']);
+  assert.equal(widgetHistory.daily[0].tokens, 150);
+
+  retainDailyHistory(graph('2026-07-17', [
+    client('claude', 'opus', 100, 4, 5),
+    client('codex', 'gpt', 50, 2, 3)
+  ]), { ...storage, writeEnabled: true });
+
+  assert.equal(writes, 2);
+  assert.deepEqual(
+    Object.values(stored.days['2026-07-17'].observations).map((item) => item.client).sort(),
+    ['claude', 'codex']
+  );
+});
+
+test('lazy write ownership is checked after the archive read', () => {
+  let canWrite = true;
+  let writes = 0;
+  retainDailyHistory(graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)]), {
+    todayKey: '2026-07-18',
+    readJson: () => { canWrite = false; return {}; },
+    writeJsonAtomic: () => { writes += 1; },
+    writeEnabled: () => canWrite
+  });
+  assert.equal(writes, 0);
+});
+
 test('durable reconstruction never adds reasoning on top of output tokens', () => {
   const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
     client('codex', 'gpt', 100, 1, 1, { reasoning: 30 })
