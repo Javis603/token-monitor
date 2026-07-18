@@ -41,3 +41,19 @@ jobs:
             || { echo "::error::worker/src/shared is stale — run 'npm run sync:worker' and commit."; exit 1; }
       - run: npm run lint
       - run: npm test
+      - name: Run native macOS Widget tests
+        if: runner.os == 'macOS'
+        run: >-
+          xcodebuild
+          -project native/macos/TokenMonitorWidget.xcodeproj
+          -scheme TokenMonitorWidget
+          -destination 'platform=macOS'
+          test
+          CODE_SIGNING_ALLOWED=NO
+      - name: Build unsigned native macOS Widget extension
+        if: runner.os == 'macOS'
+        run: |
+          npm run build:mac-widget
+          test -d build/macos-widget/TokenMonitorWidget.appex
+          test -x build/macos-widget/TokenMonitorWidgetReloader
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' build/macos-widget/TokenMonitorWidget.entitlements)" = "group.com.example.tokenmonitor"
