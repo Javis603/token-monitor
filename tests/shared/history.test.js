@@ -243,7 +243,12 @@ test('mergeHistories handles empty list', () => {
   assert.equal(m.summary.totalTokens, 0);
 });
 
-const { coerceHistory, historyPreview, historyRevision } = require('../../src/shared/history');
+const {
+  HISTORY_PREVIEW_DAILY_DAYS,
+  coerceHistory,
+  historyPreview,
+  historyRevision
+} = require('../../src/shared/history');
 
 test('mergeHistories re-caps stale device daily rows without losing lifetime totals', () => {
   const history = {
@@ -279,7 +284,40 @@ test('coerceHistory normalizes shape and drops garbage', () => {
   assert.deepEqual(coerceHistory(ok), ok);
 });
 
-test('historyPreview keeps recent totals only (no per-client)', () => {
+test('historyPreview keeps 26 weeks of daily totals by default', () => {
+  const daily = Array.from({ length: 200 }, (_, index) => ({
+    date: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10),
+    tokens: index + 1,
+    cost: (index + 1) / 10,
+    activeTimeMs: (index + 1) * 1000,
+    intensity: 1,
+    perClient: { claude: { tokens: index + 1 } },
+    perModel: { opus: { tokens: index + 1 } }
+  }));
+  const monthly = Array.from({ length: 13 }, (_, index) => ({
+    month: `${2025 + Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`,
+    tokens: index + 1,
+    cost: index / 10,
+    activeTimeMs: index * 1000,
+    perClient: { claude: { tokens: index + 1 } }
+  }));
+
+  const preview = historyPreview({ daily, monthly, summary: {} });
+
+  assert.equal(HISTORY_PREVIEW_DAILY_DAYS, 182);
+  assert.equal(preview.daily.length, 182);
+  assert.equal(preview.daily[0].date, '2026-01-19');
+  assert.deepEqual(preview.daily.at(-1), {
+    date: '2026-07-19', tokens: 200, cost: 20, activeTimeMs: 200000
+  });
+  assert.ok(preview.daily.every((day) => day.perClient === undefined && day.perModel === undefined));
+  assert.equal(preview.monthly.length, 12);
+  assert.deepEqual(preview.monthly[0], {
+    month: '2025-02', tokens: 2, cost: 0.1, activeTimeMs: 1000
+  });
+});
+
+test('historyPreview honors explicit limits and keeps recent totals only (no per-client)', () => {
   const daily = [];
   for (let i = 1; i <= 40; i++) {
     const date = `2026-06-${String(i).padStart(2, '0')}`;
