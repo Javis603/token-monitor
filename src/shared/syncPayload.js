@@ -16,6 +16,76 @@ function projectEntries(period) {
     : 0;
 }
 
+function jsonBytes(value) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function sessionTimestamp(session) {
+  const value = session?.lastUsedAt || session?.startedAt;
+  const timestamp = value ? Date.parse(value) : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function recentSessionEntries(sessions) {
+  return Object.entries(sessions || {}).sort(([aKey, a], [bKey, b]) => {
+    const timeDiff = sessionTimestamp(b) - sessionTimestamp(a);
+    if (timeDiff) return timeDiff;
+    const tokenDiff = Number(b?.totalTokens || 0) - Number(a?.totalTokens || 0);
+    return tokenDiff || aKey.localeCompare(bKey);
+  });
+}
+
+function setSessionOmission(payload, periodName, omitted) {
+  const next = { ...(payload.sessionDetailsOmitted || {}) };
+  if (omitted > 0) next[periodName] = omitted;
+  else delete next[periodName];
+  if (Object.keys(next).length > 0) payload.sessionDetailsOmitted = next;
+  else delete payload.sessionDetailsOmitted;
+}
+
+function setPeriodProjectOmission(payload, periodName, omitted) {
+  const next = { ...(payload.periodProjectsOmitted || {}) };
+  if (omitted > 0) next[periodName] = omitted;
+  else delete next[periodName];
+  if (Object.keys(next).length > 0) payload.periodProjectsOmitted = next;
+  else delete payload.periodProjectsOmitted;
+}
+
+function fitRecentSessionEntries(payload, periodName, entries, maxBytes) {
+  const period = payload[periodName];
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const count = Math.ceil((low + high) / 2);
+    period.sessions = Object.fromEntries(entries.slice(0, count));
+    setSessionOmission(payload, periodName, entries.length - count);
+    if (jsonBytes(payload) <= maxBytes) low = count;
+    else high = count - 1;
+  }
+  period.sessions = Object.fromEntries(entries.slice(0, low));
+  setSessionOmission(payload, periodName, entries.length - low);
+}
+
+function fitPeriodSessions(payload, summary, periodName, maxBytes) {
+  const period = payload?.[periodName];
+  const entries = recentSessionEntries(period?.sessions);
+  if (!period || entries.length === 0) return;
+
+  // Once session detail becomes partial, carry the authoritative project rollup
+  // instead of asking the hub to rebuild an incomplete one from the retained rows.
+  if (summary.projectsEnabled !== false && summary?.[periodName]?.projects && typeof summary[periodName].projects === 'object') {
+    period.projects = summary[periodName].projects;
+  }
+
+  fitRecentSessionEntries(payload, periodName, entries, maxBytes);
+  if (jsonBytes(payload) > maxBytes && projectEntries(period) > 0) {
+    const omittedProjects = projectEntries(period);
+    delete period.projects;
+    setPeriodProjectOmission(payload, periodName, omittedProjects);
+    fitRecentSessionEntries(payload, periodName, entries, maxBytes);
+  }
+}
+
 function sessionsWithoutProjectMetadata(sessions) {
   if (!sessions || typeof sessions !== 'object') return sessions;
   const sanitized = Object.create(null);
@@ -39,6 +109,8 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
   const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
   delete payload.allTimeProjectsIncomplete;
+  delete payload.sessionDetailsOmitted;
+  delete payload.periodProjectsOmitted;
 
   for (const periodName of ['today', 'month']) {
     const period = summary[periodName];
@@ -78,6 +150,15 @@ function serializeSyncPayload(summary, options = {}) {
     payload = buildSyncPayload(summary, { ...options, omitAllTimeProjects: true });
     body = JSON.stringify(payload);
   }
+  if (Buffer.byteLength(body, 'utf8') > maxBytes) {
+    // Month detail is the first collection to grow large enough to threaten the
+    // ingest limit. Keep today's most useful live detail for as long as possible.
+    for (const periodName of ['month', 'today']) {
+      fitPeriodSessions(payload, summary, periodName, maxBytes);
+      body = JSON.stringify(payload);
+      if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
+    }
+  }
   return { payload, body, bytes: Buffer.byteLength(body, 'utf8') };
 }
 
@@ -89,6 +170,18 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
   let serialized = serializeSyncPayload(summary);
   if (serialized.payload?.allTimeProjectsOmitted === true && typeof logger === 'function') {
     logger(`all-time project breakdown omitted; payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
+  if (serialized.payload?.sessionDetailsOmitted && typeof logger === 'function') {
+    const omitted = Object.entries(serialized.payload.sessionDetailsOmitted)
+      .map(([period, count]) => `${period}: ${count}`)
+      .join(', ');
+    logger(`session detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
+  if (serialized.payload?.periodProjectsOmitted && typeof logger === 'function') {
+    const omitted = Object.entries(serialized.payload.periodProjectsOmitted)
+      .map(([period, count]) => `${period}: ${count}`)
+      .join(', ');
+    logger(`project detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
   let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   const canRetryWithoutProjects = response.status === 413

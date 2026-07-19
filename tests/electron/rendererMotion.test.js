@@ -108,13 +108,15 @@ test('Home history visuals reveal left to right only when entering the view', ()
   assert.match(app, /state\.animateChartsOnRender = true/);
   assert.match(app, /\.heat-base-layer \.heat/);
   assert.match(app, /const HOME_HISTORY_MOTION_MS = 920/);
-  assert.match(app, /const HOME_HEAT_CELL_MOTION_MS = 360/);
+  assert.match(app, /const HOME_HEATMAP_MOTION_MS = 640/);
+  assert.match(app, /const HOME_HEAT_CELL_MOTION_MS = 240/);
   assert.match(app, /const viewport = activityScroll\?\.getBoundingClientRect\(\)/);
   assert.match(app, /rect\.right > viewport\.left && rect\.left < viewport\.right/);
   assert.match(app, /const firstVisibleColumn = visibleCells\.length \? visibleCells\[0\]\.column : 0/);
-  assert.match(app, /const heatColumnDelay = \(HOME_HISTORY_MOTION_MS - HOME_HEAT_CELL_MOTION_MS\) \/ Math\.max\(1, lastVisibleColumn - firstVisibleColumn\)/);
+  assert.match(app, /const heatColumnDelay = \(HOME_HEATMAP_MOTION_MS - HOME_HEAT_CELL_MOTION_MS\) \/ Math\.max\(1, lastVisibleColumn - firstVisibleColumn\)/);
   assert.match(app, /delay: \(column - firstVisibleColumn\) \* heatColumnDelay/);
   assert.match(app, /duration: HOME_HEAT_CELL_MOTION_MS/);
+  assert.match(app, /duration: HOME_HEAT_CELL_MOTION_MS,[\s\S]*?easing: 'cubic-bezier\(0\.22, 1, 0\.36, 1\)'/);
   assert.match(app, /strokeDasharray: `\$\{length\} \$\{length\}`[\s\S]*?strokeDashoffset: length[\s\S]*?strokeDashoffset: 0/);
   assert.equal((app.match(/duration: HOME_HISTORY_MOTION_MS/g) || []).length, 2);
   assert.match(app, /clipPath: 'inset\(0 100% 0 0\)'[\s\S]*?clipPath: 'inset\(0 0 0 0\)'/);

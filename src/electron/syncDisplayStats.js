@@ -38,7 +38,7 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     };
   });
 
-  return {
+  const displayStats = {
     ...(hubStats || {}),
     updatedAt: aggregate.updatedAt,
     periods: aggregate.periods,
@@ -46,6 +46,13 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     projectsIncomplete: aggregate.projectsIncomplete,
     limits: hasHubStaleAfterMs || !hasOwn(hubStats, 'limits') ? aggregate.limits : hubStats.limits
   };
+
+  for (const key of ['sessionDetailsOmitted', 'periodProjectsOmitted']) {
+    if (hasOwn(aggregate, key)) displayStats[key] = aggregate[key];
+    else delete displayStats[key];
+  }
+
+  return displayStats;
 }
 
 module.exports = { composeLocalSyncStats };

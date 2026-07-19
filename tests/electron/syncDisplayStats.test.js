@@ -73,6 +73,34 @@ test('composeLocalSyncStats can render a local device before the first hub snaps
   assert.equal(result.devices[0].deviceId, 'local');
 });
 
+test('composeLocalSyncStats exposes current aggregate omission diagnostics', () => {
+  const result = composeLocalSyncStats(null, device('local', 25, {
+    sessionDetailsOmitted: { month: 7 },
+    periodProjectsOmitted: { month: 4 }
+  }), { nowMs: Date.parse('2026-07-16T00:00:00.000Z') });
+
+  assert.deepEqual(result.sessionDetailsOmitted, { month: 7 });
+  assert.deepEqual(result.periodProjectsOmitted, { month: 4 });
+});
+
+test('composeLocalSyncStats clears obsolete Hub omission diagnostics', () => {
+  const nowMs = Date.parse('2026-07-16T00:01:00.000Z');
+  const hubStats = aggregateDevices([
+    device('local', 25, {
+      sessionDetailsOmitted: { month: 7 },
+      periodProjectsOmitted: { month: 4 }
+    })
+  ], 0, nowMs);
+
+  const result = composeLocalSyncStats(hubStats, device('local', 30, {
+    updatedAt: '2026-07-16T00:01:00.000Z',
+    receivedAt: '2026-07-16T00:01:00.000Z'
+  }), { nowMs });
+
+  assert.equal(Object.prototype.hasOwnProperty.call(result, 'sessionDetailsOmitted'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, 'periodProjectsOmitted'), false);
+});
+
 test('composeLocalSyncStats uses the Hub threshold to refresh local limits without reviving stale remote data', () => {
   const nowMs = Date.parse('2026-07-16T00:20:00.000Z');
   const hubStats = aggregateDevices([

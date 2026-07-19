@@ -304,17 +304,62 @@
     return `${daily.length}:${last.date || ''}:${last.tokens || 0}`;
   }
 
-  // Whether loadHomeHistory should (re)fetch the full history. The first fetch can
-  // race the local collector at cold start and return empty; don't let that stick —
-  // refetch once the stats preview confirms history exists, but only when the preview
-  // has actually changed since the last attempt (so one bad fetch can't loop), stop
-  // once we hold the full data, and never poll a genuinely zero-usage account (#39).
-  function shouldFetchHomeHistory({ homeHistory, requested, preview, lastPreviewKey } = {}) {
-    if (historyHasDays(homeHistory)) return false;
+  // Identity of the history the held snapshot was fetched for. Mirrors main's
+  // statsHistoryRevision so Home invalidates on exactly the changes the standalone
+  // dashboard does: prefer the real revision, and for an older hub that predates
+  // revisions fall back to the WHOLE preview, not just its daily tail — a tail key
+  // (`length:lastDate:lastTokens`) misses a change to a non-tail day, a cost, an
+  // active-time, or a monthly total, so a backfill of an earlier day would never
+  // reach Home. Empty preview still collapses to '' so a genuinely zero-usage
+  // account is never polled (#39). The revision only moves when the collector
+  // actually produces a different history (carry-forward keeps it stable between
+  // the gated history ticks), so keying refetches on it costs no extra
+  // `tokscale graph` runs.
+  function homeHistorySignature(stats) {
+    const revision = String(stats?.historyRevision || '').trim();
+    if (revision) return revision;
+    return stats?.historyPreview?.daily?.length ? JSON.stringify(stats.historyPreview) : '';
+  }
+
+  // Whether loadHomeHistory should (re)fetch the full history. Home used to freeze
+  // the first non-empty result for the whole renderer session, so a snapshot taken
+  // before midnight kept showing yesterday at its startup value (0 for a day that
+  // had not happened yet) until the app restarted (#177). Refetch whenever the
+  // history signature moves; a failed/empty fetch leaves the recorded signature
+  // untouched, so it still can't spin the render→fetch loop, and a genuinely
+  // zero-usage account with nothing to fetch is still never polled (#39).
+  function shouldFetchHomeHistory({ requested, stats, lastSignature } = {}) {
     if (!requested) return true;
-    const key = historyPreviewKey(preview);
-    if (!key) return false;
-    return key !== lastPreviewKey;
+    const signature = homeHistorySignature(stats);
+    if (!signature) return false;
+    return signature !== lastSignature;
+  }
+
+  // After a fetch settles, whether loadHomeHistory should schedule a bounded retry.
+  // The signature is recorded before the fetch to keep a failed attempt from
+  // re-firing every render (the #39 spin), which means a transient failure or a
+  // raced empty result would otherwise strand Home on the 30-day preview until the
+  // history genuinely changes or the app restarts — a real gap for an account with
+  // history but no current activity, since its revision never moves. So: if the
+  // fetch produced no days but the live preview says days exist, retry up to a cap.
+  // A genuinely zero-usage account (no preview days) is never retried, so this cannot
+  // reintroduce the render→fetch loop.
+  function shouldRetryHomeHistory({ loadedDays, previewHasDays, retries, maxRetries } = {}) {
+    if (loadedDays) return false;
+    if (!previewHasDays) return false;
+    return Number(retries || 0) < Number(maxRetries || 0);
+  }
+
+  // Keep the result of this request separate from any older full history still used
+  // for display. A rejected request must not look successful merely because the
+  // previous snapshot had days, and a raced empty result must not replace useful
+  // stale data while the live preview proves history still exists.
+  function homeHistoryFetchOutcome({ resolved, history, previewHasDays } = {}) {
+    const loadedDays = Boolean(resolved) && historyHasDays(history);
+    return {
+      loadedDays,
+      accepted: Boolean(resolved) && (loadedDays || !previewHasDays)
+    };
   }
 
   function homeActivityWheelRoute(event) {
@@ -360,7 +405,11 @@
     pickHomeHistory,
     patchDailyToday,
     historyPreviewKey,
+    historyHasDays,
+    homeHistorySignature,
     shouldFetchHomeHistory,
+    shouldRetryHomeHistory,
+    homeHistoryFetchOutcome,
     homeActivityHeatmapLayout,
     homeActivityWheelRoute,
     homeActivityScrollTarget,

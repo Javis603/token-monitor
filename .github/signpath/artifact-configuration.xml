@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file
+      path="installer/Token-Monitor-Setup-${version}.exe"
+      product-name="Token Monitor"
+      product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file
+      path="portable/Token-Monitor-${version}.exe"
+      product-name="Token Monitor"
+      product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

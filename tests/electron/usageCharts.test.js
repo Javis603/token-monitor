@@ -4,9 +4,30 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  weekStartKey, dailyBarsChart, candleChart, contribHeatmap, statsCards, sparklinePreview,
+  weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, statsCards, sparklinePreview,
   areaLineChart, areaLineSvg, heatmapSvg, rollingYearHeatmap
 } = require('../../src/electron/renderer/usageCharts');
+
+test('computeHeatmapIntensities derives independent metrics from raw values', () => {
+  const daily = [
+    { date: '2026-06-01', tokens: 100, cost: 1, intensity: 4, costIntensity: 4 },
+    { date: '2026-06-02', tokens: 25, cost: 4, intensity: 1, costIntensity: 1 }
+  ];
+  const rows = computeHeatmapIntensities(daily);
+
+  assert.deepEqual(rows.map((row) => row.tokenIntensity), [4, 2]);
+  assert.deepEqual(rows.map((row) => row.costIntensity), [2, 4]);
+  assert.deepEqual(rows.map((row) => row.intensity), [2, 4]);
+  assert.equal(daily[0].tokenIntensity, undefined);
+  assert.equal(daily[0].costIntensity, 4);
+});
+
+test('computeHeatmapIntensities handles preview rows with one empty metric', () => {
+  const tokenOnly = computeHeatmapIntensities([{ date: 'a', tokens: 10, cost: 0 }]);
+  assert.deepEqual(tokenOnly[0], { date: 'a', tokens: 10, cost: 0, intensity: 0, costIntensity: 0, tokenIntensity: 4 });
+  const costOnly = computeHeatmapIntensities([{ date: 'a', tokens: 0, cost: 2 }]);
+  assert.deepEqual(costOnly[0], { date: 'a', tokens: 0, cost: 2, intensity: 4, costIntensity: 4, tokenIntensity: 0 });
+});
 
 test('weekStartKey returns the Monday of the given date (UTC)', () => {
   assert.equal(weekStartKey('2026-06-08'), '2026-06-08'); // Monday -> itself

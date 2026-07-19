@@ -347,12 +347,15 @@ test('tray primary-limit modes use the shared provider-aware resolver', () => {
   assert.match(renderBars, /secondaryWindow/);
   assert.doesNotMatch(renderBars, /\.find\(\(w\) => w\.kind/);
   assert.match(renderAllSessions, /trayBarsLayout\(height, \{ contentOnly: true \}\)/);
+  assert.match(renderAllSessions, /function renderAllSessionsIcon\(stats, height = 44, configOrder, colors = \{\}, options = \{\}\)/);
+  assert.match(renderAllSessions, /picks\.length === 1\) return renderBarsIcon\(stats, height, \(\) => picks\[0\], colors, options\)/);
 });
 
 test('limit percent tray mode renders provider icons into a generated tray image', () => {
   const app = readRendererFile('app.js');
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const renderLimitSessionsIcon = functionBody(app, 'renderLimitSessionsIcon', 'barsDataUrlForMode');
+  const drawProviderImage = functionBody(app, 'drawProviderImage', 'renderBarsIcon');
   const maybeUpdateBarsIcon = functionBody(app, 'maybeUpdateBarsIcon', 'loadImage');
   const updateTrayDisplay = functionBody(main, 'updateTrayDisplay', 'sendStatus');
 
@@ -363,18 +366,50 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /primaryWindow/);
   assert.match(renderLimitSessionsIcon, /secondaryWindow/);
   assert.match(renderLimitSessionsIcon, /trayProviderImages\[pick\.providerRecord\.provider\]/);
+  assert.match(renderLimitSessionsIcon, /drawProviderImage\(ctx, entry\.image/);
+  assert.match(drawProviderImage, /shadowColor/);
+  assert.match(drawProviderImage, /shadowBlur/);
+  assert.doesNotMatch(drawProviderImage, /fillRect|\.fill\(/);
+  assert.match(app, /providerContrastHalo:\s*true/);
+  assert.match(app, /function floatingBubbleGeneratedColors\(\)/);
+  assert.match(app, /resolvedThemeColor\('text'\)/);
+  assert.match(app, /appliedThemeOverrides = themePresetsApi\.normalizeOverrides\(overrides/);
+  assert.match(app, /function applyThemeColors\(overrides\)[\s\S]*renderFloatingBubbleContent\(\);/);
+  assert.match(app, /function resolvedThemeColor\(key\)[\s\S]*appliedThemeOverrides\[key\]/);
   assert.match(renderLimitSessionsIcon, /`500 \$\{fontSize\}px/);
   assert.match(renderLimitSessionsIcon, /formatPercent\(limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);
-  assert.match(maybeUpdateBarsIcon, /limitsAllSessions/);
+  assert.match(maybeUpdateBarsIcon, /TokenMonitorTrayText\.isGeneratedTrayIconMode\(mode\)/);
   assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44\)/);
   assert.match(maybeUpdateBarsIcon, /\{ \[mode\]: dataUrl \|\| null \}/);
   assert.match(updateTrayDisplay, /mode === 'limitsAllSessions'/);
-  assert.match(updateTrayDisplay, /const barsImageMode = .*?!limitText && providerTrayIcons\[mode\]/);
+  assert.match(updateTrayDisplay, /const barsImageMode = isBarsTrayIconMode\(mode\) && !limitText && providerTrayIcons\[mode\]/);
   assert.match(updateTrayDisplay, /Boolean\(limitText\)/);
   assert.match(updateTrayDisplay, /const limitText = formatTrayText/);
   assert.match(updateTrayDisplay, /trayImageMode[\s\S]*?\? '' : limitText/);
   assert.match(main, /if \(dataUrl === null\) \{[\s\S]*?delete providerTrayIcons\[id\]/);
+  assert.match(main, /if \(shouldUseTemplateTrayIcon\(id, process\.platform, settings\?\.showTrayProviderBadge\)\) sized\.setTemplateImage\(true\)/);
+  assert.doesNotMatch(main, /process\.platform === 'darwin'\) sized\.setTemplateImage\(true\)/);
+});
+
+test('provider tray badges are opt-in and keep monochrome assets visible', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
+  const providerImage = functionBody(app, 'providerImageToPngDataUrl', 'deliverTrayProviderIcons');
+
+  assert.match(defaults, /showTrayProviderBadge:\s*false/);
+  assert.match(html, /<input id="showTrayProviderBadgeInput" type="checkbox" \/>/);
+  assert.match(html, /data-i18n="settings\.display\.trayProviderBadge"/);
+  assert.match(app, /showTrayProviderBadgeInput: document\.getElementById\('showTrayProviderBadgeInput'\)/);
+  assert.match(app, /saveSettings\(\{ showTrayProviderBadge: els\.showTrayProviderBadgeInput\.checked \}\)/);
+  assert.match(app, /deliverTrayProviderIcons\(patch\.showTrayProviderBadge === true\)/);
+  assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge\)/);
+  assert.match(app, /if \(!trayProviderIconDeliveryGuard\.isCurrent\(deliveryId\)\) return;/);
+  assert.match(providerImage, /if \(!showBadge\) return canvas\.toDataURL\('image\/png'\)/);
+  assert.match(providerImage, /shadowColor = 'rgba\(255, 255, 255, 0\.95\)'/);
+  assert.match(providerImage, /shadowBlur = Math\.max/);
 });
 
 test('Grok renders its single Monthly billing window full-width instead of an empty session/weekly pair', () => {

@@ -16,6 +16,23 @@
     return total;
   }
 
+  // Wall-clock "today" as a LOCAL day key. Day cells and the live period totals
+  // patched into them are both local-day scoped (the collector keys periods with
+  // localTodayKey), so reading today off toISOString() — which is UTC — pasted the
+  // local today's tokens onto the UTC day: at UTC+8 that is the *previous* day's
+  // cell between 00:00 and 07:59 local, blanking yesterday every morning (#177).
+  // Built from the local getters rather than a locale-formatted string so the key
+  // stays YYYY-MM-DD regardless of the user's locale.
+  function localDayKey(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // Day keys are compared and stepped as plain calendar strings, so the arithmetic
+  // below stays UTC-anchored on purpose: it operates on an already-correct key and
+  // never reads the wall clock.
   function addDaysUTC(key, delta) {
     return new Date(Date.parse(`${key}T00:00:00Z`) + delta * 86400000).toISOString().slice(0, 10);
   }
@@ -38,6 +55,26 @@
   function weekStartKey(key) {
     const k = String(key).slice(0, 10);
     return addDaysUTC(k, -dayOfWeekMon(k));
+  }
+
+  function heatmapIntensity(value, max) {
+    if (max <= 0) return 0;
+    const ratio = n(value) / max;
+    return ratio >= 0.75 ? 4 : ratio >= 0.5 ? 3 : ratio >= 0.25 ? 2 : ratio > 0 ? 1 : 0;
+  }
+
+  // Derive both metrics from the raw values at render time. This keeps preview
+  // payloads, older hubs, and the live-today patched row on the same semantics
+  // without relying on optional wire-level intensity fields.
+  function computeHeatmapIntensities(daily) {
+    const rows = Array.isArray(daily) ? daily : [];
+    const maxTokens = Math.max(0, ...rows.map((row) => n(row?.tokens)));
+    const maxCost = Math.max(0, ...rows.map((row) => n(row?.cost)));
+    return rows.map((row) => {
+      const tokenIntensity = heatmapIntensity(row?.tokens, maxTokens);
+      const costIntensity = heatmapIntensity(row?.cost, maxCost);
+      return { ...row, intensity: costIntensity, costIntensity, tokenIntensity };
+    });
   }
 
   function dailyBarsChart(series, options) {
@@ -146,7 +183,7 @@
   }
 
   function contribHeatmap(daily, options) {
-    const o = Object.assign({ cell: 11, gap: 2, startDate: null, endDate: null }, options || {});
+    const o = Object.assign({ cell: 11, gap: 2, startDate: null, endDate: null, intensityKey: 'intensity' }, options || {});
     const intensities = new Map();
     const values = new Map();
     // startDate/endDate, when given, fix the window (e.g. a rolling year) so the grid
@@ -155,7 +192,7 @@
     let maxDate = o.endDate ? String(o.endDate).slice(0, 10) : null;
     for (const d of (Array.isArray(daily) ? daily : [])) {
       const key = String(d.date).slice(0, 10);
-      intensities.set(key, n(d.intensity));
+      intensities.set(key, n(d[o.intensityKey]));
       values.set(key, { tokens: n(d.tokens), cost: n(d.cost) });
       if (!o.startDate && (!minDate || key < minDate)) minDate = key;
       if (!o.endDate && (!maxDate || key > maxDate)) maxDate = key;
@@ -186,7 +223,7 @@
   }
 
   function rollingYearHeatmap(daily, options) {
-    const o = Object.assign({ endDate: new Date().toISOString().slice(0, 10), cell: 8, gap: 3 }, options || {});
+    const o = Object.assign({ endDate: localDayKey(), cell: 8, gap: 3 }, options || {});
     const endDate = String(o.endDate).slice(0, 10);
     const end = new Date(`${endDate}T00:00:00Z`);
     const startDate = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
@@ -543,7 +580,7 @@
   }
 
   return {
-    weekStartKey, dailyBarsChart, candleChart, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
+    localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,

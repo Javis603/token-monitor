@@ -44,7 +44,13 @@
     <section id="activityPane" class="dash-pane">
       <div id="dashCards" class="dash-cards"></div>
       <div class="dash-heatmap-block">
-        <div class="dash-heatmap-title" data-i18n="dashboard.heatmap.title">Token Activity</div>
+        <div class="dash-heatmap-title-row">
+          <div class="dash-heatmap-title" data-i18n="dashboard.heatmap.title">Token Activity</div>
+          <div class="seg seg--sm" data-control="heatmapMetric">
+            <button class="seg-btn" data-val="tokens" aria-pressed="false" data-i18n="dashboard.heatmap.tokens">Tokens</button>
+            <button class="seg-btn active" data-val="cost" aria-pressed="true" data-i18n="dashboard.heatmap.cost">Cost</button>
+          </div>
+        </div>
         <div id="dashHeatmap" class="dash-heatmap-wrap"></div>
       </div>
       <div id="dashBreakdown" class="dash-breakdown"></div>

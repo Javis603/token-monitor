@@ -19,7 +19,10 @@ const {
   pickHomeHistory,
   patchDailyToday,
   historyPreviewKey,
-  shouldFetchHomeHistory
+  homeHistorySignature,
+  shouldFetchHomeHistory,
+  shouldRetryHomeHistory,
+  homeHistoryFetchOutcome
 } = require('../../src/electron/renderer/homeOverview');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
@@ -71,6 +74,8 @@ test('Home activity uses a custom spotlight hover instead of native SVG titles',
   assert.match(match[1], /setupHomeActivityHover\(activityScroll\)/);
   assert.match(match[1], /spotlightId:\s*'homeActivitySpotlight'/);
   assert.doesNotMatch(match[1], /titleOf:/);
+  assert.match(match[1], /tokenIntensity/);
+  assert.match(rendererSource, /computeHeatmapIntensities\(daily\)/);
 });
 
 test('Home activity tooltip is dismissed on Home rerender and when the view leaves Home', () => {
@@ -490,6 +495,18 @@ test('renderHomeTrendsModule patches the activity today cell with the live perio
   assert.match(match[1], /patchDailyToday\([\s\S]*?totalTokens/);
 });
 
+test('loadHomeHistory wires the bounded retry through a timer, not a render', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const match = rendererSource.match(/async function loadHomeHistory\(\) \{([\s\S]*?)\n\}/);
+  assert.ok(match, 'loadHomeHistory exists');
+  const body = match[1];
+  assert.match(body, /shouldRetryHomeHistory\(/, 'retry decision is delegated to the guarded predicate');
+  assert.match(body, /setTimeout\(/, 'the retry is timer-driven so it cannot re-enter on every render');
+  assert.match(body, /homeHistoryRetries \+= 1/, 'the retry counter advances toward the cap');
+  assert.match(body, /homeHistoryRetrySignature !== requestSignature[\s\S]*?homeHistoryRetries = 0/, 'a new signature receives a fresh retry budget');
+  assert.match(body, /homeHistoryLoadedSignature === requestSignature/, 'stale display history cannot suppress a retry');
+});
+
 test('historyPreviewKey is empty for no days and changes as the daily tail moves', () => {
   assert.equal(historyPreviewKey(null), '');
   assert.equal(historyPreviewKey(emptyHistory), '');
@@ -499,41 +516,117 @@ test('historyPreviewKey is empty for no days and changes as the daily tail moves
   assert.notEqual(historyPreviewKey({ daily: [{ date: '2026-06-02', tokens: 99 }] }), key);
 });
 
+test('homeHistorySignature prefers the revision and falls back to the whole preview', () => {
+  assert.equal(homeHistorySignature({ historyRevision: 'abc123', historyPreview: historyWithDays }), 'abc123');
+  // An older hub that predates revisions falls back to the full preview, mirroring
+  // main's statsHistoryRevision, so any field change moves the signature.
+  assert.equal(
+    homeHistorySignature({ historyPreview: historyWithDays }),
+    JSON.stringify(historyWithDays)
+  );
+  assert.equal(homeHistorySignature(null), '');
+  assert.equal(homeHistorySignature({ historyRevision: '   ' , historyPreview: emptyHistory }), '');
+});
+
+test('homeHistorySignature (revision-less) moves on a non-tail change the tail key would miss', () => {
+  // The daily tail (length:lastDate:lastTokens) is identical across these, but an
+  // earlier day's cost/tokens and a monthly total differ — a backfill of an older
+  // day. Home must still invalidate, which the tail key could not detect.
+  const base = { daily: [{ date: '2026-06-01', tokens: 0, cost: 0 }, { date: '2026-06-02', tokens: 10, cost: 1 }], monthly: [{ month: '2026-06', tokens: 10 }], summary: {} };
+  const backfilled = { daily: [{ date: '2026-06-01', tokens: 500, cost: 5 }, { date: '2026-06-02', tokens: 10, cost: 1 }], monthly: [{ month: '2026-06', tokens: 510 }], summary: {} };
+  assert.equal(historyPreviewKey(base), historyPreviewKey(backfilled)); // tail key is blind to it
+  assert.notEqual(
+    homeHistorySignature({ historyPreview: base }),
+    homeHistorySignature({ historyPreview: backfilled })
+  );
+});
+
 test('shouldFetchHomeHistory fetches on the first request', () => {
-  assert.equal(shouldFetchHomeHistory({ homeHistory: null, requested: false, preview: null }), true);
+  assert.equal(shouldFetchHomeHistory({ requested: false, stats: null }), true);
 });
 
 test('shouldFetchHomeHistory refetches when an empty result raced the collector', () => {
-  // Requested once during the race (preview was empty → lastPreviewKey ''), but the
-  // preview now shows history exists — fetch again instead of sticking on the empty result.
+  // Requested once during the race (no stats yet → lastSignature ''), but stats now
+  // show history exists — fetch again instead of sticking on the empty result.
   assert.equal(shouldFetchHomeHistory({
-    homeHistory: emptyHistory, requested: true, preview: historyWithDays, lastPreviewKey: ''
+    requested: true, stats: { historyRevision: 'rev-1' }, lastSignature: ''
   }), true);
 });
 
-test('shouldFetchHomeHistory does not refetch against the preview it already tried', () => {
+test('shouldFetchHomeHistory does not refetch against the history it already tried', () => {
   // A failed/empty full-history fetch must not loop: loadHomeHistory's finally always
-  // re-renders Home, so refetching the same preview state would spin the IPC path.
-  const key = historyPreviewKey(historyWithDays);
+  // re-renders Home, so refetching the same history state would spin the IPC path.
   assert.equal(shouldFetchHomeHistory({
-    homeHistory: emptyHistory, requested: true, preview: historyWithDays, lastPreviewKey: key
+    requested: true, stats: { historyRevision: 'rev-1' }, lastSignature: 'rev-1'
   }), false);
 });
 
-test('shouldFetchHomeHistory retries once the preview changes after a failed attempt', () => {
-  const staleKey = historyPreviewKey(historyWithDays);
-  const newerPreview = { daily: [{ date: '2026-06-02', tokens: 42 }] };
+test('shouldFetchHomeHistory refetches once the collector produces a newer history (#177)', () => {
+  // Home used to freeze the first non-empty snapshot for the whole renderer session, so
+  // a snapshot taken before midnight kept rendering yesterday at its startup value until
+  // the app was restarted. Holding data must not block a refetch any more.
   assert.equal(shouldFetchHomeHistory({
-    homeHistory: emptyHistory, requested: true, preview: newerPreview, lastPreviewKey: staleKey
+    requested: true, stats: { historyRevision: 'rev-2' }, lastSignature: 'rev-1'
+  }), true);
+  // Same for a revision-less hub, via the preview tail fallback.
+  assert.equal(shouldFetchHomeHistory({
+    requested: true,
+    stats: { historyPreview: { daily: [{ date: '2026-06-02', tokens: 42 }] } },
+    lastSignature: historyPreviewKey(historyWithDays)
   }), true);
 });
 
-test('shouldFetchHomeHistory stops once the full history is held', () => {
-  assert.equal(shouldFetchHomeHistory({ homeHistory: historyWithDays, requested: true, preview: historyWithDays }), false);
+test('shouldRetryHomeHistory retries a failed first load when the preview has days', () => {
+  // Account has history but no current activity, so its revision never moves; a
+  // transient first-load failure must still recover without waiting for a real change.
+  assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: true, retries: 0, maxRetries: 3 }), true);
+  assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: true, retries: 2, maxRetries: 3 }), true);
+});
+
+test('shouldRetryHomeHistory stops at the cap and after a success', () => {
+  assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: true, retries: 3, maxRetries: 3 }), false);
+  assert.equal(shouldRetryHomeHistory({ loadedDays: true, previewHasDays: true, retries: 0, maxRetries: 3 }), false);
+});
+
+test('shouldRetryHomeHistory never retries a genuinely zero-usage account (#39)', () => {
+  // No preview days means there is nothing to load, so retrying would just poll — and
+  // could reintroduce the render→fetch loop. Suppress it regardless of the counter.
+  assert.equal(shouldRetryHomeHistory({ loadedDays: false, previewHasDays: false, retries: 0, maxRetries: 3 }), false);
+});
+
+test('homeHistoryFetchOutcome does not mistake stale display history for a successful request', () => {
+  // The rejected request produced no value. Passing the old snapshot here proves
+  // that it cannot make this attempt look loaded merely because it still has days.
+  assert.deepEqual(homeHistoryFetchOutcome({
+    resolved: false,
+    history: historyWithDays,
+    previewHasDays: true
+  }), { loadedDays: false, accepted: false });
+});
+
+test('homeHistoryFetchOutcome preserves stale history across a raced empty result', () => {
+  assert.deepEqual(homeHistoryFetchOutcome({
+    resolved: true,
+    history: emptyHistory,
+    previewHasDays: true
+  }), { loadedDays: false, accepted: false });
+  assert.deepEqual(homeHistoryFetchOutcome({
+    resolved: true,
+    history: historyWithDays,
+    previewHasDays: true
+  }), { loadedDays: true, accepted: true });
+});
+
+test('homeHistoryFetchOutcome accepts an empty result for a zero-usage account', () => {
+  assert.deepEqual(homeHistoryFetchOutcome({
+    resolved: true,
+    history: emptyHistory,
+    previewHasDays: false
+  }), { loadedDays: false, accepted: true });
 });
 
 test('shouldFetchHomeHistory never polls a zero-usage account', () => {
-  // Requested once, still no preview data — nothing to fetch, so don't poll on every render.
-  assert.equal(shouldFetchHomeHistory({ homeHistory: emptyHistory, requested: true, preview: emptyHistory }), false);
-  assert.equal(shouldFetchHomeHistory({ homeHistory: null, requested: true, preview: null }), false);
+  // Requested once, still nothing to identify a history by — don't poll on every render.
+  assert.equal(shouldFetchHomeHistory({ requested: true, stats: { historyPreview: emptyHistory } }), false);
+  assert.equal(shouldFetchHomeHistory({ requested: true, stats: null }), false);
 });

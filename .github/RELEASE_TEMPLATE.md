@@ -1,36 +1,40 @@
 # English
 
-**Open-source build.** macOS is signed and notarized; Windows is unsigned (SmartScreen may appear); Linux AppImages need executable permission — see notes below.
-
 ## What's changed
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Sync upload frequency:** Choose Live or every 10, 20, or 30 minutes under Multi-device Sync. Interval modes send the latest snapshot on the selected schedule. (#148)
+- **Activity heatmap metric:** Color activity by Tokens or Cost on Home and Dashboard; Cost remains the default. (#190)
+- **Home account count:** Choose how many accounts (1–12) appear in Home → Limits under Settings → Main. (#195)
+- **Provider tray icon badge:** Optionally add a Token Monitor badge to provider icons so they are easier to distinguish from the matching IDE apps. Existing tray appearance remains the default. (#139)
 
 ### Improved
-- **All-new Settings:** A complete visual and interaction redesign brings Settings in line with the modernized main interface, with one continuous card, clearer title-left/control-right rows, iOS-style switches, compact inline options, refined sliders, and cleaner shortcut and status controls. (#172)
-- **Default window:** The main window now opens narrower and taller to better fit the interface.
+- **Windows downloads:** The installer and portable executable are now code-signed under the Token Monitor code signing policy. (#196)
+- **Activity animation:** The Home heatmap now enters faster with smoother cell motion.
 
 ### Fixed
-- **Settings navigation:** Clicked section headers now stay in place while accordion sections collapse. (#168)
+- **Activity history retention:** With **Preserve deleted session usage** enabled, daily activity already observed by Token Monitor no longer disappears when source transcripts are later cleaned up. (#193)
+- **Activity history refresh:** Home and Dashboard now follow the local calendar day, reload history across midnight, and rescan it on manual refresh. (#187)
+- **Floating Bubble contrast:** The collapsed bubble now follows the app appearance and keeps text and provider icons readable over light and dark wallpapers. (#189)
+- **Session recency:** Time sorting now works for supported tools when project tracking is disabled. (#191)
+- **Large sync payloads:** Devices with extensive session history now stay within the Hub upload limit while preserving totals and clearly marking omitted details. (#197)
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.30.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.30.0/Token-Monitor-0.30.0-arm64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.30.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.30.0/Token-Monitor-Setup-0.30.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.30.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.30.0/Token-Monitor-0.30.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.30.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.30.0/Token-Monitor-0.30.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.31.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.31.0/Token-Monitor-0.31.0-arm64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.31.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.31.0/Token-Monitor-Setup-0.31.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.31.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.31.0/Token-Monitor-0.31.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.31.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.31.0/Token-Monitor-0.31.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
 
 ### First launch
 
-**macOS:** open the `.dmg`, drag Token Monitor to Applications.
+**macOS:** the app is Developer ID-signed and notarized by Apple. Open the `.dmg`, then drag Token Monitor to Applications.
 
-**Windows:** SmartScreen → More info → Run anyway.
+**Windows:** both executables are signed ([how to verify](https://github.com/Javis603/token-monitor/blob/main/docs/code-signing.md#verify-a-download)), but you may still see a brief SmartScreen prompt on the first few releases while the certificate builds reputation with Microsoft — More info → Run anyway.
 
 **Linux:** mark the AppImage executable, then run it:
 
@@ -55,37 +59,41 @@ open-source: https://github.com/junhoyeo/tokscale
 
 # 中文
 
-**这是开源构建。** macOS 已签名并 notarize；Windows 尚未签名（可能跳出 SmartScreen）；Linux AppImage 需要先赋予执行权限，说明见下方。
-
 ## 更新内容
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **同步上传频率：** 可在多设备同步中选择实时，或每 10、20、30 分钟上传；定时模式会按所选频率发送最新快照。（#148）
+- **活动热力图指标：** 可在主页与仪表板中按 Tokens 或成本为活动数据着色；默认仍为成本。（#190）
+- **主页账号数量：** 可在设置 → 主画面 → 主页 → 额度中选择显示 1–12 个账号。（#195）
+- **提供者托盘图标徽章：** 可选择为提供者图标添加 Token Monitor 徽章，更容易与对应的 IDE 应用区分；现有托盘外观仍为默认设置。（#139）
 
 ### 改进
-- **全新设置：** 设置面板迎来完整的视觉与交互设计升级，与现代化主界面保持一致；采用一体式卡片、清晰的左侧标题／右侧控件布局、iOS 风格开关、紧凑的行内选项、精致滑杆，以及更简洁的快捷键与状态控件。（#172）
-- **默认窗口：** 主窗口现在以更窄、更高的比例打开，更贴合界面内容。
+- **Windows 下载：** 安装版与便携版现已根据 Token Monitor 代码签名政策完成签名。（#196）
+- **活动动画：** 主页热力图现在以更快、更流畅的单元格动画显示。
 
 ### 修复
-- **设置导航：** 折叠分区时，已点击的标题现在会保持在原位。（#168）
+- **活动历史保留：** 开启**保留已删除会话用量**后，Token Monitor 已观测到的每日活动不会再因来源 transcript 后续被清理而消失。（#193）
+- **活动历史刷新：** 主页与仪表板现在会按本地日期显示数据、跨午夜重新载入历史，并在手动刷新时重新扫描。（#187）
+- **悬浮球对比度：** 折叠后的悬浮球现在会跟随应用外观，并让文字与提供者图标在明暗壁纸上都保持清晰可读。（#189）
+- **会话时间排序：** 关闭项目追踪时，支持的工具现在也能正常按时间排序。（#191）
+- **大型同步数据：** 会话历史较多的设备现在也能保持在 Hub 上传限制内，同时保留总计，并清楚标示省略的明细。（#197）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.30.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.30.0/Token-Monitor-0.30.0-arm64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.30.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.30.0/Token-Monitor-Setup-0.30.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.30.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.30.0/Token-Monitor-0.30.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.30.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.30.0/Token-Monitor-0.30.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.31.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.31.0/Token-Monitor-0.31.0-arm64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.31.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.31.0/Token-Monitor-Setup-0.31.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.31.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.31.0/Token-Monitor-0.31.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.31.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.31.0/Token-Monitor-0.31.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
 
 ### 首次启动
 
-**macOS：** 打开 `.dmg`，把 Token Monitor 拖到 Applications。
+**macOS：** 应用已使用 Developer ID 签名并通过 Apple 公证。打开 `.dmg`，然后把 Token Monitor 拖到 Applications。
 
-**Windows：** SmartScreen → 更多信息 → 仍要运行。
+**Windows：** 两个可执行文件均已签名（[查看验证方法](https://github.com/Javis603/token-monitor/blob/main/docs/code-signing.md#verify-a-download)），但在证书刚建立信誉的最初几个版本，仍可能短暂出现 SmartScreen 提示 → 更多信息 → 仍要运行。
 
 **Linux：** 先给 AppImage 执行权限，然后运行：
 

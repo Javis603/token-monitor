@@ -141,12 +141,37 @@ test('disabling project tracking skips local metadata attribution', async () => 
       projectsEnabled: false, limitsEnabled: false, historyEnabled: false,
       runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 's1', model: 'm', input: 1 }] }),
       collectWslUsage: async (options) => {
-        assert.equal(options.decoratePeriods, undefined);
+        // Timestamps still need backfilling with projects off, so the decorator is
+        // provided; it just resolves no project identity.
+        assert.equal(typeof options.decoratePeriods, 'function');
         return { bundle: emptyWslBundle(), detected: [] };
       }
     });
     const session = summary.today.sessions['claude:s1'];
     assert.equal(summary.projectsEnabled, false);
+    assert.equal(session.projectId, '');
+    assert.equal(session.projectLabel, '');
+    // The timestamp backfill still runs (mtime fallback), only project attribution is skipped.
+    assert.ok(session.lastUsedAt);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('session timestamps are backfilled even when project tracking is disabled', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-ts-no-projects-'));
+  try {
+    const transcriptDir = path.join(home, '.claude', 'projects', 'repo');
+    fs.mkdirSync(transcriptDir, { recursive: true });
+    fs.writeFileSync(path.join(transcriptDir, 's1.jsonl'), `${JSON.stringify({ cwd: '/work/private-repo', timestamp: '2026-01-02T03:04:05Z' })}\n`);
+    const summary = await collectUsageOnce({
+      clients: 'claude', allTimeSince: '2025-01-01', deviceId: 'dev1', homeDir: home,
+      projectsEnabled: false, limitsEnabled: false, historyEnabled: false,
+      runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 's1', model: 'm', input: 1 }] }),
+      collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [] })
+    });
+    const session = summary.today.sessions['claude:s1'];
+    // Timestamp backfilled so the session view can sort by recency (issue #182).
+    assert.equal(session.lastUsedAt, '2026-01-02T03:04:05.000Z');
+    // Project attribution still suppressed by the opt-out.
     assert.equal(session.projectId, '');
     assert.equal(session.projectLabel, '');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }

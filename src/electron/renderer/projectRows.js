@@ -11,7 +11,8 @@
   const { canonicalProjectKey, deterministicProjectLabel } = projectKeyApi;
 
   function projectBreakdownIncomplete(stats, period) {
-    return period === 'allTime' && stats?.projectsIncomplete === true;
+    if (period === 'allTime') return stats?.projectsIncomplete === true;
+    return Number(stats?.periodProjectsOmitted?.[period] || 0) > 0;
   }
 
   function clientGradient(clients, colorFor, fallbackColor = '#73bdf5') {

@@ -24,5 +24,33 @@
     return sources;
   }
 
-  return { trayProviderIconSources };
+  function trayProviderBadgeLayout(size = 44) {
+    const iconSize = Math.max(16, Math.round(Number(size) || 44));
+    const badgeSize = Math.round(iconSize * 0.43);
+    const borderWidth = Math.max(2, Math.round(iconSize * 0.045));
+    const edgeInset = Math.ceil(borderWidth / 2);
+    return {
+      iconSize,
+      badgeSize,
+      x: iconSize - badgeSize - edgeInset,
+      y: iconSize - badgeSize - edgeInset,
+      radius: Math.round(badgeSize * 0.28),
+      borderWidth
+    };
+  }
+
+  function createTrayProviderIconDeliveryGuard() {
+    let latestDeliveryId = 0;
+    return {
+      begin() {
+        latestDeliveryId += 1;
+        return latestDeliveryId;
+      },
+      isCurrent(deliveryId) {
+        return deliveryId === latestDeliveryId;
+      }
+    };
+  }
+
+  return { createTrayProviderIconDeliveryGuard, trayProviderIconSources, trayProviderBadgeLayout };
 });

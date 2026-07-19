@@ -39,7 +39,24 @@ const opencodeCookie = String(process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '').t
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
 
-const collectorOptions = { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent', projectsEnabled, historyEnabled, historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS), limitsEnabled, limitProviders, limitsRefreshMs, wslScanEnabled, opencodeCookie };
+const collectorOptions = {
+  clients,
+  allTimeSince,
+  commandTimeoutMs,
+  deviceId,
+  agentVersion: appVersion(),
+  agentRuntime: 'headless-agent',
+  projectsEnabled,
+  historyEnabled,
+  historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
+  dailyHistoryArchiveEnabled: sessionUsageArchiveEnabled,
+  dailyHistoryArchiveWriteEnabled: !dryRun,
+  limitsEnabled,
+  limitProviders,
+  limitsRefreshMs,
+  wslScanEnabled,
+  opencodeCookie
+};
 let sessionUsageArchive;
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
@@ -94,12 +111,14 @@ function registerPidFile() {
 async function main() {
   console.log(`Token Monitor agent device=${deviceId} hub=${hubUrl} intervalMs=${intervalMs} watch=${watchEnabled} projects=${projectsEnabled ? 'on' : 'off'} history=${historyEnabled ? 'on' : 'off'} sessionArchive=${sessionUsageArchiveEnabled ? 'on' : 'off'} limits=${limitsEnabled ? `${limitProviders || 'none'}:${limitsRefreshMs}ms` : 'off'}`);
   if (!secret) console.warn('Warning: TOKEN_MONITOR_SECRET is not set. Posting without authorization header.');
+  // Claim archive ownership before either a one-shot or long-running scan so
+  // Electron can yield before its history read-modify-write reaches disk.
+  if (!dryRun) registerPidFile();
   if (once) {
     const summary = await collectUsageOnce({ ...collectorOptions, includeHistory: true });
     await deliver(summary);
     return;
   }
-  if (!dryRun) registerPidFile();
   startCollector({
     ...collectorOptions,
     intervalMs,

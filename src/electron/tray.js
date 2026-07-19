@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-const { formatTrayText, pickWorstLimit } = require('../shared/trayText');
+const { formatTrayText, isBarsTrayIconMode, isGeneratedTrayIconMode, pickWorstLimit } = require('../shared/trayText');
 const { maskEmailAddress } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
@@ -49,6 +49,10 @@ function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = [
   if (!client) return null;
   const available = new Set(availableIconIds);
   return available.has(client) ? client : null;
+}
+
+function shouldUseTemplateTrayIcon(id, platform = process.platform, showProviderBadge = false) {
+  return platform === 'darwin' && (isGeneratedTrayIconMode(id) || !showProviderBadge);
 }
 
 function sortCodexAccountsForDisplay(accounts) {
@@ -244,9 +248,11 @@ module.exports = {
   buildTrayMenuTemplate,
   createTray,
   formatTrayText,
+  isBarsTrayIconMode,
   pickUsageTrayIconId,
   pickWorstLimit,
   popoverBounds,
   reconcileCodexAccountSelection,
+  shouldUseTemplateTrayIcon,
   sortCodexAccountsForDisplay
 };

@@ -122,6 +122,13 @@
     return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
   }
 
+  function sessionBreakdownIncomplete(stats, periodName) {
+    const omitted = stats?.sessionDetailsOmitted || {};
+    if (periodName === 'today') return finiteNumber(omitted.today) > 0;
+    if (periodName === 'month') return finiteNumber(omitted.month) > 0;
+    return false;
+  }
+
   function archivedSessionCount(stats) {
     const periods = stats?.periods && typeof stats.periods === 'object' ? stats.periods : stats;
     const archivedKeys = new Set();
@@ -137,6 +144,7 @@
   return {
     archivedSessionCount,
     compactSessionTime,
+    sessionBreakdownIncomplete,
     sessionIdLabel,
     sessionRowsForPeriod
   };

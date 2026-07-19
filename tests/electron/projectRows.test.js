@@ -12,6 +12,13 @@ test('projectBreakdownIncomplete only flags the all-time project breakdown', () 
   assert.equal(projectBreakdownIncomplete({ projectsIncomplete: false }, 'allTime'), false);
 });
 
+test('projectBreakdownIncomplete flags bounded synchronized periods', () => {
+  const stats = { periodProjectsOmitted: { month: 12 } };
+  assert.equal(projectBreakdownIncomplete(stats, 'today'), false);
+  assert.equal(projectBreakdownIncomplete(stats, 'month'), true);
+  assert.equal(projectBreakdownIncomplete(stats, 'allTime'), false);
+});
+
 test('projectRowsForPeriod merges sessions by workspace and sorts by cost', () => {
   const rows = projectRowsForPeriod({ sessions: {
     a: { client: 'codex', projectId: 'sha256:a', projectLabel: 'client-a', totalTokens: 100, costUsd: 2, models: { gpt: 100 } },

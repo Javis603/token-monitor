@@ -1,7 +1,7 @@
 {
   "name": "token-monitor-hub-worker",
   "private": true,
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "Cloudflare Worker deployment of the Token Monitor hub.",
   "type": "module",
   "scripts": {

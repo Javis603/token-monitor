@@ -153,6 +153,8 @@ test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods
     projectsEnabled: false,
     allTimeProjectsOmitted: true,
     allTimeProjectsIncomplete: true,
+    sessionDetailsOmitted: { month: 12 },
+    periodProjectsOmitted: { month: 4 },
     syncUploadIntervalMs: 20 * 60 * 1000
   });
   const incoming = {
@@ -172,6 +174,8 @@ test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods
   assert.equal(merged.projectsEnabled, false);
   assert.equal(merged.allTimeProjectsOmitted, true);
   assert.equal(merged.allTimeProjectsIncomplete, true);
+  assert.deepEqual(merged.sessionDetailsOmitted, { month: 12 });
+  assert.deepEqual(merged.periodProjectsOmitted, { month: 4 });
   assert.equal(merged.syncUploadIntervalMs, 20 * 60 * 1000);
 });
 
@@ -218,6 +222,30 @@ test('aggregateDevices merges project rollups and exposes incomplete-device diag
     costUsd: 1,
     clients: { codex: 60, claude: 140 }
   });
+});
+
+test('aggregateDevices exposes bounded session-detail diagnostics without changing totals', () => {
+  const aggregate = aggregateDevices([
+    {
+      deviceId: 'a',
+      month: {
+        totalTokens: 100,
+        sessions: { 'codex:recent': { client: 'codex', sessionId: 'recent', totalTokens: 40, projectId: 'sha256:app', projectLabel: 'App' } },
+        projects: { app: { label: 'App', tokens: 100, costUsd: 0.5, clients: { codex: 100 } } }
+      },
+      sessionDetailsOmitted: { month: 7 },
+      periodProjectsOmitted: { month: 2 }
+    },
+    { deviceId: 'b', month: { totalTokens: 200 }, sessionDetailsOmitted: { month: 3, today: 1 }, periodProjectsOmitted: { month: 5, today: 1 } }
+  ], 60000);
+
+  assert.equal(aggregate.periods.month.totalTokens, 300);
+  assert.equal(aggregate.periods.month.sessions['codex:recent'].totalTokens, 40);
+  assert.equal(aggregate.periods.month.projects.app.tokens, 100);
+  assert.deepEqual(aggregate.sessionDetailsOmitted, { month: 10, today: 1 });
+  assert.deepEqual(aggregate.periodProjectsOmitted, { month: 7, today: 1 });
+  assert.deepEqual(aggregate.devices.find((device) => device.deviceId === 'a').sessionDetailsOmitted, { month: 7 });
+  assert.deepEqual(aggregate.devices.find((device) => device.deviceId === 'a').periodProjectsOmitted, { month: 2 });
 });
 
 test('stale project omissions remain incomplete while stale all-time usage is aggregated', () => {

@@ -16,6 +16,12 @@
   --control-alpha: 0.049;
   --highlight-alpha: 0.07;
   --glass: rgba(var(--glass-rgb), var(--glass-alpha));
+  --glass-surface:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), var(--highlight-alpha)), rgba(var(--overlay-rgb), 0.022)),
+    linear-gradient(135deg, rgba(var(--overlay-rgb), 0.035), rgba(0, 0, 0, 0.09)),
+    var(--glass);
+  --glass-filter: blur(32px) saturate(115%);
+  --floating-bubble-radius: 17px;
   --glass-strong: rgba(31, 35, 41, 0.56);
   --glass-soft: rgba(var(--overlay-rgb), 0.05);
   --line: rgba(var(--line-rgb), var(--line-alpha));
@@ -71,13 +77,10 @@ input, textarea, [contenteditable="true"] {
   border: 1px solid var(--line-strong);
   border-radius: 14px;
   clip-path: inset(0 round 14px);
-  background:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), var(--highlight-alpha)), rgba(var(--overlay-rgb), 0.022)),
-    linear-gradient(135deg, rgba(var(--overlay-rgb), 0.035), rgba(0, 0, 0, 0.09)),
-    var(--glass);
+  background: var(--glass-surface);
   box-shadow: 0 22px 55px var(--shadow), inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
-  -webkit-backdrop-filter: blur(32px) saturate(115%);
-  backdrop-filter: blur(32px) saturate(115%);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
 }
 html.is-windows, html.is-windows body {
   border-radius: 8px;
@@ -119,12 +122,21 @@ html.is-mac-legacy .shell {
   width: 100%;
   height: 100%;
   padding: 0;
+  overflow: hidden;
   border: 0;
-  background: transparent;
-  color: var(--green);
+  border-radius: var(--floating-bubble-radius);
+  background: var(--glass-surface);
+  color: var(--number);
   cursor: grab;
-  box-shadow: none;
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
   outline: none;
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
+.system-glass-disabled .floating-bubble-tab {
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
@@ -150,19 +162,15 @@ html.floating-bubble-collapsed-left,
 body.floating-bubble-collapsed-left,
 html.floating-bubble-collapsed-right,
 body.floating-bubble-collapsed-right {
-  background:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), var(--highlight-alpha)), rgba(var(--overlay-rgb), 0.022)),
-    linear-gradient(135deg, rgba(var(--overlay-rgb), 0.035), rgba(0, 0, 0, 0.09)),
-    var(--glass),
-    rgb(var(--glass-rgb));
+  background: transparent;
 }
 html.floating-bubble-collapsed-left,
 body.floating-bubble-collapsed-left {
-  border-radius: 0;
+  border-radius: var(--floating-bubble-radius);
 }
 html.floating-bubble-collapsed-right,
 body.floating-bubble-collapsed-right {
-  border-radius: 0;
+  border-radius: var(--floating-bubble-radius);
 }
 html.floating-bubble-collapsed-left body .shell,
 html.floating-bubble-collapsed-right body .shell,
@@ -174,12 +182,22 @@ body.floating-bubble-collapsed-right .shell {
 html.floating-bubble-collapsed-left body .floating-bubble-tab,
 body.floating-bubble-collapsed-left .floating-bubble-tab {
   display: flex;
-  border-radius: 0;
+  border-radius: var(--floating-bubble-radius);
 }
 html.floating-bubble-collapsed-right body .floating-bubble-tab,
 body.floating-bubble-collapsed-right .floating-bubble-tab {
   display: flex;
-  border-radius: 0;
+  border-radius: var(--floating-bubble-radius);
+}
+html.is-windows.floating-bubble-collapsed-left,
+html.is-windows.floating-bubble-collapsed-right,
+html.is-windows body.floating-bubble-collapsed-left,
+html.is-windows body.floating-bubble-collapsed-right,
+html.is-windows.floating-bubble-collapsed-left body .floating-bubble-tab,
+html.is-windows.floating-bubble-collapsed-right body .floating-bubble-tab,
+body.is-windows.floating-bubble-collapsed-left .floating-bubble-tab,
+body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
+  border-radius: 8px;
 }
 .floating-bubble-tab:hover {
   color: var(--text);
@@ -537,6 +555,11 @@ span.settings-note.settings-item-desc {
   flex: 0 0 auto;
   width: auto;
   max-width: 58%;
+}
+.settings-panel .settings-item > input[type="number"] {
+  flex: 0 0 64px;
+  width: 64px;
+  text-align: right;
 }
 /* Inline text options (Codex-style): plain labels, the active one gets a soft pill. */
 .inline-options { display: inline-flex; align-items: center; gap: 2px; }
@@ -1953,7 +1976,7 @@ html.is-windows .settings-panel select option {
 }
 .breakdown.hidden { display: none; }
 .breakdown::-webkit-scrollbar { width: 0; height: 0; }
-.project-incomplete-hint {
+.breakdown-incomplete-hint {
   margin: 0;
   padding: 0 2px 1px;
   color: var(--muted);
@@ -3841,6 +3864,18 @@ html.is-windows .limit-live-badge {
   margin: 2px 0 4px 14px;
   padding: 0 0 0 8px;
   border-left: 1px solid rgba(var(--line-rgb), 0.14);
+}
+.home-activity-settings {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 4px 14px;
+  padding: 2px 0 2px 8px;
+  border-left: 1px solid rgba(var(--line-rgb), 0.14);
+  color: var(--muted);
+  font-size: 11px;
 }
 .home-limit-provider-header { margin-bottom: 1px; }
 .home-limit-status-setting {

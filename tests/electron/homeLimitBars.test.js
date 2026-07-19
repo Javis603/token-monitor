@@ -46,3 +46,28 @@ test('Home low-limit indicator setting is translated in every locale', () => {
     assert.ok(messages['settings.home.showLimitBars'], `${locale} should translate the Home limit bar setting`);
   }
 });
+
+test('Home account display count defaults to three and is configurable', () => {
+  const main = read('src/electron/main.js');
+  const app = read('src/electron/renderer/app.js');
+  const html = read('src/electron/renderer/index.html');
+
+  assert.match(main, /HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3/);
+  assert.match(main, /homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT/);
+  assert.match(main, /merged\.homeLimitAccountCount = normalizeHomeLimitAccountCount\(merged\.homeLimitAccountCount\)/);
+  assert.match(main, /homeLimitAccountCount: normalizeHomeLimitAccountCount\(patch\.homeLimitAccountCount \?\? settings\.homeLimitAccountCount\)/);
+  assert.match(app, /limit: state\.settings\?\.homeLimitAccountCount \?\? 3/);
+  const renderSettings = app.slice(app.indexOf('function renderHomeLimitProviderList'), app.indexOf('function renderHomeSettingsList'));
+  assert.match(renderSettings, /countInput\.type = 'number'/);
+  assert.match(renderSettings, /countInput\.min = '1'/);
+  assert.match(renderSettings, /countInput\.max = '12'/);
+  assert.match(renderSettings, /saveSettings\(\{ homeLimitAccountCount: Number\(countInput\.value\) \}\)/);
+  assert.doesNotMatch(html, /homeLimitAccountCountInput|settings\.limits\.homeAccountCount/);
+});
+
+test('Home account display count setting is translated in every locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    assert.ok(messages['settings.home.limitAccountCount'], `${locale} should translate the Home account count setting`);
+  }
+});

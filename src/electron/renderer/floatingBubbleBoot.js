@@ -7,6 +7,9 @@
     document.documentElement.classList.add(`floating-bubble-collapsed-${side}`);
     window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ = { collapsed: true, side };
   }
+  if (query.get('systemGlassDisabled') === '1') {
+    document.documentElement.classList.add('system-glass-disabled');
+  }
   const period = query.get('period');
   const breakdown = query.get('breakdown');
   const viewState = {};

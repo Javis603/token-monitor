@@ -28,14 +28,16 @@ const els = {
   empty: document.getElementById('dashEmpty'),
   tooltip: document.getElementById('dashTooltip'),
   stackBtns: Array.from(document.querySelectorAll('[data-control="stack"] .seg-btn')),
-  modeBtns: Array.from(document.querySelectorAll('[data-control="mode"] .seg-btn'))
+  modeBtns: Array.from(document.querySelectorAll('[data-control="mode"] .seg-btn')),
+  heatmapMetricBtns: Array.from(document.querySelectorAll('[data-control="heatmapMetric"] .seg-btn'))
 };
 
 const RANGES = ['7', '30', '90', '365', 'all'];
 const state = {
   tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
   locale: 'en', currency: 'USD', history: null, chartModel: null,
-  chartKind: 'bars', motion: 'none', reduceMotion: 'system'
+  chartKind: 'bars', motion: 'none', reduceMotion: 'system',
+  heatmapMetric: 'cost'
 };
 
 const DATA_MOTION_MS = 800;
@@ -249,7 +251,9 @@ function formatCostCompact(usd) {
 }
 function shortDate(key) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key)); return m ? `${Number(m[2])}/${Number(m[3])}` : String(key); }
 function axisEvery(list) { return Math.max(1, Math.ceil(list.length / 9)); }
-function todayKey() { return new Date().toISOString().slice(0, 10); }
+// Local, not UTC: the heatmap's day cells are local-day scoped, so a UTC "today"
+// shifted the whole rolling year by a day for non-UTC users (#177).
+function todayKey() { return charts.localDayKey(); }
 function daysBetween(a, b) {
   return Math.round((Date.parse(`${String(b).slice(0, 10)}T00:00:00Z`) - Date.parse(`${String(a).slice(0, 10)}T00:00:00Z`)) / 86400000);
 }
@@ -455,19 +459,20 @@ function balanceStatCards() {
 }
 
 function renderActivity() {
-  const daily = state.history?.daily || [];
+  const daily = charts.computeHeatmapIntensities(state.history?.daily || []);
   const end = todayKey();
   // Start at the 1st of the month 11 months back → exactly 12 distinct months (Jul→Jun),
   // like GitHub/codex, so there's no duplicate leading month label.
   const now = new Date(`${end}T00:00:00Z`);
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
+  const intensityKey = state.heatmapMetric === 'cost' ? 'costIntensity' : 'tokenIntensity';
   const gap = 4;
-  let heat = charts.contribHeatmap(daily, { cell: 14, gap, startDate: start, endDate: end });
+  let heat = charts.contribHeatmap(daily, { cell: 14, gap, startDate: start, endDate: end, intensityKey });
   const avail = els.heatmap.clientWidth || 0;
   if (heat.weeks > 0 && avail > 0) {
     // Size cells to the available width, capped so a wide window doesn't stretch them edge-to-edge.
     const cell = Math.max(9, Math.min(22, (avail - heat.weeks * gap) / heat.weeks)); // fractional → fills exactly
-    heat = charts.contribHeatmap(daily, { cell, gap, startDate: start, endDate: end });
+    heat = charts.contribHeatmap(daily, { cell, gap, startDate: start, endDate: end, intensityKey });
   }
   const hideHeatmapForEntry = !prefersReducedMotion()
     && (state.motion === 'entry' || els.heatmap.classList.contains('is-motion-pending'));
@@ -501,6 +506,7 @@ function render() {
   els.activityPane.classList.toggle('hidden', state.tab !== 'activity');
   els.modeBtns.forEach((b) => b.classList.toggle('active', b.dataset.mode === state.mode));
   els.stackBtns.forEach((b) => b.classList.toggle('active', b.dataset.stack === state.stackBy));
+  els.heatmapMetricBtns.forEach((b) => { const active = b.dataset.val === state.heatmapMetric; b.classList.toggle('active', active); b.setAttribute('aria-pressed', String(active)); });
   document.querySelector('[data-control="stack"]').style.display = state.mode === 'kline' ? 'none' : '';
   if (state.tab === 'trends') {
     heatmapMotionGeneration += 1;
@@ -591,6 +597,7 @@ async function boot() {
     window.TokenMonitorCurrency.configureRates(settings.currencyRatesEffective);
   }
   state.flat = settings.dashboardFlat === true;
+  state.heatmapMetric = settings.heatmapMetric || 'cost';
   applyAppearance(settings);
   applyTranslations();
   populateRangeSelect();
@@ -618,6 +625,11 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   const reduceMotion = motionPreferenceApi.normalize(next.reduceMotion);
   if (state.reduceMotion !== reduceMotion) {
     applyReduceMotionPreference(reduceMotion);
+    needsRender = true;
+  }
+  const nextMetric = next.heatmapMetric || 'cost';
+  if (state.heatmapMetric !== nextMetric) {
+    state.heatmapMetric = nextMetric;
     needsRender = true;
   }
   if (needsRender) render();
@@ -649,6 +661,13 @@ els.modeBtns.forEach((b) => b.addEventListener('click', () => {
   state.mode = b.dataset.mode;
   state.motion = 'update';
   render();
+}));
+els.heatmapMetricBtns.forEach((b) => b.addEventListener('click', () => {
+  if (state.heatmapMetric === b.dataset.val) return;
+  state.heatmapMetric = b.dataset.val;
+  state.motion = 'none';
+  render();
+  window.tokenMonitor.updateSettings({ heatmapMetric: state.heatmapMetric });
 }));
 els.themeToggle.addEventListener('click', () => { state.flat = !state.flat; els.body.classList.toggle('flat', state.flat); window.tokenMonitor.updateSettings({ dashboardFlat: state.flat }); });
 els.refreshBtn.addEventListener('click', refresh);
