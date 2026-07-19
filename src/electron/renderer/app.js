@@ -98,6 +98,7 @@ const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMod
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
 const projectRowsApi = window.TokenMonitorProjectRows;
 const sessionDetailApi = window.TokenMonitorSessionDetail;
 const windowShortcutApi = window.TokenMonitorWindowShortcut;
@@ -1304,6 +1305,7 @@ function applyBarScale(fill, scale) {
 }
 
 function rowWidth(value, max) {
+  if (Number(value) <= 0) return 0;
   return max > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
 }
 
@@ -1321,11 +1323,90 @@ function rowTemplate(rowData) {
   return row;
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, stale, platform, local, client, kind, cacheReadTokens, outputTokens }) {
+function renderDeviceAccordion(accordionInner, deviceDetail) {
+  const signature = JSON.stringify([
+    deviceDetail.emptyText,
+    deviceDetail.metaParts,
+    deviceDetail.tools.map((tool) => [
+      tool.key,
+      tool.value,
+      Math.round(tool.percent),
+      tool.color,
+      tool.models.map((model) => [model.key, model.value])
+    ])
+  ]);
+  if (accordionInner.dataset.signature === signature) return;
+
+  const content = document.createElement('div');
+  content.className = 'accordion-content device-breakdown';
+  if (deviceDetail.tools.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'device-breakdown-empty';
+    empty.textContent = deviceDetail.emptyText;
+    content.append(empty);
+  } else {
+    for (const tool of deviceDetail.tools) {
+      const toolGroup = document.createElement('div');
+      toolGroup.className = 'device-tool';
+      const head = document.createElement('div');
+      head.className = 'device-tool-head';
+      const label = document.createElement('div');
+      label.className = 'device-tool-label';
+      const mark = document.createElement('span');
+      if (state.settings?.showToolIcons && clientsWithIcon.has(tool.client)) {
+        mark.className = `device-tool-mark row-icon row-icon-${tool.client}`;
+      } else {
+        mark.className = 'device-tool-mark dot';
+        mark.style.background = tool.color;
+      }
+      const name = document.createElement('span');
+      name.className = 'device-tool-name';
+      name.textContent = tool.name;
+      const percent = document.createElement('span');
+      percent.className = 'accordion-pct';
+      percent.textContent = `${Math.round(tool.percent)}%`;
+      label.append(mark, name, percent);
+      const metrics = document.createElement('span');
+      metrics.className = 'device-tool-metrics';
+      metrics.textContent = formatNumber(tool.value);
+      head.append(label, metrics);
+      toolGroup.append(head);
+
+      if (tool.models.length > 0) {
+        const modelList = document.createElement('div');
+        modelList.className = 'device-model-list';
+        for (const model of tool.models) {
+          const modelRow = document.createElement('div');
+          modelRow.className = 'device-model-row';
+          const modelName = document.createElement('span');
+          modelName.className = 'device-model-name';
+          modelName.textContent = model.name;
+          const modelValue = document.createElement('span');
+          modelValue.className = 'device-model-value';
+          modelValue.textContent = formatCompact(model.value);
+          modelRow.append(modelName, modelValue);
+          modelList.append(modelRow);
+        }
+        toolGroup.append(modelList);
+      }
+      content.append(toolGroup);
+    }
+  }
+  if (deviceDetail.metaParts.length > 0) {
+    const meta = document.createElement('div');
+    meta.className = 'device-meta';
+    meta.textContent = deviceDetail.metaParts.join(' · ');
+    content.append(meta);
+  }
+  accordionInner.replaceChildren(content);
+  accordionInner.dataset.signature = signature;
+}
+
+function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens }) {
   const width = rowWidth(value, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
-  if (local) row.title = 'This device';
+  row.title = local ? 'This device' : '';
   
   if (cacheReadTokens !== undefined || outputTokens !== undefined) {
     row.dataset.cacheRead = cacheReadTokens || 0;
@@ -1362,7 +1443,11 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
   applyBarScale(fill, width / 100);
 
   const accordionInner = row.querySelector('.row-accordion-inner');
-  if (Array.isArray(accordionRows) && accordionRows.length > 0) {
+  if (deviceDetail) {
+    renderDeviceAccordion(accordionInner, deviceDetail);
+    row.classList.add('has-accordion');
+    if (isExpanded) row.classList.add('expanded');
+  } else if (Array.isArray(accordionRows) && accordionRows.length > 0) {
     const accordionSignature = JSON.stringify(accordionRows.map((tool) => [tool.name, tool.value, Math.round(tool.percent), tool.color]));
     if (accordionInner.dataset.signature !== accordionSignature) {
       const content = document.createElement('div');
@@ -1494,6 +1579,39 @@ function deviceColor(stale) {
   return stale ? deviceStaleColor : deviceAccent;
 }
 
+function devicePlatformLabel(value) {
+  const platform = String(value || '').toLowerCase().split('-')[0];
+  if (platform === 'darwin') return 'macOS';
+  if (platform === 'win32') return 'Windows';
+  if (platform === 'linux') return 'Linux';
+  return String(value || '');
+}
+
+function deviceRuntimeLabel(value) {
+  if (value === 'electron-widget') return t('devices.runtime.widget');
+  if (value === 'headless-agent') return t('devices.runtime.agent');
+  return String(value || '');
+}
+
+function deviceSyncedLabel(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const diffMs = Math.max(0, Date.now() - date.getTime());
+  let age;
+  if (diffMs < 45_000) age = t('settings.age.justNow');
+  else {
+    const minutes = Math.round(diffMs / 60000);
+    if (minutes < 60) age = t('settings.age.minutesAgo', { minutes });
+    else {
+      const hours = Math.round(minutes / 60);
+      age = hours < 24
+        ? t('settings.age.hoursAgo', { hours })
+        : t('settings.age.daysAgo', { days: Math.round(hours / 24) });
+    }
+  }
+  return t('devices.synced', { age });
+}
+
 function stableColor(value, colors) {
   let hash = 0;
   for (const char of String(value || '')) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
@@ -1502,16 +1620,32 @@ function stableColor(value, colors) {
 
 function deviceRowsForPeriod() {
   const localId = state.settings?.deviceId || '';
-  return (state.stats?.devices || []).map((device) => ({
-    key: device.deviceId,
-    name: deviceLabel(device),
-    value: Number(device.periods?.[state.period]?.totalTokens || 0),
-    cost: Number(device.periods?.[state.period]?.costUsd || 0),
-    color: deviceColor(Boolean(device.stale)),
-    stale: Boolean(device.stale),
-    platform: device.platform || '',
-    local: Boolean(localId) && device.deviceId === localId
-  })).sort((a, b) => b.value - a.value);
+  return (state.stats?.devices || []).map((device) => {
+    const breakdown = deviceBreakdownApi.deviceBreakdownForPeriod(device, state.period, {
+      clientLabels,
+      clientColors,
+      fallbackColor: clientColors.default
+    });
+    const period = device.periods?.[state.period] || {};
+    const runtime = deviceRuntimeLabel(device.agentRuntime);
+    const version = device.agentVersion ? `${runtime ? `${runtime} ` : ''}v${device.agentVersion}` : runtime;
+    const metaParts = [devicePlatformLabel(device.platform), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
+    return {
+      key: device.deviceId,
+      name: deviceLabel(device),
+      value: breakdown.totalTokens,
+      cost: Number(period.costUsd || 0),
+      color: deviceColor(Boolean(device.stale)),
+      stale: Boolean(device.stale),
+      platform: device.platform || '',
+      local: Boolean(localId) && device.deviceId === localId,
+      deviceDetail: {
+        ...breakdown,
+        emptyText: breakdown.totalTokens > 0 ? t('devices.detailsUnavailable') : t('home.noTools'),
+        metaParts
+      }
+    };
+  }).sort((a, b) => b.value - a.value);
 }
 
 function toolRowsForPeriod(period) {

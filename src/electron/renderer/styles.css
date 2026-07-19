@@ -4049,6 +4049,84 @@ html.is-windows .limit-live-badge {
   gap: 6px;
   white-space: nowrap;
 }
+.device-breakdown { gap: 6px; }
+.device-tool {
+  display: grid;
+  gap: 2px;
+}
+.device-tool + .device-tool {
+  padding-top: 6px;
+  border-top: 1px solid rgba(var(--overlay-rgb), 0.07);
+}
+.device-tool-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+}
+.device-tool-label {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.device-tool-mark {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+}
+.device-tool-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device-tool-metrics {
+  flex: 0 0 auto;
+  min-width: max-content;
+  color: var(--text);
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.device-model-list {
+  display: grid;
+  gap: 2px;
+  padding-left: 15px;
+}
+.device-model-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+.device-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device-model-value {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.62;
+}
+.device-meta {
+  padding-top: 6px;
+  border-top: 1px solid rgba(var(--overlay-rgb), 0.07);
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.device-breakdown-empty { color: var(--muted); font-size: 10px; }
 .accordion-pct {
   font-size: 10px;
   opacity: 0.6;
@@ -4063,6 +4141,10 @@ html.is-windows .limit-live-badge {
   text-align: right;
 }
 .project-tool-breakdown { gap: 5px; }
+@media (prefers-reduced-motion: reduce) {
+  .row-accordion,
+  .row-accordion-inner { transition: none; }
+}
 .project-tool-row { align-items: center; }
 .project-tool-mark {
   width: 7px;
