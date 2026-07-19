@@ -312,6 +312,7 @@ function defaultSettings() {
     currency: normalizeCurrency(process.env.TOKEN_MONITOR_CURRENCY || 'USD'),
     currencyRates: {},
     startAtLogin: false,
+    automaticAppUpdates: false,
     language: 'auto',
     opencodeCookie: '',
     opencodeProfiles: {},
@@ -1622,6 +1623,7 @@ function readSettings() {
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
@@ -3310,7 +3312,7 @@ async function runAppUpdateCheck({ force = false } = {}) {
       }
       sendAppUpdatePush();
     }
-    return deriveAppUpdateState();
+    return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
   }
   const block = settings?.appUpdate || {};
   if (shouldSkipAppUpdateCheck({
@@ -3320,7 +3322,7 @@ async function runAppUpdateCheck({ force = false } = {}) {
     dismissedVersion: block.dismissedVersion,
     currentVersion: app.getVersion()
   })) {
-    return deriveAppUpdateState();
+    return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
   }
   const checkTask = (async () => {
     appUpdateCheckInFlight = true;
@@ -3354,7 +3356,18 @@ async function runAppUpdateCheck({ force = false } = {}) {
   } finally {
     if (appUpdateCheckPromise === checkTask) appUpdateCheckPromise = null;
   }
-  return deriveAppUpdateState();
+  return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
+}
+
+async function maybeDownloadAutomaticAppUpdate(updateState) {
+  if (
+    !settings?.automaticAppUpdates ||
+    !updateState?.hasUpdate ||
+    !updateState.installSupported ||
+    updateState.downloaded ||
+    updateState.installBusy
+  ) return updateState;
+  return downloadAndPrepareAppUpdate();
 }
 
 function maybeRunBackgroundUpdateCheck() {
@@ -3833,6 +3846,7 @@ app.whenReady().then(() => {
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousCurrency = settings.currency;
     const previousStartAtLogin = settings.startAtLogin;
+    const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
@@ -3925,6 +3939,7 @@ app.whenReady().then(() => {
       currencyRates: patch.currencyRates !== undefined ? normalizeCurrencyOverrides(patch.currencyRates) : normalizeCurrencyOverrides(settings.currencyRates),
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
+      automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
       deepseekApiKey: patch.deepseekApiKey !== undefined ? normalizeDeepSeekApiKey(patch.deepseekApiKey) : (settings.deepseekApiKey || ''),
       minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
       copilotApiToken: patch.copilotApiToken !== undefined ? normalizeCopilotApiToken(patch.copilotApiToken) : (settings.copilotApiToken || ''),
@@ -3962,6 +3977,7 @@ app.whenReady().then(() => {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
     }
+    if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) maybeRunBackgroundUpdateCheck();
     if (patch.zoomFactor !== undefined) applyZoomFactor();
     if (settings.discordRpcEnabled && !previousDiscordRpcEnabled) {
       startDiscordRpc();

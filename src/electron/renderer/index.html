@@ -65,6 +65,13 @@
             </div>
             <div class="settings-subgroup">
               <div class="settings-group-header"><span data-i18n="settings.appUpdate.title">App Updates</span><span data-i18n="settings.appUpdate.source">GitHub releases</span></div>
+              <label class="checkbox-label settings-item">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.appUpdate.automatic">Automatic updates</span>
+                </span>
+                <input id="automaticAppUpdatesInput" type="checkbox" />
+                <span class="settings-note settings-item-desc" data-i18n="settings.appUpdate.automaticDescription">Check for and download updates automatically. You'll be prompted to restart.</span>
+              </label>
               <div class="tokscale-lines">
                 <div><span data-i18n="settings.appUpdate.installed">Installed</span><strong id="appUpdateInstalled">—</strong></div>
                 <div><span data-i18n="settings.appUpdate.latest">Latest</span><strong id="appUpdateLatest" data-i18n="settings.common.notChecked">Not checked</strong></div>

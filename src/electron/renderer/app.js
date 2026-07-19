@@ -290,6 +290,7 @@ Object.assign(els, {
   appUpdatePopoverRelease: document.getElementById('appUpdatePopoverRelease'),
   appUpdatePopoverClose: document.getElementById('appUpdatePopoverClose'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
+  automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
   appUpdateLatest: document.getElementById('appUpdateLatest'),
   appUpdateCheckButton: document.getElementById('appUpdateCheckButton'),
   appUpdateViewReleaseButton: document.getElementById('appUpdateViewReleaseButton'),
@@ -5520,6 +5521,7 @@ function syncSettingsForm() {
   }
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
+  if (els.automaticAppUpdatesInput) els.automaticAppUpdatesInput.checked = state.settings.automaticAppUpdates === true;
   renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
@@ -7352,6 +7354,7 @@ els.showTrayProviderBadgeInput.addEventListener('change', () => saveSettings({ s
 els.windowToggleShortcutValue?.addEventListener('click', startWindowShortcutRecording);
 els.windowToggleShortcutClearButton?.addEventListener('click', () => setWindowToggleShortcut('').catch(() => {}));
 els.startAtLoginInput?.addEventListener('change', () => saveSettings({ startAtLogin: els.startAtLoginInput.checked }));
+els.automaticAppUpdatesInput?.addEventListener('change', () => saveSettings({ automaticAppUpdates: els.automaticAppUpdatesInput.checked }));
 els.glassInput.addEventListener('change', saveAppearanceFromControls);
 els.blurInput.addEventListener('change', saveAppearanceFromControls);
 els.zoomInput.addEventListener('change', saveAppearanceFromControls);
