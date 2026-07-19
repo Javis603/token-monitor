@@ -6513,7 +6513,17 @@ function preserveSettingsPanelScroll(callback) {
 }
 
 async function saveSettings(patch) {
-  state.settings = await window.tokenMonitor.updateSettings(patch);
+  try {
+    state.settings = await window.tokenMonitor.updateSettings(patch);
+  } catch (error) {
+    console.error('Could not persist settings:', error);
+    try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+    applyEffectiveCurrencyRates();
+    preserveSettingsPanelScroll(syncSettingsForm);
+    restartTimer();
+    maybeUpdateBarsIcon();
+    return false;
+  }
   applyEffectiveCurrencyRates();
   preserveSettingsPanelScroll(syncSettingsForm);
   restartTimer();
@@ -6521,6 +6531,7 @@ async function saveSettings(patch) {
   if (patch.showTrayProviderBadge !== undefined) {
     await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
   }
+  return true;
 }
 
 function renderHomeIfVisible() {

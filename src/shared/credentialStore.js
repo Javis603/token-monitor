@@ -99,23 +99,75 @@ function normalizeDocument(value) {
   };
 }
 
+function readRegularFileNoFollow(filePath, options = {}) {
+  const fsApi = options.fs || fs;
+  const constants = fsApi.constants || fs.constants;
+  const description = options.description || 'File';
+  const noFollow = constants.O_NOFOLLOW || 0;
+  let descriptor = null;
+  let pathStat = null;
+  try {
+    if (!noFollow) {
+      pathStat = fsApi.lstatSync(filePath);
+      if (!pathStat.isFile() || pathStat.isSymbolicLink()) {
+        throw new Error(`${description} must be a regular file`);
+      }
+    }
+    descriptor = fsApi.openSync(filePath, constants.O_RDONLY | noFollow);
+    const descriptorStat = fsApi.fstatSync(descriptor);
+    if (!descriptorStat.isFile()) throw new Error(`${description} must be a regular file`);
+    if (pathStat && (pathStat.dev !== descriptorStat.dev || pathStat.ino !== descriptorStat.ino)) {
+      throw new Error(`${description} changed while it was being opened`);
+    }
+    if (options.mode !== undefined && process.platform !== 'win32') {
+      fsApi.fchmodSync(descriptor, options.mode);
+    }
+    return fsApi.readFileSync(descriptor, options.encoding || 'utf8');
+  } catch (error) {
+    if (error?.code === 'ELOOP') {
+      const symlinkError = new Error(`${description} must be a regular file`);
+      symlinkError.cause = error;
+      throw symlinkError;
+    }
+    throw error;
+  } finally {
+    if (descriptor !== null) {
+      try { fsApi.closeSync(descriptor); } catch (_) {}
+    }
+  }
+}
+
 function writePrivateJsonAtomic(filePath, value, options = {}) {
   const fsApi = options.fs || fs;
+  const constants = fsApi.constants || fs.constants;
   const directory = path.dirname(filePath);
   const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   let descriptor = null;
+  let directoryDescriptor = null;
+  let renamed = false;
   fsApi.mkdirSync(directory, { recursive: true, mode: 0o700 });
   try {
     descriptor = fsApi.openSync(temporary, 'wx', 0o600);
     fsApi.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    if (process.platform !== 'win32') fsApi.fchmodSync(descriptor, 0o600);
     fsApi.fsyncSync(descriptor);
     fsApi.closeSync(descriptor);
     descriptor = null;
     fsApi.renameSync(temporary, filePath);
-    if (process.platform !== 'win32') fsApi.chmodSync(filePath, 0o600);
+    renamed = true;
+    if (process.platform !== 'win32') {
+      directoryDescriptor = fsApi.openSync(directory, constants.O_RDONLY);
+      fsApi.fsyncSync(directoryDescriptor);
+      fsApi.closeSync(directoryDescriptor);
+      directoryDescriptor = null;
+    }
   } catch (error) {
+    if (renamed) error.atomicWriteCommitted = true;
     if (descriptor !== null) {
       try { fsApi.closeSync(descriptor); } catch (_) {}
+    }
+    if (directoryDescriptor !== null) {
+      try { fsApi.closeSync(directoryDescriptor); } catch (_) {}
     }
     try { fsApi.rmSync(temporary, { force: true }); } catch (_) {}
     throw error;
@@ -141,6 +193,50 @@ function credentialSettingsForRenderer(settings, options = {}) {
   return out;
 }
 
+function persistSettingsAndCredentials({
+  store,
+  settingsPath,
+  settings,
+  previousSettings,
+  writeSettings = writePrivateJsonAtomic
+}) {
+  const previousDocument = store.readDocument();
+  let credentialsCommitted = false;
+  let settingsCommitted = false;
+  try {
+    try {
+      store.replaceSettingsCredentials(settings, previousDocument);
+      credentialsCommitted = true;
+    } catch (error) {
+      credentialsCommitted = error?.atomicWriteCommitted === true;
+      throw error;
+    }
+    try {
+      writeSettings(settingsPath, stripCredentialSettings(settings));
+      settingsCommitted = true;
+    } catch (error) {
+      settingsCommitted = error?.atomicWriteCommitted === true;
+      throw error;
+    }
+    return true;
+  } catch (error) {
+    const rollbackErrors = [];
+    if (credentialsCommitted) {
+      try { store.writeDocument(previousDocument); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+    }
+    if (settingsCommitted) {
+      try { writeSettings(settingsPath, stripCredentialSettings(previousSettings)); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+    }
+    if (rollbackErrors.length > 0) {
+      const rollbackDetail = rollbackErrors.map((rollbackError) => rollbackError?.message || String(rollbackError)).join('; ');
+      const combined = new Error(`${error?.message || error}; rollback failed: ${rollbackDetail}`);
+      combined.cause = error;
+      throw combined;
+    }
+    throw error;
+  }
+}
+
 class CredentialStore {
   constructor(dataDir, options = {}) {
     this.fs = options.fs || fs;
@@ -150,16 +246,17 @@ class CredentialStore {
   readDocument() {
     let raw;
     try {
-      const stat = this.fs.lstatSync(this.filePath);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Credential store must be a regular file');
-      raw = this.fs.readFileSync(this.filePath, 'utf8');
+      raw = readRegularFileNoFollow(this.filePath, {
+        fs: this.fs,
+        description: 'Credential store',
+        encoding: 'utf8',
+        mode: 0o600
+      });
     } catch (error) {
       if (error.code === 'ENOENT') return emptyDocument();
       throw error;
     }
-    const document = normalizeDocument(JSON.parse(raw));
-    if (process.platform !== 'win32') this.fs.chmodSync(this.filePath, 0o600);
-    return document;
+    return normalizeDocument(JSON.parse(raw));
   }
 
   writeDocument(document) {
@@ -196,8 +293,8 @@ class CredentialStore {
     return { migrated: true, document: this.writeDocument(document) };
   }
 
-  replaceSettingsCredentials(settings) {
-    const document = this.readDocument();
+  replaceSettingsCredentials(settings, baseDocument = this.readDocument()) {
+    const document = normalizeDocument(baseDocument);
     for (const [key, segments] of Object.entries(CREDENTIAL_SETTING_PATHS)) {
       const value = settings?.[key];
       if (credentialValuePresent(value)) setValueAt(document.credentials, segments, value);
@@ -259,6 +356,8 @@ module.exports = {
   CredentialStore,
   credentialSettingsForRenderer,
   hasCredentialSettings,
+  persistSettingsAndCredentials,
+  readRegularFileNoFollow,
   stripCredentialSettings,
   writePrivateJsonAtomic
 };

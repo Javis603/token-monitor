@@ -220,7 +220,7 @@ test('OpenCode profile enable toggles restart the collector mode so limits sourc
   );
   assert.ok(handler, 'opencode:setProfileEnabled handler should exist');
   assert.match(handler, /profiles\[name\]\.enabled = Boolean\(enabled\);/);
-  assert.match(handler, /saveSettings\(\);/);
+  assert.match(handler, /saveSettings\(\{ throwOnError: true \}\);/);
   assert.match(handler, /opencodeStatusCache = \{ value: null, at: 0 \};/);
   assert.match(handler, /startMode\(\)/);
 });
@@ -835,10 +835,9 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   );
   assert.match(mimoRendererShape, /id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled/);
   assert.doesNotMatch(mimoRendererShape, /cookieHeader/);
-  assert.doesNotMatch(main, /safeStorage/);
-  assert.doesNotMatch(credentialStore, /safeStorage/);
   assert.match(credentialStore, /fsApi\.openSync\(temporary, 'wx', 0o600\)/);
-  assert.match(credentialStore, /fsApi\.chmodSync\(filePath, 0o600\)/);
+  assert.match(credentialStore, /fsApi\.fchmodSync\(descriptor, 0o600\)/);
+  assert.match(credentialStore, /fsApi\.openSync\(directory, constants\.O_RDONLY\)/);
   assert.match(main, /ensureCredentialStore\(\)\.writeMimoCredential\(id, cookieHeader\)/);
   assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
   assert.match(main, /migrateLegacyMimoCredentialFiles\(merged\.mimoManagedAccounts\)/);
@@ -855,14 +854,37 @@ test('legacy credential cleanup retries independently from the migration marker'
   assert.doesNotMatch(body, /migration\.migrated/);
 });
 
+test('legacy MiMo migration rejects symlinks and retries cleanup after a partial failure', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const body = functionBody(main, 'migrateLegacyMimoCredentialFiles', 'readSettings');
+  assert.match(body, /readRegularFileNoFollow\(legacyMimoCredentialPath\(account\.id\)/);
+  assert.match(body, /ensureCredentialStore\(\)\.migrateLegacyMimoCredentials\(entries\);/);
+  assert.match(body, /if \(!readMimoCredential\(entry\.id\)\) continue;/);
+  assert.doesNotMatch(body, /migratedIds/);
+});
+
 test('credential storage failures preserve the file and surface one actionable error', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const reporter = functionBody(main, 'reportCredentialStorageError', 'loadCredentialSettings');
   assert.match(reporter, /credentialStorageErrorShown \|\| !app\.isReady\(\)/);
   assert.match(reporter, /dialog\.showErrorBox\(/);
-  assert.match(reporter, /file was left unchanged to protect existing credentials/);
+  assert.match(reporter, /save was stopped and previous data was restored where possible/);
   const saveBody = functionBody(main, 'saveSettings', 'loginItemEnabledHere');
+  assert.match(saveBody, /persistSettingsAndCredentials\(/);
+  assert.match(saveBody, /settings = previousSettings;/);
   assert.match(saveBody, /reportCredentialStorageError\('could not persist settings', error\)/);
+  assert.match(saveBody, /if \(options\.throwOnError\) throw error;/);
+
+  const settingsHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('appearance:preview'")
+  );
+  assert.match(settingsHandler, /saveSettings\(\{ throwOnError: true \}\);/);
+
+  const renderer = readRendererFile('app.js');
+  const rendererSave = functionBody(renderer, 'saveSettings', 'renderHomeIfVisible');
+  assert.match(rendererSave, /state\.settings = await window\.tokenMonitor\.getSettings\(\)/);
+  assert.match(rendererSave, /return false;/);
 });
 
 test('main settings normalize the Z.ai API region', () => {

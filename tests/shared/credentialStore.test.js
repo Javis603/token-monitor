@@ -10,6 +10,8 @@ const {
   CredentialStore,
   credentialSettingsForRenderer,
   hasCredentialSettings,
+  persistSettingsAndCredentials,
+  readRegularFileNoFollow,
   stripCredentialSettings,
   writePrivateJsonAtomic
 } = require('../../src/shared/credentialStore');
@@ -106,12 +108,34 @@ test('clearing a runtime credential removes it without resurrecting legacy data'
 test('writes private JSON atomically with owner-only permissions', (t) => {
   const dataDir = tempDataDir(t);
   const filePath = path.join(dataDir, 'private.json');
-  writePrivateJsonAtomic(filePath, { ok: true });
+  const fsApi = Object.create(fs);
+  const syncedKinds = [];
+  fsApi.fsyncSync = (descriptor) => {
+    syncedKinds.push(fs.fstatSync(descriptor).isDirectory() ? 'directory' : 'file');
+    return fs.fsyncSync(descriptor);
+  };
+  writePrivateJsonAtomic(filePath, { ok: true }, { fs: fsApi });
   assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), { ok: true });
   assert.equal(fs.readdirSync(dataDir).some((name) => name.endsWith('.tmp')), false);
+  assert.ok(syncedKinds.includes('file'));
   if (process.platform !== 'win32') {
     assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+    assert.ok(syncedKinds.includes('directory'));
   }
+});
+
+test('reads private files through a validated descriptor', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'credentials.json');
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, credentials: {}, migrations: {} }), 'utf8');
+  const fsApi = Object.create(fs);
+  let readTarget = null;
+  fsApi.readFileSync = (target, ...args) => {
+    readTarget = target;
+    return fs.readFileSync(target, ...args);
+  };
+  assert.match(readRegularFileNoFollow(filePath, { fs: fsApi, description: 'Credential store' }), /"version":1/);
+  assert.equal(typeof readTarget, 'number');
 });
 
 test('does not overwrite a corrupt credential store', (t) => {
@@ -131,6 +155,36 @@ test('refuses to follow a credential-store symlink', { skip: process.platform ==
   fs.symlinkSync(target, filePath);
   const store = new CredentialStore(dataDir);
   assert.throws(() => store.readDocument(), /regular file/);
+});
+
+test('rolls back a credential clear when the settings write fails after commit', (t) => {
+  const dataDir = tempDataDir(t);
+  const settingsPath = path.join(dataDir, 'settings.json');
+  const store = new CredentialStore(dataDir);
+  const previousSettings = { language: 'en', kimiApiKey: 'old-key' };
+  store.replaceSettingsCredentials(previousSettings);
+  writePrivateJsonAtomic(settingsPath, stripCredentialSettings(previousSettings));
+
+  let firstSettingsWrite = true;
+  const writeSettings = (target, value) => {
+    writePrivateJsonAtomic(target, value);
+    if (firstSettingsWrite) {
+      firstSettingsWrite = false;
+      const error = new Error('settings write failed after rename');
+      error.atomicWriteCommitted = true;
+      throw error;
+    }
+  };
+
+  assert.throws(() => persistSettingsAndCredentials({
+    store,
+    settingsPath,
+    settings: { language: 'zh-TW', kimiApiKey: '' },
+    previousSettings,
+    writeSettings
+  }), /settings write failed after rename/);
+  assert.equal(store.settingsCredentials().kimiApiKey, 'old-key');
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { language: 'en' });
 });
 
 test('stores, migrates, and removes MiMo account cookies in the unified store', (t) => {

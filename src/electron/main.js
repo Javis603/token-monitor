@@ -11,6 +11,8 @@ const {
   CredentialStore,
   credentialSettingsForRenderer,
   hasCredentialSettings,
+  persistSettingsAndCredentials,
+  readRegularFileNoFollow,
   stripCredentialSettings,
   writePrivateJsonAtomic
 } = require('../shared/credentialStore');
@@ -191,6 +193,7 @@ let mainWindow = null;
 let dashboardWindow = null;
 let settingsPath = null;
 let settings = null;
+let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
 let sessionUsageArchive = null;
@@ -585,6 +588,7 @@ async function addMimoManagedAccount(cookieValue) {
     return { ok: false, errorCode };
   }
   result.account.accountEmail = String(validation.accountEmail || '').trim().slice(0, 254);
+  const previousCookie = readMimoCredential(result.account.id);
   const credentialStored = writeMimoCredential(result.account.id, result.account.cookieHeader);
   delete result.account.cookieHeader;
   if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
@@ -592,7 +596,13 @@ async function addMimoManagedAccount(cookieValue) {
     ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
     result.account
   ]);
-  saveSettings();
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCookie) writeMimoCredential(result.account.id, previousCookie);
+    else removeMimoCredential(result.account.id);
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
   pushSettingsToRenderer();
   sendMimoAccountsPush();
   startMode();
@@ -604,9 +614,15 @@ async function removeMimoManagedAccount(id) {
   const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
   const account = accounts.find((entry) => entry.id === accountId);
   if (!account) return { ok: false, error: 'Account not found' };
+  const previousCookie = readMimoCredential(accountId);
   if (!removeMimoCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
   settings.mimoManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  saveSettings();
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCookie) writeMimoCredential(accountId, previousCookie);
+    return { ok: false, error: 'Could not persist account removal' };
+  }
   pushSettingsToRenderer();
   sendMimoAccountsPush();
   startMode();
@@ -621,7 +637,11 @@ function setMimoManagedAccountEnabled(id, enabled) {
   account.enabled = Boolean(enabled);
   account.updatedAt = new Date().toISOString();
   settings.mimoManagedAccounts = accounts;
-  saveSettings();
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    return { ok: false, error: 'Could not persist account state' };
+  }
   pushSettingsToRenderer();
   sendMimoAccountsPush();
   startMode();
@@ -691,7 +711,7 @@ function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
     ...accounts.filter((account) => account.id !== id),
     record
   ]);
-  saveSettings();
+  saveSettings({ throwOnError: true });
   if (options.restart !== false) startMode();
   return codexAccountsForRenderer().find((account) => account.id === id);
 }
@@ -850,7 +870,11 @@ async function removeCodexManagedAccount(id) {
   const account = accounts.find((entry) => entry.id === accountId);
   if (!account) return { ok: false, error: 'Account not found' };
   settings.codexManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  saveSettings();
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Could not persist account removal' };
+  }
   await removeManagedHomeIfSafe(account.homePath);
   startMode();
   return { ok: true, accounts: codexAccountsForRenderer() };
@@ -863,7 +887,11 @@ function setCodexManagedAccountEnabled(id, enabled) {
   if (!account) return { ok: false, error: 'Account not found' };
   account.enabled = Boolean(enabled);
   settings.codexManagedAccounts = accounts;
-  saveSettings();
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Could not persist account state' };
+  }
   startMode();
   return { ok: true, accounts: codexAccountsForRenderer() };
 }
@@ -1061,6 +1089,7 @@ function floatingBubblePayload() {
 function ensureSettingsLoaded() {
   if (settings) return settings;
   settings = readSettings();
+  persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
   return settings;
 }
@@ -1346,7 +1375,7 @@ function reportCredentialStorageError(context, error) {
   try {
     dialog.showErrorBox(
       'Credential storage error',
-      `Token Monitor could not safely access credentials.json (${context}). The file was left unchanged to protect existing credentials. Check the file's JSON and permissions, then restart the app.\n\n${detail}`
+      `Token Monitor could not safely access credentials.json (${context}). The save was stopped and previous data was restored where possible. Check the file's JSON and permissions, then restart the app.\n\n${detail}`
     );
   } catch (_) {}
 }
@@ -1377,16 +1406,18 @@ function migrateLegacyMimoCredentialFiles(accounts) {
   const entries = [];
   for (const account of accounts || []) {
     try {
-      const cookieHeader = normalizeMimoCookieHeader(fs.readFileSync(legacyMimoCredentialPath(account.id), 'utf8'));
+      const cookieHeader = normalizeMimoCookieHeader(readRegularFileNoFollow(legacyMimoCredentialPath(account.id), {
+        fs,
+        description: 'Legacy MiMo credential',
+        encoding: 'utf8'
+      }));
       if (cookieHeader) entries.push({ id: account.id, cookieHeader });
     } catch (_) {}
   }
   if (entries.length === 0) return;
   try {
-    const { migratedIds } = ensureCredentialStore().migrateLegacyMimoCredentials(entries);
-    const migrated = new Set(migratedIds);
+    ensureCredentialStore().migrateLegacyMimoCredentials(entries);
     for (const entry of entries) {
-      if (!migrated.has(entry.id)) continue;
       if (!readMimoCredential(entry.id)) continue;
       try { fs.rmSync(legacyMimoCredentialPath(entry.id), { force: true }); } catch (_) {}
     }
@@ -1517,13 +1548,25 @@ function readSettings() {
   }
 }
 
-function saveSettings() {
+function cloneSettingsSnapshot(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function saveSettings(options = {}) {
+  const previousSettings = cloneSettingsSnapshot(persistedSettingsSnapshot || settings);
   try {
-    ensureCredentialStore().replaceSettingsCredentials(settings);
-    writePrivateJsonAtomic(settingsPath, stripCredentialSettings(settings));
+    persistSettingsAndCredentials({
+      store: ensureCredentialStore(),
+      settingsPath,
+      settings,
+      previousSettings
+    });
+    persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
     return true;
   } catch (error) {
+    settings = previousSettings;
     reportCredentialStorageError('could not persist settings', error);
+    if (options.throwOnError) throw error;
     return false;
   }
 }
@@ -3824,7 +3867,7 @@ app.whenReady().then(() => {
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
-    saveSettings();
+    saveSettings({ throwOnError: true });
     if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {
       regenerateTokscalePricing();
       refreshAfterPricingChange();
@@ -3832,7 +3875,7 @@ app.whenReady().then(() => {
     configureWindowToggleShortcut();
     if (settings.startAtLogin !== previousStartAtLogin) {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
-      saveSettings();
+      saveSettings({ throwOnError: true });
     }
     if (patch.zoomFactor !== undefined) applyZoomFactor();
     if (settings.discordRpcEnabled && !previousDiscordRpcEnabled) {
@@ -4047,7 +4090,7 @@ app.whenReady().then(() => {
   ipcMain.handle('hub:getInfo', () => getHubInfo());
   ipcMain.handle('hub:regenerateSecret', () => {
     settings.hubHostSecret = generateHubSecret();
-    saveSettings();
+    saveSettings({ throwOnError: true });
     if (settings.hubMode === 'host') startMode();
     return getHubInfo();
   });
@@ -4119,7 +4162,11 @@ app.whenReady().then(() => {
     if (!cookie) {
       settings.opencodeProfiles = {};
       settings.opencodeCookie = '';
-      saveSettings();
+      try {
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        return { ok: false, error: error?.message || 'Could not persist OpenCode credentials' };
+      }
       opencodeStatusCache = { value: null, at: 0 };
       startMode();
       return { ok: true, cleared: true };
@@ -4136,7 +4183,7 @@ app.whenReady().then(() => {
       profiles.default = { cookie, enabled: true };
       settings.opencodeProfiles = profiles;
       settings.opencodeCookie = cookie;
-      saveSettings();
+      saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
       startMode();
       return { ok: true };
@@ -4157,7 +4204,7 @@ app.whenReady().then(() => {
     try {
       settings.opencodeProfiles = {};
       settings.opencodeCookie = '';
-      saveSettings();
+      saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
       startMode();
       return { ok: true };
@@ -4253,7 +4300,7 @@ app.whenReady().then(() => {
       const profiles = settings.opencodeProfiles || {};
       profiles[name] = { cookie, enabled: true };
       settings.opencodeProfiles = profiles;
-      saveSettings();
+      saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
       startMode();
       return { ok: true };
@@ -4269,7 +4316,11 @@ app.whenReady().then(() => {
       settings.opencodeCookie = '';
     }
     settings.opencodeProfiles = profiles;
-    saveSettings();
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist OpenCode profile deletion' };
+    }
     opencodeStatusCache = { value: null, at: 0 };
     startMode();
     return { ok: true };
@@ -4282,7 +4333,11 @@ app.whenReady().then(() => {
     profiles[newName] = profiles[oldName];
     delete profiles[oldName];
     settings.opencodeProfiles = profiles;
-    saveSettings();
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist OpenCode profile rename' };
+    }
     opencodeStatusCache = { value: null, at: 0 };
     startMode();
     return { ok: true };
@@ -4292,7 +4347,11 @@ app.whenReady().then(() => {
     if (!profiles[name]) return { ok: false, error: 'Profile not found' };
     profiles[name].enabled = Boolean(enabled);
     settings.opencodeProfiles = profiles;
-    saveSettings();
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist OpenCode profile state' };
+    }
     opencodeStatusCache = { value: null, at: 0 };
     startMode();
     return { ok: true };
@@ -4378,7 +4437,7 @@ app.whenReady().then(() => {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
       settings.copilotApiToken = normalizeCopilotApiToken(result.accessToken);
-      saveSettings();
+      saveSettings({ throwOnError: true });
       pushSettingsToRenderer();
       startMode();
       return { ok: true, flowId };
