@@ -7,6 +7,13 @@ const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
+const {
+  CredentialStore,
+  credentialSettingsForRenderer,
+  hasCredentialSettings,
+  stripCredentialSettings,
+  writePrivateJsonAtomic
+} = require('../shared/credentialStore');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
@@ -184,6 +191,8 @@ let mainWindow = null;
 let dashboardWindow = null;
 let settingsPath = null;
 let settings = null;
+let credentialStore = null;
+let credentialStorageErrorShown = false;
 let sessionUsageArchive = null;
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
@@ -533,7 +542,7 @@ function mimoManagedAccountsForCollector() {
   })).filter((account) => account.cookieHeader);
 }
 
-function mimoCredentialPath(id) {
+function legacyMimoCredentialPath(id) {
   const digest = crypto.createHash('sha256').update(String(id || '')).digest('hex');
   return path.join(app.getPath('userData'), 'mimo-credentials', `${digest}.cookie`);
 }
@@ -541,35 +550,24 @@ function mimoCredentialPath(id) {
 function writeMimoCredential(id, value) {
   const cookieHeader = normalizeMimoCookieHeader(value);
   if (!cookieHeader) return false;
-  const destination = mimoCredentialPath(id);
-  const temporary = `${destination}.${process.pid}.tmp`;
   try {
-    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
-    fs.chmodSync(path.dirname(destination), 0o700);
-    fs.writeFileSync(temporary, `${cookieHeader}\n`, { encoding: 'utf8', mode: 0o600 });
-    fs.chmodSync(temporary, 0o600);
-    fs.renameSync(temporary, destination);
-    fs.chmodSync(destination, 0o600);
-    return true;
+    return ensureCredentialStore().writeMimoCredential(id, cookieHeader);
   } catch (_) {
-    try { fs.rmSync(temporary, { force: true }); } catch (_) {}
     return false;
   }
 }
 
 function readMimoCredential(id) {
   try {
-    return normalizeMimoCookieHeader(fs.readFileSync(mimoCredentialPath(id), 'utf8'));
+    return normalizeMimoCookieHeader(ensureCredentialStore().readMimoCredential(id));
   } catch (_) {
     return '';
   }
 }
 
 function removeMimoCredential(id) {
-  const target = mimoCredentialPath(id);
   try {
-    fs.rmSync(target, { force: true });
-    return !fs.existsSync(target);
+    return ensureCredentialStore().removeMimoCredential(id);
   } catch (_) {
     return false;
   }
@@ -1335,13 +1333,89 @@ function normalizeCurrencyOverrides(value) {
   return out;
 }
 
+function ensureCredentialStore() {
+  if (!credentialStore) credentialStore = new CredentialStore(app.getPath('userData'));
+  return credentialStore;
+}
+
+function reportCredentialStorageError(context, error) {
+  const detail = error?.message || String(error || 'Unknown error');
+  console.error(`[credentials] ${context}: ${detail}`);
+  if (credentialStorageErrorShown || !app.isReady()) return;
+  credentialStorageErrorShown = true;
+  try {
+    dialog.showErrorBox(
+      'Credential storage error',
+      `Token Monitor could not safely access credentials.json (${context}). The file was left unchanged to protect existing credentials. Check the file's JSON and permissions, then restart the app.\n\n${detail}`
+    );
+  } catch (_) {}
+}
+
+function loadCredentialSettings(saved) {
+  try {
+    const store = ensureCredentialStore();
+    store.migrateLegacySettings(saved);
+    const stored = store.settingsCredentials();
+    // Cleanup is intentionally independent from the migration marker. If the
+    // first cleanup write fails after credentials.json was committed, retry on
+    // every startup until no credential keys remain in settings.json.
+    if (hasCredentialSettings(saved)) {
+      try {
+        writePrivateJsonAtomic(settingsPath, stripCredentialSettings(saved));
+      } catch (error) {
+        reportCredentialStorageError('could not remove migrated credentials from settings.json', error);
+      }
+    }
+    return stored;
+  } catch (error) {
+    reportCredentialStorageError('could not load credentials.json', error);
+    return {};
+  }
+}
+
+function migrateLegacyMimoCredentialFiles(accounts) {
+  const entries = [];
+  for (const account of accounts || []) {
+    try {
+      const cookieHeader = normalizeMimoCookieHeader(fs.readFileSync(legacyMimoCredentialPath(account.id), 'utf8'));
+      if (cookieHeader) entries.push({ id: account.id, cookieHeader });
+    } catch (_) {}
+  }
+  if (entries.length === 0) return;
+  try {
+    const { migratedIds } = ensureCredentialStore().migrateLegacyMimoCredentials(entries);
+    const migrated = new Set(migratedIds);
+    for (const entry of entries) {
+      if (!migrated.has(entry.id)) continue;
+      if (!readMimoCredential(entry.id)) continue;
+      try { fs.rmSync(legacyMimoCredentialPath(entry.id), { force: true }); } catch (_) {}
+    }
+    try { fs.rmdirSync(path.join(app.getPath('userData'), 'mimo-credentials')); } catch (_) {}
+  } catch (error) {
+    console.warn(`[credentials] Could not migrate MiMo credentials: ${error.message}`);
+  }
+}
+
 function readSettings() {
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
   try {
     const defaults = defaultSettings();
-    const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    let saved = {};
+    try {
+      saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) saved = {};
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.warn(`[settings] Could not load settings.json: ${error.message}`);
+    }
+    if (process.platform !== 'win32') {
+      try {
+        const stat = fs.lstatSync(settingsPath);
+        if (stat.isFile() && !stat.isSymbolicLink()) fs.chmodSync(settingsPath, 0o600);
+      } catch (_) {}
+    }
+    const storedCredentials = loadCredentialSettings(saved);
     if (!saved.secret && defaults.secret) delete saved.secret;
-    const merged = { ...defaults, ...saved };
+    const merged = { ...defaults, ...saved, ...storedCredentials };
     // Migrate older configs that predate hubMode: infer from hubUrl.
     if (saved.hubMode === undefined) {
       merged.hubMode = (saved.hubUrl && String(saved.hubUrl).trim()) ? 'client' : 'local';
@@ -1432,6 +1506,7 @@ function readSettings() {
     if (merged.opencodeCookie && Object.keys(merged.opencodeProfiles || {}).length === 0) {
       merged.opencodeProfiles = { default: { cookie: merged.opencodeCookie, enabled: true } };
     }
+    migrateLegacyMimoCredentialFiles(merged.mimoManagedAccounts);
     Object.assign(merged, normalizeTrayModeSettings(merged));
     return normalizeWindowBehaviorSettings(merged);
   }
@@ -1443,8 +1518,14 @@ function readSettings() {
 }
 
 function saveSettings() {
-  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-  fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  try {
+    ensureCredentialStore().replaceSettingsCredentials(settings);
+    writePrivateJsonAtomic(settingsPath, stripCredentialSettings(settings));
+    return true;
+  } catch (error) {
+    reportCredentialStorageError('could not persist settings', error);
+    return false;
+  }
 }
 
 function loginItemEnabledHere() {
@@ -2382,20 +2463,20 @@ function settingsForRenderer() {
     : kimiToken(process.env)
       ? 'env'
       : '';
+  // Default-deny every credential field added to the canonical store. The two
+  // hub secrets remain explicit exceptions because the existing sync UI must
+  // prefill/copy them; provider credentials only cross as blank/configured state.
+  const redactedCredentials = credentialSettingsForRenderer(settings, {
+    expose: ['hubHostSecret', 'secret']
+  });
   return {
     ...settings,
-    deepseekApiKey: '',
-    minimaxApiKey: '',
-    copilotApiToken: '',
-    zaiApiKey: '',
+    ...redactedCredentials,
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
-    zaiTeamApiKey: '',
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
     zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
-    volcengineSecretAccessKey: '',
     qoderCookie: settings?.qoderCookie ? 'set' : '',
-    kimiApiKey: '',
     ollamaCookie: settings?.ollamaCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
     // know whether a cookie is configured, not its value.

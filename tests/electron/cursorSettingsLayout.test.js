@@ -818,11 +818,13 @@ test('opencode status env account avoids saved profile names', () => {
 
 test('settingsForRenderer strips provider cookies before they reach the renderer', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const credentialStore = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'credentialStore.js'), 'utf8');
   const body = main.slice(
     main.indexOf('function settingsForRenderer'),
     main.indexOf('function pushSettingsToRenderer')
   );
   assert.ok(body, 'settingsForRenderer should exist');
+  assert.match(body, /credentialSettingsForRenderer\(settings, \{\s*expose: \['hubHostSecret', 'secret'\]\s*\}\)/);
   // The raw OpenCode cookie must be reduced to a presence flag, never forwarded verbatim.
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
@@ -834,13 +836,33 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(mimoRendererShape, /id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled/);
   assert.doesNotMatch(mimoRendererShape, /cookieHeader/);
   assert.doesNotMatch(main, /safeStorage/);
-  assert.match(main, /fs\.writeFileSync\(temporary, `\$\{cookieHeader\}\\n`, \{ encoding: 'utf8', mode: 0o600 \}\)/);
-  assert.match(main, /fs\.chmodSync\(destination, 0o600\)/);
+  assert.doesNotMatch(credentialStore, /safeStorage/);
+  assert.match(credentialStore, /fsApi\.openSync\(temporary, 'wx', 0o600\)/);
+  assert.match(credentialStore, /fsApi\.chmodSync\(filePath, 0o600\)/);
+  assert.match(main, /ensureCredentialStore\(\)\.writeMimoCredential\(id, cookieHeader\)/);
   assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
-  assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
-  assert.doesNotMatch(main, /legacyCookieHeader|keepLegacyCookie|hadPlaintextMimoCookie/);
+  assert.match(main, /migrateLegacyMimoCredentialFiles\(merged\.mimoManagedAccounts\)/);
   assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
   assert.match(main, /delete result\.account\.cookieHeader/);
+});
+
+test('legacy credential cleanup retries independently from the migration marker', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const body = functionBody(main, 'loadCredentialSettings', 'migrateLegacyMimoCredentialFiles');
+  assert.match(body, /store\.migrateLegacySettings\(saved\);/);
+  assert.match(body, /if \(hasCredentialSettings\(saved\)\) \{/);
+  assert.match(body, /writePrivateJsonAtomic\(settingsPath, stripCredentialSettings\(saved\)\)/);
+  assert.doesNotMatch(body, /migration\.migrated/);
+});
+
+test('credential storage failures preserve the file and surface one actionable error', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const reporter = functionBody(main, 'reportCredentialStorageError', 'loadCredentialSettings');
+  assert.match(reporter, /credentialStorageErrorShown \|\| !app\.isReady\(\)/);
+  assert.match(reporter, /dialog\.showErrorBox\(/);
+  assert.match(reporter, /file was left unchanged to protect existing credentials/);
+  const saveBody = functionBody(main, 'saveSettings', 'loginItemEnabledHere');
+  assert.match(saveBody, /reportCredentialStorageError\('could not persist settings', error\)/);
 });
 
 test('main settings normalize the Z.ai API region', () => {
