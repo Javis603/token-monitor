@@ -711,13 +711,38 @@ function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
     ...accounts.filter((account) => account.id !== id),
     record
   ]);
-  saveSettings({ throwOnError: true });
+  if (options.persist !== false) saveSettings({ throwOnError: true });
   if (options.restart !== false) startMode();
   return codexAccountsForRenderer().find((account) => account.id === id);
 }
 
 function hasCodexIdentity(identity) {
   return Boolean(identity?.accountKey || identity?.email);
+}
+
+async function snapshotCodexAuthFile(authPath) {
+  let parentExisted = true;
+  try { await fs.promises.stat(path.dirname(authPath)); } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    parentExisted = false;
+  }
+  try {
+    return { authPath, data: await fs.promises.readFile(authPath, 'utf8'), existed: true, parentExisted };
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    return { authPath, data: '', existed: false, parentExisted };
+  }
+}
+
+async function restoreCodexAuthFileSnapshot(snapshot, options = {}) {
+  if (snapshot.existed) {
+    await writeCodexAuthFile(snapshot.authPath, snapshot.data);
+    return;
+  }
+  await fs.promises.rm(snapshot.authPath, { force: true });
+  if (options.removeNewParent && !snapshot.parentExisted) {
+    await removeManagedHomeIfSafe(path.dirname(snapshot.authPath));
+  }
 }
 
 async function preserveLiveCodexAuthAsManagedAccount(targetIdentity) {
@@ -734,11 +759,22 @@ async function preserveLiveCodexAuthAsManagedAccount(targetIdentity) {
   const existing = findExistingCodexAccount(accounts, liveMaterial.identity);
   const homePath = codexManagedHomePath(codexAccountId(liveMaterial.identity, existing));
   if (!homePath) return null;
-  await writeCodexAuthFile(path.join(homePath, 'auth.json'), liveMaterial.data);
-  return commitCodexManagedAccount(liveMaterial.identity, homePath, existing, {
-    enabled: existing?.enabled ?? true,
-    restart: false
-  });
+  const authSnapshot = await snapshotCodexAuthFile(path.join(homePath, 'auth.json'));
+  try {
+    await writeCodexAuthFile(authSnapshot.authPath, liveMaterial.data);
+    const account = commitCodexManagedAccount(liveMaterial.identity, homePath, existing, {
+      enabled: existing?.enabled ?? true,
+      persist: false,
+      restart: false
+    });
+    return {
+      account,
+      rollback: () => restoreCodexAuthFileSnapshot(authSnapshot, { removeNewParent: true })
+    };
+  } catch (error) {
+    await restoreCodexAuthFileSnapshot(authSnapshot, { removeNewParent: true }).catch(() => {});
+    throw error;
+  }
 }
 
 function codexLoginErrorMessage(result) {
@@ -913,14 +949,25 @@ async function switchCodexSystemAccount(id) {
     return { ok: false, error: 'Could not identify the selected Codex account credentials.' };
   }
 
+  const previousAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
+  const liveAuthPath = liveCodexAuthPath(process.env);
+  let liveAuthSnapshot;
   try {
-    await preserveLiveCodexAuthAsManagedAccount(targetMaterial.identity);
-    await writeCodexAuthFile(liveCodexAuthPath(process.env), targetMaterial.data);
+    liveAuthSnapshot = await snapshotCodexAuthFile(liveAuthPath);
+  } catch (error) {
+    return { ok: false, error: `Could not back up the local Codex account: ${error?.message || error}` };
+  }
+  let preservedLiveAccount = null;
+  try {
+    preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount(targetMaterial.identity);
+    await writeCodexAuthFile(liveAuthPath, targetMaterial.data);
     const refreshedAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
     const refreshed = refreshedAccounts.find((entry) => entry.id === account.id) || account;
     commitCodexManagedAccount(targetMaterial.identity, refreshed.homePath, refreshed, {
-      enabled: refreshed.enabled !== false
+      enabled: refreshed.enabled !== false,
+      restart: false
     });
+    try { startMode(); } catch (error) { console.warn('Could not restart after switching Codex account:', error?.message || error); }
     const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
     const accountsForRenderer = codexAccountsForRenderer();
     return {
@@ -930,7 +977,14 @@ async function switchCodexSystemAccount(id) {
       accounts: accountsForRenderer
     };
   } catch (error) {
-    return { ok: false, error: `Could not switch the local Codex account: ${error?.message || error}` };
+    settings.codexManagedAccounts = previousAccounts;
+    const rollbackErrors = [];
+    try { await restoreCodexAuthFileSnapshot(liveAuthSnapshot); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+    try { await preservedLiveAccount?.rollback?.(); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+    const rollbackDetail = rollbackErrors.length > 0
+      ? ` Rollback also failed: ${rollbackErrors.map((rollbackError) => rollbackError?.message || rollbackError).join('; ')}`
+      : '';
+    return { ok: false, error: `Could not switch the local Codex account: ${error?.message || error}.${rollbackDetail}` };
   }
 }
 

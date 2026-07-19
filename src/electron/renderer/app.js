@@ -6522,7 +6522,7 @@ async function saveSettings(patch) {
     preserveSettingsPanelScroll(syncSettingsForm);
     restartTimer();
     maybeUpdateBarsIcon();
-    return false;
+    throw error;
   }
   applyEffectiveCurrencyRates();
   preserveSettingsPanelScroll(syncSettingsForm);

@@ -458,7 +458,17 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(switchFlush, /state\.breakdown !== 'limits'/);
   assert.match(switchFlush, /renderLimits\(\)/);
   const switchBody = functionBody(main, 'switchCodexSystemAccount', 'refreshCodexManagedAccountLimits');
-  assert.doesNotMatch(switchBody, /restart: false/);
+  assert.match(switchBody, /const previousAccounts = normalizeCodexManagedAccounts\(settings\.codexManagedAccounts\)/);
+  assert.match(switchBody, /liveAuthSnapshot = await snapshotCodexAuthFile\(liveAuthPath\)/);
+  assert.match(switchBody, /preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount/);
+  assert.match(switchBody, /restart: false/);
+  assert.match(switchBody, /settings\.codexManagedAccounts = previousAccounts;/);
+  assert.match(switchBody, /restoreCodexAuthFileSnapshot\(liveAuthSnapshot\)/);
+  assert.match(switchBody, /preservedLiveAccount\?\.rollback\?\.\(\)/);
+  const preserveBody = functionBody(main, 'preserveLiveCodexAuthAsManagedAccount', 'codexLoginErrorMessage');
+  assert.match(preserveBody, /const authSnapshot = await snapshotCodexAuthFile/);
+  assert.match(preserveBody, /persist: false/);
+  assert.match(preserveBody, /rollback: \(\) => restoreCodexAuthFileSnapshot/);
   const findExistingBody = functionBody(main, 'findExistingCodexAccount', 'codexAccountId');
   assert.match(findExistingBody, /if \(identity\.accountKey && account\.accountKey && !codexEmailDerivedAccountKey\(account, identity\)\)/);
   assert.match(main, /function codexEmailDerivedAccountKey\(account, identity\)/);
@@ -884,7 +894,7 @@ test('credential storage failures preserve the file and surface one actionable e
   const renderer = readRendererFile('app.js');
   const rendererSave = functionBody(renderer, 'saveSettings', 'renderHomeIfVisible');
   assert.match(rendererSave, /state\.settings = await window\.tokenMonitor\.getSettings\(\)/);
-  assert.match(rendererSave, /return false;/);
+  assert.match(rendererSave, /throw error;/);
 });
 
 test('main settings normalize the Z.ai API region', () => {
