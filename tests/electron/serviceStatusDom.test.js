@@ -303,8 +303,9 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.view-switcher-menu/);
   assert.match(cssRule(css, '.view-switcher-menu-item'), /grid-template-columns:\s*16px minmax\(0, 1fr\)/);
   assert.doesNotMatch(css, /\.view-switcher-menu-item\.is-current::after/);
-  assert.match(cssRule(css, '#footerActionSlot .icon-button'), /flex:\s*0 0 34px/);
-  assert.match(cssRule(css, '#footerActionSlot .refresh-button'), /flex:\s*0 0 34px/);
+  assert.match(cssRule(css, '.utility-actions'), /flex:\s*0 0 34px/);
+  assert.match(cssRule(css, '.utility-actions .refresh-button'), /position:\s*absolute/);
+  assert.match(cssRule(css, '.utility-actions .refresh-button'), /right:\s*calc\(100% \+ 6px\)/);
   assert.doesNotMatch(css, /@media \(max-width: 280px\)[\s\S]*\.view-switcher-current > \.view-switcher-icon/);
   assert.match(cssRule(css, '.view-switcher-icon'), /flex:\s*0 0 auto/);
   assert.doesNotMatch(css, /\.view-dock/);

@@ -27,6 +27,22 @@ test('footer update pill opens an accessible release-note popover', () => {
   assert.match(html, /id="appUpdatePopoverRelease"[\s\S]*settings\.appUpdate\.viewFullRelease/);
 });
 
+test('footer update pill yields its space while utility actions are disclosed', () => {
+  const css = read('styles.css');
+  const start = css.indexOf('.footer:has(.utility-actions:hover) .update-pill,');
+  const end = css.indexOf('}', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const hiddenDuringDisclosure = css.slice(start, end);
+
+  assert.match(hiddenDuringDisclosure, /\.footer:has\(\.utility-actions :focus-visible\) \.update-pill/);
+  assert.match(hiddenDuringDisclosure, /\.refresh-button:is\(\.is-refreshing, \.is-refreshed, \.is-refresh-error\)/);
+  assert.match(hiddenDuringDisclosure, /\.shell\.settings-open \.footer \.update-pill/);
+  assert.match(hiddenDuringDisclosure, /opacity:\s*0/);
+  assert.match(hiddenDuringDisclosure, /pointer-events:\s*none/);
+  assert.doesNotMatch(hiddenDuringDisclosure, /display:\s*none/, 'the pill keeps its layout width so hover causes no movement');
+});
+
 test('release notes render as text nodes and auto-open once for a new version', () => {
   const app = read('app.js');
   const renderer = app.slice(

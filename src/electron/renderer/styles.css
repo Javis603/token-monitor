@@ -300,6 +300,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   width: 154px;
   height: 30px;
   display: flex;
+  justify-content: flex-end;
   gap: 6px;
   opacity: 0;
   pointer-events: none;
@@ -307,14 +308,70 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   transition: opacity 160ms ease 280ms, transform 160ms ease 280ms;
   z-index: 4;
 }
-#titlebarActionSlot { display: contents; }
 #footerActionSlot { display: contents; }
-/* Size the swappable action button by its slot, not by its element identity,
-   so Settings/Refresh look right in either location. */
-#titlebarActionSlot .icon-button, #titlebarActionSlot .refresh-button { width: 34px; height: 28px; font-size: 14px; }
-#footerActionSlot .icon-button { flex: 0 0 34px; }
-#footerActionSlot .refresh-button { flex: 0 0 34px; }
-#footerActionSlot .icon-button, #footerActionSlot .refresh-button { width: 34px; height: 30px; font-size: 16px; }
+/* Settings and Refresh move as one utility group. The selected primary action
+   stays anchored while the other progressively discloses to its left. */
+.utility-actions {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 34px;
+  width: 34px;
+  isolation: isolate;
+}
+.utility-actions::before {
+  content: "";
+  position: absolute;
+  inset: 0 100% 0 auto;
+  width: 6px;
+}
+.utility-actions .settings-icon-button {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 34px;
+  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease, background 160ms ease;
+}
+.utility-actions .refresh-button {
+  position: absolute;
+  right: calc(100% + 6px);
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(8px) scale(0.96);
+  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.25, 1, 0.5, 1), background 160ms cubic-bezier(0.25, 1, 0.5, 1), color 160ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.utility-actions.is-swapped .settings-icon-button {
+  position: absolute;
+  right: calc(100% + 6px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(8px) scale(0.96);
+}
+.utility-actions.is-swapped .refresh-button {
+  position: relative;
+  right: auto;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.utility-actions:not(.is-swapped):hover .refresh-button,
+.utility-actions:not(.is-swapped):has(:focus-visible) .refresh-button,
+.shell.settings-open .utility-actions:not(.is-swapped) .refresh-button,
+.utility-actions .refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error) {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.utility-actions.is-swapped:hover .settings-icon-button,
+.utility-actions.is-swapped:has(:focus-visible) .settings-icon-button,
+.shell.settings-open .utility-actions.is-swapped .settings-icon-button {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+#footerActionSlot .utility-actions,
+#footerActionSlot .utility-actions .icon-button,
+#footerActionSlot .utility-actions .refresh-button { height: 30px; font-size: 16px; }
+.shell.tray-mode:not(.settings-open) .actions-hotspot { display: none; }
 .actions-hotspot:hover ~ .window-actions, .window-actions:hover, .window-actions:focus-within, .shell.settings-open .window-actions {
   opacity: 1;
   pointer-events: auto;
@@ -1867,7 +1924,9 @@ html.is-windows .settings-panel select option {
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .refresh-button,
-  :root:not([data-reduce-motion="off"]) .refresh-button-icon {
+  :root:not([data-reduce-motion="off"]) .refresh-button-icon,
+  :root:not([data-reduce-motion="off"]) .utility-actions .refresh-button,
+  :root:not([data-reduce-motion="off"]) .utility-actions .settings-icon-button {
     transition-duration: 0.01ms;
   }
 }
@@ -3505,10 +3564,17 @@ html.is-windows .limit-live-badge {
   font-size: 10px;
   line-height: 1;
   white-space: nowrap;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: opacity 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
 .update-pill.hidden { display: none; }
 .update-pill:hover { background: rgba(115, 189, 245, 0.18); border-color: rgba(115, 189, 245, 0.52); }
+.footer:has(.utility-actions:hover) .update-pill,
+.footer:has(.utility-actions :focus-visible) .update-pill,
+.footer:has(.refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)) .update-pill,
+.shell.settings-open .footer .update-pill {
+  opacity: 0;
+  pointer-events: none;
+}
 .update-pill-action {
   appearance: none;
   background: transparent;
@@ -3605,6 +3671,7 @@ html.is-windows .limit-live-badge {
 .app-update-popover .inline-link { font-size: 10px; }
 .app-update-popover .inline-link.hidden { display: none; }
 @media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .update-pill,
   :root:not([data-reduce-motion="off"]) .app-update-popover { transition-duration: 0.01ms; }
 
   :root:not([data-reduce-motion="off"]) *,

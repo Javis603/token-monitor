@@ -24,7 +24,6 @@
           <div class="actions-hotspot" title="Window controls"></div>
           <div class="window-actions">
             <button id="pinButton" class="icon-button" title="Cycle window behavior">⇧</button>
-            <span id="titlebarActionSlot"><button id="refreshButton" class="refresh-button" title="Refresh" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true">↻</span><span class="refresh-button-spinner" aria-hidden="true"></span></button></span>
             <button id="minButton" class="icon-button" title="Minimize">−</button>
             <button id="closeButton" class="icon-button" title="Close">×</button>
           </div>
@@ -254,7 +253,7 @@
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.settingsInTitlebar">Settings button in title bar</span></span><input id="settingsInTitlebarInput" type="checkbox" /></label>
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" title="Reset zoom" data-i18n-title="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
@@ -995,7 +994,12 @@
           </button>
           <button id="appUpdatePillDismiss" type="button" class="update-pill-dismiss" data-i18n-title="settings.appUpdate.dismiss" data-i18n-aria-label="settings.appUpdate.dismiss" title="Dismiss this version" aria-label="Dismiss this version">×</button>
         </div>
-        <span id="footerActionSlot"><button id="settingsButton" class="icon-button settings-icon-button" title="Settings" aria-label="Settings"></button></span>
+        <span id="footerActionSlot">
+          <span id="utilityActions" class="utility-actions">
+            <button id="refreshButton" class="refresh-button" title="Refresh" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true">↻</span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
+            <button id="settingsButton" class="icon-button settings-icon-button" title="Settings" aria-label="Settings"></button>
+          </span>
+        </span>
       </footer>
       <div id="appUpdatePopover" class="app-update-popover" popover="auto" role="dialog" aria-labelledby="appUpdatePopoverTitle">
         <div class="app-update-popover-header">
