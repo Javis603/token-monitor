@@ -43,8 +43,9 @@ test('appearance exposes and persists the three-state motion control', () => {
 
 test('enabling reduced motion settles active row counters immediately', () => {
   const app = read('app.js');
-  assert.match(app, /const rowNumberAnimationHandles = new Map\(\)/);
-  assert.match(app, /for \(const \[el, handle\] of rowNumberAnimationHandles\)[\s\S]*?cancelAnimationFrame\(handle\)[\s\S]*?rowNumberAnimationHandles\.clear\(\)/);
+  assert.match(app, /const rowNumberAnimations = new Map\(\)/);
+  assert.match(app, /for \(const \[el, motion\] of rowNumberAnimations\)[\s\S]*?cancelAnimationFrame\(motion\.handle\)[\s\S]*?rowNumberAnimations\.clear\(\)/);
+  assert.match(app, /rowBarAnimations\.clear\(\)/);
   assert.match(app, /el\.dataset\.motionTarget = String\(to\)/);
 });
 

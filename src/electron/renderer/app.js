@@ -1026,33 +1026,48 @@ function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
 // frame and overwrites a later static update (e.g. switching to a zero period
 // mid-animation).
 let numberAnimHandle = 0;
+let numberAnimTarget = null;
+let numberAnimValue = 0;
 function cancelNumberAnimation() {
-  if (numberAnimHandle) { cancelAnimationFrame(numberAnimHandle); numberAnimHandle = 0; }
+  if (numberAnimHandle) cancelAnimationFrame(numberAnimHandle);
+  numberAnimHandle = 0;
+  numberAnimTarget = null;
+}
+
+function headlineNumberIsAnimatingTo(value) {
+  return Boolean(numberAnimHandle) && numberAnimTarget === value;
 }
 
 function animateNumber(el, from, to, duration = 1000, onDone = null) {
   cancelNumberAnimation();
   if (prefersReducedMotion()) {
     el.textContent = formatNumber(to);
+    numberAnimValue = to;
     if (typeof onDone === 'function') onDone();
     return;
   }
   const start = performance.now();
   const delta = to - from;
+  numberAnimTarget = to;
+  numberAnimValue = from;
   function frame(now) {
     const progress = Math.min(1, (now - start) / duration);
-    el.textContent = formatNumber(from + delta * easeOutQuart(progress));
+    numberAnimValue = from + delta * easeOutQuart(progress);
+    el.textContent = formatNumber(numberAnimValue);
     if (progress < 1) {
       numberAnimHandle = requestAnimationFrame(frame);
     } else {
       numberAnimHandle = 0;
+      numberAnimTarget = null;
+      numberAnimValue = to;
       if (typeof onDone === 'function') onDone();
     }
   }
   numberAnimHandle = requestAnimationFrame(frame);
 }
 
-const rowNumberAnimationHandles = new Map();
+const rowNumberAnimations = new Map();
+const rowBarAnimations = new Map();
 
 function prefersReducedMotion() {
   return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
@@ -1060,19 +1075,21 @@ function prefersReducedMotion() {
 
 function settleMotionAnimations() {
   cancelNumberAnimation();
+  numberAnimValue = state.currentTotal;
   els.totalTokens.textContent = formatNumber(state.currentTotal);
   updateTotalCompact(state.currentTotal);
-  for (const [el, handle] of rowNumberAnimationHandles) {
-    cancelAnimationFrame(handle);
-    const target = Number(el.dataset.motionTarget || el.dataset.motionValue || 0);
+  for (const [el, motion] of rowNumberAnimations) {
+    cancelAnimationFrame(motion.handle);
+    const target = Number(motion.target ?? el.dataset.motionTarget ?? el.dataset.motionValue ?? 0);
     el.textContent = formatNumber(target);
     el.dataset.motionValue = String(target);
     delete el.dataset.motionTarget;
   }
-  rowNumberAnimationHandles.clear();
+  rowNumberAnimations.clear();
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
+  rowBarAnimations.clear();
 }
 
 function applyReduceMotionPreference(value) {
@@ -1099,40 +1116,44 @@ function captureBreakdownMotion() {
 }
 
 function animateRowNumber(el, from, to, duration = 420) {
-  const previousHandle = rowNumberAnimationHandles.get(el);
-  if (previousHandle) cancelAnimationFrame(previousHandle);
-  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to || prefersReducedMotion()) {
+  const previous = rowNumberAnimations.get(el);
+  if (previous?.target === to) return;
+  if (previous) cancelAnimationFrame(previous.handle);
+  const startValue = Number.isFinite(previous?.value) ? previous.value : from;
+  if (!Number.isFinite(startValue) || !Number.isFinite(to) || startValue === to || prefersReducedMotion()) {
     el.textContent = formatNumber(to);
     el.dataset.motionValue = String(Number(to) || 0);
     delete el.dataset.motionTarget;
-    rowNumberAnimationHandles.delete(el);
+    rowNumberAnimations.delete(el);
     return;
   }
   const startedAt = performance.now();
-  const delta = to - from;
-  el.textContent = formatNumber(from);
-  el.dataset.motionValue = String(from);
+  const delta = to - startValue;
+  const motion = { handle: 0, target: to, value: startValue };
+  el.textContent = formatNumber(startValue);
+  el.dataset.motionValue = String(startValue);
   el.dataset.motionTarget = String(to);
   function frame(now) {
     if (prefersReducedMotion()) {
       el.textContent = formatNumber(to);
       el.dataset.motionValue = String(Number(to) || 0);
       delete el.dataset.motionTarget;
-      rowNumberAnimationHandles.delete(el);
+      if (rowNumberAnimations.get(el) === motion) rowNumberAnimations.delete(el);
       return;
     }
     const progress = Math.min(1, (now - startedAt) / duration);
-    const current = from + delta * easeOutQuart(progress);
-    el.textContent = formatNumber(current);
-    el.dataset.motionValue = String(current);
+    motion.value = startValue + delta * easeOutQuart(progress);
+    el.textContent = formatNumber(motion.value);
+    el.dataset.motionValue = String(motion.value);
     if (progress < 1) {
-      rowNumberAnimationHandles.set(el, requestAnimationFrame(frame));
+      motion.handle = requestAnimationFrame(frame);
     } else {
       delete el.dataset.motionTarget;
-      rowNumberAnimationHandles.delete(el);
+      if (rowNumberAnimations.get(el) === motion) rowNumberAnimations.delete(el);
     }
   }
-  rowNumberAnimationHandles.set(el, requestAnimationFrame(frame));
+  motion.handle = requestAnimationFrame(frame);
+  rowNumberAnimations.set(el, motion);
 }
 
 function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
@@ -1172,9 +1193,14 @@ function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
 }
 
 function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) {
-  if (!fill?.animate || Math.abs(toScale - fromScale) < 0.001) return;
+  if (!fill?.animate) return;
+  const previous = rowBarAnimations.get(fill);
+  const previousIsActive = previous?.animation.pending || previous?.animation.playState === 'running';
+  if (previousIsActive && Math.abs(previous.target - toScale) < 0.001) return;
   for (const animation of fill.getAnimations()) animation.cancel();
-  fill.animate([
+  rowBarAnimations.delete(fill);
+  if (Math.abs(toScale - fromScale) < 0.001) return;
+  const animation = fill.animate([
     { transform: `scaleX(${fromScale})` },
     { transform: `scaleX(${toScale})` }
   ], {
@@ -1183,6 +1209,13 @@ function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) 
     easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
     fill: 'backwards'
   });
+  const motion = { animation, target: toScale };
+  const forget = () => {
+    if (rowBarAnimations.get(fill) === motion) rowBarAnimations.delete(fill);
+  };
+  animation.onfinish = forget;
+  animation.oncancel = forget;
+  rowBarAnimations.set(fill, motion);
 }
 
 function captureTrendBarMotion() {
@@ -1267,11 +1300,7 @@ function applyBarScale(fill, scale) {
   const safeScale = Math.max(0, Math.min(1, Number(scale) || 0));
   fill.style.setProperty('--bar-scale', String(safeScale));
   if (!state.animateBarsFromZero || prefersReducedMotion() || !fill.animate) return;
-  for (const animation of fill.getAnimations()) animation.cancel();
-  fill.animate([
-    { transform: 'scaleX(0)' },
-    { transform: `scaleX(${safeScale})` }
-  ], { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+  animateBarBetween(fill, 0, safeScale, 0, 420);
 }
 
 function rowWidth(value, max) {
@@ -3972,6 +4001,7 @@ function render() {
   const totalChanged = nextTotal !== state.currentTotal;
   if (state.suppressInitialNumberAnimation) {
     cancelNumberAnimation();
+    numberAnimValue = nextTotal;
     els.totalTokens.textContent = formatNumber(nextTotal);
     updateTotalCompact(nextTotal);
     state.suppressInitialNumberAnimation = false;
@@ -3980,13 +4010,15 @@ function render() {
     // widest endpoint first (a downward roll starts wider than it settles), so the
     // number never vanishes, clips, or resizes mid-roll. Re-fit on completion so a
     // window resize during the animation, or a downward settle, still ends correct.
-    const widest = formatNumber(nextTotal).length >= formatNumber(state.currentTotal).length ? nextTotal : state.currentTotal;
+    const animationFrom = numberAnimHandle ? numberAnimValue : state.currentTotal;
+    const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
     els.totalTokens.textContent = formatNumber(widest);
     updateTotalCompact(nextTotal);
-    animateNumber(els.totalTokens, state.currentTotal, nextTotal, state.periodMotionActive ? 800 : 1000, fitTotalNumber);
+    animateNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000, fitTotalNumber);
     pulseLiveDot();
-  } else {
+  } else if (!headlineNumberIsAnimatingTo(nextTotal)) {
     cancelNumberAnimation();
+    numberAnimValue = nextTotal;
     els.totalTokens.textContent = formatNumber(nextTotal);
     updateTotalCompact(nextTotal);
   }
