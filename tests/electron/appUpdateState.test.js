@@ -6,6 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+const renderer = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'index.html'), 'utf8');
 
 function sourceBetween(startMarker, endMarker) {
   const start = main.indexOf(startMarker);
@@ -31,4 +33,19 @@ test('manual checks preserve feedback when reusing an in-flight background check
 test('starting a user-requested download restores its dismissed notification', () => {
   const download = sourceBetween('async function downloadAndPrepareAppUpdate', 'function installDownloadedAppUpdate');
   assert.match(download, /restoreDismissedAppUpdate\(latest\?\.version\)/);
+});
+
+test('automatic updates are opt-in and download without installing', () => {
+  const defaults = sourceBetween('function defaultSettings', 'function normalizeCollectionMode');
+  const automaticDownload = sourceBetween('async function maybeDownloadAutomaticAppUpdate', 'function maybeRunBackgroundUpdateCheck');
+  assert.match(defaults, /automaticAppUpdates: false/);
+  assert.match(automaticDownload, /!settings\?\.automaticAppUpdates/);
+  assert.match(automaticDownload, /return downloadAndPrepareAppUpdate\(\)/);
+  assert.doesNotMatch(automaticDownload, /installDownloadedAppUpdate/);
+});
+
+test('automatic update control persists through settings', () => {
+  assert.match(html, /id="automaticAppUpdatesInput"[^>]*type="checkbox"/);
+  assert.match(renderer, /automaticAppUpdatesInput\.checked = state\.settings\.automaticAppUpdates === true/);
+  assert.match(renderer, /saveSettings\(\{ automaticAppUpdates: els\.automaticAppUpdatesInput\.checked \}\)/);
 });
