@@ -1686,6 +1686,10 @@ function enabledLimitProviderSet() {
   return new Set(configuredLimitProviderSelection());
 }
 
+function limitProviderEnabled(providerName) {
+  return enabledLimitProviderSet().has(providerName);
+}
+
 function limitProviderSelectionIncluding(providerName) {
   const selected = new Set(configuredLimitProviderSelection());
   selected.add(providerName);
@@ -6298,6 +6302,7 @@ async function onLimitProviderToggle() {
     setBreakdown('tool');
   }
   await saveSettings({ limitProviders: checked.join(','), limitsEnabled: checked.length > 0 });
+  clearDisabledLimitProviderPendingChecks(new Set(checked));
   await refreshStats({ force: true });
 }
 
@@ -7878,6 +7883,15 @@ const externalLimitAccountConfig = {
   }
 };
 
+function clearDisabledLimitProviderPendingChecks(enabledProviders) {
+  if (!enabledProviders.has('deepseek')) clearDeepseekPendingCheck();
+  if (!enabledProviders.has('minimax')) clearMinimaxPendingCheck();
+  if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
+  for (const providerName of Object.keys(externalLimitAccountConfig)) {
+    if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
+  }
+}
+
 function externalProviderForAccount(providerName) {
   const provider = localProviderStatus(providerName);
   const config = externalLimitAccountConfig[providerName];
@@ -7932,8 +7946,8 @@ function isCurrentCopilotSignInFlow(flowId) {
   return current && incoming === current;
 }
 
-function copilotAccountStatusText(provider, configured, source) {
-  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured);
+function copilotAccountStatusText(provider, configured, source, enabled = true) {
+  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     const accountName = String(provider?.accountName || '').trim();
     return accountName || t(source === 'env' ? 'settings.copilot.statusEnv' : 'settings.copilot.statusSet');
@@ -7942,6 +7956,7 @@ function copilotAccountStatusText(provider, configured, source) {
   if (accountStatus === 'notConfigured') return t('settings.copilot.statusNotSet');
   const statusKeys = {
     checking: 'settings.common.checking',
+    disabled: 'settings.limits.status.disabled',
     limited: 'settings.common.limited',
     unavailable: 'settings.common.unavailable',
     notChecked: 'settings.common.notChecked',
@@ -7950,8 +7965,8 @@ function copilotAccountStatusText(provider, configured, source) {
   return t(statusKeys[accountStatus] || 'settings.common.error');
 }
 
-function apiKeyAccountStatusText(providerName, provider, configured, source) {
-  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured);
+function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
+  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     return t(source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`);
   }
@@ -7959,6 +7974,7 @@ function apiKeyAccountStatusText(providerName, provider, configured, source) {
   if (accountStatus === 'notConfigured') return t(`settings.${providerName}.statusNotSet`);
   const statusKeys = {
     checking: 'settings.common.checking',
+    disabled: 'settings.limits.status.disabled',
     limited: 'settings.common.limited',
     unavailable: 'settings.common.unavailable',
     notChecked: 'settings.common.notChecked',
@@ -8054,7 +8070,8 @@ function renderExternalProviderStatus(providerName) {
   const wasPending = Number(state[config.pendingKey] || 0) > 0;
   const provider = externalProviderForAccount(providerName);
   const configured = Boolean(state.settings?.[config.configuredKey]);
-  const pending = Number(state[config.pendingKey] || 0) > 0;
+  const enabled = limitProviderEnabled(providerName);
+  const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
   if (providerName === 'ollama' && wasPending && !pending && linked) {
     setExternalAccountExpanded('ollama', false);
@@ -8070,7 +8087,7 @@ function renderExternalProviderStatus(providerName) {
   }
   setCursorStatusText(
     statusEl,
-    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source)
+    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
   );
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
@@ -8103,8 +8120,9 @@ function renderMinimaxStatus() {
   const source = state.settings?.minimaxApiKeySource || '';
   const provider = minimaxProviderForAccount();
   const configured = Boolean(state.settings?.minimaxApiKeyConfigured);
+  const enabled = limitProviderEnabled('minimax');
   const linked = minimaxAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('minimax', provider, configured, source));
+  setCursorStatusText(statusEl, apiKeyAccountStatusText('minimax', provider, configured, source, enabled));
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
   logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
@@ -8126,10 +8144,11 @@ function renderCopilotStatus() {
   const source = state.settings?.copilotApiTokenSource || '';
   const provider = copilotProviderForAccount();
   const configured = Boolean(state.settings?.copilotApiTokenConfigured);
+  const enabled = limitProviderEnabled('copilot');
   const linked = copilotAccountLinked();
   errorEl.textContent = state.copilotErrorMessage || '';
   errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-  setCursorStatusText(statusEl, copilotAccountStatusText(provider, configured, source));
+  setCursorStatusText(statusEl, copilotAccountStatusText(provider, configured, source, enabled));
   manualPanel.classList.toggle('hidden', linked);
   if (linked && state.copilotManualExpanded) setCopilotManualExpanded(false);
   signInBtn.classList.toggle('hidden', linked || state.copilotSignInBusy);
@@ -8156,8 +8175,9 @@ function renderDeepseekStatus() {
   const source = state.settings?.deepseekApiKeySource || '';
   const provider = deepseekProviderForAccount();
   const configured = Boolean(state.settings?.deepseekApiKeyConfigured);
+  const enabled = limitProviderEnabled('deepseek');
   const linked = deepseekAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('deepseek', provider, configured, source));
+  setCursorStatusText(statusEl, apiKeyAccountStatusText('deepseek', provider, configured, source, enabled));
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
   logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');

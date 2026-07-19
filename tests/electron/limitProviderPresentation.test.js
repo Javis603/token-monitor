@@ -125,7 +125,9 @@ test('Grok CLI/Web capability tag is localized in settings', () => {
 
 test('API key account status distinguishes pending checks from completed failures', () => {
   assert.equal(apiKeyAccountStatus(null, false), 'notConfigured');
+  assert.equal(apiKeyAccountStatus(null, false, false), 'notConfigured');
   assert.equal(apiKeyAccountStatus(null, true), 'checking');
+  assert.equal(apiKeyAccountStatus(null, true, false), 'disabled');
   assert.equal(apiKeyAccountStatus({ status: 'ok' }, true), 'linked');
   assert.equal(apiKeyAccountStatus({ status: 'unauthorized' }, true), 'invalid');
   assert.equal(apiKeyAccountStatus({ status: 'rateLimited' }, true), 'limited');

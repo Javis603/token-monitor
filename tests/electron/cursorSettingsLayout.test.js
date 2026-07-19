@@ -687,7 +687,7 @@ test('DeepSeek account linked state requires a validated API key', () => {
 
   const renderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
   assert.match(renderBody, /const configured = Boolean\(state\.settings\?\.deepseekApiKeyConfigured\);/);
-  assert.match(renderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source\)/);
+  assert.match(renderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
 });
 
 test('DeepSeek key changes invalidate stale provider status before re-checking', () => {
@@ -709,6 +709,29 @@ test('DeepSeek key changes invalidate stale provider status before re-checking',
   const clearBody = functionBody(app, 'clearDeepseekProviderStatus', 'renderDeepseekStatus');
   assert.match(clearBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
   assert.match(clearBody, /provider\.provider !== 'deepseek'/);
+});
+
+test('disabled credential providers settle account status instead of checking forever', () => {
+  const app = readRendererFile('app.js');
+  const toggleBody = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
+  const clearBody = functionBody(app, 'clearDisabledLimitProviderPendingChecks', 'externalProviderForAccount');
+  const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
+  const deepseekRenderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
+  const minimaxRenderBody = functionBody(app, 'renderMinimaxStatus', 'renderCopilotStatus');
+  const copilotRenderBody = functionBody(app, 'renderCopilotStatus', 'renderDeepseekStatus');
+
+  assert.match(toggleBody, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
+  assert.match(clearBody, /clearDeepseekPendingCheck\(\)/);
+  assert.match(clearBody, /clearMinimaxPendingCheck\(\)/);
+  assert.match(clearBody, /clearCopilotPendingCheck\(\)/);
+  assert.match(clearBody, /Object\.keys\(externalLimitAccountConfig\)/);
+  assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
+  assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
+  assert.match(externalRenderBody, /const pending = enabled &&/);
+  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
+  assert.match(deepseekRenderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
+  assert.match(minimaxRenderBody, /apiKeyAccountStatusText\('minimax', provider, configured, source, enabled\)/);
+  assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
 });
 
 test('MiniMax key changes invalidate stale provider status before re-checking', () => {

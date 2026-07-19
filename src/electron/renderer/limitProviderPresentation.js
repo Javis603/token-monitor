@@ -177,8 +177,9 @@
     return status ? { label: 'Error', tone: 'warn' } : null;
   }
 
-  function apiKeyAccountStatus(provider, configured) {
+  function apiKeyAccountStatus(provider, configured, enabled = true) {
     if (!configured) return 'notConfigured';
+    if (!enabled) return 'disabled';
     const status = statusId(provider);
     if (!status) return 'checking';
     if (status === 'ok') return 'linked';
