@@ -990,7 +990,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.doesNotMatch(controls, /<option value="3600000"/);
   assert.doesNotMatch(controls, /id="collectionModeInput"/);
   assert.doesNotMatch(controls, /id="collectionIntervalInput"/);
-  assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects only after agent activity; fixed intervals turn off file watching\.'/);
+  assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects after agent activity, with an hourly reconciliation; fixed intervals turn off file watching\.'/);
 
   const app = readRendererFile('app.js');
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');

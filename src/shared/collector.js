@@ -1199,6 +1199,7 @@ function startCollector(options) {
   let tickPending = false;
   let pendingForceLimits = false;
   let pendingForceHistory = false;
+  let pendingActivityRevision = null;
   let lastHistoryAt = 0;
   // Last full-scan snapshot; lets watch ticks scan only --today and derive
   // month/allTime exactly (applyPeriodDelta). Reset by every full tick.
@@ -1422,6 +1423,11 @@ function startCollector(options) {
       tickPending = true;
       pendingForceLimits = pendingForceLimits || Boolean(tickOptions.forceLimits);
       pendingForceHistory = pendingForceHistory || Boolean(tickOptions.forceHistory);
+      if (Number.isFinite(tickOptions.activityRevision)) {
+        pendingActivityRevision = pendingActivityRevision === null
+          ? tickOptions.activityRevision
+          : Math.max(pendingActivityRevision, tickOptions.activityRevision);
+      }
       return new Promise((resolve) => pendingWaiters.push(resolve));
     }
     tickInFlight = true;
@@ -1430,10 +1436,16 @@ function startCollector(options) {
       while (tickPending && !stopped) {
         const forceLimits = pendingForceLimits;
         const forceHistory = pendingForceHistory;
+        const activityRevision = pendingActivityRevision;
         tickPending = false;
         pendingForceLimits = false;
         pendingForceHistory = false;
-        await performTick('coalesced', { forceLimits, forceHistory });
+        pendingActivityRevision = null;
+        await performTick('coalesced', {
+          forceLimits,
+          forceHistory,
+          ...(activityRevision === null ? {} : { activityRevision })
+        });
       }
     } finally {
       tickInFlight = false;
@@ -1486,9 +1498,14 @@ function startCollector(options) {
   function loop() {
     if (stopped) return;
     const activityRevisionAtStart = activityRevision;
+    // Native watchers are an optimization, not the source of truth. Always
+    // retain the hourly reconciliation path for missed events, newly created
+    // client directories, WSL-only activity, and cross-day metadata refreshes.
+    const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
     if (
       intervalRequiresActivity &&
       initialCollectionComplete &&
+      !fullScanDue &&
       activityRevisionAtStart <= collectedActivityRevision
     ) {
       intervalTimer = setTimeout(loop, intervalMs);
@@ -1498,7 +1515,6 @@ function startCollector(options) {
     // does not drift from reality over a long-running session.
     // lastFullScanAt === 0 means no valid timestamp exists (cold start,
     // unparseable, or future timestamp) — force a full scan immediately.
-    const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
     const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
     runTick('interval', {
       ...(anchorToday ? { todayOnly: true, refreshWsl: true } : {}),
