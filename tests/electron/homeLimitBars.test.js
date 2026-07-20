@@ -64,8 +64,15 @@ test('Home multi-account provider names are opt-in and persist through the setti
 
 test('Home provider name setting is translated in every locale', () => {
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
-  for (const [locale, messages] of Object.entries(MESSAGES)) {
-    assert.ok(messages['settings.home.showLimitProviderNames'], `${locale} should translate the Home provider name setting`);
+  const expected = {
+    en: 'Show provider names for multiple accounts',
+    'zh-TW': '多帳號顯示提供者名稱',
+    'zh-CN': '多账号显示提供商名称',
+    ko: '여러 계정에 제공업체 이름 표시',
+    ja: '複数アカウントでプロバイダー名を表示'
+  };
+  for (const [locale, label] of Object.entries(expected)) {
+    assert.equal(MESSAGES[locale]['settings.home.showLimitProviderNames'], label);
   }
 });
 
