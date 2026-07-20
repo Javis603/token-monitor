@@ -89,6 +89,14 @@ function parseOsRelease(output) {
   return values;
 }
 
+function systemRelease(options) {
+  try {
+    return normalizeOsVersion((options.release || os.release)());
+  } catch (_) {
+    return '';
+  }
+}
+
 function detectLinuxInfo(options) {
   const readFile = options.readFileSync || fs.readFileSync;
   let values = Object.create(null);
@@ -105,16 +113,15 @@ function detectLinuxInfo(options) {
     const prettyVersion = prettyName.toLowerCase().startsWith(name.toLowerCase())
       ? prettyName.slice(name.length).trim()
       : '';
+    const distroVersion = normalizeOsVersion(prettyVersion || values.VERSION_ID || values.VERSION);
+    const release = distroVersion ? '' : systemRelease(options);
     return normalizeOsInfo({
       name,
-      version: prettyVersion || values.VERSION_ID || values.VERSION
+      version: distroVersion || (release ? `kernel ${release}` : '')
     });
   }
 
-  let release = '';
-  try {
-    release = normalizeOsVersion((options.release || os.release)());
-  } catch (_) {}
+  const release = systemRelease(options);
   return normalizeOsInfo({ name: 'Linux', version: release ? `kernel ${release}` : '' });
 }
 

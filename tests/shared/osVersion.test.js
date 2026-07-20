@@ -103,6 +103,16 @@ test('detectOsInfo falls back to the vendor os-release file', () => {
   assert.deepEqual(info, { name: 'Fedora Linux', version: '42 (Workstation Edition)' });
 });
 
+test('detectOsInfo keeps a rolling distro name and labels its kernel fallback', () => {
+  const info = detectOsInfo({
+    platform: 'linux',
+    readFileSync: () => 'NAME="Arch Linux"\nPRETTY_NAME="Arch Linux"\n',
+    release: () => '6.15.7-arch1-1'
+  });
+
+  assert.deepEqual(info, { name: 'Arch Linux', version: 'kernel 6.15.7-arch1-1' });
+});
+
 test('detectOsInfo labels a Linux kernel fallback honestly', () => {
   assert.deepEqual(detectOsInfo({
     platform: 'linux',
