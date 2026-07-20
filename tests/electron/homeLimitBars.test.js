@@ -47,6 +47,28 @@ test('Home low-limit indicator setting is translated in every locale', () => {
   }
 });
 
+test('Home multi-account provider names are opt-in and persist through the settings boundary', () => {
+  const main = read('src/electron/main.js');
+  const app = read('src/electron/renderer/app.js');
+
+  assert.match(main, /showHomeLimitProviderNames:\s*false/);
+  assert.match(main, /merged\.showHomeLimitProviderNames = parseBoolean\(merged\.showHomeLimitProviderNames, false\)/);
+  assert.match(main, /showHomeLimitProviderNames:\s*parseBoolean\(patch\.showHomeLimitProviderNames \?\? settings\.showHomeLimitProviderNames, false\)/);
+  assert.match(app, /providerEntries\.length > 1/);
+  assert.match(app, /homeLimitAccountTitle\(id, provider, index\)/);
+  assert.match(app, /state\.settings\?\.showHomeLimitProviderNames === true/);
+  assert.match(app, /`\$\{providerTitle\} · \$\{accountTitle\}`/);
+  assert.match(app, /saveSettings\(\{ showHomeLimitProviderNames: providerNamesInput\.checked \}\)/);
+  assert.match(app, /renderHomeIfVisible\(\)/);
+});
+
+test('Home provider name setting is translated in every locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    assert.ok(messages['settings.home.showLimitProviderNames'], `${locale} should translate the Home provider name setting`);
+  }
+});
+
 test('Home account display count defaults to three and is configurable', () => {
   const main = read('src/electron/main.js');
   const app = read('src/electron/renderer/app.js');

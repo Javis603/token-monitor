@@ -3565,6 +3565,13 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   return { module, body };
 }
 
+function homeLimitAccountTitle(id, provider, index) {
+  if (id === 'codex') return codexAccountTitle(provider, index);
+  if (id === 'mimo') return mimoAccountTitle(provider, index);
+  if (id === 'opencode') return opencodeAccountTitle(provider, index);
+  return String(provider?.accountEmail || provider?.accountName || '').trim() || `Account ${index + 1}`;
+}
+
 function homeLimitRows() {
   const enabled = enabledLimitProviderSet();
   const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
@@ -3581,12 +3588,14 @@ function homeLimitRows() {
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
+      const providerTitle = option?.label || id;
       if (providerEntries.length > 1) {
-        if (id === 'codex') return codexAccountTitle(provider, index);
-        if (id === 'mimo') return mimoAccountTitle(provider, index);
-        if (id === 'opencode') return opencodeAccountTitle(provider, index);
+        const accountTitle = homeLimitAccountTitle(id, provider, index);
+        return state.settings?.showHomeLimitProviderNames === true
+          ? `${providerTitle} · ${accountTitle}`
+          : accountTitle;
       }
-      return option?.label || id;
+      return providerTitle;
     }
   });
 }
@@ -5826,6 +5835,18 @@ function renderHomeLimitProviderList() {
   statusText.textContent = t('settings.home.showLimitBars');
   statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
   statusLabel.append(statusInput, statusText);
+  const providerNamesLabel = document.createElement('label');
+  providerNamesLabel.className = 'checkbox-label home-limit-status-setting';
+  const providerNamesInput = document.createElement('input');
+  providerNamesInput.type = 'checkbox';
+  providerNamesInput.checked = state.settings?.showHomeLimitProviderNames === true;
+  const providerNamesText = document.createElement('span');
+  providerNamesText.textContent = t('settings.home.showLimitProviderNames');
+  providerNamesInput.addEventListener('change', async () => {
+    await saveSettings({ showHomeLimitProviderNames: providerNamesInput.checked });
+    renderHomeIfVisible();
+  });
+  providerNamesLabel.append(providerNamesInput, providerNamesText);
   const countLabel = document.createElement('label');
   countLabel.className = 'settings-item home-limit-account-count-setting';
   const countText = document.createElement('span');
@@ -5874,7 +5895,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(statusLabel, countLabel, header);
+  wrap.append(statusLabel, providerNamesLabel, countLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
