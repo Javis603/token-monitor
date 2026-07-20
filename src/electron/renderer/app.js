@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', trae: 'Trae Work' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -61,7 +61,8 @@ const KNOWN_CLIENTS = [
   { id: 'kiro', label: 'Kiro' },
   { id: 'codebuddy', label: 'CodeBuddy' },
   { id: 'workbuddy', label: 'WorkBuddy' },
-  { id: 'proma', label: 'Proma' }
+  { id: 'proma', label: 'Proma' },
+  { id: 'trae', label: 'Trae Work' }
 ];
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },

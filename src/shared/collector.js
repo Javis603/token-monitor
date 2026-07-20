@@ -21,6 +21,7 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildTraePeriods, buildTraeHistoryGraph, collectTraeRows, traeDbPath } = require('./traeUsage');
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 
@@ -567,6 +568,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
+  if (options.traeGraph) {
+    rawGraphs.push(options.traeGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.traeGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -621,11 +626,12 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // tokscale doesn't know about Proma yet — filter it out of the subprocess
-  // calls so --client doesn't reject an unknown value. Proma is parsed
-  // separately below and merged back in.
-  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',') : normalizedClients;
+  // tokscale doesn't know about Proma or Trae yet — filter them out of the
+  // subprocess calls so --client doesn't reject an unknown value. They are
+  // parsed separately below and merged back in.
+  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma' && c !== 'trae').join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
+  const includesTrae = normalizedClients.split(',').includes('trae');
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
@@ -634,6 +640,7 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
+  let traePeriods = null;
   if (normalizedClients) {
     await maybeSyncCursor(tokscaleClients, options.logger);
     await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
@@ -655,6 +662,18 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
       }
     }
+    if (includesTrae) {
+      try {
+        const traeJson = buildTraePeriods({ now: collectedAt, allTimeSince, sharedDataDir: sharedDataDir() });
+        traePeriods = {
+          today: extractUsageFromTokscale(traeJson.today),
+          month: extractUsageFromTokscale(traeJson.month),
+          allTime: extractUsageFromTokscale(traeJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`trae parse failed: ${err.message}`);
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -667,6 +686,7 @@ async function collectUsageOnce(options) {
       // locally parsed Proma. Include its fresh today usage before deriving
       // broader windows so base + (fresh today - anchor today) stays exact.
       if (promaPeriods) today = mergePeriods(today, promaPeriods.today);
+      if (traePeriods) today = mergePeriods(today, traePeriods.today);
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
     } else if (tokscaleClients) {
@@ -703,6 +723,11 @@ async function collectUsageOnce(options) {
       today = mergePeriods(today, promaPeriods.today);
       month = mergePeriods(month, promaPeriods.month);
       allTime = mergePeriods(allTime, promaPeriods.allTime);
+    }
+    if (traePeriods && !anchorUsed) {
+      today = mergePeriods(today, traePeriods.today);
+      month = mergePeriods(month, traePeriods.month);
+      allTime = mergePeriods(allTime, traePeriods.allTime);
     }
   }
 
@@ -820,6 +845,7 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+      traeGraph: includesTrae ? buildTraeHistoryGraph({ sharedDataDir: sharedDataDir() }) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -928,6 +954,15 @@ function clientWatchCandidates(clientsCsv) {
   add('workbuddy', path.join(home, '.workbuddy', 'projects'));
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', path.join(home, '.proma', 'agent-sessions'));
+  // Trae Work (TRAE SOLO CN / Trae CN) — SQLCipher database
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    add('trae', path.join(appData, 'TRAE SOLO CN', 'ModularData', 'ai-agent'), path.join(appData, 'Trae CN', 'ModularData', 'ai-agent'));
+  } else if (process.platform === 'darwin') {
+    add('trae', path.join(home, 'Library', 'Application Support', 'TRAE SOLO CN', 'ModularData', 'ai-agent'), path.join(home, 'Library', 'Application Support', 'Trae CN', 'ModularData', 'ai-agent'));
+  } else {
+    add('trae', path.join(home, '.config', 'TRAE SOLO CN', 'ModularData', 'ai-agent'), path.join(home, '.config', 'Trae CN', 'ModularData', 'ai-agent'));
+  }
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute

@@ -42,7 +42,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
 });
 
 test('default tracked clients are accepted by bundled tokscale', () => {
-  const locallyParsedClients = new Set(['proma']);
+  const locallyParsedClients = new Set(['proma', 'trae']);
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
