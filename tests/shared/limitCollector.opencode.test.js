@@ -171,8 +171,8 @@ test('fetchOpenCodeLimits keeps multi-account profile names separate from plan l
     limitProviders: 'opencode',
     limitsEnabled: true,
     opencodeProfiles: {
-      personal: { enabled: true, cookie: 'personal-cookie' },
-      work: { enabled: true, cookie: 'work-cookie' }
+      myPersonal: { enabled: true, cookie: 'personal-cookie' },
+      myWork: { enabled: true, cookie: 'work-cookie' }
     }
   }, {
     now: () => now,
@@ -188,8 +188,8 @@ test('fetchOpenCodeLimits keeps multi-account profile names separate from plan l
   assert.deepStrictEqual(
     summary.providers.map(({ accountName, accountLabel }) => ({ accountName, accountLabel })),
     [
-      { accountName: 'personal', accountLabel: 'Zen' },
-      { accountName: 'work', accountLabel: 'Go' }
+      { accountName: 'myPersonal', accountLabel: 'Zen' },
+      { accountName: 'myWork', accountLabel: 'Go' }
     ]
   );
 });
