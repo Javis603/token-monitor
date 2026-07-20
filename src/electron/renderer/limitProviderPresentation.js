@@ -122,6 +122,16 @@
     return label.replace(/^[a-z]/, (letter) => letter.toUpperCase());
   }
 
+  function limitResetRemainingMs(value, nowMs = Date.now(), resetNowGraceMs = 60 * 1000) {
+    if (!value) return null;
+    const resetMs = new Date(value).getTime();
+    const currentMs = Number(nowMs);
+    if (!Number.isFinite(resetMs) || !Number.isFinite(currentMs)) return null;
+    const remainingMs = resetMs - currentMs;
+    if (remainingMs > 0) return remainingMs;
+    return remainingMs >= -Math.max(0, Number(resetNowGraceMs) || 0) ? 0 : null;
+  }
+
   // The "live" Codex account is the one THIS device's Codex app/CLI is currently
   // signed into (sourceDetail app/cli/unknown). Managed accounts added inside
   // Token Monitor report sourceDetail 'managed' and are NOT live. A remote
@@ -301,6 +311,7 @@
     limitProviderDisplayLabel,
     limitProviderMainDeviceLabel,
     limitProviderProvenance,
+    limitResetRemainingMs,
     limitProviderSourceLabel,
     limitProviderStatusLabel,
     limitProviderSettingsTags

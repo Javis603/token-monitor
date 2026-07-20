@@ -212,6 +212,28 @@ test('Claude OAuth usage mapping preserves fractional percentage utilization val
   assert.equal(cliCalls, 0);
 });
 
+test('Claude OAuth usage preserves a real idle five-hour window without a reset timestamp', () => {
+  const provider = mapClaudeUsageToProvider({
+    five_hour: { utilization: 0, resets_at: null },
+    seven_day: { utilization: 12, resets_at: '2026-06-18T10:00:00Z' }
+  });
+  const session = provider.windows.find((window) => window.kind === 'session');
+
+  assert.equal(session.usedPercent, 0);
+  assert.equal(session.remainingPercent, 100);
+  assert.equal(session.resetsAt, null);
+});
+
+test('Claude OAuth usage omits the five-hour window only when the API returns null', () => {
+  const provider = mapClaudeUsageToProvider({
+    five_hour: null,
+    seven_day: { utilization: 12, resets_at: '2026-06-18T10:00:00Z' }
+  });
+
+  assert.equal(provider.windows.some((window) => window.kind === 'session'), false);
+  assert.equal(provider.windows.some((window) => window.kind === 'weekly'), true);
+});
+
 test('Claude limits keep successful OAuth quota on macOS instead of replacing it with CLI', async () => {
   let cliCalls = 0;
   const provider = await fetchClaudeLimits({}, {

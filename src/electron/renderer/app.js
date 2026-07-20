@@ -662,10 +662,9 @@ function syncCurrencyRateControls() {
 function formatTime(value) { const date = value ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'; }
 function formatReset(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  const diffMs = date.getTime() - Date.now();
-  if (diffMs <= 0) return 'Reset now';
+  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(value);
+  if (diffMs === null) return '';
+  if (diffMs === 0) return 'Reset now';
   return `Reset ${formatDuration(diffMs)}`;
 }
 function formatDuration(ms) {
@@ -2110,7 +2109,9 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   const meter = limitMeterNode(color, fillPercent, tone);
   const reset = document.createElement('div');
   reset.className = 'limit-reset';
-  const resetText = formatReset(window?.resetsAt) || window?.resetDescription || '';
+  const resetText = window?.resetsAt
+    ? formatReset(window.resetsAt)
+    : window?.resetDescription || '';
   if (detailText) {
     // Keep the reset text left-aligned (consistent with every other provider)
     // and add the absolute count on the right, under the top-line percentage.
@@ -3633,9 +3634,11 @@ function renderHomeLimitModule() {
       const resetAt = formatReset(window.resetsAt);
       const resetText = document.createElement('span');
       resetText.className = 'home-limit-reset';
-      resetText.textContent = resetAt || (window.resetDescription
+      resetText.textContent = window.resetsAt
+        ? resetAt || '\u00a0'
+        : window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
-        : '\u00a0');
+        : '\u00a0';
       metric.append(resetText);
       windows.append(metric);
     }

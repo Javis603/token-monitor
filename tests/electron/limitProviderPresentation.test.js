@@ -14,6 +14,7 @@ const {
   limitProviderCapabilityTags,
   limitProviderMainDeviceLabel,
   limitProviderProvenance,
+  limitResetRemainingMs,
   limitProviderSettingsTags
 } = require('../../src/electron/renderer/limitProviderPresentation');
 
@@ -49,6 +50,16 @@ test('limitProviderDisplayLabel normalizes short account labels without rewritin
   assert.equal(limitProviderDisplayLabel(''), '');
 });
 
+test('limitResetRemainingMs keeps future resets, briefly marks reset time, and expires old timestamps', () => {
+  const now = Date.parse('2026-07-10T03:00:00.000Z');
+
+  assert.equal(limitResetRemainingMs('2026-07-10T04:30:00.000Z', now), 90 * 60 * 1000);
+  assert.equal(limitResetRemainingMs('2026-07-10T02:59:30.000Z', now), 0);
+  assert.equal(limitResetRemainingMs('2026-07-10T02:58:59.000Z', now), null);
+  assert.equal(limitResetRemainingMs('not-a-date', now), null);
+  assert.equal(limitResetRemainingMs(null, now), null);
+});
+
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
 function readRendererFile(name) {
@@ -79,6 +90,21 @@ function runLocalLiveCodexProvider(source, state) {
     { accountIdentityApi, state }
   );
 }
+
+test('Limits and Home share reset expiry while preserving the existing reset copy', () => {
+  const app = readRendererFile('app.js');
+  const formatReset = functionBody(app, 'formatReset', 'formatDuration');
+  const limitWindow = functionBody(app, 'limitWindowNode', 'providersByLimitProviderId');
+  const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
+
+  assert.match(formatReset, /limitResetRemainingMs\(value\)/);
+  assert.match(formatReset, /diffMs === 0\) return 'Reset now'/);
+  assert.match(formatReset, /return `Reset \$\{formatDuration\(diffMs\)\}`/);
+  assert.match(limitWindow, /window\?\.resetsAt\s*\? formatReset\(window\.resetsAt\)/);
+  assert.doesNotMatch(limitWindow, /formatReset\(window\?\.resetsAt\) \|\| window\?\.resetDescription/);
+  assert.match(homeLimits, /window\.resetsAt\s*\? resetAt \|\|/);
+  assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);
+});
 
 test('capability tags explain how each provider is collected in settings', () => {
   assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI']);
