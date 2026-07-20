@@ -625,6 +625,10 @@ function normalizePeriodOmissionCounts(value) {
   return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
+function normalizeDeviceOsVersion(value) {
+  return String(value || '').trim().slice(0, 128);
+}
+
 function normalizeDeviceRecord(record) {
   const nowIso = new Date().toISOString();
   const normalized = {
@@ -638,6 +642,7 @@ function normalizeDeviceRecord(record) {
     periods: {},
     limits: normalizeLimitsSummary(record.limits)
   };
+  if (hasOwn(record, 'osVersion')) normalized.osVersion = normalizeDeviceOsVersion(record.osVersion);
   if (hasOwn(record, 'trackedClients')) normalized.trackedClients = normalizeTrackedClients(record.trackedClients);
   if (hasOwn(record, 'clientStatus')) normalized.clientStatus = normalizeClientStatus(record.clientStatus);
   if (hasOwn(record, 'wslStatus')) normalized.wslStatus = normalizeWslStatus(record.wslStatus);
@@ -813,6 +818,9 @@ function mergeDeviceRecord(existing, incoming) {
     if (!hasOwn(normalizedIncoming, 'syncUploadIntervalMs') && hasOwn(normalizedExisting, 'syncUploadIntervalMs')) {
       normalizedIncoming.syncUploadIntervalMs = normalizedExisting.syncUploadIntervalMs;
     }
+    if (!hasOwn(normalizedIncoming, 'osVersion') && hasOwn(normalizedExisting, 'osVersion')) {
+      normalizedIncoming.osVersion = normalizedExisting.osVersion;
+    }
   }
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
@@ -936,6 +944,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       deviceId: normalized.deviceId,
       hostname: normalized.hostname,
       platform: normalized.platform,
+      ...(hasOwn(normalized, 'osVersion') ? { osVersion: normalized.osVersion } : {}),
       agentVersion: normalized.agentVersion,
       agentRuntime: normalized.agentRuntime,
       updatedAt: normalized.updatedAt,

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { deviceBreakdownForPeriod } = require('../../src/electron/renderer/deviceBreakdown');
+const { deviceBreakdownForPeriod, devicePlatformLabel } = require('../../src/electron/renderer/deviceBreakdown');
 
 test('deviceBreakdownForPeriod nests sorted models under each tool', () => {
   const result = deviceBreakdownForPeriod({ periods: { month: {
@@ -48,6 +48,12 @@ test('deviceBreakdownForPeriod tolerates shared models and legacy device records
     totalTokens: 20,
     tools: []
   });
+});
+
+test('devicePlatformLabel appends OS versions without exposing architecture', () => {
+  assert.equal(devicePlatformLabel('darwin-arm64', '26.0'), 'macOS 26.0');
+  assert.equal(devicePlatformLabel('win32-x64', '10.0.26100'), 'Windows 10.0.26100');
+  assert.equal(devicePlatformLabel('linux-x64', ''), 'Linux');
 });
 
 test('device breakdown browser helper loads before app.js and keeps reduced-motion coverage', () => {

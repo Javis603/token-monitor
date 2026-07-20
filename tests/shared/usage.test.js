@@ -65,6 +65,25 @@ test('mergeDeviceRecord allows explicit empty limits to clear stale provider sta
   assert.deepEqual(merged.limits.providers, []);
 });
 
+test('device records carry, expose, and preserve OS versions', () => {
+  const existing = recordWithLimits({ osVersion: '15.6' });
+  const updated = mergeDeviceRecord(existing, {
+    deviceId: 'macbook',
+    osVersion: '26.0',
+    updatedAt: '2026-05-27T00:01:00.000Z'
+  });
+  assert.equal(updated.osVersion, '26.0');
+  assert.equal(aggregateDevices([updated], 0).devices[0].osVersion, '26.0');
+
+  const limitsOnly = mergeDeviceRecord(updated, {
+    deviceId: 'macbook',
+    limitsOnly: true,
+    limits: { providers: [] },
+    updatedAt: '2026-05-27T00:02:00.000Z'
+  });
+  assert.equal(limitsOnly.osVersion, '26.0');
+});
+
 test('aggregateDevices does not let an orphaned stale device id override the current limits state', () => {
   const oldDevice = recordWithLimits({
     deviceId: 'old-device-id',

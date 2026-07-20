@@ -1580,14 +1580,6 @@ function deviceColor(stale) {
   return stale ? deviceStaleColor : deviceAccent;
 }
 
-function devicePlatformLabel(value) {
-  const platform = String(value || '').toLowerCase().split('-')[0];
-  if (platform === 'darwin') return 'macOS';
-  if (platform === 'win32') return 'Windows';
-  if (platform === 'linux') return 'Linux';
-  return String(value || '');
-}
-
 function deviceRuntimeLabel(value) {
   if (value === 'electron-widget') return t('devices.runtime.widget');
   if (value === 'headless-agent') return t('devices.runtime.agent');
@@ -1630,7 +1622,7 @@ function deviceRowsForPeriod() {
     const period = device.periods?.[state.period] || {};
     const runtime = deviceRuntimeLabel(device.agentRuntime);
     const version = device.agentVersion ? `${runtime ? `${runtime} ` : ''}v${device.agentVersion}` : runtime;
-    const metaParts = [devicePlatformLabel(device.platform), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
+    const metaParts = [deviceBreakdownApi.devicePlatformLabel(device.platform, device.osVersion), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
     return {
       key: device.deviceId,
       name: deviceLabel(device),

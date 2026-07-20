@@ -54,10 +54,12 @@ test('collectUsageOnce stamps updatedAt and periodWindows from one injected cloc
   const summary = await collectUsageOnce({
     clients: '',
     deviceId: 'device-a',
+    osVersion: '26.0',
     now,
     historyEnabled: false,
     limitsEnabled: false
   });
   assert.equal(summary.updatedAt, now.toISOString());
+  assert.equal(summary.osVersion, '26.0');
   assert.deepEqual(summary.periodWindows, computePeriodWindows(now));
 });

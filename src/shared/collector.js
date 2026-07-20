@@ -22,6 +22,7 @@ const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 const { hashKey } = require('./hashKey');
+const { hostOsVersion, normalizeOsVersion } = require('./osVersion');
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...
@@ -604,6 +605,9 @@ async function collectUsageOnce(options) {
   // build path on a non-Windows CI box (the real process.platform stays for
   // tokscale binary resolution, which is genuinely platform-bound).
   const platformValue = options.platform || process.platform;
+  const osVersion = options.osVersion === undefined
+    ? hostOsVersion()
+    : normalizeOsVersion(options.osVersion);
   const normalizedClients = normalizeClientsCsv(clients);
   const projectsEnabled = options.projectsEnabled !== false;
   const localSessionMetadataDeps = {
@@ -796,6 +800,7 @@ async function collectUsageOnce(options) {
     deviceId,
     hostname: os.hostname(),
     platform: `${process.platform}-${process.arch}`,
+    ...(osVersion ? { osVersion } : {}),
     updatedAt: collectedAt.toISOString(),
     agentVersion,
     ...(agentRuntime ? { agentRuntime } : {}),
@@ -1109,6 +1114,9 @@ function startCollector(options) {
     intervalMs, historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled, watchDebounceMs, limitsEnabled,
     onUpdate, onPreview, onError, logger
   } = options;
+  const deviceOsVersion = options.osVersion === undefined
+    ? hostOsVersion()
+    : normalizeOsVersion(options.osVersion);
   const log = logger || (() => {});
   const limitsCollector = limitsEnabled !== false ? createLimitsCollector(options) : null;
   let tickInFlight = false;
@@ -1182,6 +1190,7 @@ function startCollector(options) {
         deviceId,
         agentVersion,
         agentRuntime,
+        osVersion: deviceOsVersion,
         limitsCollector,
         includeHistory,
         forceLimits: Boolean(tickOptions.forceLimits),
@@ -1200,6 +1209,7 @@ function startCollector(options) {
               const preview = {
                 deviceId, hostname: os.hostname(),
                 platform: `${process.platform}-${process.arch}`,
+                ...(deviceOsVersion ? { osVersion: deviceOsVersion } : {}),
                 updatedAt: partial.updatedAt,
                 agentVersion, agentRuntime,
                 trackedClients: (clients || '').split(',').filter(Boolean),
