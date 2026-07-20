@@ -361,6 +361,32 @@ test('fetchMimoLimits returns one row per enabled account and skips disabled acc
   assert.equal(result[0].accountKey, 'sha256:mimo-1');
 });
 
+test('fetchMimoLimits refresh scope probes only the requested account', async () => {
+  const accounts = [
+    managed(COOKIE),
+    managed('userId=456; api-platform_serviceToken=second', {
+      id: 'mimo-2', accountKey: 'sha256:mimo-2'
+    })
+  ];
+  const cookies = [];
+  const result = await fetchMimoLimits({
+    mimoManagedAccounts: accounts,
+    limitRefreshScope: { provider: 'mimo', accountKey: 'sha256:mimo-2' }
+  }, {
+    fetch: async (url, init) => {
+      cookies.push(init.headers.Cookie);
+      return url.endsWith('/balance')
+        ? response({ code: 0, data: { balance: '1', currency: 'USD' } })
+        : response({ code: 0, data: {} });
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].accountKey, 'sha256:mimo-2');
+  assert.ok(cookies.length > 0);
+  assert.ok(cookies.every((cookie) => cookie.includes('userId=456')));
+});
+
 test('fetchMimoLimits starts managed accounts in parallel', async () => {
   const accounts = [
     managed(COOKIE),

@@ -2065,9 +2065,28 @@ async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now()) {
 
 async function fetchCodexLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
+  const scope = options.limitRefreshScope?.provider === 'codex'
+    ? options.limitRefreshScope
+    : null;
   const managedAccounts = normalizeCodexManagedAccounts(options.codexManagedAccounts || deps.codexManagedAccounts)
-    .filter((account) => account.enabled !== false);
-  const includeLiveAccount = options.includeLiveCodexAccount !== false;
+    .filter((account) => account.enabled !== false)
+    .filter((account) => {
+      if (!scope) return true;
+      if (scope.sourceDetail && scope.sourceDetail !== 'managed') return false;
+      const accountKey = codexAccountKeyFromSeed(account.accountKey || account.email || account.id || account.homePath);
+      if (scope.accountKey) return accountKey === scope.accountKey;
+      if (scope.accountEmail) return account.email === scope.accountEmail;
+      if (scope.accountLabel) return account.accountLabel === scope.accountLabel;
+      return false;
+    });
+  let includeLiveAccount = options.includeLiveCodexAccount !== false;
+  if (scope) {
+    if (scope.sourceDetail) {
+      includeLiveAccount = includeLiveAccount && scope.sourceDetail !== 'managed';
+    } else if (scope.accountKey) {
+      includeLiveAccount = includeLiveAccount && readLiveCodexIdentity(deps).accountKey === scope.accountKey;
+    }
+  }
   // Single live account: keep the original single-provider shape (and error
   // propagation) so a signed-out/not-configured state surfaces as before.
   if (managedAccounts.length === 0) {
@@ -2168,10 +2187,19 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     cookies.push({ name: 'default (env)', cookie: envCookie });
   }
 
-  const goLocal = collectGo({ env: deps.env || process.env, now: () => nowMs });
+  const multiAccountMode = cookies.length > 1;
+  const scope = options.limitRefreshScope?.provider === 'opencode'
+    ? options.limitRefreshScope
+    : null;
+  if (scope && multiAccountMode) {
+    cookies = scope.accountLabel
+      ? cookies.filter(({ name }) => name === scope.accountLabel)
+      : [];
+  }
 
-  // ── Single account (<1 cookie): OLD merged behavior ──────────────────────
-  if (cookies.length <= 1) {
+  // ── Single account (0 or 1 cookie): existing merged behavior ─────────────
+  if (!multiAccountMode) {
+    const goLocal = collectGo({ env: deps.env || process.env, now: () => nowMs });
     const cookie = cookies[0]?.cookie;
     const [goWeb, zen] = cookie
       ? await Promise.all([
@@ -2437,7 +2465,10 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     ...(deps.providerFetchers || {})
   };
   const providers = [];
-  for (const provider of parseLimitProviders(options.limitProviders ?? options.providers)) {
+  const scope = options.limitRefreshScope;
+  const selectedProviders = parseLimitProviders(options.limitProviders ?? options.providers)
+    .filter((provider) => !scope?.provider || provider === scope.provider);
+  for (const provider of selectedProviders) {
     try {
       const result = await fetchers[provider](options);
       if (Array.isArray(result)) providers.push(...result);
@@ -2447,6 +2478,45 @@ async function collectLimitsOnce(options = {}, deps = {}) {
     }
   }
   return normalizeLimitsSummary({ updatedAt: nowIso(nowMs), refreshMs, providers });
+}
+
+function limitProviderMatchesScope(provider, scope) {
+  if (!provider || provider.provider !== scope?.provider) return false;
+  if (scope.accountKey) return provider.accountKey === scope.accountKey;
+  if (scope.accountEmail) return provider.accountEmail === scope.accountEmail;
+  if (scope.accountLabel) return provider.accountLabel === scope.accountLabel;
+  if (scope.sourceDetail) return provider.sourceDetail === scope.sourceDetail;
+  return true;
+}
+
+function mergeScopedLimits(cachedInput, partialInput, scope, nowMs) {
+  const partial = normalizeLimitsSummary(partialInput);
+  if (!cachedInput) return partial;
+  const cached = normalizeLimitsSummary(cachedInput);
+  const existingTarget = cached.providers.filter((provider) => limitProviderMatchesScope(provider, scope));
+  const refreshedTarget = mergeCodexTransientWindows({
+    updatedAt: cached.updatedAt,
+    refreshMs: cached.refreshMs,
+    providers: existingTarget
+  }, partial, nowMs).providers;
+  const providers = [];
+  let inserted = false;
+  for (const provider of cached.providers) {
+    if (!limitProviderMatchesScope(provider, scope)) {
+      providers.push(provider);
+      continue;
+    }
+    if (!inserted) {
+      providers.push(...refreshedTarget);
+      inserted = true;
+    }
+  }
+  if (!inserted) providers.push(...refreshedTarget);
+  return normalizeLimitsSummary({
+    updatedAt: partial.updatedAt,
+    refreshMs: cached.refreshMs,
+    providers
+  });
 }
 
 function createLimitsCollector(options = {}, deps = {}) {
@@ -2462,6 +2532,25 @@ function createLimitsCollector(options = {}, deps = {}) {
   let cached = options.previousLimits ? normalizeLimitsSummary(options.previousLimits) : null;
   let cachedAt = 0;
   let inFlight = null;
+  const scopedInFlight = new Map();
+
+  async function refreshScope(scope) {
+    const current = (deps.now || Date.now)();
+    if (!scope?.provider) throw new TypeError('limit refresh scope requires a provider');
+    if (inFlight) return inFlight;
+    const scopeKey = JSON.stringify(scope);
+    if (scopedInFlight.has(scopeKey)) return scopedInFlight.get(scopeKey);
+    const task = collectLimitsOnce({
+      ...options,
+      limitsRefreshMs: refreshMs,
+      limitRefreshScope: scope
+    }, deps).then((summary) => {
+      cached = mergeScopedLimits(cached, summary, scope, current);
+      return cached;
+    }).finally(() => { scopedInFlight.delete(scopeKey); });
+    scopedInFlight.set(scopeKey, task);
+    return task;
+  }
 
   async function snapshot(force = false) {
     const current = (deps.now || Date.now)();
@@ -2477,7 +2566,7 @@ function createLimitsCollector(options = {}, deps = {}) {
     return inFlight;
   }
 
-  return { snapshot };
+  return { refreshScope, snapshot };
 }
 
 function hashCursorAccountKey(account) {

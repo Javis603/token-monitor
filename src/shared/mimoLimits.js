@@ -335,7 +335,17 @@ function normalizeMimoManagedAccounts(value) {
 }
 
 async function fetchMimoLimits(options = {}, deps = {}) {
-  const accounts = normalizeMimoManagedAccounts(options.mimoManagedAccounts || deps.mimoManagedAccounts);
+  const scope = options.limitRefreshScope?.provider === 'mimo'
+    ? options.limitRefreshScope
+    : null;
+  const accounts = normalizeMimoManagedAccounts(options.mimoManagedAccounts || deps.mimoManagedAccounts)
+    .filter((account, _index, all) => {
+      if (!scope) return true;
+      if (scope.accountKey) return account.accountKey === scope.accountKey;
+      if (scope.accountEmail) return account.accountEmail === scope.accountEmail;
+      if (scope.accountLabel) return account.accountLabel === scope.accountLabel;
+      return all.length === 1;
+    });
   if (!accounts.length) {
     return statusProvider('notConfigured', new Date((deps.now || Date.now)()).toISOString());
   }

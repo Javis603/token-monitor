@@ -1108,6 +1108,66 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
 // valid, so a long-running session periodically rescans month/allTime
 // and picks up any changes that the delta-derivation might miss.
 const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
+const LIMITS_RESET_BOUNDARY_DELAY_MS = 30 * 1000;
+const LIMITS_RESET_BOUNDARY_MIN_TIMER_MS = 5 * 1000;
+const LIMITS_RESET_BOUNDARY_MAX_TIMER_MS = 2_147_483_647;
+
+function limitResetBoundaryEntries(limits) {
+  const entries = [];
+  for (const provider of limits?.providers || []) {
+    const providerKey = [
+      provider?.provider,
+      provider?.accountKey,
+      provider?.accountEmail,
+      provider?.accountLabel
+    ].map((value) => String(value || '').trim()).join(':');
+    const scope = {
+      provider: String(provider?.provider || '').trim(),
+      accountKey: String(provider?.accountKey || '').trim(),
+      accountEmail: String(provider?.accountEmail || '').trim().toLowerCase(),
+      accountLabel: String(provider?.accountLabel || '').trim(),
+      sourceDetail: String(provider?.sourceDetail || '').trim()
+    };
+    for (const window of provider?.windows || []) {
+      const resetAt = Date.parse(window?.resetsAt || '');
+      if (!Number.isFinite(resetAt)) continue;
+      entries.push({
+        resetAt,
+        key: `${providerKey}:${String(window?.kind || '').trim()}:${new Date(resetAt).toISOString()}`,
+        scope
+      });
+    }
+  }
+  return entries;
+}
+
+function nextLimitsResetBoundary(limits, nowMs = Date.now(), attempted = new Set()) {
+  let refreshAt = Infinity;
+  let keys = [];
+  let scopes = new Map();
+  for (const entry of limitResetBoundaryEntries(limits)) {
+    if (attempted.has(entry.key)) continue;
+    const candidate = entry.resetAt + LIMITS_RESET_BOUNDARY_DELAY_MS;
+    if (candidate < refreshAt) {
+      refreshAt = candidate;
+      keys = [entry.key];
+      scopes = new Map([[JSON.stringify(entry.scope), entry.scope]]);
+    } else if (candidate === refreshAt) {
+      keys.push(entry.key);
+      scopes.set(JSON.stringify(entry.scope), entry.scope);
+    }
+  }
+  if (!Number.isFinite(refreshAt)) return null;
+  return {
+    refreshAt,
+    delayMs: Math.min(
+      LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
+      Math.max(LIMITS_RESET_BOUNDARY_MIN_TIMER_MS, refreshAt - nowMs)
+    ),
+    keys,
+    scopes: [...scopes.values()]
+  };
+}
 
 function startCollector(options) {
   const {
@@ -1120,6 +1180,13 @@ function startCollector(options) {
     : normalizeOsInfo(options.osInfo);
   const log = logger || (() => {});
   const limitsCollector = limitsEnabled !== false ? createLimitsCollector(options) : null;
+  const resetBoundaryNow = typeof options.resetBoundaryNow === 'function' ? options.resetBoundaryNow : Date.now;
+  const setResetBoundaryTimer = typeof options.resetBoundarySetTimeout === 'function'
+    ? options.resetBoundarySetTimeout
+    : setTimeout;
+  const clearResetBoundaryTimer = typeof options.resetBoundaryClearTimeout === 'function'
+    ? options.resetBoundaryClearTimeout
+    : clearTimeout;
   let tickInFlight = false;
   let tickPending = false;
   let pendingForceLimits = false;
@@ -1136,7 +1203,10 @@ function startCollector(options) {
   let pendingWaiters = [];
   let debounceTimer = null;
   let intervalTimer = null;
+  let resetBoundaryTimer = null;
+  let lastSummary = null;
   let stopped = false;
+  const attemptedResetBoundaries = new Set();
   const watchers = [];
 
   // On-disk anchor: persist full-scan snapshots so the collector can reuse
@@ -1173,6 +1243,52 @@ function startCollector(options) {
     const waiters = pendingWaiters;
     pendingWaiters = [];
     for (const resolve of waiters) resolve();
+  }
+
+  function clearScheduledResetBoundary() {
+    if (!resetBoundaryTimer) return;
+    clearResetBoundaryTimer(resetBoundaryTimer);
+    resetBoundaryTimer = null;
+  }
+
+  function scheduleLimitsResetBoundary(limits) {
+    clearScheduledResetBoundary();
+    if (stopped || !limitsCollector) return;
+    const next = nextLimitsResetBoundary(limits, resetBoundaryNow(), attemptedResetBoundaries);
+    if (!next) return;
+    resetBoundaryTimer = setResetBoundaryTimer(() => {
+      resetBoundaryTimer = null;
+      if (resetBoundaryNow() < next.refreshAt) {
+        scheduleLimitsResetBoundary(lastSummary?.limits);
+        return;
+      }
+      for (const key of next.keys) attemptedResetBoundaries.add(key);
+      refreshLimitsAtResetBoundary(next.scopes);
+    }, next.delayMs);
+  }
+
+  async function refreshLimitsAtResetBoundary(scopes) {
+    if (stopped || !limitsCollector || !lastSummary) return;
+    try {
+      let limits = lastSummary.limits;
+      for (const scope of scopes || []) {
+        limits = await limitsCollector.refreshScope(scope);
+      }
+      if (stopped) return;
+      const summary = {
+        ...lastSummary,
+        updatedAt: new Date(resetBoundaryNow()).toISOString(),
+        limits,
+        limitsOnly: true
+      };
+      lastSummary = summary;
+      scheduleLimitsResetBoundary(limits);
+      await onUpdate?.(summary, 'limits-reset-boundary');
+    } catch (error) {
+      if (stopped) return;
+      if (onError) onError(error, 'limits-reset-boundary');
+      else log(`collector tick failed (limits-reset-boundary): ${error.message}`);
+    }
   }
 
   async function performTick(reason, tickOptions = {}) {
@@ -1271,6 +1387,8 @@ function startCollector(options) {
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
       }
+      lastSummary = summary;
+      scheduleLimitsResetBoundary(summary.limits);
       await onUpdate?.(summary, reason);
     } catch (error) {
       if (stopped) return;
@@ -1360,6 +1478,7 @@ function startCollector(options) {
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
+    clearScheduledResetBoundary();
     for (const watcher of watchers) {
       try { watcher.close(); } catch (_) {}
     }
@@ -1387,7 +1506,9 @@ module.exports = {
   decideResolver,
   DEFAULT_HISTORY_INTERVAL_MS,
   HISTORY_INTERVAL_VALUES,
+  LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
   localTodayKey,
+  nextLimitsResetBoundary,
   normalizeHistoryIntervalMs,
   sessionTimestampMap,
   locateBundledBinary,

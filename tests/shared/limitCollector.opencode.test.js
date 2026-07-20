@@ -164,3 +164,40 @@ test('fetchOpenCodeLimits: surfaces unauthorized when no source has data', async
   assert.strictEqual(p.status, 'unauthorized');
   assert.strictEqual(p.source, 'web');
 });
+
+test('fetchOpenCodeLimits refresh scope probes only the requested profile', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const cookies = [];
+  const summary = await collectLimitsOnce({
+    limitProviders: 'claude,opencode',
+    limitsEnabled: true,
+    limitRefreshScope: {
+      provider: 'opencode',
+      accountKey: 'sha256:work',
+      accountLabel: 'work'
+    },
+    opencodeProfiles: {
+      personal: { enabled: true, cookie: 'personal-cookie' },
+      work: { enabled: true, cookie: 'work-cookie' }
+    }
+  }, {
+    now: () => now,
+    opencodeCollectGo: () => ({ status: 'notConfigured', windows: [] }),
+    opencodeFetchGoWeb: async (cookie) => {
+      cookies.push(cookie);
+      return { status: 'ok', workspaceId: 'work', windows: [{ kind: 'session', usedPercent: 20 }] };
+    },
+    opencodeFetchZen: async (cookie) => {
+      cookies.push(cookie);
+      return { status: 'ok', workspaceId: 'work', windows: [], balanceUsd: 5 };
+    },
+    providerFetchers: {
+      claude: async () => { throw new Error('unrelated provider must not refresh'); }
+    }
+  });
+
+  assert.deepStrictEqual(cookies, ['work-cookie', 'work-cookie']);
+  assert.equal(summary.providers.length, 1);
+  assert.equal(summary.providers[0].provider, 'opencode');
+  assert.equal(summary.providers[0].accountLabel, 'work');
+});
