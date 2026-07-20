@@ -30,7 +30,7 @@ function preferredPlanInfoName(planInfo) {
 }
 
 function isLanguageServerCommand(lowerCommand) {
-  return /(^|[/\\])language_server(_macos|\.exe)?(\s|$)/.test(lowerCommand);
+  return /(^|[/\\])language(?:_|-)server(?:[_-][a-z0-9]+)*(?:\.exe)?(\s|$)/.test(lowerCommand);
 }
 
 function isAntigravityCommand(lowerCommand) {
@@ -50,13 +50,36 @@ function isAntigravityCliCommand(lowerCommand) {
   return false;
 }
 
+function isAntigravityIdeCommand(lowerCommand) {
+  return [
+    'antigravity ide.app/',
+    'antigravity ide.app\\',
+    '--app_data_dir antigravity-ide',
+    '--app_data_dir=antigravity-ide',
+    '/extensions/antigravity/bin/language_server',
+    '\\extensions\\antigravity\\bin\\language_server'
+  ].some((marker) => lowerCommand.includes(marker));
+}
+
 // Classify a process command line as the Antigravity IDE language server, the
 // Antigravity CLI language server, or neither. IDE takes precedence so its
 // CSRF-token requirement is preserved.
 function antigravityProcessKind(lowerCommand) {
-  if (isLanguageServerCommand(lowerCommand) && isAntigravityCommand(lowerCommand)) return 'ide';
+  if (isLanguageServerCommand(lowerCommand) && isAntigravityCommand(lowerCommand)) {
+    return isAntigravityIdeCommand(lowerCommand) ? 'ide' : 'app';
+  }
   if (isAntigravityCliCommand(lowerCommand)) return 'cli';
   return null;
+}
+
+const PROCESS_KIND_ORDER = Object.freeze(['app', 'cli', 'ide']);
+
+function sortProcessInfos(infos) {
+  const rank = (kind) => {
+    const index = PROCESS_KIND_ORDER.indexOf(kind);
+    return index === -1 ? PROCESS_KIND_ORDER.length : index;
+  };
+  return [...infos].sort((a, b) => rank(a.kind) - rank(b.kind) || a.pid - b.pid);
 }
 
 function extractFlag(flag, command) {
@@ -86,10 +109,10 @@ function parseProcessLine(line) {
   const kind = antigravityProcessKind(lower);
   if (!kind) return null;
   const csrfToken = extractFlag('--csrf_token', command);
-  // The IDE language server authenticates local requests with `--csrf_token` and
-  // must keep requiring it (a tokenless IDE match is skipped so a later valid one
-  // can be found). The CLI's language server exposes no token flag and needs none.
-  if (kind === 'ide' && !csrfToken) return null;
+  // Desktop app/IDE language servers authenticate local requests with
+  // `--csrf_token`; tokenless matches are skipped so a later valid process can
+  // still be used. The CLI language server exposes no token flag and needs none.
+  if (kind !== 'cli' && !csrfToken) return null;
   return {
     pid,
     kind,
@@ -125,45 +148,57 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
   });
 }
 
-async function detectProcessInfoPosix(deps = {}) {
-  const stdout = await runProcessText('ps', ['-ax', '-o', 'pid=,command='], { deps, timeoutMs: 8000 });
-  let sawAntigravityWithoutCsrf = false;
-  for (const line of stdout.split('\n')) {
+function processInfosFromText(stdout) {
+  const infos = [];
+  let sawDesktopWithoutCsrf = false;
+  for (const line of String(stdout || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const lower = trimmed.toLowerCase();
-    const looksLikeAntigravity = isLanguageServerCommand(lower) && isAntigravityCommand(lower);
     const info = parseProcessLine(trimmed);
-    if (info) return info;
-    if (looksLikeAntigravity) sawAntigravityWithoutCsrf = true;
+    if (info) {
+      infos.push(info);
+      continue;
+    }
+    const split = trimmed.indexOf(' ');
+    const lower = split === -1 ? '' : trimmed.slice(split + 1).trim().toLowerCase();
+    const kind = antigravityProcessKind(lower);
+    if ((kind === 'app' || kind === 'ide') && !extractFlag('--csrf_token', trimmed)) {
+      sawDesktopWithoutCsrf = true;
+    }
   }
-  if (sawAntigravityWithoutCsrf) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
+  return { infos: sortProcessInfos(infos), sawDesktopWithoutCsrf };
+}
+
+function requireDetectedProcessInfos(stdout) {
+  const { infos, sawDesktopWithoutCsrf } = processInfosFromText(stdout);
+  if (infos.length > 0) return infos;
+  if (sawDesktopWithoutCsrf) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
   throw errorWithStatus('notConfigured', 'Antigravity language server not running');
 }
 
-async function detectProcessInfoWin32(deps = {}) {
+async function detectProcessInfosPosix(deps = {}) {
+  const stdout = await runProcessText('ps', ['-ax', '-o', 'pid=,command='], { deps, timeoutMs: 8000 });
+  return requireDetectedProcessInfos(stdout);
+}
+
+async function detectProcessInfosWin32(deps = {}) {
   // Surface both the IDE language server and the CLI (`agy` / `antigravity-cli`)
   // hosts; the command-line classifier (antigravityProcessKind) re-filters for
   // precision, so a broad Name filter here is safe.
   const script = `Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'language_server*' -or $_.Name -like 'agy*' -or $_.Name -like 'antigravity*' } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`;
   const stdout = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { deps, timeoutMs: 10000 });
-  let sawAntigravityWithoutCsrf = false;
-  for (const rawLine of stdout.split(/\r?\n/)) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) continue;
-    const info = parseProcessLine(trimmed);
-    if (info) return info;
-    const lower = trimmed.toLowerCase();
-    if (isLanguageServerCommand(lower) && isAntigravityCommand(lower)) sawAntigravityWithoutCsrf = true;
-  }
-  if (sawAntigravityWithoutCsrf) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
-  throw errorWithStatus('notConfigured', 'Antigravity language server not running');
+  return requireDetectedProcessInfos(stdout);
+}
+
+async function detectProcessInfos(deps = {}) {
+  const platform = deps.platform || process.platform;
+  if (platform === 'win32') return detectProcessInfosWin32(deps);
+  return detectProcessInfosPosix(deps);
 }
 
 async function detectProcessInfo(deps = {}) {
-  const platform = deps.platform || process.platform;
-  if (platform === 'win32') return detectProcessInfoWin32(deps);
-  return detectProcessInfoPosix(deps);
+  const infos = await detectProcessInfos(deps);
+  return infos[0];
 }
 
 async function listeningPortsPosix(pid, deps = {}) {
@@ -279,6 +314,69 @@ function parseResetTime(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+function quotaRemainingFraction(bucket) {
+  const direct = bucket?.remainingFraction;
+  if (typeof direct === 'number' && Number.isFinite(direct)) return direct;
+  const remaining = bucket?.remaining;
+  if (typeof remaining?.remainingFraction === 'number' && Number.isFinite(remaining.remainingFraction)) {
+    return remaining.remainingFraction;
+  }
+  if (remaining?.case === 'remainingFraction' && typeof remaining.value === 'number' && Number.isFinite(remaining.value)) {
+    return remaining.value;
+  }
+  return null;
+}
+
+function quotaGroupName(displayName) {
+  const name = String(displayName || '').trim();
+  const lower = name.toLowerCase();
+  if (lower.includes('gemini')) return 'Gemini';
+  if (lower.includes('claude') || lower.includes('gpt')) return 'Claude/GPT';
+  return name || 'Quota';
+}
+
+function quotaBucketKind(bucket) {
+  const aliases = new Set(['session', '5h', '5-hour', 'five hour', 'five-hour']);
+  const candidates = [];
+  for (const value of [bucket?.bucketId, bucket?.displayName]) {
+    const normalized = String(value || '').trim().toLowerCase().replaceAll('_', '-');
+    if (!normalized) continue;
+    candidates.push(normalized);
+    if (normalized.endsWith(' limit')) candidates.push(normalized.slice(0, -' limit'.length));
+  }
+  for (const candidate of candidates) {
+    if (candidate === 'weekly' || candidate.endsWith('-weekly')) return 'weekly';
+    if (aliases.has(candidate) || [...aliases].some((alias) => candidate.endsWith(`-${alias}`))) return 'session';
+  }
+  return null;
+}
+
+function quotaSummaryWindows(payload) {
+  const summary = payload?.response || payload?.summary || payload;
+  const groups = Array.isArray(summary?.groups) ? summary.groups : [];
+  const windows = [];
+  for (const group of groups) {
+    const groupName = quotaGroupName(group?.displayName);
+    for (const bucket of Array.isArray(group?.buckets) ? group.buckets : []) {
+      const kind = quotaBucketKind(bucket);
+      if (!kind) continue;
+      const remainingFraction = quotaRemainingFraction(bucket);
+      const disabled = bucket?.disabled === true;
+      windows.push({
+        kind,
+        name: `${groupName} ${kind === 'session' ? '5-hour' : 'weekly'}`,
+        remainingFraction: disabled ? null : remainingFraction,
+        resetTime: parseResetTime(bucket?.resetTime),
+        resetDescription: typeof bucket?.description === 'string' ? bucket.description : '',
+        showMeter: !disabled && remainingFraction !== null
+      });
+    }
+  }
+  const groupRank = (name) => name.startsWith('Gemini ') ? 0 : name.startsWith('Claude/GPT ') ? 1 : 2;
+  const kindRank = (kind) => kind === 'session' ? 0 : 1;
+  return windows.sort((a, b) => groupRank(a.name) - groupRank(b.name) || kindRank(a.kind) - kindRank(b.kind));
+}
+
 function modelsFromConfigs(configs) {
   return (Array.isArray(configs) ? configs : [])
     .map((cfg) => {
@@ -336,12 +434,38 @@ const PROBE_METADATA = {
   locale: 'en'
 };
 
-async function probe(deps = {}) {
-  const info = await (deps.detectProcessInfo || detectProcessInfo)(deps);
-  const ports = await (deps.listeningPorts || listeningPorts)(info.pid, deps);
-  const call = deps.callLs || callLs;
-  const candidates = endpointCandidates(info, ports);
+async function groupedQuotaFromCandidates(candidates, call) {
+  let lastError = errorWithStatus('unavailable', 'no endpoint candidates');
+  for (const candidate of candidates) {
+    try {
+      const summary = await call({
+        ...candidate,
+        method: 'RetrieveUserQuotaSummary',
+        body: { forceRefresh: true }
+      });
+      const windows = quotaSummaryWindows(summary);
+      if (windows.some((window) => window.remainingFraction !== null)) {
+        let accountPlan = null;
+        let accountEmail = null;
+        try {
+          const identity = await call({ ...candidate, method: 'GetUserStatus', body: { metadata: PROBE_METADATA } });
+          accountPlan =
+            firstTrimmedString(identity?.userStatus?.userTier?.name)
+            || preferredPlanInfoName(identity?.userStatus?.planStatus?.planInfo)
+            || null;
+          accountEmail = identity?.userStatus?.email?.trim?.() || null;
+        } catch (_) {}
+        return { snapshot: { accountPlan, accountEmail, windows }, lastError };
+      }
+      lastError = errorWithStatus('unavailable', 'empty quota summary');
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  return { snapshot: null, lastError };
+}
 
+async function legacyQuotaFromCandidates(candidates, call) {
   let lastError = errorWithStatus('unavailable', 'no endpoint candidates');
   for (const candidate of candidates) {
     try {
@@ -354,15 +478,65 @@ async function probe(deps = {}) {
           || null;
         const accountEmail = data.userStatus.email?.trim?.() || null;
         const models = modelsFromConfigs(configs);
-        if (models.length > 0) return { accountPlan, accountEmail, pools: collapsePools(models) };
+        if (models.length > 0) return { snapshot: { accountPlan, accountEmail, pools: collapsePools(models) }, lastError };
       }
       // Fall back to GetCommandModelConfigs on the same endpoint.
       const fallback = await call({ ...candidate, method: 'GetCommandModelConfigs', body: { metadata: PROBE_METADATA } });
       const models = modelsFromConfigs(fallback?.clientModelConfigs);
-      if (models.length > 0) return { accountPlan: null, accountEmail: null, pools: collapsePools(models) };
+      if (models.length > 0) {
+        return { snapshot: { accountPlan: null, accountEmail: null, pools: collapsePools(models) }, lastError };
+      }
       lastError = errorWithStatus('unavailable', 'empty model configs');
     } catch (err) {
       lastError = err;
+    }
+  }
+  return { snapshot: null, lastError };
+}
+
+function normalizeProcessInfos(infos) {
+  return sortProcessInfos((Array.isArray(infos) ? infos : [infos])
+    .filter(Boolean)
+    .map((info) => ({ ...info, kind: PROCESS_KIND_ORDER.includes(info.kind) ? info.kind : 'app' })));
+}
+
+async function detectedProcessInfos(deps) {
+  if (deps.detectProcessInfos) return normalizeProcessInfos(await deps.detectProcessInfos(deps));
+  // Preserve the existing dependency seam for callers/tests that inject a
+  // single process, while production always enumerates every local source.
+  if (deps.detectProcessInfo) return normalizeProcessInfos(await deps.detectProcessInfo(deps));
+  return normalizeProcessInfos(await detectProcessInfos(deps));
+}
+
+async function probe(deps = {}) {
+  const infos = await detectedProcessInfos(deps);
+  const listPorts = deps.listeningPorts || listeningPorts;
+  const call = deps.callLs || callLs;
+  let lastError = errorWithStatus('notConfigured', 'Antigravity language server not running');
+
+  // Source priority is deliberate and independent of ps/PID order. Within one
+  // source, exhaust the richer grouped endpoint across every matching process
+  // before accepting a legacy model-pool response from that same source.
+  for (const kind of PROCESS_KIND_ORDER) {
+    const sourceInfos = infos.filter((info) => info.kind === kind);
+    const candidatesByProcess = [];
+    for (const info of sourceInfos) {
+      try {
+        const ports = await listPorts(info.pid, deps);
+        candidatesByProcess.push({ info, candidates: endpointCandidates(info, ports) });
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    for (const entry of candidatesByProcess) {
+      const result = await groupedQuotaFromCandidates(entry.candidates, call);
+      if (result.snapshot) return { ...result.snapshot, sourceDetail: kind };
+      lastError = result.lastError;
+    }
+    for (const entry of candidatesByProcess) {
+      const result = await legacyQuotaFromCandidates(entry.candidates, call);
+      if (result.snapshot) return { ...result.snapshot, sourceDetail: kind };
+      lastError = result.lastError;
     }
   }
   throw lastError;
@@ -371,15 +545,20 @@ async function probe(deps = {}) {
 module.exports = {
   probe,
   detectProcessInfo,
+  detectProcessInfos,
   listeningPorts,
   callLs,
   _parseProcessLine: parseProcessLine,
   _antigravityProcessKind: antigravityProcessKind,
+  _isAntigravityIdeCommand: isAntigravityIdeCommand,
   _isAntigravityCliCommand: isAntigravityCliCommand,
+  _sortProcessInfos: sortProcessInfos,
   _extractFlag: extractFlag,
   _errorWithStatus: errorWithStatus,
   _modelsFromConfigs: modelsFromConfigs,
   _collapsePools: collapsePools,
   _poolForModel: poolForModel,
+  _quotaSummaryWindows: quotaSummaryWindows,
+  _quotaBucketKind: quotaBucketKind,
   _endpointCandidates: endpointCandidates
 };

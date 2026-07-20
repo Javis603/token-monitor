@@ -266,7 +266,18 @@ function normalizeLimitProvider(input) {
   const windows = Array.isArray(input.windows)
     ? input.windows.map(normalizeLimitWindow).filter(Boolean)
     : [];
-  windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
+  if (provider === 'antigravity') {
+    const groupRank = (window) => {
+      const label = String(window.label || '').toLowerCase();
+      if (label.includes('gemini')) return 0;
+      if (label.includes('claude') || label.includes('gpt')) return 1;
+      return 2;
+    };
+    windows.sort((a, b) => groupRank(a) - groupRank(b)
+      || WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
+  } else {
+    windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
+  }
   return {
     provider,
     accountKey: input.accountKey ? String(input.accountKey) : '',

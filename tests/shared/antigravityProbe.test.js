@@ -32,12 +32,19 @@ test('parseProcessLine matches language_server.exe on win32 cmdlines', () => {
   const info = probe._parseProcessLine(line);
   assert.equal(info.pid, 7777);
   assert.equal(info.csrfToken, 'abc-123');
-  assert.equal(info.kind, 'ide');
+  assert.equal(info.kind, 'app');
 });
 
-test('parseProcessLine tags the IDE language server as kind=ide', () => {
+test('parseProcessLine tags the Antigravity app language server as kind=app', () => {
   const line = '53602 /Applications/Antigravity.app/Contents/Resources/bin/language_server --override_ide_name antigravity --csrf_token abc --app_data_dir antigravity';
-  assert.equal(probe._parseProcessLine(line).kind, 'ide');
+  assert.equal(probe._parseProcessLine(line).kind, 'app');
+});
+
+test('parseProcessLine distinguishes the Antigravity IDE language server', () => {
+  const appBundle = '53603 /Applications/Antigravity IDE.app/Contents/Resources/bin/language_server --csrf_token ide-a --app_data_dir antigravity-ide';
+  const extension = '53604 /Users/example/.vscode/extensions/antigravity/bin/language_server --csrf_token ide-b --app_data_dir antigravity';
+  assert.equal(probe._parseProcessLine(appBundle).kind, 'ide');
+  assert.equal(probe._parseProcessLine(extension).kind, 'ide');
 });
 
 test('parseProcessLine matches the agy CLI without a csrf token (kind=cli)', () => {
@@ -83,14 +90,31 @@ function fakeSpawn(stdout, { exitCode = 0, stderr = '' } = {}) {
   };
 }
 
-test('detectProcessInfo (posix) returns the first matching antigravity LS', async () => {
+test('detectProcessInfo (posix) returns the highest-priority Antigravity source', async () => {
   const stdout = [
     '111 /bin/bash --login',
+    '60123 /Users/example/.antigravity/bin/agy language-server --stdio',
     '53602 /Applications/Antigravity.app/Contents/Resources/bin/language_server --standalone --override_ide_name antigravity --csrf_token abc-123 --app_data_dir antigravity'
   ].join('\n');
   const info = await probe.detectProcessInfo({ platform: 'darwin', spawn: fakeSpawn(stdout) });
   assert.equal(info.pid, 53602);
   assert.equal(info.csrfToken, 'abc-123');
+});
+
+test('detectProcessInfos orders app, CLI, then IDE independent of ps order', async () => {
+  const stdout = [
+    '70003 /Applications/Antigravity IDE.app/Contents/Resources/bin/language_server --csrf_token ide --app_data_dir antigravity-ide',
+    '70001 /Users/example/.antigravity/bin/agy language-server --stdio',
+    '70002 /Applications/Antigravity.app/Contents/Resources/bin/language_server --csrf_token app-b --app_data_dir antigravity',
+    '70000 /Applications/Antigravity.app/Contents/Resources/bin/language_server --csrf_token app-a --app_data_dir antigravity'
+  ].join('\n');
+  const infos = await probe.detectProcessInfos({ platform: 'darwin', spawn: fakeSpawn(stdout) });
+  assert.deepEqual(infos.map((info) => [info.kind, info.pid]), [
+    ['app', 70000],
+    ['app', 70002],
+    ['cli', 70001],
+    ['ide', 70003]
+  ]);
 });
 
 test('detectProcessInfo (posix) throws notConfigured when no LS is present', async () => {
@@ -257,6 +281,224 @@ test('_collapsePools omits pools that have no model in the response', () => {
   assert.deepEqual(pools.map((p) => p.name), ['Claude']);
 });
 
+test('_quotaSummaryWindows maps two model groups to session and weekly windows', () => {
+  const windows = probe._quotaSummaryWindows({
+    response: {
+      groups: [
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [
+            { bucketId: '3p-weekly', displayName: 'Weekly Limit', remaining: { remainingFraction: 0.64 }, resetTime: '2026-06-20T00:39:54Z' },
+            { bucketId: '3p-5h', displayName: 'Five Hour Limit', remaining: { remainingFraction: 0.73 }, resetTime: '2026-06-15T12:52:10Z' }
+          ]
+        },
+        {
+          displayName: 'Gemini Models',
+          buckets: [
+            { bucketId: 'gemini-weekly', displayName: 'Weekly Limit', remaining: { case: 'remainingFraction', value: 0.82 } },
+            { bucketId: 'gemini-5h', displayName: 'Five Hour Limit', remainingFraction: 0.91, description: 'Refreshes in four hours.' }
+          ]
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(windows.map((window) => [window.name, window.kind, window.remainingFraction]), [
+    ['Gemini 5-hour', 'session', 0.91],
+    ['Gemini weekly', 'weekly', 0.82],
+    ['Claude/GPT 5-hour', 'session', 0.73],
+    ['Claude/GPT weekly', 'weekly', 0.64]
+  ]);
+  assert.equal(windows[0].resetDescription, 'Refreshes in four hours.');
+  assert.equal(windows[2].resetTime, '2026-06-15T12:52:10.000Z');
+});
+
+test('_quotaSummaryWindows recognizes cadence aliases and marks disabled buckets unknown', () => {
+  const windows = probe._quotaSummaryWindows({
+    groups: [{
+      displayName: 'Gemini Models',
+      buckets: [
+        { bucketId: 'gemini_session', displayName: 'Session', remaining: { remainingFraction: 0.75 } },
+        { bucketId: 'gemini-weekly', displayName: 'Weekly Limit', remainingFraction: 0.5, disabled: true },
+        { bucketId: 'gemini-session-history', displayName: 'Session History', remainingFraction: 0.25 }
+      ]
+    }]
+  });
+
+  assert.deepEqual(windows.map((window) => window.name), ['Gemini 5-hour', 'Gemini weekly']);
+  assert.equal(windows[0].showMeter, true);
+  assert.equal(windows[1].remainingFraction, null);
+  assert.equal(windows[1].showMeter, false);
+});
+
+test('probe prefers quota summary and merges identity from GetUserStatus', async () => {
+  const methods = [];
+  const result = await probe.probe({
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+    listeningPorts: async () => [54733],
+    callLs: async ({ method, body }) => {
+      methods.push(method);
+      if (method === 'RetrieveUserQuotaSummary') {
+        assert.deepEqual(body, { forceRefresh: true });
+        return {
+          response: {
+            groups: [{
+              displayName: 'Gemini Models',
+              buckets: [
+                { bucketId: 'gemini-5h', displayName: 'Five Hour Limit', remaining: { remainingFraction: 0.8 } },
+                { bucketId: 'gemini-weekly', displayName: 'Weekly Limit', remaining: { remainingFraction: 0.6 } }
+              ]
+            }]
+          }
+        };
+      }
+      return { userStatus: { email: 'a@b.com', userTier: { name: 'Google AI Pro' } } };
+    }
+  });
+
+  assert.deepEqual(methods, ['RetrieveUserQuotaSummary', 'GetUserStatus']);
+  assert.equal(result.accountEmail, 'a@b.com');
+  assert.equal(result.accountPlan, 'Google AI Pro');
+  assert.deepEqual(result.windows.map((window) => window.name), ['Gemini 5-hour', 'Gemini weekly']);
+});
+
+test('probe checks every endpoint for grouped quota before accepting a legacy response', async () => {
+  const calls = [];
+  const result = await probe.probe({
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+    listeningPorts: async () => [54733],
+    callLs: async ({ scheme, method }) => {
+      calls.push(`${scheme}:${method}`);
+      if (scheme === 'https' && method === 'RetrieveUserQuotaSummary') return { code: 7 };
+      if (scheme === 'http' && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-weekly', displayName: 'Weekly Limit', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (scheme === 'http' && method === 'GetUserStatus') {
+        return { userStatus: { email: 'rich@example.com', planStatus: { planInfo: { planName: 'Pro' } } } };
+      }
+      return {
+        userStatus: {
+          cascadeModelConfigData: {
+            clientModelConfigs: [
+              { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.9 } }
+            ]
+          }
+        }
+      };
+    }
+  });
+
+  assert.deepEqual(calls, [
+    'https:RetrieveUserQuotaSummary',
+    'http:RetrieveUserQuotaSummary',
+    'http:GetUserStatus'
+  ]);
+  assert.equal(result.accountEmail, 'rich@example.com');
+  assert.deepEqual(result.windows.map((window) => window.name), ['Gemini weekly']);
+  assert.equal(result.pools, undefined);
+});
+
+test('probe follows app, CLI, then IDE source priority and stops after success', async () => {
+  const calls = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 30, kind: 'ide', csrfToken: 'ide' },
+      { pid: 20, kind: 'cli', csrfToken: '' },
+      { pid: 10, kind: 'app', csrfToken: 'app' }
+    ],
+    listeningPorts: async (pid) => [pid],
+    callLs: async ({ port, method }) => {
+      calls.push(`${port}:${method}`);
+      if (port === 10) throw probe._errorWithStatus('unavailable', 'app unavailable');
+      if (port === 20 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-weekly', remainingFraction: 0.7 }]
+          }]
+        };
+      }
+      return { userStatus: { email: 'cli@example.com' } };
+    }
+  });
+
+  assert.equal(result.sourceDetail, 'cli');
+  assert.equal(result.accountEmail, 'cli@example.com');
+  assert.ok(calls.some((call) => call.startsWith('10:')));
+  assert.ok(calls.some((call) => call.startsWith('20:')));
+  assert.ok(calls.every((call) => !call.startsWith('30:')));
+});
+
+test('probe accepts a valid app legacy response before lower-priority grouped sources', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 20, kind: 'cli', csrfToken: '' },
+      { pid: 10, kind: 'app', csrfToken: 'app' }
+    ],
+    listeningPorts: async (pid) => [pid],
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 10 && method === 'RetrieveUserQuotaSummary') return { groups: [] };
+      if (port === 10 && method === 'GetUserStatus') {
+        return {
+          userStatus: {
+            email: 'app@example.com',
+            cascadeModelConfigData: {
+              clientModelConfigs: [
+                { label: 'Gemini 3 Pro', modelOrAlias: { model: 'APP' }, quotaInfo: { remainingFraction: 0.5 } }
+              ]
+            }
+          }
+        };
+      }
+      throw new Error('lower-priority CLI should not be called');
+    }
+  });
+
+  assert.equal(result.sourceDetail, 'app');
+  assert.equal(result.accountEmail, 'app@example.com');
+  assert.deepEqual(result.pools.map((pool) => pool.name), ['Gemini Pro']);
+  assert.ok(calledPorts.every((port) => port === 10));
+});
+
+test('probe exhausts grouped quota across same-source processes before legacy fallback', async () => {
+  const calls = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 11, kind: 'app', csrfToken: 'first' },
+      { pid: 12, kind: 'app', csrfToken: 'second' }
+    ],
+    listeningPorts: async (pid) => [pid],
+    callLs: async ({ port, scheme, method }) => {
+      calls.push(`${port}:${scheme}:${method}`);
+      if (port === 11 && method === 'RetrieveUserQuotaSummary') return { groups: [] };
+      if (port === 12 && scheme === 'https' && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Future Models',
+            buckets: [{ bucketId: 'future-weekly', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (port === 12 && method === 'GetUserStatus') return { userStatus: { email: 'second@example.com' } };
+      throw new Error('legacy endpoint should not be reached');
+    }
+  });
+
+  assert.equal(result.sourceDetail, 'app');
+  assert.equal(result.accountEmail, 'second@example.com');
+  assert.deepEqual(result.windows.map((window) => window.name), ['Future Models weekly']);
+  assert.ok(calls.some((call) => call.startsWith('11:')));
+  assert.ok(calls.some((call) => call.startsWith('12:')));
+  assert.ok(calls.every((call) => !call.includes('GetCommandModelConfigs')));
+});
+
 test('probe returns plan + 3 pools when GetUserStatus succeeds', async () => {
   const result = await probe.probe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
@@ -331,7 +573,7 @@ test('probe falls back to GetCommandModelConfigs when GetUserStatus has no userS
       };
     }
   });
-  assert.equal(callCount, 2);
+  assert.equal(callCount, 4);
   assert.equal(result.accountPlan, null);
   assert.deepEqual(result.pools.map((p) => p.name), ['Claude']);
 });

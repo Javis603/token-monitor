@@ -2133,18 +2133,32 @@ async function fetchAntigravityLimits(_options = {}, deps = {}) {
     const snapshot = await probeFn(deps);
     const accountLabel = snapshot.accountPlan ? antigravityPlanLabelFromParts(snapshot.accountPlan) : '';
     const accountKeySeed = snapshot.accountEmail || snapshot.accountPlan || 'default';
-    const windows = (snapshot.pools || []).map((pool) => ({
-      kind: 'weekly',
-      label: pool.name,
-      usedPercent: Math.max(0, Math.min(100, (1 - pool.remainingFraction) * 100)),
-      resetsAt: pool.resetTime || null,
-      windowMinutes: null
-    }));
+    const windows = Array.isArray(snapshot.windows)
+      ? snapshot.windows.map((window) => ({
+          kind: window.kind,
+          label: window.name,
+          usedPercent: typeof window.remainingFraction === 'number'
+            ? Math.max(0, Math.min(100, (1 - window.remainingFraction) * 100))
+            : null,
+          resetsAt: window.resetTime || null,
+          resetDescription: window.resetDescription || '',
+          windowMinutes: window.kind === 'session' ? 300 : window.kind === 'weekly' ? 10_080 : null,
+          showMeter: window.showMeter !== false
+        }))
+      : (snapshot.pools || []).map((pool) => ({
+          kind: 'weekly',
+          label: pool.name,
+          usedPercent: Math.max(0, Math.min(100, (1 - pool.remainingFraction) * 100)),
+          resetsAt: pool.resetTime || null,
+          windowMinutes: null
+        }));
     return normalizeLimitProvider({
       provider: 'antigravity',
       accountKey: hashKey('antigravity', accountKeySeed),
       accountLabel,
+      accountEmail: snapshot.accountEmail || '',
       source: 'rpc',
+      sourceDetail: snapshot.sourceDetail || '',
       status: 'ok',
       updatedAt,
       windows

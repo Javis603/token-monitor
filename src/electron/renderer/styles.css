@@ -2993,6 +2993,37 @@ html.is-windows .settings-panel select option {
   grid-template-columns: 1fr;
   gap: 8px;
 }
+.limit-windows-antigravity-grouped {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.limit-window-group {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+.limit-window-group + .limit-window-group {
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.12);
+}
+.limit-window-group-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.limit-window-group-items {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+  gap: 10px;
+}
+.limit-window-group-items > .limit-window:only-child {
+  grid-column: 1 / -1;
+}
 .limit-row-group {
   gap: 8px;
 }

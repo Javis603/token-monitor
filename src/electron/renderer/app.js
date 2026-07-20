@@ -1837,6 +1837,28 @@ function windowsForKind(provider, kind) {
   return (provider?.windows || []).filter((window) => window.kind === kind);
 }
 
+function antigravityQuotaGroups(provider) {
+  const entries = (provider?.windows || [])
+    .filter((window) => window.kind === 'session' || window.kind === 'weekly')
+    .map((window) => {
+      const windowLabel = window.kind === 'session' ? '5-hour' : 'Weekly';
+      const label = String(window.label || '').trim();
+      const suffix = window.kind === 'session' ? /\s+5-hour$/i : /\s+weekly$/i;
+      if (!suffix.test(label)) return null;
+      const groupLabel = label.replace(suffix, '').trim();
+      return groupLabel ? { groupLabel, windowLabel, window } : null;
+    });
+  // Legacy GetUserStatus pools have model names rather than group + period
+  // labels. Keep their existing flat layout instead of guessing a hierarchy.
+  if (entries.length === 0 || entries.some((entry) => entry === null)) return [];
+  const groups = new Map();
+  for (const entry of entries) {
+    if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
+    groups.get(entry.groupLabel).push(entry);
+  }
+  return [...groups].map(([label, windows]) => ({ label, windows }));
+}
+
 function formatLimitAmount(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '';
@@ -2476,12 +2498,39 @@ function renderProviderWindows(provider, color) {
     }
   } else if (provider.provider === 'antigravity') {
     windows.classList.add('limit-windows-antigravity');
-    const weeklyWindows = windowsForKind(provider, 'weekly');
-    const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
-    for (const weekly of visibleWindows) {
-      const node = limitWindowNode(weekly?.label || 'Weekly', weekly, color, 0.78);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
+    const quotaGroups = antigravityQuotaGroups(provider);
+    if (quotaGroups.length > 0) {
+      windows.classList.add('limit-windows-antigravity-grouped');
+      for (const group of quotaGroups) {
+        const groupNode = document.createElement('div');
+        groupNode.className = 'limit-window-group';
+        groupNode.setAttribute('role', 'group');
+        groupNode.setAttribute('aria-label', group.label);
+        const title = document.createElement('div');
+        title.className = 'limit-window-group-title';
+        title.textContent = group.label;
+        const groupWindows = document.createElement('div');
+        groupWindows.className = 'limit-window-group-items';
+        for (const entry of group.windows) {
+          const opacity = entry.window.kind === 'session' ? 0.95 : 0.78;
+          groupWindows.append(limitWindowNode(
+            entry.windowLabel,
+            { ...entry.window, label: entry.windowLabel },
+            color,
+            opacity
+          ));
+        }
+        groupNode.append(title, groupWindows);
+        windows.append(groupNode);
+      }
+    } else {
+      const weeklyWindows = windowsForKind(provider, 'weekly');
+      const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
+      for (const quotaWindow of visibleWindows) {
+        const node = limitWindowNode(quotaWindow?.label || 'Weekly', quotaWindow, color, 0.78);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
     }
   } else if (provider.provider === 'opencode') {
     // Go reports session/weekly/monthly windows ($12/$30/$60); Zen reports a prepaid balance (and,

@@ -453,6 +453,51 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
+test('Antigravity groups returned quota windows under dynamic model-family headings', () => {
+  const app = readRendererFile('app.js');
+  const quotaGroups = functionBody(app, 'antigravityQuotaGroups', 'formatLimitAmount');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const css = readRendererFile('styles.css');
+
+  const grouped = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
+    { kind: 'session', label: 'Gemini 5-hour' },
+    { kind: 'weekly', label: 'Gemini weekly' },
+    { kind: 'weekly', label: 'Future Group weekly' }
+  ] });`);
+  assert.deepEqual(JSON.parse(JSON.stringify(grouped)), [
+    {
+      label: 'Gemini',
+      windows: [
+        { groupLabel: 'Gemini', windowLabel: '5-hour', window: { kind: 'session', label: 'Gemini 5-hour' } },
+        { groupLabel: 'Gemini', windowLabel: 'Weekly', window: { kind: 'weekly', label: 'Gemini weekly' } }
+      ]
+    },
+    {
+      label: 'Future Group',
+      windows: [
+        { groupLabel: 'Future Group', windowLabel: 'Weekly', window: { kind: 'weekly', label: 'Future Group weekly' } }
+      ]
+    }
+  ]);
+  const legacy = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
+    { kind: 'weekly', label: 'Gemini Pro' },
+    { kind: 'weekly', label: 'Claude' }
+  ] });`);
+  assert.deepEqual(JSON.parse(JSON.stringify(legacy)), []);
+
+  assert.match(quotaGroups, /window\.kind === 'session' \? '5-hour' : 'Weekly'/);
+  assert.match(quotaGroups, /const groupLabel = label\.replace\(suffix, ''\)\.trim\(\)/);
+  assert.match(quotaGroups, /groups\.set\(entry\.groupLabel, \[\]\)/);
+  assert.match(quotaGroups, /entries\.some\(\(entry\) => entry === null\)/);
+  assert.match(renderProviderWindows, /provider\.provider === 'antigravity'/);
+  assert.match(renderProviderWindows, /const quotaGroups = antigravityQuotaGroups\(provider\)/);
+  assert.match(renderProviderWindows, /title\.textContent = group\.label/);
+  assert.match(renderProviderWindows, /entry\.windowLabel/);
+  assert.match(css, /\.limit-windows-antigravity-grouped \{[\s\S]*grid-template-columns: 1fr;/);
+  assert.match(css, /\.limit-window-group-items \{[\s\S]*grid-template-columns: 1fr 1fr;/);
+  assert.match(css, /\.limit-window-group-title \{[\s\S]*font-weight: 400;/);
+});
+
 test('Qoder renders its single Credits billing window full-width', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
