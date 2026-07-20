@@ -11,6 +11,7 @@ const {
   parseMimoPlanUsage,
   parseMimoProfile
 } = require('../../src/shared/mimoLimits');
+const { createLimitsCollector } = require('../../src/shared/limitCollector');
 
 const COOKIE = 'unrelated=drop; userId=123; api-platform_serviceToken=secret; api-platform_ph=optional';
 
@@ -383,6 +384,82 @@ test('fetchMimoLimits refresh scope probes only the requested account', async ()
 
   assert.equal(result.length, 1);
   assert.equal(result[0].accountKey, 'sha256:mimo-2');
+  assert.ok(cookies.length > 0);
+  assert.ok(cookies.every((cookie) => cookie.includes('userId=456')));
+});
+
+test('fetchMimoLimits fails closed for a provider-only scope with multiple accounts', async () => {
+  const accounts = [
+    managed(COOKIE),
+    managed('userId=456; api-platform_serviceToken=second', {
+      id: 'mimo-2', accountKey: 'sha256:mimo-2'
+    })
+  ];
+  let fetchCalls = 0;
+
+  await assert.rejects(fetchMimoLimits({
+    mimoManagedAccounts: accounts,
+    limitRefreshScope: { provider: 'mimo' }
+  }, {
+    fetch: async () => {
+      fetchCalls += 1;
+      return response({ code: 0, data: {} });
+    }
+  }), /requires an account identifier/);
+
+  assert.equal(fetchCalls, 0);
+});
+
+test('createLimitsCollector leaves cached MiMo accounts untouched for an ambiguous scope', async () => {
+  const accounts = [
+    managed(COOKIE),
+    managed('userId=456; api-platform_serviceToken=second', {
+      id: 'mimo-2', accountKey: 'sha256:mimo-2'
+    })
+  ];
+  let fetchCalls = 0;
+  const cookies = [];
+  const oldAt = '2026-07-20T00:00:00.000Z';
+  const collector = createLimitsCollector({
+    limitsEnabled: true,
+    limitProviders: 'mimo',
+    mimoManagedAccounts: accounts,
+    previousLimits: {
+      updatedAt: oldAt,
+      refreshMs: 300000,
+      providers: accounts.map((account) => ({
+        provider: 'mimo',
+        accountKey: account.accountKey,
+        status: 'ok',
+        updatedAt: oldAt,
+        windows: []
+      }))
+    }
+  }, {
+    fetch: async (url, init) => {
+      fetchCalls += 1;
+      cookies.push(init.headers.Cookie);
+      return url.endsWith('/balance')
+        ? response({ code: 0, data: { balance: '1', currency: 'USD' } })
+        : response({ code: 0, data: {} });
+    }
+  });
+
+  await assert.rejects(
+    collector.refreshScope({ provider: 'mimo' }),
+    /requires an account identifier/
+  );
+  assert.equal(fetchCalls, 0);
+
+  const summary = await collector.refreshScope({
+    provider: 'mimo',
+    accountKey: 'sha256:mimo-2'
+  });
+  assert.deepEqual(
+    summary.providers.map((provider) => provider.accountKey),
+    ['sha256:mimo-1', 'sha256:mimo-2']
+  );
+  assert.equal(summary.providers[0].updatedAt, oldAt);
   assert.ok(cookies.length > 0);
   assert.ok(cookies.every((cookie) => cookie.includes('userId=456')));
 });

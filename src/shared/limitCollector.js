@@ -2537,6 +2537,15 @@ function createLimitsCollector(options = {}, deps = {}) {
   async function refreshScope(scope) {
     const current = (deps.now || Date.now)();
     if (!scope?.provider) throw new TypeError('limit refresh scope requires a provider');
+    if (scope.provider === 'mimo') {
+      // Validate before collectLimitsOnce converts provider errors into a
+      // status row. An ambiguous multi-account scope must leave the cache
+      // untouched instead of replacing every MiMo account or probing them all.
+      mimoLimits.scopedMimoManagedAccounts(
+        options.mimoManagedAccounts || deps.mimoManagedAccounts,
+        scope
+      );
+    }
     if (inFlight) return inFlight;
     const scopeKey = JSON.stringify(scope);
     if (scopedInFlight.has(scopeKey)) return scopedInFlight.get(scopeKey);

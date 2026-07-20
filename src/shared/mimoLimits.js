@@ -334,18 +334,31 @@ function normalizeMimoManagedAccounts(value) {
   return accounts;
 }
 
+function scopedMimoManagedAccounts(value, scope) {
+  const accounts = normalizeMimoManagedAccounts(value);
+  if (!scope) return accounts;
+  const hasAccountIdentifier = Boolean(
+    scope.accountKey || scope.accountEmail || scope.accountLabel
+  );
+  if (!hasAccountIdentifier && accounts.length > 1) {
+    throw new TypeError('MiMo limit refresh scope requires an account identifier when multiple accounts are configured');
+  }
+  return accounts.filter((account) => {
+    if (scope.accountKey) return account.accountKey === scope.accountKey;
+    if (scope.accountEmail) return account.accountEmail === scope.accountEmail;
+    if (scope.accountLabel) return account.accountLabel === scope.accountLabel;
+    return true;
+  });
+}
+
 async function fetchMimoLimits(options = {}, deps = {}) {
   const scope = options.limitRefreshScope?.provider === 'mimo'
     ? options.limitRefreshScope
     : null;
-  const accounts = normalizeMimoManagedAccounts(options.mimoManagedAccounts || deps.mimoManagedAccounts)
-    .filter((account, _index, all) => {
-      if (!scope) return true;
-      if (scope.accountKey) return account.accountKey === scope.accountKey;
-      if (scope.accountEmail) return account.accountEmail === scope.accountEmail;
-      if (scope.accountLabel) return account.accountLabel === scope.accountLabel;
-      return all.length === 1;
-    });
+  const accounts = scopedMimoManagedAccounts(
+    options.mimoManagedAccounts || deps.mimoManagedAccounts,
+    scope
+  );
   if (!accounts.length) {
     return statusProvider('notConfigured', new Date((deps.now || Date.now)()).toISOString());
   }
@@ -389,5 +402,6 @@ module.exports = {
   parseMimoBalance,
   parseMimoProfile,
   parseMimoPlanDetail,
-  parseMimoPlanUsage
+  parseMimoPlanUsage,
+  scopedMimoManagedAccounts
 };

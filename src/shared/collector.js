@@ -1169,6 +1169,13 @@ function nextLimitsResetBoundary(limits, nowMs = Date.now(), attempted = new Set
   };
 }
 
+function pruneAttemptedResetBoundaries(limits, attempted) {
+  const currentKeys = new Set(limitResetBoundaryEntries(limits).map((entry) => entry.key));
+  for (const key of attempted) {
+    if (!currentKeys.has(key)) attempted.delete(key);
+  }
+}
+
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
@@ -1254,6 +1261,10 @@ function startCollector(options) {
   function scheduleLimitsResetBoundary(limits) {
     clearScheduledResetBoundary();
     if (stopped || !limitsCollector) return;
+    // Keep stale keys that are still present so a failed/source-stale refresh
+    // cannot loop, but discard historical windows once a fresh snapshot no
+    // longer contains them. This bounds the set to the current limits shape.
+    pruneAttemptedResetBoundaries(limits, attemptedResetBoundaries);
     const next = nextLimitsResetBoundary(limits, resetBoundaryNow(), attemptedResetBoundaries);
     if (!next) return;
     resetBoundaryTimer = setResetBoundaryTimer(() => {
@@ -1514,6 +1525,7 @@ module.exports = {
   locateBundledBinary,
   lookupModelPricing,
   normalizePromaPricing,
+  pruneAttemptedResetBoundaries,
   readDownloadedPointer,
   resolvePlatformBinary,
   resolvePromaPricing,

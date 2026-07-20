@@ -274,6 +274,29 @@ test('reset boundary scheduling caps timers that exceed the Node timeout range',
   delete require.cache[collectorPath];
 });
 
+test('reset boundary scheduling prunes historical attempted keys but retains current stale keys', () => {
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+  const {
+    nextLimitsResetBoundary,
+    pruneAttemptedResetBoundaries
+  } = require(collectorPath);
+  const limits = {
+    providers: [{
+      provider: 'codex',
+      accountKey: 'codex-test',
+      windows: [{ kind: 'session', resetsAt: '2026-07-20T00:01:00.000Z' }]
+    }]
+  };
+  const currentKey = nextLimitsResetBoundary(limits).keys[0];
+  const attempted = new Set(['historical-reset-key', currentKey]);
+
+  pruneAttemptedResetBoundaries(limits, attempted);
+
+  assert.deepEqual([...attempted], [currentKey]);
+  delete require.cache[collectorPath];
+});
+
 test('collectUsageOnce returns empty usage without spawning tokscale when clients is empty', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
