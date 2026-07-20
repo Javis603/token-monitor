@@ -105,7 +105,10 @@ function queryViaSqlcipherCli(dbPath, key, sql) {
     sql
   ].join('\n');
   try {
-    const stdout = execFileSync('sqlcipher', [dbPath, commands], {
+    // SQL is fed through stdin so the key never appears in the process
+    // argument list (visible to other local users via ps/tasklist).
+    const stdout = execFileSync('sqlcipher', [dbPath], {
+      input: commands,
       encoding: 'utf8',
       timeout: 30000,
       windowsHide: true,
@@ -205,8 +208,14 @@ function collectTraeRows(options = {}) {
   const key = options.key || resolveTraeKey(options.sharedDataDir);
   if (!key) return [];
 
-  const rows = queryHistoryRows(dbPath, key, 0);
-  if (!rows || !Array.isArray(rows)) return [];
+  const sinceTimestamp = options.sinceTimestamp || 0;
+  const rows = queryHistoryRows(dbPath, key, sinceTimestamp);
+  if (!rows || !Array.isArray(rows)) {
+    if (typeof options.logger === 'function') {
+      options.logger('trae: unable to query database — requires a SQLCipher-capable backend (better-sqlite3 built with cipher support, or the sqlcipher CLI on PATH); check that the configured key is correct');
+    }
+    return [];
+  }
 
   const result = [];
   for (const row of rows) {
@@ -235,53 +244,34 @@ function collectTraeRows(options = {}) {
 // Tokscale-compatible output
 // ---------------------------------------------------------------------------
 
-function buildTokscaleJson(windows = {}, options = {}) {
-  const sinceMs = Math.max(
-    0,
-    Number(windows.todayStart || 0),
-    Number(windows.monthStart || 0),
-    Number(windows.allTimeSince || 0)
-  );
-  const sinceTimestamp = sinceMs ? Math.floor(sinceMs / 1000) : 0;
-
-  const dbPath = options.dbPath || traeDbPath();
-  if (!dbPath) return emptyTokscaleJson();
-
-  const key = options.key || resolveTraeKey(options.sharedDataDir);
-  if (!key) return emptyTokscaleJson();
-
-  const rows = queryHistoryRows(dbPath, key, sinceTimestamp);
-  if (!rows || !Array.isArray(rows)) return emptyTokscaleJson();
-
-  // Aggregate by session + model
+/**
+ * Aggregate pre-parsed usage rows (from collectTraeRows) into a
+ * tokscale-compatible JSON payload, counting only rows at or after sinceMs.
+ */
+function aggregateParsedRows(parsedRows, sinceMs = 0) {
   const bySessionModel = new Map();
   let allInput = 0, allOutput = 0, allMessages = 0;
 
-  for (const row of rows) {
-    const output = numberValue(row.token_usage);
-    if (!output) continue;
-
-    const { model, inputToken } = extractModelFromMessages(row.messages);
-    const createdAt = numberValue(row.created_at) * 1000;
-    const sessionId = String(row.session_id || 'unknown');
-    const mapKey = `${sessionId}\u0000${model}`;
+  for (const row of parsedRows) {
+    if (sinceMs && row.createdAt < sinceMs) continue;
+    const mapKey = `${row.sessionId}\u0000${row.model}`;
 
     if (!bySessionModel.has(mapKey)) {
       bySessionModel.set(mapKey, {
-        sessionId, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
-        messages: 0, cost: 0, startedAt: 0, lastUsedAt: 0
+        sessionId: row.sessionId, model: row.model, input: 0, output: 0,
+        cacheRead: 0, cacheWrite: 0, messages: 0, startedAt: 0, lastUsedAt: 0
       });
     }
     const m = bySessionModel.get(mapKey);
-    m.input += inputToken;
-    m.output += output;
-    m.messages += 1;
-    if (createdAt && (!m.startedAt || createdAt < m.startedAt)) m.startedAt = createdAt;
-    if (createdAt > m.lastUsedAt) m.lastUsedAt = createdAt;
+    m.input += row.input;
+    m.output += row.output;
+    m.messages += row.messages;
+    if (row.createdAt && (!m.startedAt || row.createdAt < m.startedAt)) m.startedAt = row.createdAt;
+    if (row.createdAt > m.lastUsedAt) m.lastUsedAt = row.createdAt;
 
-    allInput += inputToken;
-    allOutput += output;
-    allMessages += 1;
+    allInput += row.input;
+    allOutput += row.output;
+    allMessages += row.messages;
   }
 
   const entries = [];
@@ -318,6 +308,19 @@ function buildTokscaleJson(windows = {}, options = {}) {
   };
 }
 
+function buildTokscaleJson(windows = {}, options = {}) {
+  const sinceMs = Math.max(
+    0,
+    Number(windows.todayStart || 0),
+    Number(windows.monthStart || 0),
+    Number(windows.allTimeSince || 0)
+  );
+
+  const rows = Array.isArray(options.rows) ? options.rows : collectTraeRows(options);
+  if (!rows.length) return emptyTokscaleJson();
+  return aggregateParsedRows(rows, sinceMs);
+}
+
 function emptyTokscaleJson() {
   return {
     groupBy: 'client,session,model',
@@ -341,10 +344,15 @@ function buildTraePeriods(options = {}) {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
   const allTimeSince = options.allTimeSince ? new Date(options.allTimeSince).getTime() : 0;
 
+  // Load and decrypt the database exactly once; every window below is an
+  // in-memory filter of the same snapshot, so periods never disagree
+  // mid-collection and large databases are not re-decrypted per window.
+  const rows = Array.isArray(options.rows) ? options.rows : collectTraeRows(options);
+
   return {
-    today: buildTokscaleJson({ todayStart }, options),
-    month: buildTokscaleJson({ monthStart }, options),
-    allTime: buildTokscaleJson({ allTimeSince }, options)
+    today: aggregateParsedRows(rows, todayStart),
+    month: aggregateParsedRows(rows, monthStart),
+    allTime: aggregateParsedRows(rows, allTimeSince)
   };
 }
 

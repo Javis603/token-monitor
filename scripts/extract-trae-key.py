@@ -179,8 +179,62 @@ def scan_memory_for_key(pid, db_path):
         if _verify_key(key, page1):
             return key
 
-    # If HMAC verification fails, return first candidate (try direct open)
-    return candidates[0] if candidates else None
+    # HMAC didn't match (SQLCipher variants differ) — prove the key works by
+    # actually opening the database before claiming success.
+    for key in candidates:
+        verdict = _validate_key_opens_db(key, db_path)
+        if verdict is True:
+            return key
+
+    # No candidate could be validated. Only fall back to the first candidate
+    # when no validation backend exists at all, with a loud warning.
+    if candidates:
+        if _validate_key_opens_db(None, None) is None:
+            print("[!] WARNING: could not verify key (HMAC mismatch and no sqlcipher3 module).")
+            print("    Saving first candidate anyway — collection may fail if it is wrong.")
+            return candidates[0]
+        print("[-] All key candidates failed validation against the database.")
+    return None
+
+
+def _validate_key_opens_db(key, db_path):
+    """Try to actually open the database with the candidate key.
+
+    Returns True (key works), False (key rejected), or None when no
+    SQLCipher-capable Python driver is available to test with.
+    """
+    if key is None or db_path is None:
+        # Probe whether any driver is importable at all.
+        try:
+            import sqlcipher3.dbapi2  # noqa: F401
+            return None
+        except ImportError:
+            pass
+        try:
+            from pysqlcipher3 import dbapi2  # noqa: F401
+            return None
+        except ImportError:
+            return None
+        return None
+    sqlcipher = None
+    try:
+        import sqlcipher3.dbapi2 as sqlcipher
+    except ImportError:
+        try:
+            from pysqlcipher3 import dbapi2 as sqlcipher
+        except ImportError:
+            return None
+    try:
+        conn = sqlcipher.connect(db_path)
+        try:
+            conn.execute(f"PRAGMA key = \"x'{key}'\"")
+            conn.execute("PRAGMA cipher_compatibility = 4")
+            conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        finally:
+            conn.close()
+        return True
+    except Exception:
+        return False
 
 
 def _verify_key(enc_key_hex, page1):
@@ -255,17 +309,19 @@ def main():
     print(f"[+] Key found in {elapsed:.1f}s!")
     print(f"    enc_key = {key}")
 
-    # Determine output path
+    # Determine output path (never truncate an existing file to test access)
     output = args.output
     if not output:
         # Try next to database first
         db_dir = os.path.dirname(db_path)
         candidate = os.path.join(db_dir, "trae-key.json")
-        try:
-            with open(candidate, "w") as f:
-                f.write("")
+        if os.path.exists(candidate):
+            writable = os.access(candidate, os.W_OK)
+        else:
+            writable = os.access(db_dir, os.W_OK)
+        if writable:
             output = candidate
-        except OSError:
+        else:
             # Fall back to Token Monitor data dir
             appdata = os.environ.get("APPDATA", os.path.join(os.path.expanduser("~"), "AppData", "Roaming"))
             tm_dir = os.path.join(appdata, "Token Monitor")
@@ -273,8 +329,12 @@ def main():
             output = os.path.join(tm_dir, "trae-key.json")
 
     result = {"key": key, "db_path": db_path, "extracted_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    with open(output, "w") as f:
+    # Atomic write: temp file + rename so an interrupted run can never
+    # destroy an existing working key file.
+    tmp_path = output + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(result, f, indent=2)
+    os.replace(tmp_path, output)
 
     print(f"[+] Key saved to: {output}")
     print("\nToken Monitor will now be able to read Trae Work usage data.")

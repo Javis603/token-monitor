@@ -21,7 +21,7 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
-const { buildTraePeriods, buildTraeHistoryGraph } = require('./traeUsage');
+const { buildTraePeriods, buildTraeHistoryGraph, collectTraeRows } = require('./traeUsage');
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 
@@ -641,6 +641,7 @@ async function collectUsageOnce(options) {
   let promaRows = null;
   let promaPricing = null;
   let traePeriods = null;
+  let traeRows = null;
   if (normalizedClients) {
     await maybeSyncCursor(tokscaleClients, options.logger);
     await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
@@ -664,7 +665,10 @@ async function collectUsageOnce(options) {
     }
     if (includesTrae) {
       try {
-        const traeJson = buildTraePeriods({ now: collectedAt, allTimeSince, sharedDataDir: sharedDataDir() });
+        // Collect once; periods and the history graph both derive from this
+        // shared snapshot (one decrypt + query instead of four).
+        traeRows = collectTraeRows({ sharedDataDir: sharedDataDir(), logger: options.logger });
+        const traeJson = buildTraePeriods({ now: collectedAt, allTimeSince, rows: traeRows });
         traePeriods = {
           today: extractUsageFromTokscale(traeJson.today),
           month: extractUsageFromTokscale(traeJson.month),
@@ -845,7 +849,7 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
-      traeGraph: includesTrae ? buildTraeHistoryGraph({ sharedDataDir: sharedDataDir() }) : null,
+      traeGraph: includesTrae ? buildTraeHistoryGraph({ rows: traeRows || collectTraeRows({ sharedDataDir: sharedDataDir() }) }) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
