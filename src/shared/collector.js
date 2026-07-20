@@ -21,7 +21,7 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
-const { buildTraePeriods, buildTraeHistoryGraph, collectTraeRows, traeDbPath } = require('./traeUsage');
+const { buildTraePeriods, buildTraeHistoryGraph } = require('./traeUsage');
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 

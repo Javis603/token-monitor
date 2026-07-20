@@ -28,7 +28,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { createHash } = require('node:crypto');
 
 // ---------------------------------------------------------------------------
 // Database path resolution
