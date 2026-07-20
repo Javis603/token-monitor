@@ -49,8 +49,6 @@ function windowsProductName(productName, build) {
     if (/^Windows 10$/i.test(desktop[0]) && build >= 22000) return 'Windows 11';
     return desktop[0].replace(/^windows/i, 'Windows');
   }
-  if (build >= 22000) return 'Windows 11';
-  if (build >= 10240) return 'Windows 10';
   return 'Windows';
 }
 

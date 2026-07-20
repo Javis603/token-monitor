@@ -48,14 +48,28 @@ test('detectOsInfo reports the Windows product family and display version', () =
   assert.deepEqual(info, { name: 'Windows 11', version: '24H2' });
 });
 
-test('detectOsInfo falls back to an honest Windows build label', () => {
+test('detectOsInfo keeps the Windows build fallback product-neutral', () => {
   const info = detectOsInfo({
     platform: 'win32',
     release: () => '10.0.26100',
     execFileSync: () => { throw new Error('registry unavailable'); }
   });
 
-  assert.deepEqual(info, { name: 'Windows 11', version: 'build 26100' });
+  assert.deepEqual(info, { name: 'Windows', version: 'build 26100' });
+});
+
+test('detectOsInfo does not confuse Windows Server with Windows 11', () => {
+  const info = detectOsInfo({
+    platform: 'win32',
+    release: () => '10.0.26100',
+    execFileSync: () => [
+      '    ProductName    REG_SZ    Windows Server 2025 Datacenter',
+      '    DisplayVersion    REG_SZ    24H2',
+      '    CurrentBuildNumber    REG_SZ    26100'
+    ].join('\r\n')
+  });
+
+  assert.deepEqual(info, { name: 'Windows Server 2025', version: '24H2' });
 });
 
 test('detectOsInfo uses the Linux distribution name and product version', () => {
