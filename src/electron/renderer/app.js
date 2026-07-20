@@ -2765,6 +2765,18 @@ function renderMimoAccountGroup(label, providers, color) {
   return row;
 }
 
+function opencodeAccountTitle(provider, index) {
+  const name = String(provider?.accountName || '').trim();
+  if (name) return name;
+  // Older synced clients put the user-defined profile name in accountLabel.
+  // Keep those rows identifiable while new clients carry profile and plan in
+  // separate fields. Go/Zen are plan labels, never account identities.
+  const legacyName = String(provider?.accountLabel || '').trim();
+  return legacyName && legacyName !== 'Go' && legacyName !== 'Zen'
+    ? legacyName
+    : `Account ${index + 1}`;
+}
+
 function renderOpenCodeAccountGroup(label, providers, color) {
   const row = document.createElement('div');
   row.className = 'limit-row limit-row-group';
@@ -2775,10 +2787,15 @@ function renderOpenCodeAccountGroup(label, providers, color) {
   });
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
-  providers.forEach((provider) => {
-    accountList.append(renderLimitProviderRow('opencode', provider.accountLabel || 'OpenCode', provider, color, {
+  providers.forEach((provider, index) => {
+    const legacyProfileLabel = !provider?.accountName
+      && provider?.accountLabel
+      && provider.accountLabel !== 'Go'
+      && provider.accountLabel !== 'Zen';
+    accountList.append(renderLimitProviderRow('opencode', opencodeAccountTitle(provider, index), provider, color, {
       accountRow: true,
-      showIcon: false
+      showIcon: false,
+      ...(legacyProfileLabel ? { planText: '' } : {})
     }));
   });
   row.append(head, accountList);
@@ -3564,7 +3581,12 @@ function homeLimitRows() {
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
-      return id === 'codex' && providerEntries.length > 1 ? codexAccountTitle(provider, index) : option?.label || id;
+      if (providerEntries.length > 1) {
+        if (id === 'codex') return codexAccountTitle(provider, index);
+        if (id === 'mimo') return mimoAccountTitle(provider, index);
+        if (id === 'opencode') return opencodeAccountTitle(provider, index);
+      }
+      return option?.label || id;
     }
   });
 }

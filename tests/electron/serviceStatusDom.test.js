@@ -230,6 +230,8 @@ test('Home limit provider settings stay compact and list only enabled providers'
   assert.match(homeLimitRows, /const hasConfiguredOrder = Boolean\(state\.settings\?\.homeLimitProviderOrder\)/);
   assert.doesNotMatch(homeLimitRows, /normalizeLimitProviderOrder\(state\.settings\?\.limitProviderOrder, LIMIT_PROVIDERS\)\.join\(','\) !== DEFAULT_LIMIT_PROVIDER_ORDER/);
   assert.match(homeLimitRows, /sort: hasConfiguredOrder \? 'configured' : 'remaining'/);
+  assert.match(homeLimitRows, /if \(id === 'opencode'\) return opencodeAccountTitle\(provider, index\);/);
+  assert.doesNotMatch(homeLimitRows, /`\$\{option\?\.label \|\| id\} ·/);
   assert.match(renderHomeLimitProviderList, /enabledLimitProviderSet\(\)/);
   assert.match(renderHomeLimitProviderList, /orderedLimitProviders\(LIMIT_PROVIDERS, homeLimitProviderOrderValue\(\)\)/);
   assert.match(renderHomeLimitProviderList, /const hasCustomOrder = Boolean\(state\.settings\?\.homeLimitProviderOrder\);/);
