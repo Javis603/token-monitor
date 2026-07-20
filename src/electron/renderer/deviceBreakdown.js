@@ -40,14 +40,15 @@
     };
   }
 
-  function devicePlatformLabel(value, osVersion) {
+  function devicePlatformLabel(value, osName, osVersion) {
     const platform = String(value || '').toLowerCase().split('-')[0];
     let label = String(value || '');
     if (platform === 'darwin') label = 'macOS';
     else if (platform === 'win32') label = 'Windows';
     else if (platform === 'linux') label = 'Linux';
+    const name = String(osName || '').trim() || label;
     const version = String(osVersion || '').trim();
-    return [label, version].filter(Boolean).join(' ');
+    return [name, version].filter(Boolean).join(' ');
   }
 
   return { deviceBreakdownForPeriod, devicePlatformLabel };

@@ -3,23 +3,23 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { detectOsVersion, normalizeOsVersion } = require('../../src/shared/osVersion');
+const { detectOsInfo, normalizeOsInfo } = require('../../src/shared/osVersion');
 
-test('detectOsVersion prefers Electron system version on macOS', () => {
+test('detectOsInfo prefers the macOS product version from Electron', () => {
   let spawned = false;
-  const version = detectOsVersion({
+  const info = detectOsInfo({
     platform: 'darwin',
     getSystemVersion: () => ' 26.0.1 ',
     execFileSync: () => { spawned = true; }
   });
 
-  assert.equal(version, '26.0.1');
+  assert.deepEqual(info, { name: 'macOS', version: '26.0.1' });
   assert.equal(spawned, false);
 });
 
-test('detectOsVersion uses sw_vers for a headless macOS agent', () => {
+test('detectOsInfo uses sw_vers for a headless macOS agent', () => {
   let invocation;
-  const version = detectOsVersion({
+  const info = detectOsInfo({
     platform: 'darwin',
     getSystemVersion: () => '',
     execFileSync: (...args) => {
@@ -28,24 +28,89 @@ test('detectOsVersion uses sw_vers for a headless macOS agent', () => {
     }
   });
 
-  assert.equal(version, '15.6');
+  assert.deepEqual(info, { name: 'macOS', version: '15.6' });
   assert.equal(invocation[0], '/usr/bin/sw_vers');
   assert.deepEqual(invocation[1], ['-productVersion']);
 });
 
-test('detectOsVersion uses the system release outside macOS', () => {
-  assert.equal(detectOsVersion({ platform: 'win32', release: () => '10.0.26100' }), '10.0.26100');
-  assert.equal(detectOsVersion({ platform: 'linux', release: () => '6.8.0-60-generic' }), '6.8.0-60-generic');
+test('detectOsInfo reports the Windows product family and display version', () => {
+  const info = detectOsInfo({
+    platform: 'win32',
+    release: () => '10.0.26100',
+    execFileSync: () => [
+      'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
+      '    ProductName    REG_SZ    Windows 10 Pro',
+      '    DisplayVersion    REG_SZ    24H2',
+      '    CurrentBuildNumber    REG_SZ    26100'
+    ].join('\r\n')
+  });
+
+  assert.deepEqual(info, { name: 'Windows 11', version: '24H2' });
 });
 
-test('detectOsVersion omits a macOS version when product detection fails', () => {
-  assert.equal(detectOsVersion({
+test('detectOsInfo falls back to an honest Windows build label', () => {
+  const info = detectOsInfo({
+    platform: 'win32',
+    release: () => '10.0.26100',
+    execFileSync: () => { throw new Error('registry unavailable'); }
+  });
+
+  assert.deepEqual(info, { name: 'Windows 11', version: 'build 26100' });
+});
+
+test('detectOsInfo uses the Linux distribution name and product version', () => {
+  const info = detectOsInfo({
+    platform: 'linux',
+    readFileSync: (filePath) => {
+      assert.equal(filePath, '/etc/os-release');
+      return [
+        'NAME="Ubuntu"',
+        'VERSION_ID="24.04"',
+        'PRETTY_NAME="Ubuntu 24.04.2 LTS"'
+      ].join('\n');
+    }
+  });
+
+  assert.deepEqual(info, { name: 'Ubuntu', version: '24.04.2 LTS' });
+});
+
+test('detectOsInfo falls back to the vendor os-release file', () => {
+  const visited = [];
+  const info = detectOsInfo({
+    platform: 'linux',
+    readFileSync: (filePath) => {
+      visited.push(filePath);
+      if (filePath === '/etc/os-release') throw new Error('missing');
+      return 'NAME="Fedora Linux"\nPRETTY_NAME="Fedora Linux 42 (Workstation Edition)"\n';
+    }
+  });
+
+  assert.deepEqual(visited, ['/etc/os-release', '/usr/lib/os-release']);
+  assert.deepEqual(info, { name: 'Fedora Linux', version: '42 (Workstation Edition)' });
+});
+
+test('detectOsInfo labels a Linux kernel fallback honestly', () => {
+  assert.deepEqual(detectOsInfo({
+    platform: 'linux',
+    readFileSync: () => { throw new Error('unavailable'); },
+    release: () => '6.8.0-60-generic'
+  }), { name: 'Linux', version: 'kernel 6.8.0-60-generic' });
+});
+
+test('detectOsInfo keeps a macOS label when product detection fails', () => {
+  assert.deepEqual(detectOsInfo({
     platform: 'darwin',
     getSystemVersion: () => { throw new Error('unavailable'); },
     execFileSync: () => { throw new Error('unavailable'); }
-  }), '');
+  }), { name: 'macOS', version: '' });
 });
 
-test('normalizeOsVersion trims and bounds external values', () => {
-  assert.equal(normalizeOsVersion(`  ${'1'.repeat(200)}  `).length, 128);
+test('normalizeOsInfo trims and bounds external values', () => {
+  assert.deepEqual(normalizeOsInfo({
+    name: `  ${'n'.repeat(100)}  `,
+    version: `  ${'1'.repeat(200)}  `
+  }), {
+    name: 'n'.repeat(64),
+    version: '1'.repeat(128)
+  });
 });

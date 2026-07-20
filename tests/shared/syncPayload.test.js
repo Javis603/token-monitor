@@ -23,10 +23,12 @@ test('syncPayload preserves the upload interval used by hub staleness checks', (
 test('syncPayload carries OS version metadata to the hub', () => {
   const payload = syncPayload({
     deviceId: 'dev-a',
+    osName: 'macOS',
     osVersion: '26.0',
     limits: { providers: [] }
   });
 
+  assert.equal(payload.osName, 'macOS');
   assert.equal(payload.osVersion, '26.0');
 });
 

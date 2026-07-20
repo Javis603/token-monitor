@@ -81,7 +81,7 @@ Two caveats on top of the table:
 
 ### Data flow contract
 
-The hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). The wire shape between agent/widget and hub is whatever `collectUsageOnce()` returns — that function is the source of truth, and `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osVersion` / `agentRuntime` / `history` / `limits`. The Worker hub uses the exact same shapes.
+The hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). The wire shape between agent/widget and hub is whatever `collectUsageOnce()` returns — that function is the source of truth, and `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osName` / `osVersion` / `agentRuntime` / `history` / `limits`. The Worker hub uses the exact same shapes.
 
 ### Stale devices
 

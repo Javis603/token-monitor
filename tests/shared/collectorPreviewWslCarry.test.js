@@ -84,7 +84,7 @@ test('warm progressive preview keeps the frozen WSL contribution in today and mo
     commandTimeoutMs: 1000,
     deviceId: 'dev1',
     agentVersion: 'test',
-    osVersion: '26.5.2',
+    osInfo: { name: 'macOS', version: '26.5.2' },
     intervalMs: 60 * 60 * 1000,
     watchEnabled: false,
     historyEnabled: false,
@@ -101,6 +101,7 @@ test('warm progressive preview keeps the frozen WSL contribution in today and mo
     await waitForUpdates(updates, 1);
     const cold = previews.slice();
     assert.ok(cold.length >= 1, 'cold tick should emit at least one preview');
+    assert.equal(cold[0].osName, 'macOS', 'preview carries the friendly OS name immediately');
     assert.equal(cold[0].osVersion, '26.5.2', 'preview carries static OS metadata immediately');
     assert.equal(cold[0].today.totalTokens, 100, 'cold preview today is host-only (no WSL anchor yet)');
 

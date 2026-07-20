@@ -1622,7 +1622,7 @@ function deviceRowsForPeriod() {
     const period = device.periods?.[state.period] || {};
     const runtime = deviceRuntimeLabel(device.agentRuntime);
     const version = device.agentVersion ? `${runtime ? `${runtime} ` : ''}v${device.agentVersion}` : runtime;
-    const metaParts = [deviceBreakdownApi.devicePlatformLabel(device.platform, device.osVersion), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
+    const metaParts = [deviceBreakdownApi.devicePlatformLabel(device.platform, device.osName, device.osVersion), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
     return {
       key: device.deviceId,
       name: deviceLabel(device),

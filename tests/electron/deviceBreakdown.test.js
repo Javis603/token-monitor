@@ -51,9 +51,10 @@ test('deviceBreakdownForPeriod tolerates shared models and legacy device records
 });
 
 test('devicePlatformLabel appends OS versions without exposing architecture', () => {
-  assert.equal(devicePlatformLabel('darwin-arm64', '26.0'), 'macOS 26.0');
-  assert.equal(devicePlatformLabel('win32-x64', '10.0.26100'), 'Windows 10.0.26100');
-  assert.equal(devicePlatformLabel('linux-x64', ''), 'Linux');
+  assert.equal(devicePlatformLabel('darwin-arm64', 'macOS', '26.0'), 'macOS 26.0');
+  assert.equal(devicePlatformLabel('win32-x64', 'Windows 11', '24H2'), 'Windows 11 24H2');
+  assert.equal(devicePlatformLabel('linux-x64', 'Ubuntu', '24.04.2 LTS'), 'Ubuntu 24.04.2 LTS');
+  assert.equal(devicePlatformLabel('linux-x64', '', ''), 'Linux');
 });
 
 test('device breakdown browser helper loads before app.js and keeps reduced-motion coverage', () => {
