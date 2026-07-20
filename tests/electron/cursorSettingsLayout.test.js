@@ -196,6 +196,7 @@ test('OpenCode multi-account rows separate profile identity from plan label', ()
   assert.match(groupBody, /opencodeAccountTitle\(provider, index\)/);
   assert.match(groupBody, /legacyProfileLabel/);
   assert.match(groupBody, /planText: ''/);
+  assert.match(app, /provider\?\.planLabel \|\| provider\?\.accountLabel/);
   assert.doesNotMatch(groupBody, /renderLimitProviderRow\('opencode', provider\.accountLabel/);
 });
 

@@ -165,7 +165,7 @@ test('fetchOpenCodeLimits: surfaces unauthorized when no source has data', async
   assert.strictEqual(p.source, 'web');
 });
 
-test('fetchOpenCodeLimits keeps multi-account profile names separate from plan labels', async () => {
+test('fetchOpenCodeLimits keeps multi-account identity compatible with old renderers while separating plan labels', async () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
   const summary = await collectLimitsOnce({
     limitProviders: 'opencode',
@@ -186,11 +186,17 @@ test('fetchOpenCodeLimits keeps multi-account profile names separate from plan l
   });
 
   assert.deepStrictEqual(
-    summary.providers.map(({ accountName, accountLabel }) => ({ accountName, accountLabel })),
+    summary.providers.map(({ accountName, accountLabel, planLabel }) => ({ accountName, accountLabel, planLabel })),
     [
-      { accountName: 'myPersonal', accountLabel: 'Zen' },
-      { accountName: 'myWork', accountLabel: 'Go' }
+      { accountName: 'myPersonal', accountLabel: 'myPersonal', planLabel: 'Zen' },
+      { accountName: 'myWork', accountLabel: 'myWork', planLabel: 'Go' }
     ]
+  );
+  // Renderers from before accountName existed read accountLabel as the row
+  // title. New producers must therefore keep the profile name there too.
+  assert.deepStrictEqual(
+    summary.providers.map((provider, index) => provider.accountLabel || `Account ${index + 1}`),
+    ['myPersonal', 'myWork']
   );
 });
 
@@ -204,7 +210,8 @@ test('fetchOpenCodeLimits refresh scope probes only the requested profile', asyn
       provider: 'opencode',
       accountKey: 'sha256:work',
       accountName: 'work',
-      accountLabel: 'Go'
+      accountLabel: 'work',
+      planLabel: 'Go'
     },
     opencodeProfiles: {
       personal: { enabled: true, cookie: 'personal-cookie' },
@@ -230,5 +237,6 @@ test('fetchOpenCodeLimits refresh scope probes only the requested profile', asyn
   assert.equal(summary.providers.length, 1);
   assert.equal(summary.providers[0].provider, 'opencode');
   assert.equal(summary.providers[0].accountName, 'work');
-  assert.equal(summary.providers[0].accountLabel, 'Go');
+  assert.equal(summary.providers[0].accountLabel, 'work');
+  assert.equal(summary.providers[0].planLabel, 'Go');
 });

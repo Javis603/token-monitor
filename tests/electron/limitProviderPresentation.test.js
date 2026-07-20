@@ -671,7 +671,7 @@ test('main Limits plan text shows failure status before account labels', () => {
   const planBody = functionBody(app, 'limitProviderPlan', 'configuredLimitProviderOrder');
 
   assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return limitStatusLabel\(provider\.status, false\);/);
-  assert.match(planBody, /const label = String\(provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
+  assert.match(planBody, /const label = String\(provider\?\.planLabel \|\| provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
 });
 
 test('settings provider status waits for stats and refreshes when stats arrive', () => {

@@ -2289,19 +2289,19 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     const { goWeb, zen } = result;
     const windows = [];
     let status = 'notConfigured';
-    let accountLabel = '';
+    let planLabel = '';
     let balanceUsd = null;
 
     if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
       windows.push(...goWeb.windows);
       status = 'ok';
-      accountLabel = 'Go';
+      planLabel = 'Go';
     }
 
     if (zen && zen.status === 'ok') {
       windows.push(...zen.windows);
       status = 'ok';
-      if (!accountLabel) accountLabel = 'Zen';
+      if (!planLabel) planLabel = 'Zen';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
     }
 
@@ -2329,7 +2329,10 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       provider: 'opencode',
       accountKey,
       accountName: name,
-      accountLabel,
+      // Keep accountLabel as the profile name for pre-accountName renderers.
+      // New renderers use planLabel for Go/Zen and accountName for identity.
+      accountLabel: name,
+      planLabel,
       source: 'web',
       status,
       updatedAt,
@@ -2341,7 +2344,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return normalizeLimitProvider({
       provider: 'opencode', accountKey: hashKey('opencode', `cookie:${cookieHash}`),
-      accountName: name, accountLabel: '', source: 'web', status: 'unavailable',
+      accountName: name, accountLabel: name, planLabel: '', source: 'web', status: 'unavailable',
       updatedAt, windows: [], balanceUsd: null
     });
   }

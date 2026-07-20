@@ -1789,7 +1789,7 @@ function limitProviderMeta(provider, provenance = null) {
 
 function limitProviderPlan(provider) {
   if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
-  const label = String(provider?.accountLabel || '').trim();
+  const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
   if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(label);
   return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
 }
@@ -3591,7 +3591,7 @@ function homeLimitRows() {
       const providerTitle = option?.label || id;
       if (providerEntries.length > 1) {
         const accountTitle = homeLimitAccountTitle(id, provider, index);
-        return state.settings?.showHomeLimitProviderNames === true
+        return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
           ? `${providerTitle} · ${accountTitle}`
           : accountTitle;
       }
@@ -5839,14 +5839,29 @@ function renderHomeLimitProviderList() {
   providerNamesLabel.className = 'checkbox-label home-limit-status-setting';
   const providerNamesInput = document.createElement('input');
   providerNamesInput.type = 'checkbox';
-  providerNamesInput.checked = state.settings?.showHomeLimitProviderNames === true;
+  const providerNamesRequired = state.settings?.showToolIcons === false;
+  providerNamesInput.checked = providerNamesRequired || state.settings?.showHomeLimitProviderNames === true;
+  providerNamesInput.disabled = providerNamesRequired;
   const providerNamesText = document.createElement('span');
   providerNamesText.textContent = t('settings.home.showLimitProviderNames');
+  const providerNamesCopy = document.createElement('span');
+  providerNamesCopy.className = 'home-limit-provider-names-copy';
+  providerNamesCopy.append(providerNamesText);
+  if (providerNamesRequired) {
+    const requiredReason = t('settings.home.providerNamesRequiredWithoutIcons');
+    const requiredReasonText = document.createElement('span');
+    requiredReasonText.id = 'homeLimitProviderNamesReason';
+    requiredReasonText.className = 'home-limit-provider-names-reason';
+    requiredReasonText.textContent = requiredReason;
+    providerNamesCopy.append(requiredReasonText);
+    providerNamesLabel.title = requiredReason;
+    providerNamesInput.setAttribute('aria-describedby', requiredReasonText.id);
+  }
   providerNamesInput.addEventListener('change', async () => {
     await saveSettings({ showHomeLimitProviderNames: providerNamesInput.checked });
     renderHomeIfVisible();
   });
-  providerNamesLabel.append(providerNamesInput, providerNamesText);
+  providerNamesLabel.append(providerNamesInput, providerNamesCopy);
   const countLabel = document.createElement('label');
   countLabel.className = 'settings-item home-limit-account-count-setting';
   const countText = document.createElement('span');

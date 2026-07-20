@@ -240,13 +240,17 @@ test('aggregateLimits still exposes stale configured Codex quota when no fresh o
 test('mergeCodexTransientWindows keeps recent Codex windows when the same account reads empty', () => {
   const previous = {
     updatedAt: '2026-06-14T10:00:00.000Z',
-    providers: [codexProvider('sha256:codex-a', 'a@example.com', 50, '2026-06-14T10:00:00.000Z')]
+    providers: [{
+      ...codexProvider('sha256:codex-a', 'a@example.com', 50, '2026-06-14T10:00:00.000Z'),
+      planLabel: 'Plus'
+    }]
   };
   const current = {
     updatedAt: '2026-06-14T10:05:00.000Z',
     providers: [
       {
         ...codexProvider('sha256:codex-a', 'a@example.com', 0, '2026-06-14T10:05:00.000Z'),
+        planLabel: '',
         windows: []
       }
     ]
@@ -258,6 +262,7 @@ test('mergeCodexTransientWindows keeps recent Codex windows when the same accoun
   assert.equal(merged.providers.length, 1);
   assert.equal(merged.providers[0].windows.length, 1);
   assert.equal(merged.providers[0].windows[0].remainingPercent, 50);
+  assert.equal(merged.providers[0].planLabel, 'Plus');
   assert.equal(merged.providers[0].updatedAt, '2026-06-14T10:00:00.000Z');
 });
 
@@ -450,7 +455,7 @@ test('mergeCodexTransientWindows stops keeping old Codex windows after retention
   assert.equal(merged.providers[0].updatedAt, '2026-06-14T10:12:00.000Z');
 });
 
-test('syncLimits carries Codex account key, email and plan label to the authenticated hub', () => {
+test('syncLimits carries Codex account identity and legacy plan label to the authenticated hub', () => {
   const payload = syncLimits({
     updatedAt: '2026-06-14T10:00:00.000Z',
     providers: [
@@ -474,6 +479,7 @@ test('syncLimits carries Codex account key, email and plan label to the authenti
   assert.equal(payload.providers[0].accountName, 'a');
   assert.equal(payload.providers[0].accountEmail, 'a@example.com');
   assert.equal(payload.providers[0].accountLabel, 'Plus');
+  assert.equal(payload.providers[0].planLabel, '');
   assert.deepEqual(payload.providers[0].resetCredits, {
     availableCount: 2,
     nextExpiresAt: '2026-07-18T23:00:00.000Z',
@@ -498,6 +504,33 @@ test('publicLimits strips Codex account identity fields', () => {
   assert.equal(Object.hasOwn(payload.providers[0], 'accountName'), false);
   assert.equal(Object.hasOwn(payload.providers[0], 'accountEmail'), false);
   assert.equal(Object.hasOwn(payload.providers[0], 'accountLabel'), false);
+  assert.equal(Object.hasOwn(payload.providers[0], 'planLabel'), false);
+});
+
+test('OpenCode sync keeps the legacy profile label and explicit plan while public stats scrub both', () => {
+  const limits = {
+    providers: [{
+      provider: 'opencode',
+      accountKey: 'sha256:opencode-work',
+      accountName: 'work',
+      accountLabel: 'work',
+      planLabel: 'Go',
+      status: 'ok',
+      source: 'web',
+      updatedAt: '2026-07-20T00:00:00.000Z',
+      windows: []
+    }]
+  };
+
+  const synced = syncLimits(limits).providers[0];
+  assert.equal(synced.accountName, 'work');
+  assert.equal(synced.accountLabel, 'work');
+  assert.equal(synced.planLabel, 'Go');
+
+  const publicProvider = publicLimits(limits).providers[0];
+  assert.equal(Object.hasOwn(publicProvider, 'accountName'), false);
+  assert.equal(Object.hasOwn(publicProvider, 'accountLabel'), false);
+  assert.equal(Object.hasOwn(publicProvider, 'planLabel'), false);
 });
 
 test('collectLimitsOnce flattens multiple providers returned by a provider fetcher', async () => {
