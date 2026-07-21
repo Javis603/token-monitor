@@ -3603,7 +3603,10 @@ function homeLimitRows() {
   const providerOptions = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, providerOrder);
   const hasConfiguredOrder = Boolean(state.settings?.homeLimitProviderOrder);
   return homeOverviewApi.homeLimitAccountsForProviders({
-    providers: state.stats?.limits?.providers || [],
+    providers: (state.stats?.limits?.providers || []).map((provider) => ({
+      ...provider,
+      windows: limitProviderPresentationApi.limitProviderCompactWindows(provider, provider.windows)
+    })),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
@@ -3618,7 +3621,9 @@ function homeLimitRows() {
   });
 }
 
-function homeLimitWindowLabel(window) {
+function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
+  const compactLabel = limitProviderPresentationApi.limitProviderCompactWindowLabel(providerId, window, visibleWindows);
+  if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
     const label = String(window?.label || '').trim();
     if (label) return label;
@@ -3664,7 +3669,7 @@ function renderHomeLimitModule() {
       line.className = 'home-limit-window-line';
       const label = document.createElement('span');
       label.className = 'home-limit-window-label';
-      label.textContent = homeLimitWindowLabel(window);
+      label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
       const value = document.createElement('span');
       value.className = 'home-list-value';
       const showUsed = Boolean(state.settings?.showLimitUsed);
@@ -3683,11 +3688,13 @@ function renderHomeLimitModule() {
       const resetAt = formatReset(window.resetsAt);
       const resetText = document.createElement('span');
       resetText.className = 'home-limit-reset';
-      resetText.textContent = window.resetsAt
+      const resetLabel = window.resetsAt
         ? resetAt || '\u00a0'
         : window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
         : '\u00a0';
+      const periodLabel = limitProviderPresentationApi.limitProviderCompactWindowPeriodLabel(row.providerId, window, row.windows);
+      resetText.textContent = periodLabel && resetLabel !== '\u00a0' ? `${periodLabel} · ${resetLabel}` : resetLabel;
       metric.append(resetText);
       windows.append(metric);
     }
