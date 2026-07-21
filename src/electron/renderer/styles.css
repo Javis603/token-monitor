@@ -2995,16 +2995,12 @@ html.is-windows .settings-panel select option {
 }
 .limit-windows-antigravity-grouped {
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 16px;
 }
 .limit-window-group {
   display: grid;
   min-width: 0;
   gap: 6px;
-}
-.limit-window-group + .limit-window-group {
-  padding-top: 10px;
-  border-top: 1px solid rgba(var(--line-rgb), 0.12);
 }
 .limit-window-group-title {
   overflow: hidden;

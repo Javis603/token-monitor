@@ -493,9 +493,10 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   assert.match(renderProviderWindows, /const quotaGroups = antigravityQuotaGroups\(provider\)/);
   assert.match(renderProviderWindows, /title\.textContent = group\.label/);
   assert.match(renderProviderWindows, /entry\.windowLabel/);
-  assert.match(css, /\.limit-windows-antigravity-grouped \{[\s\S]*grid-template-columns: 1fr;/);
+  assert.match(css, /\.limit-windows-antigravity-grouped \{[\s\S]*grid-template-columns: 1fr;[\s\S]*gap: 16px;/);
   assert.match(css, /\.limit-window-group-items \{[\s\S]*grid-template-columns: 1fr 1fr;/);
   assert.match(css, /\.limit-window-group-title \{[\s\S]*font-weight: 400;/);
+  assert.doesNotMatch(css, /\.limit-window-group \+ \.limit-window-group/);
 });
 
 test('Qoder renders its single Credits billing window full-width', () => {
