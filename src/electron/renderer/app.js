@@ -7084,7 +7084,11 @@ for (const input of els.reduceMotionInputs || []) {
   });
 }
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
-els.toolIconsInput.addEventListener('change', saveAppearanceFromControls);
+els.toolIconsInput.addEventListener('change', async () => {
+  state.settings.showToolIcons = els.toolIconsInput.checked;
+  renderHomeIfVisible();
+  await saveAppearanceFromControls();
+});
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();

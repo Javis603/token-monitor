@@ -69,6 +69,7 @@ test('Home multi-account provider names are opt-in and persist through the setti
   assert.match(css, /\.home-limit-provider-names-reason\s*\{[^}]*font-size:\s*10px/s);
   assert.match(app, /saveSettings\(\{ showHomeLimitProviderNames: providerNamesInput\.checked \}\)/);
   assert.match(app, /renderHomeIfVisible\(\)/);
+  assert.match(app, /els\.toolIconsInput\.addEventListener\('change', async \(\) => \{\s*state\.settings\.showToolIcons = els\.toolIconsInput\.checked;\s*renderHomeIfVisible\(\);\s*await saveAppearanceFromControls\(\);\s*\}\);/);
 });
 
 test('Home provider name setting is translated in every locale', () => {
