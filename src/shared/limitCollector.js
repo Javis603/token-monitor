@@ -8,7 +8,6 @@ const path = require('node:path');
 const { appVersion } = require('./appVersion');
 const {
   DEFAULT_LIMITS_REFRESH_MS,
-  mergeCodexTransientWindows,
   normalizeLimitProvider,
   normalizeLimitsSummary
 } = require('./limits');
@@ -52,6 +51,8 @@ const {
 } = grokLimits;
 
 const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama'];
+const DEFAULT_PROVIDER_PHYSICAL_BOUND_MS = 120_000;
+const PROVIDER_CLEANUP_GRACE_MS = 5_000;
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -2460,145 +2461,93 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
   }
 }
 
+function providerFetchers(deps = {}) {
+  return {
+    claude: (providerOptions, probeDeps) => fetchClaudeLimits(providerOptions, probeDeps),
+    codex: (providerOptions, probeDeps) => fetchCodexLimits(providerOptions, probeDeps),
+    cursor: (providerOptions, probeDeps) => fetchCursorLimits(providerOptions, probeDeps),
+    antigravity: (providerOptions, probeDeps) => fetchAntigravityLimits(providerOptions, probeDeps),
+    opencode: (providerOptions, probeDeps) => fetchOpenCodeLimits(providerOptions, probeDeps),
+    deepseek: (providerOptions, probeDeps) => fetchDeepSeekLimits(providerOptions, probeDeps),
+    minimax: (providerOptions, probeDeps) => minimaxLimits.fetchMinimaxLimits(providerOptions, probeDeps),
+    mimo: (providerOptions, probeDeps) => fetchMimoLimits(providerOptions, probeDeps),
+    grok: (providerOptions, probeDeps) => grokLimits.fetchGrokLimits(providerOptions, probeDeps),
+    copilot: (providerOptions, probeDeps) => copilotLimits.fetchCopilotLimits(providerOptions, probeDeps),
+    kiro: (providerOptions, probeDeps) => kiroLimits.fetchKiroLimits(providerOptions, probeDeps),
+    zai: (providerOptions, probeDeps) => zaiLimits.fetchZaiLimits(providerOptions, probeDeps),
+    zaiteam: (providerOptions, probeDeps) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, probeDeps),
+    volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
+    qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
+    ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
+    kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
+    ...(deps.providerFetchers || {})
+  };
+}
+
+function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
+  const configured = Number(deps.providerPhysicalBounds?.[provider]);
+  const base = Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_PROVIDER_PHYSICAL_BOUND_MS;
+  let jobs = 1;
+  if (provider === 'codex') {
+    const managed = normalizeCodexManagedAccounts(options.codexManagedAccounts || deps.codexManagedAccounts);
+    jobs = Math.max(1, managed.length + 1);
+  } else if (provider === 'mimo') {
+    const managed = Array.isArray(options.mimoManagedAccounts || deps.mimoManagedAccounts)
+      ? (options.mimoManagedAccounts || deps.mimoManagedAccounts)
+      : [];
+    jobs = options.limitRefreshScope?.provider === 'mimo' ? 1 : Math.max(1, managed.length);
+  }
+  return base * jobs;
+}
+
+async function probeLimitProvider(provider, options = {}, context = {}, deps = {}) {
+  const nowMs = (deps.now || Date.now)();
+  const fetcher = providerFetchers(deps)[provider];
+  if (!fetcher) return [statusProvider(provider, 'notConfigured', nowIso(nowMs))];
+  try {
+    const result = await fetcher(options, { ...deps, signal: context.signal });
+    return (Array.isArray(result) ? result : [result]).filter(Boolean);
+  } catch (error) {
+    return [statusProvider(provider, providerStatusFromError(error), nowIso(nowMs))];
+  }
+}
+
 async function collectLimitsOnce(options = {}, deps = {}) {
   const enabled = parseBoolean(options.limitsEnabled ?? options.enabled, true);
   const refreshMs = normalizeLimitsRefreshMs(options.limitsRefreshMs ?? options.refreshMs);
   const nowMs = (deps.now || Date.now)();
   if (!enabled) return normalizeLimitsSummary({ updatedAt: nowIso(nowMs), refreshMs, providers: [] });
 
-  const fetchers = {
-    claude: (providerOptions) => fetchClaudeLimits(providerOptions, deps),
-    codex: (providerOptions) => fetchCodexLimits(providerOptions, deps),
-    cursor: (providerOptions) => fetchCursorLimits(providerOptions, deps),
-    antigravity: (providerOptions) => fetchAntigravityLimits(providerOptions, deps),
-    opencode: (providerOptions) => fetchOpenCodeLimits(providerOptions, deps),
-    deepseek: (providerOptions) => fetchDeepSeekLimits(providerOptions, deps),
-    minimax: (providerOptions) => minimaxLimits.fetchMinimaxLimits(providerOptions, deps),
-    mimo: (providerOptions) => fetchMimoLimits(providerOptions, deps),
-    grok: (providerOptions) => grokLimits.fetchGrokLimits(providerOptions, deps),
-    copilot: (providerOptions) => copilotLimits.fetchCopilotLimits(providerOptions, deps),
-    kiro: (providerOptions) => kiroLimits.fetchKiroLimits(providerOptions, deps),
-    zai: (providerOptions) => zaiLimits.fetchZaiLimits(providerOptions, deps),
-    zaiteam: (providerOptions) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, deps),
-    volcengine: (providerOptions) => volcengineLimits.fetchVolcengineLimits(providerOptions, deps),
-    qoder: (providerOptions) => qoderLimits.fetchQoderLimits(providerOptions, deps),
-    ollama: (providerOptions) => ollamaLimits.fetchOllamaLimits(providerOptions, deps),
-    kimi: (providerOptions) => kimiLimits.fetchKimiLimits(providerOptions, deps),
-    ...(deps.providerFetchers || {})
-  };
   const providers = [];
   const scope = options.limitRefreshScope;
   const selectedProviders = parseLimitProviders(options.limitProviders ?? options.providers)
     .filter((provider) => !scope?.provider || provider === scope.provider);
   for (const provider of selectedProviders) {
-    try {
-      const result = await fetchers[provider](options);
-      if (Array.isArray(result)) providers.push(...result);
-      else providers.push(result);
-    } catch (error) {
-      providers.push(statusProvider(provider, providerStatusFromError(error), nowIso(nowMs)));
-    }
+    providers.push(...await probeLimitProvider(provider, options, {}, deps));
   }
   return normalizeLimitsSummary({ updatedAt: nowIso(nowMs), refreshMs, providers });
 }
 
-function limitProviderMatchesScope(provider, scope) {
-  if (!provider || provider.provider !== scope?.provider) return false;
-  if (scope.accountKey) return provider.accountKey === scope.accountKey;
-  if (scope.accountEmail) return provider.accountEmail === scope.accountEmail;
-  if (scope.accountName) return provider.accountName === scope.accountName;
-  if (scope.accountLabel) return provider.accountLabel === scope.accountLabel;
-  if (scope.sourceDetail) return provider.sourceDetail === scope.sourceDetail;
-  return true;
-}
-
-function mergeScopedLimits(cachedInput, partialInput, scope, nowMs) {
-  const partial = normalizeLimitsSummary(partialInput);
-  if (!cachedInput) return partial;
-  const cached = normalizeLimitsSummary(cachedInput);
-  const existingTarget = cached.providers.filter((provider) => limitProviderMatchesScope(provider, scope));
-  const refreshedTarget = mergeCodexTransientWindows({
-    updatedAt: cached.updatedAt,
-    refreshMs: cached.refreshMs,
-    providers: existingTarget
-  }, partial, nowMs).providers;
-  const providers = [];
-  let inserted = false;
-  for (const provider of cached.providers) {
-    if (!limitProviderMatchesScope(provider, scope)) {
-      providers.push(provider);
-      continue;
-    }
-    if (!inserted) {
-      providers.push(...refreshedTarget);
-      inserted = true;
-    }
-  }
-  if (!inserted) providers.push(...refreshedTarget);
-  return normalizeLimitsSummary({
-    updatedAt: partial.updatedAt,
-    refreshMs: cached.refreshMs,
-    providers
-  });
-}
-
+// Compatibility facade for internal callers that still use the former
+// snapshot/refreshScope API. All ordering, identity, retention, and deadline
+// semantics are owned by LimitsRuntime; this facade deliberately has no cache
+// or in-flight coordination of its own.
 function createLimitsCollector(options = {}, deps = {}) {
-  const refreshMs = normalizeLimitsRefreshMs(options.limitsRefreshMs ?? options.refreshMs);
-  // Seed the Codex transient-window retention from the last published limits.
-  // The collector is recreated on any settings change that reloads it (notably
-  // switching the active Codex account), and without a seed that restart wipes
-  // the 10-minute window that keeps an account's bars visible through a
-  // transient probe failure — which is exactly the cold RPC/token-refresh that
-  // tends to fail on the first tick after a switch. cachedAt stays 0 so the seed
-  // is never served as fresh: the first snapshot still refetches and only uses
-  // the seed as the retention baseline.
-  let cached = options.previousLimits ? normalizeLimitsSummary(options.previousLimits) : null;
-  let cachedAt = 0;
-  let inFlight = null;
-  const scopedInFlight = new Map();
-
-  async function refreshScope(scope) {
-    const current = (deps.now || Date.now)();
-    if (!scope?.provider) throw new TypeError('limit refresh scope requires a provider');
-    if (scope.provider === 'mimo') {
-      // Validate before collectLimitsOnce converts provider errors into a
-      // status row. An ambiguous multi-account scope must leave the cache
-      // untouched instead of replacing every MiMo account or probing them all.
-      mimoLimits.scopedMimoManagedAccounts(
-        options.mimoManagedAccounts || deps.mimoManagedAccounts,
-        scope
-      );
-    }
-    if (inFlight) return inFlight;
-    const scopeKey = JSON.stringify(scope);
-    if (scopedInFlight.has(scopeKey)) return scopedInFlight.get(scopeKey);
-    const task = collectLimitsOnce({
-      ...options,
-      limitsRefreshMs: refreshMs,
-      limitRefreshScope: scope
-    }, deps).then((summary) => {
-      cached = mergeScopedLimits(cached, summary, scope, current);
-      return cached;
-    }).finally(() => { scopedInFlight.delete(scopeKey); });
-    scopedInFlight.set(scopeKey, task);
-    return task;
-  }
-
-  async function snapshot(force = false) {
-    const current = (deps.now || Date.now)();
-    if (!force && cached && current - cachedAt < refreshMs) return cached;
-    if (inFlight) return inFlight;
-    inFlight = collectLimitsOnce({ ...options, limitsRefreshMs: refreshMs }, deps)
-      .then((summary) => {
-        cached = mergeCodexTransientWindows(cached, summary, current);
-        cachedAt = current;
-        return cached;
-      })
-      .finally(() => { inFlight = null; });
-    return inFlight;
-  }
-
-  return { refreshScope, snapshot };
+  const { createLimitsRuntime } = require('./limitsRuntime');
+  const runtime = createLimitsRuntime(options, { ...deps, autoStart: false });
+  const refreshedSnapshot = async (scope, reason) => {
+    const result = await runtime.refresh(scope, reason);
+    return result?.snapshot || (result?.providers ? result : runtime.getSnapshot());
+  };
+  return {
+    refreshScope: (scope) => refreshedSnapshot(scope, 'compat-scoped'),
+    snapshot: (force = false) => force
+      ? refreshedSnapshot({}, 'compat-full')
+      : Promise.resolve(runtime.getSnapshot()),
+    stop: () => runtime.stop()
+  };
 }
 
 function hashCursorAccountKey(account) {
@@ -2772,11 +2721,15 @@ async function fetchCursorLimits(_options = {}, deps = {}) {
 }
 
 module.exports = {
+  DEFAULT_PROVIDER_PHYSICAL_BOUND_MS,
+  PROVIDER_CLEANUP_GRACE_MS,
   collectLimitsOnce,
   claudeCommandCandidates,
   codexCommandCandidates,
   codexCommandSourceDetail,
   createLimitsCollector,
+  probeLimitProvider,
+  providerPhysicalBoundMs,
   fetchAntigravityLimits,
   fetchOpenCodeLimits,
   fetchSingleOpenCodeProfile,

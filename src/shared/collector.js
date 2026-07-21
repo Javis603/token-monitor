@@ -16,13 +16,17 @@ const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: pro
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
 const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory } = require('./dailyHistoryArchive');
-const { collectLimitsOnce, createLimitsCollector } = require('./limitCollector');
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
+const {
+  LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
+  nextLimitsResetBoundary,
+  pruneAttemptedResetBoundaries
+} = require('./limitResetBoundary');
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...
@@ -489,17 +493,21 @@ function applySessionTimestamps(periods, home, deps = {}) {
 const SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const lastSyncAt = { cursor: 0, antigravity: 0 };
 
-function syncDue(kind, nowMs = Date.now()) {
+function syncDue(kind, nowMs = Date.now(), force = false) {
+  if (force) {
+    lastSyncAt[kind] = nowMs;
+    return true;
+  }
   if (nowMs - lastSyncAt[kind] < SYNC_MIN_INTERVAL_MS) return false;
   lastSyncAt[kind] = nowMs;
   return true;
 }
 
-async function maybeSyncCursor(clientsCsv, logger) {
+async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!enabled.has('cursor')) return;
   if (!cursorAuth.readActiveAccount()) return;
-  if (!syncDue('cursor')) return;
+  if (!syncDue('cursor', Date.now(), options.force === true)) return;
   try {
     await cursorAuth.runCursorSync();
   } catch (err) {
@@ -635,7 +643,7 @@ async function collectUsageOnce(options) {
   let promaRows = null;
   let promaPricing = null;
   if (normalizedClients) {
-    await maybeSyncCursor(tokscaleClients, options.logger);
+    await maybeSyncCursor(tokscaleClients, options.logger, { force: options.forceCursorSync === true });
     await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
     if (includesProma) {
       try {
@@ -831,11 +839,6 @@ async function collectUsageOnce(options) {
       logger: options.logger
     });
     if (history) summary.history = history;
-  }
-  if (options.limitsEnabled !== false) {
-    summary.limits = options.limitsCollector
-      ? await options.limitsCollector.snapshot(Boolean(options.forceLimits))
-      : await collectLimitsOnce(options);
   }
   return summary;
 }
@@ -1108,97 +1111,21 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
 // valid, so a long-running session periodically rescans month/allTime
 // and picks up any changes that the delta-derivation might miss.
 const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
-const LIMITS_RESET_BOUNDARY_DELAY_MS = 30 * 1000;
-const LIMITS_RESET_BOUNDARY_MIN_TIMER_MS = 5 * 1000;
-const LIMITS_RESET_BOUNDARY_MAX_TIMER_MS = 2_147_483_647;
-
-function limitResetBoundaryEntries(limits) {
-  const entries = [];
-  for (const provider of limits?.providers || []) {
-    const providerKey = [
-      provider?.provider,
-      provider?.accountKey,
-      provider?.accountEmail,
-      provider?.accountLabel
-    ].map((value) => String(value || '').trim()).join(':');
-    const scope = {
-      provider: String(provider?.provider || '').trim(),
-      accountKey: String(provider?.accountKey || '').trim(),
-      accountEmail: String(provider?.accountEmail || '').trim().toLowerCase(),
-      accountName: String(provider?.accountName || '').trim(),
-      accountLabel: String(provider?.accountLabel || '').trim(),
-      sourceDetail: String(provider?.sourceDetail || '').trim()
-    };
-    for (const window of provider?.windows || []) {
-      const resetAt = Date.parse(window?.resetsAt || '');
-      if (!Number.isFinite(resetAt)) continue;
-      entries.push({
-        resetAt,
-        key: `${providerKey}:${String(window?.kind || '').trim()}:${new Date(resetAt).toISOString()}`,
-        scope
-      });
-    }
-  }
-  return entries;
-}
-
-function nextLimitsResetBoundary(limits, nowMs = Date.now(), attempted = new Set()) {
-  let refreshAt = Infinity;
-  let keys = [];
-  let scopes = new Map();
-  for (const entry of limitResetBoundaryEntries(limits)) {
-    if (attempted.has(entry.key)) continue;
-    const candidate = entry.resetAt + LIMITS_RESET_BOUNDARY_DELAY_MS;
-    if (candidate < refreshAt) {
-      refreshAt = candidate;
-      keys = [entry.key];
-      scopes = new Map([[JSON.stringify(entry.scope), entry.scope]]);
-    } else if (candidate === refreshAt) {
-      keys.push(entry.key);
-      scopes.set(JSON.stringify(entry.scope), entry.scope);
-    }
-  }
-  if (!Number.isFinite(refreshAt)) return null;
-  return {
-    refreshAt,
-    delayMs: Math.min(
-      LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
-      Math.max(LIMITS_RESET_BOUNDARY_MIN_TIMER_MS, refreshAt - nowMs)
-    ),
-    keys,
-    scopes: [...scopes.values()]
-  };
-}
-
-function pruneAttemptedResetBoundaries(limits, attempted) {
-  const currentKeys = new Set(limitResetBoundaryEntries(limits).map((entry) => entry.key));
-  for (const key of attempted) {
-    if (!currentKeys.has(key)) attempted.delete(key);
-  }
-}
 
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
-    intervalMs, historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled, watchDebounceMs, limitsEnabled,
+    intervalMs, historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled, watchDebounceMs,
     onUpdate, onPreview, onError, logger
   } = options;
   const deviceOsInfo = options.osInfo === undefined
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
   const log = logger || (() => {});
-  const limitsCollector = limitsEnabled !== false ? createLimitsCollector(options) : null;
-  const resetBoundaryNow = typeof options.resetBoundaryNow === 'function' ? options.resetBoundaryNow : Date.now;
-  const setResetBoundaryTimer = typeof options.resetBoundarySetTimeout === 'function'
-    ? options.resetBoundarySetTimeout
-    : setTimeout;
-  const clearResetBoundaryTimer = typeof options.resetBoundaryClearTimeout === 'function'
-    ? options.resetBoundaryClearTimeout
-    : clearTimeout;
   let tickInFlight = false;
   let tickPending = false;
-  let pendingForceLimits = false;
   let pendingForceHistory = false;
+  let pendingForceCursorSync = false;
   let lastHistoryAt = 0;
   // Last full-scan snapshot; lets watch ticks scan only --today and derive
   // month/allTime exactly (applyPeriodDelta). Reset by every full tick.
@@ -1211,10 +1138,7 @@ function startCollector(options) {
   let pendingWaiters = [];
   let debounceTimer = null;
   let intervalTimer = null;
-  let resetBoundaryTimer = null;
-  let lastSummary = null;
   let stopped = false;
-  const attemptedResetBoundaries = new Set();
   const watchers = [];
 
   // On-disk anchor: persist full-scan snapshots so the collector can reuse
@@ -1222,85 +1146,37 @@ function startCollector(options) {
   // valid for today and configFingerprint matches, only --today is scanned
   // and month/allTime are derived via applyPeriodDelta.
   const anchorPath = path.join(sharedDataDir(), 'collector-anchor.json');
-  try {
-    const saved = readJson(anchorPath, null);
-    if (saved && saved.dateKey === localTodayKey()) {
-      const fp = configFingerprint(clients, allTimeSince, options.projectsEnabled);
-      if (saved.configFingerprint === fp) {
-        anchor = { dateKey: saved.dateKey, today: saved.today, month: saved.month, allTime: saved.allTime };
-        // Don't restore a persisted WSL snapshot when WSL scanning is now off —
-        // the configFingerprint intentionally ignores the toggle (host periods
-        // stay valid), so without this gate a warm-scan preview would briefly
-        // re-merge the old WSL totals before the first full tick clears them.
-        wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
-        wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
-        if (saved.fullScanAt) {
-          const parsed = Date.parse(saved.fullScanAt);
-          // Only trust timestamps that are valid and not in the future.
-          // Invalid, future, or missing timestamps leave lastFullScanAt at 0,
-          // which forces a full scan on the first interval tick (see loop()).
-          if (Number.isFinite(parsed) && parsed <= Date.now()) {
-            lastFullScanAt = parsed;
+  if (options.anchorPersistenceEnabled !== false) {
+    try {
+      const saved = readJson(anchorPath, null);
+      if (saved && saved.dateKey === localTodayKey()) {
+        const fp = configFingerprint(clients, allTimeSince, options.projectsEnabled);
+        if (saved.configFingerprint === fp) {
+          anchor = { dateKey: saved.dateKey, today: saved.today, month: saved.month, allTime: saved.allTime };
+          // Don't restore a persisted WSL snapshot when WSL scanning is now off —
+          // the configFingerprint intentionally ignores the toggle (host periods
+          // stay valid), so without this gate a warm-scan preview would briefly
+          // re-merge the old WSL totals before the first full tick clears them.
+          wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
+          wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
+          if (saved.fullScanAt) {
+            const parsed = Date.parse(saved.fullScanAt);
+            // Only trust timestamps that are valid and not in the future.
+            // Invalid, future, or missing timestamps leave lastFullScanAt at 0,
+            // which forces a full scan on the first interval tick (see loop()).
+            if (Number.isFinite(parsed) && parsed <= Date.now()) {
+              lastFullScanAt = parsed;
+            }
           }
         }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
   function resolvePendingWaiters() {
     const waiters = pendingWaiters;
     pendingWaiters = [];
     for (const resolve of waiters) resolve();
-  }
-
-  function clearScheduledResetBoundary() {
-    if (!resetBoundaryTimer) return;
-    clearResetBoundaryTimer(resetBoundaryTimer);
-    resetBoundaryTimer = null;
-  }
-
-  function scheduleLimitsResetBoundary(limits) {
-    clearScheduledResetBoundary();
-    if (stopped || !limitsCollector) return;
-    // Keep stale keys that are still present so a failed/source-stale refresh
-    // cannot loop, but discard historical windows once a fresh snapshot no
-    // longer contains them. This bounds the set to the current limits shape.
-    pruneAttemptedResetBoundaries(limits, attemptedResetBoundaries);
-    const next = nextLimitsResetBoundary(limits, resetBoundaryNow(), attemptedResetBoundaries);
-    if (!next) return;
-    resetBoundaryTimer = setResetBoundaryTimer(() => {
-      resetBoundaryTimer = null;
-      if (resetBoundaryNow() < next.refreshAt) {
-        scheduleLimitsResetBoundary(lastSummary?.limits);
-        return;
-      }
-      for (const key of next.keys) attemptedResetBoundaries.add(key);
-      refreshLimitsAtResetBoundary(next.scopes);
-    }, next.delayMs);
-  }
-
-  async function refreshLimitsAtResetBoundary(scopes) {
-    if (stopped || !limitsCollector || !lastSummary) return;
-    try {
-      let limits = lastSummary.limits;
-      for (const scope of scopes || []) {
-        limits = await limitsCollector.refreshScope(scope);
-      }
-      if (stopped) return;
-      const summary = {
-        ...lastSummary,
-        updatedAt: new Date(resetBoundaryNow()).toISOString(),
-        limits,
-        limitsOnly: true
-      };
-      lastSummary = summary;
-      scheduleLimitsResetBoundary(limits);
-      await onUpdate?.(summary, 'limits-reset-boundary');
-    } catch (error) {
-      if (stopped) return;
-      if (onError) onError(error, 'limits-reset-boundary');
-      else log(`collector tick failed (limits-reset-boundary): ${error.message}`);
-    }
   }
 
   async function performTick(reason, tickOptions = {}) {
@@ -1320,9 +1196,8 @@ function startCollector(options) {
         agentVersion,
         agentRuntime,
         osInfo: deviceOsInfo,
-        limitsCollector,
         includeHistory,
-        forceLimits: Boolean(tickOptions.forceLimits),
+        forceCursorSync: Boolean(tickOptions.forceCursorSync),
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
@@ -1380,27 +1255,27 @@ function startCollector(options) {
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
         lastFullScanAt = Date.now();
-        try {
-          fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
-          fs.writeFileSync(anchorPath, JSON.stringify({
-            dateKey: anchor.dateKey,
-            today: anchor.today,
-            month: anchor.month,
-            allTime: anchor.allTime,
-            wslBundle: wslAnchor,
-            wslStatus: wslStatusAnchor,
-            configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
-            fullScanAt: new Date().toISOString()
-          }));
-        } catch (_) {}
+        if (options.anchorPersistenceEnabled !== false) {
+          try {
+            fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
+            fs.writeFileSync(anchorPath, JSON.stringify({
+              dateKey: anchor.dateKey,
+              today: anchor.today,
+              month: anchor.month,
+              allTime: anchor.allTime,
+              wslBundle: wslAnchor,
+              wslStatus: wslStatusAnchor,
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
+              fullScanAt: new Date().toISOString()
+            }));
+          } catch (_) {}
+        }
       } else if (anchored && refreshWsl && captured) {
         // Interval anchored ticks refresh WSL independently; update the
         // frozen snapshot so subsequent watch ticks see the fresh data.
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
       }
-      lastSummary = summary;
-      scheduleLimitsResetBoundary(summary.limits);
       await onUpdate?.(summary, reason);
     } catch (error) {
       if (stopped) return;
@@ -1411,20 +1286,20 @@ function startCollector(options) {
   async function runTick(reason, tickOptions = {}) {
     if (tickInFlight) {
       tickPending = true;
-      pendingForceLimits = pendingForceLimits || Boolean(tickOptions.forceLimits);
       pendingForceHistory = pendingForceHistory || Boolean(tickOptions.forceHistory);
+      pendingForceCursorSync = pendingForceCursorSync || Boolean(tickOptions.forceCursorSync);
       return new Promise((resolve) => pendingWaiters.push(resolve));
     }
     tickInFlight = true;
     try {
       await performTick(reason, tickOptions);
       while (tickPending && !stopped) {
-        const forceLimits = pendingForceLimits;
         const forceHistory = pendingForceHistory;
+        const forceCursorSync = pendingForceCursorSync;
         tickPending = false;
-        pendingForceLimits = false;
         pendingForceHistory = false;
-        await performTick('coalesced', { forceLimits, forceHistory });
+        pendingForceCursorSync = false;
+        await performTick('coalesced', { forceHistory, forceCursorSync, todayOnly: forceCursorSync });
       }
     } finally {
       tickInFlight = false;
@@ -1490,7 +1365,6 @@ function startCollector(options) {
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
-    clearScheduledResetBoundary();
     for (const watcher of watchers) {
       try { watcher.close(); } catch (_) {}
     }
@@ -1500,7 +1374,22 @@ function startCollector(options) {
   setupWatchers();
   loop();
 
-  return { stop, tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions) };
+  function refreshClient(clientId, refreshOptions = {}) {
+    const normalized = String(clientId || '').trim().toLowerCase();
+    if (normalized !== 'cursor') {
+      throw new TypeError(`Unsupported targeted usage client: ${normalized || '(empty)'}`);
+    }
+    return runTick(`client:${normalized}`, {
+      todayOnly: true,
+      forceCursorSync: refreshOptions.forceSync === true
+    });
+  }
+
+  return {
+    refreshClient,
+    stop,
+    tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions)
+  };
 }
 
 module.exports = {

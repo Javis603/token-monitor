@@ -140,3 +140,21 @@ test('fetchQoderLimits requests the selected site with the dashboard cookie', as
   assert.equal(requests[0].init.headers.Cookie, 'session=abc');
   assert.equal(requests[0].init.headers.Origin, 'https://qoder.com.cn');
 });
+
+test('fetchQoderLimits physically aborts a hung request within its configured bound', async () => {
+  let signal;
+  const provider = await fetchQoderLimits(
+    { qoderCookie: 'session=hung' },
+    {
+      env: {},
+      qoderFetchTimeoutMs: 5,
+      fetch: async (_url, init) => {
+        signal = init.signal;
+        return new Promise(() => {});
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(signal.aborted, true);
+});

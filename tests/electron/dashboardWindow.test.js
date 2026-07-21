@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...p) => fs.readFileSync(path.join(rootDir, ...p), 'utf8');
+const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
 
 test('preload exposes the dashboard IPC surface', () => {
   const preload = read('src', 'electron', 'preload.js');
@@ -62,7 +63,9 @@ test('dashboard history is gated by the historyEnabled setting', () => {
   assert.match(main, /historyEnabled:\s*true/);
   assert.match(main, /historyEnabled:\s*parseBoolean\(patch\.historyEnabled[\s\S]*?,\s*false\)/);
   assert.match(main, /if \(settings\?\.historyEnabled === false\) return aggregateHistory\(\[\]\)/);
-  assert.match(main, /historyEnabled:\s*settings\.historyEnabled !== false/);
+  assert.equal(usageConfigFromSettings({ historyEnabled: true }).historyEnabled, true);
+  assert.equal(usageConfigFromSettings({ historyEnabled: false }).historyEnabled, false);
+  assert.match(main, /usageConfigFromSettings\(settings, \{/);
 });
 
 test('agent history collection defaults to enabled, matching the widget', () => {

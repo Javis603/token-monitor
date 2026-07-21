@@ -2,6 +2,9 @@
 
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
+const { runWithProbeDeadline } = require('./probeDeadline');
+
+const KIMI_FETCH_TIMEOUT_MS = 12_000;
 
 const KIMI_CODE_BASE_URL = 'https://api.kimi.com/coding/v1';
 const KIMI_CODE_USAGES_URL = `${KIMI_CODE_BASE_URL}/usages`;
@@ -375,9 +378,14 @@ function kimiRequestError(label, response) {
 }
 
 async function fetchJson(url, init, deps, label) {
-  const response = await (deps.fetch || fetch)(url, init);
-  if (!response.ok) throw kimiRequestError(label, response);
-  return response.json();
+  const inputSignals = [deps.signal, init?.signal].filter(Boolean);
+  const parentSignal = inputSignals.length > 1 ? AbortSignal.any(inputSignals) : inputSignals[0];
+  const deadlineMs = Number(deps.kimiFetchTimeoutMs || deps.fetchTimeoutMs || KIMI_FETCH_TIMEOUT_MS);
+  return runWithProbeDeadline(async ({ signal }) => {
+    const response = await (deps.fetch || fetch)(url, { ...init, signal });
+    if (!response.ok) throw kimiRequestError(label, response);
+    return response.json();
+  }, { signal: parentSignal, deadlineMs });
 }
 
 function jwtSessionHeaders(token) {
@@ -547,6 +555,7 @@ async function fetchKimiLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
+  KIMI_FETCH_TIMEOUT_MS,
   KIMI_CODE_BASE_URL,
   KIMI_CODE_USAGES_URL,
   KIMI_WEB_BASE_URL,

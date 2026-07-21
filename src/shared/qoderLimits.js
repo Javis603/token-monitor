@@ -2,6 +2,9 @@
 
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
+const { runWithProbeDeadline } = require('./probeDeadline');
+
+const QODER_FETCH_TIMEOUT_MS = 12_000;
 
 const QODER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 
@@ -186,6 +189,14 @@ function parseQoderUsage(body) {
   };
 }
 
+function fetchWithDeadline(url, init, deps = {}) {
+  const deadlineMs = Number(deps.qoderFetchTimeoutMs || deps.fetchTimeoutMs || QODER_FETCH_TIMEOUT_MS);
+  return runWithProbeDeadline(
+    ({ signal }) => (deps.fetch || fetch)(url, { ...init, signal }),
+    { signal: deps.signal, deadlineMs }
+  );
+}
+
 async function fetchQoderLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
@@ -214,9 +225,9 @@ async function fetchQoderLimits(options = {}, deps = {}) {
     'Bx-V': '2.5.35'
   };
   try {
-    const response = await (deps.fetch || fetch)(qoderUsageUrl(site), {
+    const response = await fetchWithDeadline(qoderUsageUrl(site), {
       headers
-    });
+    }, deps);
     if (!response.ok) {
       const error = new Error(`Qoder usage returned ${response.status}`);
       error.status = response.status === 401 || response.status === 403
@@ -227,7 +238,7 @@ async function fetchQoderLimits(options = {}, deps = {}) {
     const usage = parseQoderUsage(await response.json());
     let accountLabel = '';
     try {
-      const planResponse = await (deps.fetch || fetch)(qoderUserPlanUrl(site), { headers });
+      const planResponse = await fetchWithDeadline(qoderUserPlanUrl(site), { headers }, deps);
       if (planResponse.ok) accountLabel = parseQoderPlanLabel(await planResponse.json());
     } catch (_) {}
     return normalizeLimitProvider({
@@ -244,7 +255,7 @@ async function fetchQoderLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({
       provider: 'qoder',
       source: 'web',
-      status: error?.status || 'unavailable',
+      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
       updatedAt,
       windows: [],
       region: site === 'cn' ? 'cn' : 'global'
@@ -253,6 +264,7 @@ async function fetchQoderLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
+  QODER_FETCH_TIMEOUT_MS,
   qoderCookie,
   qoderSite,
   qoderOrigin,

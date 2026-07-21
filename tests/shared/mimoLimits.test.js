@@ -410,7 +410,7 @@ test('fetchMimoLimits fails closed for a provider-only scope with multiple accou
   assert.equal(fetchCalls, 0);
 });
 
-test('createLimitsCollector leaves cached MiMo accounts untouched for an ambiguous scope', async () => {
+test('LimitsRuntime compatibility distinguishes provider-wide and account-scoped MiMo refreshes', async () => {
   const accounts = [
     managed(COOKIE),
     managed('userId=456; api-platform_serviceToken=second', {
@@ -445,11 +445,16 @@ test('createLimitsCollector leaves cached MiMo accounts untouched for an ambiguo
     }
   });
 
-  await assert.rejects(
-    collector.refreshScope({ provider: 'mimo' }),
-    /requires an account identifier/
+  const full = await collector.refreshScope({ provider: 'mimo' });
+  assert.deepEqual(
+    full.providers.map((provider) => provider.accountKey),
+    ['sha256:mimo-1', 'sha256:mimo-2']
   );
-  assert.equal(fetchCalls, 0);
+  assert.ok(fetchCalls > 0);
+  assert.ok(cookies.some((cookie) => cookie.includes('userId=123')));
+  assert.ok(cookies.some((cookie) => cookie.includes('userId=456')));
+  const firstAccountUpdatedAt = full.providers[0].updatedAt;
+  cookies.length = 0;
 
   const summary = await collector.refreshScope({
     provider: 'mimo',
@@ -459,7 +464,7 @@ test('createLimitsCollector leaves cached MiMo accounts untouched for an ambiguo
     summary.providers.map((provider) => provider.accountKey),
     ['sha256:mimo-1', 'sha256:mimo-2']
   );
-  assert.equal(summary.providers[0].updatedAt, oldAt);
+  assert.equal(summary.providers[0].updatedAt, firstAccountUpdatedAt);
   assert.ok(cookies.length > 0);
   assert.ok(cookies.every((cookie) => cookie.includes('userId=456')));
 });

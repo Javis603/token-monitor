@@ -194,3 +194,21 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
     'https://open.bigmodel.cn/api/biz/subscription/list'
   ]);
 });
+
+test('fetchZaiLimits physically aborts a hung request within its configured bound', async () => {
+  let signal;
+  const provider = await fetchZaiLimits(
+    { zaiApiKey: 'hung-key' },
+    {
+      env: {},
+      zaiFetchTimeoutMs: 5,
+      fetch: async (_url, init) => {
+        signal = init.signal;
+        return new Promise(() => {});
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(signal.aborted, true);
+});

@@ -14,10 +14,12 @@ function createSyncUploadScheduler(options = {}) {
   const onError = typeof options.onError === 'function' ? options.onError : null;
   const intervalMs = normalizeSyncUploadIntervalMs(options.intervalMs);
   let lastUploadAt = null;
-  let pendingSummary = null;
+  let pendingEntry = null;
   let uploadInFlight = null;
   let timer = null;
   let stopped = false;
+  let nextRevision = 0;
+  let highestRevision = Number.NEGATIVE_INFINITY;
 
   function clearPendingTimer() {
     if (!timer) return;
@@ -25,19 +27,19 @@ function createSyncUploadScheduler(options = {}) {
     timer = null;
   }
 
-  async function uploadNow(summary) {
+  async function uploadNow(entry) {
     if (uploadInFlight) {
-      pendingSummary = summary;
+      if (!pendingEntry || entry.revision >= pendingEntry.revision) pendingEntry = entry;
       return;
     }
-    const task = Promise.resolve().then(() => upload(summary));
+    const task = Promise.resolve().then(() => upload(entry.summary));
     uploadInFlight = task;
     try {
       await task;
       lastUploadAt = now();
     } finally {
       uploadInFlight = null;
-      if (pendingSummary && !stopped) {
+      if (pendingEntry && !stopped) {
         const elapsedMs = lastUploadAt === null ? intervalMs : now() - lastUploadAt;
         schedulePending(intervalMs <= 0 ? 0 : intervalMs - elapsedMs);
       }
@@ -54,22 +56,28 @@ function createSyncUploadScheduler(options = {}) {
     }, Math.max(0, delayMs));
   }
 
-  async function enqueue(summary) {
+  async function enqueue(summary, revision = undefined) {
     if (stopped) return;
+    const parsed = Number(revision);
+    const resolvedRevision = Number.isFinite(parsed) ? parsed : ++nextRevision;
+    nextRevision = Math.max(nextRevision, resolvedRevision);
+    if (resolvedRevision < highestRevision) return;
+    highestRevision = resolvedRevision;
+    const entry = { summary, revision: resolvedRevision };
     if (intervalMs <= 0 || lastUploadAt === null) {
       clearPendingTimer();
-      pendingSummary = null;
-      await uploadNow(summary);
+      pendingEntry = null;
+      await uploadNow(entry);
       return;
     }
     const elapsedMs = now() - lastUploadAt;
     if (elapsedMs >= intervalMs) {
       clearPendingTimer();
-      pendingSummary = null;
-      await uploadNow(summary);
+      pendingEntry = null;
+      await uploadNow(entry);
       return;
     }
-    pendingSummary = summary;
+    pendingEntry = entry;
     schedulePending(intervalMs - elapsedMs);
   }
 
@@ -86,15 +94,15 @@ function createSyncUploadScheduler(options = {}) {
       if (stopped) return;
       clearPendingTimer();
     }
-    if (!pendingSummary) return;
-    const summary = pendingSummary;
-    pendingSummary = null;
-    await uploadNow(summary);
+    if (!pendingEntry) return;
+    const entry = pendingEntry;
+    pendingEntry = null;
+    await uploadNow(entry);
   }
 
   function stop() {
     stopped = true;
-    pendingSummary = null;
+    pendingEntry = null;
     clearPendingTimer();
   }
 

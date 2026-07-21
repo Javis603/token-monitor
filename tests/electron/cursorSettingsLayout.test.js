@@ -226,7 +226,7 @@ test('OpenCode profile deletion clears the legacy default cookie when it owns th
   assert.match(handler, /settings\.opencodeCookie = '';/);
 });
 
-test('OpenCode profile enable toggles restart the collector mode so limits source updates', () => {
+test('OpenCode profile enable toggles refresh only the affected limits lane', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const handler = main.slice(
     main.indexOf("ipcMain.handle('opencode:setProfileEnabled'"),
@@ -236,7 +236,10 @@ test('OpenCode profile enable toggles restart the collector mode so limits sourc
   assert.match(handler, /profiles\[name\]\.enabled = Boolean\(enabled\);/);
   assert.match(handler, /saveSettings\(\{ throwOnError: true \}\);/);
   assert.match(handler, /opencodeStatusCache = \{ value: null, at: 0 \};/);
-  assert.match(handler, /startMode\(\)/);
+  assert.match(handler, /queueLimitInvalidation\(\{ provider: 'opencode', accountName: name \}, 'profile-state'/);
+  assert.match(handler, /clear: !enabled/);
+  assert.match(handler, /refresh: Boolean\(enabled\)/);
+  assert.doesNotMatch(handler, /startMode\(\)/);
 });
 
 test('Codex account panel supports per-account enable toggles without showing timestamps', () => {
@@ -487,11 +490,13 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(findExistingBody, /if \(identity\.accountKey && account\.accountKey && !codexEmailDerivedAccountKey\(account, identity\)\)/);
   assert.match(main, /function codexEmailDerivedAccountKey\(account, identity\)/);
   const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
-  assert.match(refreshBody, /limitProviders: 'codex'/);
-  assert.match(refreshBody, /includeLiveCodexAccount: false/);
-  assert.match(refreshBody, /codexManagedAccounts: \[account\]/);
-  assert.match(refreshBody, /mergeCodexTransientWindows\(latestStats\?\.limits, summary\)/);
+  assert.match(refreshBody, /deviceRuntimeHandle\.refreshLimits\(\{/);
+  assert.match(refreshBody, /provider: 'codex'/);
+  assert.match(refreshBody, /accountId: account\.id/);
+  assert.match(refreshBody, /accountKey: account\.accountKey \|\| ''/);
+  assert.match(refreshBody, /result\?\.snapshot \|\| deviceRuntimeHandle\.getSnapshot\(\)\?\.limits/);
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
+  assert.doesNotMatch(refreshBody, /collectLimitsOnce/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(renderLimits, /id === 'codex' \? \{\s*accountTitle: true,\s*allowSystemSwitch: true\s*\} : undefined/s);
   assert.doesNotMatch(
@@ -949,10 +954,10 @@ test('main settings normalize the Z.ai API region', () => {
     main.indexOf("ipcMain.handle('settings:update'"),
     main.indexOf("ipcMain.handle('customPricing:list'")
   );
-  assert.match(handler, /const previousZaiApiRegion = settings\.zaiApiRegion;/);
   assert.match(handler, /if \(patch\.zaiApiRegion !== undefined\) normalizedPatch\.zaiApiRegion = normalizeZaiApiRegion\(patch\.zaiApiRegion\);/);
-  assert.match(handler, /zaiApiRegion: patch\.zaiApiRegion !== undefined \? normalizeZaiApiRegion\(patch\.zaiApiRegion\) : normalizeZaiApiRegion\(settings\.zaiApiRegion \|\| 'global'\)/);
-  assert.match(handler, /settings\.zaiApiRegion !== previousZaiApiRegion/);
+  assert.match(handler, /const runtimeChange = classifySettingsChange\(previousRuntimeSettings, settings\);/);
+  assert.match(handler, /for \(const scope of runtimeChange\.limitScopes\)/);
+  assert.match(handler, /queueLimitInvalidation\(scope, 'settings-change'/);
 });
 
 test('main settings migration preserves explicit AI limit provider selections', () => {
@@ -1047,7 +1052,7 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
   assert.match(listenerSlice, /saveSettings\(\{ syncUploadIntervalMs: Number\(els\.syncUploadIntervalInput\.value\) \}\)/);
 });
 
-test('main settings normalize collection cadence and restart collectors when it changes', () => {
+test('main settings normalize collection cadence and restart only the device runtime when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   assert.match(main, /function normalizeCollectionMode/);
   assert.match(main, /function normalizeCollectionIntervalMs/);
@@ -1056,26 +1061,21 @@ test('main settings normalize collection cadence and restart collectors when it 
   assert.match(defaults, /collectionMode: 'live'/);
   assert.match(defaults, /collectionIntervalMs: 5 \* 60 \* 1000/);
 
-  const syncCollector = main.slice(main.indexOf('function startSyncCollector'), main.indexOf('function stopHostStats'));
-  assert.match(syncCollector, /intervalMs: collectorIntervalMs\(\)/);
-  assert.match(syncCollector, /watchEnabled: collectorWatchEnabled\(\)/);
-
-  const localCollector = main.slice(main.indexOf('function startLocalCollector'), main.indexOf('function scheduleStreamRetry'));
-  assert.match(localCollector, /intervalMs: collectorIntervalMs\(\)/);
-  assert.match(localCollector, /watchEnabled: collectorWatchEnabled\(\)/);
+  const usageConfig = functionBody(main, 'electronUsageConfig', 'electronLimitsConfig');
+  assert.match(usageConfig, /intervalMs: collectorIntervalMs\(\)/);
+  assert.match(usageConfig, /watchEnabled: collectorWatchEnabled\(\)/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
-  assert.match(updateHandler, /previousCollectionMode/);
-  assert.match(updateHandler, /previousCollectionIntervalMs/);
+  assert.match(updateHandler, /const previousRuntimeSettings = JSON\.parse\(JSON\.stringify\(settings\)\);/);
   assert.match(updateHandler, /normalizedPatch\.collectionMode = normalizeCollectionMode/);
   assert.match(updateHandler, /normalizedPatch\.collectionIntervalMs = normalizeCollectionIntervalMs/);
   assert.match(updateHandler, /collectionMode: normalizeCollectionMode/);
   assert.match(updateHandler, /collectionIntervalMs: normalizeCollectionIntervalMs/);
-  assert.match(updateHandler, /settings\.collectionMode !== previousCollectionMode/);
-  assert.match(updateHandler, /settings\.collectionIntervalMs !== previousCollectionIntervalMs/);
+  assert.match(updateHandler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
+  assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
 });
 
-test('main settings normalize sync upload intervals and restart sync collectors when it changes', () => {
+test('main settings normalize sync upload intervals and restart only the device runtime when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
   assert.match(main, /createSyncUploadScheduler/);
@@ -1092,39 +1092,37 @@ test('main settings normalize sync upload intervals and restart sync collectors 
   const syncCollector = main.slice(main.indexOf('function startSyncCollector'), main.indexOf('// Host mode'));
   assert.match(syncCollector, /createSyncUploadScheduler\(\{/);
   assert.match(syncCollector, /intervalMs: syncUploadIntervalMs\(\)/);
-  assert.match(syncCollector, /const visibleSummary = \{[\s\S]*summaryWithArchivedClientUsage\(summary\)[\s\S]*syncUploadIntervalMs: syncUploadIntervalMs\(\)[\s\S]*\};/);
-  assert.match(syncCollector, /await syncUploadScheduler\.enqueue\(visibleSummary\)/);
+  assert.match(syncCollector, /const visibleSummary = \{[\s\S]*\.\.\.summary,[\s\S]*syncUploadIntervalMs: syncUploadIntervalMs\(\)[\s\S]*\};/);
+  assert.match(syncCollector, /transformUsage: summaryWithArchivedClientUsage/);
+  assert.match(syncCollector, /await syncUploadScheduler\.enqueue\(visibleSummary, revision\)/);
 
   const hostCollector = main.slice(main.indexOf('function startHostCollector'), main.indexOf('function stopHostStats'));
   assert.doesNotMatch(hostCollector, /createSyncUploadScheduler|syncUploadScheduler/);
   assert.match(hostCollector, /embeddedHub\.hub\.ingest\(payload\)/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
-  assert.match(updateHandler, /previousSyncUploadIntervalMs/);
   assert.match(updateHandler, /normalizedPatch\.syncUploadIntervalMs = normalizeSyncUploadIntervalMs/);
   assert.match(updateHandler, /syncUploadIntervalMs: normalizeSyncUploadIntervalMs/);
-  assert.match(updateHandler, /\(settings\.hubMode === 'client' && settings\.syncUploadIntervalMs !== previousSyncUploadIntervalMs\)/);
+  assert.match(updateHandler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
+  assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
 });
 
-test('main collectors pass GUI limit credentials in every widget mode', () => {
+test('main collectors share one live GUI limit credential resolver in every widget mode', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const runtimeConfig = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'runtimeConfig.js'), 'utf8');
   const collectors = [
     functionBodyBeforeMarker(main, 'startSyncCollector', '// Host mode'),
     functionBody(main, 'startHostCollector', 'stopHostStats'),
     functionBody(main, 'startLocalCollector', 'scheduleStreamRetry')
   ];
   for (const collector of collectors) {
-    assert.match(collector, /zaiApiKey: settings\.zaiApiKey \|\| ''/);
-    assert.match(collector, /zaiApiRegion: settings\.zaiApiRegion \|\| 'global'/);
-    assert.match(collector, /volcengineAccessKeyId: settings\.volcengineAccessKeyId \|\| ''/);
-    assert.match(collector, /volcengineSecretAccessKey: settings\.volcengineSecretAccessKey \|\| ''/);
-    assert.match(collector, /volcengineRegion: settings\.volcengineRegion \|\| ''/);
-    assert.match(collector, /qoderCookie: settings\.qoderCookie \|\| ''/);
-    assert.match(collector, /qoderSite: settings\.qoderSite \|\| 'global'/);
-    assert.match(collector, /kimiApiKey: settings\.kimiApiKey \|\| ''/);
-    assert.match(collector, /kimiWebAccessToken: settings\.kimiWebAccessToken \|\| ''/);
-    assert.match(collector, /ollamaCookie: settings\.ollamaCookie \|\| ''/);
+    assert.match(collector, /limitsOptions: electronLimitsConfig\(\)/);
+    assert.match(collector, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
   }
+  for (const key of [
+    'zaiApiKey', 'zaiApiRegion', 'volcengineAccessKeyId', 'volcengineSecretAccessKey',
+    'volcengineRegion', 'qoderCookie', 'qoderSite', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
+  ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
 });
 
 test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {

@@ -465,3 +465,21 @@ test('fetchKimiLimits maps 401/403 to unauthorized and 429 to sourceRateLimited'
   );
   assert.equal(unavailable.status, 'unavailable');
 });
+
+test('fetchKimiLimits physically aborts a hung request within its configured bound', async () => {
+  let signal;
+  const provider = await fetchKimiLimits(
+    { kimiApiKey: 'hung-key' },
+    {
+      env: {},
+      kimiFetchTimeoutMs: 5,
+      fetch: async (_url, init) => {
+        signal = init.signal;
+        return new Promise(() => {});
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(signal.aborted, true);
+});

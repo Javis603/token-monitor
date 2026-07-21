@@ -137,3 +137,21 @@ test('fetchZaiTeamLimits falls back to ZAI_TEAM_* env vars', async () => {
   assert.equal(provider.accountKey, hashKey('zaiteam', 'org-env', 'proj-env'));
   assert.deepEqual(urls, [ZAI_TEAM_QUOTA_URL]);
 });
+
+test('fetchZaiTeamLimits physically aborts a hung request within its configured bound', async () => {
+  let signal;
+  const provider = await fetchZaiTeamLimits(
+    { zaiTeamApiKey: 'hung-key', zaiTeamOrganizationId: 'org-1', zaiTeamProjectId: 'proj-1' },
+    {
+      env: {},
+      zaiTeamFetchTimeoutMs: 5,
+      fetch: async (_url, init) => {
+        signal = init.signal;
+        return new Promise(() => {});
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(signal.aborted, true);
+});
