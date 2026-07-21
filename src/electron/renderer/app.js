@@ -1841,12 +1841,8 @@ function antigravityQuotaGroups(provider) {
   const entries = (provider?.windows || [])
     .filter((window) => window.kind === 'session' || window.kind === 'weekly')
     .map((window) => {
-      const windowLabel = window.kind === 'session' ? '5-hour' : 'Weekly';
-      const label = String(window.label || '').trim();
-      const suffix = window.kind === 'session' ? /\s+5-hour$/i : /\s+weekly$/i;
-      if (!suffix.test(label)) return null;
-      const groupLabel = label.replace(suffix, '').trim();
-      return groupLabel ? { groupLabel, windowLabel, window } : null;
+      const presentation = limitProviderPresentationApi.antigravityQuotaWindow(window);
+      return presentation ? { ...presentation, window } : null;
     });
   // Legacy GetUserStatus pools have model names rather than group + period
   // labels. Keep their existing flat layout instead of guessing a hierarchy.

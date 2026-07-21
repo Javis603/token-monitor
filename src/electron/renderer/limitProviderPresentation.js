@@ -123,7 +123,7 @@
     return label.replace(/^[a-z]/, (letter) => letter.toUpperCase());
   }
 
-  function antigravityGroupLabel(window) {
+  function antigravityQuotaWindow(window) {
     const kind = normalizeId(window?.kind);
     const suffix = kind === 'session'
       ? /\s+5-hour$/i
@@ -131,8 +131,10 @@
         ? /\s+weekly$/i
         : null;
     const label = String(window?.label || '').trim();
-    if (!suffix || !suffix.test(label)) return '';
-    return label.replace(suffix, '').trim();
+    if (!suffix || !suffix.test(label)) return null;
+    const groupLabel = label.replace(suffix, '').trim();
+    if (!groupLabel) return null;
+    return { groupLabel, windowLabel: kind === 'session' ? '5-hour' : 'Weekly' };
   }
 
   function compactWindowRemaining(window) {
@@ -151,7 +153,7 @@
     const entries = (windows || []).map((window, index) => ({
       window,
       index,
-      groupLabel: antigravityGroupLabel(window)
+      groupLabel: antigravityQuotaWindow(window)?.groupLabel || ''
     }));
     if (entries.length === 0 || entries.some((entry) => !entry.groupLabel)) return windows;
     const groups = new Map();
@@ -189,8 +191,8 @@
 
   function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = []) {
     if (providerId(providerOrId) !== 'antigravity') return '';
-    const labels = (visibleWindows || []).map(antigravityGroupLabel);
-    const currentLabel = antigravityGroupLabel(window);
+    const labels = (visibleWindows || []).map((candidate) => antigravityQuotaWindow(candidate)?.groupLabel || '');
+    const currentLabel = antigravityQuotaWindow(window)?.groupLabel || '';
     if (labels.length < 2 || !currentLabel || labels.some((label) => !label)) return '';
     return new Set(labels).size === labels.length ? currentLabel : '';
   }
@@ -386,6 +388,7 @@
   }
 
   return {
+    antigravityQuotaWindow,
     apiKeyAccountStatus,
     isCodexLiveAccount,
     limitProviderCapabilityTags,

@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 
 const {
+  antigravityQuotaWindow,
   apiKeyAccountStatus,
   isCodexLiveAccount,
   limitProviderDisplayLabel,
@@ -62,6 +63,18 @@ test('compact Antigravity labels distinguish duplicate periods by model group', 
   assert.equal(limitProviderCompactWindowLabel('antigravity', windows[0], windows), 'Gemini');
   assert.equal(limitProviderCompactWindowLabel('antigravity', windows[1], windows), 'Claude/GPT');
   assert.equal(limitProviderCompactWindowLabel('codex', windows[0], windows), '');
+});
+
+test('Antigravity quota presentation parses grouped period labels once', () => {
+  assert.deepEqual(antigravityQuotaWindow({ kind: 'session', label: 'Gemini 5-hour' }), {
+    groupLabel: 'Gemini',
+    windowLabel: '5-hour'
+  });
+  assert.deepEqual(antigravityQuotaWindow({ kind: 'weekly', label: 'Future Group weekly' }), {
+    groupLabel: 'Future Group',
+    windowLabel: 'Weekly'
+  });
+  assert.equal(antigravityQuotaWindow({ kind: 'weekly', label: 'Gemini Pro' }), null);
 });
 
 test('compact Antigravity windows surface critical weekly quotas per model group', () => {
@@ -531,11 +544,12 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
   const css = readRendererFile('styles.css');
 
+  const context = { limitProviderPresentationApi: { antigravityQuotaWindow } };
   const grouped = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'session', label: 'Gemini 5-hour' },
     { kind: 'weekly', label: 'Gemini weekly' },
     { kind: 'weekly', label: 'Future Group weekly' }
-  ] });`);
+  ] });`, context);
   assert.deepEqual(JSON.parse(JSON.stringify(grouped)), [
     {
       label: 'Gemini',
@@ -554,11 +568,10 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   const legacy = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'weekly', label: 'Gemini Pro' },
     { kind: 'weekly', label: 'Claude' }
-  ] });`);
+  ] });`, context);
   assert.deepEqual(JSON.parse(JSON.stringify(legacy)), []);
 
-  assert.match(quotaGroups, /window\.kind === 'session' \? '5-hour' : 'Weekly'/);
-  assert.match(quotaGroups, /const groupLabel = label\.replace\(suffix, ''\)\.trim\(\)/);
+  assert.match(quotaGroups, /limitProviderPresentationApi\.antigravityQuotaWindow\(window\)/);
   assert.match(quotaGroups, /groups\.set\(entry\.groupLabel, \[\]\)/);
   assert.match(quotaGroups, /entries\.some\(\(entry\) => entry === null\)/);
   assert.match(renderProviderWindows, /provider\.provider === 'antigravity'/);
