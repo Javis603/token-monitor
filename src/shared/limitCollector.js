@@ -2206,8 +2206,9 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     ? options.limitRefreshScope
     : null;
   if (scope && multiAccountMode) {
-    cookies = scope.accountLabel
-      ? cookies.filter(({ name }) => name === scope.accountLabel)
+    const profileName = scope.accountName || scope.accountLabel;
+    cookies = profileName
+      ? cookies.filter(({ name }) => name === profileName)
       : [];
   }
 
@@ -2302,16 +2303,19 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     const { goWeb, zen } = result;
     const windows = [];
     let status = 'notConfigured';
+    let planLabel = '';
     let balanceUsd = null;
 
     if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
       windows.push(...goWeb.windows);
       status = 'ok';
+      planLabel = 'Go';
     }
 
     if (zen && zen.status === 'ok') {
       windows.push(...zen.windows);
       status = 'ok';
+      if (!planLabel) planLabel = 'Zen';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
     }
 
@@ -2338,7 +2342,11 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     return normalizeLimitProvider({
       provider: 'opencode',
       accountKey,
+      accountName: name,
+      // Keep accountLabel as the profile name for pre-accountName renderers.
+      // New renderers use planLabel for Go/Zen and accountName for identity.
       accountLabel: name,
+      planLabel,
       source: 'web',
       status,
       updatedAt,
@@ -2350,7 +2358,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return normalizeLimitProvider({
       provider: 'opencode', accountKey: hashKey('opencode', `cookie:${cookieHash}`),
-      accountLabel: name, source: 'web', status: 'unavailable',
+      accountName: name, accountLabel: name, planLabel: '', source: 'web', status: 'unavailable',
       updatedAt, windows: [], balanceUsd: null
     });
   }
@@ -2498,6 +2506,7 @@ function limitProviderMatchesScope(provider, scope) {
   if (!provider || provider.provider !== scope?.provider) return false;
   if (scope.accountKey) return provider.accountKey === scope.accountKey;
   if (scope.accountEmail) return provider.accountEmail === scope.accountEmail;
+  if (scope.accountName) return provider.accountName === scope.accountName;
   if (scope.accountLabel) return provider.accountLabel === scope.accountLabel;
   if (scope.sourceDetail) return provider.sourceDetail === scope.sourceDetail;
   return true;

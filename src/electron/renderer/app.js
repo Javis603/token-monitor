@@ -1791,7 +1791,7 @@ function limitProviderMeta(provider, provenance = null) {
 
 function limitProviderPlan(provider) {
   if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
-  const label = String(provider?.accountLabel || '').trim();
+  const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
   if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(label);
   return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
 }
@@ -2838,6 +2838,18 @@ function renderMimoAccountGroup(label, providers, color) {
   return row;
 }
 
+function opencodeAccountTitle(provider, index) {
+  const name = String(provider?.accountName || '').trim();
+  if (name) return name;
+  // Older synced clients put the user-defined profile name in accountLabel.
+  // Keep those rows identifiable while new clients carry profile and plan in
+  // separate fields. Go/Zen are plan labels, never account identities.
+  const legacyName = String(provider?.accountLabel || '').trim();
+  return legacyName && legacyName !== 'Go' && legacyName !== 'Zen'
+    ? legacyName
+    : `Account ${index + 1}`;
+}
+
 function renderOpenCodeAccountGroup(label, providers, color) {
   const row = document.createElement('div');
   row.className = 'limit-row limit-row-group';
@@ -2848,10 +2860,15 @@ function renderOpenCodeAccountGroup(label, providers, color) {
   });
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
-  providers.forEach((provider) => {
-    accountList.append(renderLimitProviderRow('opencode', provider.accountLabel || 'OpenCode', provider, color, {
+  providers.forEach((provider, index) => {
+    const legacyProfileLabel = !provider?.accountName
+      && provider?.accountLabel
+      && provider.accountLabel !== 'Go'
+      && provider.accountLabel !== 'Zen';
+    accountList.append(renderLimitProviderRow('opencode', opencodeAccountTitle(provider, index), provider, color, {
       accountRow: true,
-      showIcon: false
+      showIcon: false,
+      ...(legacyProfileLabel ? { planText: '' } : {})
     }));
   });
   row.append(head, accountList);
@@ -3621,6 +3638,13 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   return { module, body };
 }
 
+function homeLimitAccountTitle(id, provider, index) {
+  if (id === 'codex') return codexAccountTitle(provider, index);
+  if (id === 'mimo') return mimoAccountTitle(provider, index);
+  if (id === 'opencode') return opencodeAccountTitle(provider, index);
+  return String(provider?.accountEmail || provider?.accountName || '').trim() || `Account ${index + 1}`;
+}
+
 function homeLimitRows() {
   const enabled = enabledLimitProviderSet();
   const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
@@ -3640,7 +3664,14 @@ function homeLimitRows() {
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
-      return id === 'codex' && providerEntries.length > 1 ? codexAccountTitle(provider, index) : option?.label || id;
+      const providerTitle = option?.label || id;
+      if (providerEntries.length > 1) {
+        const accountTitle = homeLimitAccountTitle(id, provider, index);
+        return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
+          ? `${providerTitle} · ${accountTitle}`
+          : accountTitle;
+      }
+      return providerTitle;
     }
   });
 }
@@ -5884,6 +5915,33 @@ function renderHomeLimitProviderList() {
   statusText.textContent = t('settings.home.showLimitBars');
   statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
   statusLabel.append(statusInput, statusText);
+  const providerNamesLabel = document.createElement('label');
+  providerNamesLabel.className = 'checkbox-label home-limit-status-setting';
+  const providerNamesInput = document.createElement('input');
+  providerNamesInput.type = 'checkbox';
+  const providerNamesRequired = state.settings?.showToolIcons === false;
+  providerNamesInput.checked = providerNamesRequired || state.settings?.showHomeLimitProviderNames === true;
+  providerNamesInput.disabled = providerNamesRequired;
+  const providerNamesText = document.createElement('span');
+  providerNamesText.textContent = t('settings.home.showLimitProviderNames');
+  const providerNamesCopy = document.createElement('span');
+  providerNamesCopy.className = 'home-limit-provider-names-copy';
+  providerNamesCopy.append(providerNamesText);
+  if (providerNamesRequired) {
+    const requiredReason = t('settings.home.providerNamesRequiredWithoutIcons');
+    const requiredReasonText = document.createElement('span');
+    requiredReasonText.id = 'homeLimitProviderNamesReason';
+    requiredReasonText.className = 'home-limit-provider-names-reason';
+    requiredReasonText.textContent = requiredReason;
+    providerNamesCopy.append(requiredReasonText);
+    providerNamesLabel.title = requiredReason;
+    providerNamesInput.setAttribute('aria-describedby', requiredReasonText.id);
+  }
+  providerNamesInput.addEventListener('change', async () => {
+    await saveSettings({ showHomeLimitProviderNames: providerNamesInput.checked });
+    renderHomeIfVisible();
+  });
+  providerNamesLabel.append(providerNamesInput, providerNamesCopy);
   const countLabel = document.createElement('label');
   countLabel.className = 'settings-item home-limit-account-count-setting';
   const countText = document.createElement('span');
@@ -5932,7 +5990,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(statusLabel, countLabel, header);
+  wrap.append(statusLabel, providerNamesLabel, countLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -7106,7 +7164,11 @@ for (const input of els.reduceMotionInputs || []) {
   });
 }
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
-els.toolIconsInput.addEventListener('change', saveAppearanceFromControls);
+els.toolIconsInput.addEventListener('change', async () => {
+  state.settings.showToolIcons = els.toolIconsInput.checked;
+  renderHomeIfVisible();
+  await saveAppearanceFromControls();
+});
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();

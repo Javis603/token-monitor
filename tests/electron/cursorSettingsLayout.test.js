@@ -186,6 +186,20 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /updateOpenCodeProfilesStatus\(\)/);
 });
 
+test('OpenCode multi-account rows separate profile identity from plan label', () => {
+  const app = readRendererFile('app.js');
+  const titleBody = functionBody(app, 'opencodeAccountTitle', 'renderOpenCodeAccountGroup');
+  const groupBody = functionBody(app, 'renderOpenCodeAccountGroup', 'renderLimits');
+
+  assert.match(titleBody, /provider\?\.accountName/);
+  assert.match(titleBody, /legacyName !== 'Go' && legacyName !== 'Zen'/);
+  assert.match(groupBody, /opencodeAccountTitle\(provider, index\)/);
+  assert.match(groupBody, /legacyProfileLabel/);
+  assert.match(groupBody, /planText: ''/);
+  assert.match(app, /provider\?\.planLabel \|\| provider\?\.accountLabel/);
+  assert.doesNotMatch(groupBody, /renderLimitProviderRow\('opencode', provider\.accountLabel/);
+});
+
 test('OpenCode disabled profiles still count in the account summary', () => {
   const app = readRendererFile('app.js');
   const renderBody = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');

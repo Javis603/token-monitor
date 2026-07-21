@@ -176,6 +176,7 @@ test('reset boundary refreshes limits only and does not loop on a stale timestam
           provider: 'codex',
           accountKey: 'codex-test',
           accountEmail: '',
+          accountName: '',
           accountLabel: '',
           sourceDetail: ''
         }

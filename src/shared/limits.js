@@ -269,6 +269,7 @@ function normalizeLimitProvider(input) {
   if (!input || typeof input !== 'object') return null;
   const provider = normalizeProviderId(input.provider);
   if (!provider) return null;
+  const accountLabel = normalizeAccountLabel(input.accountLabel);
   const windows = Array.isArray(input.windows)
     ? input.windows.map(normalizeLimitWindow).filter(Boolean)
     : [];
@@ -287,7 +288,8 @@ function normalizeLimitProvider(input) {
   return {
     provider,
     accountKey: input.accountKey ? String(input.accountKey) : '',
-    accountLabel: normalizeAccountLabel(input.accountLabel),
+    accountLabel,
+    planLabel: normalizeAccountLabel(input.planLabel),
     accountName: normalizeAccountName(input.accountName ?? input.accountLogin ?? input.login),
     accountEmail: normalizeAccountEmail(input.accountEmail ?? input.email),
     status: normalizeStatus(input.status),
@@ -384,6 +386,7 @@ function retainedCodexProvider(previousProvider, currentProvider, windows) {
     ...currentProvider,
     accountKey: currentProvider.accountKey || previousProvider.accountKey,
     accountLabel: currentProvider.accountLabel || previousProvider.accountLabel,
+    planLabel: currentProvider.planLabel || previousProvider.planLabel,
     accountName: currentProvider.accountName || previousProvider.accountName,
     accountEmail: currentProvider.accountEmail || previousProvider.accountEmail,
     source: currentProvider.source || previousProvider.source,
@@ -519,14 +522,15 @@ function publicLimits(limits) {
   return {
     updatedAt: normalized.updatedAt,
     refreshMs: normalized.refreshMs,
-    providers: normalized.providers.map(({ accountKey, accountEmail, accountName, accountLabel, ...provider }) => provider)
+    providers: normalized.providers.map(({ accountKey, accountEmail, accountName, accountLabel, planLabel, ...provider }) => provider)
   };
 }
 
 // Sync to the authenticated hub carries the full account identity (key, email,
-// display name, and plan label) so other devices can show which managed account each limit belongs
-// to. Hub ingest is Secret-protected; the PUBLIC surface is still scrubbed by
-// publicLimits() above, which drops every account identifier including email.
+// display name, legacy label, and explicit plan label) so other devices can show
+// which managed account each limit belongs to. Hub ingest is Secret-protected;
+// the PUBLIC surface is still scrubbed by publicLimits() above, which drops all
+// account and plan labels together with the account identifiers.
 function syncLimits(limits) {
   const normalized = normalizeLimitsSummary(limits);
   return {

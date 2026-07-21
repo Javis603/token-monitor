@@ -1125,6 +1125,7 @@ function limitResetBoundaryEntries(limits) {
       provider: String(provider?.provider || '').trim(),
       accountKey: String(provider?.accountKey || '').trim(),
       accountEmail: String(provider?.accountEmail || '').trim().toLowerCase(),
+      accountName: String(provider?.accountName || '').trim(),
       accountLabel: String(provider?.accountLabel || '').trim(),
       sourceDetail: String(provider?.sourceDetail || '').trim()
     };
