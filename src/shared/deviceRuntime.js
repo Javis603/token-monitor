@@ -22,7 +22,15 @@ function createDeviceRuntime(options = {}, deps = {}) {
       : {}),
     onRecord(record, meta) {
       if (!active) return;
-      options.onRecord?.(record, meta);
+      try {
+        options.onRecord?.(record, meta);
+      } catch (error) {
+        try {
+          options.onError?.(error, 'record');
+        } catch {
+          // Optional observers must never block the delivery path.
+        }
+      }
       if (sink?.enqueue) {
         Promise.resolve(sink.enqueue(record, meta.revision)).catch((error) => {
           options.onError?.(error, 'sink');
@@ -38,7 +46,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
       const transformed = options.transformUsage
         ? options.transformUsage(summary, reason, { preview: false })
         : summary;
-      deviceState.updateUsage(transformed, reason, { epoch });
+      deviceState.updateUsage(transformed, reason, { epoch, preview: false });
     }
   };
   if (options.progressive === true) {
@@ -47,7 +55,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
       const transformed = options.transformUsage
         ? options.transformUsage(summary, reason, { preview: true })
         : summary;
-      deviceState.updateUsage(transformed, reason, { epoch });
+      deviceState.updateUsage(transformed, reason, { epoch, preview: true });
     };
   } else {
     delete usageOptions.onPreview;

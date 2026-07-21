@@ -346,10 +346,14 @@ function signVolcengineRequest({
   };
 }
 
-function fetchWithDeadline(url, init, deps = {}) {
+function fetchJsonWithDeadline(url, init, deps = {}) {
   const deadlineMs = Number(deps.volcengineFetchTimeoutMs || deps.fetchTimeoutMs || VOLCENGINE_FETCH_TIMEOUT_MS);
   return runWithProbeDeadline(
-    ({ signal }) => (deps.fetch || fetch)(url, { ...init, signal }),
+    async ({ signal }) => {
+      const response = await (deps.fetch || fetch)(url, { ...init, signal });
+      const body = await response.json().catch(() => null);
+      return { response, body };
+    },
     { signal: deps.signal, deadlineMs }
   );
 }
@@ -403,7 +407,7 @@ async function fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt
     date,
     ...credentials
   });
-  const response = await fetchWithDeadline(VOLCENGINE_CODING_PLAN_URL, {
+  const { response, body } = await fetchJsonWithDeadline(VOLCENGINE_CODING_PLAN_URL, {
     method: 'POST',
     headers: signed.headers,
     body: signed.body
@@ -415,7 +419,7 @@ async function fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt
       : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
     throw error;
   }
-  const usage = parseVolcengineCodingPlanUsage(await response.json());
+  const usage = parseVolcengineCodingPlanUsage(body);
   return normalizeLimitProvider({
     provider: 'volcengine',
     accountKey: hashKey('volcengine', credentials.accessKeyId, credentials.region),
@@ -460,7 +464,7 @@ async function fetchVolcengineArkLimits(credentials, deps, now, updatedAt) {
 }
 
 async function probeVolcengineArkModel(credentials, deps, model, now) {
-  const response = await fetchWithDeadline(VOLCENGINE_ARK_CHAT_COMPLETIONS_URL, {
+  const { response, body } = await fetchJsonWithDeadline(VOLCENGINE_ARK_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -473,7 +477,6 @@ async function probeVolcengineArkModel(credentials, deps, model, now) {
       messages: [{ role: 'user', content: 'hi' }]
     })
   }, deps);
-  const body = await response.json().catch(() => null);
   return {
     status: response.status,
     usage: parseVolcengineArkUsage({ headers: response.headers, body, now })

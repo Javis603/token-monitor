@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  collectLimitsOnce,
   parseLimitProviders,
   probeLimitProvider,
   providerPhysicalBoundMs
@@ -27,6 +28,10 @@ test('account-based serial probes scale their physical bound by dispatched jobs'
     mimoManagedAccounts: [{ id: 'one' }, { id: 'two' }],
     limitRefreshScope: { provider: 'mimo', accountId: 'two' }
   }, { providerPhysicalBounds: { mimo: 10 } }), 10);
+  assert.equal(providerPhysicalBoundMs('codex', {
+    codexManagedAccounts: [{ id: 'one' }, { id: 'two' }],
+    limitRefreshScope: { provider: 'codex', accountId: 'two' }
+  }, { providerPhysicalBounds: { codex: 10 } }), 10);
 });
 
 test('probeLimitProvider passes runtime cancellation into the selected adapter', async () => {
@@ -43,4 +48,23 @@ test('probeLimitProvider passes runtime cancellation into the selected adapter',
 
   assert.equal(observedSignal, controller.signal);
   assert.equal(providers[0].provider, 'kimi');
+});
+
+test('collectLimitsOnce preserves a standalone dependency cancellation signal', async () => {
+  const controller = new AbortController();
+  let observedSignal;
+  const summary = await collectLimitsOnce({
+    limitProviders: ['kimi']
+  }, {
+    signal: controller.signal,
+    providerFetchers: {
+      kimi: async (_options, deps) => {
+        observedSignal = deps.signal;
+        return { provider: 'kimi', status: 'ok', windows: [] };
+      }
+    }
+  });
+
+  assert.equal(observedSignal, controller.signal);
+  assert.equal(summary.providers[0].provider, 'kimi');
 });

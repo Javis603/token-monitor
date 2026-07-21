@@ -66,6 +66,7 @@ function createDeviceState(options = {}) {
   let usagePart = null;
   let limitsPart = hasOwn(options, 'initialLimits') ? cloneValue(options.initialLimits) : undefined;
   let currentRecord = null;
+  let hasCompleteUsageBaseline = false;
   let revision = 0;
   let stopped = false;
 
@@ -88,6 +89,10 @@ function createDeviceState(options = {}) {
   function updateUsage(summary, reason = 'usage', meta = {}) {
     if (!accepts(meta)) return null;
     usagePart = mergeUsagePart(usagePart, summary);
+    if (hasOwn(usagePart, 'month') && hasOwn(usagePart, 'allTime')) {
+      hasCompleteUsageBaseline = true;
+    }
+    if (meta.preview === true && !hasCompleteUsageBaseline) return null;
     return publish('usage', reason);
   }
 

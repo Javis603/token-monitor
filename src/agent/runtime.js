@@ -8,8 +8,7 @@ function createAgentDeviceRuntime(options = {}, deps = {}, overrides = {}) {
   const makeOrderedSink = deps.createOrderedSink || createOrderedSink;
   const sink = overrides.sink === undefined
     ? makeOrderedSink({
-        send: options.deliver,
-        onError: (error) => options.onError?.(error, 'delivery')
+        send: options.deliver
       })
     : overrides.sink;
 

@@ -2492,7 +2492,19 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
   let jobs = 1;
   if (provider === 'codex') {
     const managed = normalizeCodexManagedAccounts(options.codexManagedAccounts || deps.codexManagedAccounts);
-    jobs = Math.max(1, managed.length + 1);
+    jobs = options.limitRefreshScope?.provider === 'codex' && [
+      'accountKey',
+      'accountId',
+      'managedAccountId',
+      'id',
+      'accountEmail',
+      'email',
+      'accountName',
+      'name',
+      'accountLabel'
+    ].some((key) => String(options.limitRefreshScope[key] || '').trim())
+      ? 1
+      : Math.max(1, managed.length + 1);
   } else if (provider === 'mimo') {
     const managed = Array.isArray(options.mimoManagedAccounts || deps.mimoManagedAccounts)
       ? (options.mimoManagedAccounts || deps.mimoManagedAccounts)
@@ -2507,7 +2519,7 @@ async function probeLimitProvider(provider, options = {}, context = {}, deps = {
   const fetcher = providerFetchers(deps)[provider];
   if (!fetcher) return [statusProvider(provider, 'notConfigured', nowIso(nowMs))];
   try {
-    const result = await fetcher(options, { ...deps, signal: context.signal });
+    const result = await fetcher(options, { ...deps, signal: context.signal ?? deps.signal });
     return (Array.isArray(result) ? result : [result]).filter(Boolean);
   } catch (error) {
     return [statusProvider(provider, providerStatusFromError(error), nowIso(nowMs))];
@@ -2532,20 +2544,31 @@ async function collectLimitsOnce(options = {}, deps = {}) {
 
 // Compatibility facade for internal callers that still use the former
 // snapshot/refreshScope API. All ordering, identity, retention, and deadline
-// semantics are owned by LimitsRuntime; this facade deliberately has no cache
-// or in-flight coordination of its own.
+// semantics are owned by LimitsRuntime; this facade only retains the former
+// full-snapshot TTL and has no in-flight coordination of its own.
 function createLimitsCollector(options = {}, deps = {}) {
   const { createLimitsRuntime } = require('./limitsRuntime');
   const runtime = createLimitsRuntime(options, { ...deps, autoStart: false });
+  const refreshMs = normalizeLimitsRefreshMs(options.limitsRefreshMs ?? options.refreshMs);
+  const now = deps.now || Date.now;
+  let lastFullRefreshAt = null;
   const refreshedSnapshot = async (scope, reason) => {
     const result = await runtime.refresh(scope, reason);
     return result?.snapshot || (result?.providers ? result : runtime.getSnapshot());
   };
+  const refreshedFullSnapshot = async (reason) => {
+    const result = await refreshedSnapshot({}, reason);
+    lastFullRefreshAt = now();
+    return result;
+  };
   return {
     refreshScope: (scope) => refreshedSnapshot(scope, 'compat-scoped'),
-    snapshot: (force = false) => force
-      ? refreshedSnapshot({}, 'compat-full')
-      : Promise.resolve(runtime.getSnapshot()),
+    snapshot: (force = false) => {
+      const stale = lastFullRefreshAt === null || now() - lastFullRefreshAt >= refreshMs;
+      return force || stale
+        ? refreshedFullSnapshot(force ? 'compat-full' : 'compat-stale')
+        : Promise.resolve(runtime.getSnapshot());
+    },
     stop: () => runtime.stop()
   };
 }

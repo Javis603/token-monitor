@@ -98,7 +98,7 @@ test('partial usage previews carry broader periods and optional usage state', ()
   const preview = state.updateUsage({
     updatedAt: '2026-07-21T01:00:01.000Z',
     today: { totalTokens: 11 }
-  }, 'progress');
+  }, 'progress', { preview: true });
 
   assert.equal(preview.today.totalTokens, 11);
   assert.equal(preview.month.totalTokens, 20);
@@ -108,6 +108,23 @@ test('partial usage previews carry broader periods and optional usage state', ()
   assert.equal(preview.wslStatus.state, 'active');
   assert.equal(preview.periodWindows.today.endsAt, '2026-07-22T00:00:00.000Z');
   assert.equal(preview.allTimeProjectsIncomplete, true);
+});
+
+test('cold-start partial previews wait for a complete usage baseline', () => {
+  const emitted = [];
+  const state = createDeviceState({ onRecord: (record) => emitted.push(record) });
+
+  assert.equal(state.updateUsage({
+    updatedAt: '2026-07-21T01:00:00.000Z',
+    today: { totalTokens: 10 }
+  }, 'progress', { preview: true }), null);
+  assert.equal(state.getSnapshot(), null);
+  assert.equal(emitted.length, 0);
+
+  const record = state.updateUsage(usage(), 'startup', { preview: false });
+  assert.equal(record.month.totalTokens, 20);
+  assert.equal(record.allTime.totalTokens, 30);
+  assert.equal(emitted.length, 1);
 });
 
 test('rejects stale epoch updates and stops publishing synchronously', () => {

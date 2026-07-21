@@ -1042,3 +1042,30 @@ test('fetchCodexLimits augments reset credits expiry from the Codex OAuth endpoi
     ]
   });
 });
+
+test('LimitsRuntime compatibility snapshot probes initially and reuses the configured TTL', async () => {
+  let now = Date.parse('2026-07-21T00:00:00.000Z');
+  let calls = 0;
+  const collector = createLimitsCollector({
+    limitProviders: ['codex'],
+    limitsRefreshMs: 60_000
+  }, {
+    now: () => now,
+    providerFetchers: {
+      codex: async () => {
+        calls += 1;
+        return codexProvider('sha256:codex-a', 'a@example.com', 80, new Date(now).toISOString());
+      }
+    }
+  });
+
+  assert.equal((await collector.snapshot()).providers.length, 1);
+  assert.equal(calls, 1);
+  now += 59_999;
+  await collector.snapshot();
+  assert.equal(calls, 1);
+  now += 1;
+  await collector.snapshot();
+  assert.equal(calls, 2);
+  collector.stop();
+});

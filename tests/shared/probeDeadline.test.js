@@ -51,6 +51,21 @@ test('runWithProbeDeadline propagates parent cancellation even when the task ign
   assert.equal(taskSignal.reason, reason);
 });
 
+test('runWithProbeDeadline does not dispatch when the parent is already aborted', async () => {
+  const parent = new AbortController();
+  const reason = new Error('already stopped');
+  let called = false;
+  parent.abort(reason);
+
+  await assert.rejects(
+    runWithProbeDeadline(() => {
+      called = true;
+    }, { signal: parent.signal, deadlineMs: 100 }),
+    (error) => error === reason
+  );
+  assert.equal(called, false);
+});
+
 test('runWithProbeDeadline rejects invalid non-finite bounds before dispatch', async () => {
   let called = false;
   await assert.rejects(

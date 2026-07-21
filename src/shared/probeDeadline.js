@@ -24,6 +24,7 @@ async function runWithProbeDeadline(task, options = {}) {
   if (!Number.isFinite(deadlineMs) || deadlineMs <= 0) {
     throw new TypeError('Provider probes require a finite positive deadlineMs');
   }
+  if (options.signal?.aborted) throw abortError(options.signal);
 
   const ParentAbortController = options.AbortController || AbortController;
   const setTimer = options.setTimeout || setTimeout;

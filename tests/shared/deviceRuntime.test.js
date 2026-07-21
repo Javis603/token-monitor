@@ -83,6 +83,36 @@ test('usage transforms run only for usage events, not limits-only publishes', ()
   assert.equal(records[1].record.transformed, true);
 });
 
+test('progressive cold-start previews wait for the first complete usage record', () => {
+  const { records, usageOptions } = harness({ progressive: true });
+  usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } });
+  assert.equal(records.length, 0);
+
+  usageOptions.onUpdate({
+    updatedAt: 'usage-time',
+    today: { totalTokens: 3 },
+    month: { totalTokens: 4 },
+    allTime: { totalTokens: 5 }
+  }, 'startup');
+  assert.equal(records.length, 1);
+  assert.equal(records[0].record.allTime.totalTokens, 5);
+});
+
+test('a throwing record observer cannot block the ordered sink', () => {
+  const error = new Error('observer failed');
+  const delivered = [];
+  const errors = [];
+  const { usageOptions } = harness({
+    onRecord() { throw error; },
+    onError: (...args) => errors.push(args),
+    sink: { enqueue: (...args) => delivered.push(args) }
+  });
+
+  usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 1 } }, 'startup');
+  assert.equal(delivered.length, 1);
+  assert.deepEqual(errors, [[error, 'record']]);
+});
+
 test('stop invalidates both producer callbacks before stopping handles', () => {
   const { calls, limitsDeps, records, runtime, usageOptions } = harness();
   runtime.stop();

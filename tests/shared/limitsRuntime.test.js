@@ -396,3 +396,39 @@ test('reset boundaries enqueue the exact provider/account scope only once', asyn
     runtime.stop();
   }
 });
+
+test('clearing OpenCode by account name removes a row keyed by account key', () => {
+  const runtime = createLimitsRuntime({
+    limitProviders: ['opencode'],
+    previousLimits: {
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'opencode-key',
+        accountName: 'Work',
+        status: 'ok',
+        updatedAt: '2026-07-21T00:00:00.000Z',
+        windows: [{ kind: 'session', usedPercent: 10 }]
+      }]
+    }
+  }, runtimeDeps());
+
+  assert.equal(runtime.getSnapshot().providers.length, 1);
+  runtime.clear({ provider: 'opencode', accountName: 'Work' }, 'logout');
+  assert.deepEqual(runtime.getSnapshot().providers, []);
+  runtime.stop();
+});
+
+test('a retained transient previous row seeds lastGood windows after restart', () => {
+  const runtime = createLimitsRuntime({
+    limitProviders: ['kimi'],
+    previousLimits: {
+      providers: [providerRow('kimi', 'account', 'Kimi', { status: 'unavailable' })]
+    }
+  }, runtimeDeps());
+
+  const row = runtime.getSnapshot().providers[0];
+  assert.equal(row.status, 'unavailable');
+  assert.equal(row.windows.length, 1);
+  assert.equal(row.windows[0].usedPercent, 20);
+  runtime.stop();
+});

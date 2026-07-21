@@ -44,7 +44,7 @@ function privateCredentialDigest(provider, value) {
   return crypto.createHash('sha256').update(`${provider}\0${value}`).digest('hex').slice(0, 24);
 }
 
-function accountIdentityPart(value) {
+function accountIdentityDescriptor(value) {
   for (const [name, raw] of [
     ['accountKey', value?.accountKey],
     ['id', value?.accountId ?? value?.managedAccountId ?? value?.id],
@@ -53,9 +53,28 @@ function accountIdentityPart(value) {
     ['label', value?.accountLabel]
   ]) {
     const normalized = clean(raw).toLowerCase();
-    if (normalized) return `${name}:${normalized}`;
+    if (normalized) return { name, value: normalized, part: `${name}:${normalized}` };
   }
+  return null;
+}
+
+function accountIdentityPart(value) {
+  return accountIdentityDescriptor(value)?.part || '';
+}
+
+function accountIdentityField(value, name) {
+  if (name === 'accountKey') return value?.accountKey;
+  if (name === 'id') return value?.accountId ?? value?.managedAccountId ?? value?.id;
+  if (name === 'email') return value?.accountEmail ?? value?.email;
+  if (name === 'name') return value?.accountName ?? value?.name;
+  if (name === 'label') return value?.accountLabel;
   return '';
+}
+
+function rowMatchesScope(row, scope) {
+  const descriptor = accountIdentityDescriptor(scope);
+  if (!descriptor) return false;
+  return clean(accountIdentityField(row, descriptor.name)).toLowerCase() === descriptor.value;
 }
 
 function credentialIdentityPart(provider, value) {
@@ -278,6 +297,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     lane.identities.set(identityKey, existing);
   }
 
+  function matchingIdentityKeys(lane, scope) {
+    const keys = new Set([scopeIdentityKey(scope)]);
+    for (const [identityKey, state] of lane.identities) {
+      if (rowMatchesScope(state.lastGood, scope) || rowMatchesScope(state.lastAttempt?.row, scope)) {
+        keys.add(identityKey);
+      }
+    }
+    return keys;
+  }
+
   function commitRows(lane, dispatch, rawRows, attemptError = null) {
     if (stopped || runtimeEpoch !== dispatch.runtimeEpoch || !enabled || !configuredProviders.has(lane.provider)) return false;
     if (lane.epoch !== dispatch.providerEpoch) return false;
@@ -470,13 +499,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         lane.accountRevisions.clear();
         continue;
       }
-      const identityKey = scopeIdentityKey(normalized);
-      lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
-      lane.identities.delete(identityKey);
-      const pending = lane.pending.get(identityKey);
-      finishIntent(pending, { superseded: true, reason });
-      lane.pending.delete(identityKey);
-      if (lane.active?.intent.identityKey === identityKey) {
+      const identityKeys = matchingIdentityKeys(lane, normalized);
+      for (const identityKey of identityKeys) {
+        lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
+        lane.identities.delete(identityKey);
+        const pending = lane.pending.get(identityKey);
+        finishIntent(pending, { superseded: true, reason });
+        lane.pending.delete(identityKey);
+      }
+      if (identityKeys.has(lane.active?.intent.identityKey)) {
         lane.active.controller.abort(new Error(reason));
         finishIntent(lane.active.intent, { superseded: true, reason });
       }
@@ -573,7 +604,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     if (!configuredProviders.has(row.provider)) continue;
     const lane = laneFor(row.provider);
     const identityKey = rowIdentityKey(row);
-    applyAttempt(lane, identityKey, row, row.status, row.updatedAt || new Date(now()).toISOString());
+    const at = row.updatedAt || new Date(now()).toISOString();
+    if (TRANSIENT_STATUSES.has(row.status) && row.windows.length > 0) {
+      lane.identities.set(identityKey, {
+        identityKey,
+        lastGood: normalizeLimitProvider({ ...row, status: 'ok' }),
+        lastAttempt: { status: row.status, at, row }
+      });
+    } else {
+      applyAttempt(lane, identityKey, row, row.status, at);
+    }
   }
   rebuildSnapshot();
   if (deps.autoStart !== false) start();

@@ -88,6 +88,24 @@ test('long-running agent posts usage before hung limits and never overlaps posts
   runtime.stop();
 });
 
+test('long-running agent reports one owned error for a failed delivery', async () => {
+  const harness = runtimeHarness();
+  const expected = new Error('post failed');
+  const errors = [];
+  const runtime = runAgent({
+    envelope: { deviceId: 'device-1' },
+    usageOptions: {},
+    limitsOptions: {},
+    deliver: async () => { throw expected; },
+    onError: (...args) => errors.push(args)
+  }, harness.deps);
+
+  harness.usageUpdate(usageSummary(9));
+  await runtime.flush();
+  assert.deepEqual(errors, [[expected, 'sink']]);
+  runtime.stop();
+});
+
 test('normal once posts usage immediately and a changed limits record second', async () => {
   const harness = runtimeHarness();
   const delivered = [];
