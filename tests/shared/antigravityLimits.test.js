@@ -49,6 +49,21 @@ test('fetchAntigravityLimits maps quota summary to two session and weekly groups
   assert.equal(result.windows[0].resetDescription, 'Refreshes soon.');
 });
 
+test('fetchAntigravityLimits preserves Antigravity IDE source detail', async () => {
+  const result = await fetchAntigravityLimits({}, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      sourceDetail: 'ide',
+      windows: [
+        { name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.8 }
+      ]
+    })
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.sourceDetail, 'ide');
+});
+
 test('fetchAntigravityLimits does not invent session windows for Starter accounts', async () => {
   const result = await fetchAntigravityLimits({}, {
     antigravityProbe: async () => ({

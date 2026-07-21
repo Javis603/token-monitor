@@ -148,6 +148,20 @@ test('detectProcessInfo (win32) parses PowerShell output', async () => {
   assert.equal(info.csrfToken, 'win-token');
 });
 
+test('detectProcessInfo (win32) includes hyphenated language-server names in the PowerShell filter', async () => {
+  const stdout = '7778 C:\\Program Files\\Antigravity\\language-server.exe --app_data_dir antigravity --csrf_token win-token\n';
+  let script = '';
+  const spawn = (cmd, args) => {
+    assert.equal(cmd, 'powershell');
+    script = args.at(-1);
+    return fakeSpawn(stdout)();
+  };
+  const info = await probe.detectProcessInfo({ platform: 'win32', spawn });
+  assert.match(script, /\$_\.Name -like 'language-server\*'/);
+  assert.equal(info.pid, 7778);
+  assert.equal(info.kind, 'app');
+});
+
 test('detectProcessInfo (win32) finds the agy.exe CLI when no IDE LS is running', async () => {
   const stdout = '9001 C:\\Users\\j\\.antigravity\\agy.exe language-server\n';
   const info = await probe.detectProcessInfo({ platform: 'win32', spawn: fakeSpawn(stdout) });
@@ -356,7 +370,7 @@ test('probe prefers quota summary and merges identity from GetUserStatus', async
     }
   });
 
-  assert.deepEqual(methods, ['RetrieveUserQuotaSummary', 'GetUserStatus']);
+  assert.deepEqual(methods, ['GetUnleashData', 'RetrieveUserQuotaSummary', 'GetUserStatus']);
   assert.equal(result.accountEmail, 'a@b.com');
   assert.equal(result.accountPlan, 'Google AI Pro');
   assert.deepEqual(result.windows.map((window) => window.name), ['Gemini 5-hour', 'Gemini weekly']);
@@ -394,6 +408,7 @@ test('probe checks every endpoint for grouped quota before accepting a legacy re
   });
 
   assert.deepEqual(calls, [
+    'https:GetUnleashData',
     'https:RetrieveUserQuotaSummary',
     'http:RetrieveUserQuotaSummary',
     'http:GetUserStatus'
@@ -499,6 +514,88 @@ test('probe exhausts grouped quota across same-source processes before legacy fa
   assert.ok(calls.every((call) => !call.includes('GetCommandModelConfigs')));
 });
 
+test('probe resolves same-source process endpoints concurrently', async () => {
+  const waiting = new Map();
+  const result = await probe.probe({
+    probeTimeoutMs: 500,
+    detectProcessInfos: async () => [
+      { pid: 11, kind: 'app', csrfToken: 'first' },
+      { pid: 12, kind: 'app', csrfToken: 'second' }
+    ],
+    listeningPorts: async (pid) => [pid],
+    callLs: async ({ port, method }) => {
+      if (method === 'GetUnleashData') {
+        return new Promise((resolve) => {
+          waiting.set(port, resolve);
+          if (waiting.size === 2) {
+            for (const release of waiting.values()) release({ ok: true });
+          }
+        });
+      }
+      if (port === 11 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-weekly', remainingFraction: 0.75 }]
+          }]
+        };
+      }
+      return { userStatus: { email: 'parallel@example.com' } };
+    }
+  });
+
+  assert.equal(waiting.size, 2);
+  assert.equal(result.accountEmail, 'parallel@example.com');
+  assert.equal(result.sourceDetail, 'app');
+});
+
+test('probe enforces one provider-wide deadline and abort signal', async () => {
+  let sawAbort = false;
+  const startedAt = Date.now();
+  const err = await probe.probe({
+    probeTimeoutMs: 40,
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+    listeningPorts: async () => [54733, 54734],
+    callLs: async ({ signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        sawAbort = true;
+        reject(probe._errorWithStatus('unavailable', 'aborted'));
+      }, { once: true });
+    })
+  }).catch((error) => error);
+
+  assert.equal(err.status, 'unavailable');
+  assert.equal(sawAbort, true);
+  assert.ok(Date.now() - startedAt < 250);
+});
+
+test('probe selects a reachable endpoint before requesting quota', async () => {
+  const quotaTargets = [];
+  const result = await probe.probe({
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+    listeningPorts: async () => [100, 200],
+    callLs: async ({ scheme, port, method }) => {
+      if (method === 'GetUnleashData') {
+        if (port === 200 && scheme === 'https') return { ok: true };
+        throw probe._errorWithStatus('unavailable', 'not reachable');
+      }
+      if (method === 'RetrieveUserQuotaSummary') {
+        quotaTargets.push(`${scheme}:${port}`);
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-weekly', remainingFraction: 0.8 }]
+          }]
+        };
+      }
+      return { userStatus: { email: 'resolved@example.com' } };
+    }
+  });
+
+  assert.deepEqual(quotaTargets, ['https:200']);
+  assert.equal(result.accountEmail, 'resolved@example.com');
+});
+
 test('probe returns plan + 3 pools when GetUserStatus succeeds', async () => {
   const result = await probe.probe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
@@ -559,13 +656,14 @@ test('probe prefers userTier name and richer planInfo display fields', async () 
 });
 
 test('probe falls back to GetCommandModelConfigs when GetUserStatus has no userStatus', async () => {
-  let callCount = 0;
+  const methods = [];
   const result = await probe.probe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
     callLs: async ({ method }) => {
-      callCount += 1;
+      methods.push(method);
       if (method === 'GetUserStatus') return { code: 7 };
+      if (method === 'GetUnleashData') return { ok: true };
       return {
         clientModelConfigs: [
           { label: 'Claude Sonnet', modelOrAlias: { model: 'MX' }, quotaInfo: { remainingFraction: 0.3, resetTime: '2026-06-03T05:00:00Z' } }
@@ -573,7 +671,14 @@ test('probe falls back to GetCommandModelConfigs when GetUserStatus has no userS
       };
     }
   });
-  assert.equal(callCount, 4);
+  assert.deepEqual(methods, [
+    'GetUnleashData',
+    'RetrieveUserQuotaSummary',
+    'RetrieveUserQuotaSummary',
+    'GetUserStatus',
+    'GetUserStatus',
+    'GetCommandModelConfigs'
+  ]);
   assert.equal(result.accountPlan, null);
   assert.deepEqual(result.pools.map((p) => p.name), ['Claude']);
 });
