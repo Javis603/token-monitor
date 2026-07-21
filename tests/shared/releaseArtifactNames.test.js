@@ -154,3 +154,47 @@ test('rejects mismatched or mislabelled mac updater metadata', () => {
     /expected only arm64 artifacts/
   );
 });
+
+test('rejects stale or missing top-level mac updater paths', () => {
+  const version = '0.33.0';
+  const arm64Metadata = macUpdaterMetadata(version, 'arm64');
+  const x64Metadata = macUpdaterMetadata(version, 'x64');
+
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      arm64Metadata.replace(
+        `path: Token-Monitor-${version}-arm64.zip`,
+        `path: Token-Monitor-${version}-x64.zip`
+      ),
+      x64Metadata
+    ),
+    /arm64 metadata path Token-Monitor-0\.33\.0-x64\.zip does not reference an arm64 artifact/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      arm64Metadata.replace(
+        `path: Token-Monitor-${version}-arm64.zip`,
+        `path: Other-Monitor-${version}-arm64.zip`
+      ),
+      x64Metadata
+    ),
+    /arm64 metadata path Other-Monitor-0\.33\.0-arm64\.zip is not present in its files list/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      arm64Metadata.replace(
+        `path: Token-Monitor-${version}-arm64.zip`,
+        `path: Token-Monitor-${version}-arm64.dmg`
+      ),
+      x64Metadata
+    ),
+    /arm64 metadata path Token-Monitor-0\.33\.0-arm64\.dmg is not a zip artifact/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      arm64Metadata.replace(`path: Token-Monitor-${version}-arm64.zip\n`, ''),
+      x64Metadata
+    ),
+    /arm64 metadata must have exactly one top-level path/
+  );
+});

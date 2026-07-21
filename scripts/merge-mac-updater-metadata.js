@@ -40,6 +40,12 @@ function parseMacUpdaterMetadata(contents, label = 'metadata') {
     throw new Error(`${label} contains duplicate updater file entries`);
   }
 
+  const pathLines = lines.filter((line) => /^path:\s*\S/.test(line));
+  if (pathLines.length !== 1) {
+    throw new Error(`${label} must have exactly one top-level path`);
+  }
+  const pathName = artifactNameFromReference(pathLines[0].replace(/^path:\s*/, ''));
+
   return {
     label,
     lines,
@@ -47,7 +53,8 @@ function parseMacUpdaterMetadata(contents, label = 'metadata') {
     filesIndex,
     filesEnd,
     fileLines,
-    fileNames
+    fileNames,
+    pathName
   };
 }
 
@@ -62,6 +69,15 @@ function assertArchitecture(metadata, arch) {
     if (!metadata.fileNames.some((fileName) => fileName.endsWith(extension))) {
       throw new Error(`${metadata.label} has no ${arch} ${extension} artifact`);
     }
+  }
+  if (!metadata.pathName.includes(expected)) {
+    throw new Error(`${metadata.label} path ${metadata.pathName} does not reference an ${arch} artifact`);
+  }
+  if (!metadata.pathName.endsWith('.zip')) {
+    throw new Error(`${metadata.label} path ${metadata.pathName} is not a zip artifact`);
+  }
+  if (!metadata.fileNames.includes(metadata.pathName)) {
+    throw new Error(`${metadata.label} path ${metadata.pathName} is not present in its files list`);
   }
 }
 
