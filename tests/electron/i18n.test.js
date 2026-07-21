@@ -102,6 +102,10 @@ test('AI limit capability labels stay compact in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.limits.device.localAndSynced', { count: 2 }), '本機 + 2 同步');
   assert.equal(translate('zh-TW', 'settings.limits.device.localAlso'), '本機也有');
   assert.equal(translate('zh-TW', 'settings.limits.capability.web'), 'Web');
+  assert.equal(translate('zh-TW', 'settings.limits.capability.webApi'), 'Web/API');
+  assert.equal(translate('zh-TW', 'settings.limits.capability.membershipCodingPlan'), '會員/Coding Plan');
+  assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 kimi-auth，複製它的 Value。');
+  assert.equal(translate('zh-TW', 'settings.kimi.apiFallback'), '選用：Kimi Code API 備援');
   assert.equal(translate('zh-CN', 'settings.limits.capability.appMustBeOpen'), '需打开 App 或 CLI');
   assert.equal(translate('zh-CN', 'settings.limits.capability.appCliRpc'), 'App/CLI RPC');
   assert.equal(translate('zh-CN', 'settings.limits.capability.manualLogin'), '手动登录');

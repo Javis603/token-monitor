@@ -1095,6 +1095,35 @@ span.settings-note.settings-item-desc {
 #codexLoginStatus.hidden { display: none; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
+.kimi-cookie-steps { text-wrap: pretty; }
+.kimi-api-fallback {
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.075);
+  color: var(--muted);
+  font-size: 10px;
+}
+.kimi-api-fallback summary {
+  width: max-content;
+  max-width: 100%;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  user-select: none;
+}
+.kimi-api-fallback summary::marker { color: var(--muted); }
+.kimi-api-fallback summary:focus-visible {
+  border-radius: 3px;
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 3px;
+}
+.kimi-api-fallback-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
 .app-update-notes {
   min-width: 0;
   padding-top: 8px;

@@ -5,7 +5,11 @@ const { hashKey } = require('./hashKey');
 
 const KIMI_CODE_BASE_URL = 'https://api.kimi.com/coding/v1';
 const KIMI_CODE_USAGES_URL = `${KIMI_CODE_BASE_URL}/usages`;
+const KIMI_WEB_BASE_URL = 'https://www.kimi.com/apiv2';
+const KIMI_WEB_USAGES_URL = `${KIMI_WEB_BASE_URL}/kimi.gateway.billing.v1.BillingService/GetUsages`;
+const KIMI_MEMBERSHIP_STATS_URL = `${KIMI_WEB_BASE_URL}/kimi.gateway.membership.v2.MembershipService/GetSubscriptionStats`;
 const KIMI_KEY_NAMES = ['KIMI_CODE_API_KEY'];
+const KIMI_WEB_TOKEN_NAMES = ['KIMI_AUTH_TOKEN', 'KIMI_MANUAL_COOKIE'];
 
 // The Kimi Code usage API reports the weekly quota in top-level `usage` and
 // the rolling 5-hour rate limit in `limits[]`. Compatible proxies may expose
@@ -29,6 +33,26 @@ function kimiToken(env = process.env, explicitKey = '') {
   for (const name of KIMI_KEY_NAMES) {
     const raw = cleanSecret(env[name]);
     if (raw) return raw;
+  }
+  return '';
+}
+
+function normalizeKimiWebToken(value) {
+  let raw = cleanSecret(value);
+  if (!raw) return '';
+  raw = raw.replace(/^authorization\s*:\s*/i, '').replace(/^bearer\s+/i, '').trim();
+  const cookieMatch = raw.match(/(?:^|[;\s])kimi-auth=([^;\s'"]+)/i);
+  if (cookieMatch) return cookieMatch[1].trim();
+  if (/^(?:cookie\s*:|curl\s)/i.test(raw) || raw.includes(';')) return '';
+  return raw;
+}
+
+function kimiWebToken(env = process.env, explicitToken = '') {
+  const explicit = normalizeKimiWebToken(explicitToken);
+  if (explicit) return explicit;
+  for (const name of KIMI_WEB_TOKEN_NAMES) {
+    const token = normalizeKimiWebToken(env[name]);
+    if (token) return token;
   }
   return '';
 }
@@ -250,12 +274,205 @@ function parseKimiUsage(rawBody) {
   return { windows };
 }
 
+function objectAt(body, keys) {
+  for (const key of keys) {
+    if (body?.[key] && typeof body[key] === 'object' && !Array.isArray(body[key])) return body[key];
+  }
+  return null;
+}
+
+function ratioPercent(value) {
+  const ratio = numberOrNull(value);
+  if (ratio === null || ratio < 0) return null;
+  const percent = ratio <= 1 ? ratio * 100 : ratio;
+  return Math.max(0, Math.min(100, percent));
+}
+
+function ratioLabel(value) {
+  return Number(value.toFixed(2)).toString();
+}
+
+function membershipRateWindow(body, keys, kind, label, windowMinutes) {
+  const source = objectAt(body, keys);
+  if (!source || source.enabled === false) return null;
+  const usedPercent = ratioPercent(source.ratio ?? source.usedRatio ?? source.used_ratio);
+  if (usedPercent === null) return null;
+  const resetsAt = toIso(source.resetTime ?? source.reset_time ?? source.resetAt ?? source.reset_at);
+  return {
+    kind,
+    label,
+    usedPercent,
+    remainingPercent: Math.max(0, 100 - usedPercent),
+    windowMinutes,
+    resetsAt: resetsAt || undefined,
+    showMeter: true
+  };
+}
+
+function parseKimiMembershipStats(rawBody) {
+  const body = rawBody?.data && typeof rawBody.data === 'object' ? rawBody.data : rawBody;
+  const windows = [];
+  const session = membershipRateWindow(
+    body,
+    ['ratelimitCode5h', 'ratelimit_code_5h', 'ratelimit5h', 'ratelimit_5h'],
+    'session',
+    '5-hour',
+    5 * 60
+  );
+  const weekly = membershipRateWindow(
+    body,
+    ['ratelimitCode7d', 'ratelimit_code_7d', 'ratelimit7d', 'ratelimit_7d'],
+    'weekly',
+    'Weekly',
+    7 * 24 * 60
+  );
+  if (session) windows.push(session);
+  if (weekly) windows.push(weekly);
+
+  const balance = objectAt(body, ['subscriptionBalance', 'subscription_balance']);
+  const feature = String(balance?.feature || '').trim();
+  const type = String(balance?.type || '').trim();
+  const compatibleBalance = balance
+    && (!feature || feature === 'FEATURE_OMNI')
+    && (!type || type === 'SUBSCRIPTION');
+  if (compatibleBalance) {
+    const usedPercent = ratioPercent(balance.amountUsedRatio ?? balance.amount_used_ratio);
+    if (usedPercent !== null) {
+      const codeUsedPercent = ratioPercent(balance.kimiCodeUsedRatio ?? balance.kimi_code_used_ratio);
+      const safeCodePercent = codeUsedPercent === null ? null : Math.min(usedPercent, codeUsedPercent);
+      const detail = safeCodePercent === null
+        ? ''
+        : `Kimi ${ratioLabel(Math.max(0, usedPercent - safeCodePercent))}% · Code ${ratioLabel(safeCodePercent)}%`;
+      windows.push({
+        kind: 'billing',
+        label: 'Monthly',
+        usedPercent,
+        remainingPercent: Math.max(0, 100 - usedPercent),
+        resetsAt: toIso(balance.expireTime ?? balance.expire_time) || undefined,
+        detail,
+        showMeter: true
+      });
+    }
+  }
+  return { windows };
+}
+
+function parseKimiWebUsage(rawBody) {
+  const body = rawBody?.data && typeof rawBody.data === 'object' ? rawBody.data : rawBody;
+  const usages = Array.isArray(body?.usages) ? body.usages : [];
+  const coding = usages.find((entry) => entry?.scope === 'FEATURE_CODING');
+  if (!coding) return { windows: [] };
+  return parseKimiUsage({ usage: coding.detail, limits: coding.limits });
+}
+
+function kimiRequestError(label, response) {
+  const error = new Error(`${label} returned ${response.status}`);
+  error.status = response.status === 401 || response.status === 403
+    ? 'unauthorized'
+    : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+  return error;
+}
+
+async function fetchJson(url, init, deps, label) {
+  const response = await (deps.fetch || fetch)(url, init);
+  if (!response.ok) throw kimiRequestError(label, response);
+  return response.json();
+}
+
+function jwtSessionHeaders(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return {};
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return {
+      ...(payload.device_id ? { 'x-msh-device-id': String(payload.device_id) } : {}),
+      ...(payload.ssid ? { 'x-msh-session-id': String(payload.ssid) } : {}),
+      ...(payload.sub ? { 'x-traffic-id': String(payload.sub) } : {})
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+function kimiWebHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Cookie: `kimi-auth=${token}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    Origin: 'https://www.kimi.com',
+    Referer: 'https://www.kimi.com/code/console',
+    'connect-protocol-version': '1',
+    'x-language': 'en-US',
+    'x-msh-platform': 'web',
+    ...jwtSessionHeaders(token)
+  };
+}
+
+async function settledValue(promise) {
+  try {
+    return { value: await promise, error: null };
+  } catch (error) {
+    return { value: null, error };
+  }
+}
+
+async function fetchKimiWebWindows(token, deps = {}) {
+  const headers = kimiWebHeaders(token);
+  const [membership, usage] = await Promise.all([
+    settledValue(fetchJson(KIMI_MEMBERSHIP_STATS_URL, {
+      method: 'POST',
+      headers,
+      body: '{}'
+    }, deps, 'Kimi membership stats')),
+    settledValue(fetchJson(KIMI_WEB_USAGES_URL, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ scope: ['FEATURE_CODING'] })
+    }, deps, 'Kimi web usage'))
+  ]);
+  const membershipWindows = membership.value ? parseKimiMembershipStats(membership.value).windows : [];
+  const usageWindows = usage.value ? parseKimiWebUsage(usage.value).windows : [];
+  return {
+    windows: mergeKimiWindows(membershipWindows, usageWindows),
+    errors: [membership.error, usage.error].filter(Boolean)
+  };
+}
+
+async function fetchKimiCodeWindows(key, deps = {}) {
+  const body = await fetchJson(KIMI_CODE_USAGES_URL, {
+    headers: {
+      Authorization: `Bearer ${key}`,
+      Accept: 'application/json'
+    }
+  }, deps, 'Kimi usage');
+  return parseKimiUsage(body).windows;
+}
+
+function mergeKimiWindows(...groups) {
+  const byKind = new Map();
+  for (const windows of groups) {
+    for (const window of windows || []) {
+      if (!byKind.has(window.kind)) byKind.set(window.kind, window);
+    }
+  }
+  return ['session', 'weekly', 'billing'].map((kind) => byKind.get(kind)).filter(Boolean);
+}
+
+function failureStatus(errors) {
+  const statuses = errors.map((error) => error?.status).filter(Boolean);
+  if (statuses.includes('unauthorized')) return 'unauthorized';
+  if (statuses.includes('sourceRateLimited')) return 'sourceRateLimited';
+  return 'unavailable';
+}
+
 async function fetchKimiLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
   const key = kimiToken(env, options.kimiApiKey);
-  if (!key) {
+  const webToken = kimiWebToken(env, options.kimiWebAccessToken);
+  if (!webToken && !key) {
     return normalizeLimitProvider({
       provider: 'kimi',
       source: 'api',
@@ -265,44 +482,48 @@ async function fetchKimiLimits(options = {}, deps = {}) {
     });
   }
 
-  try {
-    const response = await (deps.fetch || fetch)(KIMI_CODE_USAGES_URL, {
-      headers: {
-        Authorization: `Bearer ${key}`,
-        Accept: 'application/json'
-      }
-    });
-    if (!response.ok) {
-      const error = new Error(`Kimi usage returned ${response.status}`);
-      error.status = response.status === 401 || response.status === 403
-        ? 'unauthorized'
-        : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-      throw error;
-    }
-    const usage = parseKimiUsage(await response.json());
-    return normalizeLimitProvider({
-      provider: 'kimi',
-      accountKey: hashKey('kimi', key),
-      source: 'api',
-      status: usage.windows.length ? 'ok' : 'unavailable',
-      updatedAt,
-      windows: usage.windows
-    });
-  } catch (error) {
-    return normalizeLimitProvider({
-      provider: 'kimi',
-      source: 'api',
-      status: error?.status || 'unavailable',
-      updatedAt,
-      windows: []
-    });
+  const errors = [];
+  let webWindows = [];
+  let codeWindows = [];
+  if (webToken) {
+    const web = await fetchKimiWebWindows(webToken, deps);
+    webWindows = web.windows;
+    errors.push(...web.errors);
   }
+  const missingCodeWindow = !webWindows.some((window) => window.kind === 'session')
+    || !webWindows.some((window) => window.kind === 'weekly');
+  if (key && (!webToken || missingCodeWindow)) {
+    try {
+      codeWindows = await fetchKimiCodeWindows(key, deps);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  const windows = mergeKimiWindows(webWindows, codeWindows);
+  const source = webWindows.length ? 'web' : 'api';
+  // Keep the configured logical account stable when a temporary web failure
+  // makes this tick report Code API fallback windows only.
+  const accountSecret = webToken || key;
+  return normalizeLimitProvider({
+    provider: 'kimi',
+    accountKey: accountSecret ? hashKey('kimi', accountSecret) : '',
+    source,
+    status: windows.length ? 'ok' : failureStatus(errors),
+    updatedAt,
+    windows
+  });
 }
 
 module.exports = {
   KIMI_CODE_BASE_URL,
   KIMI_CODE_USAGES_URL,
+  KIMI_WEB_BASE_URL,
+  KIMI_WEB_USAGES_URL,
+  KIMI_MEMBERSHIP_STATS_URL,
   kimiToken,
+  kimiWebToken,
   parseKimiUsage,
+  parseKimiWebUsage,
+  parseKimiMembershipStats,
   fetchKimiLimits
 };

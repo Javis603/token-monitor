@@ -40,7 +40,7 @@ const { qoderCookie, fetchQoderLimits } = qoderLimits;
 const ollamaLimits = require('./ollamaLimits');
 const { ollamaSessionCookie, fetchOllamaLimits } = ollamaLimits;
 const kimiLimits = require('./kimiLimits');
-const { kimiToken, fetchKimiLimits } = kimiLimits;
+const { kimiToken, kimiWebToken, fetchKimiLimits } = kimiLimits;
 const {
   grokCredential,
   readAuthJson,
@@ -2806,6 +2806,7 @@ module.exports = {
   ollamaSessionCookie,
   fetchOllamaLimits,
   kimiToken,
+  kimiWebToken,
   fetchKimiLimits,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,

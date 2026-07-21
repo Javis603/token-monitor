@@ -650,15 +650,19 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(volcengineUrlBody, /console\.volcengine\.com\/ark\/region:ark\+cn-beijing\/openManagement/);
 });
 
-test('Kimi account panel opens the allowlisted Code console', () => {
+test('Kimi account panel stores web access separately and opens the allowlisted Code console', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /data-i18n="settings\.kimi\.title">Kimi Account<\/span>/);
   assert.match(html, /data-i18n="settings\.kimi\.openBrowser">Open Kimi Code Console<\/button>/);
-  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*data-i18n="settings\.kimi\.saveApiKey">/);
+  assert.match(html, /settings\.kimi\.step2[\s\S]*Application\/Storage[\s\S]*Cookies[\s\S]*www\.kimi\.com/);
+  assert.match(html, /settings\.kimi\.step3[\s\S]*Find kimi-auth and copy its Value/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*placeholder="kimi-auth=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*?<details class="kimi-api-fallback">[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*data-i18n="settings\.kimi\.saveApiKey">/);
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   assert.match(setupBody, /saveSettings\(\{ kimiApiKey: input\.value \}\)/);
+  assert.match(setupBody, /saveSettings\(\{ kimiWebAccessToken: input\.value \}\)/);
+  assert.match(setupBody, /saveSettings\(\{ kimiApiKey: '', kimiWebAccessToken: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(kimiPlatformUrl\(\)\)/);
   const urlBody = functionBody(app, 'kimiPlatformUrl', 'renderExternalProviderStatus');
   assert.match(urlBody, /return 'https:\/\/www\.kimi\.com\/code\/console';/);
@@ -862,6 +866,8 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  assert.match(credentialStore, /kimiWebAccessToken: \['providers', 'kimi', 'webAccessToken'\]/);
+  assert.match(body, /kimiWebAccessTokenConfigured: Boolean\(currentKimiWebAccessToken\(\)\)/);
   const mimoRendererShape = main.slice(
     main.indexOf('function mimoAccountsForRenderer'),
     main.indexOf('function mimoManagedAccountsForCollector')
@@ -1101,6 +1107,8 @@ test('main collectors pass GUI limit credentials in every widget mode', () => {
     assert.match(collector, /volcengineRegion: settings\.volcengineRegion \|\| ''/);
     assert.match(collector, /qoderCookie: settings\.qoderCookie \|\| ''/);
     assert.match(collector, /qoderSite: settings\.qoderSite \|\| 'global'/);
+    assert.match(collector, /kimiApiKey: settings\.kimiApiKey \|\| ''/);
+    assert.match(collector, /kimiWebAccessToken: settings\.kimiWebAccessToken \|\| ''/);
     assert.match(collector, /ollamaCookie: settings\.ollamaCookie \|\| ''/);
   }
 });

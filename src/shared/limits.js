@@ -80,6 +80,11 @@ function normalizeWindowLabel(value) {
   return clean.length <= 32 ? clean : '';
 }
 
+function normalizeWindowDetail(value) {
+  const raw = String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return raw.slice(0, 96);
+}
+
 function normalizeIsoTimestamp(value) {
   if (value === null || value === undefined || value === '') return null;
   let date;
@@ -131,6 +136,7 @@ function normalizeLimitWindow(input) {
     resetsAt: normalizeIsoTimestamp(input.resetsAt ?? input.resets_at ?? input.resetAt ?? input.reset_at),
     windowMinutes: numberOrNull(input.windowMinutes ?? input.window_minutes ?? input.windowDurationMins),
     resetDescription: input.resetDescription ? String(input.resetDescription) : '',
+    detail: normalizeWindowDetail(input.detail ?? input.detailText ?? input.detail_text),
     showMeter: input.showMeter !== false && input.meter !== false
   };
 }

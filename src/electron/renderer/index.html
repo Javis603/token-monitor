@@ -825,11 +825,30 @@
                   <button id="kimiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
                 </div>
                 <div id="kimiManualPanel">
-                  <p class="settings-note" data-i18n="settings.kimi.note">Paste your Kimi Code API key. It stays on this device and is used only to check Kimi Code quota.</p>
-                  <input id="kimiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
+                  <p class="settings-note" data-i18n="settings.kimi.cookieIntro">Connect your Kimi website session to show 5-hour, weekly, and monthly limits. The cookie stays on this device.</p>
+                  <p class="settings-note kimi-cookie-steps">
+                    <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> https://www.kimi.com.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find kimi-auth and copy its Value.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save cookie.</span>
+                  </p>
+                  <textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" placeholder="kimi-auth=..." data-i18n-placeholder="settings.kimi.webTokenPlaceholder"></textarea>
                   <div class="settings-actions">
-                    <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
+                    <button id="kimiWebAccessTokenSubmit" data-i18n="settings.kimi.saveWebToken">Save cookie</button>
                   </div>
+                  <details class="kimi-api-fallback">
+                    <summary data-i18n="settings.kimi.apiFallback">Optional: Kimi Code API fallback</summary>
+                    <div class="kimi-api-fallback-body">
+                      <p class="settings-note" data-i18n="settings.kimi.apiKeyNote">Use this only when Kimi web access is unavailable. It can restore 5-hour and weekly limits, but not Monthly.</p>
+                      <label for="kimiApiKeyInput">
+                        <span data-i18n="settings.kimi.apiKeyLabel">Kimi Code API key</span>
+                        <input id="kimiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
+                      </label>
+                      <div class="settings-actions">
+                        <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
+                      </div>
+                    </div>
+                  </details>
                 </div>
                 <div id="kimiErrorMessage" class="settings-note error hidden"></div>
               </div>

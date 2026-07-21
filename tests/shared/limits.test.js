@@ -111,6 +111,23 @@ test('publicLimits preserves MiMo plan status while removing account identity', 
   assert.equal(Object.hasOwn(payload.providers[0], 'accountName'), false);
 });
 
+test('publicLimits preserves a bounded window detail for shared quota composition', () => {
+  const payload = publicLimits({
+    providers: [{
+      provider: 'kimi',
+      status: 'ok',
+      source: 'web',
+      windows: [{
+        kind: 'billing',
+        usedPercent: 16.12,
+        detail: 'Kimi 11.12% · Code 5%\n'
+      }]
+    }]
+  });
+
+  assert.equal(payload.providers[0].windows[0].detail, 'Kimi 11.12% · Code 5%');
+});
+
 test('aggregateLimits merges the same Codex account across devices and keeps distinct ones', () => {
   const aggregate = aggregateLimits([
     {
