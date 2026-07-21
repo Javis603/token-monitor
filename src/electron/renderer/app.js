@@ -129,6 +129,8 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   API: 'settings.limits.capability.api',
   'Add API key': 'settings.limits.status.addApiKey',
   'Update API key': 'settings.limits.status.updateApiKey',
+  'Add credential': 'settings.limits.status.addCredential',
+  'Update credential': 'settings.limits.status.updateCredential',
   Live: 'settings.limits.status.live',
   Linked: 'settings.limits.status.linked',
   'Sign in': 'settings.limits.status.signIn',

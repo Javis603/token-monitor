@@ -1181,6 +1181,15 @@ test('Kimi capability tags and source label', () => {
   );
 });
 
+test('Kimi credential statuses are localized in settings', () => {
+  const app = readRendererFile('app.js');
+  const i18n = readRendererFile('i18n.js');
+  assert.match(app, /'Add credential': 'settings\.limits\.status\.addCredential'/);
+  assert.match(app, /'Update credential': 'settings\.limits\.status\.updateCredential'/);
+  assert.match(i18n, /'settings\.limits\.status\.addCredential': '新增憑證'/);
+  assert.match(i18n, /'settings\.limits\.status\.updateCredential': '更新憑證'/);
+});
+
 test('Kimi usage and limits share the canonical provider id and vendor color', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
