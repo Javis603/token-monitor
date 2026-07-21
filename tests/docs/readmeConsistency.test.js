@@ -42,14 +42,6 @@ test('WSL SQLite guides state and verify the Node.js prerequisite', () => {
   }
 });
 
-test('WSL SQLite guides identify the affected OpenCode and Hermes databases', () => {
-  for (const file of ['docs/wsl-sqlite-setup.md', 'docs/wsl-sqlite-setup.zh-CN.md']) {
-    const guide = read(file);
-    assert.match(guide, /~\/\.local\/share\/opencode\/opencode\.db/, file);
-    assert.match(guide, /~\/\.hermes\/state\.db/, file);
-  }
-});
-
 test('legacy Hermes guide keeps published links working', () => {
   assert.match(read('docs/hermes-wsl-setup.md'), /\(wsl-sqlite-setup\.zh-CN\.md\)/);
 });

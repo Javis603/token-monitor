@@ -8,11 +8,6 @@ On Windows, Token Monitor normally scans supported tools inside every running WS
 
 OpenCode and Hermes store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Token Monitor may therefore show the tool under **Settings → Collection → WSL detection** with no usage.
 
-| Tool | Usage database inside WSL | Windows-side scan |
-|:---|:---|:---|
-| OpenCode | `~/.local/share/opencode/opencode.db` | May detect the tool but return no usage from an active database |
-| Hermes | `~/.hermes/state.db` | May detect the tool but return no usage from an active database |
-
 Do not copy a live `.db` file as a workaround. Recent transactions may still be in `-wal`, and copying the database and sidecars separately does not guarantee a consistent snapshot.
 
 The reliable setup is:

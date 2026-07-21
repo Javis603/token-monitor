@@ -8,11 +8,6 @@ Windows 版 Token Monitor 默认会通过 `\\wsl$` 扫描所有正在运行的 W
 
 OpenCode 和 Hermes 的当前用量保存在 SQLite 数据库中。Windows 进程可以通过 `\\wsl$` 找到数据库，但 SQLite 无法可靠地跨 WSL 9P 边界协调文件锁和正在使用的 WAL。因此，Token Monitor 可能会在 **设置 → 采集 → WSL 检测** 里显示已找到工具，却没有用量。
 
-| 工具 | WSL 内的用量数据库 | Windows 侧扫描结果 |
-|:---|:---|:---|
-| OpenCode | `~/.local/share/opencode/opencode.db` | 可能找到工具，但无法从正在使用的数据库取得用量 |
-| Hermes | `~/.hermes/state.db` | 可能找到工具，但无法从正在使用的数据库取得用量 |
-
 不要把复制正在使用的 `.db` 文件当作解决方案。最新事务可能还在 `-wal` 中，而分别复制数据库与 sidecar 文件也无法保证得到一致快照。
 
 可靠的架构是：
