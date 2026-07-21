@@ -387,6 +387,43 @@ test('fetchKimiLimits keeps web 5-hour and weekly windows when monthly enrichmen
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly']);
 });
 
+test('fetchKimiLimits bounds monthly enrichment without delaying web usage windows', async () => {
+  let membershipSignal = null;
+  const startedAt = Date.now();
+  const provider = await fetchKimiLimits(
+    { kimiWebAccessToken: 'web-token' },
+    {
+      env: {},
+      kimiMembershipGraceMs: 10,
+      now: () => Date.parse('2026-07-19T00:00:00Z'),
+      fetch: async (url, init) => {
+        if (String(url) === KIMI_MEMBERSHIP_STATS_URL) {
+          membershipSignal = init.signal;
+          // Deliberately ignore cancellation to prove the total grace budget,
+          // rather than transport cooperation, bounds this enrichment.
+          return new Promise(() => {});
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            usages: [{
+              scope: 'FEATURE_CODING',
+              detail: { used: 20, limit: 100 },
+              limits: [{ detail: { used: 5, limit: 50 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } }]
+            }]
+          })
+        };
+      }
+    }
+  );
+
+  assert.ok(Date.now() - startedAt < 250);
+  assert.equal(membershipSignal?.aborted, true);
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly']);
+});
+
 test('fetchKimiLimits keeps the web account identity during a Code API-only fallback tick', async () => {
   const provider = await fetchKimiLimits(
     { kimiWebAccessToken: 'web-token', kimiApiKey: 'code-key' },

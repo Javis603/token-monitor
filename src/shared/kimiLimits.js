@@ -10,6 +10,7 @@ const KIMI_WEB_USAGES_URL = `${KIMI_WEB_BASE_URL}/kimi.gateway.billing.v1.Billin
 const KIMI_MEMBERSHIP_STATS_URL = `${KIMI_WEB_BASE_URL}/kimi.gateway.membership.v2.MembershipService/GetSubscriptionStats`;
 const KIMI_KEY_NAMES = ['KIMI_CODE_API_KEY'];
 const KIMI_WEB_TOKEN_NAMES = ['KIMI_AUTH_TOKEN', 'KIMI_MANUAL_COOKIE'];
+const KIMI_MEMBERSHIP_GRACE_MS = 2000;
 
 // The Kimi Code usage API reports the weekly quota in top-level `usage` and
 // the rolling 5-hour rate limit in `limits[]`. Compatible proxies may expose
@@ -417,20 +418,51 @@ async function settledValue(promise) {
   }
 }
 
+async function settledWithin(promise, timeoutMs, onTimeout) {
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      try {
+        onTimeout?.();
+      } finally {
+        resolve({ value: null, error: null });
+      }
+    }, timeoutMs);
+  });
+  const result = await Promise.race([
+    settledValue(promise),
+    timeout
+  ]);
+  if (timer) clearTimeout(timer);
+  return result;
+}
+
 async function fetchKimiWebWindows(token, deps = {}) {
   const headers = kimiWebHeaders(token);
-  const [membership, usage] = await Promise.all([
-    settledValue(fetchJson(KIMI_MEMBERSHIP_STATS_URL, {
+  const membershipController = typeof AbortController === 'function' ? new AbortController() : null;
+  const configuredGrace = numberOrNull(deps.kimiMembershipGraceMs);
+  const membershipGraceMs = configuredGrace !== null && configuredGrace >= 0
+    ? configuredGrace
+    : KIMI_MEMBERSHIP_GRACE_MS;
+  // Membership stats enrich the reliable GetUsages baseline with the shared
+  // monthly pool (and may provide fresher 5h/7d ratios). Bound this optional
+  // request from launch time so a slow endpoint never delays existing windows.
+  const membershipOutcome = settledWithin(
+    fetchJson(KIMI_MEMBERSHIP_STATS_URL, {
       method: 'POST',
       headers,
-      body: '{}'
-    }, deps, 'Kimi membership stats')),
-    settledValue(fetchJson(KIMI_WEB_USAGES_URL, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ scope: ['FEATURE_CODING'] })
-    }, deps, 'Kimi web usage'))
-  ]);
+      body: '{}',
+      ...(membershipController ? { signal: membershipController.signal } : {})
+    }, deps, 'Kimi membership stats'),
+    membershipGraceMs,
+    () => membershipController?.abort()
+  );
+  const usageOutcome = settledValue(fetchJson(KIMI_WEB_USAGES_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ scope: ['FEATURE_CODING'] })
+  }, deps, 'Kimi web usage'));
+  const [membership, usage] = await Promise.all([membershipOutcome, usageOutcome]);
   const membershipWindows = membership.value ? parseKimiMembershipStats(membership.value).windows : [];
   const usageWindows = usage.value ? parseKimiWebUsage(usage.value).windows : [];
   return {
