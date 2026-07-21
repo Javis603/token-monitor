@@ -34,6 +34,14 @@ test('WSL SQLite guides keep English and Chinese entry points connected', () => 
   assert.match(read('docs/wsl-sqlite-setup.zh-CN.md'), /\[English\]\(wsl-sqlite-setup\.md\)/);
 });
 
+test('WSL SQLite guides state and verify the Node.js prerequisite', () => {
+  for (const file of ['docs/wsl-sqlite-setup.md', 'docs/wsl-sqlite-setup.zh-CN.md']) {
+    const guide = read(file);
+    assert.match(guide, /Node\.js 22\.13\.0/, file);
+    assert.match(guide, /node --version\nnpm --version\n/, file);
+  }
+});
+
 test('legacy Hermes guide keeps published links working', () => {
   assert.match(read('docs/hermes-wsl-setup.md'), /\(wsl-sqlite-setup\.zh-CN\.md\)/);
 });

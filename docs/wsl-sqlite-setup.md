@@ -26,9 +26,11 @@ Keep the hub on a trusted network and retain the generated secret. If WSL cannot
 
 ## 2. Install the headless agent in WSL
 
-Run these commands inside WSL:
+Token Monitor requires Node.js 22.13.0 or newer. Verify Node.js and npm inside WSL before installing; upgrade Node.js first if the reported version is older.
 
 ```bash
+node --version
+npm --version
 git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
