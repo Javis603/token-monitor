@@ -47,7 +47,12 @@ test('Worker public stats strip every account identity and plan field', async ()
     }
   };
   const hub = new worker.HubDO({
-    storage: { async list() { return new Map([['dev:macbook', device]]); } }
+    storage: {
+      async list(options) {
+        assert.deepEqual(options, { prefix: 'dev:' });
+        return new Map([['dev:macbook', device]]);
+      }
+    }
   }, { PUBLIC_STATS_ENABLED: '1' });
 
   const response = await hub.fetch(new Request('https://example.com/api/public/stats'));
