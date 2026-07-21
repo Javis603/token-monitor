@@ -16,12 +16,14 @@
     "sync:worker": "node scripts/sync-worker-shared.js",
     "prepack": "npm run icons",
     "predist:mac": "npm run icons",
+    "predist:mac:x64": "npm run icons",
     "predist:win": "npm run icons",
     "predist:win:dir": "npm run icons",
     "predist:win:prepackaged": "npm run icons",
     "predist:linux": "npm run icons",
     "pack": "electron-builder --dir",
     "dist:mac": "electron-builder --mac --arm64 --publish never",
+    "dist:mac:x64": "electron-builder --mac --x64 --publish never",
     "dist:win": "electron-builder --win --x64 --publish never",
     "dist:win:dir": "electron-builder --win dir --x64 --publish never",
     "dist:win:prepackaged": "electron-builder --prepackaged dist/win-unpacked --win nsis portable --x64 --publish never",
@@ -52,18 +54,8 @@
     "mac": {
       "artifactName": "Token-Monitor-${version}-${arch}.${ext}",
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "forceCodeSigning": true,
       "category": "public.app-category.developer-tools",

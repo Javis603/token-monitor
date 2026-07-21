@@ -109,6 +109,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 Download from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
 
 - **macOS (Apple Silicon)** — `.dmg`, signed and notarized
+- **macOS (Intel)** — x64 `.dmg`, signed and notarized
 - **Windows 10/11** — setup and portable `.exe`, signed via [SignPath Foundation](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
 
@@ -169,10 +170,11 @@ To build your own installer, use Node.js 22.13+ on the **target** OS (electron-b
 
 ```bash
 npm install
-npm run dist:mac   # macOS arm64 .dmg          → dist/
-npm run dist:win   # Windows x64 installer .exe → dist/
-npm run dist:linux # Linux x64 AppImage        → dist/
-npm run pack       # unpacked app dir (no installer), for quick local testing
+npm run dist:mac     # macOS arm64 .dmg           → dist/
+npm run dist:mac:x64 # macOS Intel x64 .dmg       → dist/
+npm run dist:win     # Windows x64 installer .exe → dist/
+npm run dist:linux   # Linux x64 AppImage         → dist/
+npm run pack         # unpacked app dir (no installer), for quick local testing
 ```
 
 Output lands in `dist/`. Windows and Linux use the matching `dist:*` script above on the target OS. Packaging the macOS release build requires a local Developer ID Application signing identity; use `npm start` for local development or unsupported platforms.

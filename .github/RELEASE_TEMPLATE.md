@@ -20,6 +20,7 @@
 ## Download
 
 - **macOS Apple Silicon** — [Token-Monitor-0.32.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.32.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0-x64.dmg)
 - **Windows Installer** — [Token-Monitor-Setup-0.32.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-Setup-0.32.0.exe) (recommended)
 - **Windows Portable** — [Token-Monitor-0.32.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0.exe) (no install required)
 - **Linux x64** — [Token-Monitor-0.32.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0.AppImage)
@@ -76,6 +77,7 @@ open-source: https://github.com/junhoyeo/tokscale
 ## 下载
 
 - **macOS Apple Silicon** — [Token-Monitor-0.32.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.32.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0-x64.dmg)
 - **Windows 安装版** — [Token-Monitor-Setup-0.32.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-Setup-0.32.0.exe)（推荐）
 - **Windows 便携版** — [Token-Monitor-0.32.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0.exe)（免安装）
 - **Linux x64** — [Token-Monitor-0.32.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0.AppImage)
