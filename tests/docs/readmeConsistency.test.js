@@ -18,3 +18,22 @@ test('localized README env summaries stay aligned', () => {
 
   for (const file of files.slice(1)) assert.deepEqual(envKeys(file), expected, file);
 });
+
+test('localized README WSL claims disclose the SQLite agent boundary', () => {
+  const files = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
+
+  for (const file of files) {
+    const line = read(file).split('\n').find((value) => value.includes('**WSL')) || '';
+    assert.match(line, /SQLite/, file);
+    assert.match(line, /docs\/wsl-sqlite-setup(?:\.zh-CN)?\.md/, file);
+  }
+});
+
+test('WSL SQLite guides keep English and Chinese entry points connected', () => {
+  assert.match(read('docs/wsl-sqlite-setup.md'), /\[简体中文\]\(wsl-sqlite-setup\.zh-CN\.md\)/);
+  assert.match(read('docs/wsl-sqlite-setup.zh-CN.md'), /\[English\]\(wsl-sqlite-setup\.md\)/);
+});
+
+test('legacy Hermes guide keeps published links working', () => {
+  assert.match(read('docs/hermes-wsl-setup.md'), /\(wsl-sqlite-setup\.zh-CN\.md\)/);
+});

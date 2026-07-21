@@ -16,11 +16,12 @@ test('homeHasData returns the client ids whose markers are present', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const present = new Set([
     `${home}\\.codex\\sessions`,
-    `${home}\\.hermes`
+    `${home}\\.hermes`,
+    `${home}\\.local\\share\\opencode`
   ]);
   const existsSync = (p) => present.has(p);
   const ids = homeHasData(home, existsSync);
-  assert.deepEqual([...ids].sort(), ['codex', 'hermes']);
+  assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode']);
 });
 
 test('homeHasData maps an alternate-root marker to its client id', () => {

@@ -566,6 +566,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .wsl-panel-title { font-size: 11px; color: var(--muted); }
 .wsl-panel-name { font-size: 11px; }
 .wsl-panel-row { padding-left: 10px; }
+.wsl-panel-help { margin: 2px 0 0 10px; line-height: 1.45; }
 /* Modern settings row: text (title + optional desc) left, control right. */
 .settings-panel label.settings-item,
 .settings-panel .settings-item {
