@@ -1,6 +1,7 @@
 'use strict';
 
 const https = require('node:https');
+const { abortError } = require('./probeDeadline');
 
 const USAGE_SUMMARY_URL = 'https://cursor.com/api/usage-summary';
 const AUTH_ME_URL = 'https://cursor.com/api/auth/me';
@@ -144,16 +145,24 @@ function parseUserInfo(input) {
   };
 }
 
-function requestJson(url, sessionToken, { timeoutMs = 15000, httpsLib = https } = {}) {
+function requestJson(url, sessionToken, { timeoutMs = 15000, httpsLib = https, signal } = {}) {
+  if (signal?.aborted) return Promise.reject(abortError(signal));
   return new Promise((resolve) => {
     const parsed = new URL(url);
     let settled = false;
+    let req = null;
     const finish = (value) => {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener?.('abort', onAbort);
       resolve(value);
     };
-    const req = httpsLib.request({
+    const onAbort = () => {
+      const error = abortError(signal);
+      try { req?.destroy?.(error); } catch (_) {}
+      finish({ ok: false, error: { kind: 'network', message: error.message } });
+    };
+    req = httpsLib.request({
       method: 'GET',
       hostname: parsed.hostname,
       path: `${parsed.pathname}${parsed.search}`,
@@ -186,6 +195,11 @@ function requestJson(url, sessionToken, { timeoutMs = 15000, httpsLib = https } 
       });
     }
     req.on('error', (err) => finish({ ok: false, error: { kind: 'network', message: err.message } }));
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
     req.end();
   });
 }

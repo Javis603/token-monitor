@@ -66,5 +66,6 @@ async function runWithProbeDeadline(task, options = {}) {
 
 module.exports = {
   ProbeTimeoutError,
+  abortError,
   runWithProbeDeadline
 };

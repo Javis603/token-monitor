@@ -8,6 +8,7 @@ const {
   displayPlanName,
   parseResetDate,
   existingKiroCli,
+  runKiroUsageCli,
   fetchKiroLimits
 } = require('../../src/shared/kiroLimits');
 const { parseLimitProviders, fetchKiroLimits: fetchKiroLimitsViaCollector } = require('../../src/shared/limitCollector');
@@ -265,4 +266,24 @@ test('limitCollector re-exports fetchKiroLimits', async () => {
   });
   assert.equal(provider.provider, 'kiro');
   assert.equal(provider.status, 'ok');
+});
+
+test('runKiroUsageCli terminates immediately when the parent probe is aborted', async () => {
+  const { EventEmitter } = require('node:events');
+  const controller = new AbortController();
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  let kills = 0;
+  child.kill = () => { kills += 1; };
+
+  const pending = runKiroUsageCli({
+    signal: controller.signal,
+    spawn: () => child,
+    kiroCliTimeoutMs: 60_000
+  });
+  controller.abort(new Error('runtime stopped'));
+
+  await assert.rejects(pending, /runtime stopped/);
+  assert.equal(kills, 1);
 });

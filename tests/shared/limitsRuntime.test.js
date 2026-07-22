@@ -41,6 +41,7 @@ function runtimeDeps(overrides = {}) {
   return {
     autoStart: false,
     cleanupGraceMs: 0,
+    maxConcurrency: 1,
     providerPhysicalBoundMs: () => 100,
     ...overrides
   };
@@ -134,6 +135,41 @@ test('different account scopes stay independent inside one provider lane', async
   runtime.stop();
 });
 
+test('diagnostic events expose queue state without leaking scoped credentials', async () => {
+  const events = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    onEvent: (event) => events.push(event),
+    probeProvider: async () => [providerRow('kimi', 'account', 'Kimi')]
+  }));
+
+  await runtime.refresh({ provider: 'kimi', credential: 'secret-cookie' }, 'credential-edit');
+
+  assert.deepEqual(events.map((event) => event.type), ['probe-start', 'probe-finish']);
+  assert.ok(events.every((event) => event.provider === 'kimi'));
+  assert.ok(events.every((event) => Number.isInteger(event.active) && Number.isInteger(event.queued)));
+  assert.ok(!JSON.stringify(events).includes('secret-cookie'));
+  await waitFor(() => runtime.getDiagnostics().active === 0, 'executor to become idle');
+  assert.deepEqual(runtime.getDiagnostics(), {
+    active: 0,
+    maxConcurrency: 1,
+    queued: 0,
+    providers: [{ provider: 'kimi', active: false, pending: 0, retryAttempt: 0, retryAt: null }]
+  });
+  runtime.stop();
+});
+
+test('a throwing diagnostic observer cannot break collection', async () => {
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    onEvent: () => { throw new Error('observer failed'); },
+    probeProvider: async () => [providerRow('kimi', 'account', 'Kimi')]
+  }));
+
+  const result = await runtime.refresh({ provider: 'kimi' }, 'manual');
+  assert.equal(result.superseded, false);
+  assert.equal(runtime.getSnapshot().providers[0].status, 'ok');
+  runtime.stop();
+});
+
 test('a later account edit trails an active provider-wide job without discarding other accounts', async () => {
   const jobs = [];
   const runtime = createLimitsRuntime({ limitProviders: ['mimo'] }, runtimeDeps({
@@ -187,11 +223,12 @@ test('provider-wide pending work supersedes older account-scoped pending work', 
   runtime.stop();
 });
 
-test('the shared limits executor never runs more than one provider job at once', async () => {
+test('the shared limits executor runs up to its configured bound', async () => {
   const jobs = [];
   let active = 0;
   let maximum = 0;
-  const runtime = createLimitsRuntime({ limitProviders: ['claude', 'kimi'] }, runtimeDeps({
+  const runtime = createLimitsRuntime({ limitProviders: ['claude', 'kimi', 'mimo'] }, runtimeDeps({
+    maxConcurrency: 2,
     probeProvider: (provider) => {
       active += 1;
       maximum = Math.max(maximum, active);
@@ -202,13 +239,158 @@ test('the shared limits executor never runs more than one provider job at once',
   }));
 
   const refresh = runtime.refresh({}, 'manual');
-  await waitFor(() => jobs.length === 1, 'first provider dispatch');
+  await waitFor(() => jobs.length === 2, 'first bounded provider batch');
+  assert.equal(active, 2);
   jobs[0].job.resolve([providerRow(jobs[0].provider, 'one', 'One')]);
-  await waitFor(() => jobs.length === 2, 'second provider dispatch');
+  await waitFor(() => jobs.length === 3, 'next provider dispatch');
   jobs[1].job.resolve([providerRow(jobs[1].provider, 'two', 'Two')]);
+  jobs[2].job.resolve([providerRow(jobs[2].provider, 'three', 'Three')]);
   await refresh;
 
-  assert.equal(maximum, 1);
+  assert.equal(maximum, 2);
+  runtime.stop();
+});
+
+test('a provider lane stays serial while other providers use executor capacity', async () => {
+  const jobs = [];
+  const activeByProvider = new Map();
+  let sameProviderOverlap = false;
+  const runtime = createLimitsRuntime({ limitProviders: ['claude', 'kimi'] }, runtimeDeps({
+    maxConcurrency: 2,
+    probeProvider: (provider, _config, context) => {
+      const active = (activeByProvider.get(provider) || 0) + 1;
+      activeByProvider.set(provider, active);
+      if (active > 1) sameProviderOverlap = true;
+      const job = deferred();
+      jobs.push({ provider, reason: context.reason, job });
+      return job.promise.finally(() => activeByProvider.set(provider, active - 1));
+    }
+  }));
+
+  const firstClaude = runtime.refresh({ provider: 'claude' }, 'manual');
+  const kimi = runtime.refresh({ provider: 'kimi' }, 'manual');
+  await waitFor(() => jobs.length === 2, 'cross-provider concurrency');
+  const secondClaude = runtime.refresh({ provider: 'claude' }, 'credential-save');
+  assert.equal((await firstClaude).superseded, true);
+  assert.equal(jobs.filter((job) => job.provider === 'claude').length, 1);
+
+  jobs.find((job) => job.provider === 'claude').job.resolve([providerRow('claude', 'old', 'Old')]);
+  await waitFor(() => jobs.filter((job) => job.provider === 'claude').length === 2, 'trailing Claude dispatch');
+  jobs.find((job) => job.provider === 'kimi').job.resolve([providerRow('kimi', 'kimi', 'Kimi')]);
+  jobs.filter((job) => job.provider === 'claude')[1].job.resolve([providerRow('claude', 'new', 'New')]);
+  await Promise.all([kimi, secondClaude]);
+
+  assert.equal(sameProviderOverlap, false);
+  runtime.stop();
+});
+
+test('a fast provider publishes before a slower provider finishes', async () => {
+  const jobs = new Map();
+  const updates = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['claude', 'kimi'] }, runtimeDeps({
+    maxConcurrency: 2,
+    onUpdate: (summary) => updates.push(summary.providers.map((row) => row.provider)),
+    probeProvider: (provider) => {
+      const job = deferred();
+      jobs.set(provider, job);
+      return job.promise;
+    }
+  }));
+
+  const refresh = runtime.refresh({}, 'manual');
+  await waitFor(() => jobs.size === 2, 'parallel provider dispatches');
+  jobs.get('kimi').resolve([providerRow('kimi', 'kimi', 'Kimi')]);
+  await waitFor(() => updates.some((providers) => providers.includes('kimi')), 'incremental Kimi publication');
+  assert.equal(updates.at(-1).includes('claude'), false);
+  jobs.get('claude').resolve([providerRow('claude', 'claude', 'Claude')]);
+  await refresh;
+  assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.provider).sort(), ['claude', 'kimi']);
+  runtime.stop();
+});
+
+test('Retry-After defers the provider retry and manual refresh does not bypass it', async () => {
+  const clock = fakeClock(10_000);
+  const calls = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    random: () => 0,
+    probeProvider: async (_provider, _config, context) => {
+      calls.push(context.reason);
+      if (calls.length === 1) {
+        context.onRetryAfter(30_000);
+        return [{ provider: 'kimi', status: 'sourceRateLimited', windows: [] }];
+      }
+      return [providerRow('kimi', 'account', 'Kimi')];
+    }
+  }));
+
+  await runtime.refresh({ provider: 'kimi' }, 'interval');
+  assert.deepEqual(clock.delays(), [30_000]);
+  const manual = await runtime.refresh({ provider: 'kimi' }, 'manual');
+  assert.equal(manual.deferred, true);
+  assert.equal(calls.length, 1);
+  clock.advance(29_999);
+  assert.equal(calls.length, 1);
+  clock.advance(1);
+  await waitFor(() => calls.length === 2, 'Retry-After dispatch');
+  assert.deepEqual(calls, ['interval', 'retry']);
+  assert.deepEqual(clock.delays(), []);
+  runtime.stop();
+});
+
+test('transient failures use exponential jittered backoff and reset after success', async () => {
+  const clock = fakeClock(0);
+  let calls = 0;
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    retryBaseMs: 1_000,
+    retryMaxMs: 10_000,
+    random: () => 0,
+    probeProvider: async () => {
+      calls += 1;
+      if (calls < 3) return [{ provider: 'kimi', status: 'unavailable', windows: [] }];
+      return [providerRow('kimi', 'account', 'Kimi')];
+    }
+  }));
+
+  await runtime.refresh({ provider: 'kimi' }, 'interval');
+  assert.deepEqual(clock.delays(), [500]);
+  clock.advance(500);
+  await waitFor(() => calls === 2, 'first retry');
+  assert.deepEqual(clock.delays(), [1_000]);
+  clock.advance(1_000);
+  await waitFor(() => calls === 3, 'second retry');
+  assert.deepEqual(clock.delays(), []);
+  runtime.stop();
+});
+
+test('a credential change clears an old provider cooldown', async () => {
+  const clock = fakeClock(0);
+  const calls = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    random: () => 0,
+    probeProvider: async (_provider, _config, context) => {
+      calls.push(context.reason);
+      if (calls.length === 1) {
+        context.onRetryAfter(60_000);
+        return [{ provider: 'kimi', status: 'sourceRateLimited', windows: [] }];
+      }
+      return [providerRow('kimi', 'new', 'New credential')];
+    }
+  }));
+
+  await runtime.refresh({ provider: 'kimi' }, 'interval');
+  assert.deepEqual(clock.delays(), [60_000]);
+  await runtime.refresh({ provider: 'kimi' }, 'credential-save');
+  assert.deepEqual(calls, ['interval', 'credential-save']);
+  assert.deepEqual(clock.delays(), []);
   runtime.stop();
 });
 

@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { normalizeLimitProvider } = require('./limits');
+const { abortError } = require('./probeDeadline');
 const { hashKey } = require('./hashKey');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -272,6 +273,8 @@ function runKiroUsageCli(deps = {}) {
   const env = { ...(deps.env || process.env), TERM: 'xterm-256color' };
   const command = deps.kiroCliPath || 'kiro-cli';
   const timeoutMs = Number(deps.kiroCliTimeoutMs || 20000);
+  const signal = deps.signal;
+  if (signal?.aborted) return Promise.reject(abortError(signal));
   return new Promise((resolve, reject) => {
     let child;
     try {
@@ -286,17 +289,33 @@ function runKiroUsageCli(deps = {}) {
     }
     let stdout = '';
     let stderr = '';
-    const timer = setTimeout(() => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+      callback(value);
+    };
+    const stopChild = () => {
       try { child.kill('SIGTERM'); } catch (_) {}
-      reject(errorWithStatus('unavailable', 'kiro-cli timed out'));
+    };
+    const onAbort = () => {
+      stopChild();
+      finish(reject, abortError(signal));
+    };
+    const timer = setTimeout(() => {
+      stopChild();
+      finish(reject, errorWithStatus('unavailable', 'kiro-cli timed out'));
     }, timeoutMs);
     child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (error) => { clearTimeout(timer); reject(error); });
+    child.on('error', (error) => finish(reject, error));
     child.on('close', () => {
-      clearTimeout(timer);
-      resolve(stdout.trim() ? stdout : stderr);
+      finish(resolve, stdout.trim() ? stdout : stderr);
     });
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 

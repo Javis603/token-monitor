@@ -6,6 +6,17 @@ const test = require('node:test');
 const probe = require('../../src/shared/antigravityProbe');
 const rootPackage = require('../../package.json');
 
+test('probe stops waiting for process discovery when the parent signal aborts', async () => {
+  const controller = new AbortController();
+  const pending = probe.probe({
+    signal: controller.signal,
+    probeTimeoutMs: 60_000,
+    detectProcessInfos: () => new Promise(() => {})
+  });
+  controller.abort(new Error('runtime stopped'));
+  await assert.rejects(pending, /runtime stopped/);
+});
+
 test('parseProcessLine extracts pid + csrf + extension port from a darwin ps line', () => {
   const line = '53602 /Applications/Antigravity.app/Contents/Resources/bin/language_server --standalone --override_ide_name antigravity --csrf_token ea1dbb2a-65a8-4766-a155-8e70f032f4ac --app_data_dir antigravity --extension_server_port 12345 --extension_server_csrf_token deadbeef';
   const info = probe._parseProcessLine(line);

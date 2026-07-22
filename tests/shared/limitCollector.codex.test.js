@@ -542,6 +542,27 @@ test('LimitsRuntime compatibility retains Codex windows while exposing a transie
   assert.equal(second.providers[0].updatedAt, '2026-06-01T00:00:00.000Z');
 });
 
+test('LimitsRuntime compatibility keeps retries demand-driven instead of starting background timers', async () => {
+  let scheduledTimers = 0;
+  const collector = createLimitsCollector({
+    limitProviders: 'codex',
+    limitsRefreshMs: 60_000
+  }, {
+    setTimeout: () => {
+      scheduledTimers += 1;
+      return scheduledTimers;
+    },
+    clearTimeout: () => {},
+    providerFetchers: {
+      codex: async () => ({ provider: 'codex', status: 'unavailable', windows: [] })
+    }
+  });
+
+  await collector.snapshot(true);
+  assert.equal(scheduledTimers, 0);
+  collector.stop();
+});
+
 test('LimitsRuntime compatibility seeds last-good windows across a transient first refresh', async () => {
   // Switching the active Codex account reloads the collector (startMode), which
   // used to reset the in-memory transient-window cache. Seeding it from the last

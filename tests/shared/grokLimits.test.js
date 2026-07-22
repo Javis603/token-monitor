@@ -351,6 +351,27 @@ test('fetchGrokRpcBilling speaks Grok agent stdio x.ai/billing JSON-RPC', async 
   assert.equal(body.usage.totalUsed.val, 4200);
 });
 
+test('fetchGrokRpcBilling kills the CLI when the parent signal aborts', async () => {
+  const controller = new AbortController();
+  let killed = false;
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  child.kill = () => { killed = true; };
+
+  const pending = fetchGrokRpcBilling({}, {
+    env: {},
+    signal: controller.signal,
+    spawn: () => child,
+    rpcTimeoutMs: 60_000
+  });
+  controller.abort(new Error('stop grok probe'));
+
+  await assert.rejects(pending, /stop grok probe/);
+  assert.equal(killed, true);
+});
+
 test('fetchGrokLimits prefers Grok CLI RPC billing before bearer web fallback', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-rpc-'));
   writeAuthJson(home, {

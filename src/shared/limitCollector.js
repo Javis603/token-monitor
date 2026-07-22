@@ -11,6 +11,8 @@ const {
   normalizeLimitProvider,
   normalizeLimitsSummary
 } = require('./limits');
+const { parseRetryAfterHeader } = require('./limitsRetryPolicy');
+const { abortError } = require('./probeDeadline');
 const cursorAuth = require('./cursorAuth');
 const cursorProbe = require('./cursorProbe');
 const antigravityProbe = require('./antigravityProbe');
@@ -478,28 +480,45 @@ function readWindowsCredentialSecret(_service, targets, deps = {}) {
 
 function readMacKeychainSecret(service, deps = {}) {
   const spawnFn = deps.spawn || spawn;
+  const signal = deps.signal;
+  if (signal?.aborted) return Promise.reject(abortError(signal));
   return new Promise((resolve, reject) => {
     const child = spawnFn('security', ['find-generic-password', '-s', service, '-w'], { windowsHide: true });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+      callback(value);
+    };
+    const onAbort = () => {
+      try { child.kill('SIGTERM'); } catch (_) {}
+      finish(reject, abortError(signal));
+    };
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('macOS keychain lookup timed out'));
+      try { child.kill('SIGTERM'); } catch (_) {}
+      finish(reject, new Error('macOS keychain lookup timed out'));
     }, 5000);
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (error) => { clearTimeout(timer); reject(error); });
+    child.on('error', (error) => finish(reject, error));
     child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) reject(new Error(stderr.trim() || `security exited ${code}`));
-      else resolve(stdout.trim());
+      if (code !== 0) finish(reject, new Error(stderr.trim() || `security exited ${code}`));
+      else finish(resolve, stdout.trim());
     });
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 
 function runProcessText(command, args = [], options = {}) {
   const spawnFn = options.spawn || spawn;
   const timeoutMs = Number(options.timeoutMs || 30000);
+  const signal = options.signal;
+  if (signal?.aborted) return Promise.reject(abortError(signal));
   return new Promise((resolve, reject) => {
     const child = spawnFn(command, args, {
       cwd: options.cwd,
@@ -509,21 +528,34 @@ function runProcessText(command, args = [], options = {}) {
     });
     let stdout = '';
     let stderr = '';
-    const timer = setTimeout(() => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+      callback(value);
+    };
+    const stopChild = () => {
       try { child.kill('SIGTERM'); } catch (_) {}
-      reject(errorWithStatus('unavailable', `${command} timed out`));
+    };
+    const onAbort = () => {
+      stopChild();
+      finish(reject, abortError(signal));
+    };
+    const timer = setTimeout(() => {
+      stopChild();
+      finish(reject, errorWithStatus('unavailable', `${command} timed out`));
     }, timeoutMs);
     child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
+    child.on('error', (error) => finish(reject, error));
     child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0 && stdout.trim()) resolve(stdout);
-      else reject(errorWithStatus('unavailable', stderr.trim() || `${command} exited ${code}`));
+      if (code === 0 && stdout.trim()) finish(resolve, stdout);
+      else finish(reject, errorWithStatus('unavailable', stderr.trim() || `${command} exited ${code}`));
     });
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 
@@ -1440,8 +1472,18 @@ function shouldRetryCodexEmptyQuotaPayload(payload = {}) {
 async function waitForCodexEmptyQuotaRetry(deps = {}) {
   const delayMs = Number(deps.codexEmptyQuotaRetryDelayMs ?? CODEX_EMPTY_QUOTA_RETRY_DELAY_MS);
   if (!Number.isFinite(delayMs) || delayMs <= 0) return;
-  await new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
+  if (deps.signal?.aborted) throw abortError(deps.signal);
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(finish, delayMs);
+    const onAbort = () => finish(abortError(deps.signal));
+    function finish(error) {
+      clearTimeout(timer);
+      deps.signal?.removeEventListener?.('abort', onAbort);
+      if (error) reject(error);
+      else resolve();
+    }
+    deps.signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (deps.signal?.aborted) onAbort();
   });
 }
 
@@ -1842,8 +1884,16 @@ function createJsonRpcClient(child, timeoutMs) {
   const pending = new Map();
 
   function rejectAll(error) {
-    for (const { reject } of pending.values()) reject(error);
+    for (const { reject, timer } of pending.values()) {
+      clearTimeout(timer);
+      reject(error);
+    }
     pending.clear();
+  }
+
+  function abort(error) {
+    closed = true;
+    rejectAll(error);
   }
 
   function handleMessage(message) {
@@ -1892,7 +1942,7 @@ function createJsonRpcClient(child, timeoutMs) {
     if (!closed) child.stdin.write(`${JSON.stringify(params === undefined ? { method } : { method, params })}\n`);
   }
 
-  return { send, notify, rejectAll };
+  return { abort, send, notify, rejectAll };
 }
 
 function shouldTryNextCodexCommand(error) {
@@ -1921,9 +1971,18 @@ function codexRpcPayload(rateLimitResult, account, command, deps = {}) {
 
 async function readCodexRpcWithCommand(command, deps = {}) {
   const timeoutMs = Number(deps.codexRpcTimeoutMs || CODEX_RPC_TIMEOUT_MS);
+  const platform = deps.platform || process.platform;
+  const signal = deps.signal;
+  if (signal?.aborted) throw abortError(signal);
   const child = spawnCodexAppServer({ ...deps, codexCommand: command });
   const rpc = createJsonRpcClient(child, timeoutMs);
+  const onAbort = () => {
+    rpc.abort(abortError(signal));
+    killCodexLoginProcess(child, platform, deps);
+  };
+  signal?.addEventListener?.('abort', onAbort, { once: true });
   try {
+    if (signal?.aborted) throw abortError(signal);
     await rpc.send('initialize', {
       clientInfo: { name: 'token-monitor', title: 'Token Monitor', version: appVersion() }
     });
@@ -1950,7 +2009,9 @@ async function readCodexRpcWithCommand(command, deps = {}) {
     }
     return payload;
   } finally {
-    try { child.kill('SIGTERM'); } catch (_) {}
+    signal?.removeEventListener?.('abort', onAbort);
+    rpc.abort(new Error('codex app-server closed'));
+    if (!signal?.aborted) killCodexLoginProcess(child, platform, deps);
   }
 }
 
@@ -2514,12 +2575,42 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
   return base * jobs;
 }
 
+function createProbeFetch(fetchFn, context = {}, deps = {}) {
+  return async (url, init = {}) => {
+    const signals = [context.signal, init.signal].filter(Boolean);
+    const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+    const response = await fetchFn(url, {
+      ...init,
+      ...(signal ? { signal } : {})
+    });
+    if (Number(response?.status) >= 400) {
+      const retryAfterMs = parseRetryAfterHeader(
+        response?.headers?.get?.('retry-after'),
+        (deps.now || Date.now)()
+      );
+      if (retryAfterMs !== null) context.onRetryAfter?.(retryAfterMs);
+    }
+    return response;
+  };
+}
+
+function resolveProviderFetch(provider, deps = {}) {
+  if (typeof deps.fetch === 'function') return deps.fetch;
+  if (provider === 'grok') return grokLimits.resolveGrokFetch(deps);
+  return fetch;
+}
+
 async function probeLimitProvider(provider, options = {}, context = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const fetcher = providerFetchers(deps)[provider];
   if (!fetcher) return [statusProvider(provider, 'notConfigured', nowIso(nowMs))];
   try {
-    const result = await fetcher(options, { ...deps, signal: context.signal ?? deps.signal });
+    const signal = context.signal ?? deps.signal;
+    const result = await fetcher(options, {
+      ...deps,
+      fetch: createProbeFetch(resolveProviderFetch(provider, deps), { ...context, signal }, deps),
+      signal
+    });
     return (Array.isArray(result) ? result : [result]).filter(Boolean);
   } catch (error) {
     return [statusProvider(provider, providerStatusFromError(error), nowIso(nowMs))];
@@ -2548,7 +2639,7 @@ async function collectLimitsOnce(options = {}, deps = {}) {
 // full-snapshot TTL and has no in-flight coordination of its own.
 function createLimitsCollector(options = {}, deps = {}) {
   const { createLimitsRuntime } = require('./limitsRuntime');
-  const runtime = createLimitsRuntime(options, { ...deps, autoStart: false });
+  const runtime = createLimitsRuntime(options, { ...deps, autoStart: false, autoRetry: false });
   const refreshMs = normalizeLimitsRefreshMs(options.limitsRefreshMs ?? options.refreshMs);
   const now = deps.now || Date.now;
   let lastFullRefreshAt = null;
@@ -2630,7 +2721,7 @@ async function fetchCursorLimits(_options = {}, deps = {}) {
     };
   }
 
-  const result = await probe(account.sessionToken);
+  const result = await probe(account.sessionToken, deps);
   if (!result.ok) {
     const kind = result.error?.kind === 'unauthorized' ? 'unauthorized' : 'unavailable';
     return {
@@ -2750,6 +2841,8 @@ module.exports = {
   claudeCommandCandidates,
   codexCommandCandidates,
   codexCommandSourceDetail,
+  createProbeFetch,
+  resolveProviderFetch,
   createLimitsCollector,
   probeLimitProvider,
   providerPhysicalBoundMs,
@@ -2761,7 +2854,9 @@ module.exports = {
   fetchCursorLimits,
   fetchDeepSeekLimits,
   fetchMimoLimits,
+  readCodexRpcWithCommand,
   runCodexLogin,
+  runProcessText,
   deepseekToken,
   selectFundedRow,
   minimaxToken,

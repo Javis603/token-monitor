@@ -1,5 +1,7 @@
 'use strict';
 
+const { abortError } = require('./probeDeadline');
+
 const { spawn } = require('node:child_process');
 const https = require('node:https');
 const http = require('node:http');
@@ -28,17 +30,25 @@ function boundedTimeoutMs(deadlineMs, maximum = DEFAULT_RPC_TIMEOUT_MS) {
   return Math.max(1, Math.min(maximum, remaining));
 }
 
-function promiseBeforeDeadline(factory, deadlineMs, maximum = DEFAULT_RPC_TIMEOUT_MS) {
+function promiseBeforeDeadline(factory, deadlineMs, maximum = DEFAULT_RPC_TIMEOUT_MS, signal = null) {
   const timeoutMs = boundedTimeoutMs(deadlineMs, maximum);
+  if (signal?.aborted) return Promise.reject(abortError(signal));
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (fn, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
       fn(value);
     };
+    const onAbort = () => finish(reject, abortError(signal));
     const timer = setTimeout(() => finish(reject, probeTimeoutError()), timeoutMs);
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
     Promise.resolve()
       .then(() => factory(timeoutMs))
       .then((value) => finish(resolve, value), (error) => finish(reject, error));
@@ -49,7 +59,8 @@ function callBeforeDeadline(call, args, deadlineMs, maximum = DEFAULT_RPC_TIMEOU
   return promiseBeforeDeadline(
     (timeoutMs) => call({ ...args, timeoutMs }),
     deadlineMs,
-    maximum
+    maximum,
+    args.signal
   );
 }
 
@@ -674,7 +685,11 @@ async function probe(deps = {}) {
   const probeDeadlineMs = Date.now() + probeTimeoutMs;
   const abortController = new AbortController();
   const abortTimer = setTimeout(() => abortController.abort(), probeTimeoutMs);
-  const runtimeDeps = { ...deps, signal: abortController.signal };
+  if (deps.signal?.aborted) throw abortError(deps.signal);
+  const signal = deps.signal
+    ? AbortSignal.any([abortController.signal, deps.signal])
+    : abortController.signal;
+  const runtimeDeps = { ...deps, signal };
   const listPorts = deps.listeningPorts || listeningPorts;
   const call = deps.callLs || callLs;
   let lastError = errorWithStatus('notConfigured', 'Antigravity language server not running');
@@ -682,7 +697,9 @@ async function probe(deps = {}) {
   try {
     const infos = await promiseBeforeDeadline(
       (timeoutMs) => detectedProcessInfos({ ...runtimeDeps, timeoutMs }),
-      probeDeadlineMs
+      probeDeadlineMs,
+      DEFAULT_RPC_TIMEOUT_MS,
+      signal
     );
 
     // Source priority is deliberate and independent of ps/PID order. Processes
@@ -694,14 +711,16 @@ async function probe(deps = {}) {
         try {
           const ports = await promiseBeforeDeadline(
             (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
-            probeDeadlineMs
+            probeDeadlineMs,
+            DEFAULT_RPC_TIMEOUT_MS,
+            signal
           );
           const initialCandidates = endpointCandidates(info, ports);
           const resolved = await resolveWorkingEndpoint(
             initialCandidates,
             call,
             probeDeadlineMs,
-            abortController.signal
+            signal
           );
           return { info, candidates: resolved.candidates, error: resolved.lastError };
         } catch (error) {
@@ -719,7 +738,7 @@ async function probe(deps = {}) {
         groupedQuotaFromCandidates(entry.candidates, call, {
           summaryDeadlineMs,
           probeDeadlineMs,
-          signal: abortController.signal
+          signal
         })
       )));
       const grouped = groupedResults.find((result) => result.snapshot);
@@ -729,7 +748,7 @@ async function probe(deps = {}) {
       const legacyResults = await Promise.all(candidatesByProcess.map((entry) => (
         legacyQuotaFromCandidates(entry.candidates, call, {
           probeDeadlineMs,
-          signal: abortController.signal
+          signal
         })
       )));
       const legacy = legacyResults.find((result) => result.snapshot);

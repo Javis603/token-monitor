@@ -15,6 +15,14 @@ const {
   pruneAttemptedResetBoundaries
 } = require('./limitResetBoundary');
 const { runWithProbeDeadline } = require('./probeDeadline');
+const {
+  DEFAULT_LIMITS_RETRY_BASE_MS,
+  DEFAULT_LIMITS_RETRY_MAX_MS,
+  computeRetryDelayMs,
+  isRetryableLimitStatus
+} = require('./limitsRetryPolicy');
+
+const DEFAULT_LIMITS_MAX_CONCURRENCY = 3;
 
 const TRANSIENT_STATUSES = new Set([
   'timeout',
@@ -22,6 +30,19 @@ const TRANSIENT_STATUSES = new Set([
   'sourceRateLimited',
   'unavailable',
   'error'
+]);
+
+const COOLDOWN_BYPASS_REASONS = new Set([
+  'credential-change',
+  'credential-edit',
+  'credential-save',
+  'enabled',
+  'identity-switch',
+  'login',
+  'profile-rename',
+  'profile-save',
+  'profile-state',
+  'provider-added'
 ]);
 
 function cloneValue(value) {
@@ -110,6 +131,10 @@ function publicAttemptStatus(status) {
   return status === 'timeout' ? 'error' : status || 'unavailable';
 }
 
+function bypassesProviderCooldown(reason) {
+  return COOLDOWN_BYPASS_REASONS.has(String(reason || ''));
+}
+
 function createLimitsRuntime(initialOptions = {}, deps = {}) {
   const now = deps.now || Date.now;
   const setTimer = deps.setTimeout || setTimeout;
@@ -121,6 +146,17 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   const cleanupGraceMs = Number.isFinite(Number(deps.cleanupGraceMs))
     ? Math.max(0, Number(deps.cleanupGraceMs))
     : PROVIDER_CLEANUP_GRACE_MS;
+  const maxConcurrency = Number.isFinite(Number(deps.maxConcurrency))
+    ? Math.max(1, Math.floor(Number(deps.maxConcurrency)))
+    : DEFAULT_LIMITS_MAX_CONCURRENCY;
+  const retryBaseMs = Number.isFinite(Number(deps.retryBaseMs))
+    ? Math.max(1, Number(deps.retryBaseMs))
+    : DEFAULT_LIMITS_RETRY_BASE_MS;
+  const retryMaxMs = Number.isFinite(Number(deps.retryMaxMs))
+    ? Math.max(retryBaseMs, Number(deps.retryMaxMs))
+    : DEFAULT_LIMITS_RETRY_MAX_MS;
+  const autoRetry = deps.autoRetry !== false;
+  const random = deps.random || Math.random;
 
   let config = cloneValue(initialOptions);
   let enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
@@ -130,7 +166,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   let stopped = false;
   let started = false;
   let sequence = 0;
-  let executorActive = false;
+  let executorActive = 0;
   let pumpQueued = false;
   let intervalTimer = null;
   let resetTimer = null;
@@ -150,7 +186,11 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         accountRevisions: new Map(),
         pending: new Map(),
         active: null,
-        identities: new Map()
+        identities: new Map(),
+        retryAttempt: 0,
+        retryNotBefore: 0,
+        retryScope: null,
+        retryTimer: null
       });
     }
     return lanes.get(provider);
@@ -160,6 +200,77 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     if (!intent || intent.settled) return;
     intent.settled = true;
     intent.resolve(result);
+  }
+
+  function emitEvent(type, provider, detail = {}) {
+    try {
+      deps.onEvent?.({
+        type,
+        provider,
+        active: executorActive,
+        queued: providerQueue.length,
+        ...detail
+      });
+    } catch (_) {
+      // Diagnostics observers must never affect collection or retry state.
+    }
+  }
+
+  function clearRetryTimer(lane) {
+    if (lane.retryTimer !== null) clearTimer(lane.retryTimer);
+    lane.retryTimer = null;
+  }
+
+  function resetRetryPolicy(lane) {
+    clearRetryTimer(lane);
+    lane.retryAttempt = 0;
+    lane.retryNotBefore = 0;
+    lane.retryScope = null;
+  }
+
+  function scheduleRetryTimer(lane) {
+    clearRetryTimer(lane);
+    if (!autoRetry || stopped || !enabled || !configuredProviders.has(lane.provider) || !lane.retryScope) return;
+    const delayMs = Math.max(0, lane.retryNotBefore - now());
+    lane.retryTimer = setTimer(() => {
+      lane.retryTimer = null;
+      if (stopped || !enabled || !configuredProviders.has(lane.provider)) return;
+      lane.retryNotBefore = 0;
+      void queueScope(cloneValue(lane.retryScope), 'retry');
+    }, delayMs);
+  }
+
+  function retryStatus(rawRows, error) {
+    if (error) {
+      const status = error.status || (error.code === 'PROBE_TIMEOUT' ? 'timeout' : 'unavailable');
+      return isRetryableLimitStatus(status) ? status : '';
+    }
+    const rows = Array.isArray(rawRows) ? rawRows : rawRows?.providers || [];
+    return rows.map((row) => String(row?.status || '')).find(isRetryableLimitStatus) || '';
+  }
+
+  function applyRetryPolicy(lane, intent, rawRows, error, retryAfterMs) {
+    const status = retryStatus(rawRows, error);
+    if (!status) {
+      resetRetryPolicy(lane);
+      return;
+    }
+    lane.retryAttempt += 1;
+    const delayMs = computeRetryDelayMs(lane.retryAttempt, {
+      baseMs: retryBaseMs,
+      maxMs: retryMaxMs,
+      random,
+      retryAfterMs
+    });
+    lane.retryNotBefore = now() + delayMs;
+    lane.retryScope = cloneValue(intent.scope);
+    scheduleRetryTimer(lane);
+    emitEvent('retry-scheduled', lane.provider, {
+      attempt: lane.retryAttempt,
+      delayMs,
+      reason: status,
+      retryAfter: Number.isFinite(Number(retryAfterMs)) && Number(retryAfterMs) > 0
+    });
   }
 
   function cancelLane(lane, reason = 'superseded') {
@@ -382,6 +493,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       expectedIdentityKeys: [...lane.identities.keys()]
     };
     lane.active = { intent, controller, dispatch };
+    emitEvent('probe-start', lane.provider, { reason: intent.reason });
+    let reportedRetryAfterMs = null;
     try {
       const resolved = deps.resolveConfigSnapshot
         ? await deps.resolveConfigSnapshot(cloneValue(intent.scope), cloneValue(config))
@@ -397,37 +510,43 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
           signal: AbortSignal.any([signal, controller.signal]),
           deadlineMs,
           scope: cloneValue(intent.scope),
-          reason: intent.reason
+          reason: intent.reason,
+          onRetryAfter(value) {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed) || parsed <= 0) return;
+            reportedRetryAfterMs = Math.max(reportedRetryAfterMs || 0, parsed);
+          }
         }, deps),
         { deadlineMs }
       );
       const committed = commitRows(lane, dispatch, rows);
+      if (committed) applyRetryPolicy(lane, intent, rows, null, reportedRetryAfterMs);
       finishIntent(intent, { superseded: !committed, snapshot: getSnapshot() });
     } catch (error) {
       const committed = commitRows(lane, dispatch, [], error);
+      if (committed) applyRetryPolicy(lane, intent, [], error, reportedRetryAfterMs || error?.retryAfterMs);
       finishIntent(intent, { superseded: !committed, error, snapshot: getSnapshot() });
     } finally {
       if (lane.active?.intent === intent) lane.active = null;
+      emitEvent('probe-finish', lane.provider, { reason: intent.reason });
     }
   }
 
-  async function pump() {
-    if (executorActive || stopped) return;
-    while (providerQueue.length > 0) {
+  function pump() {
+    if (stopped) return;
+    while (executorActive < maxConcurrency && providerQueue.length > 0) {
       const provider = providerQueue.shift();
       queuedProviders.delete(provider);
       const lane = lanes.get(provider);
       if (!lane || lane.active || lane.pending.size === 0 || !configuredProviders.has(provider)) continue;
       const intent = nextIntent(lane);
       if (!intent) continue;
-      executorActive = true;
-      try {
-        await dispatchIntent(lane, intent);
-      } finally {
-        executorActive = false;
+      executorActive += 1;
+      void dispatchIntent(lane, intent).finally(() => {
+        executorActive = Math.max(0, executorActive - 1);
         if (lane.pending.size > 0) enqueueProvider(provider);
-        for (const queuedProvider of [...providerQueue]) enqueueProvider(queuedProvider);
-      }
+        pump();
+      });
     }
   }
 
@@ -437,6 +556,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       return Promise.resolve({ superseded: true, reason: 'disabled' });
     }
     const lane = laneFor(provider);
+    if (bypassesProviderCooldown(reason)) {
+      resetRetryPolicy(lane);
+    } else if (lane.retryNotBefore > now()) {
+      scheduleRetryTimer(lane);
+      return Promise.resolve({
+        deferred: true,
+        provider,
+        retryAt: new Date(lane.retryNotBefore).toISOString()
+      });
+    }
     const accountScoped = isAccountScope(scope);
     const identityKey = scopeIdentityKey(scope);
     const key = accountScoped ? identityKey : `${provider}:*`;
@@ -495,11 +624,13 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       if (!lane) continue;
       if (!isAccountScope(normalized)) {
         cancelLane(lane, reason);
+        resetRetryPolicy(lane);
         lane.identities.clear();
         lane.accountRevisions.clear();
         continue;
       }
       const identityKeys = matchingIdentityKeys(lane, normalized);
+      resetRetryPolicy(lane);
       for (const identityKey of identityKeys) {
         lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
         lane.identities.delete(identityKey);
@@ -529,6 +660,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const lane = lanes.get(provider);
       if (lane) {
         cancelLane(lane, 'provider removed');
+        resetRetryPolicy(lane);
         lane.identities.clear();
       }
       lanes.delete(provider);
@@ -540,6 +672,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       resetTimer = null;
       for (const lane of lanes.values()) {
         cancelLane(lane, 'limits disabled');
+        resetRetryPolicy(lane);
         lane.identities.clear();
       }
       rebuildSnapshot();
@@ -571,6 +704,21 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     return cloneValue(snapshot);
   }
 
+  function getDiagnostics() {
+    return {
+      active: executorActive,
+      maxConcurrency,
+      queued: providerQueue.length,
+      providers: [...lanes.values()].map((lane) => ({
+        provider: lane.provider,
+        active: Boolean(lane.active),
+        pending: lane.pending.size,
+        retryAttempt: lane.retryAttempt,
+        retryAt: lane.retryNotBefore > 0 ? new Date(lane.retryNotBefore).toISOString() : null
+      }))
+    };
+  }
+
   function subscribe(listener) {
     if (typeof listener !== 'function') throw new TypeError('listener must be a function');
     listeners.add(listener);
@@ -594,7 +742,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     clearIntervalTimer();
     if (resetTimer !== null) clearTimer(resetTimer);
     resetTimer = null;
-    for (const lane of lanes.values()) cancelLane(lane, 'runtime stopped');
+    for (const lane of lanes.values()) {
+      cancelLane(lane, 'runtime stopped');
+      resetRetryPolicy(lane);
+    }
     providerQueue.length = 0;
     queuedProviders.clear();
     listeners.clear();
@@ -620,6 +771,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
   return {
     clear,
+    getDiagnostics,
     getSnapshot,
     reconfigure,
     refresh,
@@ -630,6 +782,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 }
 
 module.exports = {
+  DEFAULT_LIMITS_MAX_CONCURRENCY,
   TRANSIENT_STATUSES,
   accountIdentityPart,
   createLimitsRuntime,
