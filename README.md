@@ -63,17 +63,25 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 ## Showcase
 
-| Home View | Limits View | Tools View |
-|:---:|:---:|:---:|
-| ![Home View](.github/assets/home-view.png)<br><sub>Customizable dashboard — choose which modules show and their order</sub> | ![Limits View](.github/assets/limits-view.png)<br><sub>Multiple accounts side by side, one-click switch of the active Codex account</sub> | ![Tools View](.github/assets/tools-view.png)<br><sub>Click any tool to expand input / output and cache-hit detail</sub> |
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="Home View"><br><sub>Customizable dashboard — choose which modules show and their order</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="Limits View"><br><sub>Multiple accounts side by side, one-click switch of the active Codex account</sub></td>
+<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="Tools View"><br><sub>Click any tool to expand input / output and cache-hit detail</sub></td>
+</tr>
+<tr>
+<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="Session View"><br><sub>Open a single session to break each prompt into tokens and tools used</sub></td>
+<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="Models View"><br><sub>Every model's usage and cost, aggregated across tools</sub></td>
+<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="Devices View"><br><sub>Each device's usage, cost, and sync status — expand for per-machine detail</sub></td>
+</tr>
+</table>
 
-| Session View | Models View | Devices View |
-|:---:|:---:|:---:|
-| ![Session View](.github/assets/sessions-view.png)<br><sub>Open a single session to break each prompt into tokens and tools used</sub> | ![Models View](.github/assets/models-view.png)<br><sub>Every model's usage and cost, aggregated across tools</sub> | ![Devices View](.github/assets/devices-view.png)<br><sub>Each device's usage, cost, and sync status — expand for per-machine detail</sub> |
-
-| Usage Dashboard — Overview | Usage Dashboard — Trends |
-|:---:|:---:|
-| ![Usage Dashboard Overview](.github/assets/dashboard-overview.png)<br><sub>A year of activity heatmap and streaks, aggregated across all devices</sub> | ![Usage Dashboard Trends](.github/assets/dashboard-trends.png)<br><sub>A year of daily trends, stacked by tool / model, with K-line</sub> |
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="Usage Dashboard Overview"><br><sub>A year of activity heatmap and streaks, aggregated across all devices</sub></td>
+<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="Usage Dashboard Trends"><br><sub>A year of daily trends, stacked by tool / model, with K-line</sub></td>
+</tr>
+</table>
 
 ## Why Token Monitor?
 

@@ -63,17 +63,25 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 ## 쇼케이스
 
-| 홈 보기 | 한도 보기 | 도구 보기 |
-|:---:|:---:|:---:|
-| ![홈 보기](.github/assets/home-view.png)<br><sub>커스터마이즈 가능한 대시보드 — 표시할 모듈과 순서를 선택</sub> | ![한도 보기](.github/assets/limits-view.png)<br><sub>여러 계정을 나란히, Codex는 로컬 계정을 원클릭 전환</sub> | ![도구 보기](.github/assets/tools-view.png)<br><sub>도구를 클릭해 입력／출력과 캐시 히트 상세를 펼치기</sub> |
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="홈 보기"><br><sub>커스터마이즈 가능한 대시보드 — 표시할 모듈과 순서를 선택</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="한도 보기"><br><sub>여러 계정을 나란히, Codex는 로컬 계정을 원클릭 전환</sub></td>
+<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="도구 보기"><br><sub>도구를 클릭해 입력／출력과 캐시 히트 상세를 펼치기</sub></td>
+</tr>
+<tr>
+<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="세션 보기"><br><sub>단일 세션을 열어 프롬프트별 토큰과 사용 도구로 분해</sub></td>
+<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="모델 보기"><br><sub>도구 전반에서 각 모델의 사용량과 비용을 집계</sub></td>
+<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="기기 보기"><br><sub>각 기기의 사용량·비용·동기화 상태, 펼치면 기기별 상세</sub></td>
+</tr>
+</table>
 
-| 세션 보기 | 모델 보기 | 기기 보기 |
-|:---:|:---:|:---:|
-| ![세션 보기](.github/assets/sessions-view.png)<br><sub>단일 세션을 열어 프롬프트별 토큰과 사용 도구로 분해</sub> | ![모델 보기](.github/assets/models-view.png)<br><sub>도구 전반에서 각 모델의 사용량과 비용을 집계</sub> | ![기기 보기](.github/assets/devices-view.png)<br><sub>각 기기의 사용량·비용·동기화 상태, 펼치면 기기별 상세</sub> |
-
-| 사용 대시보드 — 개요 | 사용 대시보드 — 추세 |
-|:---:|:---:|
-| ![사용 대시보드 개요](.github/assets/dashboard-overview.png)<br><sub>모든 기기를 아우른 1년치 활동 히트맵과 연속 일수</sub> | ![사용 대시보드 추세](.github/assets/dashboard-trends.png)<br><sub>1년치 일별 추세, 도구／모델별 누적, K선 지원</sub> |
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="사용 대시보드 개요"><br><sub>모든 기기를 아우른 1년치 활동 히트맵과 연속 일수</sub></td>
+<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="사용 대시보드 추세"><br><sub>1년치 일별 추세, 도구／모델별 누적, K선 지원</sub></td>
+</tr>
+</table>
 
 ## Token Monitor를 쓰는 이유
 

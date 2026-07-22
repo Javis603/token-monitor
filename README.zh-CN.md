@@ -63,17 +63,25 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 
 ## 界面展示
 
-| 主页视图 | 额度视图 | 工具视图 |
-|:---:|:---:|:---:|
-| ![主页视图](.github/assets/home-view.png)<br><sub>可自定义仪表板：自选要显示的模块与排序</sub> | ![额度视图](.github/assets/limits-view.png)<br><sub>多账号并列，Codex 可一键切换本机账号</sub> | ![工具视图](.github/assets/tools-view.png)<br><sub>点任一工具展开输入／输出与缓存命中明细</sub> |
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="主页视图"><br><sub>可自定义仪表板：自选要显示的模块与排序</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="额度视图"><br><sub>多账号并列，Codex 可一键切换本机账号</sub></td>
+<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="工具视图"><br><sub>点任一工具展开输入／输出与缓存命中明细</sub></td>
+</tr>
+<tr>
+<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="Session 视图"><br><sub>点进单个 session，逐条提问拆解 token 与用到的工具</sub></td>
+<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="模型视图"><br><sub>跨工具汇总每个模型的用量与成本</sub></td>
+<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="设备视图"><br><sub>每台设备的用量、成本与同步状态，可展开看单机明细</sub></td>
+</tr>
+</table>
 
-| Session 视图 | 模型视图 | 设备视图 |
-|:---:|:---:|:---:|
-| ![Session 视图](.github/assets/sessions-view.png)<br><sub>点进单个 session，逐条提问拆解 token 与用到的工具</sub> | ![模型视图](.github/assets/models-view.png)<br><sub>跨工具汇总每个模型的用量与成本</sub> | ![设备视图](.github/assets/devices-view.png)<br><sub>每台设备的用量、成本与同步状态，可展开看单机明细</sub> |
-
-| 使用仪表板 — 总览 | 使用仪表板 — 趋势 |
-|:---:|:---:|
-| ![使用仪表板 总览](.github/assets/dashboard-overview.png)<br><sub>跨所有设备汇总的一年活跃热力图与连续天数</sub> | ![使用仪表板 趋势](.github/assets/dashboard-trends.png)<br><sub>一年的每日趋势，按工具／模型堆叠，含 K 线</sub> |
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="使用仪表板 总览"><br><sub>跨所有设备汇总的一年活跃热力图与连续天数</sub></td>
+<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="使用仪表板 趋势"><br><sub>一年的每日趋势，按工具／模型堆叠，含 K 线</sub></td>
+</tr>
+</table>
 
 ## 为什么用 Token Monitor？
 

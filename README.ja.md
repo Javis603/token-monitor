@@ -63,17 +63,25 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 ## ショーケース
 
-| ホームビュー | 制限ビュー | ツールビュー |
-|:---:|:---:|:---:|
-| ![ホームビュー](.github/assets/home-view.png)<br><sub>カスタマイズ可能なダッシュボード — 表示するモジュールと順序を選択</sub> | ![制限ビュー](.github/assets/limits-view.png)<br><sub>複数アカウントを並べて表示、Codex はローカルアカウントをワンクリック切り替え</sub> | ![ツールビュー](.github/assets/tools-view.png)<br><sub>任意のツールをクリックして入力／出力とキャッシュヒットの内訳を展開</sub> |
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="ホームビュー"><br><sub>カスタマイズ可能なダッシュボード — 表示するモジュールと順序を選択</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="制限ビュー"><br><sub>複数アカウントを並べて表示、Codex はローカルアカウントをワンクリック切り替え</sub></td>
+<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="ツールビュー"><br><sub>任意のツールをクリックして入力／出力とキャッシュヒットの内訳を展開</sub></td>
+</tr>
+<tr>
+<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="セッションビュー"><br><sub>単一セッションを開いて、プロンプトごとにトークンと使用ツールを分解</sub></td>
+<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="モデルビュー"><br><sub>ツール横断で各モデルの使用量とコストを集計</sub></td>
+<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="デバイスビュー"><br><sub>各デバイスの使用量・コスト・同期状態、展開でマシン別詳細</sub></td>
+</tr>
+</table>
 
-| セッションビュー | モデルビュー | デバイスビュー |
-|:---:|:---:|:---:|
-| ![セッションビュー](.github/assets/sessions-view.png)<br><sub>単一セッションを開いて、プロンプトごとにトークンと使用ツールを分解</sub> | ![モデルビュー](.github/assets/models-view.png)<br><sub>ツール横断で各モデルの使用量とコストを集計</sub> | ![デバイスビュー](.github/assets/devices-view.png)<br><sub>各デバイスの使用量・コスト・同期状態、展開でマシン別詳細</sub> |
-
-| 使用ダッシュボード — 概要 | 使用ダッシュボード — トレンド |
-|:---:|:---:|
-| ![使用ダッシュボード概要](.github/assets/dashboard-overview.png)<br><sub>全デバイス横断の 1 年分アクティビティヒートマップと連続日数</sub> | ![使用ダッシュボードトレンド](.github/assets/dashboard-trends.png)<br><sub>1 年分の日次トレンド、ツール／モデル別に積み上げ、K 線対応</sub> |
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="使用ダッシュボード概要"><br><sub>全デバイス横断の 1 年分アクティビティヒートマップと連続日数</sub></td>
+<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="使用ダッシュボードトレンド"><br><sub>1 年分の日次トレンド、ツール／モデル別に積み上げ、K 線対応</sub></td>
+</tr>
+</table>
 
 ## Token Monitor を使う理由
 
