@@ -368,30 +368,38 @@ test('transient failures use exponential jittered backoff and reset after succes
   runtime.stop();
 });
 
-test('a credential change clears an old provider cooldown', async () => {
-  const clock = fakeClock(0);
-  const calls = [];
-  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
-    now: clock.now,
-    setTimeout: clock.setTimeout,
-    clearTimeout: clock.clearTimeout,
-    random: () => 0,
-    probeProvider: async (_provider, _config, context) => {
-      calls.push(context.reason);
-      if (calls.length === 1) {
-        context.onRetryAfter(60_000);
-        return [{ provider: 'kimi', status: 'sourceRateLimited', windows: [] }];
+test('credential and account lifecycle changes clear an old provider cooldown', async () => {
+  for (const reason of [
+    'credential-save',
+    'account-added',
+    'account-state',
+    'system-account-switch',
+    'settings-change'
+  ]) {
+    const clock = fakeClock(0);
+    const calls = [];
+    const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      random: () => 0,
+      probeProvider: async (_provider, _config, context) => {
+        calls.push(context.reason);
+        if (calls.length === 1) {
+          context.onRetryAfter(60_000);
+          return [{ provider: 'kimi', status: 'sourceRateLimited', windows: [] }];
+        }
+        return [providerRow('kimi', 'new', 'New credential')];
       }
-      return [providerRow('kimi', 'new', 'New credential')];
-    }
-  }));
+    }));
 
-  await runtime.refresh({ provider: 'kimi' }, 'interval');
-  assert.deepEqual(clock.delays(), [60_000]);
-  await runtime.refresh({ provider: 'kimi' }, 'credential-save');
-  assert.deepEqual(calls, ['interval', 'credential-save']);
-  assert.deepEqual(clock.delays(), []);
-  runtime.stop();
+    await runtime.refresh({ provider: 'kimi' }, 'interval');
+    assert.deepEqual(clock.delays(), [60_000], reason);
+    await runtime.refresh({ provider: 'kimi', accountKey: 'new' }, reason);
+    assert.deepEqual(calls, ['interval', reason], reason);
+    assert.deepEqual(clock.delays(), [], reason);
+    runtime.stop();
+  }
 });
 
 test('a transient failure retains matching lastGood windows with the latest status', async () => {

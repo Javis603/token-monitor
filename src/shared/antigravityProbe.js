@@ -20,6 +20,10 @@ function probeTimeoutError() {
   return errorWithStatus('unavailable', 'Antigravity probe timed out');
 }
 
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortError(signal);
+}
+
 function remainingMs(deadlineMs) {
   return Math.max(0, deadlineMs - Date.now());
 }
@@ -562,6 +566,7 @@ async function resolveWorkingEndpoint(candidates, call, deadlineMs, signal) {
       }, deadlineMs, attemptTimeoutMs);
       return { candidates: prioritizeCandidate(candidate, candidates), lastError: null };
     } catch (error) {
+      throwIfAborted(signal);
       lastError = error;
       // Any HTTP response proves that the port, scheme, and CSRF routing are
       // reachable even when this lightweight endpoint itself is unsupported.
@@ -606,11 +611,15 @@ async function groupedQuotaFromCandidates(candidates, call, {
             || preferredPlanInfoName(identity?.userStatus?.planStatus?.planInfo)
             || null;
           accountEmail = identity?.userStatus?.email?.trim?.() || null;
-        } catch (_) {}
+        } catch (_) {
+          throwIfAborted(signal);
+        }
+        throwIfAborted(signal);
         return { snapshot: { accountPlan, accountEmail, windows }, lastError };
       }
       lastError = errorWithStatus('unavailable', 'empty quota summary');
     } catch (err) {
+      throwIfAborted(signal);
       lastError = err;
       if (remainingMs(summaryDeadlineMs) <= 0) break;
     }
@@ -637,10 +646,14 @@ async function legacyQuotaFromCandidates(candidates, call, { probeDeadlineMs, si
           || null;
         const accountEmail = data.userStatus.email?.trim?.() || null;
         const models = modelsFromConfigs(configs);
-        if (models.length > 0) return { snapshot: { accountPlan, accountEmail, pools: collapsePools(models) }, lastError };
+        if (models.length > 0) {
+          throwIfAborted(signal);
+          return { snapshot: { accountPlan, accountEmail, pools: collapsePools(models) }, lastError };
+        }
       }
       lastError = errorWithStatus('unavailable', 'empty user status');
     } catch (err) {
+      throwIfAborted(signal);
       lastError = err;
       if (remainingMs(userStatusDeadlineMs) <= 0) break;
     }
@@ -655,10 +668,12 @@ async function legacyQuotaFromCandidates(candidates, call, { probeDeadlineMs, si
       }, probeDeadlineMs);
       const models = modelsFromConfigs(fallback?.clientModelConfigs);
       if (models.length > 0) {
+        throwIfAborted(signal);
         return { snapshot: { accountPlan: null, accountEmail: null, pools: collapsePools(models) }, lastError };
       }
       lastError = errorWithStatus('unavailable', 'empty model configs');
     } catch (err) {
+      throwIfAborted(signal);
       lastError = err;
       if (remainingMs(probeDeadlineMs) <= 0) break;
     }
@@ -683,9 +698,9 @@ async function detectedProcessInfos(deps) {
 async function probe(deps = {}) {
   const probeTimeoutMs = Math.max(1, Number(deps.probeTimeoutMs) || DEFAULT_PROBE_TIMEOUT_MS);
   const probeDeadlineMs = Date.now() + probeTimeoutMs;
+  throwIfAborted(deps.signal);
   const abortController = new AbortController();
-  const abortTimer = setTimeout(() => abortController.abort(), probeTimeoutMs);
-  if (deps.signal?.aborted) throw abortError(deps.signal);
+  const abortTimer = setTimeout(() => abortController.abort(probeTimeoutError()), probeTimeoutMs);
   const signal = deps.signal
     ? AbortSignal.any([abortController.signal, deps.signal])
     : abortController.signal;
@@ -727,6 +742,7 @@ async function probe(deps = {}) {
           return { info, candidates: [], error };
         }
       }));
+      throwIfAborted(signal);
       const candidatesByProcess = prepared.filter((entry) => entry.candidates.length > 0);
       for (const entry of prepared) {
         if (entry.error) lastError = entry.error;
@@ -741,6 +757,7 @@ async function probe(deps = {}) {
           signal
         })
       )));
+      throwIfAborted(signal);
       const grouped = groupedResults.find((result) => result.snapshot);
       if (grouped?.snapshot) return { ...grouped.snapshot, sourceDetail: kind };
       for (const result of groupedResults) lastError = result.lastError || lastError;
@@ -751,6 +768,7 @@ async function probe(deps = {}) {
           signal
         })
       )));
+      throwIfAborted(signal);
       const legacy = legacyResults.find((result) => result.snapshot);
       if (legacy?.snapshot) return { ...legacy.snapshot, sourceDetail: kind };
       for (const result of legacyResults) lastError = result.lastError || lastError;

@@ -663,6 +663,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
         windows
       });
     } catch (error) {
+      if (deps.signal?.aborted) throw abortError(deps.signal);
       const status = classifyGrokRpcError(error);
       if (!credential || status === 'unauthorized') {
         return status === 'unauthorized'
@@ -689,10 +690,12 @@ async function fetchGrokLimits(options = {}, deps = {}) {
       windows: []
     });
   }
+  if (deps.signal?.aborted) throw abortError(deps.signal);
   let windows;
   try {
     windows = await (deps.fetchWebGrpcBilling || fetchGrokWebGrpcBilling)(credential, deps);
   } catch (webError) {
+    if (deps.signal?.aborted) throw abortError(deps.signal);
     return normalizeLimitProvider({
       provider: 'grok',
       source: 'web',
@@ -704,6 +707,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
   }
 
   try {
+    if (deps.signal?.aborted) throw abortError(deps.signal);
     return normalizeLimitProvider({
       provider: 'grok',
       accountKey: hashKey('grok', credential.token),

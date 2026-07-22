@@ -17,6 +17,22 @@ test('probe stops waiting for process discovery when the parent signal aborts', 
   await assert.rejects(pending, /runtime stopped/);
 });
 
+test('an already-aborted parent does not create the provider timeout timer', async (t) => {
+  let scheduled = 0;
+  t.mock.method(global, 'setTimeout', () => {
+    scheduled += 1;
+    return 1;
+  });
+  const controller = new AbortController();
+  controller.abort(new Error('already stopped'));
+
+  await assert.rejects(probe.probe({
+    signal: controller.signal,
+    probeTimeoutMs: 60_000
+  }), /already stopped/);
+  assert.equal(scheduled, 0);
+});
+
 test('parseProcessLine extracts pid + csrf + extension port from a darwin ps line', () => {
   const line = '53602 /Applications/Antigravity.app/Contents/Resources/bin/language_server --standalone --override_ide_name antigravity --csrf_token ea1dbb2a-65a8-4766-a155-8e70f032f4ac --app_data_dir antigravity --extension_server_port 12345 --extension_server_csrf_token deadbeef';
   const info = probe._parseProcessLine(line);
@@ -385,6 +401,32 @@ test('probe prefers quota summary and merges identity from GetUserStatus', async
   assert.equal(result.accountEmail, 'a@b.com');
   assert.equal(result.accountPlan, 'Google AI Pro');
   assert.deepEqual(result.windows.map((window) => window.name), ['Gemini 5-hour', 'Gemini weekly']);
+});
+
+test('parent cancellation during optional grouped identity lookup rejects the probe', async () => {
+  const controller = new AbortController();
+  const pending = probe.probe({
+    signal: controller.signal,
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+    listeningPorts: async () => [54733],
+    callLs: async ({ method }) => {
+      if (method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-weekly', remainingFraction: 0.6 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') {
+        controller.abort(new Error('grouped lookup cancelled'));
+        return new Promise(() => {});
+      }
+      return { ok: true };
+    }
+  });
+
+  await assert.rejects(pending, /grouped lookup cancelled/);
 });
 
 test('probe checks every endpoint for grouped quota before accepting a legacy response', async () => {

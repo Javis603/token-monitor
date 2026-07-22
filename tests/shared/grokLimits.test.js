@@ -372,6 +372,29 @@ test('fetchGrokRpcBilling kills the CLI when the parent signal aborts', async ()
   assert.equal(killed, true);
 });
 
+test('fetchGrokLimits does not start web fallback after the RPC parent signal aborts', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-abort-'));
+  writeAuthJson(home, { 'https://auth.x.ai::client': { key: 'eyJsecret.signature' } });
+  const controller = new AbortController();
+  let webCalls = 0;
+  const pending = fetchGrokLimits({}, {
+    env: {},
+    grokHome: home,
+    signal: controller.signal,
+    fetchRpcBilling: async () => {
+      controller.abort(new Error('grok probe superseded'));
+      throw new Error('RPC aborted');
+    },
+    fetchWebGrpcBilling: async () => {
+      webCalls += 1;
+      return [];
+    }
+  });
+
+  await assert.rejects(pending, /grok probe superseded/);
+  assert.equal(webCalls, 0);
+});
+
 test('fetchGrokLimits prefers Grok CLI RPC billing before bearer web fallback', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-rpc-'));
   writeAuthJson(home, {

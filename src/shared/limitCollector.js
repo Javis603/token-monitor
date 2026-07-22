@@ -1988,7 +1988,10 @@ async function readCodexRpcWithCommand(command, deps = {}) {
     });
     rpc.notify('initialized', {});
     let rateLimitResult = await rpc.send('account/rateLimits/read');
-    const accountResult = await rpc.send('account/read').catch(() => null);
+    const accountResult = await rpc.send('account/read').catch(() => {
+      if (signal?.aborted) throw abortError(signal);
+      return null;
+    });
     const account = accountResult?.account || null;
     let payload = codexRpcPayload(rateLimitResult, account, command, deps);
     if (deps.codexEmptyQuotaRetry !== false && shouldRetryCodexEmptyQuotaPayload(payload)) {
@@ -2002,11 +2005,14 @@ async function readCodexRpcWithCommand(command, deps = {}) {
             rateLimitResetCredits: retryPayload.rateLimitResetCredits || payload.rateLimitResetCredits
           };
         }
-      } catch (_) {}
+      } catch (_) {
+        if (signal?.aborted) throw abortError(signal);
+      }
     }
     if (!account && !hasCodexRateLimitWindows(codexRateLimitSnapshot(payload))) {
       throw errorWithStatus('notConfigured', 'Codex account not configured');
     }
+    if (signal?.aborted) throw abortError(signal);
     return payload;
   } finally {
     signal?.removeEventListener?.('abort', onAbort);

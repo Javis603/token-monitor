@@ -33,6 +33,8 @@ const TRANSIENT_STATUSES = new Set([
 ]);
 
 const COOLDOWN_BYPASS_REASONS = new Set([
+  'account-added',
+  'account-state',
   'credential-change',
   'credential-edit',
   'credential-save',
@@ -42,7 +44,9 @@ const COOLDOWN_BYPASS_REASONS = new Set([
   'profile-rename',
   'profile-save',
   'profile-state',
-  'provider-added'
+  'provider-added',
+  'settings-change',
+  'system-account-switch'
 ]);
 
 function cloneValue(value) {
