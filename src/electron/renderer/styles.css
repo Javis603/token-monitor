@@ -14,12 +14,7 @@
   --line-alpha: 0.138;
   --line-strong-alpha: 0.238;
   --control-alpha: 0.049;
-  --highlight-alpha: 0.07;
   --glass: rgba(var(--glass-rgb), var(--glass-alpha));
-  --glass-surface:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), var(--highlight-alpha)), rgba(var(--overlay-rgb), 0.022)),
-    linear-gradient(135deg, rgba(var(--overlay-rgb), 0.035), rgba(0, 0, 0, 0.09)),
-    var(--glass);
   --glass-filter: blur(32px) saturate(115%);
   --floating-bubble-radius: 17px;
   --glass-strong: rgba(31, 35, 41, 0.56);
@@ -78,11 +73,10 @@ input, textarea, [contenteditable="true"] {
   padding: 12px 14px 14px;
   overflow: hidden;
   isolation: isolate;
-  border: 1px solid var(--line-strong);
   border-radius: 14px;
   clip-path: inset(0 round 14px);
-  background: var(--glass-surface);
-  box-shadow: 0 22px 55px var(--shadow), inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
+  background: var(--glass);
+  box-shadow: 0 22px 55px var(--shadow);
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
 }
@@ -105,14 +99,6 @@ html.is-mac-legacy .shell {
   border-radius: 10px;
   clip-path: inset(0 round 10px);
 }
-.shell::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background: linear-gradient(180deg, rgba(var(--overlay-rgb), 0.08), transparent 36%);
-}
 .floating-bubble-tab {
   -webkit-app-region: no-drag;
   -webkit-appearance: none;
@@ -129,18 +115,14 @@ html.is-mac-legacy .shell {
   overflow: hidden;
   border: 0;
   border-radius: var(--floating-bubble-radius);
-  background: var(--glass-surface);
+  background: var(--glass);
   color: var(--number);
   cursor: grab;
-  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
   outline: none;
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
 }
 .system-glass-disabled .floating-bubble-tab {
-  box-shadow:
-    inset 0 0 0 1px var(--line-strong),
-    inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }

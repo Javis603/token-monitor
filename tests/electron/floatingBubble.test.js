@@ -360,7 +360,7 @@ test('dragFloatingBubbleBounds anchors the mini-window to the OS cursor point', 
   );
 });
 
-test('floating bubble collapsed styles fill the mini window with app glass styling', () => {
+test('glass surfaces keep the shared tint and blur without decorative chrome', () => {
   const css = fs.readFileSync(stylesPath, 'utf8');
   const app = fs.readFileSync(appPath, 'utf8');
   const html = fs.readFileSync(indexPath, 'utf8');
@@ -374,20 +374,29 @@ test('floating bubble collapsed styles fill the mini window with app glass styli
   assert.match(css, /html\.floating-bubble-collapsed-left,\s*body\.floating-bubble-collapsed-left/);
   assert.match(css, /html\.floating-bubble-collapsed-right,\s*body\.floating-bubble-collapsed-right/);
   const collapsedBlock = cssBlock(css, 'html\\.floating-bubble-collapsed-left,\\s*body\\.floating-bubble-collapsed-left,\\s*html\\.floating-bubble-collapsed-right,\\s*body\\.floating-bubble-collapsed-right');
+  const shellBlock = cssBlock(css, '\\.shell');
   const tabBlock = cssBlock(css, '\\.floating-bubble-tab');
+  const flatTabBlock = cssBlock(css, '\\.system-glass-disabled \\.floating-bubble-tab');
   assert.match(collapsedBlock, /background:\s*transparent;/);
+  assert.match(shellBlock, /background:\s*var\(--glass\);/);
+  assert.match(shellBlock, /box-shadow:\s*0 22px 55px var\(--shadow\);/);
+  assert.doesNotMatch(shellBlock, /(?:^|\n)\s*border\s*:/);
+  assert.doesNotMatch(shellBlock, /box-shadow:[^;]*\binset\b/);
   assert.match(tabBlock, /appearance:\s*none;/);
   assert.match(tabBlock, /border:\s*0;/);
   assert.match(tabBlock, /border-radius:\s*var\(--floating-bubble-radius\);/);
   assert.match(app, /const BUBBLE_CONTENT_MIN_W = 34;/);
-  assert.match(tabBlock, /background:\s*var\(--glass-surface\);/);
+  assert.match(tabBlock, /background:\s*var\(--glass\);/);
   assert.match(tabBlock, /color:\s*var\(--number\);/);
   assert.match(tabBlock, /backdrop-filter:\s*var\(--glass-filter\);/);
-  assert.match(css, /\.system-glass-disabled \.floating-bubble-tab\s*\{[\s\S]*backdrop-filter:\s*none;/);
+  assert.doesNotMatch(tabBlock, /box-shadow/);
+  assert.match(flatTabBlock, /backdrop-filter:\s*none;/);
+  assert.doesNotMatch(flatTabBlock, /box-shadow/);
   assert.match(app, /classList\.toggle\('system-glass-disabled', systemGlassDisabled\)/);
   assert.match(boot, /query\.get\('systemGlassDisabled'\) === '1'/);
-  assert.match(css, /--glass-surface:\s*[\s\S]*var\(--glass\);/);
   assert.match(css, /--glass-filter:\s*blur\(32px\) saturate\(115%\);/);
+  assert.doesNotMatch(css, /--glass-surface|--highlight-alpha|\.shell::after/);
+  assert.doesNotMatch(app, /--highlight-alpha/);
   assert.doesNotMatch(css, /--bubble-(?:alpha|blur)/);
   assert.doesNotMatch(app, /--bubble-(?:alpha|blur)/);
   assert.match(css, /html\.floating-bubble-collapsed-left body \.shell,\s*html\.floating-bubble-collapsed-right body \.shell/);

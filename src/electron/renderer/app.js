@@ -4607,7 +4607,6 @@ function applyAppearanceSettings(settings) {
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
-  document.documentElement.style.setProperty('--highlight-alpha', (0.045 + depth * 0.06).toFixed(3));
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
   els.windowsBackdropRow?.classList.toggle('hidden', !windowsGlass.showBackdropControl);
   if (els.windowsBackdropInput) {
