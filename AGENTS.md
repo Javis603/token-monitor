@@ -38,7 +38,9 @@ Three runtime entry points share a single `src/shared/` library:
 
 ### AI Tool Limits collector
 
-`src/shared/limitCollector.js` runs alongside the usage collector to surface Claude Code / Codex session and weekly windows. Provider-specific probing lives in `src/shared/limits.js` (Codex limits are read via CLI RPC, including a Windows-specific path). Limits flow through the same wire shape — see "Data flow contract" below — and are merged into device records by the hub.
+Usage and limits have independent lifecycles under `src/shared/deviceRuntime.js`: `UsageRuntime` owns the tokscale collector, while `LimitsRuntime` owns its refresh timer, per-provider latest-wins lanes, scoped account refreshes, finite probe deadlines, and `lastGood` / `lastAttempt` retention. Credential changes refresh or clear only the affected limits lane and never restart usage; Cursor additionally forces one targeted usage sync because its tokscale cache is self-synced.
+
+`DeviceState` composes both outputs into the unchanged device wire record, buffering limits until usage exists and cold-start previews until a complete usage baseline exists; limits-only updates preserve the usage `updatedAt`. Provider dispatch starts in `src/shared/limitCollector.js`, with provider-specific implementations split between that file and `src/shared/*Limits.js`; shared normalization remains in `src/shared/limits.js`. The hub and Worker receive the composed record and never need provider credentials.
 
 ### Widget mode switching
 
