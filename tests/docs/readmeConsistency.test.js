@@ -8,15 +8,24 @@ const test = require('node:test');
 const rootDir = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
 
-test('localized README env summaries stay aligned', () => {
-  const files = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
-  const envKeys = (file) => {
-    const block = read(file).match(/```env\n([\s\S]*?)```/)?.[1] || '';
+const localizedReadmes = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
+
+test('configuration reference env keys all exist in .env.example', () => {
+  const envKeys = (text) => {
+    const block = text.match(/```env\n([\s\S]*?)```/)?.[1] || '';
     return [...block.matchAll(/^(TOKEN_MONITOR_[A-Z0-9_]+)=/gm)].map((match) => match[1]);
   };
-  const expected = envKeys(files[0]);
+  const docKeys = envKeys(read('docs/configuration.md'));
+  assert.ok(docKeys.length > 0, 'docs/configuration.md should list env keys');
 
-  for (const file of files.slice(1)) assert.deepEqual(envKeys(file), expected, file);
+  const exampleKeys = new Set(
+    [...read('.env.example').matchAll(/^(TOKEN_MONITOR_[A-Z0-9_]+)=/gm)].map((match) => match[1])
+  );
+  for (const key of docKeys) assert.ok(exampleKeys.has(key), `${key} missing from .env.example`);
+});
+
+test('localized READMEs link to the configuration reference', () => {
+  for (const file of localizedReadmes) assert.match(read(file), /docs\/configuration\.md/, file);
 });
 
 test('localized README WSL claims disclose the SQLite agent boundary', () => {

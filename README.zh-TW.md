@@ -26,11 +26,11 @@
 
 ## 什麼是 Token Monitor？
 
-一款桌面小工具，即時顯示各種 AI 編程工具（包含 Claude Code、Codex、Hermes Agent、OpenCode、OpenClaw、Cursor、Antigravity、Cline、Kimi、Qwen、Grok Build、GitHub Copilot 等）的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型或 session 分項顯示。
+一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot 等 25+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
 
 ## 支援的工具
 
-Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分別支援：
+Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 | Logo | 工具 | 資料路徑 | Token 用量 | AI 工具額度 | session 明細 |
 |:---:|------|-----------|:---:|:---:|:---:|
@@ -65,15 +65,15 @@ Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分�
 
 | 主頁檢視 | 額度檢視 | 工具檢視 |
 |:---:|:---:|:---:|
-| ![主頁檢視](.github/assets/home-view.png) | ![額度檢視](.github/assets/limits-view.png) | ![工具檢視](.github/assets/tools-view.png) |
+| ![主頁檢視](.github/assets/home-view.png)<br><sub>可自訂儀表板：自選要顯示的模組與排序</sub> | ![額度檢視](.github/assets/limits-view.png)<br><sub>多帳號並列，Codex 可一鍵切換本機帳號</sub> | ![工具檢視](.github/assets/tools-view.png)<br><sub>點任一工具展開輸入／輸出與快取命中明細</sub> |
 
-| Session 檢視 | 模型檢視 | 服務狀態 |
+| Session 檢視 | 模型檢視 | 裝置檢視 |
 |:---:|:---:|:---:|
-| ![Session 檢視](.github/assets/sessions-view.png) | ![模型檢視](.github/assets/models-view.png) | ![服務狀態](.github/assets/status-view.png) |
+| ![Session 檢視](.github/assets/sessions-view.png)<br><sub>點進單一 session，逐則提問拆解 token 與用到的工具</sub> | ![模型檢視](.github/assets/models-view.png)<br><sub>跨工具彙總每個模型的用量與成本</sub> | ![裝置檢視](.github/assets/devices-view.png)<br><sub>每台裝置的用量、成本與同步狀態，可展開看單機明細</sub> |
 
 | 使用儀表板 — 總覽 | 使用儀表板 — 趨勢 |
 |:---:|:---:|
-| ![使用儀表板 總覽](.github/assets/dashboard-overview.png) | ![使用儀表板 趨勢](.github/assets/dashboard-trends.png) |
+| ![使用儀表板 總覽](.github/assets/dashboard-overview.png)<br><sub>跨所有裝置彙總的一年活躍熱力圖與連續天數</sub> | ![使用儀表板 趨勢](.github/assets/dashboard-trends.png)<br><sub>一年份每日趨勢，依工具／模型堆疊，含 K 線</sub> |
 
 ## 為什麼要用 Token Monitor？
 
@@ -81,28 +81,40 @@ Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分�
 
 ## 功能特色
 
-- **即時 Token 追蹤**：涵蓋 Claude Code、Codex、Hermes Agent、OpenCode、OpenClaw、Cursor、Antigravity、Cline、Kimi、Qwen、Grok Build、GitHub Copilot、Pi、Zed、Kilo Code、MiMo Code、ZCode、Kiro、CodeBuddy、WorkBuddy、Proma（每輪對話後 UI 在數秒內更新）
-- **WSL 用量（Windows）**：執行中 WSL 發行版裡的檔案型用量會自動偵測，約每 5 分鐘併入總量；OpenCode、Hermes 等 SQLite 來源可能需要依照[指南](docs/wsl-sqlite-setup.zh-CN.md)在 WSL 內執行 headless agent
-- **多裝置即時同步**：透過 Server-Sent Events 推送
-- **分組統計檢視**：可依工具、裝置、模型、session 或帳戶額度分組
+### 用量追蹤
+
+- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 20+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
 - **單一 session 明細**：點進 Claude Code、Codex 或 OpenCode 的 session，可看每則提問的 Token 消耗，並展開查看每次回覆的 Token 拆分與用到的工具（開啟時才即時讀取本機 transcript 或資料庫，絕不同步）
-- **快取命中統計**：點擊任何工具或模型以展開查看輸入 Token（快取命中與未命中）、輸出 Token 的詳細分類及命中率百分比
-- **成本分項**：Token 數量旁附帶成本統計
-- **以你的幣別顯示成本**：可用 USD、TWD、HKD 或 CNY 顯示成本；匯率每日自動更新，也可在設定中手動覆寫
+- **快取命中統計**：點擊任何工具或模型，展開查看輸入 Token（快取命中與未命中）、輸出 Token 的詳細分類及命中率百分比
+- **成本與幣別**：Token 數量旁附帶成本；可用 USD、TWD、HKD 或 CNY 顯示，匯率每日自動更新，也可在設定中手動覆寫
+- **WSL 用量（Windows）**：執行中 WSL 發行版裡的檔案型用量會自動偵測，約每 5 分鐘併入總量；OpenCode、Hermes 等 SQLite 來源可能需要依照[指南](docs/wsl-sqlite-setup.zh-CN.md)在 WSL 內執行 headless agent
+
+### 額度、趨勢與匯出
+
+- **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、GLM、Kimi 等 15+ 家供應商的 session、每週、帳單與 credits 視窗，以及 DeepSeek 預付餘額與今日/本月消費
+- **多帳號與 Codex 帳號切換**：同一供應商可追蹤多個帳號、各自顯示額度；已加入追蹤的 Codex 帳號還能一鍵切換為本機使用帳號，免重新登入授權
+- **保留已刪除會話用量**：許多工具會定期清除舊 session（Claude Code 預設清 30 天前的 transcript），一刪就再也算不到。開啟後，Token Monitor 會在本機不設期限地封存已觀測到的每日工具／模型用量，讓熱力圖與趨勢即使在來源檔案被清掉後仍然完整（詳見下方[〈會話資料保留期〉](#會話資料保留期)）
 - **使用趨勢與儀表板**：主頁的活躍熱力圖與趨勢圖，加上獨立的儀表板視窗，提供連續天數，以及跨所有裝置、依工具／依模型堆疊的歷史（柱狀圖與 K 線兩種檢視）
-- **資料匯出**：把使用資料匯出成與工具無關的 CSV + JSON，可手動或自動寫入資料夾，接試算表、Obsidian、Grafana 或自寫腳本；詳見 [docs/export.md](docs/export.md)
-- **AI 工具額度偵測**：支援 Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、MiMo、GitHub Copilot、Kiro、GLM、Volcengine、Qoder、Kimi 與 Ollama，涵蓋各供應商不同的 session、每週、帳單與 credits 視窗，以及 DeepSeek 預付餘額與今日/本月消費。已加入追蹤的 Codex 帳號可一鍵設為本機 Codex 使用帳號，不用重新登入授權。
 - **可選的狀態檢視**：追蹤 Claude、OpenAI、Cursor 與 DeepSeek status 頁，支援手動或定時重新檢查
-- **工具列表自訂**：可隱藏、置頂和拖曳排序主列表中的工具，不影響實際追蹤
-- **外觀控制**：介面主題切換（含淺色模式）、各工具廠商色、玻璃透明度、模糊度、完全透明視窗
-- **選單列（macOS）與系統匣（Windows）彈出視窗**：圖示旁可顯示成本、token 數，或 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／MiMo／GitHub Copilot／Kiro／GLM／Volcengine／Qoder／Kimi／Ollama 最接近用完的剩餘額度百分比
-- **懸浮小窗模式**：可將小工具收成可拖曳的緊湊小窗，支援點擊或懸停預覽展開，並可顯示托盤同款內容
-- **可錄製全域快捷鍵**：可從任何地方快速顯示或隱藏視窗
+- **資料匯出**：把使用資料匯出成與工具無關的 CSV + JSON，可手動或自動寫入資料夾，接試算表、Obsidian、Grafana 或自寫腳本；詳見 [docs/export.md](docs/export.md)
+
+### 多裝置與部署
+
+- **多裝置即時同步**：透過 Server-Sent Events 推送，一台裝置的更新數秒內出現在其他裝置
 - **本地優先**：單裝置使用完全不需伺服器
-- **自架同步後端**：小工具內 hub、Node CLI hub 或 Cloudflare Worker
+- **自架同步後端**：小工具內 hub、Node CLI hub 或 Cloudflare Worker，任你選
 - **iOS 小工具支援**：透過 Worker hub 搭配 Widgy、Scriptable
-- **Discord Rich Presence**：將今日 Token、花費與主要工具廣播到你的 Discord 個人檔案（需手動開啟）
 - **隱私優先**：提示詞、回應、原始碼與檔案內容都留在你的機器上
+
+### 介面與呈現
+
+- **分組檢視**：可依工具、裝置、模型、session、專案或帳戶額度分組查看用量
+- **選單列（macOS）與系統匣（Windows）彈出視窗**：圖示旁可顯示成本、token 數，或最接近用完的供應商剩餘額度百分比
+- **懸浮小窗模式**：可將小工具收成可拖曳的緊湊小窗，支援點擊或懸停預覽展開，並可顯示托盤同款內容
+- **外觀控制**：介面主題切換（含淺色模式）、各工具廠商色、玻璃透明度、模糊度、完全透明視窗
+- **工具列表自訂**：可隱藏、置頂和拖曳排序主列表中的工具，不影響實際追蹤
+- **可錄製全域快捷鍵**：可從任何地方快速顯示或隱藏視窗
+- **Discord Rich Presence**：將今日 Token、花費與主要工具廣播到你的 Discord 個人檔案（需手動開啟）
 
 ## 安裝
 
@@ -110,7 +122,7 @@ Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分�
 
 - **macOS（Apple Silicon）** — `.dmg`，已簽章並 notarize
 - **macOS（Intel）** — x64 `.dmg`，已簽章並 notarize
-- **Windows 10/11** — 安裝版與可攜版 `.exe`，均已透過 [SignPath Foundation](docs/code-signing.md) 簽章
+- **Windows 10/11** — 安裝版與可攜版 `.exe`，均[已簽章](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
 
 打包版會自動檢查 GitHub Releases。有新版本時，介面會顯示更新提示；支援的平台也可在 設定 → 一般 中安裝更新。
@@ -125,7 +137,7 @@ Token Monitor 對「Token 用量」「帳戶額度」與「session 明細」分�
 
 #### 選項 A——直接在小工具內開 hub（最簡單，無需命令列）
 
-在一台持續開機的機器上打開小工具，進入 設定 → 多裝置同步，選 **Host hub on this device**。小工具會產生隨機 secret，並列出其他裝置可連入的區網 URL（Tailscale 或 ZeroTier 位址也會顯示在這裡）。在其他每台裝置上選 **Connect to a hub**，把 URL 與 secret 貼進去即可。
+在一台持續開機的機器上打開小工具，進入 設定 → 多裝置同步，選 **在這台裝置架設 Hub**。小工具會產生隨機 secret，並列出其他裝置可連入的區網 URL（Tailscale 或 ZeroTier 位址也會顯示在這裡）。在其他每台裝置上選 **連接到 Hub**，把 URL 與 secret 貼進去即可。
 
 只要 Token Monitor 還在跑，hub 就會運作——結束 App（僅關閉視窗不算）會停掉 hub，所有連入的裝置都會中斷。
 
@@ -195,9 +207,14 @@ npm run pack         # 未封裝的 app 目錄（無安裝檔），方便本機�
 
 ## 會話資料保留期
 
-活動熱力圖與趨勢儀錶板，是由各工具仍留在磁碟上的會話檔建構的。**Claude Code 預設會清除 30 天前的 transcript**（`cleanupPeriodDays`）。開啟**保留已刪除會話用量**（設定 → 採集）後，Token Monitor 除了保留今日／本月／全部的會話總量，也會在本機不設期限地保存所有已觀測到的每日工具／模型資料。熱力圖與同步資料仍採用 370 天的滾動視窗，更舊的觀測資料則留在本機供未來檢視。來源日後清理檔案時，已觀測的日期不會再消失；但在 Token Monitor 首次觀測前就已刪除的資料，無法由這份封存記錄救回。
+開啟**保留已刪除會話用量**（設定 → 採集）後，Token Monitor 會在本機不設期限地封存已觀測到的每日工具／模型用量——即使來源工具日後清掉 session，熱力圖與趨勢也不受影響。
 
-若要保住熱力圖完整的滾動年份，請在時限過去之前，於 `~/.claude/settings.json` 調高 Claude Code 的保留期：
+<details>
+<summary><strong>進階：延長來源工具本身的保留期</strong></summary>
+
+<br>
+
+熱力圖與同步資料採 370 天的滾動視窗（更舊的觀測資料仍留在本機供日後檢視）。**Claude Code 預設只保留 30 天的 transcript**（`cleanupPeriodDays`）；若想在封存啟用前就保住完整的滾動年份，請在時限過去之前於 `~/.claude/settings.json` 調高：
 
 ```json
 {
@@ -205,61 +222,24 @@ npm run pack         # 未封裝的 app 目錄（無安裝檔），方便本機�
 }
 ```
 
-370 對應熱力圖的窗口；設更大能留更多，代價是 transcript 會依你設定的期限一直留在磁碟上。其他工具的預設值與設定檔路徑，請見 tokscale 的 [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) 表。
+設更大能留更多，代價是 transcript 會依你設定的期限一直留在磁碟上。其他工具的預設值與設定檔路徑，請見 tokscale 的 [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) 表。
+
+這份封存只涵蓋 Token Monitor 已觀測過的日期；在它開始追蹤之前就被刪除的資料無法補回。
+
+</details>
 
 ## 設定
 
-### 小工具（GUI）
+設定分兩處，日常使用只需要前者：
 
-點擊小工具標題列上的 `⚙` 按鈕開啟設定面板。
+- **小工具（GUI）**——點右下角的 `⚙` 開啟，分區依序為：一般（語言、登入啟動、更新）、主畫面（首頁模組與顯示幣別）、視窗（視窗行為、托盤模式、懸浮小窗、快捷鍵）、外觀（主題與廠商色）、採集（追蹤的工具、採集頻率、保留已刪除會話用量、資料匯出）、AI 工具額度、帳號（各供應商憑證）、多裝置同步。標題列的 `⇧` 鈕可循環切換視窗行為。
+- **無頭代理與 hub**——沒有 UI，用專案根目錄的 `.env` 設定（從 `.env.example` 複製）；優先序為 CLI 旗標 → 環境變數 → 內建預設。
 
-- **多裝置同步**——三種模式：**Local only**（僅本機，無 hub）、**Connect to a hub**（貼入其他機器的 Hub URL + secret）、**Host hub on this device**（在本機開 hub 供其他裝置連入；面板會列出可用的區網 / Tailscale / ZeroTier 位址）。
-- **追蹤的工具**——選擇要收集的 AI 工具，也可以獨立隱藏、置頂或拖曳排序主列表中的工具。
-- **AI 工具額度**——選擇 Claude Code、Codex、Cursor、Antigravity、OpenCode、DeepSeek、Grok、Minimax、MiMo、GitHub Copilot、Kiro、GLM、Volcengine、Qoder、Kimi 與 Ollama 的額度偵測與更新頻率。
-- **趨勢**——選擇每日使用歷史的掃描間隔，或直接關閉；開啟使用儀表板可看到活躍熱力圖、連續天數，以及依工具／依模型堆疊的柱狀圖與 K 線圖。
-- **視窗行為**——選擇浮在其他 app 上方、一般視窗，或固定在桌面。
-- **托盤模式**——切換為 macOS 選單列或 Windows 系統匣的彈出視窗，並選擇圖示旁顯示的內容：成本、今日 token 數、累計 token 數、成本＋token、最接近用完的 Claude／Codex／Cursor／Antigravity／OpenCode／Grok／Minimax／MiMo／GitHub Copilot／Kiro／GLM／Volcengine／Qoder／Kimi／Ollama 剩餘額度百分比，或只顯示圖示。
-- **懸浮小窗**——將小工具收成可拖曳的小窗，可用點擊或懸停預覽展開，並可選擇顯示圖示、token、費用或 AI 工具額度條。
-- **快捷鍵**——錄製全域快捷鍵，用來顯示或隱藏視窗。
-- **外觀**——介面主題切換，可選預設（預設、黑曜、瓷白淺色模式）或自訂色彩（強調色、背景、文字、次要文字）、各工具廠商色、系統玻璃、即時點、工具圖示、Discord Rich Presence、玻璃透明度、玻璃模糊度。
-- **進階**——開啟底層 `settings.json` 來調整較少用的選項，例如 `allTimeSince`。
-
-小工具標題列上的釘選按鈕可切換「永遠置頂」。
-
-### 無頭代理與 hub（`.env`）
-
-代理與 hub 沒有 UI。請在專案根目錄用 `.env` 檔案設定（從 `.env.example` 複製）:
-
-```env
-TOKEN_MONITOR_HUB_URL=               # 同步模式必填——Worker URL 或 http://<lan-ip>:17321
-TOKEN_MONITOR_SECRET=                # 共用 secret，必須與 hub 一致
-TOKEN_MONITOR_DEVICE_ID=             # 選填——預設為主機名稱
-TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # 選填——0／即時、600000／10 分鐘、1200000／20 分鐘、1800000／30 分鐘
-TOKEN_MONITOR_CLIENTS=               # 選填——預設為所有支援的工具；設為空表示不追蹤
-TOKEN_MONITOR_PROJECTS_ENABLED=      # 選填——預設關閉；設為 1 可收集專案中繼資料
-TOKEN_MONITOR_HISTORY_ENABLED=       # 選填——預設啟用；設為 0 可跳過收集趨勢歷史
-TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # 選填——預設啟用；設為 0 可停止保留封存的會話用量
-TOKEN_MONITOR_LIMITS_ENABLED=        # 選填——預設啟用；設為 0 可跳過 CLI 探測
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # 選填——預設為所有支援的供應商（claude、codex、cursor、antigravity、opencode、deepseek、minimax、mimo、grok、copilot、kiro、zai、zaiteam、volcengine、qoder、kimi、ollama）
-```
-
-完整清單請見 `.env.example`。小工具會把環境變數讀作首次啟動的預設值；代理與 hub 則以 CLI 旗標優先。
-
-一次性執行範例：
-
-```bash
-npm run agent -- --clients=claude,codex,opencode --once
-```
+每一項設定與所有環境變數的完整說明，請見[設定參考文件](docs/configuration.md)。
 
 ## 隱私
 
 Token Monitor 會在本機處理使用紀錄，不會向專案維護者傳送分析或遙測資料。網路存取僅用於文件中說明或由使用者啟用的功能；更新、供應商整合、Discord Rich Presence 與可選多裝置同步所使用的資料，請參閱[隱私權政策](docs/privacy.md)。
-
-## 系統需求
-
-- macOS、Windows 或 Linux x64
-- Node.js 22.13+
-- 僅同步模式：每個代理／小工具到 hub 的網路連通性
 
 ## Star 歷史
 

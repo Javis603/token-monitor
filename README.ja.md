@@ -26,7 +26,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Hermes Agent、OpenCode、OpenClaw、Cursor、Antigravity、Cline など、さまざまな AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション別の内訳表示に対応しています。
+Claude Code、Codex、Cursor、GitHub Copilot など 25+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
 
 ## 対応ツール
 
@@ -65,15 +65,15 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 | ホームビュー | 制限ビュー | ツールビュー |
 |:---:|:---:|:---:|
-| ![ホームビュー](.github/assets/home-view.png) | ![制限ビュー](.github/assets/limits-view.png) | ![ツールビュー](.github/assets/tools-view.png) |
+| ![ホームビュー](.github/assets/home-view.png)<br><sub>カスタマイズ可能なダッシュボード — 表示するモジュールと順序を選択</sub> | ![制限ビュー](.github/assets/limits-view.png)<br><sub>複数アカウントを並べて表示、Codex はローカルアカウントをワンクリック切り替え</sub> | ![ツールビュー](.github/assets/tools-view.png)<br><sub>任意のツールをクリックして入力／出力とキャッシュヒットの内訳を展開</sub> |
 
-| セッションビュー | モデルビュー | サービスステータス |
+| セッションビュー | モデルビュー | デバイスビュー |
 |:---:|:---:|:---:|
-| ![セッションビュー](.github/assets/sessions-view.png) | ![モデルビュー](.github/assets/models-view.png) | ![サービスステータス](.github/assets/status-view.png) |
+| ![セッションビュー](.github/assets/sessions-view.png)<br><sub>単一セッションを開いて、プロンプトごとにトークンと使用ツールを分解</sub> | ![モデルビュー](.github/assets/models-view.png)<br><sub>ツール横断で各モデルの使用量とコストを集計</sub> | ![デバイスビュー](.github/assets/devices-view.png)<br><sub>各デバイスの使用量・コスト・同期状態、展開でマシン別詳細</sub> |
 
 | 使用ダッシュボード — 概要 | 使用ダッシュボード — トレンド |
 |:---:|:---:|
-| ![使用ダッシュボード概要](.github/assets/dashboard-overview.png) | ![使用ダッシュボードトレンド](.github/assets/dashboard-trends.png) |
+| ![使用ダッシュボード概要](.github/assets/dashboard-overview.png)<br><sub>全デバイス横断の 1 年分アクティビティヒートマップと連続日数</sub> | ![使用ダッシュボードトレンド](.github/assets/dashboard-trends.png)<br><sub>1 年分の日次トレンド、ツール／モデル別に積み上げ、K 線対応</sub> |
 
 ## Token Monitor を使う理由
 
@@ -81,28 +81,40 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 ## 機能
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Hermes Agent、OpenCode、OpenClaw、Cursor、Antigravity、Cline、Kimi、Qwen、Grok Build、GitHub Copilot、Pi、Zed、Kilo Code、MiMo Code、ZCode、Kiro、CodeBuddy、WorkBuddy、Proma（各ターンから数秒以内に UI 更新）
-- **WSL 使用量 (Windows)** — 実行中の WSL ディストリビューションにあるファイルベースの使用量を約 5 分ごとに自動検出して合算。OpenCode や Hermes など SQLite ベースのツールでは、[WSL 内のヘッドレスエージェント](docs/wsl-sqlite-setup.md)が必要になる場合があります
-- **マルチデバイスリアルタイム同期** — Server-Sent Events
-- **内訳ビュー** — ツール、デバイス、モデル、セッション、アカウント制限別
+### 使用量の追跡
+
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 20+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **セッション別詳細** — Claude Code、Codex、OpenCode セッションでプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細
-- **コスト内訳** — トークン数とともにコストを表示
-- **希望の通貨でコスト表示** — USD、TWD、HKD、CNY；為替レートは毎日自動更新、設定で手動上書き可能
+- **コストと通貨** — トークン数とともにコストを表示。USD、TWD、HKD、CNY に対応し、為替レートは毎日自動更新、設定で手動上書き可能
+- **WSL 使用量 (Windows)** — 実行中の WSL ディストリビューションにあるファイルベースの使用量を約 5 分ごとに自動検出して合算。OpenCode や Hermes など SQLite ベースのツールでは、[WSL 内のヘッドレスエージェント](docs/wsl-sqlite-setup.md)が必要になる場合があります
+
+### 制限・トレンド・エクスポート
+
+- **AI ツール制限検出** — Claude Code、Codex、Cursor、GLM、Kimi など 15+ プロバイダーの session/weekly/billing/credits、DeepSeek プリペイド残高・本日/今月の使用額
+- **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
+- **削除されたセッション使用量を保持** — 多くのツールは古いセッションを削除します（Claude Code はデフォルトで 30 日後にトランスクリプトを削除）。有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量をローカルにアーカイブし、元ファイルが消えてもヒートマップとトレンドを維持します（下記 [セッションデータの保持期間](#セッションデータの保持期間) を参照）
 - **使用トレンド & ダッシュボード** — ホーム画面のアクティビティヒートマップ・トレンドチャート、連続日数・全デバイス横断のツール/モデル別累積使用（棒・K 線）専用ダッシュボードウィンドウ
-- **データエクスポート** — ツール非依存の CSV + JSON で手動エクスポートまたはフォルダへの自動書き込み（スプレッドシート、Obsidian、Grafana、スクリプト用）；[docs/export.md](docs/export.md) を参照
-- **AI ツール制限検出** — Claude Code、Codex、Cursor、Antigravity、OpenCode、Grok、Minimax、MiMo、GitHub Copilot、Kiro、GLM、Volcengine、Qoder、Kimi、Ollama のプロバイダー固有の session/weekly/billing/credits、DeepSeek プリペイド残高・本日/今月の使用額。追跡済みの Codex アカウントは、再認証なしでローカル Codex アカウントに切り替えできます
 - **ステータスビュー**（任意） — Claude、OpenAI、Cursor、DeepSeek のステータスページを手動/定期確認
-- **ツールリストのカスタマイズ** — 追跡は維持したまま非表示、ピン留め、順序変更
-- **外観** — テーマ（ライトモード含む）、ツール別カラー、ガラス透明度・ぼかし、透明ウィンドウ
-- **メニューバー (macOS) / システムトレイ (Windows)** — コスト、トークン、Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/MiMo/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi/Ollama 制限 % など
-- **フローティングバブル** — ドラッグ可能なミニウィンドウ、クリック/ホバープレビュー
-- **グローバルショートカット** — どこからでもウィンドウの表示/非表示
+- **データエクスポート** — ツール非依存の CSV + JSON で手動エクスポートまたはフォルダへの自動書き込み（スプレッドシート、Obsidian、Grafana、スクリプト用）；[docs/export.md](docs/export.md) を参照
+
+### マルチデバイスとデプロイ
+
+- **マルチデバイスリアルタイム同期** — Server-Sent Events。1 台の変更が数秒以内に他のデバイスに反映
 - **ローカルファースト** — 単一デバイスではサーバー不要
 - **セルフホスト同期** — ウィジェット内 hub、Node CLI hub、Cloudflare Worker
 - **iOS ウィジェット** — Worker hub + Widgy、Scriptable
-- **Discord Rich Presence** — 本日のトークン・コスト・主要クライアント（オプトイン）
 - **プライバシー優先** — プロンプト、応答、ソースコード、ファイル内容はすべてデバイス内に保持
+
+### インターフェースと表示
+
+- **内訳ビュー** — ツール、デバイス、モデル、セッション、プロジェクト、アカウント制限別
+- **メニューバー (macOS) / システムトレイ (Windows)** — コスト、トークン、または残量が最も少ないプロバイダー制限 % をアイコン横に表示
+- **フローティングバブル** — ドラッグ可能なミニウィンドウ、クリック/ホバープレビュー
+- **外観** — テーマ（ライトモード含む）、ツール別カラー、ガラス透明度・ぼかし、透明ウィンドウ
+- **ツールリストのカスタマイズ** — 追跡は維持したまま非表示、ピン留め、順序変更
+- **グローバルショートカット** — どこからでもウィンドウの表示/非表示
+- **Discord Rich Presence** — 本日のトークン・コスト・主要クライアント（オプトイン）
 
 ## インストール
 
@@ -110,7 +122,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 - **macOS (Apple Silicon)** — `.dmg`、署名および notarize 済み
 - **macOS (Intel)** — x64 `.dmg`、署名および notarize 済み
-- **Windows 10/11** — インストーラー版とポータブル版の `.exe`、[SignPath Foundation](docs/code-signing.md) により署名済み
+- **Windows 10/11** — インストーラー版とポータブル版の `.exe`、[署名済み](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
 
 パッケージ版は GitHub Releases を自動確認します。新しいバージョンがある場合は画面に更新インジケーターが表示され、対応プラットフォームでは 設定 → 一般 からもインストールできます。
@@ -125,7 +137,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 #### オプション A — ウィジェットから hub をホスト（最も簡単、CLI 不要）
 
-常時起動のマシンで **設定 → マルチデバイス同期 → Host hub on this device** を選択します。ウィジェットが secret を生成し、LAN URL（Tailscale/ZeroTier 含む）を表示します。他のデバイスでは **Connect to a hub** に URL と secret を貼り付けます。
+常時起動のマシンで **設定 → マルチデバイス同期 → このデバイスでHubをホスト** を選択します。ウィジェットが secret を生成し、LAN URL（Tailscale/ZeroTier 含む）を表示します。他のデバイスでは **Hubに接続** に URL と secret を貼り付けます。
 
 Token Monitor が実行中の間のみ hub が動作します。アプリを終了すると（ウィンドウを閉じるだけではなく）hub が停止し、接続されたデバイスが切断されます。
 
@@ -195,9 +207,14 @@ npm run pack         # インストーラーなしのアプリディレクトリ
 
 ## セッションデータの保持期間
 
-アクティビティヒートマップとトレンドダッシュボードは、各ツールがディスクに残しているセッションファイルから構築されます。**Claude Code はデフォルトで 30 日を過ぎたトランスクリプトを削除します**（`cleanupPeriodDays`）。**削除されたセッション使用量を保持**（設定 → 収集）を有効にすると、Token Monitor は今日/今月/全期間のセッション合計に加え、一度観測した日別のツール/モデル情報を期限なしですべてローカルに保存します。ヒートマップと同期データは引き続き 370 日のローリング期間を使用し、それより古い観測データは将来の表示用にローカルへ残ります。その後に元データが削除されても観測済みの日は消えませんが、Token Monitor が初めて観測する前に削除済みだったデータは、このアーカイブでは復元できません。
+**削除されたセッション使用量を保持**（設定 → 収集）を有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量を期限なしでローカルにアーカイブします。元のツールが後からセッションを削除しても、ヒートマップとトレンドは影響を受けません。
 
-ヒートマップのローリング 1 年分を保つには、期限が過ぎる前に `~/.claude/settings.json` で Claude Code の保持期間を延長してください：
+<details>
+<summary><strong>詳細: 元ツール自体の保持期間を延長する</strong></summary>
+
+<br>
+
+ヒートマップと同期データは 370 日のローリング期間を使用します（それより古い観測データは将来の表示用にローカルへ残ります）。**Claude Code はデフォルトで 30 日分のトランスクリプトしか保持しません**（`cleanupPeriodDays`）。アーカイブが働き始める前にローリング 1 年分を保つには、期限が過ぎる前に `~/.claude/settings.json` で延長してください：
 
 ```json
 {
@@ -205,61 +222,24 @@ npm run pack         # インストーラーなしのアプリディレクトリ
 }
 ```
 
-370 はヒートマップの表示期間に対応します。値を大きくすればより多く残せますが、その分トランスクリプトがディスク上に残り続けます。他のツールのデフォルト値と設定ファイルのパスは、tokscale の [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) の表を参照してください。
+値を大きくすればより多く残せますが、その分トランスクリプトがディスク上に残り続けます。他のツールのデフォルト値と設定ファイルのパスは、tokscale の [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) の表を参照してください。
+
+このアーカイブは Token Monitor が既に観測した日のみを対象とします。追跡を開始する前に削除されたデータは復元できません。
+
+</details>
 
 ## 設定
 
-### ウィジェット (GUI)
+Token Monitor の設定は 2 か所にあります。日常利用に必要なのは前者だけです。
 
-ウィジェットヘッダーの `⚙` ボタンで設定パネルを開きます。
+- **ウィジェット (GUI)** — 右下の `⚙` ボタンで開きます。セクションは順に：一般（言語、ログイン時に起動、アップデート）、メイン画面（ホームモジュールと表示通貨）、ウィンドウ（ウィンドウ動作、トレイモード、フローティングバブル、ショートカット）、外観（テーマとツール別カラー）、収集（追跡ツール、収集間隔、削除されたセッション使用量を保持、データエクスポート）、AI ツール制限、アカウント（プロバイダー別の認証情報）、マルチデバイス同期。タイトルバーの `⇧` ボタンでウィンドウ動作を切り替えます。
+- **Headless agent と hub** — UI なし。プロジェクトルートの `.env`（`.env.example` をコピー）で設定します。優先順位は CLI フラグ → 環境変数 → 既定値。
 
-- **マルチデバイス同期** — **Local only**、**Connect to a hub**、**Host hub on this device**
-- **追跡ツール** — 収集対象の選択、リストでの非表示・ピン留め・順序変更
-- **AI ツール制限** — Claude Code、Codex、Cursor、Antigravity、OpenCode、DeepSeek、Grok、Minimax、MiMo、GitHub Copilot、Kiro、GLM、Volcengine、Qoder、Kimi、Ollama の制限検出と更新頻度
-- **トレンド** — 日次使用履歴のスキャン間隔を選択またはオフ；使用ダッシュボード（ヒートマップ、連続日数、棒/K 線）を開く
-- **ウィンドウ動作** — 常に前面、通常ウィンドウ、デスクトップ固定
-- **トレイモード** — メニューバー/システムトレイポップオーバー、アイコン横の表示項目を選択
-- **フローティングバブル** — ミニウィンドウ、クリック/ホバープレビュー
-- **ショートカット** — グローバル表示/非表示
-- **外観** — テーマ、カラー、Discord Rich Presence、ガラス効果など
-- **詳細設定** — `settings.json` を直接編集（`allTimeSince` など）
-
-ヘッダーのピンボタンで「常に前面」を切り替えます。
-
-### Headless agent と hub (`.env`)
-
-agent と hub には UI がありません。プロジェクトルートの `.env`（`.env.example` をコピー）で設定します。
-
-```env
-TOKEN_MONITOR_HUB_URL=               # 同期に必須 — Worker URL または http://<lan-ip>:17321
-TOKEN_MONITOR_SECRET=                # hub と同じ secret
-TOKEN_MONITOR_DEVICE_ID=             # 任意 — デフォルトはホスト名
-TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # 任意 — 0／ライブ、600000／10分、1200000／20分、1800000／30分
-TOKEN_MONITOR_CLIENTS=               # 任意 — デフォルトは全ツール；空にすると追跡無効
-TOKEN_MONITOR_PROJECTS_ENABLED=      # 任意 — デフォルトは無効；1 でプロジェクトメタデータを収集
-TOKEN_MONITOR_HISTORY_ENABLED=       # 任意 — デフォルトは有効；0 でトレンド履歴をスキップ
-TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # 任意 — デフォルトは有効；0 でアーカイブ済みセッション使用量の保持を停止
-TOKEN_MONITOR_LIMITS_ENABLED=        # 任意 — デフォルトは有効；0 で CLI プローブをスキップ
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # 任意 — claude,codex,cursor,antigravity,opencode,deepseek,minimax,mimo,grok,copilot,kiro,zai,zaiteam,volcengine,qoder,kimi,ollama
-```
-
-完全な一覧は `.env.example` を参照してください。ウィジェットは env を初回起動時のデフォルトとして使用し、agent と hub では CLI フラグが優先されます。
-
-一回限りの実行例:
-
-```bash
-npm run agent -- --clients=claude,codex,opencode --once
-```
+すべての設定と環境変数の詳細は [設定リファレンス](docs/configuration.md) を参照してください。
 
 ## プライバシー
 
 Token Monitor は使用ログをローカルで処理し、プロジェクトのメンテナーに分析データやテレメトリを送信しません。ネットワークアクセスは、文書化された機能またはユーザーが有効にした機能に限られます。アップデート、プロバイダー連携、Discord Rich Presence、任意のマルチデバイス同期で使用されるデータについては、[プライバシーポリシー](docs/privacy.md)を参照してください。
-
-## 要件
-
-- macOS、Windows、または Linux x64
-- Node.js 22.13+
-- 同期モードのみ: agent/ウィジェットから hub へのネットワーク接続
 
 ## Star 履歴
 
