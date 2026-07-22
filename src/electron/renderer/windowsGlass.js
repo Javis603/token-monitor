@@ -1,13 +1,14 @@
 'use strict';
 
 (function initWindowsGlass(root, factory) {
-  const api = factory();
+  const backdropModeApi = typeof module === 'object' && module.exports
+    ? require('../windowsBackdropMode')
+    : root?.TokenMonitorWindowsBackdropMode;
+  const api = factory(backdropModeApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorWindowsGlass = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, () => {
-  function normalizeWindowsBackdropMode(value) {
-    return value === 'accent' ? 'accent' : 'acrylic';
-  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, (backdropModeApi) => {
+  const { normalizeWindowsBackdropMode } = backdropModeApi;
 
   function appearanceState(settings = {}, { isWindows = false } = {}) {
     const systemGlassEnabled = settings.systemGlass !== false;

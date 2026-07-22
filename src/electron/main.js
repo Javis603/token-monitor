@@ -165,9 +165,9 @@ const {
 const { applyWindowsChrome } = require('./windowsChrome');
 const {
   WINDOWS_BACKDROP_ACCENT,
-  applyWindowsAccentBlur,
   normalizeWindowsBackdropMode
-} = require('./windowsBackdrop');
+} = require('./windowsBackdropMode');
+const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 
 if (!app.isPackaged) loadDotEnv();
 

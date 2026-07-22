@@ -6,8 +6,6 @@
 // SetWindowCompositionAttribute(WCA_ACCENT_POLICY) API. Keep every call lazy
 // and best-effort so an unsupported Windows build can fall back to Acrylic.
 
-const WINDOWS_BACKDROP_ACRYLIC = 'acrylic';
-const WINDOWS_BACKDROP_ACCENT = 'accent';
 const DEFAULT_ACCENT_ARGB = 0x3a232323;
 
 const WCA_ACCENT_POLICY = 19;
@@ -17,12 +15,6 @@ const DWM_BB_BLURREGION = 0x2;
 const DWM_BB_TRANSITIONONMAXIMIZED = 0x4;
 
 let accentApi = null;
-
-function normalizeWindowsBackdropMode(value) {
-  return value === WINDOWS_BACKDROP_ACCENT
-    ? WINDOWS_BACKDROP_ACCENT
-    : WINDOWS_BACKDROP_ACRYLIC;
-}
 
 function hwndOf(win) {
   const buffer = win.getNativeWindowHandle();
@@ -80,7 +72,14 @@ function createAccentApi(koffi) {
           hRgnBlur: region,
           fTransitionOnMaximized: 1
         };
-        DwmEnableBlurBehindWindow(hwnd, blurBehind);
+        if (DwmEnableBlurBehindWindow(hwnd, blurBehind) < 0) return false;
+
+        if (DwmExtendFrameIntoClientArea(hwnd, {
+          cxLeftWidth: -1,
+          cxRightWidth: -1,
+          cyTopHeight: -1,
+          cyBottomHeight: -1
+        }) < 0) return false;
 
         const accent = {
           AccentState: ACCENT_ENABLE_ACRYLICBLURBEHIND,
@@ -93,15 +92,7 @@ function createAccentApi(koffi) {
           pvData: koffi.as(accent, 'TOKEN_MONITOR_ACCENT_POLICY *'),
           cbData: koffi.sizeof(ACCENT_POLICY)
         };
-        if (!SetWindowCompositionAttribute(hwnd, data)) return false;
-
-        DwmExtendFrameIntoClientArea(hwnd, {
-          cxLeftWidth: -1,
-          cxRightWidth: -1,
-          cyTopHeight: -1,
-          cyBottomHeight: -1
-        });
-        return true;
+        return Boolean(SetWindowCompositionAttribute(hwnd, data));
       } finally {
         DeleteObject(region);
       }
@@ -133,8 +124,6 @@ function applyWindowsAccentBlur(win, options = {}) {
 
 module.exports = {
   DEFAULT_ACCENT_ARGB,
-  WINDOWS_BACKDROP_ACCENT,
   applyWindowsAccentBlur,
-  createAccentApi,
-  normalizeWindowsBackdropMode
+  createAccentApi
 };

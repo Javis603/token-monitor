@@ -15,15 +15,16 @@ const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
 const {
   DEFAULT_ACCENT_ARGB,
   applyWindowsAccentBlur,
-  createAccentApi,
-  normalizeWindowsBackdropMode
+  createAccentApi
 } = require('../../src/electron/windowsBackdrop');
+const { normalizeWindowsBackdropMode } = require('../../src/electron/windowsBackdropMode');
 const {
   appearanceState,
   normalizeWindowsBackdropMode: normalizeRendererMode
 } = require('../../src/electron/renderer/windowsGlass');
 
 test('Windows backdrop modes fail closed to documented Acrylic', () => {
+  assert.equal(normalizeRendererMode, normalizeWindowsBackdropMode);
   for (const value of [undefined, null, '', 'mica', 'ACRYLIC']) {
     assert.equal(normalizeWindowsBackdropMode(value), 'acrylic');
     assert.equal(normalizeRendererMode(value), 'acrylic');
@@ -100,21 +101,58 @@ test('native Accent adapter enables a full blur region before applying policy an
   const api = createAccentApi(koffi);
 
   assert.equal(api.apply(7n, DEFAULT_ACCENT_ARGB), true);
-  assert.deepEqual(calls.map(([name]) => name), ['region', 'blur', 'accent', 'frame', 'delete']);
+  assert.deepEqual(calls.map(([name]) => name), ['region', 'blur', 'frame', 'accent', 'delete']);
   assert.equal(calls[1][1].dwFlags, 7);
   assert.equal(calls[1][1].hRgnBlur, region);
-  assert.equal(calls[2][1].Attrib, 19);
-  assert.deepEqual(calls[2][1].pvData.value, {
+  assert.deepEqual(calls[2][1], {
+    cxLeftWidth: -1,
+    cxRightWidth: -1,
+    cyTopHeight: -1,
+    cyBottomHeight: -1
+  });
+  assert.equal(calls[3][1].Attrib, 19);
+  assert.deepEqual(calls[3][1].pvData.value, {
     AccentState: 4,
     AccentFlags: 0,
     GradientColor: DEFAULT_ACCENT_ARGB,
     AnimationId: 0
   });
-  assert.deepEqual(calls[3][1], {
-    cxLeftWidth: -1,
-    cxRightWidth: -1,
-    cyTopHeight: -1,
-    cyBottomHeight: -1
+});
+
+test('native Accent adapter rejects failed DWM setup before applying the Accent policy', () => {
+  function run({ blurResult = 0, frameResult = 0 }) {
+    const calls = [];
+    const fakeFunctions = {
+      CreateRectRgn: () => { calls.push('region'); return {}; },
+      DwmEnableBlurBehindWindow: () => { calls.push('blur'); return blurResult; },
+      DwmExtendFrameIntoClientArea: () => { calls.push('frame'); return frameResult; },
+      SetWindowCompositionAttribute: () => { calls.push('accent'); return true; },
+      DeleteObject: () => { calls.push('delete'); return true; }
+    };
+    const koffi = {
+      load: () => ({
+        func(signature) {
+          return fakeFunctions[signature.match(/([A-Za-z0-9_]+)\(/)?.[1]];
+        }
+      }),
+      struct: (name, fields) => ({ name, fields }),
+      as: (value, type) => ({ value, type }),
+      sizeof: () => 16
+    };
+    return { result: createAccentApi(koffi).apply(7n, DEFAULT_ACCENT_ARGB), calls };
+  }
+
+  assert.deepEqual(run({ blurResult: -1 }), {
+    result: false,
+    calls: ['region', 'blur', 'delete']
+  });
+  assert.deepEqual(run({ frameResult: -1 }), {
+    result: false,
+    calls: ['region', 'blur', 'frame', 'delete']
+  });
+  assert.deepEqual(run({ blurResult: 1, frameResult: 1 }), {
+    result: true,
+    calls: ['region', 'blur', 'frame', 'accent', 'delete']
   });
 });
 
@@ -139,7 +177,7 @@ test('Windows exposes an accessible Acrylic and experimental Accent selector', (
   assert.match(html, /option value="accent"/);
   assert.match(html, /data-i18n="settings\.appearance\.windowsBackdropNote"/);
   assert.match(html, /id="windowsBackdropNote"/);
-  assert.match(html, /<script src="windowsGlass\.js"><\/script>[\s\S]*<script src="app\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/windowsBackdropMode\.js"><\/script>[\s\S]*<script src="windowsGlass\.js"><\/script>[\s\S]*<script src="app\.js"><\/script>/);
   assert.match(app, /windowsBackdropRow\?\.classList\.toggle\('hidden', !windowsGlass\.showBackdropControl\)/);
   assert.match(app, /classList\.toggle\('hidden', !windowsGlass\.showAccentNote\)/);
   assert.doesNotMatch(app, /backdropControlDisabled/);
