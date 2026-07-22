@@ -2593,6 +2593,11 @@ html.is-windows .settings-panel select option {
 }
 
 .row { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(var(--line-rgb), 0.12); }
+.breakdown.large-session-list .session-row {
+  content-visibility: auto;
+  contain: layout paint style;
+  contain-intrinsic-block-size: auto 72px;
+}
 .row-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .row-name { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 8px; color: var(--text); }
 .dot {

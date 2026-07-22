@@ -101,6 +101,12 @@ const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMod
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
+const {
+  isLargeSessionBreakdown,
+  rowRenderFingerprint,
+  shouldAnimateBreakdownRows
+} = breakdownRenderPolicyApi;
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
 const projectRowsApi = window.TokenMonitorProjectRows;
 const sessionDetailApi = window.TokenMonitorSessionDetail;
@@ -1080,6 +1086,7 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
 
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
+const rowRenderFingerprints = new WeakMap();
 
 function prefersReducedMotion() {
   return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
@@ -1112,8 +1119,10 @@ function applyReduceMotionPreference(value) {
 }
 
 function captureBreakdownMotion() {
+  const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
+  if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return null;
   const snapshot = new Map();
-  for (const row of els.breakdown?.querySelectorAll('.row[data-key]') || []) {
+  for (const row of rows) {
     const rect = row.getBoundingClientRect();
     const fill = row.querySelector('.bar-fill');
     const trackWidth = fill?.parentElement?.getBoundingClientRect().width || 0;
@@ -1169,9 +1178,11 @@ function animateRowNumber(el, from, to, duration = 420) {
 }
 
 function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
-  if (prefersReducedMotion()) return;
+  if (!snapshot) return;
+  const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
+  if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return;
   let enteringIndex = 0;
-  for (const row of els.breakdown?.querySelectorAll('.row[data-key]') || []) {
+  for (const row of rows) {
     const previous = snapshot.get(row.dataset.key);
     const value = Number(row.dataset.motionValue || 0);
     const fill = row.querySelector('.bar-fill');
@@ -1547,6 +1558,8 @@ function applyHomeListMark(mark, iconKind, color) {
 }
 
 function renderRows(rows, { incompleteHint = '' } = {}) {
+  const largeSessionList = isLargeSessionBreakdown(state.breakdown, rows.length);
+  els.breakdown.classList.toggle('large-session-list', largeSessionList);
   if (rows.length === 0 && !incompleteHint) {
     els.breakdown.replaceChildren();
     state.rowSignature = '';
@@ -1576,9 +1589,20 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   const current = new Map(Array.from(els.breakdown.children)
     .filter((child) => !child.classList.contains('breakdown-incomplete-hint'))
     .map((child) => [child.dataset.key, child]));
+  const renderContext = {
+    breakdown: state.breakdown,
+    currency: currentCurrency(),
+    currencyRatesEffective: state.settings?.currencyRatesEffective || null,
+    locale: currentLocale(),
+    showToolIcons: state.settings?.showToolIcons !== false
+  };
   for (const rowData of rows) {
     const row = current.get(rowData.key);
-    if (row) updateRow(row, { ...rowData, max });
+    if (!row) continue;
+    const fingerprint = rowRenderFingerprint(rowData, max, renderContext);
+    if (rowRenderFingerprints.get(row) === fingerprint) continue;
+    updateRow(row, { ...rowData, max });
+    rowRenderFingerprints.set(row, fingerprint);
   }
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
