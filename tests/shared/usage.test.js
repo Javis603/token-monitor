@@ -34,6 +34,11 @@ test('periodFromDailyHistory derives the rolling seven days and replaces today w
   assert.equal(period.models.old, undefined);
   assert.deepEqual(Object.keys(period.projects), []);
   assert.deepEqual(period.sessions, {});
+  assert.equal(period.cacheReadTokens, 0);
+  assert.equal(period.cacheWriteTokens, 0);
+  assert.equal(period.outputTokens, 0);
+  assert.deepEqual(period.clientCacheReads, {});
+  assert.deepEqual(period.clientOutputs, {});
 });
 
 test('aggregateDevices exposes summed and per-device rolling seven-day periods', () => {
@@ -96,6 +101,26 @@ test('aggregateDevices preserves an expired device local day near UTC midnight',
       summary: {}
     }
   })], 10 * 60 * 1000, Date.parse('2026-06-08T17:00:00.000Z'));
+
+  assert.equal(aggregate.periods.last7Days.totalTokens, 10);
+});
+
+test('aggregateDevices ignores malformed period window dates instead of throwing', () => {
+  let aggregate;
+  assert.doesNotThrow(() => {
+    aggregate = aggregateDevices([recordWithLimits({
+    periodWindows: { today: { key: '2026-02-31', endsAt: '2026-06-01T00:00:00.000Z' } },
+    history: { daily: [{ date: '2026-06-08', tokens: 10, cost: 1, perClient: {}, perModel: {} }], monthly: [], summary: {} }
+    })], 600000, Date.parse('2026-06-08T12:00:00.000Z'));
+  });
+  assert.equal(aggregate.periods.last7Days.totalTokens, 10);
+});
+
+test('aggregateDevices uses the reported IANA timezone for an offline device', () => {
+  const aggregate = aggregateDevices([recordWithLimits({
+    periodWindows: { today: { key: '2026-03-07', endsAt: '2026-03-08T05:00:00.000Z', timeZone: 'America/New_York' } },
+    history: { daily: [{ date: '2026-03-08', tokens: 10, cost: 1, perClient: {}, perModel: {} }], monthly: [], summary: {} }
+  })], 600000, Date.parse('2026-03-09T04:00:00.000Z'));
 
   assert.equal(aggregate.periods.last7Days.totalTokens, 10);
 });
