@@ -66,6 +66,21 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
   assert.ok(intelBullets.every((line) => line.includes(`/download/v${rootPackage.version}/`)));
 });
 
+test('release icons use source assets without the legacy generator', () => {
+  const projectRoot = path.join(__dirname, '..', '..');
+  const iconSources = new Set([
+    rootPackage.build.mac.icon,
+    rootPackage.build.win.icon,
+    rootPackage.build.linux.icon
+  ]);
+
+  for (const iconSource of iconSources) {
+    assert.ok(fs.existsSync(path.join(projectRoot, iconSource)), `missing release icon source: ${iconSource}`);
+  }
+  assert.equal(rootPackage.scripts.icons, undefined);
+  assert.equal(rootPackage.devDependencies['electron-icon-builder'], undefined);
+});
+
 test('extracts updater artifact names from url and path fields', () => {
   const names = referencedArtifactNames([
     'files:',
