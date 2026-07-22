@@ -2038,6 +2038,46 @@ html.is-windows .settings-panel select option {
 }
 .total-compact.hidden { display: none; }
 .cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
+.view-back-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  margin-top: -6px;
+  margin-bottom: -2px;
+  padding: 0 2px;
+}
+.view-back-row.hidden { display: none; }
+.back-home-button {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  transition: color 120ms ease, background 120ms ease;
+}
+.back-home-button:hover {
+  background: rgba(var(--overlay-rgb), 0.06);
+  color: var(--text);
+}
+.back-home-button:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
+  color: var(--text);
+}
+.back-home-button:active { background: rgba(var(--overlay-rgb), 0.1); }
+.back-home-icon {
+  font-size: 14px;
+  line-height: 1;
+}
 .breakdown {
   position: relative;
   z-index: 1;
@@ -3753,6 +3793,7 @@ html.is-windows .limit-live-badge {
   .footer { display: none; }
 }
 @media (max-height: 240px) {
+  .view-back-row,
   .limits-panel,
   .home-panel,
   .service-status-panel,

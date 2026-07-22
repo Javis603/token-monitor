@@ -180,4 +180,7 @@ test('view switcher actions are localized', () => {
   assert.equal(translate('zh-TW', 'views.switcher.choose'), '選擇視圖');
   assert.equal(translate('zh-CN', 'views.switcher.next', { view: '模型' }), '下一个：模型');
   assert.equal(translate('zh-CN', 'views.switcher.choose'), '选择视图');
+  assert.equal(translate('en', 'views.backHome'), 'Back to Home');
+  assert.equal(translate('zh-TW', 'views.backHome'), '返回主頁');
+  assert.equal(translate('zh-CN', 'views.backHome'), '返回主页');
 });
