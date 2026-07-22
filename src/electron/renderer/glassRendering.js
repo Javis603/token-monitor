@@ -6,7 +6,7 @@
   if (root) root.TokenMonitorGlassRendering = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, () => {
   function clampOpacity(value) {
-    const parsed = Number(value);
+    const parsed = value == null ? NaN : Number(value);
     const opacity = Number.isFinite(parsed) ? parsed : 68;
     return Math.max(0, Math.min(100, opacity)) / 100;
   }

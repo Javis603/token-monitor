@@ -59,6 +59,7 @@ test('system glass and other platforms retain true zero opacity', () => {
 
 test('glass renderer normalizes invalid and out-of-range settings', () => {
   assert.equal(renderedGlassOpacity({}, { platform: 'darwin' }), 0.68);
+  assert.equal(renderedGlassOpacity({ glassOpacity: null, systemGlass: false }, { platform: 'darwin' }), 0.68);
   assert.equal(renderedGlassOpacity({ glassOpacity: -10, systemGlass: true }, { platform: 'darwin' }), 0);
   assert.equal(renderedGlassOpacity({ glassOpacity: 120 }, { platform: 'win32' }), 1);
 });
