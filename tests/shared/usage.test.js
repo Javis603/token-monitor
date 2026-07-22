@@ -3,7 +3,102 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { aggregateDevices, extractUsageFromTokscale, mergeDeviceRecord } = require('../../src/shared/usage');
+const { aggregateDevices, extractUsageFromTokscale, mergeDeviceRecord, periodFromDailyHistory } = require('../../src/shared/usage');
+
+test('periodFromDailyHistory derives the rolling seven days and replaces today with live usage', () => {
+  const history = {
+    daily: [
+      { date: '2026-06-01', tokens: 99, cost: 9, perClient: { claude: { tokens: 99, cost: 9 } }, perModel: { old: { tokens: 99, cost: 9 } } },
+      { date: '2026-06-02', tokens: 10, cost: 1, perClient: { claude: { tokens: 10, cost: 1 } }, perModel: { opus: { tokens: 10, cost: 1 } } },
+      { date: '2026-06-08', tokens: 20, cost: 2, perClient: { codex: { tokens: 20, cost: 2 } }, perModel: { gpt: { tokens: 20, cost: 2 } } }
+    ]
+  };
+  const liveToday = {
+    totalTokens: 25,
+    costUsd: 2.5,
+    clients: { codex: 25 },
+    clientCosts: { codex: 2.5 },
+    models: { gpt: 25 },
+    modelCosts: { gpt: 2.5 },
+    projects: { current: { totalTokens: 25 } },
+    sessions: { current: { totalTokens: 25 } }
+  };
+
+  const period = periodFromDailyHistory(history, '2026-06-08', liveToday);
+
+  assert.equal(period.totalTokens, 35);
+  assert.equal(period.costUsd, 3.5);
+  assert.deepEqual(period.clients, { claude: 10, codex: 25 });
+  assert.deepEqual(period.clientCosts, { claude: 1, codex: 2.5 });
+  assert.deepEqual(period.models, { opus: 10, gpt: 25 });
+  assert.equal(period.models.old, undefined);
+  assert.deepEqual(Object.keys(period.projects), []);
+  assert.deepEqual(period.sessions, {});
+});
+
+test('aggregateDevices exposes summed and per-device rolling seven-day periods', () => {
+  const now = Date.parse('2026-06-08T12:00:00.000Z');
+  const first = recordWithLimits({
+    deviceId: 'first',
+    updatedAt: '2026-06-08T11:00:00.000Z',
+    receivedAt: '2026-06-08T11:00:00.000Z',
+    today: { totalTokens: 5, costUsd: 0.5, clients: { claude: 5 }, clientCosts: { claude: 0.5 } },
+    periodWindows: { today: { key: '2026-06-08', endsAt: '2026-06-09T00:00:00.000Z' } },
+    history: { daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: { claude: { tokens: 10, cost: 1 } }, perModel: {} }], monthly: [], summary: {} }
+  });
+  const second = recordWithLimits({
+    deviceId: 'second',
+    updatedAt: '2026-06-08T11:00:00.000Z',
+    receivedAt: '2026-06-08T11:00:00.000Z',
+    today: { totalTokens: 7, costUsd: 0.7, clients: { codex: 7 }, clientCosts: { codex: 0.7 } },
+    periodWindows: { today: { key: '2026-06-08', endsAt: '2026-06-09T00:00:00.000Z' } },
+    history: null
+  });
+
+  const aggregate = aggregateDevices([first, second], 10 * 60 * 1000, now);
+
+  assert.equal(aggregate.periods.last7Days.totalTokens, 22);
+  assert.deepEqual(aggregate.periods.last7Days.clients, { claude: 15, codex: 7 });
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'first').periods.last7Days.totalTokens, 15);
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'second').periods.last7Days.totalTokens, 7);
+});
+
+test('aggregateDevices anchors expired devices to the current day instead of their last report', () => {
+  const aggregate = aggregateDevices([recordWithLimits({
+    deviceId: 'offline',
+    updatedAt: '2026-06-01T11:00:00.000Z',
+    receivedAt: '2026-06-01T11:00:00.000Z',
+    today: { totalTokens: 50, costUsd: 5, clients: { claude: 50 }, clientCosts: { claude: 5 } },
+    periodWindows: { today: { key: '2026-06-01', endsAt: '2026-06-02T00:00:00.000Z' } },
+    history: {
+      daily: [
+        { date: '2026-06-01', tokens: 50, cost: 5, perClient: { claude: { tokens: 50, cost: 5 } }, perModel: {} },
+        { date: '2026-06-07', tokens: 10, cost: 1, perClient: { codex: { tokens: 10, cost: 1 } }, perModel: {} }
+      ],
+      monthly: [],
+      summary: {}
+    }
+  })], 10 * 60 * 1000, Date.parse('2026-06-08T12:00:00.000Z'));
+
+  assert.equal(aggregate.periods.last7Days.totalTokens, 10);
+  assert.deepEqual(aggregate.periods.last7Days.clients, { codex: 10 });
+});
+
+test('aggregateDevices preserves an expired device local day near UTC midnight', () => {
+  const aggregate = aggregateDevices([recordWithLimits({
+    deviceId: 'utc-plus-eight',
+    updatedAt: '2026-06-01T12:00:00.000Z',
+    receivedAt: '2026-06-01T12:00:00.000Z',
+    periodWindows: { today: { key: '2026-06-01', endsAt: '2026-06-01T16:00:00.000Z' } },
+    history: {
+      daily: [{ date: '2026-06-09', tokens: 10, cost: 1, perClient: { codex: { tokens: 10, cost: 1 } }, perModel: {} }],
+      monthly: [],
+      summary: {}
+    }
+  })], 10 * 60 * 1000, Date.parse('2026-06-08T17:00:00.000Z'));
+
+  assert.equal(aggregate.periods.last7Days.totalTokens, 10);
+});
 
 function recordWithLimits(extra = {}) {
   return {

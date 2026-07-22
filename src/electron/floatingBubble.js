@@ -5,7 +5,7 @@ const FLOATING_BUBBLE_HANDLE_HEIGHT = 34;
 const FLOATING_BUBBLE_MARGIN = 8;
 const FLOATING_BUBBLE_COLLAPSED_MARGIN = { x: 0, y: FLOATING_BUBBLE_MARGIN };
 const FLOATING_BUBBLE_WINDOWS_COLLAPSED_MARGIN = { x: 0, y: 0 };
-const INITIAL_RENDERER_PERIODS = new Set(['today', 'month', 'allTime']);
+const INITIAL_RENDERER_PERIODS = new Set(['today', 'last7Days', 'month', 'allTime']);
 const INITIAL_RENDERER_BREAKDOWNS = new Set(['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends']);
 
 function clamp(value, min, max) {
