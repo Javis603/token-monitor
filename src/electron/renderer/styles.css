@@ -1952,7 +1952,7 @@ html.is-windows .settings-panel select option {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 2px;
   padding: 3px;
   width: 100%;
@@ -1969,7 +1969,7 @@ html.is-windows .settings-panel select option {
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc((100% - 10px) / 3);
+  width: calc((100% - 12px) / 4);
   border: 1px solid rgba(var(--line-rgb), 0.13);
   border-radius: 6px;
   background: rgba(var(--overlay-rgb), 0.06);
@@ -1981,7 +1981,9 @@ html.is-windows .settings-panel select option {
 .tab {
   position: relative;
   z-index: 1;
+  min-width: 0;
   height: 22px;
+  padding: 0;
   border-color: transparent;
   border-radius: 6px;
   background: transparent;

@@ -1,6 +1,7 @@
 'use strict';
 
 const PERIODS = ['today', 'month', 'allTime'];
+const LAST_7_DAYS_PERIOD = 'last7Days';
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { coerceHistory, mergeHistories } = require('./history');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
@@ -109,6 +110,68 @@ function emptyPeriod() {
     projects: Object.create(null),
     sessions: {}
   };
+}
+
+function dayKeyAddDays(key, delta) {
+  const ms = Date.parse(`${key}T00:00:00Z`) + delta * 86400000;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function currentDeviceDayKey(record, nowMs) {
+  const window = record?.periodWindows?.today;
+  const key = String(window?.key || '').slice(0, 10);
+  const endsAtMs = timestampMs(window?.endsAt);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key) && endsAtMs > 0) {
+    const nextUtcMidnight = Date.parse(`${dayKeyAddDays(key, 1)}T00:00:00Z`);
+    const offsetMs = endsAtMs - nextUtcMidnight;
+    return new Date(nowMs - offsetMs).toISOString().slice(0, 10);
+  }
+  return utcDayKey(new Date(nowMs));
+}
+
+// Derive a display-only rolling period from durable daily history. This never enters
+// the ingest/storage contract: aggregateDevices adds it only to GET /api/stats output.
+// The live today period replaces history's today bucket because history collection is
+// intentionally less frequent than usage collection.
+function periodFromDailyHistory(history, todayKey, liveToday = null, days = 7) {
+  const period = emptyPeriod();
+  const endKey = String(todayKey || '').slice(0, 10);
+  const count = Math.max(0, Math.floor(asNumber(days)));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endKey) || count === 0) return period;
+  const startKey = dayKeyAddDays(endKey, -(count - 1));
+  const daily = coerceHistory(history).daily;
+  for (const day of daily) {
+    const key = String(day?.date || '').slice(0, 10);
+    if (key < startKey || key > endKey || (liveToday && key === endKey)) continue;
+    period.totalTokens += asNumber(day?.tokens);
+    period.costUsd += asNumber(day?.cost);
+    for (const [client, value] of Object.entries(day?.perClient || {})) {
+      period.clients[client] = (period.clients[client] || 0) + asNumber(value?.tokens);
+      period.clientCosts[client] = (period.clientCosts[client] || 0) + asNumber(value?.cost);
+    }
+    for (const [model, value] of Object.entries(day?.perModel || {})) {
+      period.models[model] = (period.models[model] || 0) + asNumber(value?.tokens);
+      period.modelCosts[model] = (period.modelCosts[model] || 0) + asNumber(value?.cost);
+    }
+  }
+  if (liveToday) {
+    const today = normalizePeriod(liveToday);
+    period.totalTokens += today.totalTokens;
+    period.costUsd += today.costUsd;
+    for (const [client, tokens] of Object.entries(today.clients)) {
+      period.clients[client] = (period.clients[client] || 0) + tokens;
+    }
+    for (const [client, cost] of Object.entries(today.clientCosts)) {
+      period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
+    }
+    for (const [model, tokens] of Object.entries(today.models)) {
+      period.models[model] = (period.models[model] || 0) + tokens;
+    }
+    for (const [model, cost] of Object.entries(today.modelCosts)) {
+      period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
+    }
+  }
+  return period;
 }
 
 function normalizeClientName(value) {
@@ -939,12 +1002,19 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
   const sessionDetailsOmitted = {};
   const periodProjectsOmitted = {};
   for (const periodName of PERIODS) aggregate.periods[periodName] = emptyPeriod();
+  aggregate.periods[LAST_7_DAYS_PERIOD] = emptyPeriod();
   const now = nowMs;
   for (const record of devices) {
     const normalized = normalizeDeviceRecord(record);
     const ageMs = now - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
     const deviceStaleAfterMs = staleAfterMsForSyncUpload(normalized.syncUploadIntervalMs, staleAfterMs);
     const stale = Number.isFinite(ageMs) && deviceStaleAfterMs > 0 ? ageMs > deviceStaleAfterMs : false;
+    const liveToday = isPeriodExpired(normalized, 'today', now) ? null : normalized.periods.today;
+    const todayKey = liveToday
+      ? (normalized.periodWindows?.today?.key || utcDayKey(new Date(now)))
+      : currentDeviceDayKey(normalized, now);
+    const last7Days = periodFromDailyHistory(normalized.history, todayKey, liveToday);
+    const displayPeriods = { ...normalized.periods, [LAST_7_DAYS_PERIOD]: last7Days };
     aggregate.devices.push({
       deviceId: normalized.deviceId,
       hostname: normalized.hostname,
@@ -967,9 +1037,10 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       ...(hasOwn(normalized, 'periodProjectsOmitted') ? { periodProjectsOmitted: normalized.periodProjectsOmitted } : {}),
       ...(hasOwn(normalized, 'syncUploadIntervalMs') ? { syncUploadIntervalMs: normalized.syncUploadIntervalMs } : {}),
       ...(hasOwn(normalized, 'periodWindows') ? { periodWindows: normalized.periodWindows } : {}),
-      periods: normalized.periods,
+      periods: displayPeriods,
       limits: normalized.limits
     });
+    addPeriodInto(aggregate.periods[LAST_7_DAYS_PERIOD], last7Days);
     if (
       normalized.allTimeProjectsOmitted === true
       || normalized.allTimeProjectsIncomplete === true
@@ -992,7 +1063,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
   if (Object.keys(sessionDetailsOmitted).length > 0) aggregate.sessionDetailsOmitted = sessionDetailsOmitted;
   if (Object.keys(periodProjectsOmitted).length > 0) aggregate.periodProjectsOmitted = periodProjectsOmitted;
   aggregate.devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-  for (const periodName of PERIODS) {
+  for (const periodName of [...PERIODS, LAST_7_DAYS_PERIOD]) {
     aggregate.periods[periodName].totalTokens = Math.round(aggregate.periods[periodName].totalTokens);
     aggregate.periods[periodName].costUsd = Number(aggregate.periods[periodName].costUsd.toFixed(6));
     for (const [client, cost] of Object.entries(aggregate.periods[periodName].clientCosts)) {
@@ -1062,4 +1133,4 @@ function deltaValue(base, fresh, anchor, key) {
   return base ?? fresh;
 }
 
-module.exports = { PERIODS, addPeriodInto, aggregateDevices, aggregateHistory, applyPeriodDelta, applyProjectRollups, canonicalProjectKey, carryDeviceHistory, emptyPeriod, extractUsageFromTokscale, mergeDeviceRecord, mergePeriods, normalizeDeviceRecord, normalizePeriod, projectRollupFromSessions };
+module.exports = { PERIODS, LAST_7_DAYS_PERIOD, addPeriodInto, aggregateDevices, aggregateHistory, applyPeriodDelta, applyProjectRollups, canonicalProjectKey, carryDeviceHistory, emptyPeriod, extractUsageFromTokscale, mergeDeviceRecord, mergePeriods, normalizeDeviceRecord, normalizePeriod, periodFromDailyHistory, projectRollupFromSessions };

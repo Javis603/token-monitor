@@ -16,10 +16,12 @@ test('period tabs use one sliding selection indicator', () => {
   const css = read('styles.css');
   const app = read('app.js');
 
-  assert.match(html, /<nav class="tabs"[\s\S]*?<span class="tab-indicator" aria-hidden="true"><\/span>[\s\S]*?data-period="today"[\s\S]*?data-period="month"[\s\S]*?data-period="allTime"/);
+  assert.match(html, /<nav class="tabs"[\s\S]*?<span class="tab-indicator" aria-hidden="true"><\/span>[\s\S]*?data-period="today"[^>]*>DAY<\/[Bb]utton>[\s\S]*?data-period="last7Days"[^>]*>WEEK<\/[Bb]utton>[\s\S]*?data-period="month"[^>]*>MONTH<\/[Bb]utton>[\s\S]*?data-period="allTime"[^>]*>TOTAL<\/[Bb]utton>/);
+  assert.match(css, /\.tab\s*\{[^}]*min-width:\s*0;[^}]*padding:\s*0;/s);
   assert.match(css, /\.tab-indicator\s*\{[^}]*transform:\s*translate3d\(calc\(var\(--period-index\)/s);
   assert.match(css, /\.tab-indicator\s*\{[^}]*transition:\s*transform 220ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/s);
   assert.match(app, /style\.setProperty\('--period-index', String\(activeIndex\)\)/);
+  assert.match(app, /state\.period === 'today' \|\| state\.period === 'last7Days'[\s\S]*?patchTodayBar/);
   assert.match(app, /tab\.setAttribute\('aria-pressed', String\(active\)\)/);
 });
 

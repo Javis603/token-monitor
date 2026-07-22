@@ -212,6 +212,7 @@ Response includes:
 
 - `staleAfterMs`, the effective Hub threshold used to recompute device and provider freshness
 - `periods.today`
+- `periods.last7Days`, a read-only rolling seven-calendar-day view derived by the hub from each device's daily history plus its live `today` period; it includes token/cost totals and client/model breakdowns, and is never stored or accepted by `/api/ingest`
 - `periods.month`
 - `periods.allTime`
 - `periods.*.clientModels` and `periods.*.clientModelCosts` for preserving model breakdowns when a tracked tool is disabled
@@ -222,7 +223,7 @@ Response includes:
 - `projectsIncomplete` plus the corresponding `devices[].allTimeProjectsOmitted`, `devices[].allTimeProjectsIncomplete`, or `devices[].projectsEnabled` diagnostic
 - `historyPreview.daily[].activeTimeMs`, `historyPreview.monthly[].activeTimeMs`, and `historyPreview.summary.activeTimeMs` when tokscale graph exposes session active-time metrics
 - `limits.providers` aggregated by provider account
-- `devices`, including each device's normalized `periods`, `limits`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`
+- `devices`, including each device's normalized periods plus the derived `last7Days` view, `limits`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`
 - stale status for devices that have not reported recently
 
 If multiple devices report the same provider account, the hub keeps the freshest valid limits status for that account. Public Worker stats omit account identifiers.

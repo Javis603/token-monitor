@@ -173,7 +173,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'limits', labelKey: 'views.limits' },
   { id: 'trends', labelKey: 'views.trends' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'allTime']);
+const viewPeriodValues = new Set(['today', 'last7Days', 'month', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -219,6 +219,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 }
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+if (state.period === 'last7Days' && (state.breakdown === 'project' || state.breakdown === 'session')) state.breakdown = 'home';
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.appUpdateNotesPresentedVersion = '';
@@ -3310,7 +3311,9 @@ function renderTrends() {
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
   const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
   const { points, metric, labelKey } = charts.selectPreviewSeries(preview, state.period);
-  const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
+  const finalPoints = state.period === 'today' || state.period === 'last7Days'
+    ? charts.patchTodayBar(points, todayTotal)
+    : points;
 
   if (finalPoints.length === 0) {
     els.trendsPanel.innerHTML = `<div class="trends-empty">${t('trends.empty')}</div>`;
@@ -4609,6 +4612,10 @@ function setPeriod(period) {
 
 function setBreakdown(breakdown, options = {}) {
   const next = normalizeInitialViewValue(breakdown, viewBreakdownValues, state.breakdown);
+  if ((next === 'project' || next === 'session') && state.period === 'last7Days') {
+    state.period = 'today';
+    syncPeriodTabs();
+  }
   directBreakdownOverride = options.allowHidden === true ? next : null;
   if (next === state.breakdown) {
     publishViewState();
@@ -7058,8 +7065,9 @@ for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {
     const snapshot = captureBreakdownMotion();
     if (!setPeriod(tab.dataset.period)) return;
+    if (state.period === 'last7Days' && (state.breakdown === 'project' || state.breakdown === 'session')) setBreakdown('home');
     syncPeriodTabs();
-    if (state.openSession) openSessionDetail(state.openSession);
+    if (state.openSession && state.breakdown === 'session') openSessionDetail(state.openSession);
     state.rowSignature = '';
     state.periodMotionActive = true;
     render();
