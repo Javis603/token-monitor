@@ -21,7 +21,7 @@ function osIconFor(platform) {
 }
 
 function iconKindFor(rowData, breakdown) {
-  if (!state.settings?.showToolIcons) return { kind: 'dot' };
+  if (!toolIconsEnabled(state.settings?.showToolIcons)) return { kind: 'dot' };
   if (breakdown === 'device') {
     const os = osIconFor(rowData.platform);
     return os ? { kind: 'icon', iconClass: `row-icon-os-${os}` } : { kind: 'dot' };
@@ -103,9 +103,11 @@ const currencyApi = window.TokenMonitorCurrency;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
+  createAfterLayoutScheduler,
   isLargeSessionBreakdown,
   rowRenderFingerprint,
-  shouldAnimateBreakdownRows
+  shouldAnimateBreakdownRows,
+  toolIconsEnabled
 } = breakdownRenderPolicyApi;
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
 const projectRowsApi = window.TokenMonitorProjectRows;
@@ -1087,6 +1089,32 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
 const rowRenderFingerprints = new WeakMap();
+const largeSessionContainmentScheduler = createAfterLayoutScheduler(
+  typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null,
+  typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : null
+);
+
+function updateLargeSessionContainment(enabled, { remeasure = false } = {}) {
+  els.breakdown.classList.toggle('large-session-list', enabled);
+  if (!enabled) {
+    largeSessionContainmentScheduler.cancel();
+    els.breakdown.classList.remove('large-session-list-ready');
+    return;
+  }
+  if (remeasure) {
+    largeSessionContainmentScheduler.cancel();
+    els.breakdown.classList.remove('large-session-list-ready');
+  }
+  if (largeSessionContainmentScheduler.pending() || els.breakdown.classList.contains('large-session-list-ready')) return;
+  // Let Chromium lay out every new row without size containment first. The
+  // `auto` intrinsic size can then retain each row's real block size before
+  // off-screen rendering is enabled, avoiding scroll-geometry corrections.
+  largeSessionContainmentScheduler.schedule(() => {
+    if (els.breakdown.classList.contains('large-session-list')) {
+      els.breakdown.classList.add('large-session-list-ready');
+    }
+  });
+}
 
 function prefersReducedMotion() {
   return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
@@ -1347,7 +1375,7 @@ function rowTemplate(rowData) {
 
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
-    state.settings?.showToolIcons === true,
+    toolIconsEnabled(state.settings?.showToolIcons),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
     deviceDetail.tools.map((tool) => [
@@ -1376,7 +1404,7 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       const label = document.createElement('div');
       label.className = 'device-tool-label';
       const mark = document.createElement('span');
-      if (state.settings?.showToolIcons && clientsWithIcon.has(tool.client)) {
+      if (toolIconsEnabled(state.settings?.showToolIcons) && clientsWithIcon.has(tool.client)) {
         mark.className = `device-tool-mark row-icon row-icon-${tool.client}`;
       } else {
         mark.className = 'device-tool-mark dot';
@@ -1559,8 +1587,8 @@ function applyHomeListMark(mark, iconKind, color) {
 
 function renderRows(rows, { incompleteHint = '' } = {}) {
   const largeSessionList = isLargeSessionBreakdown(state.breakdown, rows.length);
-  els.breakdown.classList.toggle('large-session-list', largeSessionList);
   if (rows.length === 0 && !incompleteHint) {
+    updateLargeSessionContainment(false);
     els.breakdown.replaceChildren();
     state.rowSignature = '';
     return;
@@ -1574,7 +1602,8 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   const children = Array.from(els.breakdown.children);
   const existingHint = children.find((child) => child.classList.contains('breakdown-incomplete-hint'));
   const existing = new Map(children.filter((child) => child !== existingHint).map((child) => [child.dataset.key, child]));
-  if (signature !== state.rowSignature) {
+  const structureChanged = signature !== state.rowSignature;
+  if (structureChanged) {
     const nodes = rows.map((row) => existing.get(row.key) || rowTemplate(row));
     if (incompleteHint) {
       const hint = existingHint || document.createElement('p');
@@ -1586,6 +1615,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     els.breakdown.replaceChildren(...nodes);
     state.rowSignature = signature;
   }
+  updateLargeSessionContainment(largeSessionList, { remeasure: structureChanged });
   const current = new Map(Array.from(els.breakdown.children)
     .filter((child) => !child.classList.contains('breakdown-incomplete-hint'))
     .map((child) => [child.dataset.key, child]));
@@ -1594,7 +1624,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     currency: currentCurrency(),
     currencyRatesEffective: state.settings?.currencyRatesEffective || null,
     locale: currentLocale(),
-    showToolIcons: state.settings?.showToolIcons !== false
+    showToolIcons: toolIconsEnabled(state.settings?.showToolIcons)
   };
   for (const rowData of rows) {
     const row = current.get(rowData.key);

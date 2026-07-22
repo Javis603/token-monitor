@@ -23,14 +23,50 @@
     return breakdown === 'session' && rowCount(count) > MAX_ANIMATED_BREAKDOWN_ROWS;
   }
 
+  function toolIconsEnabled(value) {
+    return value === true;
+  }
+
+  function createAfterLayoutScheduler(requestFrame, cancelFrame) {
+    let handle = 0;
+
+    function cancel() {
+      if (!handle) return;
+      if (typeof cancelFrame === 'function') cancelFrame(handle);
+      handle = 0;
+    }
+
+    function schedule(callback) {
+      cancel();
+      if (typeof requestFrame !== 'function') {
+        callback();
+        return;
+      }
+      handle = requestFrame(() => {
+        handle = requestFrame(() => {
+          handle = 0;
+          callback();
+        });
+      });
+    }
+
+    return {
+      cancel,
+      pending: () => handle !== 0,
+      schedule
+    };
+  }
+
   function rowRenderFingerprint(row, max, context = {}) {
     return JSON.stringify([row || null, Number(max) || 0, context || null]);
   }
 
   return {
     MAX_ANIMATED_BREAKDOWN_ROWS,
+    createAfterLayoutScheduler,
     isLargeSessionBreakdown,
     rowRenderFingerprint,
-    shouldAnimateBreakdownRows
+    shouldAnimateBreakdownRows,
+    toolIconsEnabled
   };
 });
