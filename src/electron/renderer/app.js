@@ -4,6 +4,7 @@ const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', 
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
+const glassRenderingApi = window.TokenMonitorGlassRendering;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
@@ -4598,7 +4599,10 @@ function applyControlLayout(swapSettingsAndRefresh) {
 }
 
 function applyAppearanceSettings(settings) {
-  const opacity = clamp(settings?.glassOpacity ?? 68, 0, 100) / 100;
+  const opacity = glassRenderingApi.renderedGlassOpacity(settings, {
+    platform: state.appInfo?.platform,
+    userAgent: navigator.userAgent
+  });
   const depth = clamp(settings?.glassBlur ?? 32, 0, 100) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
