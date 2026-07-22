@@ -8785,8 +8785,9 @@ function renderCustomPricing() {
   }
   for (const ov of overrides) {
     const row = document.createElement('div');
-    row.className = 'managed-account-row';
-    const main = document.createElement('div');
+    row.className = 'managed-account-row custom-pricing-row';
+    const main = document.createElement('button');
+    main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
     main.title = t('settings.customPricing.edit');
     main.addEventListener('click', () => { if (openCustomPricingForm) openCustomPricingForm(ov); });
@@ -8799,7 +8800,7 @@ function renderCustomPricing() {
     main.append(name, meta);
     const remove = document.createElement('button');
     remove.type = 'button';
-    remove.className = 'managed-account-remove';
+    remove.className = 'managed-account-remove custom-pricing-remove';
     remove.textContent = t('settings.customPricing.remove');
     remove.addEventListener('click', async () => {
       const next = customPricingFormApi.removeOverride(state.settings?.customModelPricing || [], ov.modelId);

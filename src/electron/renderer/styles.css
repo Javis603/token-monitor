@@ -4225,7 +4225,49 @@ html.is-windows .limit-live-badge {
   font-size: 0.85em;
 }
 
-.custom-pricing-edit { cursor: pointer; }
+.custom-pricing-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.custom-pricing-edit {
+  display: grid;
+  justify-self: stretch;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.custom-pricing-edit:focus-visible {
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 2px;
+}
+
+.custom-pricing-row .managed-account-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.custom-pricing-row .custom-pricing-remove {
+  width: auto;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 10px;
+  line-height: 24px;
+  opacity: 0.72;
+}
 
 .opencode-profile-list {
   margin-bottom: 4px;
