@@ -584,6 +584,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   border-top: 1px solid rgba(var(--line-rgb), 0.06);
 }
 .settings-panel .settings-item.hidden { display: none; }
+#windowsBackdropNote.hidden { display: none; }
 .settings-item-text {
   flex: 1 1 auto;
   min-width: 0;
