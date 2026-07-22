@@ -3,7 +3,7 @@
 const PERIODS = ['today', 'month', 'allTime'];
 const LAST_7_DAYS_PERIOD = 'last7Days';
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
-const { coerceHistory, mergeHistories } = require('./history');
+const { coerceHistory, dayKeyAddDays, isValidDayKey, mergeHistories } = require('./history');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
@@ -112,21 +112,36 @@ function emptyPeriod() {
   };
 }
 
-function dayKeyAddDays(key, delta) {
-  const ms = Date.parse(`${key}T00:00:00Z`) + delta * 86400000;
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
 function currentDeviceDayKey(record, nowMs) {
   const window = record?.periodWindows?.today;
   const key = String(window?.key || '').slice(0, 10);
   const endsAtMs = timestampMs(window?.endsAt);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(key) && endsAtMs > 0) {
-    const nextUtcMidnight = Date.parse(`${dayKeyAddDays(key, 1)}T00:00:00Z`);
+  const timeZone = String(window?.timeZone || '').trim();
+  if (timeZone && isValidTimeZone(timeZone)) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', { timeZone }).formatToParts(new Date(nowMs));
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      const localKey = `${values.year}-${values.month}-${values.day}`;
+      if (isValidDayKey(localKey)) return localKey;
+    } catch (_) { /* fall through to the legacy offset estimate */ }
+  }
+  if (isValidDayKey(key) && endsAtMs > 0) {
+    const nextKey = dayKeyAddDays(key, 1);
+    if (!nextKey) return utcDayKey(new Date(nowMs));
+    const nextUtcMidnight = Date.parse(`${nextKey}T00:00:00Z`);
     const offsetMs = endsAtMs - nextUtcMidnight;
     return new Date(nowMs - offsetMs).toISOString().slice(0, 10);
   }
   return utcDayKey(new Date(nowMs));
+}
+
+function isValidTimeZone(value) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 // Derive a display-only rolling period from durable daily history. This never enters
@@ -137,7 +152,7 @@ function periodFromDailyHistory(history, todayKey, liveToday = null, days = 7) {
   const period = emptyPeriod();
   const endKey = String(todayKey || '').slice(0, 10);
   const count = Math.max(0, Math.floor(asNumber(days)));
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(endKey) || count === 0) return period;
+  if (!isValidDayKey(endKey) || count === 0) return period;
   const startKey = dayKeyAddDays(endKey, -(count - 1));
   const daily = coerceHistory(history).daily;
   for (const day of daily) {
@@ -348,6 +363,7 @@ function normalizePeriodWindows(value) {
     if (!endsAt) continue;
     result[periodName] = { endsAt };
     if (window.key) result[periodName].key = String(window.key);
+    if (window.timeZone && isValidTimeZone(String(window.timeZone))) result[periodName].timeZone = String(window.timeZone);
   }
   return Object.keys(result).length ? result : null;
 }
@@ -1010,9 +1026,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
     const deviceStaleAfterMs = staleAfterMsForSyncUpload(normalized.syncUploadIntervalMs, staleAfterMs);
     const stale = Number.isFinite(ageMs) && deviceStaleAfterMs > 0 ? ageMs > deviceStaleAfterMs : false;
     const liveToday = isPeriodExpired(normalized, 'today', now) ? null : normalized.periods.today;
-    const todayKey = liveToday
-      ? (normalized.periodWindows?.today?.key || utcDayKey(new Date(now)))
-      : currentDeviceDayKey(normalized, now);
+    const todayKey = currentDeviceDayKey(normalized, now);
     const last7Days = periodFromDailyHistory(normalized.history, todayKey, liveToday);
     const displayPeriods = { ...normalized.periods, [LAST_7_DAYS_PERIOD]: last7Days };
     aggregate.devices.push({

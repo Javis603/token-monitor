@@ -5,8 +5,15 @@ const test = require('node:test');
 
 const {
   sumTokens, num, parseGraphResult, computeIntensities,
-  computeStreaks, monthlyRollup, normalizeHistory, mergeHistories
+  computeStreaks, dayKeyAddDays, isValidDayKey, monthlyRollup, normalizeHistory, mergeHistories
 } = require('../../src/shared/history');
+
+test('day keys validate real calendar dates before arithmetic', () => {
+  assert.equal(isValidDayKey('2026-02-28'), true);
+  assert.equal(isValidDayKey('2026-02-31'), false);
+  assert.equal(dayKeyAddDays('2026-02-28', 1), '2026-03-01');
+  assert.equal(dayKeyAddDays('2026-02-31', 1), '');
+});
 
 function graphFromDays(days) {
   return {

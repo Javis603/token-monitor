@@ -63,4 +63,5 @@ test('collectUsageOnce stamps updatedAt and periodWindows from one injected cloc
   assert.equal(summary.osName, 'macOS');
   assert.equal(summary.osVersion, '26.0');
   assert.deepEqual(summary.periodWindows, computePeriodWindows(now));
+  assert.equal(typeof summary.periodWindows.today.timeZone, 'string');
 });

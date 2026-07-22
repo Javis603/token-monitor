@@ -103,8 +103,18 @@ function computeIntensities(days) {
 }
 
 function dayKeyAddDays(key, delta) {
+  if (!isValidDayKey(key)) return '';
   const ms = Date.parse(`${key}T00:00:00Z`) + delta * 86400000;
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+function isValidDayKey(key) {
+  const raw = String(key || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const date = new Date(`${raw}T00:00:00Z`);
+  return date.getUTCFullYear() === Number(raw.slice(0, 4))
+    && date.getUTCMonth() + 1 === Number(raw.slice(5, 7))
+    && date.getUTCDate() === Number(raw.slice(8, 10));
 }
 
 // A day is "active" when tokens > 0. currentStreak = consecutive active days ending at
@@ -341,6 +351,6 @@ function historyRevision(history) {
 
 module.exports = {
   num, sumTokens, parseGraphResult, computeIntensities,
-  computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
+  computeStreaks, dayKeyAddDays, isValidDayKey, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision
 };
