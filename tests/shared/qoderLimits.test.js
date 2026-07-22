@@ -158,3 +158,27 @@ test('fetchQoderLimits physically aborts a hung request within its configured bo
   assert.equal(provider.status, 'unavailable');
   assert.equal(signal.aborted, true);
 });
+
+test('fetchQoderLimits keeps the response body read inside the deadline', async () => {
+  let signal;
+  const provider = await fetchQoderLimits(
+    { qoderCookie: 'session=hung-body' },
+    {
+      env: {},
+      qoderFetchTimeoutMs: 5,
+      fetch: async (_url, init) => {
+        signal = init.signal;
+        return {
+          ok: true,
+          status: 200,
+          json: () => new Promise((resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(signal.aborted, true);
+});

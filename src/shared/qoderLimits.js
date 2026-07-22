@@ -189,10 +189,14 @@ function parseQoderUsage(body) {
   };
 }
 
-function fetchWithDeadline(url, init, deps = {}) {
+function fetchJsonWithDeadline(url, init, deps = {}) {
   const deadlineMs = Number(deps.qoderFetchTimeoutMs || deps.fetchTimeoutMs || QODER_FETCH_TIMEOUT_MS);
   return runWithProbeDeadline(
-    ({ signal }) => (deps.fetch || fetch)(url, { ...init, signal }),
+    async ({ signal }) => {
+      const response = await (deps.fetch || fetch)(url, { ...init, signal });
+      const body = response.ok ? await response.json() : null;
+      return { response, body };
+    },
     { signal: deps.signal, deadlineMs }
   );
 }
@@ -225,7 +229,7 @@ async function fetchQoderLimits(options = {}, deps = {}) {
     'Bx-V': '2.5.35'
   };
   try {
-    const response = await fetchWithDeadline(qoderUsageUrl(site), {
+    const { response, body } = await fetchJsonWithDeadline(qoderUsageUrl(site), {
       headers
     }, deps);
     if (!response.ok) {
@@ -235,11 +239,15 @@ async function fetchQoderLimits(options = {}, deps = {}) {
         : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
       throw error;
     }
-    const usage = parseQoderUsage(await response.json());
+    const usage = parseQoderUsage(body);
     let accountLabel = '';
     try {
-      const planResponse = await fetchWithDeadline(qoderUserPlanUrl(site), { headers }, deps);
-      if (planResponse.ok) accountLabel = parseQoderPlanLabel(await planResponse.json());
+      const { response: planResponse, body: planBody } = await fetchJsonWithDeadline(
+        qoderUserPlanUrl(site),
+        { headers },
+        deps
+      );
+      if (planResponse.ok) accountLabel = parseQoderPlanLabel(planBody);
     } catch (_) {}
     return normalizeLimitProvider({
       provider: 'qoder',
