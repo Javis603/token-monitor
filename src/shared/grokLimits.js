@@ -706,8 +706,8 @@ async function fetchGrokLimits(options = {}, deps = {}) {
     });
   }
 
+  if (deps.signal?.aborted) throw abortError(deps.signal);
   try {
-    if (deps.signal?.aborted) throw abortError(deps.signal);
     return normalizeLimitProvider({
       provider: 'grok',
       accountKey: hashKey('grok', credential.token),

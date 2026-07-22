@@ -395,6 +395,25 @@ test('fetchGrokLimits does not start web fallback after the RPC parent signal ab
   assert.equal(webCalls, 0);
 });
 
+test('fetchGrokLimits preserves cancellation after a successful web billing read', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-web-abort-'));
+  writeAuthJson(home, { 'https://auth.x.ai::client': { key: 'eyJsecret.signature' } });
+  const controller = new AbortController();
+
+  await assert.rejects(fetchGrokLimits({}, {
+    env: {},
+    grokHome: home,
+    signal: controller.signal,
+    fetchRpcBilling: async () => {
+      throw new Error('RPC unavailable');
+    },
+    fetchWebGrpcBilling: async () => {
+      controller.abort(new Error('web result superseded'));
+      return [];
+    }
+  }), /web result superseded/);
+});
+
 test('fetchGrokLimits prefers Grok CLI RPC billing before bearer web fallback', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-rpc-'));
   writeAuthJson(home, {
