@@ -112,6 +112,8 @@ test('shouldDownloadAutomaticAppUpdate covers the automatic-download state matri
   const ready = {
     hasUpdate: true,
     installSupported: true,
+    latest: { version: '0.28.1' },
+    dismissedVersion: null,
     downloaded: false,
     installBusy: false
   };
@@ -120,6 +122,8 @@ test('shouldDownloadAutomaticAppUpdate covers the automatic-download state matri
     ['preference disabled', false, ready, false],
     ['no update', true, { ...ready, hasUpdate: false }, false],
     ['unsupported build', true, { ...ready, installSupported: false }, false],
+    ['latest version dismissed', true, { ...ready, dismissedVersion: '0.28.1' }, false],
+    ['older version dismissed', true, { ...ready, dismissedVersion: '0.28.0' }, true],
     ['already downloaded', true, { ...ready, downloaded: true }, false],
     ['check or download already in flight', true, { ...ready, installBusy: true }, false],
     ['missing update state', true, null, false]

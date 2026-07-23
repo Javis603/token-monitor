@@ -179,6 +179,7 @@ function shouldDownloadAutomaticAppUpdate({
     automaticAppUpdates
     && updateState?.hasUpdate
     && updateState.installSupported
+    && updateState.dismissedVersion !== updateState.latest?.version
     && !updateState.downloaded
     && !updateState.installBusy
   );
