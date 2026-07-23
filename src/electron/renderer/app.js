@@ -2170,14 +2170,6 @@ function formatHomeLimitWindowValue(window, showUsed) {
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
 }
 
-function balanceRemainingWindow(balance) {
-  const amount = Math.max(0, Number(balance?.amount || 0));
-  const spend = Math.max(0, Number(balance?.monthSpend || 0));
-  const total = amount + spend;
-  const remainingPercent = total > 0 ? (amount / total) * 100 : 100;
-  return { remainingPercent };
-}
-
 function mimoTokenPlanWindowFromBalance(balance) {
   if (!balance) return null;
   if (balance.planStatus === 'expired') return null;
@@ -2667,13 +2659,13 @@ function renderProviderWindows(provider, color) {
       windows.append(node);
     }
   } else if (provider.provider === 'deepseek') {
-    // DeepSeek is pay-as-you-go: render the prepaid balance as a meter so the
-    // provider uses the same visual language as fixed quota windows.
+    // DeepSeek reports an absolute prepaid balance, not a quota denominator.
+    // Keep it meterless so a tiny balance is never presented as "100% remaining".
     windows.classList.add('limit-windows-deepseek');
     const balance = provider.balance || null;
     if (balance) {
       const currency = balance.currency;
-      const balanceNode = limitWindowNode('Balance', balanceRemainingWindow(balance), color, 0.95,
+      const balanceNode = limitWindowNode('Balance', { showMeter: false }, color, 0.95,
         `${formatMoney(balance.amount, currency)} left`);
       balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
       windows.append(balanceNode);

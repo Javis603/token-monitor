@@ -39,17 +39,18 @@
     return remaining == null ? null : 100 - remaining;
   }
 
-  function balanceWindow(balance) {
+  function balanceWindow(balance, { showMeter = true } = {}) {
     if (!balance) return null;
     const amount = Math.max(0, Number(balance?.amount || 0));
     if (!Number.isFinite(amount)) return null;
     const spend = Math.max(0, Number(balance?.monthSpend || 0));
     const total = amount + spend;
-    const percent = total > 0 ? (amount / total) * 100 : 100;
+    const percent = showMeter ? (total > 0 ? (amount / total) * 100 : 100) : null;
     return {
       kind: 'balance',
       label: '',
-      remainingPercent: clampPercent(percent),
+      remainingPercent: percent == null ? null : clampPercent(percent),
+      showMeter,
       amount,
       currency: balance?.currency || ''
     };
@@ -87,7 +88,7 @@
       if (plan) windows.push(plan);
     }
     if (providerId === 'deepseek' || providerId === 'mimo') {
-      const balance = balanceWindow(account.balance);
+      const balance = balanceWindow(account.balance, { showMeter: providerId !== 'deepseek' });
       if (balance) windows.push(balance);
     }
     return windows;
@@ -106,11 +107,15 @@
             resetDescription: window.resetDescription || '',
             value: window.value || '',
             planStatus: window.planStatus || '',
+            showMeter: window.showMeter !== false,
             amount: finiteNumber(window.amount),
             currency: window.currency || '',
             index: windowIndex
           }))
-          .filter((window) => window.remainingPercent != null || window.planStatus === 'expired' || window.value)
+          .filter((window) => window.remainingPercent != null
+            || window.planStatus === 'expired'
+            || window.value
+            || (window.kind === 'balance' && window.amount != null))
           .sort((a, b) => {
             if (providerId === 'antigravity') return a.index - b.index;
             const aPriority = windowPriority.get(a.kind) ?? 10;

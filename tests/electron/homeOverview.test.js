@@ -191,8 +191,8 @@ test('homeLimitAccountsForProviders includes Grok billing and DeepSeek balance r
   assert.deepEqual(rows[0].windows.map((window) => [window.kind, window.label, window.remainingPercent]), [
     ['billing', 'Monthly', 100]
   ]);
-  assert.deepEqual(rows[1].windows.map((window) => [window.kind, window.label, window.remainingPercent, window.amount, window.currency, window.value]), [
-    ['balance', 'balance', 100, 4.61, 'CNY', '']
+  assert.deepEqual(rows[1].windows.map((window) => [window.kind, window.label, window.remainingPercent, window.showMeter, window.amount, window.currency, window.value]), [
+    ['balance', 'balance', null, false, 4.61, 'CNY', '']
   ]);
 });
 

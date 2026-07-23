@@ -54,23 +54,32 @@ test('computeConsumption: rounds to cents', () => {
 const { recordConsumption } = require('../../src/shared/deepseekBalanceHistory');
 
 function memoryStore(initial = {}) {
-  const box = { value: JSON.parse(JSON.stringify(initial)) };
+  const box = { value: JSON.parse(JSON.stringify(initial)), writes: 0 };
   return {
     readJson: () => JSON.parse(JSON.stringify(box.value)),
-    writeJsonAtomic: (_path, value) => { box.value = JSON.parse(JSON.stringify(value)); },
-    peek: () => box.value
+    writeJsonAtomic: (_path, value) => {
+      box.value = JSON.parse(JSON.stringify(value));
+      box.writes += 1;
+    },
+    peek: () => box.value,
+    writes: () => box.writes
   };
 }
 
-test('recordConsumption: persists snapshot under accountKey and computes spend', () => {
+test('recordConsumption: persists a compact balance anchor and daily spend', () => {
   const store = memoryStore();
   const t0 = new Date(2026, 5, 7, 8, 0, 0).getTime();
   const t1 = new Date(2026, 5, 7, 9, 0, 0).getTime();
   recordConsumption({ accountKey: 'sha256:abc', currency: 'CNY', paid: 10, now: t0, storePath: '/x' }, store);
   const r = recordConsumption({ accountKey: 'sha256:abc', currency: 'CNY', paid: 7, now: t1, storePath: '/x' }, store);
   assert.equal(r.todaySpend, 3);
-  assert.equal(store.peek()['sha256:abc'].snapshots.length, 2);
-  assert.equal(store.peek()['sha256:abc'].currency, 'CNY');
+  assert.deepEqual(store.peek()['sha256:abc'], {
+    version: 2,
+    currency: 'CNY',
+    trackingSince: t0,
+    lastPaid: 7,
+    dailySpend: { '2026-06-07': 3 }
+  });
 });
 
 test('recordConsumption: resets the series when the funded currency changes', () => {
@@ -80,15 +89,64 @@ test('recordConsumption: resets the series when the funded currency changes', ()
   recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 10, now: t0, storePath: '/x' }, store);
   const r = recordConsumption({ accountKey: 'k', currency: 'USD', paid: 4, now: t1, storePath: '/x' }, store);
   assert.equal(store.peek().k.currency, 'USD');
-  assert.equal(store.peek().k.snapshots.length, 1); // old CNY series dropped
+  assert.equal(store.peek().k.lastPaid, 4);
+  assert.deepEqual(store.peek().k.dailySpend, {});
   assert.equal(r.todaySpend, 0);
 });
 
-test('recordConsumption: prunes snapshots older than 40 days', () => {
-  const store = memoryStore();
-  const old = new Date(2026, 3, 1, 8, 0, 0).getTime(); // ~67 days before now
+test('recordConsumption: keeps an old balance anchor while pruning daily spend older than 40 days', () => {
+  const old = new Date(2026, 3, 1, 8, 0, 0).getTime();
   const now = new Date(2026, 5, 7, 9, 0, 0).getTime();
-  recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 10, now: old, storePath: '/x' }, store);
-  recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 9, now, storePath: '/x' }, store);
-  assert.equal(store.peek().k.snapshots.length, 1); // old one pruned
+  const store = memoryStore({
+    k: {
+      version: 2,
+      currency: 'CNY',
+      trackingSince: old,
+      lastPaid: 10,
+      dailySpend: { '2026-04-02': 2 }
+    }
+  });
+  const result = recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 9, now, storePath: '/x' }, store);
+  assert.equal(store.peek().k.lastPaid, 9);
+  assert.deepEqual(store.peek().k.dailySpend, { '2026-06-07': 1 });
+  assert.equal(result.todaySpend, 1);
+  assert.equal(result.monthSpend, 1);
+  assert.equal(result.monthSinceTracking, false);
+});
+
+test('recordConsumption: migrates repeated legacy snapshots into compact daily state', () => {
+  const t0 = new Date(2026, 5, 7, 8, 0, 0).getTime();
+  const t1 = new Date(2026, 5, 7, 9, 0, 0).getTime();
+  const t2 = new Date(2026, 5, 7, 10, 0, 0).getTime();
+  const store = memoryStore({
+    k: {
+      currency: 'CNY',
+      snapshots: [
+        { ts: t0, paid: 10 },
+        { ts: t1, paid: 10 },
+        { ts: t2, paid: 7 }
+      ]
+    }
+  });
+
+  const result = recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 7, now: t2 + 1000, storePath: '/x' }, store);
+  assert.deepEqual(store.peek().k, {
+    version: 2,
+    currency: 'CNY',
+    trackingSince: t0,
+    lastPaid: 7,
+    dailySpend: { '2026-06-07': 3 }
+  });
+  assert.equal(result.todaySpend, 3);
+  assert.equal(store.writes(), 1);
+});
+
+test('recordConsumption: unchanged balances are idempotent and do not rewrite the store', () => {
+  const store = memoryStore();
+  const t0 = new Date(2026, 5, 7, 8, 0, 0).getTime();
+  recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 4.61, now: t0, storePath: '/x' }, store);
+  recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 4.61, now: t0 + 5 * 60 * 1000, storePath: '/x' }, store);
+  recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 4.61, now: t0 + 10 * 60 * 1000, storePath: '/x' }, store);
+  assert.equal(store.writes(), 1);
+  assert.deepEqual(store.peek().k.dailySpend, {});
 });
