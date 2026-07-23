@@ -227,6 +227,10 @@ function buildSyncPayload(summary, {
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
   delete payload.codexLocalSessionKeys;
+  if (Array.isArray(payload.history?.dailyTotals)) {
+    payload.history = { ...payload.history };
+    delete payload.history.dailyTotalsOmitted;
+  }
 
   for (const periodName of ['today', 'month']) {
     const period = payload[periodName];
@@ -252,6 +256,18 @@ function buildSyncPayload(summary, {
     }
   }
   return payload;
+}
+
+function omitHistoryDailyTotals(payload) {
+  if (!Array.isArray(payload?.history?.dailyTotals)) return false;
+  const omitted = payload.history.dailyTotals.length;
+  payload.history = {
+    ...payload.history,
+    summary: { ...(payload.history.summary || {}), activeDaysComplete: false },
+    dailyTotalsOmitted: omitted
+  };
+  delete payload.history.dailyTotals;
+  return true;
 }
 
 function serializeSyncPayload(summary, options = {}) {
@@ -300,6 +316,9 @@ function serializeSyncPayload(summary, options = {}) {
       if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
     }
   }
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && omitHistoryDailyTotals(payload)) {
+    body = JSON.stringify(payload);
+  }
   return { payload, body, bytes: Buffer.byteLength(body, 'utf8') };
 }
 
@@ -329,6 +348,9 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
       .map(([period, count]) => `${period}: ${count}`)
       .join(', ');
     logger(`project detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
+  if (serialized.payload?.history?.dailyTotalsOmitted > 0 && typeof logger === 'function') {
+    logger(`all-time daily history omitted from sync (${serialized.payload.history.dailyTotalsOmitted} days); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
   let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   const retrySerialized = response.status === 413
