@@ -323,7 +323,8 @@ test('Home-launched secondary views expose an accessible return action', () => {
 
   assert.match(html, /id="viewBackRow" class="view-back-row hidden"/);
   assert.match(html, /id="backHomeButton"[^>]*data-i18n-title="views\.backHome"[^>]*data-i18n-aria-label="views\.backHome"/);
-  assert.match(html, /class="back-home-icon" aria-hidden="true">←<\/span>/);
+  assert.match(html, /class="back-home-icon" aria-hidden="true"><\/span>/);
+  assert.doesNotMatch(html, /class="back-home-icon"[^>]*>←<\/span>/);
   assert.match(app, /state\.homeReturnVisible = false/);
   assert.match(homeModuleShellBody, /renderBreakdownChange\(viewId, \{ fromHome: true \}\)/);
   assert.equal((homeModuleShellBody.match(/\{ fromHome: true \}/g) || []).length, 2);
@@ -334,6 +335,7 @@ test('Home-launched secondary views expose an accessible return action', () => {
   assert.match(cssRule(css, '.view-back-row.hidden'), /display:\s*none/);
   assert.match(cssRule(css, '.back-home-button'), /height:\s*26px/);
   assert.match(cssRule(css, '.back-home-button:focus-visible'), /outline:\s*2px solid/);
+  assert.match(cssRule(css, '.back-home-icon'), /mask:\s*url\("icons\/actions\/arrow-left\.svg"\)/);
 });
 
 test('Projects view separates visibility from metadata collection', () => {

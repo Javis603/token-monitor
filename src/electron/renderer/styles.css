@@ -2075,8 +2075,12 @@ html.is-windows .settings-panel select option {
 }
 .back-home-button:active { background: rgba(var(--overlay-rgb), 0.1); }
 .back-home-icon {
-  font-size: 14px;
-  line-height: 1;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
 }
 .breakdown {
   position: relative;
