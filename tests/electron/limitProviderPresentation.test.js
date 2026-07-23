@@ -970,7 +970,7 @@ test('Copilot env token is documented in env example, not the README overview', 
   assert.doesNotMatch(readmeTw, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
 });
 
-test('Accounts summary counts all managed account groups including MiMo and Ollama', () => {
+test('Accounts summary counts all managed account groups including OpenRouter, MiMo, and Ollama', () => {
   const app = readRendererFile('app.js');
   const mimoLinkedBody = functionBody(app, 'mimoAccountLinked', 'renderMimoStatus');
   const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
@@ -983,6 +983,7 @@ test('Accounts summary counts all managed account groups including MiMo and Olla
   assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
   assert.match(summaryBody, /const kimiLinked = externalProviderAccountLinked\('kimi'\);/);
   assert.match(summaryBody, /const ollamaLinked = externalProviderAccountLinked\('ollama'\);/);
+  assert.match(summaryBody, /const openrouterCount = state\.openrouterProfileCount \|\| 0;/);
   assert.match(summaryBody, /const mimoLinked = mimoAccountLinked\(\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
@@ -992,9 +993,10 @@ test('Accounts summary counts all managed account groups including MiMo and Olla
   assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(kimiLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(ollamaLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(openrouterCount > 0 \? 1 : 0\)/);
   assert.match(summaryBody, /\(mimoLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 13/);
+  assert.match(summaryBody, /total: 14/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
@@ -1095,6 +1097,19 @@ test('deepseek status copy: notConfigured -> Add API key, unauthorized -> Update
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'deepseek', status: 'unauthorized' }),
+    { label: 'Update API key', tone: 'setup' }
+  );
+});
+
+test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'openrouter', source: 'api' }), 'API');
+  assert.deepEqual(presentation.limitProviderCapabilityTags('openrouter'), ['Pay-as-you-go', 'API key']);
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'openrouter', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'openrouter', status: 'unauthorized' }),
     { label: 'Update API key', tone: 'setup' }
   );
 });

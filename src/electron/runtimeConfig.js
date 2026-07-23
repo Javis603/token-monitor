@@ -30,6 +30,7 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   opencode: ['opencodeCookie', 'opencodeProfiles'],
+  openrouter: ['openrouterProfiles'],
   deepseek: ['deepseekApiKey'],
   minimax: ['minimaxApiKey'],
   copilot: ['copilotApiToken', 'copilotEnterpriseHost'],
@@ -84,6 +85,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
     opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
+    openrouterProfiles: settings.openrouterProfiles || {},
     deepseekApiKey: settings.deepseekApiKey || '',
     minimaxApiKey: settings.minimaxApiKey || '',
     copilotApiToken: settings.copilotApiToken || '',

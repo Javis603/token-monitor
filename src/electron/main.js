@@ -78,6 +78,7 @@ const {
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
+const openrouterLimits = require('../shared/openrouterLimits');
 const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
@@ -317,6 +318,7 @@ function defaultSettings() {
     language: 'auto',
     opencodeCookie: '',
     opencodeProfiles: {},
+    openrouterProfiles: {},
     deepseekApiKey: '',
     minimaxApiKey: '',
     copilotApiToken: '',
@@ -2538,6 +2540,15 @@ function redactOpencodeProfilesForRenderer(profiles) {
   return out;
 }
 
+function redactOpenRouterProfilesForRenderer(profiles) {
+  if (!profiles || typeof profiles !== 'object') return profiles;
+  const out = {};
+  for (const [name, profile] of Object.entries(profiles)) {
+    out[name] = { enabled: profile?.enabled !== false, apiKey: profile?.apiKey ? 'set' : '' };
+  }
+  return out;
+}
+
 function settingsForRenderer() {
   const deepseekApiKeySource = settings?.deepseekApiKey
     ? 'settings'
@@ -2610,6 +2621,10 @@ function settingsForRenderer() {
     ...(settings?.opencodeProfiles
       ? { opencodeProfiles: redactOpencodeProfilesForRenderer(settings.opencodeProfiles) }
       : {}),
+    ...(settings?.openrouterProfiles
+      ? { openrouterProfiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles) }
+      : {}),
+    openrouterEnvConfigured: Boolean(openrouterLimits.openrouterToken(process.env)),
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
@@ -3449,6 +3464,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/token-monitor')) return true;
   if ((parsed.hostname === 'cursor.com' || parsed.hostname === 'www.cursor.com') && parsed.pathname.startsWith('/settings')) return true;
   if (parsed.hostname === 'opencode.ai' || parsed.hostname === 'www.opencode.ai') return true;
+  if (parsed.hostname === 'openrouter.ai' && parsed.pathname.startsWith('/settings/keys')) return true;
   if (parsed.hostname === 'platform.deepseek.com' && parsed.pathname.startsWith('/api_keys')) return true;
   if (parsed.hostname === 'platform.minimaxi.com') return true;
   if (parsed.hostname === 'platform.minimax.io') return true;
@@ -3850,6 +3866,7 @@ app.whenReady().then(() => {
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
+    delete normalizedPatch.openrouterProfiles;
     delete normalizedPatch.customModelPricing;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
@@ -4453,6 +4470,91 @@ app.whenReady().then(() => {
     }
     opencodeStatusCache = { value: null, at: 0 };
     void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-state', {
+      clear: !enabled,
+      refresh: Boolean(enabled)
+    });
+    return { ok: true };
+  });
+  ipcMain.handle('openrouter:getProfiles', async () => {
+    return {
+      profiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles || {}),
+      hasEnvVar: Boolean(openrouterLimits.openrouterToken(process.env))
+    };
+  });
+  ipcMain.handle('openrouter:saveProfile', async (_event, rawName, rawApiKey) => {
+    const name = String(rawName || '').trim().slice(0, 64);
+    const apiKey = openrouterLimits.openrouterToken({}, rawApiKey);
+    if (!name || !apiKey) return { ok: false, error: 'Empty name or API key' };
+    try {
+      const provider = await openrouterLimits.fetchOpenRouterAccount(name, apiKey, {
+        env: process.env,
+        signal: AbortSignal.timeout(15_000)
+      });
+      if (provider?.status !== 'ok') {
+        return { ok: false, error: provider?.status === 'unauthorized' ? 'OpenRouter rejected the API key' : 'Could not validate the OpenRouter API key' };
+      }
+      settings.openrouterProfiles = {
+        ...(settings.openrouterProfiles || {}),
+        [name]: { apiKey, enabled: true }
+      };
+      saveSettings({ throwOnError: true });
+      void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-save');
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not validate the OpenRouter API key' };
+    }
+  });
+  ipcMain.handle('openrouter:deleteProfile', async (_event, rawName) => {
+    const name = String(rawName || '').trim();
+    const profiles = { ...(settings.openrouterProfiles || {}) };
+    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
+    delete profiles[name];
+    settings.openrouterProfiles = profiles;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile deletion' };
+    }
+    void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-delete', {
+      clear: true,
+      refresh: false
+    });
+    return { ok: true };
+  });
+  ipcMain.handle('openrouter:renameProfile', async (_event, rawOldName, rawNewName) => {
+    const oldName = String(rawOldName || '').trim();
+    const newName = String(rawNewName || '').trim().slice(0, 64);
+    const profiles = { ...(settings.openrouterProfiles || {}) };
+    if (!newName || oldName === newName) return { ok: false, error: 'Invalid name' };
+    if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
+    if (profiles[newName]) return { ok: false, error: 'Profile name already exists' };
+    profiles[newName] = profiles[oldName];
+    delete profiles[oldName];
+    settings.openrouterProfiles = profiles;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile rename' };
+    }
+    void queueLimitInvalidation({ provider: 'openrouter', accountName: oldName }, 'profile-rename', {
+      clear: true,
+      refresh: false
+    });
+    void queueLimitInvalidation({ provider: 'openrouter', accountName: newName }, 'profile-rename');
+    return { ok: true };
+  });
+  ipcMain.handle('openrouter:setProfileEnabled', async (_event, rawName, enabled) => {
+    const name = String(rawName || '').trim();
+    const profiles = { ...(settings.openrouterProfiles || {}) };
+    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
+    profiles[name] = { ...profiles[name], enabled: Boolean(enabled) };
+    settings.openrouterProfiles = profiles;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile state' };
+    }
+    void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-state', {
       clear: !enabled,
       refresh: Boolean(enabled)
     });

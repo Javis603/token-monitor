@@ -597,6 +597,43 @@
                 <div id="opencodeErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
+              <button id="openrouterSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="openrouterSettingsDetails">
+                <span data-i18n="settings.openrouter.title">OpenRouter Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="openrouterStatus" class="cursor-status-pill" data-i18n="settings.openrouter.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="openrouterSettingsDetails" class="cursor-settings-details hidden">
+                <div id="openrouterProfileList" class="opencode-profile-list"></div>
+                <div id="openrouterAddForm" class="opencode-add-form">
+                  <button id="openrouterAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="openrouterAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.openrouter.addProfile">Add account</span>
+                  </button>
+                  <div id="openrouterAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="openrouterOpenBrowser" data-i18n="settings.openrouter.openBrowser">Open OpenRouter API keys</button>
+                      </div>
+                      <p class="settings-note" data-i18n="settings.openrouter.note">Standard API keys show their usage and key limit. A Management API key can additionally show account credits. Keys stay on this device and only official OpenRouter endpoints are used.</p>
+                      <div class="settings-row">
+                        <label for="openrouterProfileName" data-i18n="settings.opencode.profileName">Account name</label>
+                        <input id="openrouterProfileName" type="text" data-i18n-placeholder="settings.openrouter.profileNamePlaceholder" placeholder="e.g. work, personal">
+                      </div>
+                      <textarea id="openrouterApiKeyInput" rows="2" spellcheck="false" placeholder="sk-or-v1-..."></textarea>
+                      <div class="settings-actions">
+                        <button id="openrouterProfileSubmit" data-i18n="settings.openrouter.saveProfile">Save</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="openrouterErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="deepseekAccountGroup" class="settings-group cursor-account-group">
               <button id="deepseekSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="deepseekSettingsDetails">
                 <span data-i18n="settings.deepseek.title">DeepSeek Account</span>

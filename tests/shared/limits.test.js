@@ -98,6 +98,36 @@ test('aggregateLimits preserves distinct MiMo accounts by hashed account key', (
   );
 });
 
+test('aggregateLimits preserves distinct OpenRouter accounts and public stats scrub profile identity', () => {
+  const providers = ['work', 'personal'].map((accountName, index) => ({
+    provider: 'openrouter',
+    accountKey: `sha256:openrouter-${index}`,
+    accountName,
+    accountLabel: accountName,
+    status: 'ok',
+    source: 'api',
+    updatedAt: `2026-07-23T10:0${index}:00.000Z`,
+    windows: [{
+      kind: 'billing',
+      label: 'Credits',
+      used: index + 1,
+      limit: 10,
+      remaining: 9 - index
+    }]
+  }));
+  const aggregate = aggregateLimits([{
+    deviceId: 'macbook',
+    limits: { updatedAt: '2026-07-23T10:02:00.000Z', providers }
+  }], 0, Date.parse('2026-07-23T10:03:00.000Z'));
+  const openrouter = aggregate.providers.filter((provider) => provider.provider === 'openrouter');
+  assert.equal(openrouter.length, 2);
+  assert.deepEqual(new Set(openrouter.map((provider) => provider.accountName)), new Set(['work', 'personal']));
+
+  const publicPayload = publicLimits({ providers: openrouter });
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountKey')));
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountName')));
+});
+
 test('publicLimits preserves MiMo plan status while removing account identity', () => {
   const payload = publicLimits({
     providers: [{
