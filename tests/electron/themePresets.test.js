@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -29,9 +31,8 @@ const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
 test('interface palette is the four always-visible colours, each mapped to a CSS variable', () => {
   assert.deepEqual(INTERFACE_COLOR_KEYS, ['accent', 'bg', 'text', 'muted']);
-  // Semantic status colours (blue/orange/purple/yellow/red) are intentionally
-  // not customisable — they only surface in edge states and purple is unused.
-  for (const dead of ['blue', 'orange', 'purple', 'yellow', 'red']) {
+  // Semantic status colours are intentionally not customisable.
+  for (const dead of ['success', 'blue', 'orange', 'purple', 'yellow', 'red']) {
     assert.ok(!INTERFACE_COLOR_KEYS.includes(dead), `${dead} should not be customisable`);
   }
   for (const key of INTERFACE_COLOR_KEYS) {
@@ -40,6 +41,54 @@ test('interface palette is the four always-visible colours, each mapped to a CSS
   }
   // bg default must equal the --glass-rgb default (48, 52, 56).
   assert.equal(hexToRgbTriplet(DEFAULT_THEME.bg), '48, 52, 56');
+});
+
+test('semantic success states stay independent from the custom accent', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/styles.css'), 'utf8');
+  const semanticSelectors = [
+    '.export-status-pill.is-active',
+    '.hub-status.ok',
+    '.tokscale-message.success',
+    '.tool-status-tag-ok',
+    '.theme-code-status.success',
+    '.refresh-button.is-refreshed',
+    '.service-status-ok .service-status-pill'
+  ];
+
+  for (const selector of semanticSelectors) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rule = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || '';
+    assert.match(rule, /var\(--success(?:-rgb)?\)/, `${selector} should use semantic success`);
+    assert.doesNotMatch(rule, /var\(--accent(?:-rgb)?\)/, `${selector} should not inherit the custom accent`);
+  }
+});
+
+test('presence and current-account indicators follow the custom accent', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/styles.css'), 'utf8');
+  for (const selector of ['.live-dot.live', '.limit-live-badge']) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rule = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || '';
+    assert.match(rule, /var\(--accent(?:-rgb)?\)/, `${selector} should follow the custom accent`);
+    assert.doesNotMatch(rule, /var\(--success(?:-rgb)?\)/, `${selector} should not imply success`);
+  }
+});
+
+test('device provenance tags use informational colours instead of state colours', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/styles.css'), 'utf8');
+  const ruleFor = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || '';
+  };
+
+  const local = ruleFor('.limit-provider-tag-local');
+  assert.match(local, /color:\s*var\(--muted\)/);
+  assert.doesNotMatch(local, /var\(--(?:accent|success|yellow)(?:-rgb)?\)/);
+
+  for (const selector of ['.limit-provider-tag-remote', '.limit-provider-tag-multi']) {
+    const rule = ruleFor(selector);
+    assert.match(rule, /color:\s*var\(--blue\)/, `${selector} should be informational`);
+    assert.doesNotMatch(rule, /var\(--(?:accent|success|yellow)(?:-rgb)?\)/, `${selector} should not imply selection, success, or warning`);
+  }
 });
 
 test('hexToRgbTriplet converts hex to a CSS rgb triplet', () => {
@@ -61,9 +110,10 @@ test('themeCssVarEntries maps bg to --glass-rgb and mirrors text onto --number',
   assert.equal(set['--glass-rgb'], '16, 16, 16'); // bg becomes a triplet
   assert.equal(set['--text'], '#abcdef');
   assert.equal(set['--number'], '#abcdef'); // big TOTAL figure follows text
-  assert.equal(set['--green'], '#112233'); // accent maps to --green
+  assert.equal(set['--accent'], '#112233'); // accent maps to the interaction token
   assert.equal(set['--accent-rgb'], '17, 34, 51'); // accent also flips the tints
   assert.equal(cleared['--accent-rgb'], null); // absent accent -> :root default
+  assert.equal(set['--success'], null); // dark-theme success never inherits accent
 });
 
 test('isLightHex detects pale backgrounds', () => {
@@ -79,7 +129,7 @@ test('themeCssVarEntries flips the overlay/border system for light backgrounds',
 
   // Dark bg -> surface vars cleared to the dark :root defaults.
   const dark = byName(themeCssVarEntries({ bg: '#0b0c0e' }));
-  for (const name of ['--overlay-rgb', '--line-rgb', '--panel-rgb', '--sunken-rgb', 'color-scheme']) {
+  for (const name of ['--overlay-rgb', '--line-rgb', '--panel-rgb', '--sunken-rgb', '--success', '--success-rgb', 'color-scheme']) {
     assert.equal(dark[name], null, `${name} should be cleared on a dark bg`);
   }
 
@@ -90,6 +140,8 @@ test('themeCssVarEntries flips the overlay/border system for light backgrounds',
   assert.equal(light['--line-rgb'], '24, 28, 36');
   assert.equal(light['--panel-rgb'], '255, 255, 255');
   assert.equal(light['--sunken-rgb'], '188, 196, 206');
+  assert.equal(light['--success'], '#18794e');
+  assert.equal(light['--success-rgb'], '24, 121, 78');
   assert.equal(light['color-scheme'], 'light');
 
   // No bg override resolves to the dark default, so no flip.

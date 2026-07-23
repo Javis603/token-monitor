@@ -118,7 +118,7 @@ test('view changes render immediately without a page crossfade', () => {
   assert.match(app, /function renderBreakdownChange\(breakdown, options = \{\}\)/);
   assert.match(app, /state\.animateBarsFromZero = true;[\s\S]*?let renderSucceeded = false;[\s\S]*?render\(\);[\s\S]*?renderSucceeded = true;[\s\S]*?state\.animateBarsFromZero = false;[\s\S]*?if \(!renderSucceeded\) state\.animateChartsOnRender = false;/);
   assert.match(app, /else renderBreakdownChange\(id\)/);
-  assert.match(app, /renderBreakdownChange\(viewId\)/);
+  assert.match(app, /renderBreakdownChange\(viewId, \{ fromHome: true \}\)/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.bar-fill,[\s\S]*?\.tab-indicator[\s\S]*?transition:\s*none/s);
 });
 

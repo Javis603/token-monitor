@@ -2,6 +2,7 @@ Renderer icon assets include local copies of open-source SVG icons.
 
 Sources:
 - Lucide Icons: https://github.com/lucide-icons/lucide
+  - actions/arrow-left.svg: arrow-left
   - actions/settings.svg: settings
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left

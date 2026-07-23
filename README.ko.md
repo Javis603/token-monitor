@@ -26,7 +26,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Hermes Agent, OpenCode, OpenClaw, Cursor, Antigravity, Cline 등 다양한 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션별 분류 보기를 지원합니다.
+Claude Code, Codex, Cursor, GitHub Copilot 등 25개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
 
 ## 지원 도구
 
@@ -63,17 +63,25 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 ## 쇼케이스
 
-| 홈 보기 | 한도 보기 | 도구 보기 |
-|:---:|:---:|:---:|
-| ![홈 보기](.github/assets/home-view.png) | ![한도 보기](.github/assets/limits-view.png) | ![도구 보기](.github/assets/tools-view.png) |
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="홈 보기"><br><sub>커스터마이즈 가능한 대시보드 — 표시할 모듈과 순서를 선택</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="한도 보기"><br><sub>여러 계정을 나란히, Codex는 로컬 계정을 원클릭 전환</sub></td>
+<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="도구 보기"><br><sub>도구를 클릭해 입력／출력과 캐시 히트 상세를 펼치기</sub></td>
+</tr>
+<tr>
+<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="세션 보기"><br><sub>단일 세션을 열어 프롬프트별 토큰과 사용 도구로 분해</sub></td>
+<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="모델 보기"><br><sub>도구 전반에서 각 모델의 사용량과 비용을 집계</sub></td>
+<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="기기 보기"><br><sub>각 기기의 사용량·비용·동기화 상태, 펼치면 기기별 상세</sub></td>
+</tr>
+</table>
 
-| 세션 보기 | 모델 보기 | 서비스 상태 |
-|:---:|:---:|:---:|
-| ![세션 보기](.github/assets/sessions-view.png) | ![모델 보기](.github/assets/models-view.png) | ![서비스 상태](.github/assets/status-view.png) |
-
-| 사용 대시보드 — 개요 | 사용 대시보드 — 추세 |
-|:---:|:---:|
-| ![사용 대시보드 개요](.github/assets/dashboard-overview.png) | ![사용 대시보드 추세](.github/assets/dashboard-trends.png) |
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="사용 대시보드 개요"><br><sub>모든 기기를 아우른 1년치 활동 히트맵과 연속 일수</sub></td>
+<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="사용 대시보드 추세"><br><sub>1년치 일별 추세, 도구／모델별 누적, K선 지원</sub></td>
+</tr>
+</table>
 
 ## Token Monitor를 쓰는 이유
 
@@ -81,35 +89,48 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 ## 기능
 
-- **실시간 토큰 추적** — Claude Code, Codex, Hermes Agent, OpenCode, OpenClaw, Cursor, Antigravity, Cline, Kimi, Qwen, Grok Build, GitHub Copilot, Pi, Zed, Kilo Code, MiMo Code, ZCode, Kiro, CodeBuddy, WorkBuddy, Proma (턴당 수 초 내 UI 갱신)
-- **WSL 사용량 (Windows)** — 실행 중인 WSL 배포판 안 AI 도구 사용량을 자동 감지해 합산 (약 5분마다 주기 스캔)
-- **멀티 디바이스 실시간 동기화** — Server-Sent Events
-- **분류 보기** — 도구, 기기, 모델, 세션, 계정 한도별
+### 사용량 추적
+
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 20개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
 - **세션별 상세** — Claude Code, Codex, OpenCode 세션에서 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
-- **비용 분류** — 토큰 수와 함께 비용 표시
-- **원하는 통화로 비용 표시** — USD, TWD, HKD, CNY; 환율은 매일 자동 갱신, 설정에서 수동 덮어쓰기 가능
+- **비용과 통화** — 토큰 수와 함께 비용 표시. USD, TWD, HKD, CNY 지원, 환율은 매일 자동 갱신, 설정에서 수동 덮어쓰기 가능
+- **WSL 사용량 (Windows)** — 실행 중인 WSL 배포판의 파일 기반 사용량을 약 5분마다 자동 감지해 합산합니다. OpenCode와 Hermes 같은 SQLite 기반 도구는 [WSL 내부 헤드리스 에이전트](docs/wsl-sqlite-setup.md)가 필요할 수 있습니다
+
+### 한도·추세·내보내기
+
+- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, GLM, Kimi 등 15개 이상 공급자의 session/weekly/billing/credits, DeepSeek 선불 잔액·오늘/이번 달 사용액
+- **여러 계정과 Codex 전환** — 한 공급자에서 여러 계정을 추적하고 각각의 한도를 표시. 추적 중인 Codex 계정은 재인증 없이 로컬 계정으로 한 번에 전환 가능
+- **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Token Monitor가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
 - **사용 추세 & 대시보드** — 홈 화면 활동 히트맵·추세 차트, 연속 일수·기기 전체 도구/모델별 누적 사용(막대·K선) 전용 대시보드 창
-- **데이터 내보내기** — 도구 무관 CSV + JSON으로 수동 내보내기 또는 폴더 자동 기록 (스프레드시트, Obsidian, Grafana, 스크립트용); [docs/export.md](docs/export.md) 참고
-- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, MiMo, GitHub Copilot, Kiro, GLM, Volcengine, Qoder, Kimi, Ollama의 공급자별 session/weekly/billing/credits, DeepSeek 선불 잔액·오늘/이번 달 사용액. 추적 중인 Codex 계정을 재인증 없이 로컬 Codex 계정으로 전환할 수 있습니다
 - **상태 보기** (선택) — Claude, OpenAI, Cursor, DeepSeek 상태 페이지 수동/주기 확인
-- **도구 목록 커스터마이즈** — 추적은 유지한 채 숨기기, 고정, 순서 변경
-- **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창
-- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/MiMo/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi/Ollama 한도 % 등
-- **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
-- **전역 단축키** — 어디서든 창 표시/숨김
+- **데이터 내보내기** — 도구 무관 CSV + JSON으로 수동 내보내기 또는 폴더 자동 기록 (스프레드시트, Obsidian, Grafana, 스크립트용); [docs/export.md](docs/export.md) 참고
+
+### 멀티 디바이스와 배포
+
+- **멀티 디바이스 실시간 동기화** — Server-Sent Events. 한 기기의 변경이 수 초 내 다른 기기에 반영
 - **로컬 우선** — 단일 기기는 서버 불필요
 - **자체 호스트 동기화** — 위젯 내 hub, Node CLI hub, Cloudflare Worker
 - **iOS 위젯** — Worker hub + Widgy, Scriptable
-- **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
 - **프라이버시 우선** — 프롬프트, 응답, 소스 코드, 파일 내용은 모두 기기에만 보관
+
+### 인터페이스와 표시
+
+- **분류 보기** — 도구, 기기, 모델, 세션, 프로젝트, 계정 한도별
+- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, 또는 소진에 가장 가까운 공급자 한도 %를 아이콘 옆에 표시
+- **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
+- **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창
+- **도구 목록 커스터마이즈** — 추적은 유지한 채 숨기기, 고정, 순서 변경
+- **전역 단축키** — 어디서든 창 표시/숨김
+- **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
 
 ## 설치
 
 [GitHub Releases](https://github.com/Javis603/token-monitor/releases)에서 다운로드하세요.
 
 - **macOS (Apple Silicon)** — `.dmg`, 서명 및 notarize 완료
-- **Windows 10/11** — 설치용 및 휴대용 `.exe`, [SignPath Foundation](docs/code-signing.md)을 통해 서명됨
+- **macOS (Intel)** — x64 `.dmg`, 서명 및 notarize 완료
+- **Windows 10/11** — 설치용 및 휴대용 `.exe`, [서명됨](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
 
 패키지 빌드는 GitHub Releases를 자동 확인합니다. 새 버전이 있으면 화면에 업데이트 표시가 나타나며, 지원되는 플랫폼에서는 설정 → 일반에서도 설치할 수 있습니다.
@@ -124,7 +145,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 #### 옵션 A — 위젯에서 hub 호스트 (가장 쉬움, CLI 불필요)
 
-항상 켜 둔 기기에서 **설정 → 멀티 디바이스 동기화 → Host hub on this device**를 선택합니다. 위젯이 secret을 생성하고 LAN URL(Tailscale/ZeroTier 포함)을 표시합니다. 다른 기기에서는 **Connect to a hub**에 URL과 secret을 붙여 넣습니다.
+항상 켜 둔 기기에서 **설정 → 멀티 디바이스 동기화 → 이 기기에서 Hub 호스팅**을 선택합니다. 위젯이 secret을 생성하고 LAN URL(Tailscale/ZeroTier 포함)을 표시합니다. 다른 기기에서는 **Hub에 연결**에 URL과 secret을 붙여 넣습니다.
 
 Token Monitor가 실행 중일 때만 hub가 동작합니다. 앱을 종료하면(창만 닫는 것과 다름) hub가 멈추고 연결된 기기가 끊깁니다.
 
@@ -169,10 +190,11 @@ npx wrangler deploy
 
 ```bash
 npm install
-npm run dist:mac   # macOS arm64 .dmg          → dist/
-npm run dist:win   # Windows x64 installer .exe → dist/
-npm run dist:linux # Linux x64 AppImage        → dist/
-npm run pack       # 설치 없이 앱 디렉터리만 (로컬 테스트)
+npm run dist:mac     # macOS arm64 .dmg           → dist/
+npm run dist:mac:x64 # macOS Intel x64 .dmg       → dist/
+npm run dist:win     # Windows x64 installer .exe → dist/
+npm run dist:linux   # Linux x64 AppImage         → dist/
+npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
 ```
 
 결과물은 `dist/`에 생성됩니다. Windows와 Linux는 대상 OS에서 위의 해당 `dist:*` 스크립트를 사용하세요. macOS 릴리스 빌드를 패키징하려면 이 Mac에 Developer ID Application 서명 ID가 있어야 합니다. 로컬 개발 또는 지원되지 않는 플랫폼에서는 `npm start`를 사용하세요.
@@ -193,9 +215,14 @@ npm run pack       # 설치 없이 앱 디렉터리만 (로컬 테스트)
 
 ## 세션 데이터 보존 기간
 
-활동 히트맵과 트렌드 대시보드는 각 도구가 디스크에 남겨 둔 세션 파일로 만들어집니다. **Claude Code는 기본적으로 30일이 지난 트랜스크립트를 삭제합니다**(`cleanupPeriodDays`). **삭제된 세션 사용량 유지**(설정 → 수집)를 켜면 Token Monitor는 오늘/이번 달/전체 세션 합계와 함께 이미 관측한 모든 일별 도구/모델 정보를 기간 제한 없이 로컬에 보존합니다. 히트맵과 동기화 데이터는 계속 370일 롤링 기간을 사용하며, 더 오래된 관측 데이터는 향후 보기를 위해 로컬에 남습니다. 이후 원본 파일이 정리되어도 관측된 날짜는 사라지지 않지만, Token Monitor가 처음 관측하기 전에 이미 삭제된 데이터는 이 아카이브로 복구할 수 없습니다.
+**삭제된 세션 사용량 유지**(설정 → 수집)를 켜면 Token Monitor는 관측한 일별 도구/모델 사용량을 기간 제한 없이 로컬에 보관합니다. 원본 도구가 나중에 세션을 정리해도 히트맵과 추세는 영향을 받지 않습니다.
 
-히트맵의 1년치 롤링 기간을 보존하려면 기간이 지나기 전에 `~/.claude/settings.json`에서 Claude Code의 보존 기간을 늘리세요:
+<details>
+<summary><strong>고급: 원본 도구 자체의 보존 기간 늘리기</strong></summary>
+
+<br>
+
+히트맵과 동기화 데이터는 370일 롤링 기간을 사용합니다(더 오래된 관측 데이터는 향후 보기를 위해 로컬에 남습니다). **Claude Code는 기본적으로 30일치 트랜스크립트만 보관합니다**(`cleanupPeriodDays`). 아카이브가 작동하기 전에 1년치 롤링 기간을 보존하려면, 기간이 지나기 전에 `~/.claude/settings.json`에서 늘리세요:
 
 ```json
 {
@@ -203,61 +230,24 @@ npm run pack       # 설치 없이 앱 디렉터리만 (로컬 테스트)
 }
 ```
 
-370은 히트맵의 표시 기간에 해당합니다. 값을 키우면 더 오래 남길 수 있지만, 그만큼 트랜스크립트가 디스크에 계속 남습니다. 다른 도구의 기본값과 설정 파일 경로는 tokscale의 [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) 표를 참고하세요.
+값을 키우면 더 오래 남길 수 있지만, 그만큼 트랜스크립트가 디스크에 계속 남습니다. 다른 도구의 기본값과 설정 파일 경로는 tokscale의 [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) 표를 참고하세요.
+
+이 아카이브는 Token Monitor가 이미 관측한 날짜만 포함합니다. 추적을 시작하기 전에 삭제된 데이터는 복구할 수 없습니다.
+
+</details>
 
 ## 설정
 
-### 위젯 (GUI)
+Token Monitor 설정은 두 곳에 있으며, 일상 사용에는 앞의 것만 필요합니다.
 
-위젯 헤더의 `⚙` 버튼으로 설정 패널을 엽니다.
+- **위젯 (GUI)** — 오른쪽 아래 `⚙` 버튼으로 엽니다. 섹션 순서: 일반(언어, 로그인 시 시작, 업데이트), 메인 화면(홈 모듈과 표시 통화), 창(창 동작, 트레이 모드, 플로팅 버블, 단축키), 외관(테마와 도구별 색), 수집(추적 도구, 수집 주기, 삭제된 세션 사용량 유지, 데이터 내보내기), AI 도구 한도, 계정(공급자별 자격 증명), 멀티 디바이스 동기화. 타이틀 바의 `⇧` 버튼으로 창 동작을 전환합니다.
+- **Headless agent와 hub** — UI 없음. 프로젝트 루트의 `.env`(`.env.example` 복사)로 설정하며, 우선순위는 CLI 플래그 → 환경 변수 → 기본값입니다.
 
-- **멀티 디바이스 동기화** — **Local only**, **Connect to a hub**, **Host hub on this device**
-- **추적 도구** — 수집 대상 선택, 목록에서 숨기기·고정·순서 변경
-- **AI 도구 한도** — Claude Code, Codex, Cursor, Antigravity, OpenCode, DeepSeek, Grok, Minimax, MiMo, GitHub Copilot, Kiro, GLM, Volcengine, Qoder, Kimi, Ollama 한도 감지 및 갱신 주기
-- **추세** — 일별 사용 기록 스캔 간격 선택 또는 끄기; 사용 대시보드(히트맵, 연속 일수, 막대/K선) 열기
-- **창 동작** — 항상 위, 일반 창, 바탕 화면 고정
-- **트레이 모드** — 메뉴 막대/시스템 트레이 팝오버, 아이콘 옆 표시 항목 선택
-- **플로팅 버블** — 미니 창, 클릭/호버 미리보기
-- **단축키** — 전역 표시/숨김
-- **외관** — 테마, 색상, Discord Rich Presence, 글래스 등
-- **고급** — `settings.json` 직접 편집 (`allTimeSince` 등)
-
-헤더의 고정 버튼으로 «항상 위»를 토글합니다.
-
-### Headless agent와 hub (`.env`)
-
-agent와 hub에는 UI가 없습니다. 프로젝트 루트 `.env`(`.env.example` 복사)로 설정합니다.
-
-```env
-TOKEN_MONITOR_HUB_URL=               # 동기화 필수 — Worker URL 또는 http://<lan-ip>:17321
-TOKEN_MONITOR_SECRET=                # hub와 동일한 secret
-TOKEN_MONITOR_DEVICE_ID=             # 선택 — 기본값 호스트명
-TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # 선택 — 0/실시간, 600000/10분, 1200000/20분, 1800000/30분
-TOKEN_MONITOR_CLIENTS=               # 선택 — 기본값 전체 도구; 비우면 추적 안 함
-TOKEN_MONITOR_PROJECTS_ENABLED=      # 선택 — 기본 꺼짐; 1이면 프로젝트 메타데이터 수집
-TOKEN_MONITOR_HISTORY_ENABLED=       # 선택 — 기본 켜짐; 0이면 추세 기록 생략
-TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # 선택 — 기본 켜짐; 0이면 보관된 세션 사용량 유지 중지
-TOKEN_MONITOR_LIMITS_ENABLED=        # 선택 — 기본 켜짐; 0이면 CLI 프로브 생략
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # 선택 — claude,codex,cursor,antigravity,opencode,deepseek,minimax,mimo,grok,copilot,kiro,zai,zaiteam,volcengine,qoder,kimi,ollama
-```
-
-전체 목록은 `.env.example`을 참조하세요. 위젯은 env를 첫 실행 기본값으로 사용하며, agent와 hub에서는 CLI 플래그가 우선합니다.
-
-일회 실행 예:
-
-```bash
-npm run agent -- --clients=claude,codex,opencode --once
-```
+모든 설정과 환경 변수의 자세한 내용은 [설정 레퍼런스](docs/configuration.md)를 참고하세요.
 
 ## 프라이버시
 
 Token Monitor는 사용 로그를 로컬에서 처리하며 프로젝트 관리자에게 분석 또는 원격 측정 데이터를 보내지 않습니다. 네트워크 접근은 문서화되었거나 사용자가 활성화한 기능에만 사용됩니다. 업데이트, 제공자 연동, Discord Rich Presence 및 선택적 다중 기기 동기화에서 사용하는 데이터는 [개인정보 처리방침](docs/privacy.md)을 참고하세요.
-
-## 요구 사항
-
-- macOS, Windows 또는 Linux x64
-- Node.js 22.13+
-- 동기화 모드만: agent/위젯에서 hub까지 네트워크 연결
 
 ## Star 기록
 

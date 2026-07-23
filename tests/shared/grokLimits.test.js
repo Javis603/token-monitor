@@ -351,6 +351,69 @@ test('fetchGrokRpcBilling speaks Grok agent stdio x.ai/billing JSON-RPC', async 
   assert.equal(body.usage.totalUsed.val, 4200);
 });
 
+test('fetchGrokRpcBilling kills the CLI when the parent signal aborts', async () => {
+  const controller = new AbortController();
+  let killed = false;
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  child.kill = () => { killed = true; };
+
+  const pending = fetchGrokRpcBilling({}, {
+    env: {},
+    signal: controller.signal,
+    spawn: () => child,
+    rpcTimeoutMs: 60_000
+  });
+  controller.abort(new Error('stop grok probe'));
+
+  await assert.rejects(pending, /stop grok probe/);
+  assert.equal(killed, true);
+});
+
+test('fetchGrokLimits does not start web fallback after the RPC parent signal aborts', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-abort-'));
+  writeAuthJson(home, { 'https://auth.x.ai::client': { key: 'eyJsecret.signature' } });
+  const controller = new AbortController();
+  let webCalls = 0;
+  const pending = fetchGrokLimits({}, {
+    env: {},
+    grokHome: home,
+    signal: controller.signal,
+    fetchRpcBilling: async () => {
+      controller.abort(new Error('grok probe superseded'));
+      throw new Error('RPC aborted');
+    },
+    fetchWebGrpcBilling: async () => {
+      webCalls += 1;
+      return [];
+    }
+  });
+
+  await assert.rejects(pending, /grok probe superseded/);
+  assert.equal(webCalls, 0);
+});
+
+test('fetchGrokLimits preserves cancellation after a successful web billing read', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-web-abort-'));
+  writeAuthJson(home, { 'https://auth.x.ai::client': { key: 'eyJsecret.signature' } });
+  const controller = new AbortController();
+
+  await assert.rejects(fetchGrokLimits({}, {
+    env: {},
+    grokHome: home,
+    signal: controller.signal,
+    fetchRpcBilling: async () => {
+      throw new Error('RPC unavailable');
+    },
+    fetchWebGrpcBilling: async () => {
+      controller.abort(new Error('web result superseded'));
+      return [];
+    }
+  }), /web result superseded/);
+});
+
 test('fetchGrokLimits prefers Grok CLI RPC billing before bearer web fallback', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-rpc-'));
   writeAuthJson(home, {

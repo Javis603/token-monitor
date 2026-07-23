@@ -3,6 +3,9 @@
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { parseZaiUsage } = require('./zaiLimits');
+const { runWithProbeDeadline } = require('./probeDeadline');
+
+const ZAI_TEAM_FETCH_TIMEOUT_MS = 12_000;
 
 // The team plan only exists on the China (bigmodel.cn) side — z.ai global has no
 // team tier — so the region is fixed and there is no region selector in the UI.
@@ -47,22 +50,26 @@ function zaiTeamDashboardUrl() {
 }
 
 async function fetchJson(url, { key, organization, project }, deps = {}) {
-  const response = await (deps.fetch || fetch)(url, {
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'bigmodel-organization': organization,
-      'bigmodel-project': project,
-      Accept: 'application/json'
+  const deadlineMs = Number(deps.zaiTeamFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_TEAM_FETCH_TIMEOUT_MS);
+  return runWithProbeDeadline(async ({ signal }) => {
+    const response = await (deps.fetch || fetch)(url, {
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'bigmodel-organization': organization,
+        'bigmodel-project': project,
+        Accept: 'application/json'
+      },
+      signal
+    });
+    if (!response.ok) {
+      const error = new Error(`${url} returned ${response.status}`);
+      error.status = response.status === 401 || response.status === 403
+        ? 'unauthorized'
+        : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+      throw error;
     }
-  });
-  if (!response.ok) {
-    const error = new Error(`${url} returned ${response.status}`);
-    error.status = response.status === 401 || response.status === 403
-      ? 'unauthorized'
-      : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-    throw error;
-  }
-  return response.json();
+    return response.json();
+  }, { signal: deps.signal, deadlineMs });
 }
 
 async function fetchZaiTeamLimits(options = {}, deps = {}) {
@@ -101,7 +108,7 @@ async function fetchZaiTeamLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({
       provider: 'zaiteam',
       source: 'api',
-      status: error?.status || 'unavailable',
+      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
       updatedAt,
       windows: [],
       region: ZAI_TEAM_REGION
@@ -110,6 +117,7 @@ async function fetchZaiTeamLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
+  ZAI_TEAM_FETCH_TIMEOUT_MS,
   ZAI_TEAM_QUOTA_URL,
   zaiTeamToken,
   zaiTeamDashboardUrl,

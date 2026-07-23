@@ -87,24 +87,6 @@ const MARKER_CLIENTS = {
   '.proma/agent-sessions': 'proma'
 };
 
-// Clients whose tokscale `--home` scan can fall back to a HOST-native database
-// that ignores `--home`, mapped to the WSL-home file whose presence suppresses
-// that fallback. Only `zed` qualifies among tracked clients: tokscale 3.1.3's
-// Windows build, even with `--home` (use_env_roots=false), unconditionally
-// reads the host's %LOCALAPPDATA%\Zed\threads\threads.db when the WSL home has
-// no Linux Zed DB (scanner.rs #[cfg(target_os="windows")] block, ignores
-// use_env_roots). Passing `zed` to a home that lacks its own threads.db would
-// re-read the host's native Zed usage once per such home and `mergePeriods`
-// would add the duplicates — so we drop `zed` from a home's scan unless that
-// exact file exists. tokscale checks the DB as a *file* (xdg.is_file()), so an
-// empty `threads/` directory does NOT suppress the fallback; the gate is the
-// file itself. (macOS has the same cfg fallback but no WSL scanning, so it can
-// never double-count.) Every non-listed client is passed through untouched so
-// tokscale's own alternate-root handling is preserved.
-const WSL_HOST_FALLBACK_GATES = {
-  zed: '.local/share/zed/threads/threads.db'
-};
-
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
 // stdin is NUL ('ignore') so a non-WSL wsl.exe stub cannot block on "press any
 // key to install"; a timeout backstops any hang.
@@ -180,20 +162,6 @@ function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
   return [...ids];
 }
 
-// Scope the requested client CSV for one WSL home: pass every client through
-// untouched EXCEPT a host-fallback-gated client (zed) whose gate file is absent
-// in this home — dropping it prevents tokscale from re-reading the host-native
-// DB and double-counting (see WSL_HOST_FALLBACK_GATES). Returns a CSV string.
-function clientsForHomeScan(clientsCsv, home, existsSync) {
-  const requested = String(clientsCsv || '').split(',').map((c) => c.trim()).filter(Boolean);
-  const kept = requested.filter((client) => {
-    const gate = WSL_HOST_FALLBACK_GATES[client];
-    if (!gate) return true; // not host-fallback-prone — always pass through
-    return existsSync(wslHomePath(home, gate));
-  });
-  return kept.join(',');
-}
-
 function wslUsageHomes(deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const existsSync = deps.existsSync || fs.existsSync;
@@ -234,10 +202,9 @@ async function collectWslUsage(options = {}, deps = {}) {
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
+  const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean).join(',');
   for (const home of wslUsageHomes(deps)) {
-    // Attribution: every marker hit in this home counts as "detected", even if
-    // clientsForHomeScan drops it from the scan (e.g. a zed-only home with no
-    // threads.db) — detection is marker-based, independent of whether we scan.
+    // Attribution is marker-based, independent of whether a parser returns data.
     const homeDataClients = homeHasData(home, existsSync, readdirSync);
     for (const id of homeDataClients) {
       if (tracked.has(id)) detected.add(id);
@@ -268,20 +235,15 @@ async function collectWslUsage(options = {}, deps = {}) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
       }
     }
-    // Pass the requested clients through, dropping only a host-fallback-gated
-    // client (zed) whose gate file is missing here — otherwise tokscale's
-    // Windows Zed scanner would re-read the host %LOCALAPPDATA% DB and
-    // mergePeriods would add that native usage once per such home. An empty
-    // result means the request was zed-only and this home has no WSL Zed DB, so
-    // there's nothing to scan — skip rather than pass an empty --client
-    // (tokscale would expand that to ALL clients).
-    const homeClientsCsv = clientsForHomeScan(clients, home, existsSync);
-    if (homeClientsCsv.length === 0 || typeof runTokscale !== 'function') continue;
+    // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,
+    // so every requested client can be passed through for each discovered home.
+    // Keep the empty guard because an empty --client expands to all clients.
+    if (clientsCsv.length === 0 || typeof runTokscale !== 'function') continue;
     try {
       // Serial on purpose (issue #15): never run these concurrently.
-      const todayJson = await runTokscale({ clients: homeClientsCsv, flags: ['--today', '--home', home], commandTimeoutMs });
-      const monthJson = await runTokscale({ clients: homeClientsCsv, flags: ['--month', '--home', home], commandTimeoutMs });
-      const allTimeJson = await runTokscale({ clients: homeClientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs });
+      const todayJson = await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs });
+      const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs });
+      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs });
       const periods = {
         today: extractUsageFromTokscale(todayJson),
         month: extractUsageFromTokscale(monthJson),
@@ -300,9 +262,7 @@ async function collectWslUsage(options = {}, deps = {}) {
 
 module.exports = {
   WSL_DATA_MARKERS,
-  WSL_HOST_FALLBACK_GATES,
   MARKER_CLIENTS,
-  clientsForHomeScan,
   collectWslUsage,
   emptyWslBundle,
   homeHasData,

@@ -24,6 +24,7 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
   qoderCookie: ['providers', 'qoder', 'cookie'],
   kimiApiKey: ['providers', 'kimi', 'apiKey'],
+  kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
   ollamaCookie: ['providers', 'ollama', 'cookie']
 });
 

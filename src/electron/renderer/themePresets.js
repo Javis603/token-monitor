@@ -11,15 +11,14 @@
   // The customisable interface colours, in display order. Each maps to a CSS
   // custom property on :root (see styles.css). `bg` drives the glass tint
   // (--glass-rgb, an "r, g, b" triplet); `text` also drives --number (the big
-  // TOTAL figure) so it reads as plain text. The semantic status colours
-  // (--blue/--orange/--purple/--yellow/--red) are intentionally NOT exposed:
-  // they only surface in edge states (links, warnings, errors) and --purple is
-  // unused entirely, so a picker for them would be a no-op for everyday use.
+  // TOTAL figure) so it reads as plain text. Semantic status colours
+  // (--success/--blue/--orange/--purple/--yellow/--red) are intentionally NOT
+  // exposed: their meaning must remain stable when the accent changes.
   const INTERFACE_COLOR_KEYS = ['accent', 'bg', 'text', 'muted'];
   const THEME_CODE_VERSION = 'TM1';
 
   const THEME_VAR_MAP = {
-    accent: '--green',
+    accent: '--accent',
     bg: '--glass-rgb',
     text: '--text',
     muted: '--muted'
@@ -55,6 +54,8 @@
   const LIGHT_LINE_RGB = '24, 28, 36';
   const LIGHT_PANEL_RGB = '255, 255, 255';
   const LIGHT_SUNKEN_RGB = '188, 196, 206';
+  const LIGHT_SUCCESS = '#18794e';
+  const LIGHT_SUCCESS_RGB = '24, 121, 78';
 
   // Vendors shown in the vendor-colour list, tracked clients first. Vendors not
   // listed here but present in clientColors are appended after these, then the
@@ -204,6 +205,11 @@
     entries.push({ name: '--line-rgb', value: light ? LIGHT_LINE_RGB : null });
     entries.push({ name: '--panel-rgb', value: light ? LIGHT_PANEL_RGB : null });
     entries.push({ name: '--sunken-rgb', value: light ? LIGHT_SUNKEN_RGB : null });
+    // Semantic success stays green regardless of the custom accent. Use a
+    // darker green on pale themes so status text and borders keep their
+    // contrast instead of inheriting the user's interaction colour.
+    entries.push({ name: '--success', value: light ? LIGHT_SUCCESS : null });
+    entries.push({ name: '--success-rgb', value: light ? LIGHT_SUCCESS_RGB : null });
     entries.push({ name: 'color-scheme', value: light ? 'light' : null });
     return entries;
   }

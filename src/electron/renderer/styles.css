@@ -14,12 +14,7 @@
   --line-alpha: 0.138;
   --line-strong-alpha: 0.238;
   --control-alpha: 0.049;
-  --highlight-alpha: 0.07;
   --glass: rgba(var(--glass-rgb), var(--glass-alpha));
-  --glass-surface:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), var(--highlight-alpha)), rgba(var(--overlay-rgb), 0.022)),
-    linear-gradient(135deg, rgba(var(--overlay-rgb), 0.035), rgba(0, 0, 0, 0.09)),
-    var(--glass);
   --glass-filter: blur(32px) saturate(115%);
   --floating-bubble-radius: 17px;
   --glass-strong: rgba(31, 35, 41, 0.56);
@@ -28,11 +23,15 @@
   --line-strong: rgba(var(--line-rgb), var(--line-strong-alpha));
   --text: #eef5fb;
   --muted: #a3adbb;
-  --green: #b7ead4;
-  /* RGB triplet of the accent (--green), for the accent-tinted borders / glows /
+  --accent: #b7ead4;
+  /* RGB triplet of --accent, for accent-tinted borders / glows /
      active states. Driven from the chosen accent so they flip together — see
-     themeCssVarEntries(). Must match --green above. */
+     themeCssVarEntries(). Must match --accent above. */
   --accent-rgb: 183, 234, 212;
+  /* Semantic success is deliberately independent from the custom accent.
+     themeCssVarEntries() switches this to a darker green on light themes. */
+  --success: #b7ead4;
+  --success-rgb: 183, 234, 212;
   --number: #f3fbf7;
   /* Semantic blue, exposed as a triplet so the trend line and its area fill can
      share one hue (and match the blue heatmap ramp) instead of the fill borrowing
@@ -74,11 +73,10 @@ input, textarea, [contenteditable="true"] {
   padding: 12px 14px 14px;
   overflow: hidden;
   isolation: isolate;
-  border: 1px solid var(--line-strong);
   border-radius: 14px;
   clip-path: inset(0 round 14px);
-  background: var(--glass-surface);
-  box-shadow: 0 22px 55px var(--shadow), inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
+  background: var(--glass);
+  box-shadow: 0 22px 55px var(--shadow);
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
 }
@@ -101,14 +99,6 @@ html.is-mac-legacy .shell {
   border-radius: 10px;
   clip-path: inset(0 round 10px);
 }
-.shell::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background: linear-gradient(180deg, rgba(var(--overlay-rgb), 0.08), transparent 36%);
-}
 .floating-bubble-tab {
   -webkit-app-region: no-drag;
   -webkit-appearance: none;
@@ -125,18 +115,14 @@ html.is-mac-legacy .shell {
   overflow: hidden;
   border: 0;
   border-radius: var(--floating-bubble-radius);
-  background: var(--glass-surface);
+  background: var(--glass);
   color: var(--number);
   cursor: grab;
-  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
   outline: none;
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
 }
 .system-glass-disabled .floating-bubble-tab {
-  box-shadow:
-    inset 0 0 0 1px var(--line-strong),
-    inset 0 1px 0 rgba(var(--overlay-rgb), 0.13);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
@@ -262,7 +248,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   transition: background 200ms ease, box-shadow 200ms ease;
 }
 .live-dot.live {
-  background: var(--green);
+  background: var(--accent);
   box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.55);
 }
 /* One-shot flare on data update — flares, then settles back to the resting
@@ -414,7 +400,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   mask: url("icons/actions/settings.svg") center / contain no-repeat;
 }
 .icon-button:hover, .refresh-button:hover, .mode-button:hover, .settings-actions button:hover, .shortcut-recorder button:hover { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), 0.072); }
-.icon-button.active { border-color: rgba(var(--accent-rgb), 0.58); color: var(--green); background: rgba(var(--accent-rgb), 0.08); }
+.icon-button.active { border-color: rgba(var(--accent-rgb), 0.58); color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
 /* The settings panel is a plain view on the widget glass (like the main
    breakdown), not a recessed slab: the section cards carry all the surface
    chrome themselves — a panel background would double-frame them. */
@@ -548,7 +534,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .export-auto-head .export-auto-toggle { flex: 1 1 auto; min-width: 0; }
 .export-status-pill { flex: 0 0 auto; }
 .export-status-pill.hidden { display: none; }
-.export-status-pill.is-active { color: var(--green); border-color: rgba(var(--accent-rgb), 0.5); background: rgba(var(--accent-rgb), 0.08); }
+.export-status-pill.is-active { color: var(--success); border-color: rgba(var(--success-rgb), 0.5); background: rgba(var(--success-rgb), 0.08); }
 .export-auto-details { display: grid; gap: 8px; }
 .export-auto-details.hidden { display: none; }
 .export-dir-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -562,6 +548,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .wsl-panel-title { font-size: 11px; color: var(--muted); }
 .wsl-panel-name { font-size: 11px; }
 .wsl-panel-row { padding-left: 10px; }
+.wsl-panel-help { margin: 2px 0 0 10px; line-height: 1.45; }
 /* Modern settings row: text (title + optional desc) left, control right. */
 .settings-panel label.settings-item,
 .settings-panel .settings-item {
@@ -579,6 +566,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   border-top: 1px solid rgba(var(--line-rgb), 0.06);
 }
 .settings-panel .settings-item.hidden { display: none; }
+#windowsBackdropNote.hidden { display: none; }
 .settings-item-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -880,7 +868,7 @@ span.settings-note.settings-item-desc {
   mask: var(--settings-section-icon-url) center / contain no-repeat;
 }
 .settings-collapsible-group.expanded .settings-section-icon {
-  color: var(--green);
+  color: var(--accent);
   opacity: 1;
 }
 .settings-section-icon-general { --settings-section-icon-url: url("icons/settings/general.svg"); }
@@ -1091,6 +1079,35 @@ span.settings-note.settings-item-desc {
 #codexLoginStatus.hidden { display: none; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
+.kimi-cookie-steps { text-wrap: pretty; }
+.kimi-api-fallback {
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.075);
+  color: var(--muted);
+  font-size: 10px;
+}
+.kimi-api-fallback summary {
+  width: max-content;
+  max-width: 100%;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  user-select: none;
+}
+.kimi-api-fallback summary::marker { color: var(--muted); }
+.kimi-api-fallback summary:focus-visible {
+  border-radius: 3px;
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 3px;
+}
+.kimi-api-fallback-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
 .app-update-notes {
   min-width: 0;
   padding-top: 8px;
@@ -1174,7 +1191,7 @@ span.settings-note.settings-item-desc {
   width: auto;
   margin: 2px 0 0;
   flex: 0 0 auto;
-  accent-color: var(--green);
+  accent-color: var(--accent);
 }
 .settings-panel .hub-mode-option:has(input:checked) {
   border-color: rgba(var(--accent-rgb), 0.5);
@@ -1242,7 +1259,7 @@ span.settings-note.settings-item-desc {
   color: var(--muted);
   font-size: 10px;
 }
-.hub-status.ok { color: var(--green); border-color: rgba(var(--accent-rgb), 0.32); }
+.hub-status.ok { color: var(--success); border-color: rgba(var(--success-rgb), 0.32); }
 .hub-status.error { color: var(--red); border-color: rgba(244, 119, 136, 0.42); }
 .hub-status[hidden] { display: none; }
 .hub-address-list { display: grid; min-width: 0; gap: 5px; }
@@ -1312,7 +1329,7 @@ span.settings-note.settings-item-desc {
 }
 .tokscale-message:empty { display: none; } /* don't reserve a blank line while there's no status */
 .tokscale-message.error { color: var(--red); }
-.tokscale-message.success { color: var(--green); }
+.tokscale-message.success { color: var(--success); }
 .settings-panel .client-checkboxes {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1336,7 +1353,7 @@ span.settings-note.settings-item-desc {
   flex: 0 0 auto;
   width: auto;
   margin: 0;
-  accent-color: var(--green);
+  accent-color: var(--accent);
 }
 .settings-panel .client-checkboxes label.client-checkbox > span {
   flex: 1 1 auto;
@@ -1484,8 +1501,8 @@ span.settings-note.settings-item-desc {
   white-space: nowrap;
 }
 .tool-status-tag-ok {
-  border-color: rgba(var(--accent-rgb), 0.28);
-  color: var(--green);
+  border-color: rgba(var(--success-rgb), 0.28);
+  color: var(--success);
 }
 .tool-status-tag-neutral {
   border-color: rgba(var(--line-rgb), 0.2);
@@ -1532,7 +1549,7 @@ span.settings-note.settings-item-desc {
 .tool-preference-toggle input[type="checkbox"] {
   width: auto;
   margin: 0;
-  accent-color: var(--green);
+  accent-color: var(--accent);
 }
 .tool-visibility-button,
 .tool-pin-button {
@@ -1545,7 +1562,7 @@ span.settings-note.settings-item-desc {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--green);
+  color: var(--accent);
   cursor: pointer;
 }
 .tool-visibility-button:hover {
@@ -1577,7 +1594,7 @@ span.settings-note.settings-item-desc {
 .tool-pin-button.is-pinned {
   border-color: rgba(var(--accent-rgb), 0.28);
   background: rgba(var(--accent-rgb), 0.06);
-  color: var(--green);
+  color: var(--accent);
 }
 .tool-visibility-button svg,
 .tool-pin-button svg {
@@ -1639,8 +1656,8 @@ span.settings-note.settings-item-desc {
   white-space: nowrap;
 }
 .limit-provider-tag-status {
-  border-color: rgba(var(--accent-rgb), 0.28);
-  color: var(--green);
+  border-color: rgba(var(--success-rgb), 0.28);
+  color: var(--success);
 }
 .limit-provider-tag-source {
   border-color: rgba(115, 189, 245, 0.24);
@@ -1650,12 +1667,12 @@ span.settings-note.settings-item-desc {
   border-color: rgba(var(--line-rgb), 0.18);
 }
 .limit-provider-tag-local {
-  border-color: rgba(var(--accent-rgb), 0.24);
-  color: var(--green);
+  border-color: rgba(var(--line-rgb), 0.18);
+  color: var(--muted);
 }
 .limit-provider-tag-remote {
-  border-color: rgba(241, 217, 115, 0.32);
-  color: var(--yellow);
+  border-color: rgba(115, 189, 245, 0.28);
+  color: var(--blue);
 }
 .limit-provider-tag-multi {
   border-color: rgba(115, 189, 245, 0.3);
@@ -1767,7 +1784,7 @@ span.settings-note.settings-item-desc {
   cursor: pointer;
 }
 .theme-preset-chip:hover { border-color: var(--line-strong); color: var(--text); }
-.theme-preset-chip.active { border-color: rgba(var(--accent-rgb), 0.58); color: var(--green); background: rgba(var(--accent-rgb), 0.08); }
+.theme-preset-chip.active { border-color: rgba(var(--accent-rgb), 0.58); color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
 .theme-preset-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25); }
 .theme-code-field { display: grid; gap: 6px; }
 .settings-panel input.theme-code-input {
@@ -1778,7 +1795,7 @@ span.settings-note.settings-item-desc {
 }
 .theme-code-status { min-height: 0; margin: 0; font-size: 10px; line-height: 1.35; }
 .theme-code-status:empty { display: none; }
-.theme-code-status.success { color: var(--green); }
+.theme-code-status.success { color: var(--success); }
 .theme-code-status.error { color: var(--red); }
 .theme-color-accordion { border-top: 1px solid var(--line); padding-top: 9px; }
 .color-picker-grid { display: grid; gap: 6px; }
@@ -1903,7 +1920,7 @@ html.is-windows .settings-panel select option {
 .refresh-button:active:not(:disabled) .refresh-button-icon { transform: scale(0.9); }
 .refresh-button:disabled { cursor: default; }
 .refresh-button.is-refreshing {
-  color: var(--green);
+  color: var(--accent);
   border-color: rgba(var(--accent-rgb), 0.58);
   background: rgba(var(--accent-rgb), 0.1);
   box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.12), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
@@ -1911,10 +1928,10 @@ html.is-windows .settings-panel select option {
 .refresh-button.is-refreshing .refresh-button-icon { display: none; }
 .refresh-button.is-refreshing .refresh-button-spinner { display: block; }
 .refresh-button.is-refreshed {
-  color: var(--green);
-  border-color: rgba(var(--accent-rgb), 0.64);
-  background: rgba(var(--accent-rgb), 0.12);
-  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.12), 0 0 12px rgba(var(--accent-rgb), 0.18);
+  color: var(--success);
+  border-color: rgba(var(--success-rgb), 0.64);
+  background: rgba(var(--success-rgb), 0.12);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.12), 0 0 12px rgba(var(--success-rgb), 0.18);
 }
 .refresh-button.is-refresh-error {
   color: #ffd8d8;
@@ -1975,7 +1992,7 @@ html.is-windows .settings-panel select option {
 .tab:hover { color: var(--text); }
 .tab.active {
   border-color: transparent;
-  color: var(--green);
+  color: var(--accent);
   background: transparent;
   box-shadow: none;
 }
@@ -2021,6 +2038,50 @@ html.is-windows .settings-panel select option {
 }
 .total-compact.hidden { display: none; }
 .cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
+.view-back-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  margin-top: -6px;
+  margin-bottom: -2px;
+  padding: 0 2px;
+}
+.view-back-row.hidden { display: none; }
+.back-home-button {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  transition: color 120ms ease, background 120ms ease;
+}
+.back-home-button:hover {
+  background: rgba(var(--overlay-rgb), 0.06);
+  color: var(--text);
+}
+.back-home-button:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
+  color: var(--text);
+}
+.back-home-button:active { background: rgba(var(--overlay-rgb), 0.1); }
+.back-home-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+}
 .breakdown {
   position: relative;
   z-index: 1;
@@ -2545,7 +2606,7 @@ html.is-windows .settings-panel select option {
   padding: 0 8px;
   border-radius: 6px;
   border-color: rgba(var(--accent-rgb), 0.24);
-  color: var(--green);
+  color: var(--accent);
   font-size: 11px;
 }
 .home-empty {
@@ -2571,11 +2632,18 @@ html.is-windows .settings-panel select option {
   padding: 0 10px;
   border-radius: 7px;
   border-color: rgba(var(--accent-rgb), 0.24);
-  color: var(--green);
+  color: var(--accent);
   font-size: 11px;
 }
 
 .row { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(var(--line-rgb), 0.12); }
+.breakdown.large-session-list .session-row {
+  contain-intrinsic-block-size: auto 72px;
+}
+.breakdown.large-session-list.large-session-list-ready .session-row {
+  content-visibility: auto;
+  contain: layout paint style;
+}
 .row-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .row-name { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 8px; color: var(--text); }
 .dot {
@@ -2901,8 +2969,8 @@ html.is-windows .settings-panel select option {
   line-height: 1.1;
 }
 .service-status-ok .service-status-pill {
-  border-color: rgba(var(--accent-rgb), 0.28);
-  color: var(--green);
+  border-color: rgba(var(--success-rgb), 0.28);
+  color: var(--success);
 }
 .service-status-degraded .service-status-pill {
   border-color: rgba(241, 217, 115, 0.32);
@@ -2993,6 +3061,33 @@ html.is-windows .settings-panel select option {
   grid-template-columns: 1fr;
   gap: 8px;
 }
+.limit-windows-antigravity-grouped {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.limit-window-group {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+.limit-window-group-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.limit-window-group-items {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+  gap: 10px;
+}
+.limit-window-group-items > .limit-window:only-child {
+  grid-column: 1 / -1;
+}
 .limit-row-group {
   gap: 8px;
 }
@@ -3008,7 +3103,7 @@ html.is-windows .settings-panel select option {
   margin-left: -6px;
   align-items: center;
   justify-content: center;
-  color: var(--green);
+  color: var(--accent);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -3124,7 +3219,7 @@ html.is-windows .limit-live-badge {
 .limit-account-switch-button:focus-visible {
   border-color: rgba(var(--accent-rgb), 0.32);
   background: rgba(var(--accent-rgb), 0.075);
-  color: var(--green);
+  color: var(--accent);
   box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.16), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
 }
 .limit-account-switch-button:disabled {
@@ -3523,7 +3618,7 @@ html.is-windows .limit-live-badge {
 }
 .view-switcher-menu-item.is-current {
   background: rgba(var(--accent-rgb), 0.08);
-  color: var(--green);
+  color: var(--accent);
 }
 .view-switcher-menu-label {
   min-width: 0;
@@ -3702,6 +3797,7 @@ html.is-windows .limit-live-badge {
   .footer { display: none; }
 }
 @media (max-height: 240px) {
+  .view-back-row,
   .limits-panel,
   .home-panel,
   .service-status-panel,
@@ -3879,7 +3975,7 @@ html.is-windows .limit-live-badge {
 .view-subgroup-toggle:hover,
 .view-subgroup-toggle:focus-visible,
 .view-subgroup-toggle.is-expanded {
-  color: var(--green);
+  color: var(--accent);
 }
 .view-subgroup-toggle:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.35);
@@ -3947,6 +4043,16 @@ html.is-windows .limit-live-badge {
 .home-limit-provider-header { margin-bottom: 1px; }
 .home-limit-status-setting {
   min-height: 24px;
+}
+.home-limit-provider-names-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.home-limit-provider-names-reason {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
 }
 .home-limit-provider-row {
   grid-template-columns: minmax(0, 1fr) repeat(2, 22px);
@@ -4171,7 +4277,49 @@ html.is-windows .limit-live-badge {
   font-size: 0.85em;
 }
 
-.custom-pricing-edit { cursor: pointer; }
+.custom-pricing-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.custom-pricing-edit {
+  display: grid;
+  justify-self: stretch;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.custom-pricing-edit:focus-visible {
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 2px;
+}
+
+.custom-pricing-row .managed-account-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.custom-pricing-row .custom-pricing-remove {
+  width: auto;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 10px;
+  line-height: 24px;
+  opacity: 0.72;
+}
 
 .opencode-profile-list {
   margin-bottom: 4px;

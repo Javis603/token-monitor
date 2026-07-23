@@ -153,3 +153,27 @@ test('probe includes legacy request usage when auth returns a user id', async ()
   assert.equal(result.usage.requestsLimit, 8);
   assert.deepEqual(calls.sort(), ['/api/auth/me', '/api/usage-summary', '/api/usage?user=user_1'].sort());
 });
+
+test('probe destroys in-flight HTTPS requests when the parent signal aborts', async () => {
+  const controller = new AbortController();
+  const requests = [];
+  const fakeHttps = {
+    request() {
+      const req = new EventEmitter();
+      req.end = () => {};
+      req.setTimeout = () => {};
+      req.destroy = () => { req.destroyed = true; };
+      requests.push(req);
+      return req;
+    }
+  };
+
+  const pending = probe('tok', { httpsLib: fakeHttps, signal: controller.signal });
+  controller.abort(new Error('stop cursor probe'));
+
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.error.kind, 'network');
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every((request) => request.destroyed));
+});

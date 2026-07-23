@@ -248,7 +248,8 @@
           </button>
           <div id="appearanceSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-appearance-group">
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.systemGlass">System Glass</span></span><input id="systemGlassInput" type="checkbox" /></label>
+              <div class="settings-item"><span class="settings-item-text"><span id="windowGlassEffectLabel" class="settings-item-title" data-i18n="settings.appearance.systemGlass">Glass Backdrop</span></span><div class="inline-options" role="radiogroup" aria-labelledby="windowGlassEffectLabel"><label class="inline-option"><input type="radio" name="systemGlassOption" value="system" /><span data-i18n="settings.appearance.glassEffectSystem">System</span></label><label class="inline-option"><input type="radio" name="systemGlassOption" value="off" /><span data-i18n="settings.appearance.glassEffectTransparent">Transparent</span></label></div></div>
+              <label id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</span></span><select id="windowsBackdropInput"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent">Accent Blur (experimental)</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.windowsBackdropNote">Keeps the background translucent and blurred, even when the window is not focused.</span></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</span></span><input id="liveDotInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
@@ -826,11 +827,30 @@
                   <button id="kimiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
                 </div>
                 <div id="kimiManualPanel">
-                  <p class="settings-note" data-i18n="settings.kimi.note">Paste your Kimi Code API key. It stays on this device and is used only to check Kimi Code quota.</p>
-                  <input id="kimiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
+                  <p class="settings-note" data-i18n="settings.kimi.cookieIntro">Connect your Kimi website session to show 5-hour, weekly, and monthly limits. The cookie stays on this device.</p>
+                  <p class="settings-note kimi-cookie-steps">
+                    <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> https://www.kimi.com.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find kimi-auth and copy its Value.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save cookie.</span>
+                  </p>
+                  <textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" placeholder="kimi-auth=..." data-i18n-placeholder="settings.kimi.webTokenPlaceholder"></textarea>
                   <div class="settings-actions">
-                    <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
+                    <button id="kimiWebAccessTokenSubmit" data-i18n="settings.kimi.saveWebToken">Save cookie</button>
                   </div>
+                  <details class="kimi-api-fallback">
+                    <summary data-i18n="settings.kimi.apiFallback">Optional: Kimi Code API fallback</summary>
+                    <div class="kimi-api-fallback-body">
+                      <p class="settings-note" data-i18n="settings.kimi.apiKeyNote">Use this only when Kimi web access is unavailable. It can restore 5-hour and weekly limits, but not Monthly.</p>
+                      <label for="kimiApiKeyInput">
+                        <span data-i18n="settings.kimi.apiKeyLabel">Kimi Code API key</span>
+                        <input id="kimiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
+                      </label>
+                      <div class="settings-actions">
+                        <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
+                      </div>
+                    </div>
+                  </details>
                 </div>
                 <div id="kimiErrorMessage" class="settings-note error hidden"></div>
               </div>
@@ -980,6 +1000,13 @@
         <div id="cost" class="cost">$0.00</div>
       </section>
 
+      <div id="viewBackRow" class="view-back-row hidden">
+        <button id="backHomeButton" type="button" class="back-home-button" title="Back to Home" aria-label="Back to Home" data-i18n-title="views.backHome" data-i18n-aria-label="views.backHome">
+          <span class="back-home-icon" aria-hidden="true"></span>
+          <span data-i18n="views.backHome">Back to Home</span>
+        </button>
+      </div>
+
       <section id="homePanel" class="home-panel hidden"></section>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
@@ -1027,6 +1054,7 @@
     <script src="limitProviderPresentation.js"></script>
     <script src="limitDisplayMode.js"></script>
     <script src="clientStatusPresentation.js"></script>
+    <script src="wslStatusPresentation.js"></script>
     <script src="serviceStatusPresentation.js"></script>
     <script src="serviceStatusProviderPreferences.js"></script>
     <script src="clientDisplayPreferences.js"></script>
@@ -1035,6 +1063,7 @@
     <script src="preferenceDragSort.js"></script>
     <script src="i18n.js"></script>
     <script src="sessionRows.js"></script>
+    <script src="breakdownRenderPolicy.js"></script>
     <script src="deviceBreakdown.js"></script>
     <script src="../../shared/projectKey.js"></script>
     <script src="projectRows.js"></script>
@@ -1044,6 +1073,9 @@
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/trayText.js"></script>
     <script src="../motionPreference.js"></script>
+    <script src="../windowsBackdropMode.js"></script>
+    <script src="windowsGlass.js"></script>
+    <script src="glassRendering.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

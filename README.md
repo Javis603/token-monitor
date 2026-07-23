@@ -26,7 +26,7 @@
 
 ## What is Token Monitor?
 
-A desktop widget that shows live token usage and AI Tool Limits across various AI coding tools (Claude Code, Codex, Hermes Agent, OpenCode, OpenClaw, Cursor, Antigravity, Cline, and more) with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, or session.
+A desktop widget that shows live token usage and AI Tool Limits across 25+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
 
 ## Supported Tools
 
@@ -63,17 +63,25 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 ## Showcase
 
-| Home View | Limits View | Tools View |
-|:---:|:---:|:---:|
-| ![Home View](.github/assets/home-view.png) | ![Limits View](.github/assets/limits-view.png) | ![Tools View](.github/assets/tools-view.png) |
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="Home View"><br><sub>Customizable dashboard — choose which modules show and their order</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="Limits View"><br><sub>Multiple accounts side by side, one-click switch of the active Codex account</sub></td>
+<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="Tools View"><br><sub>Click any tool to expand input / output and cache-hit detail</sub></td>
+</tr>
+<tr>
+<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="Session View"><br><sub>Open a single session to break each prompt into tokens and tools used</sub></td>
+<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="Models View"><br><sub>Every model's usage and cost, aggregated across tools</sub></td>
+<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="Devices View"><br><sub>Each device's usage, cost, and sync status — expand for per-machine detail</sub></td>
+</tr>
+</table>
 
-| Session View | Models View | Service Status |
-|:---:|:---:|:---:|
-| ![Session View](.github/assets/sessions-view.png) | ![Models View](.github/assets/models-view.png) | ![Service Status](.github/assets/status-view.png) |
-
-| Usage Dashboard — Overview | Usage Dashboard — Trends |
-|:---:|:---:|
-| ![Usage Dashboard Overview](.github/assets/dashboard-overview.png) | ![Usage Dashboard Trends](.github/assets/dashboard-trends.png) |
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="Usage Dashboard Overview"><br><sub>A year of activity heatmap and streaks, aggregated across all devices</sub></td>
+<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="Usage Dashboard Trends"><br><sub>A year of daily trends, stacked by tool / model, with K-line</sub></td>
+</tr>
+</table>
 
 ## Why Token Monitor?
 
@@ -81,35 +89,48 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ## Features
 
-- **Live token tracking** for Claude Code, Codex, Hermes Agent, OpenCode, OpenClaw, Cursor, Antigravity, Cline, Kimi, Qwen, Grok Build, GitHub Copilot, Pi, Zed, Kilo Code, MiMo Code, ZCode, Kiro, CodeBuddy, WorkBuddy, and Proma (UI updates within seconds of each turn)
-- **WSL usage (Windows)** — usage from AI tools running inside a running WSL distro is detected automatically and merged into your totals (refreshed on the periodic scan, about every 5 minutes)
-- **Real-time multi-device sync** over Server-Sent Events
-- **Breakdown views** grouped by tool, device, model, session, or account limits
+### Tracking usage
+
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 20+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Per-session detail** — open a Claude Code, Codex, or OpenCode session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
-- **Cache hit statistics** — click on any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit rate percentages
-- **Cost breakdown** alongside token counts
-- **Cost in your currency** — show costs in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
-- **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model usage history (bar and K-line views) across all your devices
-- **Data export** — export your usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
-- **AI Tool Limits detection** for Claude Code, Codex, Cursor, Antigravity, OpenCode, Grok, Minimax, MiMo, GitHub Copilot, Kiro, GLM, Volcengine, Qoder, Kimi, and Ollama with provider-specific session, weekly, billing, and credits windows, plus DeepSeek prepaid balance and today/month spend. Tracked Codex accounts can be made the local Codex account in one click, without re-authenticating.
-- **Optional Status view** for Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
-- **Customizable tool list** to hide, pin, and reorder tools in the main dashboard without changing what gets tracked
+- **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
+- **Cost & currency** — cost alongside token counts, shown in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
+- **WSL usage (Windows)** — file-based usage from a running WSL distro is detected automatically and merged about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
+
+### Limits, trends & export
+
+- **AI Tool Limits detection** — provider-specific session, weekly, billing, and credits windows for Claude Code, Codex, Cursor, GLM, Kimi, and 15+ providers, plus DeepSeek prepaid balance and today/month spend
+- **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
+- **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
+- **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
+- **Optional Status view** — Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
+- **Data export** — export usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
+
+### Multi-device & deployment
+
+- **Real-time multi-device sync** — Server-Sent Events push an update on one device to the others within seconds
+- **Local-first** — no servers needed for single-device use
+- **Self-hosted sync backend** — in-widget hub, Node CLI hub, or Cloudflare Worker
+- **iOS widget support** — Widgy and Scriptable through the Worker hub
+- **Privacy-first** — prompts, responses, source code, and file contents stay on your machine
+
+### Interface & surfaces
+
+- **Breakdown views** — grouped by tool, device, model, session, project, or account limits
+- **Menu bar (macOS) and system tray (Windows) popover** — live cost, tokens, or the closest-to-empty provider limit % next to the icon
+- **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
 - **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, and transparent window mode
-- **Menu bar (macOS) and system tray (Windows) popover** with live cost, tokens, or closest Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/MiMo/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi/Ollama limit % next to the icon
-- **Floating Bubble mode** that collapses the widget into a draggable mini-window with click or hover preview and tray-style content
-- **Recordable global shortcut** to show or hide the window from anywhere
-- **Local-first:** no servers needed for single-device use
-- **Self-hosted sync backend** (in-widget hub, Node CLI hub, or Cloudflare Worker)
-- **iOS widget support** via Widgy and Scriptable through the Worker hub
-- **Discord Rich Presence** to broadcast today's tokens, cost, and top client (opt-in)
-- **Privacy-first:** prompts, responses, source code, and file contents stay on your machine
+- **Customizable tool list** — hide, pin, and reorder tools in the main dashboard without changing what gets tracked
+- **Recordable global shortcut** — show or hide the window from anywhere
+- **Discord Rich Presence** — broadcast today's tokens, cost, and top client (opt-in)
 
 ## Installation
 
 Download from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
 
 - **macOS (Apple Silicon)** — `.dmg`, signed and notarized
-- **Windows 10/11** — setup and portable `.exe`, signed via [SignPath Foundation](docs/code-signing.md)
+- **macOS (Intel)** — x64 `.dmg`, signed and notarized
+- **Windows 10/11** — setup and portable `.exe`, [code-signed](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
 
 Packaged builds check GitHub Releases automatically. When an update is available, the app shows an update indicator; supported platforms can also install from Settings → General.
@@ -169,10 +190,11 @@ To build your own installer, use Node.js 22.13+ on the **target** OS (electron-b
 
 ```bash
 npm install
-npm run dist:mac   # macOS arm64 .dmg          → dist/
-npm run dist:win   # Windows x64 installer .exe → dist/
-npm run dist:linux # Linux x64 AppImage        → dist/
-npm run pack       # unpacked app dir (no installer), for quick local testing
+npm run dist:mac     # macOS arm64 .dmg           → dist/
+npm run dist:mac:x64 # macOS Intel x64 .dmg       → dist/
+npm run dist:win     # Windows x64 installer .exe → dist/
+npm run dist:linux   # Linux x64 AppImage         → dist/
+npm run pack         # unpacked app dir (no installer), for quick local testing
 ```
 
 Output lands in `dist/`. Windows and Linux use the matching `dist:*` script above on the target OS. Packaging the macOS release build requires a local Developer ID Application signing identity; use `npm start` for local development or unsupported platforms.
@@ -193,9 +215,14 @@ The widget chooses local vs sync mode based on Settings → Multi-device Sync. T
 
 ## Session data retention
 
-The activity heatmap and trends dashboard are built from the session files each tool still keeps on disk. **Claude Code prunes its own transcripts after 30 days by default** (`cleanupPeriodDays`). With **Preserve deleted session usage** enabled (Settings → Collection), Token Monitor retains all daily client/model observations it has already seen locally, alongside Today/Month/All-time session totals. The heatmap and sync payload still use a rolling 370-day window, while older observations remain available locally for future views. Later source cleanup therefore no longer erases an observed day, but data deleted before Token Monitor first observed it cannot be recovered by this archive.
+With **Preserve deleted session usage** enabled (Settings → Collection), Token Monitor archives observed daily tool/model usage locally with no time limit — so even after a source tool prunes its own sessions, the heatmap and trends are unaffected.
 
-To keep the heatmap's full rolling year, raise Claude Code's retention in `~/.claude/settings.json` before the window passes:
+<details>
+<summary><strong>Advanced: extend the source tool's own retention</strong></summary>
+
+<br>
+
+The heatmap and sync payload use a rolling 370-day window (older observations remain available locally for future views). **Claude Code keeps only 30 days of transcripts by default** (`cleanupPeriodDays`); to keep the full rolling year before the archive kicks in, raise it in `~/.claude/settings.json` before the window passes:
 
 ```json
 {
@@ -203,61 +230,24 @@ To keep the heatmap's full rolling year, raise Claude Code's retention in `~/.cl
 }
 ```
 
-370 matches the heatmap's window; a larger value keeps more, at the cost of transcripts living on disk for as long as you set. tokscale's [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) table covers the other tools' defaults and config paths.
+A larger value keeps more, at the cost of transcripts living on disk for as long as you set. tokscale's [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) table covers the other tools' defaults and config paths.
+
+This archive only covers days Token Monitor has already observed; data deleted before it started tracking cannot be recovered.
+
+</details>
 
 ## Settings
 
-### Widget (GUI)
+There are two places to configure Token Monitor; day-to-day use only needs the first:
 
-Click the `⚙` button in the widget header to open the Settings panel.
+- **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates), Main (Home modules and display currency), Window (window behavior, tray mode, floating bubble, shortcut), Appearance (theme and vendor colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, data export), AI Tool Limits, Accounts (per-provider credentials), and Multi-device Sync. The `⇧` button in the title bar cycles the window behavior.
+- **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default.
 
-- **Multi-device Sync** — three modes: **Local only** (this device, no hub), **Connect to a hub** (paste another machine's Hub URL + secret), or **Host hub on this device** (open a hub here so other devices can connect; LAN/Tailscale/ZeroTier addresses are listed for you).
-- **Tracked Tools** — choose which AI tools are collected, and independently hide, pin, or reorder tools in the main list.
-- **AI Tool Limits** — choose Claude Code, Codex, Cursor, Antigravity, OpenCode, DeepSeek, Grok, Minimax, MiMo, GitHub Copilot, Kiro, GLM, Volcengine, Qoder, Kimi, and Ollama limit detection and refresh frequency.
-- **Trends** — choose the scan interval for daily usage history, or turn it off; open the Usage Dashboard for the activity heatmap, streaks, and stacked per-tool/per-model bar and K-line charts.
-- **Window behavior** — choose floating above apps, a normal window, or desktop pinned mode.
-- **Tray Mode** — switch to a menu bar (macOS) or system tray (Windows) popover and choose what shows next to the icon: cost, today's tokens, total tokens, cost + tokens, the closest Claude/Codex/Cursor/Antigravity/OpenCode/Grok/Minimax/MiMo/GitHub Copilot/Kiro/GLM/Volcengine/Qoder/Kimi/Ollama limit % left, or icon-only.
-- **Floating Bubble** — collapse the widget into a draggable mini-window, reopen it by click or hover preview, and choose bubble content from icon, tokens, cost, or AI Tool Limit bars.
-- **Shortcut** — record a global shortcut to show or hide the window.
-- **Appearance** — switch the interface theme between presets (Default, Obsidian, and a Porcelain light mode) or your own custom colours (accent, background, text, muted), set per-tool vendor colours, system glass, live dot, tool icons, Discord Rich Presence, glass opacity, and glass blur.
-- **Advanced** — opens the underlying `settings.json` for less-common options like `allTimeSince`.
-
-The pin button in the widget header toggles "always on top".
-
-### Headless agent and hub (`.env`)
-
-The agent and hub have no UI. Configure them with a `.env` file at the project root (copy from `.env.example`):
-
-```env
-TOKEN_MONITOR_HUB_URL=               # required for sync mode — Worker URL or http://<lan-ip>:17321
-TOKEN_MONITOR_SECRET=                # shared secret, must match the hub
-TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
-TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10m, 1200000/20m, 1800000/30m
-TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; set empty to disable tracking
-TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults to disabled; set to 1 to collect project metadata
-TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults to enabled; set to 0 to skip collecting Trends history
-TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults to enabled; set to 0 to stop preserving archived session usage
-TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults to enabled; set to 0 to skip CLI probing
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported (claude, codex, cursor, antigravity, opencode, deepseek, minimax, mimo, grok, copilot, kiro, zai, zaiteam, volcengine, qoder, kimi, ollama)
-```
-
-See `.env.example` for the full list. The widget uses env values as first-run defaults; CLI flags take precedence for the agent and hub.
-
-Example one-off run:
-
-```bash
-npm run agent -- --clients=claude,codex,opencode --once
-```
+See the [configuration reference](docs/configuration.md) for every setting and all environment variables.
 
 ## Privacy
 
 Token Monitor processes usage logs locally and sends no analytics or telemetry to the project maintainer. Network access occurs only for documented or user-enabled features. See the [privacy policy](docs/privacy.md) for the data used by updates, provider integrations, Discord Rich Presence, and optional multi-device sync.
-
-## Requirements
-
-- macOS, Windows, or Linux x64
-- Node.js 22.13+
-- For sync mode only: network reachability from each agent/widget to the hub
 
 ## Star History
 

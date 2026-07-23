@@ -3,6 +3,9 @@
 const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const windowsGlassApi = window.TokenMonitorWindowsGlass;
+const glassRenderingApi = window.TokenMonitorGlassRendering;
+const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
@@ -18,7 +21,7 @@ function osIconFor(platform) {
 }
 
 function iconKindFor(rowData, breakdown) {
-  if (!state.settings?.showToolIcons) return { kind: 'dot' };
+  if (!toolIconsEnabled(state.settings?.showToolIcons)) return { kind: 'dot' };
   if (breakdown === 'device') {
     const os = osIconFor(rowData.platform);
     return os ? { kind: 'icon', iconClass: `row-icon-os-${os}` } : { kind: 'dot' };
@@ -98,6 +101,14 @@ const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMod
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
+const {
+  createAfterLayoutScheduler,
+  isLargeSessionBreakdown,
+  rowRenderFingerprint,
+  shouldAnimateBreakdownRows,
+  toolIconsEnabled
+} = breakdownRenderPolicyApi;
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
 const projectRowsApi = window.TokenMonitorProjectRows;
 const sessionDetailApi = window.TokenMonitorSessionDetail;
@@ -114,6 +125,7 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'App/CLI RPC': 'settings.limits.capability.appCliRpc',
   'Manual login': 'settings.limits.capability.manualLogin',
   Web: 'settings.limits.capability.web',
+  'Web/API': 'settings.limits.capability.webApi',
   'App/CLI must be open': 'settings.limits.capability.appMustBeOpen',
   RPC: 'settings.limits.capability.rpc',
   'Local/Zen': 'settings.limits.capability.localZen',
@@ -121,12 +133,15 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   Subscription: 'settings.limits.capability.subscription',
   'Token Plan': 'settings.limits.capability.tokenPlan',
   'Coding Plan': 'settings.limits.capability.codingPlan',
+  'Membership/Coding Plan': 'settings.limits.capability.membershipCodingPlan',
   'API key': 'settings.limits.capability.apiKey',
   'AK/SK': 'settings.limits.capability.akSk',
   'GitHub OAuth': 'settings.limits.capability.githubOAuth',
   API: 'settings.limits.capability.api',
   'Add API key': 'settings.limits.status.addApiKey',
   'Update API key': 'settings.limits.status.updateApiKey',
+  'Add credential': 'settings.limits.status.addCredential',
+  'Update credential': 'settings.limits.status.updateCredential',
   Live: 'settings.limits.status.live',
   Linked: 'settings.limits.status.linked',
   'Sign in': 'settings.limits.status.signIn',
@@ -189,6 +204,7 @@ const SERVICE_STATUS_PLACEHOLDERS = [
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
 const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';
 const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/choose`;
+const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'accounts', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
@@ -205,6 +221,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, resetCreditsTooltipHasOpened: false, resetCreditsTooltipActive: false, resetCreditsTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
+state.homeReturnVisible = false;
 state.appUpdateNotesPresentedVersion = '';
 state.periodMotionActive = false;
 state.animateBarsFromZero = false;
@@ -213,15 +230,18 @@ let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
 let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), systemGlassInput: document.getElementById('systemGlassInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
+  viewBackRow: document.getElementById('viewBackRow'),
+  backHomeButton: document.getElementById('backHomeButton'),
+  systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
@@ -242,6 +262,9 @@ Object.assign(els, {
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
   sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
   reduceMotionInputs: Array.from(document.querySelectorAll('input[name="reduceMotionOption"]')),
+  windowsBackdropRow: document.getElementById('windowsBackdropRow'),
+  windowsBackdropInput: document.getElementById('windowsBackdropInput'),
+  windowsBackdropNote: document.getElementById('windowsBackdropNote'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -1068,6 +1091,33 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
 
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
+const rowRenderFingerprints = new WeakMap();
+const largeSessionContainmentScheduler = createAfterLayoutScheduler(
+  typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null,
+  typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : null
+);
+
+function updateLargeSessionContainment(enabled, { remeasure = false } = {}) {
+  els.breakdown.classList.toggle('large-session-list', enabled);
+  if (!enabled) {
+    largeSessionContainmentScheduler.cancel();
+    els.breakdown.classList.remove('large-session-list-ready');
+    return;
+  }
+  if (remeasure) {
+    largeSessionContainmentScheduler.cancel();
+    els.breakdown.classList.remove('large-session-list-ready');
+  }
+  if (largeSessionContainmentScheduler.pending() || els.breakdown.classList.contains('large-session-list-ready')) return;
+  // Let Chromium lay out every new row without size containment first. The
+  // `auto` intrinsic size can then retain each row's real block size before
+  // off-screen rendering is enabled, avoiding scroll-geometry corrections.
+  largeSessionContainmentScheduler.schedule(() => {
+    if (els.breakdown.classList.contains('large-session-list')) {
+      els.breakdown.classList.add('large-session-list-ready');
+    }
+  });
+}
 
 function prefersReducedMotion() {
   return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
@@ -1100,8 +1150,10 @@ function applyReduceMotionPreference(value) {
 }
 
 function captureBreakdownMotion() {
+  const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
+  if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return null;
   const snapshot = new Map();
-  for (const row of els.breakdown?.querySelectorAll('.row[data-key]') || []) {
+  for (const row of rows) {
     const rect = row.getBoundingClientRect();
     const fill = row.querySelector('.bar-fill');
     const trackWidth = fill?.parentElement?.getBoundingClientRect().width || 0;
@@ -1157,9 +1209,11 @@ function animateRowNumber(el, from, to, duration = 420) {
 }
 
 function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
-  if (prefersReducedMotion()) return;
+  if (!snapshot) return;
+  const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
+  if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return;
   let enteringIndex = 0;
-  for (const row of els.breakdown?.querySelectorAll('.row[data-key]') || []) {
+  for (const row of rows) {
     const previous = snapshot.get(row.dataset.key);
     const value = Number(row.dataset.motionValue || 0);
     const fill = row.querySelector('.bar-fill');
@@ -1324,7 +1378,7 @@ function rowTemplate(rowData) {
 
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
-    state.settings?.showToolIcons === true,
+    toolIconsEnabled(state.settings?.showToolIcons),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
     deviceDetail.tools.map((tool) => [
@@ -1353,7 +1407,7 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       const label = document.createElement('div');
       label.className = 'device-tool-label';
       const mark = document.createElement('span');
-      if (state.settings?.showToolIcons && clientsWithIcon.has(tool.client)) {
+      if (toolIconsEnabled(state.settings?.showToolIcons) && clientsWithIcon.has(tool.client)) {
         mark.className = `device-tool-mark row-icon row-icon-${tool.client}`;
       } else {
         mark.className = 'device-tool-mark dot';
@@ -1535,7 +1589,9 @@ function applyHomeListMark(mark, iconKind, color) {
 }
 
 function renderRows(rows, { incompleteHint = '' } = {}) {
+  const largeSessionList = isLargeSessionBreakdown(state.breakdown, rows.length);
   if (rows.length === 0 && !incompleteHint) {
+    updateLargeSessionContainment(false);
     els.breakdown.replaceChildren();
     state.rowSignature = '';
     return;
@@ -1549,7 +1605,8 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   const children = Array.from(els.breakdown.children);
   const existingHint = children.find((child) => child.classList.contains('breakdown-incomplete-hint'));
   const existing = new Map(children.filter((child) => child !== existingHint).map((child) => [child.dataset.key, child]));
-  if (signature !== state.rowSignature) {
+  const structureChanged = signature !== state.rowSignature;
+  if (structureChanged) {
     const nodes = rows.map((row) => existing.get(row.key) || rowTemplate(row));
     if (incompleteHint) {
       const hint = existingHint || document.createElement('p');
@@ -1561,12 +1618,24 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     els.breakdown.replaceChildren(...nodes);
     state.rowSignature = signature;
   }
+  updateLargeSessionContainment(largeSessionList, { remeasure: structureChanged });
   const current = new Map(Array.from(els.breakdown.children)
     .filter((child) => !child.classList.contains('breakdown-incomplete-hint'))
     .map((child) => [child.dataset.key, child]));
+  const renderContext = {
+    breakdown: state.breakdown,
+    currency: currentCurrency(),
+    currencyRatesEffective: state.settings?.currencyRatesEffective || null,
+    locale: currentLocale(),
+    showToolIcons: toolIconsEnabled(state.settings?.showToolIcons)
+  };
   for (const rowData of rows) {
     const row = current.get(rowData.key);
-    if (row) updateRow(row, { ...rowData, max });
+    if (!row) continue;
+    const fingerprint = rowRenderFingerprint(rowData, max, renderContext);
+    if (rowRenderFingerprints.get(row) === fingerprint) continue;
+    updateRow(row, { ...rowData, max });
+    rowRenderFingerprints.set(row, fingerprint);
   }
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
@@ -1789,7 +1858,7 @@ function limitProviderMeta(provider, provenance = null) {
 
 function limitProviderPlan(provider) {
   if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
-  const label = String(provider?.accountLabel || '').trim();
+  const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
   if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(label);
   return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
 }
@@ -1835,6 +1904,24 @@ function windowForKind(provider, kind) {
 
 function windowsForKind(provider, kind) {
   return (provider?.windows || []).filter((window) => window.kind === kind);
+}
+
+function antigravityQuotaGroups(provider) {
+  const entries = (provider?.windows || [])
+    .filter((window) => window.kind === 'session' || window.kind === 'weekly')
+    .map((window) => {
+      const presentation = limitProviderPresentationApi.antigravityQuotaWindow(window);
+      return presentation ? { ...presentation, window } : null;
+    });
+  // Legacy GetUserStatus pools have model names rather than group + period
+  // labels. Keep their existing flat layout instead of guessing a hierarchy.
+  if (entries.length === 0 || entries.some((entry) => entry === null)) return [];
+  const groups = new Map();
+  for (const entry of entries) {
+    if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
+    groups.get(entry.groupLabel).push(entry);
+  }
+  return [...groups].map(([label, windows]) => ({ label, windows }));
 }
 
 function formatLimitAmount(value) {
@@ -2476,12 +2563,39 @@ function renderProviderWindows(provider, color) {
     }
   } else if (provider.provider === 'antigravity') {
     windows.classList.add('limit-windows-antigravity');
-    const weeklyWindows = windowsForKind(provider, 'weekly');
-    const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
-    for (const weekly of visibleWindows) {
-      const node = limitWindowNode(weekly?.label || 'Weekly', weekly, color, 0.78);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
+    const quotaGroups = antigravityQuotaGroups(provider);
+    if (quotaGroups.length > 0) {
+      windows.classList.add('limit-windows-antigravity-grouped');
+      for (const group of quotaGroups) {
+        const groupNode = document.createElement('div');
+        groupNode.className = 'limit-window-group';
+        groupNode.setAttribute('role', 'group');
+        groupNode.setAttribute('aria-label', group.label);
+        const title = document.createElement('div');
+        title.className = 'limit-window-group-title';
+        title.textContent = group.label;
+        const groupWindows = document.createElement('div');
+        groupWindows.className = 'limit-window-group-items';
+        for (const entry of group.windows) {
+          const opacity = entry.window.kind === 'session' ? 0.95 : 0.78;
+          groupWindows.append(limitWindowNode(
+            entry.windowLabel,
+            { ...entry.window, label: entry.windowLabel },
+            color,
+            opacity
+          ));
+        }
+        groupNode.append(title, groupWindows);
+        windows.append(groupNode);
+      }
+    } else {
+      const weeklyWindows = windowsForKind(provider, 'weekly');
+      const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
+      for (const quotaWindow of visibleWindows) {
+        const node = limitWindowNode(quotaWindow?.label || 'Weekly', quotaWindow, color, 0.78);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
     }
   } else if (provider.provider === 'opencode') {
     // Go reports session/weekly/monthly windows ($12/$30/$60); Zen reports a prepaid balance (and,
@@ -2653,6 +2767,32 @@ function renderProviderWindows(provider, color) {
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
+  } else if (provider.provider === 'kimi') {
+    const fiveHour = windowForKind(provider, 'session');
+    const weekly = windowForKind(provider, 'weekly');
+    const monthly = windowForKind(provider, 'billing');
+    if (fiveHour) {
+      const node = limitWindowNode(fiveHour.label || '5-hour', fiveHour, color, 0.95);
+      if (!weekly) node.classList.add('limit-window-wide');
+      windows.append(node);
+    }
+    if (weekly) {
+      const node = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
+      if (!fiveHour) node.classList.add('limit-window-wide');
+      windows.append(node);
+    }
+    if (monthly) {
+      const node = limitWindowNode(
+        monthly.label || 'Monthly',
+        monthly,
+        color,
+        0.5,
+        null,
+        monthly.detail || ''
+      );
+      node.classList.add('limit-window-wide');
+      windows.append(node);
+    }
   } else if (provider.provider === 'ollama') {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
@@ -2765,6 +2905,18 @@ function renderMimoAccountGroup(label, providers, color) {
   return row;
 }
 
+function opencodeAccountTitle(provider, index) {
+  const name = String(provider?.accountName || '').trim();
+  if (name) return name;
+  // Older synced clients put the user-defined profile name in accountLabel.
+  // Keep those rows identifiable while new clients carry profile and plan in
+  // separate fields. Go/Zen are plan labels, never account identities.
+  const legacyName = String(provider?.accountLabel || '').trim();
+  return legacyName && legacyName !== 'Go' && legacyName !== 'Zen'
+    ? legacyName
+    : `Account ${index + 1}`;
+}
+
 function renderOpenCodeAccountGroup(label, providers, color) {
   const row = document.createElement('div');
   row.className = 'limit-row limit-row-group';
@@ -2775,10 +2927,15 @@ function renderOpenCodeAccountGroup(label, providers, color) {
   });
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
-  providers.forEach((provider) => {
-    accountList.append(renderLimitProviderRow('opencode', provider.accountLabel || 'OpenCode', provider, color, {
+  providers.forEach((provider, index) => {
+    const legacyProfileLabel = !provider?.accountName
+      && provider?.accountLabel
+      && provider.accountLabel !== 'Go'
+      && provider.accountLabel !== 'Zen';
+    accountList.append(renderLimitProviderRow('opencode', opencodeAccountTitle(provider, index), provider, color, {
       accountRow: true,
-      showIcon: false
+      showIcon: false,
+      ...(legacyProfileLabel ? { planText: '' } : {})
     }));
   });
   row.append(head, accountList);
@@ -3513,13 +3670,13 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   module.setAttribute('aria-label', title);
   module.addEventListener('click', (event) => {
     if (event.target.closest('.home-activity-scroll')) return;
-    renderBreakdownChange(viewId);
+    renderBreakdownChange(viewId, { fromHome: true });
   });
   module.addEventListener('keydown', (event) => {
     if (event.target !== module) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    renderBreakdownChange(viewId);
+    renderBreakdownChange(viewId, { fromHome: true });
   });
   const head = document.createElement('div');
   head.className = 'home-module-head';
@@ -3548,13 +3705,23 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   return { module, body };
 }
 
+function homeLimitAccountTitle(id, provider, index) {
+  if (id === 'codex') return codexAccountTitle(provider, index);
+  if (id === 'mimo') return mimoAccountTitle(provider, index);
+  if (id === 'opencode') return opencodeAccountTitle(provider, index);
+  return String(provider?.accountEmail || provider?.accountName || '').trim() || `Account ${index + 1}`;
+}
+
 function homeLimitRows() {
   const enabled = enabledLimitProviderSet();
   const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
   const providerOptions = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, providerOrder);
   const hasConfiguredOrder = Boolean(state.settings?.homeLimitProviderOrder);
   return homeOverviewApi.homeLimitAccountsForProviders({
-    providers: state.stats?.limits?.providers || [],
+    providers: (state.stats?.limits?.providers || []).map((provider) => ({
+      ...provider,
+      windows: limitProviderPresentationApi.limitProviderCompactWindows(provider, provider.windows)
+    })),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
@@ -3564,12 +3731,21 @@ function homeLimitRows() {
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
-      return id === 'codex' && providerEntries.length > 1 ? codexAccountTitle(provider, index) : option?.label || id;
+      const providerTitle = option?.label || id;
+      if (providerEntries.length > 1) {
+        const accountTitle = homeLimitAccountTitle(id, provider, index);
+        return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
+          ? `${providerTitle} · ${accountTitle}`
+          : accountTitle;
+      }
+      return providerTitle;
     }
   });
 }
 
-function homeLimitWindowLabel(window) {
+function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
+  const compactLabel = limitProviderPresentationApi.limitProviderCompactWindowLabel(providerId, window, visibleWindows);
+  if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
     const label = String(window?.label || '').trim();
     if (label) return label;
@@ -3615,7 +3791,7 @@ function renderHomeLimitModule() {
       line.className = 'home-limit-window-line';
       const label = document.createElement('span');
       label.className = 'home-limit-window-label';
-      label.textContent = homeLimitWindowLabel(window);
+      label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
       const value = document.createElement('span');
       value.className = 'home-list-value';
       const showUsed = Boolean(state.settings?.showLimitUsed);
@@ -3634,11 +3810,13 @@ function renderHomeLimitModule() {
       const resetAt = formatReset(window.resetsAt);
       const resetText = document.createElement('span');
       resetText.className = 'home-limit-reset';
-      resetText.textContent = window.resetsAt
+      const resetLabel = window.resetsAt
         ? resetAt || '\u00a0'
         : window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
         : '\u00a0';
+      const periodLabel = limitProviderPresentationApi.limitProviderCompactWindowPeriodLabel(row.providerId, window, row.windows);
+      resetText.textContent = periodLabel && resetLabel !== '\u00a0' ? `${periodLabel} · ${resetLabel}` : resetLabel;
       metric.append(resetText);
       windows.append(metric);
     }
@@ -4034,8 +4212,17 @@ function renderHomeTrendsModule() {
     cell: activityLayout.cell,
     gap: activityLayout.gap
   });
-  const activeDays = activity.cells.filter((cell) => cell.tokens > 0).length;
-  const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', t('home.activeDays', { count: activeDays }));
+  const summaryActiveDays = state.stats?.historyPreview?.summary?.activeDays;
+  const activeDaysWindow = state.settings?.homeActiveDaysWindow || 'all';
+  const displayActiveDays = activeDaysWindow === 'year'
+    ? activity.cells.filter((cell) => cell.tokens > 0).length
+    : (Number.isFinite(summaryActiveDays)
+        ? summaryActiveDays
+        : activity.cells.filter((cell) => cell.tokens > 0).length);
+  const activeDaysLabel = activeDaysWindow === 'year'
+    ? t('home.activeDaysYear', { count: displayActiveDays })
+    : t('home.activeDays', { count: displayActiveDays });
+  const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
   const activityScroll = document.createElement('div');
   activityScroll.className = 'home-activity-scroll';
   activityScroll.tabIndex = 0;
@@ -4161,6 +4348,7 @@ function render() {
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
+  els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
   // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
   // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
   if (state.breakdown !== 'home') hideHomeActivityTooltip();
@@ -4430,6 +4618,7 @@ function setBreakdown(breakdown, options = {}) {
     publishViewState();
     return false;
   }
+  state.homeReturnVisible = options.fromHome === true && state.breakdown === 'home' && next !== 'home';
   state.breakdown = next;
   state.rowSignature = '';
   publishViewState();
@@ -4478,15 +4667,32 @@ function applyControlLayout(swapSettingsAndRefresh) {
 }
 
 function applyAppearanceSettings(settings) {
-  const opacity = clamp(settings?.glassOpacity ?? 68, 0, 100) / 100;
+  const opacity = glassRenderingApi.renderedGlassOpacity(settings, {
+    platform: state.appInfo?.platform,
+    userAgent: navigator.userAgent
+  });
   const depth = clamp(settings?.glassBlur ?? 32, 0, 100) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
+  const isWindows = navigator.userAgent.toLowerCase().includes('windows');
+  const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
   document.documentElement.style.setProperty('--glass-alpha', opacity.toFixed(2));
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
-  document.documentElement.style.setProperty('--highlight-alpha', (0.045 + depth * 0.06).toFixed(3));
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
+  els.windowsBackdropRow?.classList.toggle('hidden', !windowsGlass.showBackdropControl);
+  if (els.windowsBackdropInput) {
+    els.windowsBackdropInput.value = windowsGlass.backdropMode;
+  }
+  if (els.windowsBackdropNote) {
+    const accentFallback = windowsGlass.showAccentNote
+      && new URLSearchParams(window.location.search).get('windowsBackdropFallback') === '1';
+    els.windowsBackdropNote.textContent = t(accentFallback
+      ? 'settings.appearance.windowsBackdropFallback'
+      : 'settings.appearance.windowsBackdropNote');
+    els.windowsBackdropNote.classList.toggle('error', accentFallback);
+    els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
+  }
   applyReduceMotionPreference(settings?.reduceMotion);
   // Only full settings objects carry themeColors; glass/zoom preview patches
   // omit it, so we must not wipe theme overrides mid-slider-drag.
@@ -4501,8 +4707,6 @@ function applyAppearanceSettings(settings) {
   if (settings && ('settingsInTitlebar' in settings || 'trayMode' in settings)) {
     applyControlLayout(settings.settingsInTitlebar === true);
   }
-  const isWindows = navigator.userAgent.toLowerCase().includes('windows');
-  
   let isMacLegacyRadius = false;
   if (!isWindows && state.appInfo?.platform === 'darwin' && state.appInfo?.osRelease) {
     // macOS Tahoe (macOS 26) is Darwin 25. Older macOS versions (like 14, 15) use a ~12px native vibrancy radius.
@@ -5100,8 +5304,10 @@ function handleFloatingBubblePointerUp(event) {
 }
 
 function appearancePatchFromControls() {
+  const systemGlass = els.systemGlassInputs?.find((input) => input.checked)?.value !== 'off';
   return {
-    systemGlass: Boolean(els.systemGlassInput.checked),
+    systemGlass,
+    windowsBackdrop: windowsGlassApi.normalizeWindowsBackdropMode(els.windowsBackdropInput?.value),
     reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
@@ -5337,7 +5543,9 @@ function syncSettingsForm() {
       : t('settings.export.statusNeedsFolder');
   }
   renderWslPanel();
-  els.systemGlassInput.checked = state.settings.systemGlass !== false;
+  const systemGlass = state.settings.systemGlass === false ? 'off' : 'system';
+  for (const input of els.systemGlassInputs || []) input.checked = input.value === systemGlass;
+  if (els.windowsBackdropInput) els.windowsBackdropInput.value = windowsGlassApi.normalizeWindowsBackdropMode(state.settings.windowsBackdrop);
   const reduceMotion = motionPreferenceApi.normalize(state.settings.reduceMotion);
   for (const input of els.reduceMotionInputs || []) input.checked = input.value === reduceMotion;
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
@@ -5806,6 +6014,33 @@ function renderHomeLimitProviderList() {
   statusText.textContent = t('settings.home.showLimitBars');
   statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
   statusLabel.append(statusInput, statusText);
+  const providerNamesLabel = document.createElement('label');
+  providerNamesLabel.className = 'checkbox-label home-limit-status-setting';
+  const providerNamesInput = document.createElement('input');
+  providerNamesInput.type = 'checkbox';
+  const providerNamesRequired = state.settings?.showToolIcons === false;
+  providerNamesInput.checked = providerNamesRequired || state.settings?.showHomeLimitProviderNames === true;
+  providerNamesInput.disabled = providerNamesRequired;
+  const providerNamesText = document.createElement('span');
+  providerNamesText.textContent = t('settings.home.showLimitProviderNames');
+  const providerNamesCopy = document.createElement('span');
+  providerNamesCopy.className = 'home-limit-provider-names-copy';
+  providerNamesCopy.append(providerNamesText);
+  if (providerNamesRequired) {
+    const requiredReason = t('settings.home.providerNamesRequiredWithoutIcons');
+    const requiredReasonText = document.createElement('span');
+    requiredReasonText.id = 'homeLimitProviderNamesReason';
+    requiredReasonText.className = 'home-limit-provider-names-reason';
+    requiredReasonText.textContent = requiredReason;
+    providerNamesCopy.append(requiredReasonText);
+    providerNamesLabel.title = requiredReason;
+    providerNamesInput.setAttribute('aria-describedby', requiredReasonText.id);
+  }
+  providerNamesInput.addEventListener('change', async () => {
+    await saveSettings({ showHomeLimitProviderNames: providerNamesInput.checked });
+    renderHomeIfVisible();
+  });
+  providerNamesLabel.append(providerNamesInput, providerNamesCopy);
   const countLabel = document.createElement('label');
   countLabel.className = 'settings-item home-limit-account-count-setting';
   const countText = document.createElement('span');
@@ -5854,7 +6089,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(statusLabel, countLabel, header);
+  wrap.append(statusLabel, providerNamesLabel, countLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -6000,14 +6235,16 @@ function renderHomeSettingsList() {
 }
 
 function renderHomeActivitySettings() {
-  const row = document.createElement('div');
-  row.className = 'home-activity-settings';
-  const label = document.createElement('span');
-  label.textContent = t('settings.home.heatmapColor');
-  const options = document.createElement('div');
-  options.className = 'inline-options';
-  options.setAttribute('role', 'radiogroup');
-  options.setAttribute('aria-label', label.textContent);
+  const frag = document.createDocumentFragment();
+
+  const heatmapRow = document.createElement('div');
+  heatmapRow.className = 'home-activity-settings';
+  const heatmapLabel = document.createElement('span');
+  heatmapLabel.textContent = t('settings.home.heatmapColor');
+  const heatmapOptions = document.createElement('div');
+  heatmapOptions.className = 'inline-options';
+  heatmapOptions.setAttribute('role', 'radiogroup');
+  heatmapOptions.setAttribute('aria-label', heatmapLabel.textContent);
   const currentMetric = state.settings?.heatmapMetric || 'cost';
   for (const metric of ['tokens', 'cost']) {
     const option = document.createElement('label');
@@ -6023,10 +6260,40 @@ function renderHomeActivitySettings() {
     const text = document.createElement('span');
     text.textContent = t(metric === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
     option.append(input, text);
-    options.append(option);
+    heatmapOptions.append(option);
   }
-  row.append(label, options);
-  return row;
+  heatmapRow.append(heatmapLabel, heatmapOptions);
+  frag.append(heatmapRow);
+
+  const daysRow = document.createElement('div');
+  daysRow.className = 'home-activity-settings';
+  const daysLabel = document.createElement('span');
+  daysLabel.textContent = t('settings.home.activeDaysWindow');
+  const daysOptions = document.createElement('div');
+  daysOptions.className = 'inline-options';
+  daysOptions.setAttribute('role', 'radiogroup');
+  daysOptions.setAttribute('aria-label', daysLabel.textContent);
+  const currentDaysWindow = state.settings?.homeActiveDaysWindow || 'all';
+  for (const mode of ['all', 'year']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'homeActiveDaysWindow';
+    input.value = mode;
+    input.checked = currentDaysWindow === mode;
+    input.addEventListener('change', () => {
+      if (input.checked) void saveSettings({ homeActiveDaysWindow: mode }).then(renderHomeIfVisible);
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.home.activeDaysWindow.${mode}`);
+    option.append(input, text);
+    daysOptions.append(option);
+  }
+  daysRow.append(daysLabel, daysOptions);
+  frag.append(daysRow);
+
+  return frag;
 }
 
 function renderTrendSettingsList() {
@@ -6254,6 +6521,20 @@ function renderWslPanel() {
       tag.textContent = t(has ? 'settings.collection.wslPanel.hasData' : 'settings.collection.wslPanel.noDataTag');
       row.append(name, tag);
       els.wslPanel.append(row);
+    }
+
+    if (wslStatusPresentationApi.sqliteHelpClients(status).length > 0) {
+      const help = document.createElement('p');
+      help.className = 'settings-note wsl-panel-help';
+      const message = document.createElement('span');
+      message.textContent = t('settings.collection.wslPanel.sqliteHelp');
+      const guide = document.createElement('button');
+      guide.type = 'button';
+      guide.className = 'inline-link';
+      guide.textContent = t('settings.collection.wslPanel.setupGuide');
+      guide.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL));
+      help.append(message, ' ', guide);
+      els.wslPanel.append(help);
     }
   }
 }
@@ -6733,6 +7014,13 @@ if (typeof ResizeObserver === 'function') {
 
 els.viewSwitcher?.addEventListener('pointerenter', clearViewSwitcherHoverClose);
 els.viewSwitcher?.addEventListener('pointerleave', scheduleViewSwitcherHoverClose);
+els.backHomeButton?.addEventListener('click', (event) => {
+  if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  if (!renderBreakdownChange('home')) return;
+  if (event.detail === 0) {
+    requestAnimationFrame(() => els.viewSwitcher?.querySelector('.view-switcher-current')?.focus());
+  }
+});
 
 window.addEventListener('blur', () => {
   clearViewSwitcherLongPress();
@@ -7023,7 +7311,12 @@ function setupThemeAccordion(group, toggle, details) {
 
 setupThemeAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
 setupThemeAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
-els.systemGlassInput.addEventListener('change', saveAppearanceFromControls);
+for (const input of els.systemGlassInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) saveAppearanceFromControls();
+  });
+}
+els.windowsBackdropInput?.addEventListener('change', saveAppearanceFromControls);
 for (const input of els.reduceMotionInputs || []) {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
@@ -7032,7 +7325,11 @@ for (const input of els.reduceMotionInputs || []) {
   });
 }
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
-els.toolIconsInput.addEventListener('change', saveAppearanceFromControls);
+els.toolIconsInput.addEventListener('change', async () => {
+  state.settings.showToolIcons = els.toolIconsInput.checked;
+  renderHomeIfVisible();
+  await saveAppearanceFromControls();
+});
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
@@ -8008,8 +8305,8 @@ const externalLimitAccountConfig = {
     pendingKey: 'qoderPendingCheckSince'
   },
   kimi: {
-    configuredKey: 'kimiApiKeyConfigured',
-    sourceKey: 'kimiApiKeySource',
+    configuredKey: 'kimiCredentialConfigured',
+    sourceKey: 'kimiCredentialSource',
     pendingKey: 'kimiPendingCheckSince'
   },
   ollama: {
@@ -8601,8 +8898,9 @@ function renderCustomPricing() {
   }
   for (const ov of overrides) {
     const row = document.createElement('div');
-    row.className = 'managed-account-row';
-    const main = document.createElement('div');
+    row.className = 'managed-account-row custom-pricing-row';
+    const main = document.createElement('button');
+    main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
     main.title = t('settings.customPricing.edit');
     main.addEventListener('click', () => { if (openCustomPricingForm) openCustomPricingForm(ov); });
@@ -8615,7 +8913,7 @@ function renderCustomPricing() {
     main.append(name, meta);
     const remove = document.createElement('button');
     remove.type = 'button';
-    remove.className = 'managed-account-remove';
+    remove.className = 'managed-account-remove custom-pricing-remove';
     remove.textContent = t('settings.customPricing.remove');
     remove.addEventListener('click', async () => {
       const next = customPricingFormApi.removeOverride(state.settings?.customModelPricing || [], ov.modelId);
@@ -9330,7 +9628,7 @@ function setupCursorAccountUI() {
     });
 
     document.getElementById('kimiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ kimiApiKey: '' });
+      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '' });
       clearExternalProviderCheckPending('kimi');
       clearExternalProviderPendingStatus('kimi');
       renderExternalProviderStatus('kimi');
@@ -9339,6 +9637,30 @@ function setupCursorAccountUI() {
 
     document.getElementById('kimiRefreshButton').addEventListener('click', async () => {
       await refreshStats({ force: true });
+    });
+
+    document.getElementById('kimiWebAccessTokenSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('kimiWebAccessTokenInput');
+      const errorEl = document.getElementById('kimiErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.kimi.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('kimi');
+        await saveSettings({ kimiWebAccessToken: input.value });
+        input.value = '';
+        renderExternalProviderStatus('kimi');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
+        renderExternalProviderStatus('kimi');
+      } catch (err) {
+        clearExternalProviderCheckPending('kimi');
+        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
     });
 
     document.getElementById('kimiApiKeySubmit').addEventListener('click', async () => {

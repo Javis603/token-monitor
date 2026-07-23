@@ -275,3 +275,45 @@ test('fetchVolcengineLimits falls back from signed Coding Plan to Ark API key', 
   assert.equal(requests[0].url, 'https://open.volcengineapi.com/?Action=GetCodingPlanUsage&Version=2024-01-01');
   assert.equal(requests[1].url, 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions');
 });
+
+test('fetchVolcengineLimits physically aborts a hung request within its configured bound', async () => {
+  let signal;
+  const provider = await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'AKLT-hung', volcengineSecretAccessKey: 'sk' },
+    {
+      env: {},
+      volcengineFetchTimeoutMs: 5,
+      fetch: async (_url, init) => {
+        signal = init.signal;
+        return new Promise(() => {});
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(signal.aborted, true);
+});
+
+test('fetchVolcengineLimits keeps the response body read inside the deadline', async () => {
+  let signal;
+  const provider = await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'AKLT-hung-body', volcengineSecretAccessKey: 'sk' },
+    {
+      env: {},
+      volcengineFetchTimeoutMs: 5,
+      fetch: async (_url, init) => {
+        signal = init.signal;
+        return {
+          ok: true,
+          status: 200,
+          json: () => new Promise((resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(signal.aborted, true);
+});

@@ -165,6 +165,41 @@ test('fetchOpenCodeLimits: surfaces unauthorized when no source has data', async
   assert.strictEqual(p.source, 'web');
 });
 
+test('fetchOpenCodeLimits keeps multi-account identity compatible with old renderers while separating plan labels', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const summary = await collectLimitsOnce({
+    limitProviders: 'opencode',
+    limitsEnabled: true,
+    opencodeProfiles: {
+      myPersonal: { enabled: true, cookie: 'personal-cookie' },
+      myWork: { enabled: true, cookie: 'work-cookie' }
+    }
+  }, {
+    now: () => now,
+    opencodeCollectGo: () => ({ status: 'notConfigured', windows: [] }),
+    opencodeFetchGoWeb: async (cookie) => cookie === 'work-cookie'
+      ? { status: 'ok', workspaceId: 'work', windows: [{ kind: 'session', usedPercent: 20 }] }
+      : { status: 'notConfigured', workspaceId: '', windows: [] },
+    opencodeFetchZen: async (cookie) => cookie === 'personal-cookie'
+      ? { status: 'ok', workspaceId: 'personal', windows: [], balanceUsd: 5 }
+      : { status: 'notConfigured', workspaceId: '', windows: [], balanceUsd: null }
+  });
+
+  assert.deepStrictEqual(
+    summary.providers.map(({ accountName, accountLabel, planLabel }) => ({ accountName, accountLabel, planLabel })),
+    [
+      { accountName: 'myPersonal', accountLabel: 'myPersonal', planLabel: 'Zen' },
+      { accountName: 'myWork', accountLabel: 'myWork', planLabel: 'Go' }
+    ]
+  );
+  // Renderers from before accountName existed read accountLabel as the row
+  // title. New producers must therefore keep the profile name there too.
+  assert.deepStrictEqual(
+    summary.providers.map((provider, index) => provider.accountLabel || `Account ${index + 1}`),
+    ['myPersonal', 'myWork']
+  );
+});
+
 test('fetchOpenCodeLimits refresh scope probes only the requested profile', async () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
   const cookies = [];
@@ -174,7 +209,9 @@ test('fetchOpenCodeLimits refresh scope probes only the requested profile', asyn
     limitRefreshScope: {
       provider: 'opencode',
       accountKey: 'sha256:work',
-      accountLabel: 'work'
+      accountName: 'work',
+      accountLabel: 'work',
+      planLabel: 'Go'
     },
     opencodeProfiles: {
       personal: { enabled: true, cookie: 'personal-cookie' },
@@ -199,5 +236,7 @@ test('fetchOpenCodeLimits refresh scope probes only the requested profile', asyn
   assert.deepStrictEqual(cookies, ['work-cookie', 'work-cookie']);
   assert.equal(summary.providers.length, 1);
   assert.equal(summary.providers[0].provider, 'opencode');
+  assert.equal(summary.providers[0].accountName, 'work');
   assert.equal(summary.providers[0].accountLabel, 'work');
+  assert.equal(summary.providers[0].planLabel, 'Go');
 });

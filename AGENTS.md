@@ -38,7 +38,9 @@ Three runtime entry points share a single `src/shared/` library:
 
 ### AI Tool Limits collector
 
-`src/shared/limitCollector.js` runs alongside the usage collector to surface Claude Code / Codex session and weekly windows. Provider-specific probing lives in `src/shared/limits.js` (Codex limits are read via CLI RPC, including a Windows-specific path). Limits flow through the same wire shape — see "Data flow contract" below — and are merged into device records by the hub.
+Usage and limits have independent lifecycles under `src/shared/deviceRuntime.js`: `UsageRuntime` owns the tokscale collector, while `LimitsRuntime` owns its refresh timer, bounded cross-provider concurrency, per-provider latest-wins serial lanes, scoped account refreshes, finite probe deadlines, retry/backoff, and `lastGood` / `lastAttempt` retention. Credential changes refresh or clear only the affected limits lane and never restart usage; Cursor additionally forces one targeted usage sync because its tokscale cache is self-synced.
+
+`DeviceState` composes both outputs into the unchanged device wire record, buffering limits until usage exists and cold-start previews until a complete usage baseline exists; limits-only updates preserve the usage `updatedAt`. Provider dispatch starts in `src/shared/limitCollector.js`, with provider-specific implementations split between that file and `src/shared/*Limits.js`; shared normalization remains in `src/shared/limits.js`. The hub and Worker receive the composed record and never need provider credentials.
 
 ### Widget mode switching
 
@@ -74,9 +76,8 @@ The default client CSV lives in **one** place: `DEFAULT_CLIENTS` in `src/shared/
 | Docs & env examples | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example` |
 | Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js` |
 
-Two caveats on top of the table:
+One caveat on top of the table:
 
-- If the client's tokscale `--home` scan can fall back to a HOST-native DB that ignores `--home` (currently only `zed`), also add it to `WSL_HOST_FALLBACK_GATES` keyed to the WSL-home file whose presence suppresses that fallback, so it is dropped from a home's scan when absent and never double-counts the host DB.
 - Self-synced clients (cursor/antigravity) additionally go in `SELF_SYNCED_CLIENTS`; parse-local clients must NOT.
 
 ### Data flow contract

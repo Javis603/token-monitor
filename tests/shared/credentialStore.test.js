@@ -29,6 +29,7 @@ test('stores credential settings in a versioned provider document', (t) => {
     hubHostSecret: 'host-secret',
     secret: 'client-secret',
     deepseekApiKey: 'deepseek-key',
+    kimiWebAccessToken: 'kimi-web-token',
     opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
     zaiTeamOrganizationId: 'organization-id',
     qoderCookie: ''
@@ -39,6 +40,7 @@ test('stores credential settings in a versioned provider document', (t) => {
   assert.equal(document.credentials.hub.hostSecret, 'host-secret');
   assert.equal(document.credentials.hub.clientSecret, 'client-secret');
   assert.equal(document.credentials.providers.deepseek.apiKey, 'deepseek-key');
+  assert.equal(document.credentials.providers.kimi.webAccessToken, 'kimi-web-token');
   assert.equal(document.credentials.providers.opencode.profiles.work.cookie, 'auth=secret');
   assert.equal(document.credentials.providers.zaiTeam.organizationId, 'organization-id');
   assert.equal(document.credentials.providers.qoder, undefined);
@@ -49,6 +51,7 @@ test('stores credential settings in a versioned provider document', (t) => {
     secret: 'client-secret',
     opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
     deepseekApiKey: 'deepseek-key',
+    kimiWebAccessToken: 'kimi-web-token',
     zaiTeamOrganizationId: 'organization-id'
   });
 });
@@ -76,6 +79,7 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
   assert.equal(redacted.deepseekApiKey, '');
   assert.equal(redacted.opencodeProfiles, '');
   assert.equal(redacted.kimiApiKey, '');
+  assert.equal(redacted.kimiWebAccessToken, '');
 });
 
 test('migrates legacy settings once and keeps an existing credential authoritative', (t) => {

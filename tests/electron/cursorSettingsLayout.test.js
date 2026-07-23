@@ -186,6 +186,20 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /updateOpenCodeProfilesStatus\(\)/);
 });
 
+test('OpenCode multi-account rows separate profile identity from plan label', () => {
+  const app = readRendererFile('app.js');
+  const titleBody = functionBody(app, 'opencodeAccountTitle', 'renderOpenCodeAccountGroup');
+  const groupBody = functionBody(app, 'renderOpenCodeAccountGroup', 'renderLimits');
+
+  assert.match(titleBody, /provider\?\.accountName/);
+  assert.match(titleBody, /legacyName !== 'Go' && legacyName !== 'Zen'/);
+  assert.match(groupBody, /opencodeAccountTitle\(provider, index\)/);
+  assert.match(groupBody, /legacyProfileLabel/);
+  assert.match(groupBody, /planText: ''/);
+  assert.match(app, /provider\?\.planLabel \|\| provider\?\.accountLabel/);
+  assert.doesNotMatch(groupBody, /renderLimitProviderRow\('opencode', provider\.accountLabel/);
+});
+
 test('OpenCode disabled profiles still count in the account summary', () => {
   const app = readRendererFile('app.js');
   const renderBody = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
@@ -212,7 +226,7 @@ test('OpenCode profile deletion clears the legacy default cookie when it owns th
   assert.match(handler, /settings\.opencodeCookie = '';/);
 });
 
-test('OpenCode profile enable toggles restart the collector mode so limits source updates', () => {
+test('OpenCode profile enable toggles refresh only the affected limits lane', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const handler = main.slice(
     main.indexOf("ipcMain.handle('opencode:setProfileEnabled'"),
@@ -222,7 +236,10 @@ test('OpenCode profile enable toggles restart the collector mode so limits sourc
   assert.match(handler, /profiles\[name\]\.enabled = Boolean\(enabled\);/);
   assert.match(handler, /saveSettings\(\{ throwOnError: true \}\);/);
   assert.match(handler, /opencodeStatusCache = \{ value: null, at: 0 \};/);
-  assert.match(handler, /startMode\(\)/);
+  assert.match(handler, /queueLimitInvalidation\(\{ provider: 'opencode', accountName: name \}, 'profile-state'/);
+  assert.match(handler, /clear: !enabled/);
+  assert.match(handler, /refresh: Boolean\(enabled\)/);
+  assert.doesNotMatch(handler, /startMode\(\)/);
 });
 
 test('Codex account panel supports per-account enable toggles without showing timestamps', () => {
@@ -473,11 +490,13 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(findExistingBody, /if \(identity\.accountKey && account\.accountKey && !codexEmailDerivedAccountKey\(account, identity\)\)/);
   assert.match(main, /function codexEmailDerivedAccountKey\(account, identity\)/);
   const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
-  assert.match(refreshBody, /limitProviders: 'codex'/);
-  assert.match(refreshBody, /includeLiveCodexAccount: false/);
-  assert.match(refreshBody, /codexManagedAccounts: \[account\]/);
-  assert.match(refreshBody, /mergeCodexTransientWindows\(latestStats\?\.limits, summary\)/);
+  assert.match(refreshBody, /deviceRuntimeHandle\.refreshLimits\(\{/);
+  assert.match(refreshBody, /provider: 'codex'/);
+  assert.match(refreshBody, /accountId: account\.id/);
+  assert.match(refreshBody, /accountKey: account\.accountKey \|\| ''/);
+  assert.match(refreshBody, /result\?\.snapshot \|\| deviceRuntimeHandle\.getSnapshot\(\)\?\.limits/);
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
+  assert.doesNotMatch(refreshBody, /collectLimitsOnce/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(renderLimits, /id === 'codex' \? \{\s*accountTitle: true,\s*allowSystemSwitch: true\s*\} : undefined/s);
   assert.doesNotMatch(
@@ -650,15 +669,19 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(volcengineUrlBody, /console\.volcengine\.com\/ark\/region:ark\+cn-beijing\/openManagement/);
 });
 
-test('Kimi account panel opens the allowlisted Code console', () => {
+test('Kimi account panel stores web access separately and opens the allowlisted Code console', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /data-i18n="settings\.kimi\.title">Kimi Account<\/span>/);
   assert.match(html, /data-i18n="settings\.kimi\.openBrowser">Open Kimi Code Console<\/button>/);
-  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*data-i18n="settings\.kimi\.saveApiKey">/);
+  assert.match(html, /settings\.kimi\.step2[\s\S]*Application\/Storage[\s\S]*Cookies[\s\S]*www\.kimi\.com/);
+  assert.match(html, /settings\.kimi\.step3[\s\S]*Find kimi-auth and copy its Value/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*placeholder="kimi-auth=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*?<details class="kimi-api-fallback">[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*data-i18n="settings\.kimi\.saveApiKey">/);
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   assert.match(setupBody, /saveSettings\(\{ kimiApiKey: input\.value \}\)/);
+  assert.match(setupBody, /saveSettings\(\{ kimiWebAccessToken: input\.value \}\)/);
+  assert.match(setupBody, /saveSettings\(\{ kimiApiKey: '', kimiWebAccessToken: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(kimiPlatformUrl\(\)\)/);
   const urlBody = functionBody(app, 'kimiPlatformUrl', 'renderExternalProviderStatus');
   assert.match(urlBody, /return 'https:\/\/www\.kimi\.com\/code\/console';/);
@@ -862,6 +885,8 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  assert.match(credentialStore, /kimiWebAccessToken: \['providers', 'kimi', 'webAccessToken'\]/);
+  assert.match(body, /kimiWebAccessTokenConfigured: Boolean\(currentKimiWebAccessToken\(\)\)/);
   const mimoRendererShape = main.slice(
     main.indexOf('function mimoAccountsForRenderer'),
     main.indexOf('function mimoManagedAccountsForCollector')
@@ -929,10 +954,10 @@ test('main settings normalize the Z.ai API region', () => {
     main.indexOf("ipcMain.handle('settings:update'"),
     main.indexOf("ipcMain.handle('customPricing:list'")
   );
-  assert.match(handler, /const previousZaiApiRegion = settings\.zaiApiRegion;/);
   assert.match(handler, /if \(patch\.zaiApiRegion !== undefined\) normalizedPatch\.zaiApiRegion = normalizeZaiApiRegion\(patch\.zaiApiRegion\);/);
-  assert.match(handler, /zaiApiRegion: patch\.zaiApiRegion !== undefined \? normalizeZaiApiRegion\(patch\.zaiApiRegion\) : normalizeZaiApiRegion\(settings\.zaiApiRegion \|\| 'global'\)/);
-  assert.match(handler, /settings\.zaiApiRegion !== previousZaiApiRegion/);
+  assert.match(handler, /const runtimeChange = classifySettingsChange\(previousRuntimeSettings, settings\);/);
+  assert.match(handler, /for \(const scope of runtimeChange\.limitScopes\)/);
+  assert.match(handler, /queueLimitInvalidation\(scope, 'settings-change'/);
 });
 
 test('main settings migration preserves explicit AI limit provider selections', () => {
@@ -983,6 +1008,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.match(controls, /data-i18n="settings\.collection\.cadence"/);
   assert.match(controls, /value="live"/);
   assert.match(controls, /value="smart"[\s\S]*data-i18n="settings\.collection\.mode\.smart"/);
+  assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects after agent activity, with an hourly reconciliation; fixed intervals turn off file watching\.'/);
   assert.match(controls, /<option value="300000"/);
   assert.match(controls, /<option value="900000"/);
   assert.match(controls, /<option value="1800000"/);
@@ -990,7 +1016,6 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.doesNotMatch(controls, /<option value="3600000"/);
   assert.doesNotMatch(controls, /id="collectionModeInput"/);
   assert.doesNotMatch(controls, /id="collectionIntervalInput"/);
-  assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects after agent activity, with an hourly reconciliation; fixed intervals turn off file watching\.'/);
 
   const app = readRendererFile('app.js');
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
@@ -1032,43 +1057,42 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
   assert.match(listenerSlice, /saveSettings\(\{ syncUploadIntervalMs: Number\(els\.syncUploadIntervalInput\.value\) \}\)/);
 });
 
-test('main settings normalize collection cadence and restart collectors when it changes', () => {
+test('main settings normalize collection cadence and restart only the device runtime when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   assert.match(main, /function normalizeCollectionMode/);
   assert.match(main, /function normalizeCollectionIntervalMs/);
   assert.match(main, /COLLECTION_MODE_VALUES = new Set\(\[[^\]]*'smart'/);
-  assert.match(main, /COLLECTION_INTERVAL_OPTIONS = \[[^\]]*10 \* 60 \* 1000/);
+  assert.match(main, /SMART_COLLECTION_INTERVAL_MS = 10 \* 60 \* 1000/);
+  // Smart's fixed cadence must not enter the persisted-interval allowlist, or a
+  // smart-mode value survives a switch back to live and changes its backstop.
+  assert.doesNotMatch(main, /COLLECTION_INTERVAL_OPTIONS = \[[^\]]*10 \* 60 \* 1000/);
 
   const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
   assert.match(defaults, /collectionMode: 'live'/);
   assert.match(defaults, /collectionIntervalMs: 5 \* 60 \* 1000/);
 
-  const syncCollector = main.slice(main.indexOf('function startSyncCollector'), main.indexOf('function stopHostStats'));
-  assert.match(syncCollector, /intervalMs: collectorIntervalMs\(\)/);
-  assert.match(syncCollector, /watchEnabled: collectorWatchEnabled\(\)/);
-  assert.match(syncCollector, /watchUsePolling: collectorWatchUsePolling\(\)/);
-  assert.match(syncCollector, /watchTriggersCollection: collectorWatchTriggersCollection\(\)/);
-  assert.match(syncCollector, /intervalRequiresActivity: collectorIntervalRequiresActivity\(\)/);
+  const usageConfig = functionBody(main, 'electronUsageConfig', 'electronLimitsConfig');
+  assert.match(usageConfig, /intervalMs: collectorIntervalMs\(\)/);
+  assert.match(usageConfig, /watchEnabled: collectorWatchEnabled\(\)/);
+  assert.match(usageConfig, /watchUsePolling: collectorWatchUsePolling\(\)/);
+  assert.match(usageConfig, /watchTriggersCollection: collectorWatchTriggersCollection\(\)/);
+  assert.match(usageConfig, /intervalRequiresActivity: collectorIntervalRequiresActivity\(\)/);
 
-  const localCollector = main.slice(main.indexOf('function startLocalCollector'), main.indexOf('function scheduleStreamRetry'));
-  assert.match(localCollector, /intervalMs: collectorIntervalMs\(\)/);
-  assert.match(localCollector, /watchEnabled: collectorWatchEnabled\(\)/);
-  assert.match(localCollector, /watchUsePolling: collectorWatchUsePolling\(\)/);
-  assert.match(localCollector, /watchTriggersCollection: collectorWatchTriggersCollection\(\)/);
-  assert.match(localCollector, /intervalRequiresActivity: collectorIntervalRequiresActivity\(\)/);
+  // Smart mode keeps watching (native events) but never scans on the event itself.
+  assert.match(main, /function collectorWatchUsePolling[\s\S]*?=== 'live'/);
+  assert.match(main, /function collectorIntervalRequiresActivity[\s\S]*?=== 'smart'/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
-  assert.match(updateHandler, /previousCollectionMode/);
-  assert.match(updateHandler, /previousCollectionIntervalMs/);
+  assert.match(updateHandler, /const previousRuntimeSettings = JSON\.parse\(JSON\.stringify\(settings\)\);/);
   assert.match(updateHandler, /normalizedPatch\.collectionMode = normalizeCollectionMode/);
   assert.match(updateHandler, /normalizedPatch\.collectionIntervalMs = normalizeCollectionIntervalMs/);
   assert.match(updateHandler, /collectionMode: normalizeCollectionMode/);
   assert.match(updateHandler, /collectionIntervalMs: normalizeCollectionIntervalMs/);
-  assert.match(updateHandler, /settings\.collectionMode !== previousCollectionMode/);
-  assert.match(updateHandler, /settings\.collectionIntervalMs !== previousCollectionIntervalMs/);
+  assert.match(updateHandler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
+  assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
 });
 
-test('main settings normalize sync upload intervals and restart sync collectors when it changes', () => {
+test('main settings normalize sync upload intervals and restart only the device runtime when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
   assert.match(main, /createSyncUploadScheduler/);
@@ -1085,37 +1109,37 @@ test('main settings normalize sync upload intervals and restart sync collectors 
   const syncCollector = main.slice(main.indexOf('function startSyncCollector'), main.indexOf('// Host mode'));
   assert.match(syncCollector, /createSyncUploadScheduler\(\{/);
   assert.match(syncCollector, /intervalMs: syncUploadIntervalMs\(\)/);
-  assert.match(syncCollector, /const visibleSummary = \{[\s\S]*summaryWithArchivedClientUsage\(summary\)[\s\S]*syncUploadIntervalMs: syncUploadIntervalMs\(\)[\s\S]*\};/);
-  assert.match(syncCollector, /await syncUploadScheduler\.enqueue\(visibleSummary\)/);
+  assert.match(syncCollector, /const visibleSummary = \{[\s\S]*\.\.\.summary,[\s\S]*syncUploadIntervalMs: syncUploadIntervalMs\(\)[\s\S]*\};/);
+  assert.match(syncCollector, /transformUsage: summaryWithArchivedClientUsage/);
+  assert.match(syncCollector, /await syncUploadScheduler\.enqueue\(visibleSummary, revision\)/);
 
   const hostCollector = main.slice(main.indexOf('function startHostCollector'), main.indexOf('function stopHostStats'));
   assert.doesNotMatch(hostCollector, /createSyncUploadScheduler|syncUploadScheduler/);
   assert.match(hostCollector, /embeddedHub\.hub\.ingest\(payload\)/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
-  assert.match(updateHandler, /previousSyncUploadIntervalMs/);
   assert.match(updateHandler, /normalizedPatch\.syncUploadIntervalMs = normalizeSyncUploadIntervalMs/);
   assert.match(updateHandler, /syncUploadIntervalMs: normalizeSyncUploadIntervalMs/);
-  assert.match(updateHandler, /\(settings\.hubMode === 'client' && settings\.syncUploadIntervalMs !== previousSyncUploadIntervalMs\)/);
+  assert.match(updateHandler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
+  assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
 });
 
-test('main collectors pass GUI limit credentials in every widget mode', () => {
+test('main collectors share one live GUI limit credential resolver in every widget mode', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const runtimeConfig = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'runtimeConfig.js'), 'utf8');
   const collectors = [
     functionBodyBeforeMarker(main, 'startSyncCollector', '// Host mode'),
     functionBody(main, 'startHostCollector', 'stopHostStats'),
     functionBody(main, 'startLocalCollector', 'scheduleStreamRetry')
   ];
   for (const collector of collectors) {
-    assert.match(collector, /zaiApiKey: settings\.zaiApiKey \|\| ''/);
-    assert.match(collector, /zaiApiRegion: settings\.zaiApiRegion \|\| 'global'/);
-    assert.match(collector, /volcengineAccessKeyId: settings\.volcengineAccessKeyId \|\| ''/);
-    assert.match(collector, /volcengineSecretAccessKey: settings\.volcengineSecretAccessKey \|\| ''/);
-    assert.match(collector, /volcengineRegion: settings\.volcengineRegion \|\| ''/);
-    assert.match(collector, /qoderCookie: settings\.qoderCookie \|\| ''/);
-    assert.match(collector, /qoderSite: settings\.qoderSite \|\| 'global'/);
-    assert.match(collector, /ollamaCookie: settings\.ollamaCookie \|\| ''/);
+    assert.match(collector, /limitsOptions: electronLimitsConfig\(\)/);
+    assert.match(collector, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
   }
+  for (const key of [
+    'zaiApiKey', 'zaiApiRegion', 'volcengineAccessKeyId', 'volcengineSecretAccessKey',
+    'volcengineRegion', 'qoderCookie', 'qoderSite', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
+  ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
 });
 
 test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {

@@ -4,25 +4,25 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Device usage details:** Expand a device to see its tool and model usage for Day, Month, and Total, together with its operating system, Widget or Agent version, and last sync time. (#206, #208)
+- **Windows Accent Blur:** Windows users can choose the experimental Accent Blur style under **Settings → Appearance → Windows Glass Style**. It keeps the background translucent and blurred when the window is unfocused, with an automatic Acrylic fallback on unsupported systems. (#229)
 
 ### Improved
-- **Credential storage:** GUI-managed credentials are now separated from preferences in a permission-restricted local store, with safer migration and rollback when a save fails. (#200)
-- **Footer controls:** Refresh and Settings now share a compact footer control that reveals the other button on hover or keyboard focus; their order can also be swapped under Appearance. (#203)
-- **Windows application signing:** The installed application executable is now signed as well as the installer and portable download. (#198)
+- **Usage and limits resilience:** Token usage and AI Tool Limits now refresh independently. Slow or failing providers use bounded concurrency and retries without blocking usage or other limits updates. (#225, #227)
+- **Glass appearance:** Custom glass tint and opacity now render without decorative color shifts, while very low opacity in macOS transparent mode avoids Chromium compositing artifacts. (#231)
+- **WSL usage collection:** Every requested tool can now be scanned in each detected WSL home without duplicating usage from the native Windows host.
 
 ### Fixed
-- **Grok limits:** Unified credit usage now honors standard proxy settings and no longer falls back to the legacy billing endpoint. (#175)
-- **Live usage animation:** Totals, row values, and bars no longer restart or jump during unrelated refreshes, and continue smoothly when data changes mid-animation. (#204)
-- **Disabled limit accounts:** Disabled providers no longer remain stuck on Checking, and pending checks clear immediately when a provider is turned off. (#205)
+- **Large session lists:** Hub-backed Month and Total session lists remain responsive during live updates and keep stable scroll geometry as rows appear. (#235)
+- **Custom model pricing:** Pricing rows once again keep model details readable and the edit and remove actions correctly aligned. (#236)
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.32.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0-arm64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.32.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-Setup-0.32.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.32.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.32.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.34.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-0.34.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.34.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-0.34.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.34.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-Setup-0.34.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.34.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-0.34.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.34.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-0.34.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -60,25 +60,25 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **设备用量明细：** 展开设备即可查看其在今日、本月与总计范围内的工具及模型用量，并显示操作系统、Widget 或 Agent 版本及上次同步时间。（#206、#208）
+- **Windows Accent Blur：** Windows 用户现在可以在 **设置 → 外观 → Windows 玻璃样式** 中选择实验性的 Accent Blur；窗口失去焦点时背景仍保持半透明和模糊，不支持时会自动回退到 Acrylic。（#229）
 
 ### 改进
-- **凭据存储：** GUI 管理的凭据现已与偏好设置分离，存入权限受限的本地凭据文件，并在迁移或保存失败时更安全地保留原有数据。（#200）
-- **底部操作：** 刷新与设置现在共用一个紧凑的底部操作组；将鼠标移到按钮上或用键盘聚焦时会显示另一个按钮，也可在外观设置中交换两者顺序。（#203）
-- **Windows 应用签名：** 除安装包与便携版外，安装后的应用程序可执行文件现在也会完成签名。（#198）
+- **用量与额度刷新韧性：** Token 用量与 AI 工具额度现在独立刷新；缓慢或失败的提供商会通过有限并发与重试处理，不再阻塞用量或其他额度更新。（#225、#227）
+- **玻璃效果呈现：** 自定义玻璃色调与透明度不再受装饰性叠色影响；macOS 透明模式在极低透明度下也能避免 Chromium 合成异常。（#231）
+- **WSL 用量采集：** 每个检测到的 WSL 主目录现在都能扫描所有指定工具，同时避免重复计入 Windows 主机上的原生用量。
 
 ### 修复
-- **Grok 额度：** 统一额度用量现在会遵循标准代理设置，且不再回退到旧版额度接口。（#175）
-- **实时用量动画：** 总计、列表数值与进度条不会再因无关刷新而重新开始或跳动，数据在动画途中变化时也会平滑衔接。（#204）
-- **已禁用额度账号：** 提供者停用后不再一直显示“检查中”，尚未完成的检查也会立即清除。（#205）
+- **大型会话列表：** 通过 Hub 加载的月度与总计会话列表在实时更新时保持流畅，并在新增行时维持稳定的滚动位置。（#235）
+- **自定义模型定价：** 定价行现在会正确显示模型详情，并恢复编辑与移除操作的对齐布局。（#236）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.32.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0-arm64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.32.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-Setup-0.32.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.32.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.32.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.32.0/Token-Monitor-0.32.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.34.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-0.34.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.34.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-0.34.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.34.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-Setup-0.34.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.34.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-0.34.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.34.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.34.0/Token-Monitor-0.34.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>

@@ -230,6 +230,9 @@ test('Home limit provider settings stay compact and list only enabled providers'
   assert.match(homeLimitRows, /const hasConfiguredOrder = Boolean\(state\.settings\?\.homeLimitProviderOrder\)/);
   assert.doesNotMatch(homeLimitRows, /normalizeLimitProviderOrder\(state\.settings\?\.limitProviderOrder, LIMIT_PROVIDERS\)\.join\(','\) !== DEFAULT_LIMIT_PROVIDER_ORDER/);
   assert.match(homeLimitRows, /sort: hasConfiguredOrder \? 'configured' : 'remaining'/);
+  assert.match(homeLimitRows, /homeLimitAccountTitle\(id, provider, index\)/);
+  assert.match(homeLimitRows, /showHomeLimitProviderNames === true \|\| state\.settings\?\.showToolIcons === false/);
+  assert.match(homeLimitRows, /`\$\{providerTitle\} · \$\{accountTitle\}`/);
   assert.match(renderHomeLimitProviderList, /enabledLimitProviderSet\(\)/);
   assert.match(renderHomeLimitProviderList, /orderedLimitProviders\(LIMIT_PROVIDERS, homeLimitProviderOrderValue\(\)\)/);
   assert.match(renderHomeLimitProviderList, /const hasCustomOrder = Boolean\(state\.settings\?\.homeLimitProviderOrder\);/);
@@ -284,7 +287,7 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.match(cssRule(css, '.view-switcher'), /flex:\s*0 1 auto/);
   assert.match(cssRule(css, '.view-switcher-current'), /min-width:\s*0/);
   assert.match(cssRule(css, '.view-switcher-current'), /color:\s*var\(--muted\)/);
-  assert.doesNotMatch(cssRule(css, '.view-switcher-current'), /color:\s*var\(--green\)/);
+  assert.doesNotMatch(cssRule(css, '.view-switcher-current'), /color:\s*var\(--accent\)/);
   assert.match(cssRule(css, '.view-switcher-disclosure'), /flex:\s*0 0 24px/);
   assert.match(cssRule(css, '.view-switcher-menu'), /position:\s*absolute/);
   assert.match(cssRule(css, '.view-switcher-menu'), /width:\s*100%/);
@@ -309,6 +312,30 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.doesNotMatch(css, /@media \(max-width: 280px\)[\s\S]*\.view-switcher-current > \.view-switcher-icon/);
   assert.match(cssRule(css, '.view-switcher-icon'), /flex:\s*0 0 auto/);
   assert.doesNotMatch(css, /\.view-dock/);
+});
+
+test('Home-launched secondary views expose an accessible return action', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+  const homeModuleShellBody = functionBody(app, 'homeModuleShell', 'renderHomeLimitModule');
+  const setBreakdownBody = functionBody(app, 'setBreakdown', 'renderBreakdownChange');
+
+  assert.match(html, /id="viewBackRow" class="view-back-row hidden"/);
+  assert.match(html, /id="backHomeButton"[^>]*data-i18n-title="views\.backHome"[^>]*data-i18n-aria-label="views\.backHome"/);
+  assert.match(html, /class="back-home-icon" aria-hidden="true"><\/span>/);
+  assert.doesNotMatch(html, /class="back-home-icon"[^>]*>←<\/span>/);
+  assert.match(app, /state\.homeReturnVisible = false/);
+  assert.match(homeModuleShellBody, /renderBreakdownChange\(viewId, \{ fromHome: true \}\)/);
+  assert.equal((homeModuleShellBody.match(/\{ fromHome: true \}/g) || []).length, 2);
+  assert.match(setBreakdownBody, /state\.homeReturnVisible = options\.fromHome === true && state\.breakdown === 'home' && next !== 'home'/);
+  assert.match(app, /els\.viewBackRow\?\.classList\.toggle\('hidden', state\.breakdown === 'home' \|\| !state\.homeReturnVisible\)/);
+  assert.match(app, /els\.backHomeButton\?\.addEventListener\('click',[\s\S]*?renderBreakdownChange\('home'\)/);
+  assert.match(cssRule(css, '.view-back-row'), /min-height:\s*26px/);
+  assert.match(cssRule(css, '.view-back-row.hidden'), /display:\s*none/);
+  assert.match(cssRule(css, '.back-home-button'), /height:\s*26px/);
+  assert.match(cssRule(css, '.back-home-button:focus-visible'), /outline:\s*2px solid/);
+  assert.match(cssRule(css, '.back-home-icon'), /mask:\s*url\("icons\/actions\/arrow-left\.svg"\)/);
 });
 
 test('Projects view separates visibility from metadata collection', () => {

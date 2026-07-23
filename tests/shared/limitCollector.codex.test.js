@@ -483,7 +483,7 @@ test('createLimitsCollector scoped snapshot preserves unrelated providers and ac
   assert.equal(summary.providers.find((provider) => provider.accountKey === 'codex-b').windows[0].usedPercent, 30);
 });
 
-test('createLimitsCollector retains recent Codex quota windows across one empty refresh', async () => {
+test('LimitsRuntime compatibility treats a successful empty Codex refresh as authoritative', async () => {
   let now = Date.parse('2026-06-01T00:00:00Z');
   let calls = 0;
   const collector = createLimitsCollector({
@@ -505,12 +505,12 @@ test('createLimitsCollector retains recent Codex quota windows across one empty 
   const second = await collector.snapshot(true);
 
   assert.equal(first.providers[0].windows.length, 1);
-  assert.equal(second.providers[0].windows.length, 1);
-  assert.equal(second.providers[0].windows[0].remainingPercent, 80);
-  assert.equal(second.providers[0].updatedAt, '2026-06-01T00:00:00.000Z');
+  assert.equal(second.providers[0].status, 'ok');
+  assert.equal(second.providers[0].windows.length, 0);
+  assert.equal(second.providers[0].updatedAt, '2026-06-01T00:05:00.000Z');
 });
 
-test('createLimitsCollector retains the only live Codex account across a transient fetch error', async () => {
+test('LimitsRuntime compatibility retains Codex windows while exposing a transient attempt status', async () => {
   let now = Date.parse('2026-06-01T00:00:00Z');
   let calls = 0;
   const collector = createLimitsCollector({
@@ -534,7 +534,7 @@ test('createLimitsCollector retains the only live Codex account across a transie
   const second = await collector.snapshot(true);
 
   assert.equal(first.providers[0].windows[0].remainingPercent, 80);
-  assert.equal(second.providers[0].status, 'ok');
+  assert.equal(second.providers[0].status, 'unavailable');
   assert.equal(second.providers[0].accountKey, 'sha256:codex-live');
   assert.equal(second.providers[0].accountEmail, 'live@example.com');
   assert.equal(second.providers[0].source, 'rpc');
@@ -542,7 +542,28 @@ test('createLimitsCollector retains the only live Codex account across a transie
   assert.equal(second.providers[0].updatedAt, '2026-06-01T00:00:00.000Z');
 });
 
-test('createLimitsCollector seeds retention from previousLimits so a collector restart keeps a transiently-failing Codex account', async () => {
+test('LimitsRuntime compatibility keeps retries demand-driven instead of starting background timers', async () => {
+  let scheduledTimers = 0;
+  const collector = createLimitsCollector({
+    limitProviders: 'codex',
+    limitsRefreshMs: 60_000
+  }, {
+    setTimeout: () => {
+      scheduledTimers += 1;
+      return scheduledTimers;
+    },
+    clearTimeout: () => {},
+    providerFetchers: {
+      codex: async () => ({ provider: 'codex', status: 'unavailable', windows: [] })
+    }
+  });
+
+  await collector.snapshot(true);
+  assert.equal(scheduledTimers, 0);
+  collector.stop();
+});
+
+test('LimitsRuntime compatibility seeds last-good windows across a transient first refresh', async () => {
   // Switching the active Codex account reloads the collector (startMode), which
   // used to reset the in-memory transient-window cache. Seeding it from the last
   // published limits keeps each account's bars through the cold RPC/token-refresh
@@ -582,7 +603,7 @@ test('createLimitsCollector seeds retention from previousLimits so a collector r
   const first = await collector.snapshot(true);
   const c = first.providers.find((provider) => provider.accountKey === 'sha256:codex-c');
 
-  assert.equal(c.status, 'ok');
+  assert.equal(c.status, 'unavailable');
   assert.equal(c.windows.length, 1);
   assert.equal(c.windows[0].remainingPercent, 30);
   assert.equal(c.updatedAt, seededAt);
@@ -1041,4 +1062,31 @@ test('fetchCodexLimits augments reset credits expiry from the Codex OAuth endpoi
       '2026-07-18T00:39:53.731Z'
     ]
   });
+});
+
+test('LimitsRuntime compatibility snapshot probes initially and reuses the configured TTL', async () => {
+  let now = Date.parse('2026-07-21T00:00:00.000Z');
+  let calls = 0;
+  const collector = createLimitsCollector({
+    limitProviders: ['codex'],
+    limitsRefreshMs: 60_000
+  }, {
+    now: () => now,
+    providerFetchers: {
+      codex: async () => {
+        calls += 1;
+        return codexProvider('sha256:codex-a', 'a@example.com', 80, new Date(now).toISOString());
+      }
+    }
+  });
+
+  assert.equal((await collector.snapshot()).providers.length, 1);
+  assert.equal(calls, 1);
+  now += 59_999;
+  await collector.snapshot();
+  assert.equal(calls, 1);
+  now += 1;
+  await collector.snapshot();
+  assert.equal(calls, 2);
+  collector.stop();
 });

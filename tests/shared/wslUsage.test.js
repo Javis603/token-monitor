@@ -16,11 +16,12 @@ test('homeHasData returns the client ids whose markers are present', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const present = new Set([
     `${home}\\.codex\\sessions`,
-    `${home}\\.hermes`
+    `${home}\\.hermes`,
+    `${home}\\.local\\share\\opencode`
   ]);
   const existsSync = (p) => present.has(p);
   const ids = homeHasData(home, existsSync);
-  assert.deepEqual([...ids].sort(), ['codex', 'hermes']);
+  assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode']);
 });
 
 test('homeHasData maps an alternate-root marker to its client id', () => {
@@ -216,71 +217,27 @@ function tokscaleStub(map) {
   };
 }
 
-// Regression for the P1 WSL double-count: tokscale 3.1.3's Windows Zed scanner
-// falls back to the host %LOCALAPPDATA% DB when a --home lacks a WSL Zed DB, so
-// passing `zed` to a home without its own threads.db would re-read the host's
-// native Zed usage once per such home. collectWslUsage must drop zed from a
-// home's scan unless that home holds the threads.db FILE (tokscale checks
-// is_file(), so an empty threads/ directory must NOT keep zed).
-test('collectWslUsage passes zed only to homes that hold their own threads.db', async () => {
+test('collectWslUsage passes every requested client to each discovered home', async () => {
   const seenClientsPerHome = {};
   const runTokscale = async ({ clients, flags }) => {
     const home = flags[flags.indexOf('--home') + 1];
     (seenClientsPerHome[home] ??= []).push(clients);
     return { entries: [] };
   };
-  // alice: Claude only. bob: empty threads/ DIR but no threads.db (must drop zed).
-  // carol: a real threads.db file (must keep zed).
   const deps = {
     platform: 'win32',
     exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
-    readdirSync: () => ['alice', 'bob', 'carol'],
+    readdirSync: () => ['alice', 'carol'],
     existsSync: (p) =>
       p.endsWith('\\alice\\.claude\\projects') ||
-      p.endsWith('\\bob\\.claude\\projects') ||
       p === '\\\\wsl$\\Ubuntu\\home\\carol\\.local\\share\\zed\\threads\\threads.db'
   };
   await collectWslUsage(
-    { clients: 'claude,zed', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale },
+    { clients: ' claude, zed ', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale },
     deps
   );
-  for (const c of seenClientsPerHome['\\\\wsl$\\Ubuntu\\home\\alice']) {
-    assert.ok(!c.split(',').includes('zed'), `alice scan got zed: ${c}`);
-    assert.ok(c.split(',').includes('claude'), `alice scan missing claude: ${c}`);
-  }
-  for (const c of seenClientsPerHome['\\\\wsl$\\Ubuntu\\home\\bob']) {
-    assert.ok(!c.split(',').includes('zed'), `bob (dir-only, no .db) scan got zed: ${c}`);
-  }
-  for (const c of seenClientsPerHome['\\\\wsl$\\Ubuntu\\home\\carol']) {
-    assert.ok(c.split(',').includes('zed'), `carol scan missing zed: ${c}`);
-  }
-});
-
-// Non-gated clients pass through untouched even when their data lives in an
-// alternate root, so tokscale's own alternate-root handling is preserved.
-test('collectWslUsage passes a non-gated client through regardless of which root holds it', async () => {
-  const seen = {};
-  const runTokscale = async ({ clients, flags }) => {
-    const home = flags[flags.indexOf('--home') + 1];
-    (seen[home] ??= []).push(clients);
-    return { entries: [] };
-  };
-  // Home holds Claude data ONLY under the transcripts alternate root.
-  const deps = {
-    platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
-    readdirSync: () => ['alice'],
-    existsSync: (p) => p === '\\\\wsl$\\Ubuntu\\home\\alice\\.claude\\transcripts'
-  };
-  await collectWslUsage(
-    { clients: 'claude,zed', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale },
-    deps
-  );
-  const scans = seen['\\\\wsl$\\Ubuntu\\home\\alice'];
-  assert.ok(scans && scans.length === 3, 'transcripts-only home should still be scanned');
-  for (const c of scans) {
-    assert.ok(c.split(',').includes('claude'), `claude dropped: ${c}`);
-    assert.ok(!c.split(',').includes('zed'), `zed should be gated out (no threads.db): ${c}`);
+  for (const home of ['\\\\wsl$\\Ubuntu\\home\\alice', '\\\\wsl$\\Ubuntu\\home\\carol']) {
+    assert.deepEqual(seenClientsPerHome[home], ['claude,zed', 'claude,zed', 'claude,zed']);
   }
 });
 

@@ -5,10 +5,11 @@ const path = require('node:path');
 const { defaultDeviceId, loadDotEnv, parseArgs, pidFilePath } = require('../shared/config');
 const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
-const { collectUsageOnce, normalizeHistoryIntervalMs, startCollector } = require('../shared/collector');
+const { normalizeHistoryIntervalMs } = require('../shared/collector');
 const { normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limitCollector');
 const { postSyncPayload } = require('../shared/syncPayload');
 const { applyProjectRollups } = require('../shared/usage');
+const { runAgent, runAgentOnce } = require('./runtime');
 const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
@@ -39,7 +40,7 @@ const opencodeCookie = String(process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '').t
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
 
-const collectorOptions = {
+const usageOptions = {
   clients,
   allTimeSince,
   commandTimeoutMs,
@@ -51,10 +52,18 @@ const collectorOptions = {
   historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
   dailyHistoryArchiveEnabled: sessionUsageArchiveEnabled,
   dailyHistoryArchiveWriteEnabled: !dryRun,
+  anchorPersistenceEnabled: !once && !dryRun,
+  intervalMs,
+  watchEnabled,
+  watchDebounceMs,
+  wslScanEnabled,
+  onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`),
+  logger: (message) => (dryRun ? console.error(message) : console.log(message))
+};
+const limitsOptions = {
   limitsEnabled,
   limitProviders,
   limitsRefreshMs,
-  wslScanEnabled,
   opencodeCookie
 };
 let sessionUsageArchive;
@@ -91,45 +100,50 @@ async function postUsage(summary) {
 }
 
 async function deliver(summary) {
-  const visibleSummary = summaryWithSessionUsageArchive(summary);
-  if (dryRun) { console.log(JSON.stringify(visibleSummary, null, 2)); return; }
-  await postUsage(visibleSummary);
-  console.log(`[${new Date().toISOString()}] posted ${visibleSummary.deviceId}: today=${visibleSummary.today.totalTokens} month=${visibleSummary.month.totalTokens} allTime=${visibleSummary.allTime.totalTokens}`);
+  if (dryRun) { console.log(JSON.stringify(summary, null, 2)); return; }
+  await postUsage(summary);
+  console.log(`[${new Date().toISOString()}] posted ${summary.deviceId}: today=${summary.today.totalTokens} month=${summary.month.totalTokens} allTime=${summary.allTime.totalTokens}`);
 }
 
-function registerPidFile() {
+function registerPidFile(stopRuntime) {
   const pidPath = pidFilePath();
   fs.mkdirSync(path.dirname(pidPath), { recursive: true });
   fs.writeFileSync(pidPath, String(process.pid), 'utf8');
   const cleanup = () => { try { fs.unlinkSync(pidPath); } catch (_) {} };
   process.on('exit', cleanup);
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    process.on(sig, () => { cleanup(); process.exit(0); });
+    process.on(sig, () => {
+      try { stopRuntime?.(); } catch (_) {}
+      cleanup();
+      process.exit(0);
+    });
   }
 }
 
 async function main() {
-  console.log(`Token Monitor agent device=${deviceId} hub=${hubUrl} intervalMs=${intervalMs} watch=${watchEnabled} projects=${projectsEnabled ? 'on' : 'off'} history=${historyEnabled ? 'on' : 'off'} sessionArchive=${sessionUsageArchiveEnabled ? 'on' : 'off'} limits=${limitsEnabled ? `${limitProviders || 'none'}:${limitsRefreshMs}ms` : 'off'}`);
+  const startupMessage = `Token Monitor agent device=${deviceId} hub=${hubUrl} intervalMs=${intervalMs} watch=${watchEnabled} projects=${projectsEnabled ? 'on' : 'off'} history=${historyEnabled ? 'on' : 'off'} sessionArchive=${sessionUsageArchiveEnabled ? 'on' : 'off'} limits=${limitsEnabled ? `${limitProviders || 'none'}:${limitsRefreshMs}ms` : 'off'}`;
+  if (dryRun) console.error(startupMessage);
+  else console.log(startupMessage);
   if (!secret) console.warn('Warning: TOKEN_MONITOR_SECRET is not set. Posting without authorization header.');
   // Claim archive ownership before either a one-shot or long-running scan so
   // Electron can yield before its history read-modify-write reaches disk.
-  if (!dryRun) registerPidFile();
+  let runtimeHandle = null;
+  if (!dryRun) registerPidFile(() => runtimeHandle?.stop());
+  const runtimeOptions = {
+    envelope: { deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent' },
+    usageOptions,
+    limitsOptions,
+    transformUsage: summaryWithSessionUsageArchive,
+    deliver,
+    dryRun,
+    onRuntime: (runtime) => { runtimeHandle = runtime; },
+    onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`)
+  };
   if (once) {
-    const summary = await collectUsageOnce({ ...collectorOptions, includeHistory: true });
-    await deliver(summary);
+    await runAgentOnce(runtimeOptions);
     return;
   }
-  startCollector({
-    ...collectorOptions,
-    intervalMs,
-    watchEnabled,
-    watchDebounceMs,
-    onUpdate: (summary, reason) => {
-      deliver(summary).catch((error) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`));
-    },
-    onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`),
-    logger: (msg) => console.log(msg)
-  });
+  runtimeHandle = runAgent(runtimeOptions);
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

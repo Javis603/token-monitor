@@ -66,7 +66,7 @@ test('device breakdown browser helper loads before app.js and keeps reduced-moti
   assert.match(css, /\.device-model-list \{/);
   assert.match(css, /\.device-model-row \{[\s\S]*justify-content: space-between;/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.row-accordion/);
-  assert.match(app, /const signature = JSON\.stringify\(\[\s*state\.settings\?\.showToolIcons === true,/);
+  assert.match(app, /const signature = JSON\.stringify\(\[\s*toolIconsEnabled\(state\.settings\?\.showToolIcons\),/);
   assert.match(app, /deviceDetail: \{[\s\S]*emptyText: breakdown\.totalTokens > 0 \? t\('devices\.detailsUnavailable'\) : t\('home\.noTools'\)/);
   assert.doesNotMatch(app, /deviceDetail: breakdown\.totalTokens > 0 \?/);
 });

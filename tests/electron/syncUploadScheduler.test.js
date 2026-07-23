@@ -275,3 +275,22 @@ test('stop clears a pending interval upload', async () => {
   assert.deepEqual(uploads, ['initial']);
   assert.equal(clock.timerCount(), 0);
 });
+
+test('explicit revisions prevent a stale callback from replacing newer pending data', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 600000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => uploads.push(summary.id)
+  });
+
+  await scheduler.enqueue({ id: 'initial' }, 1);
+  await scheduler.enqueue({ id: 'newer' }, 3);
+  await scheduler.enqueue({ id: 'stale' }, 2);
+  await scheduler.flush();
+
+  assert.deepEqual(uploads, ['initial', 'newer']);
+});

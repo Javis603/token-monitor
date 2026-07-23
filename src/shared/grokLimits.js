@@ -17,6 +17,7 @@ const { spawn } = require('node:child_process');
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { createOutboundFetch } = require('./outboundFetch');
+const { abortError } = require('./probeDeadline');
 
 const GROK_WEB_BILLING_GRPC_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
 const GROK_KEY_NAMES = ['GROK_BEARER_TOKEN'];
@@ -437,6 +438,8 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
   const command = grokRpcCommand(env, options);
   const args = grokRpcArgs(options);
   const timeoutMs = Number(deps.rpcTimeoutMs || deps.fetchTimeoutMs || 5000);
+  const signal = deps.signal;
+  if (signal?.aborted) throw abortError(signal);
 
   return new Promise((resolve, reject) => {
     let child;
@@ -448,6 +451,7 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
     function cleanup() {
       if (timer) clearTimeout(timer);
       timer = null;
+      signal?.removeEventListener?.('abort', onAbort);
       if (child && typeof child.kill === 'function') {
         try { child.kill(); } catch (_) {}
       }
@@ -459,6 +463,10 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
       cleanup();
       if (error) reject(error);
       else resolve(value);
+    }
+
+    function onAbort() {
+      finish(abortError(signal));
     }
 
     function writeJsonLine(value) {
@@ -504,6 +512,11 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
     }
 
     timer = setTimeout(() => finish(grokRpcError('Grok RPC timed out')), timeoutMs);
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
     child.on?.('error', finish);
     child.on?.('exit', (code) => {
       if (!settled) finish(grokRpcError(`Grok RPC exited before billing response (${code ?? 'unknown'})`));
@@ -558,7 +571,7 @@ function unauthorizedGrokProvider(updatedAt, source = 'web', sourceDetail = '') 
 
 function resolveGrokFetch(deps = {}) {
   if (typeof deps.fetch === 'function') return deps.fetch;
-  return createOutboundFetch(deps.env || process.env);
+  return createOutboundFetch(deps.env || process.env, deps);
 }
 
 function isRetryableNetworkError(error) {
@@ -650,6 +663,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
         windows
       });
     } catch (error) {
+      if (deps.signal?.aborted) throw abortError(deps.signal);
       const status = classifyGrokRpcError(error);
       if (!credential || status === 'unauthorized') {
         return status === 'unauthorized'
@@ -676,10 +690,12 @@ async function fetchGrokLimits(options = {}, deps = {}) {
       windows: []
     });
   }
+  if (deps.signal?.aborted) throw abortError(deps.signal);
   let windows;
   try {
     windows = await (deps.fetchWebGrpcBilling || fetchGrokWebGrpcBilling)(credential, deps);
   } catch (webError) {
+    if (deps.signal?.aborted) throw abortError(deps.signal);
     return normalizeLimitProvider({
       provider: 'grok',
       source: 'web',
@@ -690,6 +706,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
     });
   }
 
+  if (deps.signal?.aborted) throw abortError(deps.signal);
   try {
     return normalizeLimitProvider({
       provider: 'grok',
@@ -723,6 +740,7 @@ module.exports = {
   grokCredential,
   parseGrokBilling,
   parseGrokGrpcWebBilling,
+  resolveGrokFetch,
   fetchGrokRpcBilling,
   fetchGrokWebGrpcBilling,
   fetchGrokLimits,

@@ -6,7 +6,7 @@ const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
 const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama']);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
-const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'managed', 'unknown']);
+const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
 const WINDOW_ORDER = ['session', 'weekly', 'billing'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
@@ -80,6 +80,11 @@ function normalizeWindowLabel(value) {
   return clean.length <= 32 ? clean : '';
 }
 
+function normalizeWindowDetail(value) {
+  const raw = String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return raw.slice(0, 96);
+}
+
 function normalizeIsoTimestamp(value) {
   if (value === null || value === undefined || value === '') return null;
   let date;
@@ -131,6 +136,7 @@ function normalizeLimitWindow(input) {
     resetsAt: normalizeIsoTimestamp(input.resetsAt ?? input.resets_at ?? input.resetAt ?? input.reset_at),
     windowMinutes: numberOrNull(input.windowMinutes ?? input.window_minutes ?? input.windowDurationMins),
     resetDescription: input.resetDescription ? String(input.resetDescription) : '',
+    detail: normalizeWindowDetail(input.detail ?? input.detailText ?? input.detail_text),
     showMeter: input.showMeter !== false && input.meter !== false
   };
 }
@@ -263,14 +269,27 @@ function normalizeLimitProvider(input) {
   if (!input || typeof input !== 'object') return null;
   const provider = normalizeProviderId(input.provider);
   if (!provider) return null;
+  const accountLabel = normalizeAccountLabel(input.accountLabel);
   const windows = Array.isArray(input.windows)
     ? input.windows.map(normalizeLimitWindow).filter(Boolean)
     : [];
-  windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
+  if (provider === 'antigravity') {
+    const groupRank = (window) => {
+      const label = String(window.label || '').toLowerCase();
+      if (label.includes('gemini')) return 0;
+      if (label.includes('claude') || label.includes('gpt')) return 1;
+      return 2;
+    };
+    windows.sort((a, b) => groupRank(a) - groupRank(b)
+      || WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
+  } else {
+    windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
+  }
   return {
     provider,
     accountKey: input.accountKey ? String(input.accountKey) : '',
-    accountLabel: normalizeAccountLabel(input.accountLabel),
+    accountLabel,
+    planLabel: normalizeAccountLabel(input.planLabel),
     accountName: normalizeAccountName(input.accountName ?? input.accountLogin ?? input.login),
     accountEmail: normalizeAccountEmail(input.accountEmail ?? input.email),
     status: normalizeStatus(input.status),
@@ -367,6 +386,7 @@ function retainedCodexProvider(previousProvider, currentProvider, windows) {
     ...currentProvider,
     accountKey: currentProvider.accountKey || previousProvider.accountKey,
     accountLabel: currentProvider.accountLabel || previousProvider.accountLabel,
+    planLabel: currentProvider.planLabel || previousProvider.planLabel,
     accountName: currentProvider.accountName || previousProvider.accountName,
     accountEmail: currentProvider.accountEmail || previousProvider.accountEmail,
     source: currentProvider.source || previousProvider.source,
@@ -502,14 +522,15 @@ function publicLimits(limits) {
   return {
     updatedAt: normalized.updatedAt,
     refreshMs: normalized.refreshMs,
-    providers: normalized.providers.map(({ accountKey, accountEmail, accountName, accountLabel, ...provider }) => provider)
+    providers: normalized.providers.map(({ accountKey, accountEmail, accountName, accountLabel, planLabel, ...provider }) => provider)
   };
 }
 
 // Sync to the authenticated hub carries the full account identity (key, email,
-// display name, and plan label) so other devices can show which managed account each limit belongs
-// to. Hub ingest is Secret-protected; the PUBLIC surface is still scrubbed by
-// publicLimits() above, which drops every account identifier including email.
+// display name, legacy label, and explicit plan label) so other devices can show
+// which managed account each limit belongs to. Hub ingest is Secret-protected;
+// the PUBLIC surface is still scrubbed by publicLimits() above, which drops all
+// account and plan labels together with the account identifiers.
 function syncLimits(limits) {
   const normalized = normalizeLimitsSummary(limits);
   return {

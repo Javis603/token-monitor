@@ -96,6 +96,7 @@
   function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining' } = {}) {
     return (accounts || [])
       .map((account, index) => {
+        const providerId = String(account?.providerId || '').trim().toLowerCase();
         const windows = accountWindows(account)
           .map((window, windowIndex) => ({
             kind: String(window.kind || '').trim().toLowerCase(),
@@ -111,6 +112,7 @@
           }))
           .filter((window) => window.remainingPercent != null || window.planStatus === 'expired' || window.value)
           .sort((a, b) => {
+            if (providerId === 'antigravity') return a.index - b.index;
             const aPriority = windowPriority.get(a.kind) ?? 10;
             const bPriority = windowPriority.get(b.kind) ?? 10;
             return aPriority - bPriority || a.index - b.index;

@@ -3,6 +3,9 @@
 const crypto = require('node:crypto');
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
+const { runWithProbeDeadline } = require('./probeDeadline');
+
+const VOLCENGINE_FETCH_TIMEOUT_MS = 12_000;
 
 const VOLCENGINE_CODING_PLAN_URL = 'https://open.volcengineapi.com/?Action=GetCodingPlanUsage&Version=2024-01-01';
 const VOLCENGINE_ARK_CHAT_COMPLETIONS_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions';
@@ -343,6 +346,18 @@ function signVolcengineRequest({
   };
 }
 
+function fetchJsonWithDeadline(url, init, deps = {}) {
+  const deadlineMs = Number(deps.volcengineFetchTimeoutMs || deps.fetchTimeoutMs || VOLCENGINE_FETCH_TIMEOUT_MS);
+  return runWithProbeDeadline(
+    async ({ signal }) => {
+      const response = await (deps.fetch || fetch)(url, { ...init, signal });
+      const body = await response.json().catch(() => null);
+      return { response, body };
+    },
+    { signal: deps.signal, deadlineMs }
+  );
+}
+
 async function fetchVolcengineLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
@@ -375,7 +390,7 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({
       provider: 'volcengine',
       source: 'api',
-      status: error?.status || 'unavailable',
+      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
       updatedAt,
       windows: [],
       region: credentials.region
@@ -392,11 +407,11 @@ async function fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt
     date,
     ...credentials
   });
-  const response = await (deps.fetch || fetch)(VOLCENGINE_CODING_PLAN_URL, {
+  const { response, body } = await fetchJsonWithDeadline(VOLCENGINE_CODING_PLAN_URL, {
     method: 'POST',
     headers: signed.headers,
     body: signed.body
-  });
+  }, deps);
   if (!response.ok) {
     const error = new Error(`Volcengine Coding Plan returned ${response.status}`);
     error.status = response.status === 401 || response.status === 403
@@ -404,7 +419,7 @@ async function fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt
       : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
     throw error;
   }
-  const usage = parseVolcengineCodingPlanUsage(await response.json());
+  const usage = parseVolcengineCodingPlanUsage(body);
   return normalizeLimitProvider({
     provider: 'volcengine',
     accountKey: hashKey('volcengine', credentials.accessKeyId, credentials.region),
@@ -449,7 +464,7 @@ async function fetchVolcengineArkLimits(credentials, deps, now, updatedAt) {
 }
 
 async function probeVolcengineArkModel(credentials, deps, model, now) {
-  const response = await (deps.fetch || fetch)(VOLCENGINE_ARK_CHAT_COMPLETIONS_URL, {
+  const { response, body } = await fetchJsonWithDeadline(VOLCENGINE_ARK_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -461,8 +476,7 @@ async function probeVolcengineArkModel(credentials, deps, model, now) {
       max_tokens: 1,
       messages: [{ role: 'user', content: 'hi' }]
     })
-  });
-  const body = await response.json().catch(() => null);
+  }, deps);
   return {
     status: response.status,
     usage: parseVolcengineArkUsage({ headers: response.headers, body, now })
@@ -485,6 +499,7 @@ async function confirmVolcengineArkExhausted(credentials, deps, model, now, init
 }
 
 module.exports = {
+  VOLCENGINE_FETCH_TIMEOUT_MS,
   VOLCENGINE_CODING_PLAN_URL,
   VOLCENGINE_ARK_CHAT_COMPLETIONS_URL,
   volcengineCredentials,

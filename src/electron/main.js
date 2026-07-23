@@ -26,12 +26,12 @@ const motionPreferenceApi = require('./motionPreference');
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { startCollector, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
+const { lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
+const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { collectLimitsOnce, deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, ollamaSessionCookie } = require('../shared/limitCollector');
-const { mergeCodexTransientWindows } = require('../shared/limits');
+const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const { codexAuthIdentity, hashAccountKey } = require('../shared/codexAuth');
@@ -96,7 +96,7 @@ const {
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
-const { aggregateDevices, aggregateHistory, applyProjectRollups, carryDeviceHistory } = require('../shared/usage');
+const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
@@ -132,6 +132,13 @@ const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./servi
 const { classifyStreamFailure } = require('./syncConnection');
 const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
+const {
+  classifySettingsChange,
+  envelopeFromSettings,
+  limitsConfigFromSettings,
+  usageConfigFromSettings
+} = require('./runtimeConfig');
+const { runManualDeviceRefresh } = require('./deviceRuntimeCoordinator');
 const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
 const {
   normalizeWindowToggleShortcut,
@@ -156,6 +163,11 @@ const {
   moveFloatingBubbleBounds
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
+const {
+  WINDOWS_BACKDROP_ACCENT,
+  normalizeWindowsBackdropMode
+} = require('./windowsBackdropMode');
+const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 
 if (!app.isPackaged) loadDotEnv();
 
@@ -181,7 +193,13 @@ const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'cos
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
-const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 10 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
+const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
+// Smart mode's cadence is fixed and resolved directly in collectorIntervalMs(),
+// so it stays out of COLLECTION_INTERVAL_OPTIONS: that list validates the
+// persisted collectionIntervalMs, and admitting 10m there would let a
+// smart-mode value survive a switch back to live/interval and silently
+// change that mode's backstop interval.
+const SMART_COLLECTION_INTERVAL_MS = 10 * 60 * 1000;
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
@@ -235,12 +253,14 @@ function defaultSettings() {
     glassOpacity: 68,
     glassBlur: 32,
     systemGlass: true,
+    windowsBackdrop: 'acrylic',
     reduceMotion: 'system',
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
     showCompactTotalTokens: false,
     heatmapMetric: 'cost',
+    homeActiveDaysWindow: 'all',
     themeColors: {},
     vendorColors: {},
     floatingBubbleEnabled: false,
@@ -260,6 +280,7 @@ function defaultSettings() {
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     showHomeLimitBars: false,
+    showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false),
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
@@ -315,6 +336,7 @@ function defaultSettings() {
     qoderCookie: '',
     qoderSite: 'global',
     kimiApiKey: '',
+    kimiWebAccessToken: '',
     ollamaCookie: '',
     codexManagedAccounts: [],
     mimoManagedAccounts: [],
@@ -338,6 +360,13 @@ function normalizeHeatmapMetric(value, fallback = 'cost') {
   return fallback === 'tokens' ? 'tokens' : 'cost';
 }
 
+function normalizeHomeActiveDaysWindow(value, fallback = 'all') {
+  const next = String(value || '').trim();
+  if (next === 'year') return 'year';
+  if (next === 'all') return 'all';
+  return fallback === 'year' ? 'year' : 'all';
+}
+
 function normalizeCollectionIntervalMs(value, fallback = DEFAULT_COLLECTION_INTERVAL_MS) {
   const numeric = Number(value);
   if (COLLECTION_INTERVAL_OPTIONS.includes(numeric)) return numeric;
@@ -347,7 +376,7 @@ function normalizeCollectionIntervalMs(value, fallback = DEFAULT_COLLECTION_INTE
 
 function collectorIntervalMs() {
   return normalizeCollectionMode(settings?.collectionMode) === 'smart'
-    ? 10 * 60 * 1000
+    ? SMART_COLLECTION_INTERVAL_MS
     : normalizeCollectionIntervalMs(settings?.collectionIntervalMs);
 }
 
@@ -355,6 +384,8 @@ function collectorWatchEnabled() {
   return normalizeCollectionMode(settings?.collectionMode) !== 'interval';
 }
 
+// Smart mode watches with native events and never collects on the event itself;
+// the event only marks activity, and the interval decides whether to scan.
 function collectorWatchUsePolling() {
   return normalizeCollectionMode(settings?.collectionMode) === 'live';
 }
@@ -369,6 +400,42 @@ function collectorIntervalRequiresActivity() {
 
 function syncUploadIntervalMs() {
   return normalizeSyncUploadIntervalMs(settings?.syncUploadIntervalMs);
+}
+
+function electronUsageConfig(errorPrefix) {
+  return usageConfigFromSettings(settings, {
+    agentVersion: appVersion(),
+    agentRuntime: 'electron-widget',
+    commandTimeoutMs: 120 * 1000,
+    defaultDeviceId: defaultDeviceId(),
+    intervalMs: collectorIntervalMs(),
+    historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
+    watchEnabled: collectorWatchEnabled(),
+    watchUsePolling: collectorWatchUsePolling(),
+    watchTriggersCollection: collectorWatchTriggersCollection(),
+    intervalRequiresActivity: collectorIntervalRequiresActivity(),
+    watchDebounceMs: 1500,
+    dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
+    onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
+    logger: (message) => console.log(`[${errorPrefix}] ${message}`)
+  });
+}
+
+function electronLimitsConfig() {
+  return limitsConfigFromSettings(settings, {
+    env: process.env,
+    defaultLimitProviders: defaultLimitProviders(),
+    codexManagedAccounts: codexManagedAccountsForCollector(),
+    mimoManagedAccounts: mimoManagedAccountsForCollector()
+  });
+}
+
+function electronDeviceEnvelope() {
+  return envelopeFromSettings(settings, {
+    agentVersion: appVersion(),
+    agentRuntime: 'electron-widget',
+    defaultDeviceId: defaultDeviceId()
+  });
 }
 
 function defaultLimitProviders() {
@@ -472,6 +539,14 @@ function normalizeKimiApiKey(value) {
 
 function currentKimiApiKey() {
   return settings?.kimiApiKey || kimiToken(process.env);
+}
+
+function normalizeKimiWebAccessToken(value) {
+  return kimiWebToken({}, String(value || ''));
+}
+
+function currentKimiWebAccessToken() {
+  return settings?.kimiWebAccessToken || kimiWebToken(process.env);
 }
 
 function normalizeCopilotEnterpriseHost(value) {
@@ -619,7 +694,11 @@ async function addMimoManagedAccount(cookieValue) {
   }
   pushSettingsToRenderer();
   sendMimoAccountsPush();
-  startMode();
+  void queueLimitInvalidation({
+    provider: 'mimo',
+    accountId: result.account.id,
+    accountKey: result.account.accountKey
+  }, 'account-added');
   return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
@@ -639,7 +718,10 @@ async function removeMimoManagedAccount(id) {
   }
   pushSettingsToRenderer();
   sendMimoAccountsPush();
-  startMode();
+  void queueLimitInvalidation({ provider: 'mimo', accountId, accountKey: account.accountKey }, 'account-removed', {
+    clear: true,
+    refresh: false
+  });
   return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
@@ -658,7 +740,10 @@ function setMimoManagedAccountEnabled(id, enabled) {
   }
   pushSettingsToRenderer();
   sendMimoAccountsPush();
-  startMode();
+  void queueLimitInvalidation({ provider: 'mimo', accountId, accountKey: account.accountKey }, 'account-state', {
+    clear: !account.enabled,
+    refresh: account.enabled
+  });
   return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
@@ -726,7 +811,6 @@ function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
     record
   ]);
   if (options.persist !== false) saveSettings({ throwOnError: true });
-  if (options.restart !== false) startMode();
   return codexAccountsForRenderer().find((account) => account.id === id);
 }
 
@@ -907,7 +991,11 @@ async function addCodexManagedAccount(onOutput, options = {}) {
       movedToFinal = false;
       throw error;
     }
-    startMode();
+    void queueLimitInvalidation({
+      provider: 'codex',
+      accountId: account.id,
+      accountKey: account.accountKey || ''
+    }, 'account-added');
     return { ok: true, account };
   } finally {
     if (!accountCommitted) await removeManagedHomeIfSafe(tempHome).catch(() => {});
@@ -926,7 +1014,10 @@ async function removeCodexManagedAccount(id) {
     return { ok: false, error: error?.message || 'Could not persist account removal' };
   }
   await removeManagedHomeIfSafe(account.homePath);
-  startMode();
+  void queueLimitInvalidation({ provider: 'codex', accountId, accountKey: account.accountKey || '' }, 'account-removed', {
+    clear: true,
+    refresh: false
+  });
   return { ok: true, accounts: codexAccountsForRenderer() };
 }
 
@@ -942,7 +1033,10 @@ function setCodexManagedAccountEnabled(id, enabled) {
   } catch (error) {
     return { ok: false, error: error?.message || 'Could not persist account state' };
   }
-  startMode();
+  void queueLimitInvalidation({ provider: 'codex', accountId, accountKey: account.accountKey || '' }, 'account-state', {
+    clear: !account.enabled,
+    refresh: account.enabled
+  });
   return { ok: true, accounts: codexAccountsForRenderer() };
 }
 
@@ -981,7 +1075,7 @@ async function switchCodexSystemAccount(id) {
       enabled: refreshed.enabled !== false,
       restart: false
     });
-    try { startMode(); } catch (error) { console.warn('Could not restart after switching Codex account:', error?.message || error); }
+    void queueLimitInvalidation({ provider: 'codex' }, 'system-account-switch');
     const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
     const accountsForRenderer = codexAccountsForRenderer();
     return {
@@ -1008,18 +1102,23 @@ async function refreshCodexManagedAccountLimits(id) {
   const account = accounts.find((entry) => entry.id === accountId);
   if (!account) return { ok: false, error: 'Account not found' };
   if (account.enabled === false) return { ok: false, error: 'Account is disabled' };
+  if (!deviceRuntimeHandle) return { ok: false, error: 'Limits runtime is not ready' };
   try {
-    const summary = await collectLimitsOnce({
-      ...settings,
-      limitsEnabled: true,
-      limitProviders: 'codex',
-      includeLiveCodexAccount: false,
-      codexManagedAccounts: [account]
-    }, { env: process.env });
-    const stableSummary = mergeCodexTransientWindows(latestStats?.limits, summary);
+    const result = await deviceRuntimeHandle.refreshLimits({
+      provider: 'codex',
+      accountId: account.id,
+      accountKey: account.accountKey || ''
+    }, 'account-refresh');
+    const summary = result?.snapshot || deviceRuntimeHandle.getSnapshot()?.limits;
+    const providers = (summary?.providers || []).filter((provider) => {
+      if (provider?.provider !== 'codex') return false;
+      if (account.accountKey) return provider.accountKey === account.accountKey;
+      if (account.email) return String(provider.accountEmail || '').toLowerCase() === account.email;
+      return provider.sourceDetail === 'managed';
+    });
     return {
       ok: true,
-      providers: (stableSummary.providers || []).filter((provider) => provider?.provider === 'codex')
+      providers
     };
   } catch (error) {
     return { ok: false, error: `Could not refresh Codex account limits: ${error?.message || error}` };
@@ -1547,6 +1646,7 @@ function readSettings() {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
@@ -1570,6 +1670,7 @@ function readSettings() {
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
+    merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     if (saved.serviceProviderDisplayOrder !== undefined) {
       merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
@@ -1807,14 +1908,13 @@ function withHistoryPreview(stats, devices) {
 }
 
 let mode = 'idle';
-let localCollectorHandle = null;
+let deviceRuntimeHandle = null;
 let localDevice = null;
 let localStats = null;
 let sseAbortController = null;
 let sseRetryTimer = null;
 let streamConnected = false;
 let streamFailure = null;
-let syncCollectorHandle = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
 let tray = null;
@@ -1849,6 +1949,82 @@ let embeddedHub = null;
 let embeddedHubError = null;
 let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
+const pendingLimitInvalidations = new Map();
+const pendingUsageClientRefreshes = new Map();
+
+function limitInvalidationKey(scope) {
+  const provider = String(scope?.provider || '').trim().toLowerCase();
+  const account = String(
+    scope?.accountKey
+    || scope?.accountId
+    || scope?.id
+    || scope?.accountName
+    || scope?.accountEmail
+    || scope?.accountLabel
+    || ''
+  ).trim();
+  return account ? `${provider}:${account}` : `${provider}:*`;
+}
+
+function rememberPendingLimitInvalidation(scope, reason, clear = false, refresh = true) {
+  const normalized = { ...scope, provider: String(scope?.provider || '').trim().toLowerCase() };
+  const key = limitInvalidationKey(normalized);
+  if (key.endsWith(':*')) {
+    for (const pendingKey of pendingLimitInvalidations.keys()) {
+      if (pendingKey.startsWith(`${normalized.provider}:`)) pendingLimitInvalidations.delete(pendingKey);
+    }
+  }
+  pendingLimitInvalidations.set(key, { scope: normalized, reason, clear, refresh });
+}
+
+function queueLimitInvalidation(scope, reason = 'credential-change', options = {}) {
+  const clear = options.clear === true;
+  const refresh = options.refresh !== false;
+  if (!deviceRuntimeHandle) {
+    rememberPendingLimitInvalidation(scope, reason, clear, refresh);
+    return Promise.resolve({ queued: true });
+  }
+  if (clear) deviceRuntimeHandle.clearLimits(scope, reason);
+  if (!refresh) return Promise.resolve({ cleared: true });
+  return Promise.resolve(deviceRuntimeHandle.refreshLimits(scope, reason));
+}
+
+function drainPendingLimitInvalidations(runtime) {
+  const pending = [...pendingLimitInvalidations.values()];
+  pendingLimitInvalidations.clear();
+  for (const entry of pending) {
+    if (entry.clear) runtime.clearLimits(entry.scope, entry.reason);
+    if (entry.refresh) {
+      void Promise.resolve(runtime.refreshLimits(entry.scope, entry.reason)).catch((error) => {
+        console.log(`[limits-runtime] pending refresh failed: ${error.message}`);
+      });
+    }
+  }
+}
+
+function refreshUsageClient(clientId, options = {}) {
+  const client = String(clientId || '').trim().toLowerCase();
+  if (!deviceRuntimeHandle) {
+    pendingUsageClientRefreshes.set(client, { clientId: client, options: { ...options } });
+    return Promise.resolve({ queued: true });
+  }
+  return Promise.resolve(deviceRuntimeHandle.refreshClient(client, options));
+}
+
+function drainPendingUsageClientRefreshes(runtime) {
+  const pending = [...pendingUsageClientRefreshes.values()];
+  pendingUsageClientRefreshes.clear();
+  for (const entry of pending) {
+    void Promise.resolve(runtime.refreshClient(entry.clientId, entry.options)).catch((error) => {
+      console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
+    });
+  }
+}
+
+function drainPendingRuntimeActions(runtime) {
+  drainPendingLimitInvalidations(runtime);
+  drainPendingUsageClientRefreshes(runtime);
+}
 
 function effectiveHubConfig() {
   if (settings?.hubMode === 'host') {
@@ -1968,8 +2144,8 @@ async function postToHub(summary) {
 }
 
 function stopSyncCollector() {
-  if (syncCollectorHandle) { try { syncCollectorHandle.stop(); } catch (_) {} }
-  syncCollectorHandle = null;
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
+  deviceRuntimeHandle = null;
 }
 
 function startSyncCollector() {
@@ -1980,53 +2156,11 @@ function startSyncCollector() {
     upload: postToHub,
     onError: (error) => console.log(`[sync-collector] post failed: ${error.message}`)
   });
-  const collectorHandle = startCollector({
-    clients: clientsCsvForSetting(settings.clients),
-    allTimeSince: settings.allTimeSince || '2024-01-01',
-    commandTimeoutMs: 120 * 1000,
-    deviceId: settings.deviceId || defaultDeviceId(),
-    agentVersion: appVersion(),
-    agentRuntime: 'electron-widget',
-    intervalMs: collectorIntervalMs(),
-    historyEnabled: settings.historyEnabled !== false,
-    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
-    dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
-    projectsEnabled: settings.projectsEnabled !== false,
-    historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
-    watchEnabled: collectorWatchEnabled(),
-    watchUsePolling: collectorWatchUsePolling(),
-    watchTriggersCollection: collectorWatchTriggersCollection(),
-    intervalRequiresActivity: collectorIntervalRequiresActivity(),
-    watchDebounceMs: 1500,
-    limitsEnabled: settings.limitsEnabled !== false,
-    wslScanEnabled: settings.wslScanEnabled !== false,
-    limitProviders: settings.limitProviders ?? defaultLimitProviders(),
-    limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
-    previousLimits: lastCollectedDevice?.limits,
-    opencodeCookie: settings.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
-    opencodeProfiles: settings.opencodeProfiles || {},
-    deepseekApiKey: settings.deepseekApiKey || '',
-    minimaxApiKey: settings.minimaxApiKey || '',
-    copilotApiToken: settings.copilotApiToken || '',
-    copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
-    zaiApiKey: settings.zaiApiKey || '',
-    zaiApiRegion: settings.zaiApiRegion || 'global',
-    zaiTeamApiKey: settings.zaiTeamApiKey || '',
-    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
-    zaiTeamProjectId: settings.zaiTeamProjectId || '',
-    volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
-    volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
-    volcengineRegion: settings.volcengineRegion || '',
-    qoderCookie: settings.qoderCookie || '',
-    qoderSite: settings.qoderSite || 'global',
-    kimiApiKey: settings.kimiApiKey || '',
-    ollamaCookie: settings.ollamaCookie || '',
-    codexManagedAccounts: codexManagedAccountsForCollector(),
-    mimoManagedAccounts: mimoManagedAccountsForCollector(),
-    onUpdate: async (summary) => {
+  const sink = {
+    async enqueue(summary, revision) {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = {
-        ...summaryWithArchivedClientUsage(summary),
+        ...summary,
         syncUploadIntervalMs: syncUploadIntervalMs()
       };
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
@@ -2035,22 +2169,23 @@ function startSyncCollector() {
         updateDiscordRpc(displayStats, settings.currency);
         sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
       }
-      try {
-        await syncUploadScheduler.enqueue(visibleSummary);
-      } catch (error) {
-        console.log(`[sync-collector] post failed: ${error.message}`);
-      }
+      await syncUploadScheduler.enqueue(visibleSummary, revision);
     },
-    onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`),
-    logger: (msg) => console.log(`[sync-collector] ${msg}`)
-  });
-  syncCollectorHandle = {
-    stop() {
-      syncUploadScheduler.stop();
-      collectorHandle.stop();
-    },
-    tick: collectorHandle.tick
+    flush: () => syncUploadScheduler.flush(),
+    stop: () => syncUploadScheduler.stop()
   };
+  deviceRuntimeHandle = createDeviceRuntime({
+    envelope: electronDeviceEnvelope(),
+    initialLimits: lastCollectedDevice?.limits,
+    limitsOptions: electronLimitsConfig(),
+    transformUsage: summaryWithArchivedClientUsage,
+    usageOptions: electronUsageConfig('sync-collector'),
+    sink,
+    onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
+  }, {
+    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
+  });
+  drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
 // Host mode: this device's own usage goes straight into the embedded hub's store
@@ -2058,52 +2193,10 @@ function startSyncCollector() {
 // Monitor's own outbound connections can't zero out the widget's own usage (#17).
 function startHostCollector() {
   stopSyncCollector();
-  syncCollectorHandle = startCollector({
-    clients: clientsCsvForSetting(settings.clients),
-    allTimeSince: settings.allTimeSince || '2024-01-01',
-    commandTimeoutMs: 120 * 1000,
-    deviceId: settings.deviceId || defaultDeviceId(),
-    agentVersion: appVersion(),
-    agentRuntime: 'electron-widget',
-    intervalMs: collectorIntervalMs(),
-    historyEnabled: settings.historyEnabled !== false,
-    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
-    dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
-    projectsEnabled: settings.projectsEnabled !== false,
-    historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
-    watchEnabled: collectorWatchEnabled(),
-    watchUsePolling: collectorWatchUsePolling(),
-    watchTriggersCollection: collectorWatchTriggersCollection(),
-    intervalRequiresActivity: collectorIntervalRequiresActivity(),
-    watchDebounceMs: 1500,
-    limitsEnabled: settings.limitsEnabled !== false,
-    wslScanEnabled: settings.wslScanEnabled !== false,
-    limitProviders: settings.limitProviders ?? defaultLimitProviders(),
-    limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
-    previousLimits: lastCollectedDevice?.limits,
-    opencodeCookie: settings.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
-    opencodeProfiles: settings.opencodeProfiles || {},
-    deepseekApiKey: settings.deepseekApiKey || '',
-    minimaxApiKey: settings.minimaxApiKey || '',
-    copilotApiToken: settings.copilotApiToken || '',
-    copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
-    zaiApiKey: settings.zaiApiKey || '',
-    zaiApiRegion: settings.zaiApiRegion || 'global',
-    zaiTeamApiKey: settings.zaiTeamApiKey || '',
-    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
-    zaiTeamProjectId: settings.zaiTeamProjectId || '',
-    volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
-    volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
-    volcengineRegion: settings.volcengineRegion || '',
-    qoderCookie: settings.qoderCookie || '',
-    qoderSite: settings.qoderSite || 'global',
-    kimiApiKey: settings.kimiApiKey || '',
-    ollamaCookie: settings.ollamaCookie || '',
-    codexManagedAccounts: codexManagedAccountsForCollector(),
-    mimoManagedAccounts: mimoManagedAccountsForCollector(),
-    onUpdate: (summary) => {
+  const sink = {
+    enqueue(summary) {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
-      const visibleSummary = summaryWithArchivedClientUsage(summary);
+      const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       if (!embeddedHub) return;
       try {
@@ -2123,10 +2216,20 @@ function startHostCollector() {
       } catch (error) {
         console.log(`[host-ingest] failed: ${error.message}`);
       }
-    },
-    onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`),
-    logger: (msg) => console.log(`[host-collector] ${msg}`)
+    }
+  };
+  deviceRuntimeHandle = createDeviceRuntime({
+    envelope: electronDeviceEnvelope(),
+    initialLimits: lastCollectedDevice?.limits,
+    limitsOptions: electronLimitsConfig(),
+    transformUsage: summaryWithArchivedClientUsage,
+    usageOptions: electronUsageConfig('host-collector'),
+    sink,
+    onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
+  }, {
+    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
   });
+  drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
 function stopHostStats() {
@@ -2289,8 +2392,8 @@ function sendStatus(connected, extra) {
 }
 
 function stopLocalCollector() {
-  if (localCollectorHandle) { try { localCollectorHandle.stop(); } catch (_) {} }
-  localCollectorHandle = null;
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
+  deviceRuntimeHandle = null;
   localDevice = null;
   localStats = null;
 }
@@ -2299,108 +2402,28 @@ function startLocalCollector() {
   stopLocalCollector();
   mode = 'local';
   sendStatus(false, { reason: 'collecting' });
-  localCollectorHandle = startCollector({
-    clients: clientsCsvForSetting(settings.clients),
-    allTimeSince: settings.allTimeSince || '2024-01-01',
-    commandTimeoutMs: 120 * 1000,
-    deviceId: settings.deviceId || defaultDeviceId(),
-    agentVersion: appVersion(),
-    agentRuntime: 'electron-widget',
-    intervalMs: collectorIntervalMs(),
-    historyEnabled: settings.historyEnabled !== false,
-    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
-    dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
-    projectsEnabled: settings.projectsEnabled !== false,
-    historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
-    watchEnabled: collectorWatchEnabled(),
-    watchUsePolling: collectorWatchUsePolling(),
-    watchTriggersCollection: collectorWatchTriggersCollection(),
-    intervalRequiresActivity: collectorIntervalRequiresActivity(),
-    watchDebounceMs: 1500,
-    limitsEnabled: settings.limitsEnabled !== false,
-    wslScanEnabled: settings.wslScanEnabled !== false,
-    limitProviders: settings.limitProviders ?? defaultLimitProviders(),
-    limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
-    previousLimits: lastCollectedDevice?.limits,
-    opencodeCookie: settings.opencodeCookie || process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
-    opencodeProfiles: settings.opencodeProfiles || {},
-    deepseekApiKey: settings.deepseekApiKey || '',
-    minimaxApiKey: settings.minimaxApiKey || '',
-    copilotApiToken: settings.copilotApiToken || '',
-    copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
-    zaiApiKey: settings.zaiApiKey || '',
-    zaiApiRegion: settings.zaiApiRegion || 'global',
-    zaiTeamApiKey: settings.zaiTeamApiKey || '',
-    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
-    zaiTeamProjectId: settings.zaiTeamProjectId || '',
-    volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
-    volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
-    volcengineRegion: settings.volcengineRegion || '',
-    qoderCookie: settings.qoderCookie || '',
-    qoderSite: settings.qoderSite || 'global',
-    kimiApiKey: settings.kimiApiKey || '',
-    ollamaCookie: settings.ollamaCookie || '',
-    codexManagedAccounts: codexManagedAccountsForCollector(),
-    mimoManagedAccounts: mimoManagedAccountsForCollector(),
-    onUpdate: (summary, reason) => {
-      const visibleSummary = summaryWithArchivedClientUsage(summary);
-      // History only rides along on gated ticks; carry the last known history
-      // forward so the trends dashboard doesn't blank out between them.
-      localDevice = carryDeviceHistory(localDevice, { ...visibleSummary, receivedAt: new Date().toISOString() });
+  deviceRuntimeHandle = createDeviceRuntime({
+    envelope: electronDeviceEnvelope(),
+    initialLimits: lastCollectedDevice?.limits,
+    limitsOptions: electronLimitsConfig(),
+    transformUsage: summaryWithArchivedClientUsage,
+    usageOptions: electronUsageConfig('collector'),
+    progressive: true,
+    onRecord: (summary, meta) => {
+      const reason = meta.reason;
+      const visibleSummary = summary;
+      localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
       updateDiscordRpc(localStats, settings.currency);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
     },
-    // Progressive push: mid-tick partial results (today-only / today+month).
-    // Only wired for the local collector; sync/host modes never see these.
-    // History is carried forward by carryDeviceHistory; limits are carried
-    // forward manually so the limits panel doesn't flash empty between scans.
-    // Month/allTime/clientStatus are also carried forward when omitted so
-    // warm full scans stay stable across progressive updates.
-    onPreview: (summary) => {
-      const prevDevice = localDevice;
-      // Capture carry-forward needs before summaryWithArchivedClientUsage,
-      // which fills in empty periods for undefined fields (archived client path).
-      const needsMonth = !summary.month;
-      const needsAllTime = !summary.allTime;
-      const needsClientStatus = !summary.clientStatus;
-      const needsWslStatus = !summary.wslStatus;
-
-      const visible = summaryWithArchivedClientUsage(summary);
-      localDevice = carryDeviceHistory(localDevice, { ...visible, receivedAt: new Date().toISOString() });
-      // Carry forward usage periods omitted from the preview so warm full
-      // scans don't flash month/allTime to empty between tokscale scans.
-      if (needsMonth && prevDevice?.month) {
-        localDevice = { ...localDevice, month: prevDevice.month };
-      }
-      if (needsAllTime && prevDevice?.allTime) {
-        localDevice = { ...localDevice, allTime: prevDevice.allTime };
-      }
-      // Carry forward clientStatus when allTime is not yet available.
-      if (needsClientStatus && prevDevice?.clientStatus) {
-        localDevice = { ...localDevice, clientStatus: prevDevice.clientStatus };
-      }
-      // Carry forward wslStatus — previews never include it, so without this the
-      // WSL detection panel would blank during a warm scan if Settings is open.
-      if (needsWslStatus && prevDevice?.wslStatus) {
-        localDevice = { ...localDevice, wslStatus: prevDevice.wslStatus };
-      }
-      if (!visible.limits && prevDevice?.limits) {
-        localDevice = { ...localDevice, limits: prevDevice.limits };
-      }
-      lastCollectedDevice = localDevice;
-      localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
-      updateDiscordRpc(localStats, settings.currency);
-      sendPush({ event: 'stats', data: { type: 'stats', reason: 'progress', stats: localStats, at: new Date().toISOString() } });
-      sendStatus(true, { reason: 'progress' });
-    },
-    onError: (error, reason) => {
-      sendStatus(false, { reason: `${reason}:${error.message}` });
-    },
-    logger: (msg) => console.log(`[collector] ${msg}`)
+    onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
+  }, {
+    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
   });
+  drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
 function scheduleStreamRetry(delayMs = 3000) {
@@ -2583,6 +2606,11 @@ function settingsForRenderer() {
     : kimiToken(process.env)
       ? 'env'
       : '';
+  const kimiWebAccessTokenSource = settings?.kimiWebAccessToken
+    ? 'settings'
+    : kimiWebToken(process.env)
+      ? 'env'
+      : '';
   // Default-deny every credential field added to the canonical store. The two
   // hub secrets remain explicit exceptions because the existing sync UI must
   // prefill/copy them; provider credentials only cross as blank/configured state.
@@ -2624,6 +2652,10 @@ function settingsForRenderer() {
     ollamaCookieSource,
     kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
     kimiApiKeySource,
+    kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
+    kimiWebAccessTokenSource,
+    kimiCredentialConfigured: Boolean(currentKimiWebAccessToken() || currentKimiApiKey()),
+    kimiCredentialSource: kimiWebAccessTokenSource || kimiApiKeySource,
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
@@ -2978,6 +3010,19 @@ function startMode() {
   });
 }
 
+function restartDeviceRuntimeForMode() {
+  if (mode === 'local') {
+    startLocalCollector();
+    return;
+  }
+  if (settings.hubMode === 'host' && embeddedHub) {
+    startHostCollector();
+    return;
+  }
+  if (effectiveHubConfig().url) startSyncCollector();
+  else startLocalCollector();
+}
+
 function stopAll() {
   stopPersistBoundsTimer();
   stopLocalCollector();
@@ -3054,20 +3099,19 @@ async function fetchStats(options = {}) {
   // sign-ins and limits actions all refresh with { force: true }, so folding the
   // history rescan into it would spawn the expensive `tokscale graph` on each one.
   // Only the manual refresh button opts in.
-  const tickOptions = force ? { forceLimits: true, forceHistory: Boolean(options?.forceHistory) } : {};
+  const canRefreshRuntime = mode === 'local' || !isExternalAgentActive();
+  if (force && deviceRuntimeHandle && canRefreshRuntime) {
+    await runManualDeviceRefresh(deviceRuntimeHandle, {
+      forceHistory: Boolean(options?.forceHistory),
+      onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
+    });
+  }
   if (mode === 'local') {
-    if (force && localCollectorHandle) await localCollectorHandle.tick('manual', tickOptions);
     if (localStats) return localStats;
     return withHistoryPreview(aggregateDevices(localDevice ? [localDevice] : [], 0), localDevice ? [localDevice] : []);
   }
   if (settings.hubMode === 'host' && embeddedHub) {
-    if (force && syncCollectorHandle && !isExternalAgentActive()) {
-      await syncCollectorHandle.tick('manual', tickOptions);
-    }
     return injectLocalDeviceStatus(embeddedHub.hub.getStats());
-  }
-  if (force && syncCollectorHandle && !isExternalAgentActive()) {
-    await syncCollectorHandle.tick('manual', tickOptions);
   }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return withHistoryPreview(aggregateDevices([], 0), []);
@@ -3095,10 +3139,8 @@ function regenerateTokscalePricing() {
 
 async function refreshAfterPricingChange() {
   try {
-    if (mode === 'local') {
-      if (localCollectorHandle) await localCollectorHandle.tick('manual', {});
-    } else if (syncCollectorHandle && !isExternalAgentActive()) {
-      await syncCollectorHandle.tick('manual', {});
+    if (deviceRuntimeHandle && (mode === 'local' || !isExternalAgentActive())) {
+      await deviceRuntimeHandle.tick('manual', {});
     }
   } catch (error) {
     console.warn(`[pricing] refresh after pricing change failed: ${error.message}`);
@@ -3492,6 +3534,8 @@ function createWindow(boundsOverride, options = {}) {
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
   const glass = nativeBlurEnabled();
+  const windowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
+  const windowsAccent = process.platform === 'win32' && glass && windowsBackdrop === WINDOWS_BACKDROP_ACCENT;
   const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
   const collapsedSizeLimits = {
     minWidth: bounds.width,
@@ -3514,7 +3558,7 @@ function createWindow(boundsOverride, options = {}) {
     ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
     ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
     ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
-    ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
+    ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -3524,6 +3568,15 @@ function createWindow(boundsOverride, options = {}) {
   mainWindow = win;
   mainWindowChrome = { collapsedFloatingBubble };
   applyWindowsChrome(win, { round: true });
+  let windowsAccentFallback = false;
+  if (windowsAccent && !applyWindowsAccentBlur(win)) {
+    // The Accent API is undocumented and can disappear or reject a window on
+    // a future Windows build. This window is still non-transparent, so the
+    // documented Electron Acrylic material is a safe in-place fallback.
+    windowsAccentFallback = true;
+    console.warn('[window] AccentBlurBehind unavailable; falling back to Acrylic');
+    try { win.setBackgroundMaterial('acrylic'); } catch (_) {}
+  }
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -3569,7 +3622,8 @@ function createWindow(boundsOverride, options = {}) {
         suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
         viewState: rendererViewState
       }),
-      ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {})
+      ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {}),
+      ...(windowsAccentFallback ? { windowsBackdropFallback: '1' } : {})
     }
   });
 }
@@ -3792,41 +3846,11 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('settings:update', (_event, patch) => {
+    const previousSettingsState = settings;
+    const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousNativeMaterial = nativeBlurEnabled();
-    const previousHubMode = settings.hubMode;
-    const previousHubHostPort = settings.hubHostPort;
-    const previousHubHostSecret = settings.hubHostSecret;
-    const previousHubUrl = settings.hubUrl;
-    const previousSecret = settings.secret;
-    const previousDeviceId = settings.deviceId;
+    const previousWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
     const previousClients = settings.clients;
-    const previousLimitsEnabled = settings.limitsEnabled;
-    const previousLimitProviders = settings.limitProviders;
-    const previousLimitsRefreshMs = settings.limitsRefreshMs;
-    const previousHistoryEnabled = settings.historyEnabled;
-    const previousProjectsEnabled = settings.projectsEnabled;
-    const previousSessionUsageArchiveEnabled = settings.sessionUsageArchiveEnabled;
-    const previousHistoryIntervalMs = settings.historyIntervalMs;
-    const previousWslScanEnabled = settings.wslScanEnabled;
-    const previousCollectionMode = settings.collectionMode;
-    const previousCollectionIntervalMs = settings.collectionIntervalMs;
-    const previousSyncUploadIntervalMs = settings.syncUploadIntervalMs;
-    const previousDeepSeekApiKey = settings.deepseekApiKey;
-    const previousMinimaxApiKey = settings.minimaxApiKey;
-    const previousCopilotApiToken = settings.copilotApiToken;
-    const previousCopilotEnterpriseHost = settings.copilotEnterpriseHost;
-    const previousZaiApiKey = settings.zaiApiKey;
-    const previousZaiApiRegion = settings.zaiApiRegion;
-    const previousZaiTeamApiKey = settings.zaiTeamApiKey;
-    const previousZaiTeamOrganizationId = settings.zaiTeamOrganizationId;
-    const previousZaiTeamProjectId = settings.zaiTeamProjectId;
-    const previousVolcengineAccessKeyId = settings.volcengineAccessKeyId;
-    const previousVolcengineSecretAccessKey = settings.volcengineSecretAccessKey;
-    const previousVolcengineRegion = settings.volcengineRegion;
-    const previousQoderCookie = settings.qoderCookie;
-    const previousQoderSite = settings.qoderSite;
-    const previousKimiApiKey = settings.kimiApiKey;
-    const previousOllamaCookie = settings.ollamaCookie;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousShowTrayIcon = settings.showTrayIcon;
     const previousTrayMode = settings.trayMode;
@@ -3856,11 +3880,13 @@ app.whenReady().then(() => {
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
+    if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
     if (patch.ollamaCookie !== undefined) normalizedPatch.ollamaCookie = normalizeOllamaCookie(patch.ollamaCookie);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
+    if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
     settings = normalizeWindowBehaviorSettings({
       ...settings,
       ...normalizedPatch,
@@ -3873,6 +3899,7 @@ app.whenReady().then(() => {
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
       systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
+      windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
       reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
@@ -3891,6 +3918,7 @@ app.whenReady().then(() => {
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
+      showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
@@ -3944,7 +3972,12 @@ app.whenReady().then(() => {
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
-    saveSettings({ throwOnError: true });
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      settings = previousSettingsState;
+      throw error;
+    }
     if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {
       regenerateTokscalePricing();
       refreshAfterPricingChange();
@@ -3964,48 +3997,34 @@ app.whenReady().then(() => {
     applyWindowSettings();
     syncFloatingBubbleAvailability();
     const nextNativeMaterial = nativeBlurEnabled();
-    if (process.platform === 'win32' && previousNativeMaterial !== nextNativeMaterial) {
+    const nextWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
+    const windowsBackdropChanged = previousWindowsBackdrop !== nextWindowsBackdrop
+      && (previousNativeMaterial || nextNativeMaterial);
+    if (process.platform === 'win32' && (previousNativeMaterial !== nextNativeMaterial || windowsBackdropChanged)) {
       rebuildWindow();
     } else {
       applyNativeMaterial();
     }
-    if (
-      settings.hubMode !== previousHubMode ||
-      settings.hubHostPort !== previousHubHostPort ||
-      settings.hubHostSecret !== previousHubHostSecret ||
-      settings.hubUrl !== previousHubUrl ||
-      settings.secret !== previousSecret ||
-      settings.deviceId !== previousDeviceId ||
-      settings.clients !== previousClients ||
-      settings.limitsEnabled !== previousLimitsEnabled ||
-      settings.limitProviders !== previousLimitProviders ||
-      settings.limitsRefreshMs !== previousLimitsRefreshMs ||
-      settings.historyEnabled !== previousHistoryEnabled ||
-      settings.projectsEnabled !== previousProjectsEnabled ||
-      settings.sessionUsageArchiveEnabled !== previousSessionUsageArchiveEnabled ||
-      settings.historyIntervalMs !== previousHistoryIntervalMs ||
-      settings.wslScanEnabled !== previousWslScanEnabled ||
-      settings.collectionMode !== previousCollectionMode ||
-      settings.collectionIntervalMs !== previousCollectionIntervalMs ||
-      (settings.hubMode === 'client' && settings.syncUploadIntervalMs !== previousSyncUploadIntervalMs) ||
-      settings.deepseekApiKey !== previousDeepSeekApiKey ||
-      settings.minimaxApiKey !== previousMinimaxApiKey ||
-      settings.copilotApiToken !== previousCopilotApiToken ||
-      settings.copilotEnterpriseHost !== previousCopilotEnterpriseHost ||
-      settings.zaiApiKey !== previousZaiApiKey ||
-      settings.zaiApiRegion !== previousZaiApiRegion ||
-      settings.zaiTeamApiKey !== previousZaiTeamApiKey ||
-      settings.zaiTeamOrganizationId !== previousZaiTeamOrganizationId ||
-      settings.zaiTeamProjectId !== previousZaiTeamProjectId ||
-      settings.volcengineAccessKeyId !== previousVolcengineAccessKeyId ||
-      settings.volcengineSecretAccessKey !== previousVolcengineSecretAccessKey ||
-      settings.volcengineRegion !== previousVolcengineRegion ||
-      settings.qoderCookie !== previousQoderCookie ||
-      settings.qoderSite !== previousQoderSite ||
-      settings.kimiApiKey !== previousKimiApiKey ||
-      settings.ollamaCookie !== previousOllamaCookie
-    ) {
+    const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
+    if (runtimeChange.modeStructural) {
+      for (const scope of runtimeChange.limitScopes) {
+        rememberPendingLimitInvalidation(scope, 'settings-change');
+      }
       startMode();
+    } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
+      for (const scope of runtimeChange.limitScopes) {
+        rememberPendingLimitInvalidation(scope, 'settings-change');
+      }
+      restartDeviceRuntimeForMode();
+    } else {
+      if (runtimeChange.limitsReconfigure && deviceRuntimeHandle) {
+        deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
+      }
+      for (const scope of runtimeChange.limitScopes) {
+        void queueLimitInvalidation(scope, 'settings-change').catch((error) => {
+          console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
+        });
+      }
     }
     if (settings.showTrayIcon !== previousShowTrayIcon) {
       if (settings.showTrayIcon) ensureTray();
@@ -4027,6 +4046,7 @@ app.whenReady().then(() => {
       if (settings.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
       refreshExchangeRates();              // async: fetch if stale, then re-push
     }
+    pushSettingsToRenderer();
     return settingsForRenderer();
   });
   ipcMain.handle('appearance:preview', (_event, patch) => {
@@ -4222,6 +4242,8 @@ app.whenReady().then(() => {
       if (!probeResult.ok) return { ok: false, error: probeResult.error?.message || 'Cursor rejected the token' };
       await cursorAuth.runCursorLogin(token);
       cursorStatusCache = { value: null, at: 0 };
+      void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
+      void refreshUsageClient('cursor', { forceSync: true });
       return { ok: true, email: probeResult.user.email };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -4245,7 +4267,7 @@ app.whenReady().then(() => {
         return { ok: false, error: error?.message || 'Could not persist OpenCode credentials' };
       }
       opencodeStatusCache = { value: null, at: 0 };
-      startMode();
+      void queueLimitInvalidation({ provider: 'opencode' }, 'logout', { clear: true });
       return { ok: true, cleared: true };
     }
     try {
@@ -4262,7 +4284,7 @@ app.whenReady().then(() => {
       settings.opencodeCookie = cookie;
       saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
-      startMode();
+      void queueLimitInvalidation({ provider: 'opencode' }, 'credential-save', { clear: true });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -4272,6 +4294,8 @@ app.whenReady().then(() => {
     try {
       await cursorAuth.runCursorLogout();
       cursorStatusCache = { value: null, at: 0 };
+      void queueLimitInvalidation({ provider: 'cursor' }, 'logout', { clear: true });
+      void refreshUsageClient('cursor', { forceSync: true });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -4283,7 +4307,7 @@ app.whenReady().then(() => {
       settings.opencodeCookie = '';
       saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
-      startMode();
+      void queueLimitInvalidation({ provider: 'opencode' }, 'logout', { clear: true });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -4379,7 +4403,7 @@ app.whenReady().then(() => {
       settings.opencodeProfiles = profiles;
       saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
-      startMode();
+      void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-save');
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -4399,7 +4423,10 @@ app.whenReady().then(() => {
       return { ok: false, error: error?.message || 'Could not persist OpenCode profile deletion' };
     }
     opencodeStatusCache = { value: null, at: 0 };
-    startMode();
+    void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-delete', {
+      clear: true,
+      refresh: false
+    });
     return { ok: true };
   });
   ipcMain.handle('opencode:renameProfile', async (_event, oldName, newName) => {
@@ -4416,7 +4443,11 @@ app.whenReady().then(() => {
       return { ok: false, error: error?.message || 'Could not persist OpenCode profile rename' };
     }
     opencodeStatusCache = { value: null, at: 0 };
-    startMode();
+    void queueLimitInvalidation({ provider: 'opencode', accountName: oldName }, 'profile-rename', {
+      clear: true,
+      refresh: false
+    });
+    void queueLimitInvalidation({ provider: 'opencode', accountName: newName }, 'profile-rename');
     return { ok: true };
   });
   ipcMain.handle('opencode:setProfileEnabled', async (_event, name, enabled) => {
@@ -4430,7 +4461,10 @@ app.whenReady().then(() => {
       return { ok: false, error: error?.message || 'Could not persist OpenCode profile state' };
     }
     opencodeStatusCache = { value: null, at: 0 };
-    startMode();
+    void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-state', {
+      clear: !enabled,
+      refresh: Boolean(enabled)
+    });
     return { ok: true };
   });
   ipcMain.handle('codex:accounts', () => codexAccountsForRenderer());
@@ -4516,7 +4550,7 @@ app.whenReady().then(() => {
       settings.copilotApiToken = normalizeCopilotApiToken(result.accessToken);
       saveSettings({ throwOnError: true });
       pushSettingsToRenderer();
-      startMode();
+      void queueLimitInvalidation({ provider: 'copilot' }, 'login', { clear: true });
       return { ok: true, flowId };
     } catch (error) {
       const message = copilotLoginErrorMessage(error);

@@ -12,6 +12,19 @@ jobs:
         include:
           - os: macos-15
             target: mac
+            arch: arm64
+            dist_script: dist:mac
+            artifact_name: token-monitor-mac-arm64
+            artifact_path: |
+              dist/*.dmg
+              dist/*.zip
+              dist/latest-mac.yml
+              dist/*.blockmap
+          - os: macos-15-intel
+            target: mac
+            arch: x64
+            dist_script: dist:mac:x64
+            artifact_name: token-monitor-mac-x64
             artifact_path: |
               dist/*.dmg
               dist/*.zip
@@ -19,12 +32,16 @@ jobs:
               dist/*.blockmap
           - os: windows-latest
             target: win
+            dist_script: dist:win
+            artifact_name: token-monitor-win
             artifact_path: |
               dist/*.exe
               dist/latest.yml
               dist/*.blockmap
           - os: ubuntu-latest
             target: linux
+            dist_script: dist:linux
+            artifact_name: token-monitor-linux
             artifact_path: |
               dist/*.AppImage
               dist/latest-linux.yml
@@ -52,7 +69,7 @@ jobs:
       # run without libfuse2 (absent on the runners).
       - name: Build platform artifacts
         if: matrix.target != 'win'
-        run: npm run dist:${{ matrix.target }}
+        run: npm run ${{ matrix.dist_script }}
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
           CSC_LINK: ${{ matrix.target == 'mac' && secrets.MAC_CSC_LINK || '' }}
@@ -239,7 +256,7 @@ jobs:
         run: npm run verify:release-artifact-names
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: token-monitor-${{ matrix.target }}
+          name: ${{ matrix.artifact_name }}
           if-no-files-found: error
           path: ${{ matrix.artifact_path }}
 
@@ -250,22 +267,42 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           # The unsigned SignPath input also lives in this run. Download only the
           # final platform artifacts so an unsigned executable can never publish.
           pattern: token-monitor-*
-          merge-multiple: true
+      - name: Stage release artifacts and merge mac updater metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          while IFS= read -r -d '' file; do
+            name=$(basename "$file")
+            if [ -e "release-artifacts/$name" ]; then
+              echo "duplicate release artifact: $name" >&2
+              exit 1
+            fi
+            cp "$file" "release-artifacts/$name"
+          done < <(find artifacts -mindepth 2 -type f ! -name 'latest-mac.yml' -print0)
+          node scripts/merge-mac-updater-metadata.js \
+            release-artifacts/latest-mac.yml \
+            artifacts/token-monitor-mac-arm64/latest-mac.yml \
+            artifacts/token-monitor-mac-x64/latest-mac.yml
+          node scripts/verify-updater-artifact-names.js release-artifacts
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: |
-            artifacts/*.dmg
-            artifacts/*.zip
-            artifacts/*.exe
-            artifacts/*.AppImage
-            artifacts/latest.yml
-            artifacts/latest-mac.yml
-            artifacts/latest-linux.yml
-            artifacts/*.blockmap
+            release-artifacts/*.dmg
+            release-artifacts/*.zip
+            release-artifacts/*.exe
+            release-artifacts/*.AppImage
+            release-artifacts/latest.yml
+            release-artifacts/latest-mac.yml
+            release-artifacts/latest-linux.yml
+            release-artifacts/*.blockmap
           body_path: .github/RELEASE_TEMPLATE.md

@@ -160,7 +160,9 @@ test('appearance settings expose a Settings/Refresh swap wired to the legacy pre
   const html = readRendererFile('index.html');
   const app = readRendererFile('app.js');
 
-  const group = html.match(/<div class="settings-subgroup settings-appearance-group">[\s\S]*?<\/div>/)?.[0] || '';
+  const groupStart = html.indexOf('<div class="settings-subgroup settings-appearance-group">');
+  const groupEnd = html.indexOf('<div class="settings-subgroup settings-theme-group">', groupStart);
+  const group = groupStart >= 0 && groupEnd > groupStart ? html.slice(groupStart, groupEnd) : '';
   assert.match(group, /id="swapSettingsRefreshInput"/, 'checkbox lives in the appearance group');
   assert.match(group, /data-i18n="settings\.appearance\.swapSettingsRefresh"/, 'checkbox uses the swap label');
 
@@ -231,7 +233,7 @@ test('refresh button exposes busy, success, and error feedback states', () => {
   assert.match(css, /\.refresh-button\.is-refreshing \.refresh-button-spinner\s*\{\s*display:\s*block;\s*\}/, 'loading state reveals the masked spinner');
   assert.match(cssRule(css, '.refresh-button-spinner::before'), /mask:\s*url\("icons\/actions\/spinner\.svg"\)/, 'spinner is a reusable asset file, not markup inlined in the page');
   assert.equal(declaration(cssRule(css, '.refresh-button-spinner::before'), 'background'), 'currentColor', 'spinner mask is tinted by the button state color');
-  assert.match(cssRule(css, '.refresh-button.is-refreshed'), /border-color:\s*rgba\(var\(--accent-rgb\)/);
+  assert.match(cssRule(css, '.refresh-button.is-refreshed'), /border-color:\s*rgba\(var\(--success-rgb\)/);
   assert.match(cssRule(css, '.refresh-button.is-refresh-error'), /border-color:\s*rgba\(255,\s*99,\s*99/);
 
   const spinnerSvg = readRendererFile('icons/actions/spinner.svg');
