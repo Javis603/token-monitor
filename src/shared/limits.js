@@ -153,7 +153,9 @@ function normalizeProviderBalance(input) {
     || ''
   ).trim().toUpperCase().slice(0, 8) || null;
   const todaySpend = numberOrNull(input.todaySpend ?? input.today_spend);
+  const weekSpend = numberOrNull(input.weekSpend ?? input.week_spend);
   const monthSpend = numberOrNull(input.monthSpend ?? input.month_spend);
+  const allTimeSpend = numberOrNull(input.allTimeSpend ?? input.all_time_spend);
   const monthSinceTracking = input.monthSinceTracking ?? input.month_since_tracking;
   const giftBalance = numberOrNull(input.giftBalance ?? input.gift_balance);
   const cashBalance = numberOrNull(input.cashBalance ?? input.cash_balance);
@@ -172,7 +174,9 @@ function normalizeProviderBalance(input) {
     amount === null
     && !currency
     && todaySpend === null
+    && weekSpend === null
     && monthSpend === null
+    && allTimeSpend === null
     && monthSinceTracking === undefined
     && giftBalance === null
     && cashBalance === null
@@ -190,7 +194,9 @@ function normalizeProviderBalance(input) {
     amount,
     currency,
     todaySpend,
+    weekSpend,
     monthSpend,
+    allTimeSpend,
     monthSinceTracking: Boolean(monthSinceTracking),
     giftBalance,
     cashBalance,

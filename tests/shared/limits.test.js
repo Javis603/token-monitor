@@ -113,7 +113,15 @@ test('aggregateLimits preserves distinct OpenRouter accounts and public stats sc
       used: index + 1,
       limit: 10,
       remaining: 9 - index
-    }]
+    }],
+    balance: {
+      amount: 9 - index,
+      currency: 'USD',
+      todaySpend: index + 0.25,
+      weekSpend: index + 1.25,
+      monthSpend: index + 2.25,
+      allTimeSpend: index + 3.25
+    }
   }));
   const aggregate = aggregateLimits([{
     deviceId: 'macbook',
@@ -122,6 +130,13 @@ test('aggregateLimits preserves distinct OpenRouter accounts and public stats sc
   const openrouter = aggregate.providers.filter((provider) => provider.provider === 'openrouter');
   assert.equal(openrouter.length, 2);
   assert.deepEqual(new Set(openrouter.map((provider) => provider.accountName)), new Set(['work', 'personal']));
+  const work = openrouter.find((provider) => provider.accountName === 'work');
+  assert.equal(work.balance.amount, 9);
+  assert.equal(work.balance.currency, 'USD');
+  assert.equal(work.balance.todaySpend, 0.25);
+  assert.equal(work.balance.weekSpend, 1.25);
+  assert.equal(work.balance.monthSpend, 2.25);
+  assert.equal(work.balance.allTimeSpend, 3.25);
 
   const publicPayload = publicLimits({ providers: openrouter });
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountKey')));

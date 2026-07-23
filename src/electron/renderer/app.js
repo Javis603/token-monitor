@@ -2136,6 +2136,92 @@ function codexResetCreditsNode(resetCredits) {
   return item;
 }
 
+function openrouterSpendEntries(balance) {
+  return [
+    ['Today', optionalFiniteNumber(balance?.todaySpend)],
+    ['Week', optionalFiniteNumber(balance?.weekSpend)],
+    ['Month', optionalFiniteNumber(balance?.monthSpend)],
+    ['All time', optionalFiniteNumber(balance?.allTimeSpend)]
+  ].filter(([, value]) => value !== null);
+}
+
+function openrouterSpendNode(balance) {
+  const entries = openrouterSpendEntries(balance);
+  if (entries.length === 0) return null;
+  const currency = balance?.currency || 'USD';
+  const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
+  const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
+  const summaryText = summaryEntries
+    .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
+    .join(' · ');
+
+  const item = document.createElement('div');
+  item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
+  const line = document.createElement('div');
+  line.className = 'limit-window-text limit-spend-line';
+  const label = document.createElement('span');
+  label.textContent = 'Spend';
+  const right = document.createElement('span');
+  right.className = 'limit-spend-right';
+  const summary = document.createElement('span');
+  summary.className = 'limit-spend-summary';
+  summary.textContent = summaryText;
+  right.append(summary);
+
+  if (entries.length > summaryEntries.length) {
+    const infoWrap = document.createElement('span');
+    infoWrap.className = 'limit-reset-credits-info-wrap limit-spend-info-wrap';
+    infoWrap.classList.toggle('has-opened', state.resetCreditsTooltipHasOpened);
+    const info = document.createElement('span');
+    info.className = 'limit-reset-credits-info';
+    info.textContent = 'i';
+    info.tabIndex = 0;
+    info.setAttribute(
+      'aria-label',
+      entries.map(([entryLabel, value]) => `${entryLabel}: ${formatMoney(value, currency)}`).join(', ')
+    );
+    const tooltip = document.createElement('span');
+    tooltip.className = 'limit-reset-credits-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    entries.forEach(([entryLabel, value]) => {
+      const row = document.createElement('span');
+      row.className = 'limit-reset-credit-detail';
+      const tooltipLabel = document.createElement('span');
+      tooltipLabel.textContent = entryLabel;
+      const tooltipValue = document.createElement('span');
+      tooltipValue.textContent = formatMoney(value, currency);
+      row.append(tooltipLabel, tooltipValue);
+      tooltip.append(row);
+    });
+    const markSpendTooltipOpened = () => {
+      state.resetCreditsTooltipHasOpened = true;
+      state.resetCreditsTooltipActive = true;
+      infoWrap.classList.add('has-opened');
+    };
+    const releaseSpendTooltip = () => {
+      requestAnimationFrame(() => {
+        if (infoWrap.matches(':hover, :focus-within')) return;
+        state.resetCreditsTooltipActive = false;
+        flushPendingResetCreditsTooltipRender();
+      });
+    };
+    infoWrap.addEventListener('pointerenter', markSpendTooltipOpened);
+    infoWrap.addEventListener('focusin', markSpendTooltipOpened);
+    infoWrap.addEventListener('pointerleave', releaseSpendTooltip);
+    infoWrap.addEventListener('focusout', releaseSpendTooltip);
+    infoWrap.append(info, tooltip);
+    right.append(infoWrap);
+  }
+
+  line.append(label, right);
+  item.append(line);
+  item.setAttribute(
+    'aria-label',
+    ['Spend', ...entries.map(([entryLabel, value]) => `${entryLabel} ${formatMoney(value, currency)}`)].join(', ')
+  );
+  return item;
+}
+
 const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' };
 
 function formatMoney(value, currency) {
@@ -2670,7 +2756,25 @@ function renderProviderWindows(provider, color) {
     }
   } else if (provider.provider === 'openrouter') {
     windows.classList.add('limit-windows-openrouter');
-    for (const quotaWindow of provider.windows || []) {
+    const balance = provider.balance || null;
+    const currency = balance?.currency || 'USD';
+    const balanceAmount = optionalFiniteNumber(balance?.amount);
+    const creditsWindow = (provider.windows || []).find((window) => window?.label === 'Credits') || null;
+    if (balanceAmount !== null) {
+      const balanceWindow = creditsWindow || (balanceAmount === 0
+        ? { usedPercent: 100, remainingPercent: 0, showMeter: true }
+        : { showMeter: false });
+      const balanceNode = limitWindowNode(
+        'Balance',
+        { ...balanceWindow, label: 'Balance' },
+        color,
+        0.95,
+        `${formatMoney(balanceAmount, currency)} left`
+      );
+      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(balanceNode);
+    }
+    for (const quotaWindow of (provider.windows || []).filter((window) => window !== creditsWindow)) {
       const hasMeter = quotaWindow?.showMeter !== false;
       const remaining = optionalFiniteNumber(quotaWindow?.remaining);
       const limit = optionalFiniteNumber(quotaWindow?.limit);
@@ -2690,6 +2794,8 @@ function renderProviderWindows(provider, color) {
       if (!hasMeter) node.classList.add('limit-window-no-reset');
       windows.append(node);
     }
+    const spendNode = openrouterSpendNode(balance);
+    if (spendNode) windows.append(spendNode);
   } else if (provider.provider === 'deepseek') {
     // DeepSeek is pay-as-you-go: render the prepaid balance as a meter so the
     // provider uses the same visual language as fixed quota windows.

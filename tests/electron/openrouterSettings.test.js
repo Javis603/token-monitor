@@ -46,7 +46,7 @@ test('OpenRouter credentials stay in the main process and renderer receives conf
   assert.match(main, /openrouterLimits\.openrouterProfileName\(rawNewName\)/);
 });
 
-test('OpenRouter Limits presentation distinguishes real meters from spend-only rows', () => {
+test('OpenRouter Limits presentation shows a real balance meter and compact spend tooltip', () => {
   const app = read('src/electron/renderer/app.js');
   const presentation = read('src/electron/renderer/limitProviderPresentation.js');
   const styles = read('src/electron/renderer/styles.css');
@@ -59,10 +59,20 @@ test('OpenRouter Limits presentation distinguishes real meters from spend-only r
     app,
     /if \(id === 'openrouter' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{\s*nodes\.push\(renderOpenRouterAccountGroup\(label, visibleProviders, color\)\);\s*continue;\s*\}/
   );
+  assert.match(app, /function openrouterSpendEntries\(balance\)/);
+  assert.match(app, /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
+  assert.match(app, /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
+  assert.match(app, /summary\.className = 'limit-spend-summary'/);
+  assert.match(app, /tooltip\.className = 'limit-reset-credits-tooltip'/);
+  assert.match(app, /info\.tabIndex = 0/);
+  assert.match(app, /const creditsWindow = \(provider\.windows \|\| \[\]\)\.find/);
+  assert.match(app, /limitWindowNode\(\s*'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \}/);
+  assert.match(app, /\.filter\(\(window\) => window !== creditsWindow\)/);
   assert.match(app, /const hasMeter = quotaWindow\?\.showMeter !== false/);
   assert.match(app, /const valueOverride = hasMeter \? null : \(quotaWindow\?\.detail \|\| '—'\)/);
   assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
   assert.match(styles, /\.limit-icon-openrouter/);
+  assert.match(styles, /\.limit-spend-summary\s*\{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
   assert.match(colors, /openrouter: '#6467f2'/);
 });
 

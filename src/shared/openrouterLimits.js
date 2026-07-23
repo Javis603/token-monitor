@@ -88,25 +88,31 @@ function keyLimitWindow(data) {
 function creditsWindow(data) {
   const totalCredits = finiteNumber(data?.total_credits);
   const totalUsage = finiteNumber(data?.total_usage);
-  if (!(totalCredits > 0) || totalUsage === null) return null;
+  if (totalCredits === null || totalCredits < 0 || totalUsage === null || totalUsage < 0) return null;
   return {
     kind: 'billing',
     label: 'Credits',
     used: Math.max(0, totalUsage),
     limit: totalCredits,
     remaining: Math.max(0, totalCredits - totalUsage),
+    usedPercent: totalCredits > 0
+      ? Math.min(100, Math.max(0, (totalUsage / totalCredits) * 100))
+      : 100,
     showMeter: true
   };
 }
 
-function spendDetail(data) {
-  const rows = [
-    ['Today', finiteNumber(data?.usage_daily)],
-    ['Week', finiteNumber(data?.usage_weekly)],
-    ['Month', finiteNumber(data?.usage_monthly)],
-    ['All time', finiteNumber(data?.usage)]
-  ].filter(([, value]) => value !== null);
-  return rows.map(([label, value]) => `${label} $${Math.max(0, value).toFixed(2)}`).join(' · ');
+function spendAmounts(data) {
+  const amount = (value) => {
+    const number = finiteNumber(value);
+    return number === null ? null : Math.max(0, number);
+  };
+  return {
+    todaySpend: amount(data?.usage_daily),
+    weekSpend: amount(data?.usage_weekly),
+    monthSpend: amount(data?.usage_monthly),
+    allTimeSpend: amount(data?.usage)
+  };
 }
 
 async function fetchOpenRouterAccount(name, apiKey, deps = {}) {
@@ -140,8 +146,7 @@ async function fetchOpenRouterAccount(name, apiKey, deps = {}) {
   const keyData = keyResult.status === 'fulfilled' ? keyResult.value?.data : null;
   const creditsData = creditsResult.status === 'fulfilled' ? creditsResult.value?.data : null;
   const windows = [keyLimitWindow(keyData), creditsWindow(creditsData)].filter(Boolean);
-  const detail = spendDetail(keyData);
-  if (detail) windows.push({ kind: 'billing', label: 'Spend', detail, showMeter: false });
+  const spend = spendAmounts(keyData);
 
   const totalCredits = finiteNumber(creditsData?.total_credits);
   const totalUsage = finiteNumber(creditsData?.total_usage);
@@ -166,8 +171,7 @@ async function fetchOpenRouterAccount(name, apiKey, deps = {}) {
     balance: {
       amount,
       currency: 'USD',
-      todaySpend: finiteNumber(keyData?.usage_daily),
-      monthSpend: finiteNumber(keyData?.usage_monthly)
+      ...spend
     }
   });
 }
@@ -222,5 +226,5 @@ module.exports = {
   keyLimitWindow,
   openrouterProfileName,
   openrouterToken,
-  spendDetail
+  spendAmounts
 };

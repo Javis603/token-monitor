@@ -3307,6 +3307,25 @@ html.is-windows .limit-live-badge {
 .limit-window-note {
   gap: 3px;
 }
+.limit-spend-line {
+  min-width: 0;
+}
+.limit-spend-right {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.limit-spend-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.limit-spend-info-wrap {
+  transform: none;
+}
 .limit-reset-credits {
   display: grid;
   min-height: 11px;

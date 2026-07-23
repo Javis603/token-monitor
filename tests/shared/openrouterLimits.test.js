@@ -88,12 +88,14 @@ test('fetchOpenRouterLimits exposes true key and credits denominators plus spend
     window.detail
   ]), [
     ['Monthly limit', 12, 30, 18, true, ''],
-    ['Credits', 40, 100, 60, true, ''],
-    ['Spend', null, null, null, false, 'Today $1.25 · Week $4.50 · Month $9.75 · All time $12.00']
+    ['Credits', 40, 100, 60, true, '']
   ]);
   assert.equal(provider.planLabel, 'Management');
   assert.equal(provider.balance.amount, 60);
   assert.equal(provider.balance.todaySpend, 1.25);
+  assert.equal(provider.balance.weekSpend, 4.5);
+  assert.equal(provider.balance.monthSpend, 9.75);
+  assert.equal(provider.balance.allTimeSpend, 12);
   assert.ok(!JSON.stringify(provider).includes('sk-or-personal'));
 });
 
@@ -116,7 +118,46 @@ test('a standard key remains usable when the management credits endpoint is forb
 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.balance.amount, null);
-  assert.deepEqual(provider.windows.map((window) => [window.label, window.showMeter]), [['Spend', false]]);
+  assert.deepEqual(provider.windows, []);
+  assert.equal(provider.balance.currency, 'USD');
+  assert.equal(provider.balance.todaySpend, 0.5);
+  assert.equal(provider.balance.weekSpend, 1);
+  assert.equal(provider.balance.monthSpend, 2);
+  assert.equal(provider.balance.allTimeSpend, 3);
+});
+
+test('zero total credits remains a real empty balance meter', async () => {
+  const [provider] = await fetchOpenRouterLimits({
+    openrouterProfiles: { empty: { apiKey: 'sk-empty', enabled: true } }
+  }, {
+    env: {},
+    fetch: apiFetch({
+      'sk-empty': {
+        usage: 0,
+        usage_daily: 0,
+        usage_weekly: 0,
+        usage_monthly: 0
+      }
+    }, {
+      'sk-empty': { total_credits: 0, total_usage: 0 }
+    })
+  });
+
+  assert.equal(provider.balance.amount, 0);
+  assert.deepEqual(provider.windows, [{
+    kind: 'billing',
+    label: 'Credits',
+    used: 0,
+    limit: 0,
+    remaining: 0,
+    usedPercent: 100,
+    remainingPercent: 0,
+    resetsAt: null,
+    windowMinutes: null,
+    resetDescription: '',
+    detail: '',
+    showMeter: true
+  }]);
 });
 
 test('profiles and the official env key produce separate deduplicated accounts', async () => {
@@ -173,7 +214,9 @@ test('blank and absent API numbers stay unknown instead of becoming zero-value m
   assert.deepEqual(provider.windows, []);
   assert.equal(provider.balance.amount, null);
   assert.equal(provider.balance.todaySpend, null);
+  assert.equal(provider.balance.weekSpend, null);
   assert.equal(provider.balance.monthSpend, null);
+  assert.equal(provider.balance.allTimeSpend, null);
 });
 
 test('a key limit can derive usage from a real remaining value', () => {
