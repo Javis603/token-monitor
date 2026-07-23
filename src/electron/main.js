@@ -72,6 +72,7 @@ const {
   downloadedAppUpdateMatchesLatest,
   GITHUB_REPO,
   mergeLatestReleaseMetadata,
+  shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
@@ -318,6 +319,7 @@ function defaultSettings() {
     currency: normalizeCurrency(process.env.TOKEN_MONITOR_CURRENCY || 'USD'),
     currencyRates: {},
     startAtLogin: false,
+    automaticAppUpdates: false,
     language: 'auto',
     opencodeCookie: '',
     opencodeProfiles: {},
@@ -1647,6 +1649,7 @@ function readSettings() {
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
@@ -3322,7 +3325,7 @@ function sendAppUpdatePush() {
   mainWindow.webContents.send('appUpdate:push', deriveAppUpdateState());
 }
 
-async function runAppUpdateCheck({ force = false } = {}) {
+async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {}) {
   if (appUpdateCheckPromise) {
     if (force) sendAppUpdatePush();
     const activeResult = await appUpdateCheckPromise;
@@ -3335,17 +3338,17 @@ async function runAppUpdateCheck({ force = false } = {}) {
       }
       sendAppUpdatePush();
     }
-    return deriveAppUpdateState();
+    return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
   }
   const block = settings?.appUpdate || {};
-  if (shouldSkipAppUpdateCheck({
+  if (!bypassCooldown && shouldSkipAppUpdateCheck({
     force,
     lastCheckedAt: block.lastCheckedAt,
     latest: block.lastKnownLatest,
     dismissedVersion: block.dismissedVersion,
     currentVersion: app.getVersion()
   })) {
-    return deriveAppUpdateState();
+    return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
   }
   const checkTask = (async () => {
     appUpdateCheckInFlight = true;
@@ -3379,7 +3382,15 @@ async function runAppUpdateCheck({ force = false } = {}) {
   } finally {
     if (appUpdateCheckPromise === checkTask) appUpdateCheckPromise = null;
   }
-  return deriveAppUpdateState();
+  return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
+}
+
+async function maybeDownloadAutomaticAppUpdate(updateState) {
+  if (!shouldDownloadAutomaticAppUpdate({
+    automaticAppUpdates: settings?.automaticAppUpdates,
+    updateState
+  })) return updateState;
+  return downloadAndPrepareAppUpdate();
 }
 
 function maybeRunBackgroundUpdateCheck() {
@@ -3858,6 +3869,7 @@ app.whenReady().then(() => {
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousCurrency = settings.currency;
     const previousStartAtLogin = settings.startAtLogin;
+    const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
@@ -3950,6 +3962,7 @@ app.whenReady().then(() => {
       currencyRates: patch.currencyRates !== undefined ? normalizeCurrencyOverrides(patch.currencyRates) : normalizeCurrencyOverrides(settings.currencyRates),
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
+      automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
       deepseekApiKey: patch.deepseekApiKey !== undefined ? normalizeDeepSeekApiKey(patch.deepseekApiKey) : (settings.deepseekApiKey || ''),
       minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
       copilotApiToken: patch.copilotApiToken !== undefined ? normalizeCopilotApiToken(patch.copilotApiToken) : (settings.copilotApiToken || ''),
@@ -3986,6 +3999,9 @@ app.whenReady().then(() => {
     if (settings.startAtLogin !== previousStartAtLogin) {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
+    }
+    if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
+      runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
     }
     if (patch.zoomFactor !== undefined) applyZoomFactor();
     if (settings.discordRpcEnabled && !previousDiscordRpcEnabled) {

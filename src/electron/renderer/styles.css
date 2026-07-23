@@ -486,6 +486,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   opacity: 0.4;
   cursor: default;
 }
+.settings-panel .checkbox-label.is-disabled .settings-item-title { color: var(--muted); }
 .settings-group { display: grid; min-width: 0; gap: 8px; }
 .settings-group.hidden, .settings-subgroup.hidden, .settings-actions button.hidden { display: none; }
 .settings-collection-cadence {
@@ -2046,7 +2047,7 @@ html.is-windows .settings-panel select option {
   align-items: center;
   margin-top: -6px;
   margin-bottom: -2px;
-  padding: 0 2px;
+  padding: 0;
 }
 .view-back-row.hidden { display: none; }
 .back-home-button {
@@ -2054,18 +2055,18 @@ html.is-windows .settings-panel select option {
   height: 26px;
   align-items: center;
   gap: 6px;
-  margin-left: -6px;
-  padding: 0 6px;
+  margin-left: 0;
+  padding: 0 6px 0 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   font-size: 11px;
-  transition: color 120ms ease, background 120ms ease;
+  transition: color 120ms ease;
 }
-.back-home-button:hover {
-  background: rgba(var(--overlay-rgb), 0.06);
+.back-home-button:hover,
+.back-home-button:active {
   color: var(--text);
 }
 .back-home-button:focus-visible {
@@ -2073,14 +2074,14 @@ html.is-windows .settings-panel select option {
   outline-offset: 1px;
   color: var(--text);
 }
-.back-home-button:active { background: rgba(var(--overlay-rgb), 0.1); }
 .back-home-icon {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
   background: currentColor;
   -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
   mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  transform: translateX(-2px);
 }
 .breakdown {
   position: relative;
@@ -3674,6 +3675,7 @@ html.is-windows .limit-live-badge {
   appearance: none;
   background: transparent;
   border: 0;
+  border-radius: 999px 0 0 999px;
   color: inherit;
   display: inline-flex;
   align-items: center;
@@ -3682,7 +3684,39 @@ html.is-windows .limit-live-badge {
   padding: 3px 4px 3px 8px;
   cursor: pointer;
 }
+.update-pill-action:hover,
+.update-pill-restart:hover { background: rgba(115, 189, 245, 0.1); }
+.update-pill-action:focus-visible,
+.update-pill-restart:focus-visible {
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 1px;
+}
+.update-pill-action:disabled,
+.update-pill-restart:disabled { cursor: default; opacity: 0.55; }
+.update-pill.is-ready .update-pill-action { padding-right: 7px; }
 .update-pill-label { letter-spacing: 0.02em; }
+.update-pill-restart {
+  appearance: none;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 7px;
+  border: 0;
+  border-left: 1px solid rgba(115, 189, 245, 0.28);
+  border-radius: 0 999px 999px 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1;
+}
+.update-pill-restart.hidden { display: none; }
+@media (max-width: 300px) {
+  .update-pill-restart { gap: 0; padding-inline: 7px; }
+  .update-pill-restart-label { display: none; }
+}
 .update-pill-dismiss {
   appearance: none;
   background: transparent;
