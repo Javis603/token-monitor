@@ -167,6 +167,25 @@ test('recordConsumption: unchanged balances are idempotent and do not rewrite th
   assert.equal(store.peek().k.allTimeSpend, 0);
 });
 
+test('recordConsumption: repairs a finite timestamp outside the Date range', () => {
+  const store = memoryStore({
+    k: {
+      version: 2,
+      currency: 'CNY',
+      trackingSince: Number.MAX_SAFE_INTEGER,
+      lastPaid: 4.61,
+      allTimeSpend: 0,
+      dailySpend: {}
+    }
+  });
+  const now = new Date(2026, 5, 7, 9, 0, 0).getTime();
+  const result = recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 4.61, now, storePath: '/x' }, store);
+
+  assert.equal(result.trackingSince, new Date(now).toISOString());
+  assert.equal(store.peek().k.trackingSince, now);
+  assert.equal(store.writes(), 1);
+});
+
 test('recordConsumption: all-time spend survives daily bucket pruning', () => {
   const old = new Date(2026, 3, 1, 8, 0, 0).getTime();
   const now = new Date(2026, 5, 7, 9, 0, 0).getTime();

@@ -9,6 +9,12 @@ function round2(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
+function validDateMs(value) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds)) return null;
+  return Number.isFinite(new Date(milliseconds).getTime()) ? milliseconds : null;
+}
+
 function startOfLocalDay(ms) {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
@@ -58,8 +64,8 @@ function localDayStartFromKey(key) {
 // Spend = sum of paid drops (increases are top-ups -> 0), bucketed by interval-end local time.
 function computeConsumption(snapshots, nowMs) {
   const sorted = [...(snapshots || [])]
-    .map((s) => ({ ts: Number(s.ts), paid: Number(s.paid) }))
-    .filter((s) => Number.isFinite(s.ts) && Number.isFinite(s.paid))
+    .map((s) => ({ ts: validDateMs(s.ts), paid: Number(s.paid) }))
+    .filter((s) => s.ts !== null && Number.isFinite(s.paid))
     .sort((a, b) => a.ts - b.ts);
 
   let todaySpend = 0;
@@ -92,8 +98,8 @@ function addDailySpend(dailySpend, timestamp, amount) {
 
 function compactLegacyEntry(entry, currency, now) {
   const snapshots = [...(entry?.snapshots || [])]
-    .map((snapshot) => ({ ts: Number(snapshot?.ts), paid: Number(snapshot?.paid) }))
-    .filter((snapshot) => Number.isFinite(snapshot.ts) && Number.isFinite(snapshot.paid))
+    .map((snapshot) => ({ ts: validDateMs(snapshot?.ts), paid: Number(snapshot?.paid) }))
+    .filter((snapshot) => snapshot.ts !== null && Number.isFinite(snapshot.paid))
     .sort((a, b) => a.ts - b.ts);
   const dailySpend = {};
   for (let index = 1; index < snapshots.length; index += 1) {
@@ -128,7 +134,7 @@ function normalizedCompactEntry(entry, currency, now) {
     };
   }
 
-  const trackingSince = Number(entry.trackingSince);
+  const trackingSince = validDateMs(entry.trackingSince);
   const lastPaid = entry.lastPaid === null || entry.lastPaid === undefined || entry.lastPaid === ''
     ? null
     : Number(entry.lastPaid);
@@ -145,7 +151,7 @@ function normalizedCompactEntry(entry, currency, now) {
   const normalized = {
     version: STORE_VERSION,
     currency,
-    trackingSince: Number.isFinite(trackingSince) ? trackingSince : Number(now),
+    trackingSince: trackingSince ?? Number(now),
     lastPaid: Number.isFinite(lastPaid) ? lastPaid : null,
     allTimeSpend,
     dailySpend
@@ -185,9 +191,9 @@ function recordConsumption({ accountKey, currency, paid, now, storePath }, deps 
   const read = deps.readJson || readJson;
   const write = deps.writeJsonAtomic || writeJsonAtomic;
   const store = read(storePath, {}) || {};
-  const nowMs = Number(now);
+  const nowMs = validDateMs(now);
   const paidAmount = Number(paid);
-  if (!accountKey || !currency || !Number.isFinite(nowMs) || !Number.isFinite(paidAmount)) {
+  if (!accountKey || !currency || nowMs === null || !Number.isFinite(paidAmount)) {
     throw new TypeError('invalid DeepSeek balance observation');
   }
 
