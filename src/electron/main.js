@@ -3299,7 +3299,7 @@ function sendAppUpdatePush() {
   mainWindow.webContents.send('appUpdate:push', deriveAppUpdateState());
 }
 
-async function runAppUpdateCheck({ force = false } = {}) {
+async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {}) {
   if (appUpdateCheckPromise) {
     if (force) sendAppUpdatePush();
     const activeResult = await appUpdateCheckPromise;
@@ -3315,7 +3315,7 @@ async function runAppUpdateCheck({ force = false } = {}) {
     return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
   }
   const block = settings?.appUpdate || {};
-  if (shouldSkipAppUpdateCheck({
+  if (!bypassCooldown && shouldSkipAppUpdateCheck({
     force,
     lastCheckedAt: block.lastCheckedAt,
     latest: block.lastKnownLatest,
@@ -3977,7 +3977,9 @@ app.whenReady().then(() => {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
     }
-    if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) maybeRunBackgroundUpdateCheck();
+    if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
+      runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
+    }
     if (patch.zoomFactor !== undefined) applyZoomFactor();
     if (settings.discordRpcEnabled && !previousDiscordRpcEnabled) {
       startDiscordRpc();
