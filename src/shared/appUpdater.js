@@ -171,6 +171,19 @@ function downloadedAppUpdateMatchesLatest({
   return Boolean(version && latestVersion && version === latestVersion);
 }
 
+function shouldDownloadAutomaticAppUpdate({
+  automaticAppUpdates = false,
+  updateState = null
+} = {}) {
+  return Boolean(
+    automaticAppUpdates
+    && updateState?.hasUpdate
+    && updateState.installSupported
+    && !updateState.downloaded
+    && !updateState.installBusy
+  );
+}
+
 function deriveAppUpdateAvailability({
   currentVersion,
   latest,
@@ -234,6 +247,7 @@ module.exports = {
   parseLatestReleasePayload,
   shouldSkipAppUpdateCheck,
   downloadedAppUpdateMatchesLatest,
+  shouldDownloadAutomaticAppUpdate,
   deriveAppUpdateAvailability,
   extractReleaseNotes,
   mergeLatestReleaseMetadata,

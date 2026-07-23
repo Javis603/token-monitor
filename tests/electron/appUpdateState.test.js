@@ -39,7 +39,7 @@ test('automatic updates are opt-in and download without installing', () => {
   const defaults = sourceBetween('function defaultSettings', 'function normalizeCollectionMode');
   const automaticDownload = sourceBetween('async function maybeDownloadAutomaticAppUpdate', 'function maybeRunBackgroundUpdateCheck');
   assert.match(defaults, /automaticAppUpdates: false/);
-  assert.match(automaticDownload, /!settings\?\.automaticAppUpdates/);
+  assert.match(automaticDownload, /shouldDownloadAutomaticAppUpdate\(\{\s*automaticAppUpdates: settings\?\.automaticAppUpdates,\s*updateState\s*\}\)/);
   assert.match(automaticDownload, /return downloadAndPrepareAppUpdate\(\)/);
   assert.doesNotMatch(automaticDownload, /installDownloadedAppUpdate/);
 });
@@ -53,6 +53,7 @@ test('enabling automatic updates bypasses the background-check cooldown', () => 
 
 test('automatic update control persists through settings', () => {
   assert.match(html, /id="automaticAppUpdatesInput"[^>]*type="checkbox"/);
-  assert.match(renderer, /automaticAppUpdatesInput\.checked = state\.settings\.automaticAppUpdates === true/);
+  assert.match(html, /<script src="appUpdatePresentation\.js"><\/script>[\s\S]*<script src="app\.js"><\/script>/);
+  assert.match(renderer, /automaticAppUpdateControlState\(\{\s*preferenceEnabled: state\.settings\?\.automaticAppUpdates,\s*updateState: state\.appUpdate\s*\}\)/);
   assert.match(renderer, /saveSettings\(\{ automaticAppUpdates: els\.automaticAppUpdatesInput\.checked \}\)/);
 });

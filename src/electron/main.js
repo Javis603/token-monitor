@@ -72,6 +72,7 @@ const {
   downloadedAppUpdateMatchesLatest,
   GITHUB_REPO,
   mergeLatestReleaseMetadata,
+  shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
@@ -3360,13 +3361,10 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
 }
 
 async function maybeDownloadAutomaticAppUpdate(updateState) {
-  if (
-    !settings?.automaticAppUpdates ||
-    !updateState?.hasUpdate ||
-    !updateState.installSupported ||
-    updateState.downloaded ||
-    updateState.installBusy
-  ) return updateState;
+  if (!shouldDownloadAutomaticAppUpdate({
+    automaticAppUpdates: settings?.automaticAppUpdates,
+    updateState
+  })) return updateState;
   return downloadAndPrepareAppUpdate();
 }
 
