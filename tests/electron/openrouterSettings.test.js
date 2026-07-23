@@ -55,8 +55,10 @@ test('OpenRouter Limits presentation distinguishes real meters from spend-only r
   assert.match(app, /\{ id: 'openrouter', label: 'OpenRouter' \}/);
   assert.match(app, /provider\.provider === 'openrouter'/);
   assert.match(app, /function renderOpenRouterAccountGroup/);
-  assert.match(app, /id === 'openrouter'.*visibleProviders\.length > 1/);
-  assert.match(app, /renderOpenRouterAccountGroup\(label, visibleProviders, color\)/);
+  assert.match(
+    app,
+    /if \(id === 'openrouter' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{\s*nodes\.push\(renderOpenRouterAccountGroup\(label, visibleProviders, color\)\);\s*continue;\s*\}/
+  );
   assert.match(app, /const hasMeter = quotaWindow\?\.showMeter !== false/);
   assert.match(app, /const valueOverride = hasMeter \? null : \(quotaWindow\?\.detail \|\| '—'\)/);
   assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
