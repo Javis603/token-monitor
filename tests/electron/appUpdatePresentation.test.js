@@ -29,6 +29,18 @@ test('automatic download control is enabled only for supported idle builds', () 
   });
 });
 
+test('supported idle builds keep automatic downloads available when switched off', () => {
+  assert.deepEqual(automaticAppUpdateControlState({
+    preferenceEnabled: false,
+    updateState: { installSupported: true, installBusy: false }
+  }), {
+    checked: false,
+    disabled: false,
+    unavailable: false,
+    descriptionKey: 'settings.appUpdate.automaticDescription'
+  });
+});
+
 test('unsupported automatic download controls are off, disabled, and explain why', () => {
   const reasons = new Map([
     ['unpackaged', 'settings.appUpdate.automaticUnsupportedUnpackaged'],
