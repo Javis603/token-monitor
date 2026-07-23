@@ -18,6 +18,7 @@ test('OpenRouter settings provide multi-account API key management without a cus
   assert.match(html, /id="openrouterProfileName"/);
   assert.match(html, /id="openrouterApiKeyInput"/);
   assert.match(html, /id="openrouterProfileSubmit"/);
+  assert.match(html, /data-i18n="settings\.openrouter\.profileName"/);
   assert.doesNotMatch(html, /openrouter[^"]*(?:Base URL|baseUrl|base-url)/i);
   assert.match(app, /window\.tokenMonitor\.openExternal\('https:\/\/openrouter\.ai\/settings\/keys'\)/);
   assert.match(app, /renderOpenRouterProfiles/);
@@ -41,6 +42,8 @@ test('OpenRouter credentials stay in the main process and renderer receives conf
   assert.match(main, /ipcMain\.handle\('openrouter:renameProfile'/);
   assert.match(main, /ipcMain\.handle\('openrouter:setProfileEnabled'/);
   assert.match(main, /AbortSignal\.timeout\(15_000\)/);
+  assert.match(main, /openrouterLimits\.openrouterProfileName\(rawName\)/);
+  assert.match(main, /openrouterLimits\.openrouterProfileName\(rawNewName\)/);
 });
 
 test('OpenRouter Limits presentation distinguishes real meters from spend-only rows', () => {
@@ -51,11 +54,22 @@ test('OpenRouter Limits presentation distinguishes real meters from spend-only r
 
   assert.match(app, /\{ id: 'openrouter', label: 'OpenRouter' \}/);
   assert.match(app, /provider\.provider === 'openrouter'/);
+  assert.match(app, /function renderOpenRouterAccountGroup/);
+  assert.match(app, /id === 'openrouter'.*visibleProviders\.length > 1/);
+  assert.match(app, /renderOpenRouterAccountGroup\(label, visibleProviders, color\)/);
   assert.match(app, /const hasMeter = quotaWindow\?\.showMeter !== false/);
   assert.match(app, /const valueOverride = hasMeter \? null : \(quotaWindow\?\.detail \|\| '—'\)/);
   assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
   assert.match(styles, /\.limit-icon-openrouter/);
   assert.match(colors, /openrouter: '#6467f2'/);
+});
+
+test('OpenRouter settings status uses collision-free row identity and a stable env account name', () => {
+  const app = read('src/electron/renderer/app.js');
+  assert.match(app, /info\.dataset\.openrouterProfileName = name/);
+  assert.match(app, /info\.dataset\.openrouterEnvironment = 'true'/);
+  assert.match(app, /byName\.get\('environment'\)/);
+  assert.doesNotMatch(app, /openrouter-info-\$\{/);
 });
 
 test('OpenRouter key page is narrowly allowlisted', () => {

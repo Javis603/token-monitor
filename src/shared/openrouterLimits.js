@@ -6,6 +6,7 @@ const { normalizeLimitProvider } = require('./limits');
 
 const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/key';
 const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
+const OPENROUTER_ENV_ACCOUNT_NAME = 'environment';
 
 function cleanSecret(value) {
   let raw = typeof value === 'string' ? value.trim() : '';
@@ -22,8 +23,18 @@ function openrouterToken(env = process.env, explicitKey = '') {
 }
 
 function finiteNumber(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function openrouterProfileName(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 64 || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
+  const clean = raw.replace(/[^a-z0-9 ._-]/gi, '').replace(/\s+/g, ' ').trim();
+  if (clean !== raw || clean.toLowerCase() === OPENROUTER_ENV_ACCOUNT_NAME) return '';
+  return clean;
 }
 
 function statusForHttp(code) {
@@ -39,7 +50,7 @@ async function requestJson(url, apiKey, deps = {}) {
       Authorization: `Bearer ${apiKey}`,
       Accept: 'application/json',
       'HTTP-Referer': 'https://github.com/Javis603/token-monitor',
-      'X-Title': 'Token Monitor'
+      'X-OpenRouter-Title': 'Token Monitor'
     },
     signal: deps.signal
   });
@@ -55,8 +66,12 @@ async function requestJson(url, apiKey, deps = {}) {
 function keyLimitWindow(data) {
   const limit = finiteNumber(data?.limit);
   if (!(limit > 0)) return null;
-  const used = Math.max(0, finiteNumber(data?.usage) || 0);
+  const providedUsed = finiteNumber(data?.usage);
   const providedRemaining = finiteNumber(data?.limit_remaining);
+  if (providedUsed === null && providedRemaining === null) return null;
+  const used = providedUsed === null
+    ? Math.max(0, limit - providedRemaining)
+    : Math.max(0, providedUsed);
   const remaining = providedRemaining === null ? Math.max(0, limit - used) : Math.max(0, providedRemaining);
   const reset = String(data?.limit_reset || '').trim().toLowerCase();
   const kind = reset === 'daily' ? 'session' : reset === 'weekly' ? 'weekly' : 'billing';
@@ -161,15 +176,16 @@ function configuredAccounts(options = {}, deps = {}) {
   const accounts = [];
   const seenKeys = new Set();
   for (const [name, profile] of Object.entries(options.openrouterProfiles || {})) {
+    const profileName = openrouterProfileName(name);
     const apiKey = cleanSecret(profile?.apiKey);
-    if (profile?.enabled !== false && apiKey && !seenKeys.has(apiKey)) {
-      accounts.push({ name: String(name).trim(), apiKey });
+    if (profile?.enabled !== false && profileName && apiKey && !seenKeys.has(apiKey)) {
+      accounts.push({ name: profileName, apiKey });
       seenKeys.add(apiKey);
     }
   }
   const envKey = openrouterToken(deps.env || process.env);
   if (envKey && !seenKeys.has(envKey)) {
-    accounts.push({ name: 'default (env)', apiKey: envKey });
+    accounts.push({ name: OPENROUTER_ENV_ACCOUNT_NAME, apiKey: envKey });
   }
   return accounts.filter((account) => account.name);
 }
@@ -196,6 +212,7 @@ async function fetchOpenRouterLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
+  OPENROUTER_ENV_ACCOUNT_NAME,
   OPENROUTER_CREDITS_URL,
   OPENROUTER_KEY_URL,
   configuredAccounts,
@@ -203,6 +220,7 @@ module.exports = {
   fetchOpenRouterAccount,
   fetchOpenRouterLimits,
   keyLimitWindow,
+  openrouterProfileName,
   openrouterToken,
   spendDetail
 };

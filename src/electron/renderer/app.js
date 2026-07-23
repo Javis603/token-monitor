@@ -3009,6 +3009,30 @@ function renderOpenCodeAccountGroup(label, providers, color) {
   return row;
 }
 
+function openrouterAccountTitle(provider, index) {
+  return String(provider?.accountName || provider?.accountLabel || '').trim() || `Account ${index + 1}`;
+}
+
+function renderOpenRouterAccountGroup(label, providers, color) {
+  const row = document.createElement('div');
+  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+  const groupProvider = { provider: 'openrouter', status: 'ok', windows: [] };
+  const head = renderLimitProviderHead('openrouter', label, groupProvider, color, {
+    planText: t('settings.openrouter.nAccounts', { count: providers.length }),
+    hideMeta: true
+  });
+  const accountList = document.createElement('div');
+  accountList.className = 'limit-account-list';
+  providers.forEach((provider, index) => {
+    accountList.append(renderLimitProviderRow('openrouter', openrouterAccountTitle(provider, index), provider, color, {
+      accountRow: true,
+      showIcon: false
+    }));
+  });
+  row.append(head, accountList);
+  return row;
+}
+
 function renderLimits() {
   if (!els.limitsPanel) return;
   const holdResetCreditsTooltipRender = resetCreditsTooltipShouldHoldRender();
@@ -3046,6 +3070,10 @@ function renderLimits() {
     }
     if (id === 'opencode' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderOpenCodeAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'openrouter' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderOpenRouterAccountGroup(label, visibleProviders, color));
       continue;
     }
     if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
@@ -8878,14 +8906,13 @@ function openrouterProfileStatusText(provider, enabled = true) {
 function updateOpenRouterProfilesStatus() {
   const providers = localProviderStatuses('openrouter');
   const byName = new Map(providers.map((provider) => [String(provider.accountName || provider.accountLabel || ''), provider]));
-  const configured = state.settings?.openrouterProfiles || {};
-  for (const [name, profile] of Object.entries(configured)) {
-    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const infoEl = document.getElementById(`openrouter-info-${safeName}`);
-    if (infoEl) infoEl.textContent = openrouterProfileStatusText(byName.get(name), profile?.enabled !== false);
+  for (const infoEl of document.querySelectorAll('[data-openrouter-profile-name]')) {
+    const name = infoEl.dataset.openrouterProfileName || '';
+    const profile = state.settings?.openrouterProfiles?.[name];
+    infoEl.textContent = openrouterProfileStatusText(byName.get(name), profile?.enabled !== false);
   }
-  const envInfo = document.getElementById('openrouter-info-env');
-  if (envInfo) envInfo.textContent = openrouterProfileStatusText(byName.get('default (env)'));
+  const envInfo = document.querySelector('[data-openrouter-environment]');
+  if (envInfo) envInfo.textContent = openrouterProfileStatusText(byName.get('environment'));
 
   const statusEl = document.getElementById('openrouterStatus');
   if (!statusEl) return;
@@ -8986,7 +9013,11 @@ function renderOpenRouterProfiles() {
       rightBox.className = 'profile-right';
       const info = document.createElement('span');
       info.className = 'profile-info';
-      info.id = env ? 'openrouter-info-env' : `openrouter-info-${name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      if (env) {
+        info.dataset.openrouterEnvironment = 'true';
+      } else {
+        info.dataset.openrouterProfileName = name;
+      }
       info.textContent = t('settings.openrouter.checking');
       rightBox.append(info);
 

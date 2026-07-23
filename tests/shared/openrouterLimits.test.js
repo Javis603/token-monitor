@@ -4,9 +4,12 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  OPENROUTER_ENV_ACCOUNT_NAME,
   OPENROUTER_CREDITS_URL,
   OPENROUTER_KEY_URL,
   fetchOpenRouterLimits,
+  keyLimitWindow,
+  openrouterProfileName,
   openrouterToken
 } = require('../../src/shared/openrouterLimits');
 
@@ -21,6 +24,9 @@ function response(status, body) {
 
 function apiFetch(keyBodies, creditsBodies = {}) {
   return async (url, init) => {
+    assert.equal(init.headers['HTTP-Referer'], 'https://github.com/Javis603/token-monitor');
+    assert.equal(init.headers['X-OpenRouter-Title'], 'Token Monitor');
+    assert.equal(init.headers['X-Title'], undefined);
     const key = String(init.headers.Authorization).slice('Bearer '.length);
     if (url === OPENROUTER_KEY_URL) {
       const value = keyBodies[key];
@@ -36,6 +42,14 @@ test('openrouterToken prefers explicit, then Token Monitor env, then standard en
   assert.equal(openrouterToken({ TOKEN_MONITOR_OPENROUTER_API_KEY: 'tm', OPENROUTER_API_KEY: 'std' }, '"explicit"'), 'explicit');
   assert.equal(openrouterToken({ TOKEN_MONITOR_OPENROUTER_API_KEY: 'tm', OPENROUTER_API_KEY: 'std' }), 'tm');
   assert.equal(openrouterToken({ OPENROUTER_API_KEY: "'std'" }), 'std');
+});
+
+test('OpenRouter profile names preserve provider-safe identities and reserve the environment account', () => {
+  assert.equal(openrouterProfileName('work 2'), 'work 2');
+  assert.equal(openrouterProfileName('default (env)'), '');
+  assert.equal(openrouterProfileName('Environment'), '');
+  assert.equal(openrouterProfileName('name@example.com'), '');
+  assert.equal(openrouterProfileName('x'.repeat(65)), '');
 });
 
 test('fetchOpenRouterLimits exposes true key and credits denominators plus spend', async () => {
@@ -123,6 +137,54 @@ test('profiles and the official env key produce separate deduplicated accounts',
     })
   });
   assert.deepEqual(result.map((provider) => provider.accountName), ['work', 'duplicate']);
+});
+
+test('the official env key uses a normalization-safe account identity', async () => {
+  const [provider] = await fetchOpenRouterLimits({}, {
+    env: { OPENROUTER_API_KEY: 'sk-env' },
+    fetch: apiFetch({
+      'sk-env': { usage_monthly: 2 }
+    }, {
+      'sk-env': { status: 403 }
+    })
+  });
+  assert.equal(provider.accountName, OPENROUTER_ENV_ACCOUNT_NAME);
+});
+
+test('blank and absent API numbers stay unknown instead of becoming zero-value meters', async () => {
+  const [provider] = await fetchOpenRouterLimits({
+    openrouterProfiles: { partial: { apiKey: 'sk-partial', enabled: true } }
+  }, {
+    env: {},
+    fetch: apiFetch({
+      'sk-partial': {
+        usage: null,
+        usage_daily: '',
+        usage_weekly: ' ',
+        usage_monthly: undefined,
+        limit: 30,
+        limit_remaining: ''
+      }
+    }, {
+      'sk-partial': { total_credits: 100, total_usage: null }
+    })
+  });
+
+  assert.deepEqual(provider.windows, []);
+  assert.equal(provider.balance.amount, null);
+  assert.equal(provider.balance.todaySpend, null);
+  assert.equal(provider.balance.monthSpend, null);
+});
+
+test('a key limit can derive usage from a real remaining value', () => {
+  assert.deepEqual(keyLimitWindow({ limit: 30, limit_remaining: 18 }), {
+    kind: 'billing',
+    label: 'API key limit',
+    used: 12,
+    limit: 30,
+    remaining: 18,
+    showMeter: true
+  });
 });
 
 test('scoped refresh fetches only the selected OpenRouter profile', async () => {

@@ -4482,7 +4482,7 @@ app.whenReady().then(() => {
     };
   });
   ipcMain.handle('openrouter:saveProfile', async (_event, rawName, rawApiKey) => {
-    const name = String(rawName || '').trim().slice(0, 64);
+    const name = openrouterLimits.openrouterProfileName(rawName);
     const apiKey = openrouterLimits.openrouterToken({}, rawApiKey);
     if (!name || !apiKey) return { ok: false, error: 'Empty name or API key' };
     try {
@@ -4523,7 +4523,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('openrouter:renameProfile', async (_event, rawOldName, rawNewName) => {
     const oldName = String(rawOldName || '').trim();
-    const newName = String(rawNewName || '').trim().slice(0, 64);
+    const newName = openrouterLimits.openrouterProfileName(rawNewName);
     const profiles = { ...(settings.openrouterProfiles || {}) };
     if (!newName || oldName === newName) return { ok: false, error: 'Invalid name' };
     if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
