@@ -721,7 +721,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   const homeLabel = functionBody(app, 'homeLimitWindowLabel', 'renderHomeLimitModule');
   const homeRows = functionBody(app, 'homeLimitRows', 'homeLimitWindowLabel');
   const homeModule = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
-  const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'mimoTokenPlanWindowFromBalance');
+  const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'balanceRemainingWindow');
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
@@ -749,17 +749,19 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
   assert.doesNotMatch(renderBarsIcon, /\.find\(\(w\) => w\.kind/);
 });
 
-test('DeepSeek main Limits row renders absolute balance without a fake quota meter', () => {
+test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const balanceWindow = functionBody(app, 'balanceRemainingWindow', 'mimoTokenPlanWindowFromBalance');
   const styles = readRendererFile('styles.css');
 
-  assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\('Balance', \{ showMeter: false \}, color, 0\.95,/);
+  assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\('Balance', balanceRemainingWindow\(balance\), color, 0\.95,/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
   assert.match(renderProviderWindows, /const spendNode = limitWindowNode\('Spend', \{ showMeter: false \}, color, 0\.6,/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
   assert.doesNotMatch(renderProviderWindows, /monthSinceTracking \? 'Month \(since tracking\)' : 'Month'/);
-  assert.doesNotMatch(app, /function balanceRemainingWindow/);
+  assert.match(balanceWindow, /remainingPercent/);
+  assert.match(balanceWindow, /amount \+ spend/);
   assert.match(styles, /\.limit-window-no-reset \.limit-reset\s*\{/);
 });
 

@@ -80,6 +80,8 @@ test('fetchDeepSeekLimits returns ok with balance + spend, never leaks the key',
   assert.equal(r.balance.currency, 'CNY');
   assert.equal(r.balance.amount, 7);
   assert.equal(r.balance.todaySpend, 3);
+  assert.equal(r.balance.allTimeSpend, 3);
+  assert.equal(r.balance.trackingSince, new Date(t0).toISOString());
   assert.match(r.accountKey, /^sha256:/);
   assert.ok(!JSON.stringify(r).includes('sk-secret-123'));
 });

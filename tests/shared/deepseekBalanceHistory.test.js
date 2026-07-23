@@ -10,10 +10,17 @@ const NOW = new Date(2026, 5, 7, 10, 0, 0).getTime();
 const at = (h) => new Date(2026, 5, 7, h, 0, 0).getTime();
 
 test('computeConsumption: empty / single snapshot yields zero spend', () => {
-  assert.deepEqual(computeConsumption([], NOW), { todaySpend: 0, monthSpend: 0, monthSinceTracking: true });
+  assert.deepEqual(computeConsumption([], NOW), {
+    todaySpend: 0,
+    monthSpend: 0,
+    allTimeSpend: 0,
+    trackingSince: new Date(NOW).toISOString(),
+    monthSinceTracking: true
+  });
   const one = computeConsumption([{ ts: at(9), paid: 10 }], NOW);
   assert.equal(one.todaySpend, 0);
   assert.equal(one.monthSpend, 0);
+  assert.equal(one.allTimeSpend, 0);
 });
 
 test('computeConsumption: sums drops within the day', () => {
@@ -78,6 +85,7 @@ test('recordConsumption: persists a compact balance anchor and daily spend', () 
     currency: 'CNY',
     trackingSince: t0,
     lastPaid: 7,
+    allTimeSpend: 3,
     dailySpend: { '2026-06-07': 3 }
   });
 });
@@ -90,6 +98,7 @@ test('recordConsumption: resets the series when the funded currency changes', ()
   const r = recordConsumption({ accountKey: 'k', currency: 'USD', paid: 4, now: t1, storePath: '/x' }, store);
   assert.equal(store.peek().k.currency, 'USD');
   assert.equal(store.peek().k.lastPaid, 4);
+  assert.equal(store.peek().k.allTimeSpend, 0);
   assert.deepEqual(store.peek().k.dailySpend, {});
   assert.equal(r.todaySpend, 0);
 });
@@ -103,14 +112,18 @@ test('recordConsumption: keeps an old balance anchor while pruning daily spend o
       currency: 'CNY',
       trackingSince: old,
       lastPaid: 10,
+      allTimeSpend: 2,
       dailySpend: { '2026-04-02': 2 }
     }
   });
   const result = recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 9, now, storePath: '/x' }, store);
   assert.equal(store.peek().k.lastPaid, 9);
+  assert.equal(store.peek().k.allTimeSpend, 3);
   assert.deepEqual(store.peek().k.dailySpend, { '2026-06-07': 1 });
   assert.equal(result.todaySpend, 1);
   assert.equal(result.monthSpend, 1);
+  assert.equal(result.allTimeSpend, 3);
+  assert.equal(result.trackingSince, new Date(old).toISOString());
   assert.equal(result.monthSinceTracking, false);
 });
 
@@ -135,9 +148,11 @@ test('recordConsumption: migrates repeated legacy snapshots into compact daily s
     currency: 'CNY',
     trackingSince: t0,
     lastPaid: 7,
+    allTimeSpend: 3,
     dailySpend: { '2026-06-07': 3 }
   });
   assert.equal(result.todaySpend, 3);
+  assert.equal(result.allTimeSpend, 3);
   assert.equal(store.writes(), 1);
 });
 
@@ -149,4 +164,24 @@ test('recordConsumption: unchanged balances are idempotent and do not rewrite th
   recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 4.61, now: t0 + 10 * 60 * 1000, storePath: '/x' }, store);
   assert.equal(store.writes(), 1);
   assert.deepEqual(store.peek().k.dailySpend, {});
+  assert.equal(store.peek().k.allTimeSpend, 0);
+});
+
+test('recordConsumption: all-time spend survives daily bucket pruning', () => {
+  const old = new Date(2026, 3, 1, 8, 0, 0).getTime();
+  const now = new Date(2026, 5, 7, 9, 0, 0).getTime();
+  const store = memoryStore({
+    k: {
+      version: 2,
+      currency: 'CNY',
+      trackingSince: old,
+      lastPaid: 9,
+      allTimeSpend: 12,
+      dailySpend: { '2026-04-02': 12 }
+    }
+  });
+  const result = recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 8, now, storePath: '/x' }, store);
+  assert.deepEqual(store.peek().k.dailySpend, { '2026-06-07': 1 });
+  assert.equal(store.peek().k.allTimeSpend, 13);
+  assert.equal(result.allTimeSpend, 13);
 });

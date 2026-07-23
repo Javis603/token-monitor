@@ -64,10 +64,12 @@ function computeConsumption(snapshots, nowMs) {
 
   let todaySpend = 0;
   let monthSpend = 0;
+  let allTimeSpend = 0;
   for (let i = 1; i < sorted.length; i += 1) {
     const drop = Math.max(0, sorted[i - 1].paid - sorted[i].paid);
     if (drop <= 0) continue;
     const ts = sorted[i].ts;
+    allTimeSpend += drop;
     if (sameLocalDay(ts, nowMs)) todaySpend += drop;
     if (sameLocalMonth(ts, nowMs)) monthSpend += drop;
   }
@@ -76,6 +78,8 @@ function computeConsumption(snapshots, nowMs) {
   return {
     todaySpend: round2(todaySpend),
     monthSpend: round2(monthSpend),
+    allTimeSpend: round2(allTimeSpend),
+    trackingSince: new Date(earliest).toISOString(),
     monthSinceTracking: earliest > startOfLocalMonth(nowMs)
   };
 }
@@ -83,7 +87,7 @@ function computeConsumption(snapshots, nowMs) {
 function addDailySpend(dailySpend, timestamp, amount) {
   if (!(amount > 0)) return;
   const key = localDayKey(timestamp);
-  dailySpend[key] = Number(dailySpend[key] || 0) + amount;
+  dailySpend[key] = round2(Number(dailySpend[key] || 0) + amount);
 }
 
 function compactLegacyEntry(entry, currency, now) {
@@ -95,11 +99,13 @@ function compactLegacyEntry(entry, currency, now) {
   for (let index = 1; index < snapshots.length; index += 1) {
     addDailySpend(dailySpend, snapshots[index].ts, Math.max(0, snapshots[index - 1].paid - snapshots[index].paid));
   }
+  const allTimeSpend = round2(Object.values(dailySpend).reduce((sum, amount) => sum + Number(amount || 0), 0));
   return {
     version: STORE_VERSION,
     currency,
     trackingSince: snapshots[0]?.ts ?? Number(now),
     lastPaid: snapshots.at(-1)?.paid ?? null,
+    allTimeSpend,
     dailySpend
   };
 }
@@ -115,6 +121,7 @@ function normalizedCompactEntry(entry, currency, now) {
         currency,
         trackingSince: Number(now),
         lastPaid: null,
+        allTimeSpend: 0,
         dailySpend: {}
       },
       changed: true
@@ -129,13 +136,18 @@ function normalizedCompactEntry(entry, currency, now) {
   for (const [key, value] of Object.entries(entry.dailySpend || {}).sort(([a], [b]) => a.localeCompare(b))) {
     const amount = Number(value);
     if (localDayStartFromKey(key) == null || !Number.isFinite(amount) || amount <= 0) continue;
-    dailySpend[key] = amount;
+    dailySpend[key] = round2(amount);
   }
+  const storedAllTimeSpend = Number(entry.allTimeSpend);
+  const allTimeSpend = Number.isFinite(storedAllTimeSpend) && storedAllTimeSpend >= 0
+    ? round2(storedAllTimeSpend)
+    : round2(Object.values(dailySpend).reduce((sum, amount) => sum + Number(amount || 0), 0));
   const normalized = {
     version: STORE_VERSION,
     currency,
     trackingSince: Number.isFinite(trackingSince) ? trackingSince : Number(now),
     lastPaid: Number.isFinite(lastPaid) ? lastPaid : null,
+    allTimeSpend,
     dailySpend
   };
   return { entry: normalized, changed: JSON.stringify(normalized) !== JSON.stringify(entry) };
@@ -162,6 +174,8 @@ function computeCompactConsumption(entry, now) {
   return {
     todaySpend: round2(entry.dailySpend?.[todayKey] || 0),
     monthSpend: round2(monthSpend),
+    allTimeSpend: round2(entry.allTimeSpend || 0),
+    trackingSince: new Date(Number(entry.trackingSince)).toISOString(),
     monthSinceTracking: Number(entry.trackingSince) > startOfLocalMonth(now)
   };
 }
@@ -185,7 +199,9 @@ function recordConsumption({ accountKey, currency, paid, now, storePath }, deps 
     entry.lastPaid = paidAmount;
     changed = true;
   } else if (entry.lastPaid !== paidAmount) {
-    addDailySpend(entry.dailySpend, nowMs, Math.max(0, entry.lastPaid - paidAmount));
+    const drop = Math.max(0, entry.lastPaid - paidAmount);
+    addDailySpend(entry.dailySpend, nowMs, drop);
+    entry.allTimeSpend = round2(Number(entry.allTimeSpend || 0) + drop);
     entry.lastPaid = paidAmount;
     changed = true;
   }

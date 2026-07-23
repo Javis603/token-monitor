@@ -39,18 +39,17 @@
     return remaining == null ? null : 100 - remaining;
   }
 
-  function balanceWindow(balance, { showMeter = true } = {}) {
+  function balanceWindow(balance) {
     if (!balance) return null;
     const amount = Math.max(0, Number(balance?.amount || 0));
     if (!Number.isFinite(amount)) return null;
     const spend = Math.max(0, Number(balance?.monthSpend || 0));
     const total = amount + spend;
-    const percent = showMeter ? (total > 0 ? (amount / total) * 100 : 100) : null;
+    const percent = total > 0 ? (amount / total) * 100 : 100;
     return {
       kind: 'balance',
       label: '',
-      remainingPercent: percent == null ? null : clampPercent(percent),
-      showMeter,
+      remainingPercent: clampPercent(percent),
       amount,
       currency: balance?.currency || ''
     };
@@ -88,7 +87,7 @@
       if (plan) windows.push(plan);
     }
     if (providerId === 'deepseek' || providerId === 'mimo') {
-      const balance = balanceWindow(account.balance, { showMeter: providerId !== 'deepseek' });
+      const balance = balanceWindow(account.balance);
       if (balance) windows.push(balance);
     }
     return windows;

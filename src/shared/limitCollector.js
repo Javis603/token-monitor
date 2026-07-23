@@ -2514,6 +2514,8 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
         currency: row.currency,
         todaySpend: spend.todaySpend,
         monthSpend: spend.monthSpend,
+        allTimeSpend: spend.allTimeSpend,
+        trackingSince: spend.trackingSince,
         monthSinceTracking: spend.monthSinceTracking
       }
     });
