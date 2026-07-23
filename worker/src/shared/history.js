@@ -41,9 +41,10 @@ function parseGraphResult(raw) {
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
     const date = String(row.date || '').slice(0, 10);
-    if (!date) continue;
+    if (!isValidDayKey(date)) continue;
     const perClient = {};
     const perModel = {};
+    const perClientModel = {};
     let tokens = 0;
     let cost = 0;
     let messages = 0;
@@ -62,6 +63,9 @@ function parseGraphResult(raw) {
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
       const pm = perModel[model] || (perModel[model] = { tokens: 0, cost: 0 });
       pm.tokens += t; pm.cost += cst;
+      const clientModels = perClientModel[client] || (perClientModel[client] = {});
+      const pcm = clientModels[model] || (clientModels[model] = { tokens: 0, cost: 0 });
+      pcm.tokens += t; pcm.cost += cst;
     }
     contributions.push({
       date,
@@ -70,7 +74,8 @@ function parseGraphResult(raw) {
       messages,
       activeTimeMs: num(row.activeTimeMs ?? row.active_time_ms),
       perClient,
-      perModel
+      perModel,
+      perClientModel
     });
   }
   const timeMetrics = normalizeTimeMetrics(raw?.timeMetrics ?? raw?.time_metrics);
@@ -158,6 +163,16 @@ function addPerModel(target, source) {
   }
 }
 
+function addPerClientModel(target, source) {
+  for (const [client, models] of Object.entries(source || {})) {
+    const clientTarget = target[client] || (target[client] = {});
+    for (const [model, v] of Object.entries(models || {})) {
+      const t = clientTarget[model] || (clientTarget[model] = { tokens: 0, cost: 0 });
+      t.tokens += num(v.tokens); t.cost += num(v.cost);
+    }
+  }
+}
+
 function activeTimeTotal(days) {
   return (Array.isArray(days) ? days : []).reduce((sum, day) => sum + num(day.activeTimeMs), 0);
 }
@@ -184,7 +199,7 @@ function rollingDailyWindow(days, todayKey, capDays = DEFAULT_CAP_DAYS) {
   const startKey = dayKeyAddDays(todayKey, -(count - 1));
   return (Array.isArray(days) ? days : []).filter((d) => {
     const key = String(d?.date || '').slice(0, 10);
-    return key >= startKey && key <= todayKey;
+    return isValidDayKey(key) && key >= startKey && key <= todayKey;
   });
 }
 
@@ -243,10 +258,11 @@ function mergeDailyMaps(histories) {
   for (const h of histories) {
     for (const d of (h && Array.isArray(h.daily) ? h.daily : [])) {
       const cur = byDate.get(d.date)
-        || { date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+        || { date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {}, perClientModel: {} };
       cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
       addPerClient(cur.perClient, d.perClient);
       addPerModel(cur.perModel, d.perModel);
+      addPerClientModel(cur.perClientModel, d.perClientModel);
       byDate.set(d.date, cur);
     }
   }

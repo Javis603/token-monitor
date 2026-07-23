@@ -123,15 +123,12 @@ function currentDeviceDayKey(record, nowMs) {
       const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
       const localKey = `${values.year}-${values.month}-${values.day}`;
       if (isValidDayKey(localKey)) return localKey;
-    } catch (_) { /* fall through to the legacy offset estimate */ }
+    } catch (_) { /* fall through to the legacy UTC fallback */ }
   }
-  if (isValidDayKey(key) && endsAtMs > 0) {
-    const nextKey = dayKeyAddDays(key, 1);
-    if (!nextKey) return utcDayKey(new Date(nowMs));
-    const nextUtcMidnight = Date.parse(`${nextKey}T00:00:00Z`);
-    const offsetMs = endsAtMs - nextUtcMidnight;
-    return new Date(nowMs - offsetMs).toISOString().slice(0, 10);
-  }
+  // Without an IANA zone, the offset encoded by a historical midnight cannot
+  // be carried across DST reliably. The reported key is safe only while its
+  // original window is still active; expired legacy records use UTC.
+  if (isValidDayKey(key) && endsAtMs > nowMs) return key;
   return utcDayKey(new Date(nowMs));
 }
 
@@ -157,7 +154,7 @@ function periodFromDailyHistory(history, todayKey, liveToday = null, days = 7) {
   const daily = coerceHistory(history).daily;
   for (const day of daily) {
     const key = String(day?.date || '').slice(0, 10);
-    if (key < startKey || key > endKey || (liveToday && key === endKey)) continue;
+    if (!isValidDayKey(key) || key < startKey || key > endKey || (liveToday && key === endKey)) continue;
     period.totalTokens += asNumber(day?.tokens);
     period.costUsd += asNumber(day?.cost);
     for (const [client, value] of Object.entries(day?.perClient || {})) {
@@ -167,6 +164,14 @@ function periodFromDailyHistory(history, todayKey, liveToday = null, days = 7) {
     for (const [model, value] of Object.entries(day?.perModel || {})) {
       period.models[model] = (period.models[model] || 0) + asNumber(value?.tokens);
       period.modelCosts[model] = (period.modelCosts[model] || 0) + asNumber(value?.cost);
+    }
+    for (const [client, models] of Object.entries(day?.perClientModel || {})) {
+      if (!period.clientModels[client]) period.clientModels[client] = {};
+      if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
+      for (const [model, value] of Object.entries(models || {})) {
+        period.clientModels[client][model] = (period.clientModels[client][model] || 0) + asNumber(value?.tokens);
+        period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + asNumber(value?.cost);
+      }
     }
   }
   if (liveToday) {
@@ -184,6 +189,18 @@ function periodFromDailyHistory(history, todayKey, liveToday = null, days = 7) {
     }
     for (const [model, cost] of Object.entries(today.modelCosts)) {
       period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
+    }
+    for (const [client, models] of Object.entries(today.clientModels)) {
+      if (!period.clientModels[client]) period.clientModels[client] = {};
+      for (const [model, tokens] of Object.entries(models)) {
+        period.clientModels[client][model] = (period.clientModels[client][model] || 0) + tokens;
+      }
+    }
+    for (const [client, models] of Object.entries(today.clientModelCosts)) {
+      if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
+      for (const [model, cost] of Object.entries(models)) {
+        period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
+      }
     }
   }
   return period;

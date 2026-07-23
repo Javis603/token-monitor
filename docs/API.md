@@ -195,6 +195,8 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 
 `periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference; `timeZone` is the optional IANA zone used to keep rolling calendar windows correct across DST). The hub uses it to expire a device's `today`/`month` from the aggregate once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
 
+`history.daily[].perClientModel` is optional and maps each client to its per-model token and cost totals for that calendar day. Current agents include it so the derived `last7Days.clientModels` and `last7Days.clientModelCosts` remain exact. Histories produced by older agents remain valid; their unavailable historical client/model intersections are omitted while live `today` intersections are still included.
+
 `limits` is optional. Agents and widgets include it when AI Tool Limits detection is enabled. Raw OAuth credentials, access tokens, refresh tokens, and provider response bodies must never be sent.
 
 `limits.providers[].provider` is one of `claude`, `codex`, `cursor`, `antigravity`, `opencode`, `deepseek`, `minimax`, `mimo`, `grok`, `copilot`, `kiro`, `zai`, `zaiteam`, `volcengine`, `qoder`, `kimi`, or `ollama`.

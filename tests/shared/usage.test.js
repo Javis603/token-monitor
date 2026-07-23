@@ -9,7 +9,8 @@ test('periodFromDailyHistory derives the rolling seven days and replaces today w
   const history = {
     daily: [
       { date: '2026-06-01', tokens: 99, cost: 9, perClient: { claude: { tokens: 99, cost: 9 } }, perModel: { old: { tokens: 99, cost: 9 } } },
-      { date: '2026-06-02', tokens: 10, cost: 1, perClient: { claude: { tokens: 10, cost: 1 } }, perModel: { opus: { tokens: 10, cost: 1 } } },
+      { date: '2026-06-02', tokens: 10, cost: 1, perClient: { claude: { tokens: 10, cost: 1 } }, perModel: { opus: { tokens: 10, cost: 1 } }, perClientModel: { claude: { opus: { tokens: 10, cost: 1 } } } },
+      { date: '2026-02-31', tokens: 1000, cost: 100, perClient: { corrupt: { tokens: 1000, cost: 100 } }, perModel: {} },
       { date: '2026-06-08', tokens: 20, cost: 2, perClient: { codex: { tokens: 20, cost: 2 } }, perModel: { gpt: { tokens: 20, cost: 2 } } }
     ]
   };
@@ -20,6 +21,8 @@ test('periodFromDailyHistory derives the rolling seven days and replaces today w
     clientCosts: { codex: 2.5 },
     models: { gpt: 25 },
     modelCosts: { gpt: 2.5 },
+    clientModels: { codex: { gpt: 25 } },
+    clientModelCosts: { codex: { gpt: 2.5 } },
     projects: { current: { totalTokens: 25 } },
     sessions: { current: { totalTokens: 25 } }
   };
@@ -31,6 +34,8 @@ test('periodFromDailyHistory derives the rolling seven days and replaces today w
   assert.deepEqual(period.clients, { claude: 10, codex: 25 });
   assert.deepEqual(period.clientCosts, { claude: 1, codex: 2.5 });
   assert.deepEqual(period.models, { opus: 10, gpt: 25 });
+  assert.deepEqual(period.clientModels, { claude: { opus: 10 }, codex: { gpt: 25 } });
+  assert.deepEqual(period.clientModelCosts, { claude: { opus: 1 }, codex: { gpt: 2.5 } });
   assert.equal(period.models.old, undefined);
   assert.deepEqual(Object.keys(period.projects), []);
   assert.deepEqual(period.sessions, {});
@@ -39,6 +44,18 @@ test('periodFromDailyHistory derives the rolling seven days and replaces today w
   assert.equal(period.outputTokens, 0);
   assert.deepEqual(period.clientCacheReads, {});
   assert.deepEqual(period.clientOutputs, {});
+});
+
+test('periodFromDailyHistory rejects impossible calendar dates inside the string range', () => {
+  const period = periodFromDailyHistory({
+    daily: [
+      { date: '2026-06-30', tokens: 10, cost: 1 },
+      { date: '2026-06-31', tokens: 999, cost: 99 }
+    ]
+  }, '2026-07-01');
+
+  assert.equal(period.totalTokens, 10);
+  assert.equal(period.costUsd, 1);
 });
 
 test('aggregateDevices exposes summed and per-device rolling seven-day periods', () => {
@@ -89,18 +106,37 @@ test('aggregateDevices anchors expired devices to the current day instead of the
   assert.deepEqual(aggregate.periods.last7Days.clients, { codex: 10 });
 });
 
-test('aggregateDevices preserves an expired device local day near UTC midnight', () => {
+test('aggregateDevices uses UTC for expired legacy devices without a timezone', () => {
   const aggregate = aggregateDevices([recordWithLimits({
     deviceId: 'utc-plus-eight',
     updatedAt: '2026-06-01T12:00:00.000Z',
     receivedAt: '2026-06-01T12:00:00.000Z',
     periodWindows: { today: { key: '2026-06-01', endsAt: '2026-06-01T16:00:00.000Z' } },
     history: {
-      daily: [{ date: '2026-06-09', tokens: 10, cost: 1, perClient: { codex: { tokens: 10, cost: 1 } }, perModel: {} }],
+      daily: [
+        { date: '2026-06-09', tokens: 99, cost: 9, perClient: { claude: { tokens: 99, cost: 9 } }, perModel: {} },
+        { date: '2026-06-08', tokens: 10, cost: 1, perClient: { codex: { tokens: 10, cost: 1 } }, perModel: {} }
+      ],
       monthly: [],
       summary: {}
     }
   })], 10 * 60 * 1000, Date.parse('2026-06-08T17:00:00.000Z'));
+
+  assert.equal(aggregate.periods.last7Days.totalTokens, 10);
+});
+
+test('aggregateDevices does not carry a legacy midnight offset across DST', () => {
+  const aggregate = aggregateDevices([recordWithLimits({
+    periodWindows: { today: { key: '2026-03-07', endsAt: '2026-03-08T05:00:00.000Z' } },
+    history: {
+      daily: [
+        { date: '2026-03-02', tokens: 99, cost: 9, perClient: {}, perModel: {} },
+        { date: '2026-03-09', tokens: 10, cost: 1, perClient: {}, perModel: {} }
+      ],
+      monthly: [],
+      summary: {}
+    }
+  })], 600000, Date.parse('2026-03-09T04:00:00.000Z'));
 
   assert.equal(aggregate.periods.last7Days.totalTokens, 10);
 });

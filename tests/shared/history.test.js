@@ -81,15 +81,19 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
   assert.deepEqual(day.perClient.codex, { tokens: 10, cost: 0.5, messages: 1 });
   assert.deepEqual(day.perModel.opus, { tokens: 30, cost: 1.0 });
   assert.deepEqual(day.perModel.gpt, { tokens: 10, cost: 0.5 });
+  assert.deepEqual(day.perClientModel.claude.opus, { tokens: 30, cost: 1.0 });
+  assert.deepEqual(day.perClientModel.codex.gpt, { tokens: 10, cost: 0.5 });
 });
 
 test('parseGraphResult is defensive about missing/garbage input', () => {
   assert.deepEqual(parseGraphResult(null), { contributions: [] });
   assert.deepEqual(parseGraphResult({}), { contributions: [] });
   assert.deepEqual(parseGraphResult({ contributions: 'x' }), { contributions: [] });
+  assert.deepEqual(parseGraphResult({ contributions: [{ date: '2026-02-31' }] }), { contributions: [] });
   const out = parseGraphResult({ contributions: [{ date: '2026-01-01' }] });
   assert.deepEqual(out.contributions[0], {
-    date: '2026-01-01', tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {}
+    date: '2026-01-01', tokens: 0, cost: 0, messages: 0, activeTimeMs: 0,
+    perClient: {}, perModel: {}, perClientModel: {}
   });
 });
 
