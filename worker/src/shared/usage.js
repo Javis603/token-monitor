@@ -161,19 +161,27 @@ function periodFromDailyHistory(history, todayKey, liveToday = null, days = 7) {
     period.totalTokens += asNumber(day?.tokens);
     period.costUsd += asNumber(day?.cost);
     for (const [client, value] of Object.entries(day?.perClient || {})) {
-      period.clients[client] = (period.clients[client] || 0) + asNumber(value?.tokens);
-      period.clientCosts[client] = (period.clientCosts[client] || 0) + asNumber(value?.cost);
+      const clientKey = normalizeClientName(client);
+      if (!clientKey) continue;
+      addMapNumber(period.clients, clientKey, asNumber(value?.tokens));
+      addMapNumber(period.clientCosts, clientKey, asNumber(value?.cost));
     }
     for (const [model, value] of Object.entries(day?.perModel || {})) {
-      period.models[model] = (period.models[model] || 0) + asNumber(value?.tokens);
-      period.modelCosts[model] = (period.modelCosts[model] || 0) + asNumber(value?.cost);
+      const modelKey = normalizeModelName(model);
+      if (!modelKey) continue;
+      addMapNumber(period.models, modelKey, asNumber(value?.tokens));
+      addMapNumber(period.modelCosts, modelKey, asNumber(value?.cost));
     }
     for (const [client, models] of Object.entries(day?.perClientModel || {})) {
-      if (!period.clientModels[client]) period.clientModels[client] = {};
-      if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
+      const clientKey = normalizeClientName(client);
+      if (!clientKey) continue;
+      const clientModels = ensureOwnMap(period.clientModels, clientKey);
+      const clientModelCosts = ensureOwnMap(period.clientModelCosts, clientKey);
       for (const [model, value] of Object.entries(models || {})) {
-        period.clientModels[client][model] = (period.clientModels[client][model] || 0) + asNumber(value?.tokens);
-        period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + asNumber(value?.cost);
+        const modelKey = normalizeModelName(model);
+        if (!modelKey) continue;
+        addMapNumber(clientModels, modelKey, asNumber(value?.tokens));
+        addMapNumber(clientModelCosts, modelKey, asNumber(value?.cost));
       }
     }
   }
@@ -194,15 +202,15 @@ function periodFromDailyHistory(history, todayKey, liveToday = null, days = 7) {
       period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
     }
     for (const [client, models] of Object.entries(today.clientModels)) {
-      if (!period.clientModels[client]) period.clientModels[client] = {};
+      const clientModels = ensureOwnMap(period.clientModels, client);
       for (const [model, tokens] of Object.entries(models)) {
-        period.clientModels[client][model] = (period.clientModels[client][model] || 0) + tokens;
+        addMapNumber(clientModels, model, tokens);
       }
     }
     for (const [client, models] of Object.entries(today.clientModelCosts)) {
-      if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
+      const clientModelCosts = ensureOwnMap(period.clientModelCosts, client);
       for (const [model, cost] of Object.entries(models)) {
-        period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
+        addMapNumber(clientModelCosts, model, cost);
       }
     }
   }
@@ -258,6 +266,22 @@ function normalizeProviderName(value) {
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function setOwn(object, key, value) {
+  if (hasOwn(object, key)) object[key] = value;
+  else Object.defineProperty(object, key, { value, enumerable: true, configurable: true, writable: true });
+}
+
+function addMapNumber(object, key, value) {
+  setOwn(object, key, (hasOwn(object, key) ? asNumber(object[key]) : 0) + asNumber(value));
+}
+
+function ensureOwnMap(object, key) {
+  if (!hasOwn(object, key) || !object[key] || typeof object[key] !== 'object' || Array.isArray(object[key])) {
+    setOwn(object, key, {});
+  }
+  return object[key];
 }
 
 function emptyProject(label = '') {
@@ -618,8 +642,8 @@ function normalizePeriod(input, options = {}) {
       for (const [model, value] of Object.entries(models)) {
         const modelKey = normalizeModelName(model);
         if (!modelKey) continue;
-        if (!period.clientModels[clientKey]) period.clientModels[clientKey] = {};
-        period.clientModels[clientKey][modelKey] = (period.clientModels[clientKey][modelKey] || 0) + Math.max(0, Math.round(asNumber(value)));
+        const clientModels = ensureOwnMap(period.clientModels, clientKey);
+        addMapNumber(clientModels, modelKey, Math.max(0, Math.round(asNumber(value))));
       }
     }
   }
@@ -630,8 +654,8 @@ function normalizePeriod(input, options = {}) {
       for (const [model, value] of Object.entries(models)) {
         const modelKey = normalizeModelName(model);
         if (!modelKey) continue;
-        if (!period.clientModelCosts[clientKey]) period.clientModelCosts[clientKey] = {};
-        period.clientModelCosts[clientKey][modelKey] = (period.clientModelCosts[clientKey][modelKey] || 0) + asNumber(value);
+        const clientModelCosts = ensureOwnMap(period.clientModelCosts, clientKey);
+        addMapNumber(clientModelCosts, modelKey, asNumber(value));
       }
     }
   }
@@ -973,29 +997,29 @@ function addPeriodInto(target, source) {
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
   for (const [client, tokens] of Object.entries(source.clients)) {
-    target.clients[client] = (target.clients[client] || 0) + tokens;
+    addMapNumber(target.clients, client, tokens);
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];
     if (source.clientCacheWrites?.[client]) target.clientCacheWrites[client] = (target.clientCacheWrites[client] || 0) + source.clientCacheWrites[client];
     if (source.clientOutputs?.[client]) target.clientOutputs[client] = (target.clientOutputs[client] || 0) + source.clientOutputs[client];
   }
-  for (const [client, cost] of Object.entries(source.clientCosts)) target.clientCosts[client] = (target.clientCosts[client] || 0) + cost;
+  for (const [client, cost] of Object.entries(source.clientCosts)) addMapNumber(target.clientCosts, client, cost);
   for (const [model, tokens] of Object.entries(source.models)) {
-    target.models[model] = (target.models[model] || 0) + tokens;
+    addMapNumber(target.models, model, tokens);
     if (source.modelCacheReads?.[model]) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + source.modelCacheReads[model];
     if (source.modelCacheWrites?.[model]) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + source.modelCacheWrites[model];
     if (source.modelOutputs?.[model]) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + source.modelOutputs[model];
   }
-  for (const [model, cost] of Object.entries(source.modelCosts)) target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
+  for (const [model, cost] of Object.entries(source.modelCosts)) addMapNumber(target.modelCosts, model, cost);
   for (const [client, models] of Object.entries(source.clientModels)) {
-    if (!target.clientModels[client]) target.clientModels[client] = {};
+    const targetModels = ensureOwnMap(target.clientModels, client);
     for (const [model, tokens] of Object.entries(models)) {
-      target.clientModels[client][model] = (target.clientModels[client][model] || 0) + tokens;
+      addMapNumber(targetModels, model, tokens);
     }
   }
   for (const [client, models] of Object.entries(source.clientModelCosts)) {
-    if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
+    const targetModelCosts = ensureOwnMap(target.clientModelCosts, client);
     for (const [model, cost] of Object.entries(models)) {
-      target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+      addMapNumber(targetModelCosts, model, cost);
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);

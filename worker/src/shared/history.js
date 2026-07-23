@@ -3,6 +3,13 @@
 
 'use strict';
 
+function ownEntry(target, key, create) {
+  if (!Object.prototype.hasOwnProperty.call(target, key)) {
+    Object.defineProperty(target, key, { value: create(), enumerable: true, configurable: true, writable: true });
+  }
+  return target[key];
+}
+
 // Portable (Node-free) usage-history core. Mirrors usage.js conventions so the
 // Cloudflare Worker can import it. Pure functions only — no I/O.
 
@@ -59,12 +66,12 @@ function parseGraphResult(raw) {
       tokens += t;
       cost += cst;
       messages += msg;
-      const pc = perClient[client] || (perClient[client] = { tokens: 0, cost: 0, messages: 0 });
+      const pc = ownEntry(perClient, client, () => ({ tokens: 0, cost: 0, messages: 0 }));
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
-      const pm = perModel[model] || (perModel[model] = { tokens: 0, cost: 0 });
+      const pm = ownEntry(perModel, model, () => ({ tokens: 0, cost: 0 }));
       pm.tokens += t; pm.cost += cst;
-      const clientModels = perClientModel[client] || (perClientModel[client] = {});
-      const pcm = clientModels[model] || (clientModels[model] = { tokens: 0, cost: 0 });
+      const clientModels = ownEntry(perClientModel, client, () => ({}));
+      const pcm = ownEntry(clientModels, model, () => ({ tokens: 0, cost: 0 }));
       pcm.tokens += t; pcm.cost += cst;
     }
     contributions.push({
@@ -151,23 +158,23 @@ function computeStreaks(days, todayKey) {
 
 function addPerClient(target, source) {
   for (const [client, v] of Object.entries(source || {})) {
-    const t = target[client] || (target[client] = { tokens: 0, cost: 0, messages: 0 });
+    const t = ownEntry(target, client, () => ({ tokens: 0, cost: 0, messages: 0 }));
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
   }
 }
 
 function addPerModel(target, source) {
   for (const [model, v] of Object.entries(source || {})) {
-    const t = target[model] || (target[model] = { tokens: 0, cost: 0 });
+    const t = ownEntry(target, model, () => ({ tokens: 0, cost: 0 }));
     t.tokens += num(v.tokens); t.cost += num(v.cost);
   }
 }
 
 function addPerClientModel(target, source) {
   for (const [client, models] of Object.entries(source || {})) {
-    const clientTarget = target[client] || (target[client] = {});
+    const clientTarget = ownEntry(target, client, () => ({}));
     for (const [model, v] of Object.entries(models || {})) {
-      const t = clientTarget[model] || (clientTarget[model] = { tokens: 0, cost: 0 });
+      const t = ownEntry(clientTarget, model, () => ({ tokens: 0, cost: 0 }));
       t.tokens += num(v.tokens); t.cost += num(v.cost);
     }
   }

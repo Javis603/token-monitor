@@ -58,6 +58,53 @@ test('periodFromDailyHistory rejects impossible calendar dates inside the string
   assert.equal(period.costUsd, 1);
 });
 
+test('weekly history safely preserves reserved client and model keys', () => {
+  const history = JSON.parse(`{
+    "daily": [{
+      "date": "2026-07-01",
+      "tokens": 10,
+      "cost": 1,
+      "perClient": { "__proto__": { "tokens": 999, "cost": 99 }, "codex": { "tokens": 10, "cost": 1 } },
+      "perModel": { "constructor": { "tokens": 999, "cost": 99 }, "gpt": { "tokens": 10, "cost": 1 } },
+      "perClientModel": {
+        "__proto__": { "weeklyPolluted": { "tokens": 999, "cost": 99 } },
+        "codex": { "prototype": { "tokens": 999, "cost": 99 }, "gpt": { "tokens": 10, "cost": 1 } }
+      }
+    }]
+  }`);
+
+  try {
+    const period = periodFromDailyHistory(history, '2026-07-01');
+    assert.equal(Object.prototype.weeklyPolluted, undefined);
+    assert.equal(Object.hasOwn(period.clients, '__proto__'), true);
+    assert.equal(period.clients.__proto__, 999);
+    assert.equal(period.models.constructor, 999);
+    assert.equal(period.clientModels.__proto__.weeklypolluted, 999);
+    assert.equal(period.clientModels.codex.prototype, 999);
+    assert.equal(period.clientModels.codex.gpt, 10);
+
+    const aggregate = aggregateDevices([recordWithLimits({
+      updatedAt: '2026-06-30T12:00:00.000Z',
+      receivedAt: '2026-06-30T12:00:00.000Z',
+      periodWindows: { today: { key: '2026-06-30', endsAt: '2026-07-01T00:00:00.000Z' } },
+      history
+    })], 600000, Date.parse('2026-07-01T12:00:00.000Z'));
+    assert.equal(Object.prototype.weeklyPolluted, undefined);
+    assert.equal(aggregate.periods.last7Days.clientModels.__proto__.weeklypolluted, 999);
+
+    const live = periodFromDailyHistory(null, '2026-07-01', JSON.parse(`{
+      "clientModels": { "__proto__": { "livePolluted": 7 } },
+      "clientModelCosts": { "__proto__": { "livePolluted": 0.7 } }
+    }`));
+    assert.equal(Object.prototype.livePolluted, undefined);
+    assert.equal(live.clientModels.__proto__.livepolluted, 7);
+    assert.equal(live.clientModelCosts.__proto__.livepolluted, 0.7);
+  } finally {
+    delete Object.prototype.weeklyPolluted;
+    delete Object.prototype.livePolluted;
+  }
+});
+
 test('aggregateDevices exposes summed and per-device rolling seven-day periods', () => {
   const now = Date.parse('2026-06-08T12:00:00.000Z');
   const first = recordWithLimits({

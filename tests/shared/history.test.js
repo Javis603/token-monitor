@@ -97,6 +97,24 @@ test('parseGraphResult is defensive about missing/garbage input', () => {
   });
 });
 
+test('parseGraphResult safely preserves reserved client and model names', () => {
+  const output = parseGraphResult({
+    contributions: [{
+      date: '2026-01-01',
+      clients: [
+        { client: '__proto__', modelId: 'polluted', tokens: { input: 10 } },
+        { client: 'codex', modelId: 'constructor', tokens: { input: 20 } }
+      ]
+    }]
+  });
+
+  assert.equal(output.contributions[0].tokens, 30);
+  assert.equal(Object.hasOwn(output.contributions[0].perClientModel, '__proto__'), true);
+  assert.equal(output.contributions[0].perClientModel.__proto__.polluted.tokens, 10);
+  assert.equal(output.contributions[0].perClientModel.codex.constructor.tokens, 20);
+  assert.equal(Object.prototype.polluted, undefined);
+});
+
 test('computeIntensities keeps legacy cost intensity and exposes explicit metrics', () => {
   const days = [
     { date: 'a', tokens: 0, cost: 0 },
