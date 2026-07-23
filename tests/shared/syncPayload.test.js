@@ -43,7 +43,11 @@ test('syncPayload bounds uploads by omitting all-time sessions', () => {
       models: { opus: 30 },
       sessions: { old: { totalTokens: 30 } }
     },
-    history: { daily: [{ date: '2026-07-11', totalTokens: 10 }] },
+    history: {
+      daily: [{ date: '2026-07-11', totalTokens: 10 }],
+      dailyTotals: [{ date: '2025-01-01', tokens: 10, cost: 1, activeTimeMs: 1000 }],
+      summary: { activeDays: 1, activeDaysComplete: true }
+    },
     limits: { providers: [] }
   };
 
@@ -56,6 +60,35 @@ test('syncPayload bounds uploads by omitting all-time sessions', () => {
   assert.deepEqual(payload.allTime.models, summary.allTime.models);
   assert.deepEqual(payload.history, summary.history);
   assert.equal(summary.allTime.sessions.old.totalTokens, 30);
+});
+
+test('serializeSyncPayload omits oversized all-time daily totals and marks history incomplete', () => {
+  const dailyTotals = Array.from({ length: 40 }, (_, index) => ({
+    date: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10),
+    tokens: 1000 + index,
+    cost: index / 10,
+    activeTimeMs: index * 1000
+  }));
+  const summary = {
+    deviceId: 'large-calendar',
+    today: { totalTokens: 10 },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 },
+    history: {
+      daily: dailyTotals.slice(-2),
+      dailyTotals,
+      summary: { activeDays: 40, activeDaysComplete: true }
+    }
+  };
+
+  const { payload, bytes } = serializeSyncPayload(summary, { maxBytes: 500 });
+
+  assert.ok(bytes <= 500, `expected ${bytes} bytes to fit the test budget`);
+  assert.equal(Object.hasOwn(payload.history, 'dailyTotals'), false);
+  assert.equal(payload.history.dailyTotalsOmitted, 40);
+  assert.equal(payload.history.summary.activeDaysComplete, false);
+  assert.equal(summary.history.dailyTotals.length, 40);
+  assert.equal(summary.history.summary.activeDaysComplete, true);
 });
 
 test('syncPayload strips recomputable projects and keeps bounded all-time projects', () => {

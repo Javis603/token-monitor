@@ -15,6 +15,7 @@ const {
   homeActivityWheelRoute,
   homeActivityScrollTarget,
   homeActivityScrollRecord,
+  homeActiveDaysPresentation,
   homeTrendSummary,
   pickHomeHistory,
   patchDailyToday,
@@ -55,6 +56,33 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   assert.match(rule(css, '.home-activity-canvas .heat-bright-layer'), /pointer-events:\s*none/);
   assert.match(rule(css, '.home-activity-tooltip'), /position:\s*fixed/);
   assert.match(rule(css, '.home-activity-canvas .heat-month'), /fill:\s*rgba\(var\(--line-rgb\), 0\.5\)/);
+});
+
+test('Home uses exact all-time active days only when aggregation is complete', () => {
+  const cells = [{ tokens: 10 }, { tokens: 0 }, { tokens: 20 }];
+  assert.deepEqual(homeActiveDaysPresentation({
+    requestedWindow: 'all',
+    summary: { activeDays: 450, activeDaysComplete: true },
+    cells
+  }), { window: 'all', count: 450 });
+  assert.deepEqual(homeActiveDaysPresentation({
+    requestedWindow: 'all',
+    summary: { activeDays: 450, activeDaysComplete: false },
+    cells
+  }), { window: 'year', count: 2 });
+  assert.deepEqual(homeActiveDaysPresentation({
+    requestedWindow: 'all',
+    summary: { activeDays: 450 },
+    cells
+  }), { window: 'year', count: 2 });
+});
+
+test('Home keeps an explicit 12-month active-days selection', () => {
+  assert.deepEqual(homeActiveDaysPresentation({
+    requestedWindow: 'year',
+    summary: { activeDays: 450, activeDaysComplete: true },
+    cells: [{ tokens: 10 }, { tokens: 0 }]
+  }), { window: 'year', count: 1 });
 });
 
 test('Home module selection is independent from main view preferences', () => {

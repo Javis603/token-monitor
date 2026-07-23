@@ -111,6 +111,13 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
   delete payload.allTimeProjectsIncomplete;
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
+  if (summary.history && typeof summary.history === 'object') {
+    payload.history = { ...summary.history };
+    if (summary.history.summary && typeof summary.history.summary === 'object') {
+      payload.history.summary = { ...summary.history.summary };
+    }
+    if (Array.isArray(payload.history.dailyTotals)) delete payload.history.dailyTotalsOmitted;
+  }
 
   for (const periodName of ['today', 'month']) {
     const period = summary[periodName];
@@ -132,6 +139,18 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
     }
   }
   return payload;
+}
+
+function omitHistoryDailyTotals(payload) {
+  if (!Array.isArray(payload?.history?.dailyTotals)) return false;
+  const omitted = payload.history.dailyTotals.length;
+  payload.history = {
+    ...payload.history,
+    summary: { ...(payload.history.summary || {}), activeDaysComplete: false },
+    dailyTotalsOmitted: omitted
+  };
+  delete payload.history.dailyTotals;
+  return true;
 }
 
 function serializeSyncPayload(summary, options = {}) {
@@ -159,6 +178,9 @@ function serializeSyncPayload(summary, options = {}) {
       if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
     }
   }
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && omitHistoryDailyTotals(payload)) {
+    body = JSON.stringify(payload);
+  }
   return { payload, body, bytes: Buffer.byteLength(body, 'utf8') };
 }
 
@@ -182,6 +204,9 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
       .map(([period, count]) => `${period}: ${count}`)
       .join(', ');
     logger(`project detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
+  if (serialized.payload?.history?.dailyTotalsOmitted > 0 && typeof logger === 'function') {
+    logger(`all-time daily history omitted from sync (${serialized.payload.history.dailyTotalsOmitted} days); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
   let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   const canRetryWithoutProjects = response.status === 413

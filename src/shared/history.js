@@ -149,6 +149,23 @@ function activeTimeTotal(days) {
   return (Array.isArray(days) ? days : []).reduce((sum, day) => sum + num(day.activeTimeMs), 0);
 }
 
+// Full-history daily totals stay intentionally compact: they carry exactly what
+// an all-time active-day count and a future year heatmap need, without repeating
+// the per-client/per-model maps retained in the rolling `daily` tier.
+function compactDailyTotals(days) {
+  const byDate = new Map();
+  for (const day of (Array.isArray(days) ? days : [])) {
+    const date = String(day?.date || '').slice(0, 10);
+    if (!date) continue;
+    const current = byDate.get(date) || { date, tokens: 0, cost: 0, activeTimeMs: 0 };
+    current.tokens += num(day.tokens);
+    current.cost += num(day.cost);
+    current.activeTimeMs += num(day.activeTimeMs);
+    byDate.set(date, current);
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function monthlyRollup(days) {
   const byMonth = new Map();
   for (const d of (Array.isArray(days) ? days : [])) {
@@ -199,6 +216,7 @@ function normalizeHistory(graphData, options = {}) {
   const full = (graphData && Array.isArray(graphData.contributions) ? graphData.contributions : [])
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
+  const dailyTotals = compactDailyTotals(full);
 
   const daily = rollingDailyWindow(full, todayKey, capDays).map((d) => ({ ...d }));
   computeIntensities(daily);
@@ -207,17 +225,18 @@ function normalizeHistory(graphData, options = {}) {
   const totalTokens = full.reduce((s, d) => s + num(d.tokens), 0);
   const totalCost = full.reduce((s, d) => s + num(d.cost), 0);
   const messages = full.reduce((s, d) => s + num(d.messages), 0);
-  const activeDays = full.reduce((s, d) => s + (num(d.tokens) > 0 ? 1 : 0), 0);
-  const peakDayTokens = full.reduce((m, d) => Math.max(m, num(d.tokens)), 0);
-  const { currentStreak, longestStreak } = computeStreaks(full, todayKey);
+  const activeDays = dailyTotals.reduce((s, d) => s + (num(d.tokens) > 0 ? 1 : 0), 0);
+  const peakDayTokens = dailyTotals.reduce((m, d) => Math.max(m, num(d.tokens)), 0);
+  const { currentStreak, longestStreak } = computeStreaks(dailyTotals, todayKey);
   const timeMetrics = normalizeTimeMetrics(graphData?.timeMetrics);
-  const activeTimeMs = timeMetrics ? timeMetrics.totalActiveTimeMs : activeTimeTotal(full);
+  const activeTimeMs = timeMetrics ? timeMetrics.totalActiveTimeMs : activeTimeTotal(dailyTotals);
 
   return {
     daily,
+    dailyTotals,
     monthly,
     summary: {
-      totalTokens, totalCost, activeDays, currentStreak, longestStreak,
+      totalTokens, totalCost, activeDays, activeDaysComplete: true, currentStreak, longestStreak,
       peakDayTokens, favoriteModel: favoriteModelOf(full), messages,
       activeTimeMs,
       ...(timeMetrics ? { timeMetrics } : {})
@@ -254,9 +273,18 @@ function mergeMonthlyMaps(histories) {
   return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
 }
 
+function mergeDailyTotalMaps(histories) {
+  const days = [];
+  for (const history of histories) {
+    days.push(...history.dailyTotals);
+  }
+  return compactDailyTotals(days);
+}
+
 // Combine per-device histories. daily unions by date (sum + recompute intensity); monthly
-// unions by month. Lifetime totals come from the uncapped monthly tier; daily-granularity
-// stats (active days / peak / streaks) come from the merged daily window.
+// unions by month. New devices also provide compact all-time dailyTotals, which lets the
+// hub deduplicate dates exactly across devices. Mixed-version aggregates fail closed to
+// the rolling daily window instead of treating partial lifetime dates as complete.
 function mergeHistories(histories, options = {}) {
   const list = Array.isArray(histories) ? histories : [];
   const todayKey = String(options.todayKey || new Date().toISOString().slice(0, 10)).slice(0, 10);
@@ -268,6 +296,12 @@ function mergeHistories(histories, options = {}) {
   const daily = rollingDailyWindow(mergeDailyMaps(list), todayKey, capDays);
   computeIntensities(daily);
   const monthly = mergeMonthlyMaps(list);
+  const activeDaysComplete = list.length > 0 && list.every((history) => (
+    Array.isArray(history?.dailyTotals)
+    && history?.summary?.activeDaysComplete === true
+  ));
+  const dailyTotals = activeDaysComplete ? mergeDailyTotalMaps(list) : null;
+  const dailyDerived = dailyTotals || daily;
 
   const totalTokens = monthly.reduce((s, m) => s + num(m.tokens), 0);
   const totalCost = monthly.reduce((s, m) => s + num(m.cost), 0);
@@ -275,17 +309,18 @@ function mergeHistories(histories, options = {}) {
     for (const v of Object.values(m.perClient || {})) s += num(v.messages);
     return s;
   }, 0);
-  const activeDays = daily.reduce((s, d) => s + (num(d.tokens) > 0 ? 1 : 0), 0);
-  const peakDayTokens = daily.reduce((mx, d) => Math.max(mx, num(d.tokens)), 0);
-  const { currentStreak, longestStreak } = computeStreaks(daily, todayKey);
+  const activeDays = dailyDerived.reduce((s, d) => s + (num(d.tokens) > 0 ? 1 : 0), 0);
+  const peakDayTokens = dailyDerived.reduce((mx, d) => Math.max(mx, num(d.tokens)), 0);
+  const { currentStreak, longestStreak } = computeStreaks(dailyDerived, todayKey);
   const favoriteModel = favoriteModelOf(daily);
   const activeTimeMs = activeTimeTotal(monthly.length ? monthly : daily);
 
   return {
     daily,
+    ...(dailyTotals ? { dailyTotals } : {}),
     monthly,
     summary: {
-      totalTokens, totalCost, activeDays, currentStreak, longestStreak,
+      totalTokens, totalCost, activeDays, activeDaysComplete, currentStreak, longestStreak,
       peakDayTokens, favoriteModel, messages, activeTimeMs
     }
   };
@@ -294,11 +329,14 @@ function mergeHistories(histories, options = {}) {
 // Defensively normalize arbitrary wire JSON to the { daily, monthly, summary } shape.
 function coerceHistory(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  return {
+  const history = {
     daily: Array.isArray(src.daily) ? src.daily : [],
     monthly: Array.isArray(src.monthly) ? src.monthly : [],
     summary: src.summary && typeof src.summary === 'object' ? src.summary : {}
   };
+  if (Array.isArray(src.dailyTotals)) history.dailyTotals = src.dailyTotals;
+  if (Number.isFinite(src.dailyTotalsOmitted)) history.dailyTotalsOmitted = src.dailyTotalsOmitted;
+  return history;
 }
 
 // Trim a full History to a compact, per-client-free payload for /api/stats.

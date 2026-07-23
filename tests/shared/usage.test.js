@@ -984,6 +984,28 @@ test('aggregateHistory tolerates devices without history', () => {
   assert.deepEqual(merged.daily, []);
 });
 
+test('aggregateHistory fails closed when a usage-contributing device has no history', () => {
+  const merged = aggregateHistory([
+    {
+      deviceId: 'new-agent',
+      allTime: { totalTokens: 10 },
+      history: {
+        daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: {}, perModel: {} }],
+        dailyTotals: [{ date: '2026-06-07', tokens: 10, cost: 1, activeTimeMs: 0 }],
+        monthly: [],
+        summary: { activeDaysComplete: true }
+      }
+    },
+    {
+      deviceId: 'old-agent',
+      allTime: { totalTokens: 20 }
+    }
+  ]);
+
+  assert.equal(merged.summary.activeDaysComplete, false);
+  assert.equal('dailyTotals' in merged, false);
+});
+
 test('carryDeviceHistory carries prior history forward when the incoming snapshot omits it', () => {
   const previous = {
     deviceId: 'm1', receivedAt: '2026-06-08T00:00:00.000Z',

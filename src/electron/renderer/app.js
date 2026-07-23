@@ -4209,13 +4209,13 @@ function renderHomeTrendsModule() {
     cell: activityLayout.cell,
     gap: activityLayout.gap
   });
-  const summaryActiveDays = state.stats?.historyPreview?.summary?.activeDays;
-  const activeDaysWindow = state.settings?.homeActiveDaysWindow || 'all';
-  const displayActiveDays = activeDaysWindow === 'year'
-    ? activity.cells.filter((cell) => cell.tokens > 0).length
-    : (Number.isFinite(summaryActiveDays)
-        ? summaryActiveDays
-        : activity.cells.filter((cell) => cell.tokens > 0).length);
+  const activeDaysPresentation = homeOverviewApi.homeActiveDaysPresentation({
+    requestedWindow: state.settings?.homeActiveDaysWindow || 'all',
+    summary: state.stats?.historyPreview?.summary,
+    cells: activity.cells
+  });
+  const activeDaysWindow = activeDaysPresentation.window;
+  const displayActiveDays = activeDaysPresentation.count;
   const activeDaysLabel = activeDaysWindow === 'year'
     ? t('home.activeDaysYear', { count: displayActiveDays })
     : t('home.activeDays', { count: displayActiveDays });

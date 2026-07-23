@@ -34,7 +34,11 @@ test('composed full records remain compatible with hub normalization and merging
     today: period(10),
     month: period(20),
     allTime: period(30),
-    history: { daily: [{ date: '2026-07-21', totalTokens: 10, costUsd: 0 }] }
+    history: {
+      daily: [{ date: '2026-07-21', totalTokens: 10, costUsd: 0 }],
+      dailyTotals: [{ date: '2025-01-01', tokens: 10, cost: 0, activeTimeMs: 1000 }],
+      summary: { activeDays: 1, activeDaysComplete: true }
+    }
   });
   state.updateLimits({
     updatedAt: '2026-07-21T01:01:00.000Z',
@@ -54,6 +58,8 @@ test('composed full records remain compatible with hub normalization and merging
   const normalized = normalizeDeviceRecord(records[1].record);
   assert.equal(normalized.periods.today.totalTokens, 10);
   assert.equal(normalized.history.daily[0].totalTokens, 10);
+  assert.equal(normalized.history.dailyTotals[0].date, '2025-01-01');
+  assert.equal(normalized.history.summary.activeDaysComplete, true);
   assert.equal(normalized.limits.providers[0].status, 'unavailable');
   assert.equal(normalized.limits.providers[0].windows[0].usedPercent, 40);
 
@@ -63,6 +69,7 @@ test('composed full records remain compatible with hub normalization and merging
   });
   assert.equal(merged.periods.today.totalTokens, 10);
   assert.equal(merged.history.daily[0].totalTokens, 10);
+  assert.equal(merged.history.dailyTotals[0].tokens, 10);
   assert.equal(merged.updatedAt, '2026-07-21T01:00:00.000Z');
   assert.equal(merged.receivedAt, '2026-07-21T01:01:01.000Z');
 });

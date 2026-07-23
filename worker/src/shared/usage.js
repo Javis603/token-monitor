@@ -861,7 +861,15 @@ function aggregateHistory(devices) {
   const histories = [];
   for (const record of devices) {
     const normalized = normalizeDeviceRecord(record);
-    if (!hasOwn(normalized, 'history')) continue;
+    if (!hasOwn(normalized, 'history')) {
+      // A legacy/history-disabled device with all-time usage may own active
+      // dates absent from the histories we can merge. Include an incomplete
+      // sentinel so mixed-version hubs never advertise an exact lifetime count.
+      if (normalized.periods.allTime.totalTokens > 0) {
+        histories.push({ daily: [], monthly: [], summary: { activeDaysComplete: false } });
+      }
+      continue;
+    }
     histories.push(normalized.history);
   }
   return mergeHistories(histories);

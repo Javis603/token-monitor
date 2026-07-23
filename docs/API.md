@@ -197,6 +197,10 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 
 `limits` is optional. Agents and widgets include it when AI Tool Limits detection is enabled. Raw OAuth credentials, access tokens, refresh tokens, and provider response bodies must never be sent.
 
+`history` is optional and rides along on interval-gated history collection ticks. Its `daily` tier keeps the rolling 370-day window with per-client and per-model breakdowns, while `monthly` and `summary` retain lifetime rollups. Current clients also send `dailyTotals`, a compact all-time array of `{ date, tokens, cost, activeTimeMs }` rows without client/model identity. The hub unions these rows by date across devices so overlapping device activity counts as one active day and `/api/history` can support historical year heatmaps without expanding the detailed `daily` tier.
+
+`history.summary.activeDaysComplete` is `true` only when the active-day count was derived from complete `dailyTotals`. A mixed-version hub fails closed: if any stored device lacks complete daily totals, the aggregate omits `dailyTotals`, marks `activeDaysComplete: false`, and computes `activeDays` from the rolling `daily` window instead of presenting a partial lifetime count. If the compact calendar would exceed the ingest budget after existing payload reductions, the client omits it, sets `history.dailyTotalsOmitted` to the number of omitted rows, and also marks the count incomplete. Older hubs and clients safely ignore these optional fields.
+
 `limits.providers[].provider` is one of `claude`, `codex`, `cursor`, `antigravity`, `opencode`, `deepseek`, `minimax`, `mimo`, `grok`, `copilot`, `kiro`, `zai`, `zaiteam`, `volcengine`, `qoder`, `kimi`, or `ollama`.
 `limits.providers[].accountKey` is a stable hashed account identifier (`sha256:…`) used to dedupe the same account across devices. `accountEmail` is the account email when available, and `accountName` is a sanitized display/profile name. `accountLabel` is the legacy provider-defined short label retained for mixed-version compatibility: older OpenCode renderers use it as the profile name, while existing providers may use it for the plan. `planLabel` is the explicit plan label (for example `Plus`, `Go`, or `Zen`) when identity and plan must be carried separately; readers fall back to `accountLabel` for payloads produced before `planLabel` existed. These fields MAY be sent to the authenticated hub so devices can identify each account and its plan. The hub ingest is protected by the shared `secret`; the **public** stats endpoints (`publicLimits`) strip `accountKey`, `accountEmail`, `accountName`, `accountLabel`, and `planLabel` so neither account identity nor plan labels are exposed publicly.
 `limits.providers[].source` is one of `oauth`, `cli`, `web`, `rpc`, `local`, or `api`; `local` means the value was read from an on-disk store such as OpenCode Go usage from `opencode.db`, `web` means a browser/session cookie backed web endpoint (Cursor, OpenCode web accounts, Qoder, MiMo, Kimi membership, Ollama), and `api` means a provider HTTP API authenticated by an API key or AK/SK credentials (DeepSeek, Minimax, Copilot, GLM/Z.ai, Volcengine, Kimi Code).
@@ -221,11 +225,16 @@ Response includes:
 - `periodProjectsOmitted`, when a daily or monthly project rollup was itself too large to fit; the aggregate and affected devices expose omitted project counts and the widget marks that period's project breakdown incomplete
 - `projectsIncomplete` plus the corresponding `devices[].allTimeProjectsOmitted`, `devices[].allTimeProjectsIncomplete`, or `devices[].projectsEnabled` diagnostic
 - `historyPreview.daily[].activeTimeMs`, `historyPreview.monthly[].activeTimeMs`, and `historyPreview.summary.activeTimeMs` when tokscale graph exposes session active-time metrics
+- `historyPreview.summary.activeDaysComplete`, which callers must require before presenting `activeDays` as a lifetime count
 - `limits.providers` aggregated by provider account
 - `devices`, including each device's normalized `periods`, `limits`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`
 - stale status for devices that have not reported recently
 
 If multiple devices report the same provider account, the hub keeps the freshest valid limits status for that account. Public Worker stats omit account identifiers.
+
+## `GET /api/history`
+
+Returns the authenticated aggregate History. The detailed `daily` tier remains capped to the rolling 370-day window. When every stored device provides complete compact history, `dailyTotals` contains all observed dates merged across devices and `summary.activeDaysComplete` is `true`; otherwise `dailyTotals` is omitted and the flag is `false`.
 
 ## `GET /api/devices`
 
