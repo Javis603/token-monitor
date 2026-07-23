@@ -65,6 +65,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(app, /summary\.className = 'limit-spend-summary'/);
   assert.match(app, /tooltip\.className = 'limit-reset-credits-tooltip'/);
   assert.match(app, /info\.tabIndex = 0/);
+  assert.match(app, /const releaseSpendTooltip = \(\) => \{\s*requestAnimationFrame\(\(\) => \{\s*if \(resetCreditsTooltipShouldHoldRender\(\)\) return;/);
   assert.match(app, /const creditsWindow = \(provider\.windows \|\| \[\]\)\.find/);
   assert.match(app, /limitWindowNode\(\s*'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \}/);
   assert.match(app, /\.filter\(\(window\) => window !== creditsWindow\)/);

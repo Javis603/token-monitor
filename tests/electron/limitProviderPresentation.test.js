@@ -698,6 +698,7 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   assert.match(codexResetCreditsNode, /tooltipExpiry\.textContent = codexResetCreditExpiryLabel\(date\)/);
   assert.match(codexResetCreditsNode, /state\.resetCreditsTooltipActive = true/);
   assert.match(codexResetCreditsNode, /addEventListener\('pointerenter', markResetCreditsTooltipOpened\)/);
+  assert.match(codexResetCreditsNode, /if \(resetCreditsTooltipShouldHoldRender\(\)\) return;/);
   assert.match(codexResetCreditsNode, /formatCodexResetCreditsValue\(resetCredits\)/);
   assert.match(codexResetCreditsNode, /aria-label/);
   assert.match(resetCreditsTooltipShouldHoldRender, /state\.resetCreditsTooltipActive/);

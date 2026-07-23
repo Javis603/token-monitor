@@ -2117,7 +2117,7 @@ function codexResetCreditsNode(resetCredits) {
       };
       const releaseResetCreditsTooltip = () => {
         requestAnimationFrame(() => {
-          if (infoWrap.matches(':hover, :focus-within')) return;
+          if (resetCreditsTooltipShouldHoldRender()) return;
           state.resetCreditsTooltipActive = false;
           flushPendingResetCreditsTooltipRender();
         });
@@ -2200,7 +2200,7 @@ function openrouterSpendNode(balance) {
     };
     const releaseSpendTooltip = () => {
       requestAnimationFrame(() => {
-        if (infoWrap.matches(':hover, :focus-within')) return;
+        if (resetCreditsTooltipShouldHoldRender()) return;
         state.resetCreditsTooltipActive = false;
         flushPendingResetCreditsTooltipRender();
       });
