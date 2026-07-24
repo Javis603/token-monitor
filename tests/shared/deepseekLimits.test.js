@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 const { deepseekToken, parseLimitProviders, selectFundedRow, fetchDeepSeekLimits } = require('../../src/shared/limitCollector');
@@ -87,13 +88,16 @@ test('fetchDeepSeekLimits returns ok with balance + spend, never leaks the key',
 });
 
 test('fetchDeepSeekLimits migrates the legacy default store into the versioned path', async () => {
-  const files = { '/shared/deepseek-balance.json': {} };
+  const sharedDir = path.join('shared', 'deepseek');
+  const versionedPath = path.join(sharedDir, 'deepseek-balance-v2.json');
+  const legacyPath = path.join(sharedDir, 'deepseek-balance.json');
+  const files = { [legacyPath]: {} };
   const reads = [];
   const writes = [];
   const r = await fetchDeepSeekLimits({}, {
     env: {
       DEEPSEEK_API_KEY: 'sk-migrate',
-      TOKEN_MONITOR_SHARED_DIR: '/shared'
+      TOKEN_MONITOR_SHARED_DIR: sharedDir
     },
     now: () => new Date(2026, 5, 7, 8, 0, 0).getTime(),
     fetch: async () => balanceResponse([
@@ -112,12 +116,9 @@ test('fetchDeepSeekLimits migrates the legacy default store into the versioned p
   });
 
   assert.equal(r.status, 'ok');
-  assert.deepEqual(reads, [
-    '/shared/deepseek-balance-v2.json',
-    '/shared/deepseek-balance.json'
-  ]);
-  assert.deepEqual(writes, ['/shared/deepseek-balance-v2.json']);
-  assert.deepEqual(files['/shared/deepseek-balance.json'], {});
+  assert.deepEqual(reads, [versionedPath, legacyPath]);
+  assert.deepEqual(writes, [versionedPath]);
+  assert.deepEqual(files[legacyPath], {});
 });
 
 test('fetchDeepSeekLimits prefers the widget settings API key over env fallback', async () => {
