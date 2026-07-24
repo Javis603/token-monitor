@@ -83,10 +83,13 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(app, /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(app, /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.match(app, /summary\.className = 'limit-spend-summary'/);
-  assert.match(app, /tooltip\.className = 'limit-reset-credits-tooltip'/);
+  assert.match(app, /tooltip\.className = 'limit-detail-tooltip'/);
   assert.match(app, /info\.tabIndex = 0/);
-  assert.match(app, /const releaseSpendTooltip = \(\) => \{\s*requestAnimationFrame\(\(\) => \{\s*if \(resetCreditsTooltipShouldHoldRender\(\)\) return;/);
-  assert.match(app, /const creditsWindow = \(provider\.windows \|\| \[\]\)\.find/);
+  assert.match(app, /const releaseSpendTooltip = \(\) => \{\s*requestAnimationFrame\(\(\) => \{\s*if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
+  assert.match(app, /function openrouterCreditsWindow\(provider\)/);
+  assert.match(app, /windows\.find\(\(window\) => window\?\.metric === 'credits'\)/);
+  assert.match(app, /windows\.find\(\(window\) => !window\?\.metric && window\?\.label === 'Credits'\)/);
+  assert.match(app, /const creditsWindow = openrouterCreditsWindow\(provider\)/);
   assert.match(app, /limitWindowNode\(\s*'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \}/);
   assert.match(app, /\.filter\(\(window\) => window !== creditsWindow\)/);
   assert.match(app, /const hasMeter = quotaWindow\?\.showMeter !== false/);

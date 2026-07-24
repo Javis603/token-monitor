@@ -3372,7 +3372,7 @@ html.is-windows .limit-live-badge {
 .limit-reset-credits-separator {
   opacity: 0.72;
 }
-.limit-reset-credits-info-wrap {
+.limit-detail-tooltip-wrap {
   position: relative;
   display: inline-grid;
   width: 14px;
@@ -3381,7 +3381,7 @@ html.is-windows .limit-live-badge {
   place-items: center;
   transform: translateY(-1px);
 }
-.limit-reset-credits-info {
+.limit-detail-tooltip-trigger {
   display: inline-grid;
   width: 10px;
   height: 10px;
@@ -3397,14 +3397,14 @@ html.is-windows .limit-live-badge {
   line-height: 1;
   opacity: 0.48;
 }
-.limit-reset-credits-info:focus-visible,
-.limit-reset-credits-info-wrap:focus-within .limit-reset-credits-info {
+.limit-detail-tooltip-trigger:focus-visible,
+.limit-detail-tooltip-wrap:focus-within .limit-detail-tooltip-trigger {
   opacity: 0.8;
 }
-.limit-reset-credits-info-wrap:hover .limit-reset-credits-info {
+.limit-detail-tooltip-wrap:hover .limit-detail-tooltip-trigger {
   opacity: 0.72;
 }
-.limit-reset-credits-tooltip {
+.limit-detail-tooltip {
   position: absolute;
   right: -1px;
   bottom: calc(100% + 5px);
@@ -3431,7 +3431,7 @@ html.is-windows .limit-live-badge {
   -webkit-backdrop-filter: blur(28px) saturate(115%);
   backdrop-filter: blur(28px) saturate(115%);
 }
-.limit-reset-credits-tooltip::after {
+.limit-detail-tooltip::after {
   position: absolute;
   right: 6px;
   bottom: -4px;
@@ -3443,25 +3443,25 @@ html.is-windows .limit-live-badge {
   content: "";
   transform: rotate(45deg);
 }
-.limit-reset-credits-info-wrap:hover .limit-reset-credits-tooltip,
-.limit-reset-credits-info-wrap:focus-within .limit-reset-credits-tooltip {
+.limit-detail-tooltip-wrap:hover .limit-detail-tooltip,
+.limit-detail-tooltip-wrap:focus-within .limit-detail-tooltip {
   opacity: 1;
   transform: translateY(0);
   visibility: visible;
 }
-.limit-reset-credits-info-wrap.has-opened .limit-reset-credits-tooltip {
+.limit-detail-tooltip-wrap.has-opened .limit-detail-tooltip {
   transition: none;
 }
-.limit-reset-credit-detail {
+.limit-detail-tooltip-row {
   display: contents;
 }
-.limit-reset-credit-detail span:first-child {
+.limit-detail-tooltip-row span:first-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.limit-reset-credit-detail span:last-child {
+.limit-detail-tooltip-row span:last-child {
   flex: 0 0 auto;
   color: var(--text);
   opacity: 0.54;
@@ -3469,7 +3469,7 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-reduce-motion="off"]) .limit-reset-credits-tooltip {
+  :root:not([data-reduce-motion="off"]) .limit-detail-tooltip {
     transition: none;
   }
 }

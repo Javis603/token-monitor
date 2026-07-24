@@ -96,6 +96,7 @@ function creditsWindow(data) {
   if (totalCredits === null || totalCredits < 0 || totalUsage === null || totalUsage < 0) return null;
   return {
     kind: 'billing',
+    metric: 'credits',
     label: 'Credits',
     used: Math.max(0, totalUsage),
     limit: totalCredits,

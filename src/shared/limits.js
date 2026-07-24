@@ -121,12 +121,15 @@ function normalizeLimitWindow(input) {
   if (!input || typeof input !== 'object') return null;
   const kind = normalizeWindowKind(input.kind || input.type || input.name || input.window || input.windowKind);
   if (!kind) return null;
+  const metricValue = String(input.metric || '').trim().toLowerCase();
+  const metric = metricValue === 'credits' ? metricValue : null;
   const used = numberOrNull(input.used);
   const limit = numberOrNull(input.limit);
   const remaining = numberOrNull(input.remaining);
   const usedPercent = percentFromWindow(input, used, limit);
   return {
     kind,
+    ...(metric ? { metric } : {}),
     label: normalizeWindowLabel(input.label || input.displayLabel || input.title),
     used,
     limit,

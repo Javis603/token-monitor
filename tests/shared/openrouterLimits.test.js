@@ -154,6 +154,7 @@ test('zero total credits remains a real empty balance meter', async () => {
   assert.equal(provider.balance.amount, 0);
   assert.deepEqual(provider.windows, [{
     kind: 'billing',
+    metric: 'credits',
     label: 'Credits',
     used: 0,
     limit: 0,

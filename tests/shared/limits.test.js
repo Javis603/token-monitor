@@ -109,7 +109,8 @@ test('aggregateLimits preserves distinct OpenRouter accounts and public stats sc
     updatedAt: `2026-07-23T10:0${index}:00.000Z`,
     windows: [{
       kind: 'billing',
-      label: 'Credits',
+      metric: 'credits',
+      label: 'Account credit',
       used: index + 1,
       limit: 10,
       remaining: 9 - index
@@ -137,10 +138,13 @@ test('aggregateLimits preserves distinct OpenRouter accounts and public stats sc
   assert.equal(work.balance.weekSpend, 1.25);
   assert.equal(work.balance.monthSpend, 2.25);
   assert.equal(work.balance.allTimeSpend, 3.25);
+  assert.equal(work.windows[0].metric, 'credits');
+  assert.equal(work.windows[0].label, 'Account credit');
 
   const publicPayload = publicLimits({ providers: openrouter });
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountKey')));
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountName')));
+  assert.ok(publicPayload.providers.every((provider) => provider.windows[0].metric === 'credits'));
 });
 
 test('publicLimits preserves MiMo plan status while removing account identity', () => {
@@ -164,6 +168,7 @@ test('publicLimits preserves a bounded window detail for shared quota compositio
       source: 'web',
       windows: [{
         kind: 'billing',
+        metric: 'provider-private-value',
         usedPercent: 16.12,
         detail: 'Kimi 11.12% · Code 5%\n'
       }]
@@ -171,6 +176,7 @@ test('publicLimits preserves a bounded window detail for shared quota compositio
   });
 
   assert.equal(payload.providers[0].windows[0].detail, 'Kimi 11.12% · Code 5%');
+  assert.equal(Object.hasOwn(payload.providers[0].windows[0], 'metric'), false);
 });
 
 test('aggregateLimits merges the same Codex account across devices and keeps distinct ones', () => {
