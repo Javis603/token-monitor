@@ -106,11 +106,15 @@
             resetDescription: window.resetDescription || '',
             value: window.value || '',
             planStatus: window.planStatus || '',
+            showMeter: window.showMeter !== false,
             amount: finiteNumber(window.amount),
             currency: window.currency || '',
             index: windowIndex
           }))
-          .filter((window) => window.remainingPercent != null || window.planStatus === 'expired' || window.value)
+          .filter((window) => window.remainingPercent != null
+            || window.planStatus === 'expired'
+            || window.value
+            || (window.kind === 'balance' && window.amount != null))
           .sort((a, b) => {
             if (providerId === 'antigravity') return a.index - b.index;
             const aPriority = windowPriority.get(a.kind) ?? 10;

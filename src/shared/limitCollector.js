@@ -2497,9 +2497,12 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
     }
     const row = selectFundedRow(data.balance_infos);
     const accountKey = hashKey('deepseek', key);
-    const storePath = deps.deepseekStorePath || path.join(sharedDataDir({ env }), 'deepseek-balance.json');
+    const dataDir = sharedDataDir({ env });
+    const storePath = deps.deepseekStorePath || path.join(dataDir, 'deepseek-balance-v2.json');
+    const legacyStorePath = deps.deepseekLegacyStorePath
+      || (deps.deepseekStorePath ? null : path.join(dataDir, 'deepseek-balance.json'));
     const spend = recordConsumption(
-      { accountKey, currency: row.currency, paid: row.paid, now, storePath },
+      { accountKey, currency: row.currency, paid: row.paid, now, storePath, legacyStorePath },
       deps
     );
     return normalizeLimitProvider({
@@ -2515,6 +2518,8 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
         currency: row.currency,
         todaySpend: spend.todaySpend,
         monthSpend: spend.monthSpend,
+        allTimeSpend: spend.allTimeSpend,
+        trackingSince: spend.trackingSince,
         monthSinceTracking: spend.monthSinceTracking
       }
     });

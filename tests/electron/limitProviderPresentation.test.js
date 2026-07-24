@@ -750,10 +750,10 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
   assert.doesNotMatch(renderBarsIcon, /\.find\(\(w\) => w\.kind/);
 });
 
-test('DeepSeek main Limits row uses a balance meter without since-tracking copy', () => {
+test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const balanceWindow = functionBody(app, 'balanceRemainingWindow', 'limitWindowNode');
+  const balanceWindow = functionBody(app, 'balanceRemainingWindow', 'mimoTokenPlanWindowFromBalance');
   const styles = readRendererFile('styles.css');
 
   assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\('Balance', balanceRemainingWindow\(balance\), color, 0\.95,/);

@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 const { deepseekToken, parseLimitProviders, selectFundedRow, fetchDeepSeekLimits } = require('../../src/shared/limitCollector');
@@ -80,8 +81,44 @@ test('fetchDeepSeekLimits returns ok with balance + spend, never leaks the key',
   assert.equal(r.balance.currency, 'CNY');
   assert.equal(r.balance.amount, 7);
   assert.equal(r.balance.todaySpend, 3);
+  assert.equal(r.balance.allTimeSpend, 3);
+  assert.equal(r.balance.trackingSince, new Date(t0).toISOString());
   assert.match(r.accountKey, /^sha256:/);
   assert.ok(!JSON.stringify(r).includes('sk-secret-123'));
+});
+
+test('fetchDeepSeekLimits migrates the legacy default store into the versioned path', async () => {
+  const sharedDir = path.join('shared', 'deepseek');
+  const versionedPath = path.join(sharedDir, 'deepseek-balance-v2.json');
+  const legacyPath = path.join(sharedDir, 'deepseek-balance.json');
+  const files = { [legacyPath]: {} };
+  const reads = [];
+  const writes = [];
+  const r = await fetchDeepSeekLimits({}, {
+    env: {
+      DEEPSEEK_API_KEY: 'sk-migrate',
+      TOKEN_MONITOR_SHARED_DIR: sharedDir
+    },
+    now: () => new Date(2026, 5, 7, 8, 0, 0).getTime(),
+    fetch: async () => balanceResponse([
+      { currency: 'CNY', total_balance: '4.61', topped_up_balance: '4.61' }
+    ]),
+    readJson: (filePath, fallback) => {
+      reads.push(filePath);
+      return Object.hasOwn(files, filePath)
+        ? JSON.parse(JSON.stringify(files[filePath]))
+        : fallback;
+    },
+    writeJsonAtomic: (filePath, value) => {
+      files[filePath] = JSON.parse(JSON.stringify(value));
+      writes.push(filePath);
+    }
+  });
+
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(reads, [versionedPath, legacyPath]);
+  assert.deepEqual(writes, [versionedPath]);
+  assert.deepEqual(files[legacyPath], {});
 });
 
 test('fetchDeepSeekLimits prefers the widget settings API key over env fallback', async () => {

@@ -2797,8 +2797,9 @@ function renderProviderWindows(provider, color) {
     const spendNode = openrouterSpendNode(balance);
     if (spendNode) windows.append(spendNode);
   } else if (provider.provider === 'deepseek') {
-    // DeepSeek is pay-as-you-go: render the prepaid balance as a meter so the
-    // provider uses the same visual language as fixed quota windows.
+    // DeepSeek does not expose a fixed quota denominator. This intentionally
+    // visualizes the balance relative to this month's inferred starting funds:
+    // current / (current + observed month spend).
     windows.classList.add('limit-windows-deepseek');
     const balance = provider.balance || null;
     if (balance) {
