@@ -66,6 +66,13 @@
             </div>
             <div class="settings-subgroup">
               <div class="settings-group-header"><span data-i18n="settings.appUpdate.title">App Updates</span><span data-i18n="settings.appUpdate.source">GitHub releases</span></div>
+              <label id="automaticAppUpdatesRow" class="checkbox-label settings-item">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.appUpdate.automatic">Download updates automatically</span>
+                </span>
+                <input id="automaticAppUpdatesInput" type="checkbox" aria-describedby="automaticAppUpdatesNote" />
+                <span id="automaticAppUpdatesNote" class="settings-note settings-item-desc" data-i18n="settings.appUpdate.automaticDescription">Download new versions in the background. You'll be prompted to restart when ready.</span>
+              </label>
               <div class="tokscale-lines">
                 <div><span data-i18n="settings.appUpdate.installed">Installed</span><strong id="appUpdateInstalled">—</strong></div>
                 <div><span data-i18n="settings.appUpdate.latest">Latest</span><strong id="appUpdateLatest" data-i18n="settings.common.notChecked">Not checked</strong></div>
@@ -591,6 +598,43 @@
                 <div id="opencodeErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
+              <button id="openrouterSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="openrouterSettingsDetails">
+                <span data-i18n="settings.openrouter.title">OpenRouter Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="openrouterStatus" class="cursor-status-pill" data-i18n="settings.openrouter.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="openrouterSettingsDetails" class="cursor-settings-details hidden">
+                <div id="openrouterProfileList" class="opencode-profile-list"></div>
+                <div id="openrouterAddForm" class="opencode-add-form">
+                  <button id="openrouterAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="openrouterAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.openrouter.addProfile">Add account</span>
+                  </button>
+                  <div id="openrouterAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="openrouterOpenBrowser" data-i18n="settings.openrouter.openBrowser">Open OpenRouter API keys</button>
+                      </div>
+                      <p class="settings-note" data-i18n="settings.openrouter.note">Add an OpenRouter API key to view usage, the key limit, and available balance. Both regular and Management API keys are supported. Keys stay on this device and only official OpenRouter endpoints are used.</p>
+                      <div class="settings-row">
+                        <label for="openrouterProfileName" data-i18n="settings.openrouter.profileName">Account name</label>
+                        <input id="openrouterProfileName" type="text" data-i18n-placeholder="settings.openrouter.profileNamePlaceholder" placeholder="e.g. work, personal">
+                      </div>
+                      <input id="openrouterApiKeyInput" type="password" spellcheck="false" placeholder="sk-or-v1-..." data-i18n-placeholder="settings.openrouter.apiKeyPlaceholder" />
+                      <div class="settings-actions">
+                        <button id="openrouterProfileSubmit" data-i18n="settings.openrouter.saveProfile">Save</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="openrouterErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="deepseekAccountGroup" class="settings-group cursor-account-group">
               <button id="deepseekSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="deepseekSettingsDetails">
                 <span data-i18n="settings.deepseek.title">DeepSeek Account</span>
@@ -1000,6 +1044,13 @@
         <div id="cost" class="cost">$0.00</div>
       </section>
 
+      <div id="viewBackRow" class="view-back-row hidden">
+        <button id="backHomeButton" type="button" class="back-home-button" title="Back to Home" aria-label="Back to Home" data-i18n-title="views.backHome" data-i18n-aria-label="views.backHome">
+          <span class="back-home-icon" aria-hidden="true"></span>
+          <span data-i18n="views.backHome">Back to Home</span>
+        </button>
+      </div>
+
       <section id="homePanel" class="home-panel hidden"></section>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
@@ -1012,6 +1063,10 @@
         <div id="appUpdatePill" class="update-pill hidden" title="">
           <button id="appUpdatePillAction" type="button" class="update-pill-action">
             <span id="appUpdatePillLabel" class="update-pill-label"></span>
+          </button>
+          <button id="appUpdatePillRestart" type="button" class="update-pill-restart hidden">
+            <span aria-hidden="true">↻</span>
+            <span id="appUpdatePillRestartLabel" class="update-pill-restart-label"></span>
           </button>
           <button id="appUpdatePillDismiss" type="button" class="update-pill-dismiss" data-i18n-title="settings.appUpdate.dismiss" data-i18n-aria-label="settings.appUpdate.dismiss" title="Dismiss this version" aria-label="Dismiss this version">×</button>
         </div>
@@ -1044,6 +1099,7 @@
     <script src="trayProviderIcons.js"></script>
     <script src="limitProviderOrder.js"></script>
     <script src="accountIdentity.js"></script>
+    <script src="appUpdatePresentation.js"></script>
     <script src="limitProviderPresentation.js"></script>
     <script src="limitDisplayMode.js"></script>
     <script src="clientStatusPresentation.js"></script>

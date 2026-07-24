@@ -314,6 +314,42 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.doesNotMatch(css, /\.view-dock/);
 });
 
+test('Home-launched secondary views expose an accessible return action', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+  const homeModuleShellBody = functionBody(app, 'homeModuleShell', 'renderHomeLimitModule');
+  const setBreakdownBody = functionBody(app, 'setBreakdown', 'renderBreakdownChange');
+
+  assert.match(html, /id="viewBackRow" class="view-back-row hidden"/);
+  assert.match(html, /id="backHomeButton"[^>]*data-i18n-title="views\.backHome"[^>]*data-i18n-aria-label="views\.backHome"/);
+  assert.match(html, /class="back-home-icon" aria-hidden="true"><\/span>/);
+  assert.doesNotMatch(html, /class="back-home-icon"[^>]*>←<\/span>/);
+  assert.match(app, /state\.homeReturnVisible = false/);
+  assert.match(homeModuleShellBody, /renderBreakdownChange\(viewId, \{ fromHome: true \}\)/);
+  assert.equal((homeModuleShellBody.match(/\{ fromHome: true \}/g) || []).length, 2);
+  assert.match(setBreakdownBody, /state\.homeReturnVisible = options\.fromHome === true && state\.breakdown === 'home' && next !== 'home'/);
+  assert.match(app, /els\.viewBackRow\?\.classList\.toggle\('hidden', state\.breakdown === 'home' \|\| !state\.homeReturnVisible\)/);
+  assert.match(app, /els\.backHomeButton\?\.addEventListener\('click',[\s\S]*?renderBreakdownChange\('home'\)/);
+  const backRowRule = cssRule(css, '.view-back-row');
+  const backButtonRule = cssRule(css, '.back-home-button');
+  const backInteractionRule = cssRule(css, '.back-home-button:hover,\n.back-home-button:active');
+  const backIconRule = cssRule(css, '.back-home-icon');
+  assert.match(backRowRule, /min-height:\s*26px/);
+  assert.match(backRowRule, /padding:\s*0\s*;/);
+  assert.match(cssRule(css, '.view-back-row.hidden'), /display:\s*none/);
+  assert.match(backButtonRule, /height:\s*26px/);
+  assert.match(backButtonRule, /margin-left:\s*0\s*;/);
+  assert.match(backButtonRule, /padding:\s*0 6px 0 0\s*;/);
+  assert.match(backInteractionRule, /color:\s*var\(--text\)/);
+  assert.doesNotMatch(backInteractionRule, /background:/);
+  assert.match(cssRule(css, '.back-home-button:focus-visible'), /outline:\s*2px solid/);
+  assert.match(backIconRule, /width:\s*12px/);
+  assert.match(backIconRule, /flex:\s*0 0 12px/);
+  assert.match(backIconRule, /mask:\s*url\("icons\/actions\/arrow-left\.svg"\)/);
+  assert.match(backIconRule, /transform:\s*translateX\(-2px\)/);
+});
+
 test('Projects view separates visibility from metadata collection', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /state\.projectSettingsExpanded = false/);

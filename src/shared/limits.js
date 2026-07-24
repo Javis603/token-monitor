@@ -3,7 +3,7 @@
 const { staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
-const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama']);
+const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama']);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
@@ -121,12 +121,15 @@ function normalizeLimitWindow(input) {
   if (!input || typeof input !== 'object') return null;
   const kind = normalizeWindowKind(input.kind || input.type || input.name || input.window || input.windowKind);
   if (!kind) return null;
+  const metricValue = String(input.metric || '').trim().toLowerCase();
+  const metric = metricValue === 'credits' ? metricValue : null;
   const used = numberOrNull(input.used);
   const limit = numberOrNull(input.limit);
   const remaining = numberOrNull(input.remaining);
   const usedPercent = percentFromWindow(input, used, limit);
   return {
     kind,
+    ...(metric ? { metric } : {}),
     label: normalizeWindowLabel(input.label || input.displayLabel || input.title),
     used,
     limit,
@@ -153,7 +156,10 @@ function normalizeProviderBalance(input) {
     || ''
   ).trim().toUpperCase().slice(0, 8) || null;
   const todaySpend = numberOrNull(input.todaySpend ?? input.today_spend);
+  const weekSpend = numberOrNull(input.weekSpend ?? input.week_spend);
   const monthSpend = numberOrNull(input.monthSpend ?? input.month_spend);
+  const allTimeSpend = numberOrNull(input.allTimeSpend ?? input.all_time_spend);
+  const trackingSince = normalizeIsoTimestamp(input.trackingSince ?? input.tracking_since);
   const monthSinceTracking = input.monthSinceTracking ?? input.month_since_tracking;
   const giftBalance = numberOrNull(input.giftBalance ?? input.gift_balance);
   const cashBalance = numberOrNull(input.cashBalance ?? input.cash_balance);
@@ -172,7 +178,10 @@ function normalizeProviderBalance(input) {
     amount === null
     && !currency
     && todaySpend === null
+    && weekSpend === null
     && monthSpend === null
+    && allTimeSpend === null
+    && !trackingSince
     && monthSinceTracking === undefined
     && giftBalance === null
     && cashBalance === null
@@ -190,7 +199,10 @@ function normalizeProviderBalance(input) {
     amount,
     currency,
     todaySpend,
+    weekSpend,
     monthSpend,
+    allTimeSpend,
+    trackingSince,
     monthSinceTracking: Boolean(monthSinceTracking),
     giftBalance,
     cashBalance,
@@ -353,7 +365,13 @@ function isConfiguredProvider(provider) {
 }
 
 function providerCollapseKey(provider) {
-  if ((provider.provider === 'codex' || provider.provider === 'opencode' || provider.provider === 'mimo') && isConfiguredProvider(provider)) {
+  if (
+    (provider.provider === 'codex'
+      || provider.provider === 'opencode'
+      || provider.provider === 'openrouter'
+      || provider.provider === 'mimo')
+    && isConfiguredProvider(provider)
+  ) {
     return providerAggregateKey(provider);
   }
   return provider.provider;

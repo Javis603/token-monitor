@@ -13,6 +13,7 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   secret: ['hub', 'clientSecret'],
   opencodeCookie: ['providers', 'opencode', 'cookie'],
   opencodeProfiles: ['providers', 'opencode', 'profiles'],
+  openrouterProfiles: ['providers', 'openrouter', 'profiles'],
   deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
   minimaxApiKey: ['providers', 'minimax', 'apiKey'],
   copilotApiToken: ['providers', 'copilot', 'apiToken'],

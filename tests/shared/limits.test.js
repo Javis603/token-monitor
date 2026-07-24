@@ -98,6 +98,55 @@ test('aggregateLimits preserves distinct MiMo accounts by hashed account key', (
   );
 });
 
+test('aggregateLimits preserves distinct OpenRouter accounts and public stats scrub profile identity', () => {
+  const providers = ['work', 'personal'].map((accountName, index) => ({
+    provider: 'openrouter',
+    accountKey: `sha256:openrouter-${index}`,
+    accountName,
+    accountLabel: accountName,
+    status: 'ok',
+    source: 'api',
+    updatedAt: `2026-07-23T10:0${index}:00.000Z`,
+    windows: [{
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Account credit',
+      used: index + 1,
+      limit: 10,
+      remaining: 9 - index
+    }],
+    balance: {
+      amount: 9 - index,
+      currency: 'USD',
+      todaySpend: index + 0.25,
+      weekSpend: index + 1.25,
+      monthSpend: index + 2.25,
+      allTimeSpend: index + 3.25
+    }
+  }));
+  const aggregate = aggregateLimits([{
+    deviceId: 'macbook',
+    limits: { updatedAt: '2026-07-23T10:02:00.000Z', providers }
+  }], 0, Date.parse('2026-07-23T10:03:00.000Z'));
+  const openrouter = aggregate.providers.filter((provider) => provider.provider === 'openrouter');
+  assert.equal(openrouter.length, 2);
+  assert.deepEqual(new Set(openrouter.map((provider) => provider.accountName)), new Set(['work', 'personal']));
+  const work = openrouter.find((provider) => provider.accountName === 'work');
+  assert.equal(work.balance.amount, 9);
+  assert.equal(work.balance.currency, 'USD');
+  assert.equal(work.balance.todaySpend, 0.25);
+  assert.equal(work.balance.weekSpend, 1.25);
+  assert.equal(work.balance.monthSpend, 2.25);
+  assert.equal(work.balance.allTimeSpend, 3.25);
+  assert.equal(work.windows[0].metric, 'credits');
+  assert.equal(work.windows[0].label, 'Account credit');
+
+  const publicPayload = publicLimits({ providers: openrouter });
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountKey')));
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountName')));
+  assert.ok(publicPayload.providers.every((provider) => provider.windows[0].metric === 'credits'));
+});
+
 test('publicLimits preserves MiMo plan status while removing account identity', () => {
   const payload = publicLimits({
     providers: [{
@@ -119,6 +168,7 @@ test('publicLimits preserves a bounded window detail for shared quota compositio
       source: 'web',
       windows: [{
         kind: 'billing',
+        metric: 'provider-private-value',
         usedPercent: 16.12,
         detail: 'Kimi 11.12% · Code 5%\n'
       }]
@@ -126,6 +176,7 @@ test('publicLimits preserves a bounded window detail for shared quota compositio
   });
 
   assert.equal(payload.providers[0].windows[0].detail, 'Kimi 11.12% · Code 5%');
+  assert.equal(Object.hasOwn(payload.providers[0].windows[0], 'metric'), false);
 });
 
 test('aggregateLimits merges the same Codex account across devices and keeps distinct ones', () => {

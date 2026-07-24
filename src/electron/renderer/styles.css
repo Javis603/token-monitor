@@ -486,6 +486,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   opacity: 0.4;
   cursor: default;
 }
+.settings-panel .checkbox-label.is-disabled .settings-item-title { color: var(--muted); }
 .settings-group { display: grid; min-width: 0; gap: 8px; }
 .settings-group.hidden, .settings-subgroup.hidden, .settings-actions button.hidden { display: none; }
 .settings-collection-cadence {
@@ -2040,6 +2041,50 @@ html.is-windows .settings-panel select option {
 }
 .total-compact.hidden { display: none; }
 .cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
+.view-back-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  margin-top: -6px;
+  margin-bottom: -2px;
+  padding: 0;
+}
+.view-back-row.hidden { display: none; }
+.back-home-button {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 6px;
+  margin-left: 0;
+  padding: 0 6px 0 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  transition: color 120ms ease;
+}
+.back-home-button:hover,
+.back-home-button:active {
+  color: var(--text);
+}
+.back-home-button:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
+  color: var(--text);
+}
+.back-home-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  transform: translateX(-2px);
+}
 .breakdown {
   position: relative;
   z-index: 1;
@@ -2641,6 +2686,7 @@ html.is-windows .settings-panel select option {
 .row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
 .row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
+.row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
 .row-icon-deepseek   { -webkit-mask-image: url(../../../assets/icons/deepseek.svg);      mask-image: url(../../../assets/icons/deepseek.svg); }
 .row-icon-xai        { -webkit-mask-image: url(../../../assets/icons/grok.svg);          mask-image: url(../../../assets/icons/grok.svg); }
@@ -2693,6 +2739,10 @@ html.is-windows .settings-panel select option {
 .limit-icon-opencode {
   -webkit-mask-image: url(../../../assets/icons/opencode.svg);
   mask-image: url(../../../assets/icons/opencode.svg);
+}
+.limit-icon-openrouter {
+  -webkit-mask-image: url(../../../assets/icons/openrouter.svg);
+  mask-image: url(../../../assets/icons/openrouter.svg);
 }
 .limit-icon-deepseek {
   -webkit-mask-image: url(../../../assets/icons/deepseek.svg);
@@ -3259,6 +3309,25 @@ html.is-windows .limit-live-badge {
 .limit-window-note {
   gap: 3px;
 }
+.limit-spend-line {
+  min-width: 0;
+}
+.limit-spend-right {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.limit-spend-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.limit-spend-info-wrap {
+  transform: none;
+}
 .limit-reset-credits {
   display: grid;
   min-height: 11px;
@@ -3305,7 +3374,7 @@ html.is-windows .limit-live-badge {
 .limit-reset-credits-separator {
   opacity: 0.72;
 }
-.limit-reset-credits-info-wrap {
+.limit-detail-tooltip-wrap {
   position: relative;
   display: inline-grid;
   width: 14px;
@@ -3314,7 +3383,7 @@ html.is-windows .limit-live-badge {
   place-items: center;
   transform: translateY(-1px);
 }
-.limit-reset-credits-info {
+.limit-detail-tooltip-trigger {
   display: inline-grid;
   width: 10px;
   height: 10px;
@@ -3330,14 +3399,14 @@ html.is-windows .limit-live-badge {
   line-height: 1;
   opacity: 0.48;
 }
-.limit-reset-credits-info:focus-visible,
-.limit-reset-credits-info-wrap:focus-within .limit-reset-credits-info {
+.limit-detail-tooltip-trigger:focus-visible,
+.limit-detail-tooltip-wrap:focus-within .limit-detail-tooltip-trigger {
   opacity: 0.8;
 }
-.limit-reset-credits-info-wrap:hover .limit-reset-credits-info {
+.limit-detail-tooltip-wrap:hover .limit-detail-tooltip-trigger {
   opacity: 0.72;
 }
-.limit-reset-credits-tooltip {
+.limit-detail-tooltip {
   position: absolute;
   right: -1px;
   bottom: calc(100% + 5px);
@@ -3364,7 +3433,7 @@ html.is-windows .limit-live-badge {
   -webkit-backdrop-filter: blur(28px) saturate(115%);
   backdrop-filter: blur(28px) saturate(115%);
 }
-.limit-reset-credits-tooltip::after {
+.limit-detail-tooltip::after {
   position: absolute;
   right: 6px;
   bottom: -4px;
@@ -3376,25 +3445,25 @@ html.is-windows .limit-live-badge {
   content: "";
   transform: rotate(45deg);
 }
-.limit-reset-credits-info-wrap:hover .limit-reset-credits-tooltip,
-.limit-reset-credits-info-wrap:focus-within .limit-reset-credits-tooltip {
+.limit-detail-tooltip-wrap:hover .limit-detail-tooltip,
+.limit-detail-tooltip-wrap:focus-within .limit-detail-tooltip {
   opacity: 1;
   transform: translateY(0);
   visibility: visible;
 }
-.limit-reset-credits-info-wrap.has-opened .limit-reset-credits-tooltip {
+.limit-detail-tooltip-wrap.has-opened .limit-detail-tooltip {
   transition: none;
 }
-.limit-reset-credit-detail {
+.limit-detail-tooltip-row {
   display: contents;
 }
-.limit-reset-credit-detail span:first-child {
+.limit-detail-tooltip-row span:first-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.limit-reset-credit-detail span:last-child {
+.limit-detail-tooltip-row span:last-child {
   flex: 0 0 auto;
   color: var(--text);
   opacity: 0.54;
@@ -3402,7 +3471,7 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-reduce-motion="off"]) .limit-reset-credits-tooltip {
+  :root:not([data-reduce-motion="off"]) .limit-detail-tooltip {
     transition: none;
   }
 }
@@ -3632,6 +3701,7 @@ html.is-windows .limit-live-badge {
   appearance: none;
   background: transparent;
   border: 0;
+  border-radius: 999px 0 0 999px;
   color: inherit;
   display: inline-flex;
   align-items: center;
@@ -3640,7 +3710,39 @@ html.is-windows .limit-live-badge {
   padding: 3px 4px 3px 8px;
   cursor: pointer;
 }
+.update-pill-action:hover,
+.update-pill-restart:hover { background: rgba(115, 189, 245, 0.1); }
+.update-pill-action:focus-visible,
+.update-pill-restart:focus-visible {
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 1px;
+}
+.update-pill-action:disabled,
+.update-pill-restart:disabled { cursor: default; opacity: 0.55; }
+.update-pill.is-ready .update-pill-action { padding-right: 7px; }
 .update-pill-label { letter-spacing: 0.02em; }
+.update-pill-restart {
+  appearance: none;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 7px;
+  border: 0;
+  border-left: 1px solid rgba(115, 189, 245, 0.28);
+  border-radius: 0 999px 999px 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1;
+}
+.update-pill-restart.hidden { display: none; }
+@media (max-width: 300px) {
+  .update-pill-restart { gap: 0; padding-inline: 7px; }
+  .update-pill-restart-label { display: none; }
+}
 .update-pill-dismiss {
   appearance: none;
   background: transparent;
@@ -3755,6 +3857,7 @@ html.is-windows .limit-live-badge {
   .footer { display: none; }
 }
 @media (max-height: 240px) {
+  .view-back-row,
   .limits-panel,
   .home-panel,
   .service-status-panel,
@@ -3829,6 +3932,7 @@ html.is-windows .limit-live-badge {
 }
 #cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#openrouterApiKeyInput,
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,
@@ -3847,6 +3951,7 @@ html.is-windows .limit-live-badge {
 }
 #cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#openrouterApiKeyInput,
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,

@@ -17,6 +17,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
     collectionIntervalMs: 300000,
     limitsRefreshMs: 60000,
     kimiApiKey: 'secret',
+    openrouterProfiles: { work: { apiKey: 'openrouter-secret', enabled: true } },
     zaiApiRegion: 'bigmodel-cn'
   };
   const usage = usageConfigFromSettings(settings, {
@@ -31,6 +32,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
   assert.equal(usage.intervalMs, 120000);
   assert.equal(Object.hasOwn(usage, 'kimiApiKey'), false);
   assert.equal(limits.kimiApiKey, 'secret');
+  assert.deepEqual(limits.openrouterProfiles, { work: { apiKey: 'openrouter-secret', enabled: true } });
   assert.equal(Object.hasOwn(limits, 'clients'), false);
   assert.deepEqual(envelope, {
     deviceId: 'device-1',
@@ -82,4 +84,12 @@ test('display-only settings do not restart producers or probe providers', () => 
   assert.equal(classification.limitsReconfigure, false);
   assert.equal(classification.sinkStructural, false);
   assert.deepEqual(classification.limitScopes, []);
+});
+
+test('OpenRouter profile changes invalidate only the OpenRouter limits lane', () => {
+  const classification = classifySettingsChange(
+    { openrouterProfiles: { work: { apiKey: 'old', enabled: true } } },
+    { openrouterProfiles: { work: { apiKey: 'new', enabled: true } } }
+  );
+  assert.deepEqual(classification.limitScopes, [{ provider: 'openrouter' }]);
 });

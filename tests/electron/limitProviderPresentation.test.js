@@ -663,9 +663,9 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   const resetCreditExpirationDates = functionBody(app, 'codexResetCreditExpirationDates', 'codexResetCreditExpiryLabel');
   const resetCreditExpiryLabel = functionBody(app, 'codexResetCreditExpiryLabel', 'codexResetCreditExpiryDetailLabel');
   const resetCreditExpiryDetailLabel = functionBody(app, 'codexResetCreditExpiryDetailLabel', 'codexResetCreditExpiryDateLabel');
-  const resetCreditExpiryDateLabel = functionBody(app, 'codexResetCreditExpiryDateLabel', 'resetCreditsTooltipShouldHoldRender');
+  const resetCreditExpiryDateLabel = functionBody(app, 'codexResetCreditExpiryDateLabel', 'limitDetailTooltipShouldHoldRender');
   const codexResetCreditsNode = functionBody(app, 'codexResetCreditsNode', 'renderLimitProviderHead');
-  const resetCreditsTooltipShouldHoldRender = functionBody(app, 'resetCreditsTooltipShouldHoldRender', 'flushPendingResetCreditsTooltipRender');
+  const limitDetailTooltipShouldHoldRender = functionBody(app, 'limitDetailTooltipShouldHoldRender', 'flushPendingLimitDetailTooltipRender');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
   assert.match(renderProviderWindows, /provider\.provider === 'codex'/);
@@ -688,30 +688,31 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   assert.match(codexResetCreditsNode, /limit-reset-credits-time/);
   assert.match(codexResetCreditsNode, /limit-reset-credits-separator/);
   assert.match(codexResetCreditsNode, /separator\.textContent = '·'/);
-  assert.match(codexResetCreditsNode, /limit-reset-credits-info-wrap/);
-  assert.match(codexResetCreditsNode, /limit-reset-credits-tooltip/);
+  assert.match(codexResetCreditsNode, /limit-detail-tooltip-wrap/);
+  assert.match(codexResetCreditsNode, /limit-detail-tooltip/);
   assert.match(codexResetCreditsNode, /expirationDates\.slice\(0, 3\)\.map\(codexResetCreditExpiryLabel\)/);
   assert.match(codexResetCreditsNode, /hiddenExpirationCount = expirationDates\.length - summaryParts\.length/);
   assert.match(codexResetCreditsNode, /summaryParts\.push\(`\+\$\{hiddenExpirationCount\}`\)/);
   assert.match(codexResetCreditsNode, /expirationDates\.forEach/);
   assert.match(codexResetCreditsNode, /label\.textContent = codexResetCreditExpiryDateLabel\(date\)/);
   assert.match(codexResetCreditsNode, /tooltipExpiry\.textContent = codexResetCreditExpiryLabel\(date\)/);
-  assert.match(codexResetCreditsNode, /state\.resetCreditsTooltipActive = true/);
+  assert.match(codexResetCreditsNode, /state\.limitDetailTooltipActive = true/);
   assert.match(codexResetCreditsNode, /addEventListener\('pointerenter', markResetCreditsTooltipOpened\)/);
+  assert.match(codexResetCreditsNode, /if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
   assert.match(codexResetCreditsNode, /formatCodexResetCreditsValue\(resetCredits\)/);
   assert.match(codexResetCreditsNode, /aria-label/);
-  assert.match(resetCreditsTooltipShouldHoldRender, /state\.resetCreditsTooltipActive/);
-  assert.match(renderLimits, /const holdResetCreditsTooltipRender = resetCreditsTooltipShouldHoldRender\(\);/);
-  assert.match(renderLimits, /if \(holdResetCreditsTooltipRender \|\| holdCodexSwitchPopoverRender\)/);
+  assert.match(limitDetailTooltipShouldHoldRender, /state\.limitDetailTooltipActive/);
+  assert.match(renderLimits, /const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender\(\);/);
+  assert.match(renderLimits, /if \(holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender\)/);
   assert.match(styles, /\.limit-reset-credits\s*\{[^}]*min-height: 11px;[^}]*font-size: 9px;/s);
   assert.match(styles, /\.limit-reset-credits-line\s*\{[^}]*justify-content: space-between;/s);
   assert.match(styles, /\.limit-reset-credits-expiry-group\s*\{[^}]*flex: 0 0 auto;/s);
   assert.match(styles, /\.limit-reset-credits-timeline\s*\{[^}]*opacity: 0\.66;/s);
   assert.match(styles, /\.limit-reset-credits-time\s*\{[^}]*gap: 3px;/s);
-  assert.match(styles, /\.limit-reset-credits-info-wrap\s*\{[^}]*position: relative;/s);
-  assert.match(styles, /\.limit-reset-credits-tooltip\s*\{[^}]*position: absolute;[^}]*width: max-content;[^}]*grid-template-columns: max-content max-content;/s);
-  assert.match(styles, /\.limit-reset-credit-detail\s*\{[^}]*display: contents;/s);
-  assert.match(styles, /\.limit-reset-credit-detail span:last-child\s*\{[^}]*text-align: right;/s);
+  assert.match(styles, /\.limit-detail-tooltip-wrap\s*\{[^}]*position: relative;/s);
+  assert.match(styles, /\.limit-detail-tooltip\s*\{[^}]*position: absolute;[^}]*width: max-content;[^}]*grid-template-columns: max-content max-content;/s);
+  assert.match(styles, /\.limit-detail-tooltip-row\s*\{[^}]*display: contents;/s);
+  assert.match(styles, /\.limit-detail-tooltip-row span:last-child\s*\{[^}]*text-align: right;/s);
   assert.doesNotMatch(styles, /\.limit-reset-credits-clock/);
 });
 
@@ -749,10 +750,10 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
   assert.doesNotMatch(renderBarsIcon, /\.find\(\(w\) => w\.kind/);
 });
 
-test('DeepSeek main Limits row uses a balance meter without since-tracking copy', () => {
+test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const balanceWindow = functionBody(app, 'balanceRemainingWindow', 'limitWindowNode');
+  const balanceWindow = functionBody(app, 'balanceRemainingWindow', 'mimoTokenPlanWindowFromBalance');
   const styles = readRendererFile('styles.css');
 
   assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\('Balance', balanceRemainingWindow\(balance\), color, 0\.95,/);
@@ -970,7 +971,7 @@ test('Copilot env token is documented in env example, not the README overview', 
   assert.doesNotMatch(readmeTw, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
 });
 
-test('Accounts summary counts all managed account groups including MiMo and Ollama', () => {
+test('Accounts summary counts all managed account groups including OpenRouter, MiMo, and Ollama', () => {
   const app = readRendererFile('app.js');
   const mimoLinkedBody = functionBody(app, 'mimoAccountLinked', 'renderMimoStatus');
   const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
@@ -983,6 +984,7 @@ test('Accounts summary counts all managed account groups including MiMo and Olla
   assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
   assert.match(summaryBody, /const kimiLinked = externalProviderAccountLinked\('kimi'\);/);
   assert.match(summaryBody, /const ollamaLinked = externalProviderAccountLinked\('ollama'\);/);
+  assert.match(summaryBody, /const openrouterCount = state\.openrouterProfileCount \|\| 0;/);
   assert.match(summaryBody, /const mimoLinked = mimoAccountLinked\(\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
@@ -992,9 +994,10 @@ test('Accounts summary counts all managed account groups including MiMo and Olla
   assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(kimiLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(ollamaLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(openrouterCount > 0 \? 1 : 0\)/);
   assert.match(summaryBody, /\(mimoLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 13/);
+  assert.match(summaryBody, /total: 14/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
@@ -1095,6 +1098,19 @@ test('deepseek status copy: notConfigured -> Add API key, unauthorized -> Update
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'deepseek', status: 'unauthorized' }),
+    { label: 'Update API key', tone: 'setup' }
+  );
+});
+
+test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'openrouter', source: 'api' }), 'API');
+  assert.deepEqual(presentation.limitProviderCapabilityTags('openrouter'), ['Pay-as-you-go', 'API key']);
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'openrouter', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'openrouter', status: 'unauthorized' }),
     { label: 'Update API key', tone: 'setup' }
   );
 });
