@@ -4757,6 +4757,7 @@ async function refreshStats(options = {}) {
     renderLimitProviderCheckboxes();
     renderToolPreferences();
     renderWslPanel();
+    updateOpenRouterProfilesStatus();
     renderDeepseekStatus();
     renderMinimaxStatus();
     renderExternalProviderStatus('zai');
@@ -7783,6 +7784,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     renderLimitProviderCheckboxes();
     renderToolPreferences();
     renderWslPanel();
+    updateOpenRouterProfilesStatus();
     renderDeepseekStatus();
     renderMinimaxStatus();
     renderExternalProviderStatus('zai');

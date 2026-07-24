@@ -109,7 +109,8 @@ test('a standard key remains usable when the management credits endpoint is forb
         usage: 3,
         usage_daily: 0.5,
         usage_weekly: 1,
-        usage_monthly: 2
+        usage_monthly: 2,
+        is_free_tier: false
       }
     }, {
       'sk-standard': { status: 403 }
@@ -117,6 +118,7 @@ test('a standard key remains usable when the management credits endpoint is forb
   });
 
   assert.equal(provider.status, 'ok');
+  assert.equal(provider.planLabel, 'Pay-as-you-go');
   assert.equal(provider.balance.amount, null);
   assert.deepEqual(provider.windows, []);
   assert.equal(provider.balance.currency, 'USD');

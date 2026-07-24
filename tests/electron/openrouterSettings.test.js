@@ -16,7 +16,8 @@ test('OpenRouter settings provide multi-account API key management without a cus
   assert.match(html, /id="openrouterAccountGroup"/);
   assert.match(html, /id="openrouterProfileList"/);
   assert.match(html, /id="openrouterProfileName"/);
-  assert.match(html, /id="openrouterApiKeyInput"/);
+  assert.match(html, /<input id="openrouterApiKeyInput" type="password"[^>]*data-i18n-placeholder="settings\.openrouter\.apiKeyPlaceholder"/);
+  assert.doesNotMatch(html, /<textarea id="openrouterApiKeyInput"/);
   assert.match(html, /id="openrouterProfileSubmit"/);
   assert.match(html, /data-i18n="settings\.openrouter\.profileName"/);
   assert.doesNotMatch(html, /openrouter[^"]*(?:Base URL|baseUrl|base-url)/i);
@@ -27,6 +28,21 @@ test('OpenRouter settings provide multi-account API key management without a cus
   assert.match(app, /deleteProfile/);
   assert.match(preload, /getProfiles: \(\) => ipcRenderer\.invoke\('openrouter:getProfiles'\)/);
   assert.match(preload, /saveProfile: \(name, apiKey\) => ipcRenderer\.invoke\('openrouter:saveProfile', name, apiKey\)/);
+});
+
+test('OpenRouter account statuses settle when refreshed stats arrive', () => {
+  const app = read('src/electron/renderer/app.js');
+  const refreshStats = app.slice(
+    app.indexOf('async function refreshStats(options = {})'),
+    app.indexOf('async function refreshStatusViewManually()')
+  );
+  const statsPush = app.slice(
+    app.indexOf('window.tokenMonitor.onStatsPush?.'),
+    app.indexOf('function pickWorstProvider(')
+  );
+
+  assert.match(refreshStats, /updateOpenRouterProfilesStatus\(\)/);
+  assert.match(statsPush, /updateOpenRouterProfilesStatus\(\)/);
 });
 
 test('OpenRouter credentials stay in the main process and renderer receives configured state only', () => {
@@ -74,7 +90,16 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
   assert.match(styles, /\.limit-icon-openrouter/);
   assert.match(styles, /\.limit-spend-summary\s*\{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
-  assert.match(colors, /openrouter: '#6467f2'/);
+  assert.match(colors, /openrouter: '#6566F1'/);
+});
+
+test('OpenRouter is documented with its supplied icon in every supported-tools table', () => {
+  const row = /\.github\/assets\/tools-icon\/openrouter\.png" width="28" alt="OpenRouter" \/> \| OpenRouter \| OpenRouter API/;
+  for (const file of ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md']) {
+    assert.match(read(file), row, file);
+  }
+  assert.equal(fs.existsSync(path.join(root, '.github/assets/tools-icon/openrouter.png')), true);
+  assert.equal(fs.existsSync(path.join(root, 'assets/icons/openrouter.svg')), true);
 });
 
 test('OpenRouter settings status uses collision-free row identity and a stable env account name', () => {

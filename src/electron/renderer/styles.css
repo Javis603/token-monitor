@@ -3930,6 +3930,7 @@ html.is-windows .limit-live-badge {
 }
 #cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#openrouterApiKeyInput,
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,
@@ -3948,6 +3949,7 @@ html.is-windows .limit-live-badge {
 }
 #cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#openrouterApiKeyInput,
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,

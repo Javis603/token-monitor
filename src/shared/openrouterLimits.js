@@ -163,7 +163,9 @@ async function fetchOpenRouterAccount(name, apiKey, deps = {}) {
       ? 'Management'
       : keyData?.is_free_tier === true
         ? 'Free'
-        : '',
+        : keyData?.is_free_tier === false
+          ? 'Pay-as-you-go'
+          : '',
     source: 'api',
     status: 'ok',
     updatedAt,
