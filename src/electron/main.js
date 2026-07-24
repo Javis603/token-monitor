@@ -3432,7 +3432,9 @@ function installDownloadedAppUpdate() {
     latest
   })) return deriveAppUpdateState();
   quitRequested = true;
-  autoUpdater.quitAndInstall(false, true);
+  // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
+  // (per-user install needs no elevation); isForceRunAfter relaunches the app.
+  autoUpdater.quitAndInstall(true, true);
   return deriveAppUpdateState();
 }
 
