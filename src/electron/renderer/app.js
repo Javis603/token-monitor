@@ -8464,11 +8464,11 @@ function syncTrayComposerVisibility() {
     { id: 'tray', root: els.trayComposer, visible: state.settings?.trayContent === 'custom' },
     { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleContent === 'custom' }
   ];
-  for (const surface of surfaces) {
-    surface.root?.classList.toggle('hidden', !surface.visible);
-    if (surface.visible && !trayComposers[surface.id]) trayComposers[surface.id] = createTrayComposer(surface.id);
-  }
-  const clockNeeded = surfaces.some((surface) => surface.visible);
+  const clockNeeded = window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
+    surfaces,
+    trayComposers,
+    createTrayComposer
+  );
   if (clockNeeded && !customTrayClockTimer) {
     customTrayClockTimer = setInterval(() => {
       void maybeUpdateBarsIcon({ refreshComposers: false });

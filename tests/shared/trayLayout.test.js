@@ -98,6 +98,27 @@ test('tray layouts normalize to a versioned and bounded shape', () => {
   });
 });
 
+test('tray layout normalization keeps twelve valid items and assigns unique ids', () => {
+  const malformed = Array.from({ length: 12 }, (_, index) => (
+    index % 2 === 0 ? null : { id: 'duplicate', type: 'text', metric: 'tokens' }
+  ));
+  const validTail = Array.from({ length: 12 }, (_, index) => ({
+    id: index === 0 ? 'duplicate' : `tail-${index}`,
+    type: 'text',
+    metric: 'tokens'
+  }));
+  const normalized = normalizeTrayLayout({ items: [...malformed, ...validTail] });
+
+  assert.equal(normalized.items.length, 12);
+  assert.equal(new Set(normalized.items.map((item) => item.id)).size, 12);
+  assert.deepEqual(normalized.items.slice(0, 3).map((item) => item.id), [
+    'duplicate',
+    'duplicate-2',
+    'duplicate-3'
+  ]);
+  assert.equal(normalized.items.at(-1).id, 'tail-5');
+});
+
 test('tray layout editing keeps item ids stable and supports add, move, update and remove', () => {
   let layout = createDefaultTrayLayout();
   layout = appendTrayLayoutItem(layout, 'percentReset', { idFactory: () => 'quota' });
@@ -418,4 +439,22 @@ test('source window choices show each real provider window once and prioritize t
     `${option.selection.provider}|${option.selection.providerRecord.accountKey}|${windowKey(option.window)}`
   ));
   assert.equal(new Set(identities).size, identities.length);
+});
+
+test('active account window choices exclude managed-only Codex windows', () => {
+  const managedOnlyStats = structuredClone(stats);
+  managedOnlyStats.limits.providers[1].windows.push({
+    kind: 'billing',
+    label: 'Managed billing',
+    remainingPercent: 9
+  });
+
+  const choices = sourceWindowOptions(managedOnlyStats, {
+    provider: 'codex',
+    accountMode: 'active',
+    window: 'primary'
+  });
+
+  assert.deepEqual(choices.map((option) => option.kind), ['session', 'weekly']);
+  assert.ok(choices.every((option) => option.selection.providerRecord.accountKey === 'active'));
 });

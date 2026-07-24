@@ -386,6 +386,19 @@
     };
   }
 
+  function uniqueItemId(value, usedIds) {
+    const base = clean(value, 80) || 'item';
+    if (!usedIds.has(base)) return base;
+    let suffix = 2;
+    let candidate;
+    do {
+      const ending = `-${suffix}`;
+      candidate = `${base.slice(0, 80 - ending.length)}${ending}`;
+      suffix += 1;
+    } while (usedIds.has(candidate));
+    return candidate;
+  }
+
   function createDefaultTrayLayout() {
     return {
       version: VERSION,
@@ -399,9 +412,16 @@
     if (!input || typeof input !== 'object' || Array.isArray(input)) {
       return normalizeTrayLayout(fallback, { version: VERSION, items: [] });
     }
-    const items = Array.isArray(input.items)
-      ? input.items.slice(0, MAX_ITEMS).map(normalizeItem).filter(Boolean)
-      : [];
+    const items = [];
+    const usedIds = new Set();
+    for (const candidate of Array.isArray(input.items) ? input.items : []) {
+      const item = normalizeItem(candidate, items.length);
+      if (!item) continue;
+      item.id = uniqueItemId(item.id, usedIds);
+      usedIds.add(item.id);
+      items.push(item);
+      if (items.length >= MAX_ITEMS) break;
+    }
     return { version: VERSION, items };
   }
 
@@ -530,6 +550,7 @@
           ...entry,
           selection: selectSource(stats, { ...normalized, window: entry.value }, options)
         }))
+        .filter((entry) => entry.selection)
         .sort((left, right) => (
           Number(right.value === selectedKey) - Number(left.value === selectedKey)
         ));

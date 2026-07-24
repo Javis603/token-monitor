@@ -46,6 +46,45 @@
     return { ...item, source: { ...item.source, ...patch } };
   }
 
+  function duplicateTrayLayoutItem(layoutApi, currentLayout, itemId, options = {}) {
+    const current = layoutApi.normalizeTrayLayout(currentLayout);
+    const item = current.items.find((entry) => entry.id === itemId);
+    if (!item || current.items.length >= layoutApi.MAX_ITEMS) return current;
+    const appended = layoutApi.appendTrayLayoutItem(current, item.style, options);
+    const appendedItem = appended.items[current.items.length];
+    if (!appendedItem) return current;
+    return layoutApi.replaceTrayLayoutItem(appended, appendedItem.id, {
+      ...item,
+      id: appendedItem.id
+    });
+  }
+
+  function moveTrayLayoutItemByKey(layoutApi, currentLayout, itemId, key) {
+    const current = layoutApi.normalizeTrayLayout(currentLayout);
+    if (!['ArrowLeft', 'ArrowRight'].includes(key)) return { layout: current, moved: false };
+    const index = current.items.findIndex((item) => item.id === itemId);
+    if (index < 0) return { layout: current, moved: false };
+    const nextIndex = clamp(index + (key === 'ArrowLeft' ? -1 : 1), 0, current.items.length - 1);
+    if (nextIndex === index) return { layout: current, moved: false };
+    return {
+      layout: layoutApi.moveTrayLayoutItem(current, itemId, nextIndex),
+      moved: true
+    };
+  }
+
+  function syncTrayComposerSurfaces(surfaces, composers, createComposer) {
+    for (const surface of surfaces) {
+      surface.root?.classList.toggle('hidden', !surface.visible);
+      if (!surface.visible && composers[surface.id]) {
+        composers[surface.id].destroy();
+        delete composers[surface.id];
+      } else if (surface.visible && !composers[surface.id]) {
+        composers[surface.id] = createComposer(surface.id);
+      }
+    }
+    return surfaces.some((surface) => surface.visible);
+  }
+
   function createTrayComposer(options) {
     const {
       root,
@@ -882,11 +921,7 @@
       footer.className = 'tray-composer-editor-actions';
       footer.append(
         button('tray-composer-secondary', l('trayComposer.duplicate', 'Duplicate'), () => {
-          const appended = layoutApi.appendTrayLayoutItem(layout(), item.style);
-          const appendedItem = appended.items.at(-1);
-          const next = appendedItem
-            ? layoutApi.replaceTrayLayoutItem(appended, appendedItem.id, { ...item, id: appendedItem.id })
-            : appended;
+          const next = duplicateTrayLayoutItem(layoutApi, layout(), item.id);
           emit(next, true);
           closePopover(popover);
         }),
@@ -1013,13 +1048,11 @@
     }
 
     function keyboardMove(event, id) {
-      if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-      const current = layout();
-      const index = current.items.findIndex((item) => item.id === id);
-      const nextIndex = clamp(index + (event.key === 'ArrowLeft' ? -1 : 1), 0, current.items.length - 1);
-      if (nextIndex === index) return;
+      const movement = moveTrayLayoutItemByKey(layoutApi, layout(), id, event.key);
+      if (!movement.moved) return;
       event.preventDefault();
-      emit(layoutApi.moveTrayLayoutItem(current, id, nextIndex), true);
+      emit(movement.layout, true);
+      render();
       requestAnimationFrame(() => root.querySelector(`[data-item-id="${CSS.escape(id)}"]`)?.focus());
     }
 
@@ -1098,5 +1131,10 @@
     return { destroy, refresh, render };
   }
 
-  return { createTrayComposer };
+  return {
+    createTrayComposer,
+    duplicateTrayLayoutItem,
+    moveTrayLayoutItemByKey,
+    syncTrayComposerSurfaces
+  };
 });
