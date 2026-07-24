@@ -3,61 +3,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { computeConsumption } = require('../../src/shared/deepseekBalanceHistory');
-
-// 2026-06-07T10:00:00 local
-const NOW = new Date(2026, 5, 7, 10, 0, 0).getTime();
-const at = (h) => new Date(2026, 5, 7, h, 0, 0).getTime();
-
-test('computeConsumption: empty / single snapshot yields zero spend', () => {
-  assert.deepEqual(computeConsumption([], NOW), {
-    todaySpend: 0,
-    monthSpend: 0,
-    allTimeSpend: 0,
-    trackingSince: new Date(NOW).toISOString(),
-    monthSinceTracking: true
-  });
-  const one = computeConsumption([{ ts: at(9), paid: 10 }], NOW);
-  assert.equal(one.todaySpend, 0);
-  assert.equal(one.monthSpend, 0);
-  assert.equal(one.allTimeSpend, 0);
-});
-
-test('computeConsumption: sums drops within the day', () => {
-  const snaps = [{ ts: at(7), paid: 10 }, { ts: at(8), paid: 7 }, { ts: at(9), paid: 4 }];
-  const r = computeConsumption(snaps, NOW);
-  assert.equal(r.todaySpend, 6);
-  assert.equal(r.monthSpend, 6);
-});
-
-test('computeConsumption: a top-up (balance increase) counts as zero, baseline carries', () => {
-  const snaps = [
-    { ts: at(7), paid: 10 }, { ts: at(8), paid: 7 }, { ts: at(9), paid: 4 },
-    { ts: new Date(2026, 5, 7, 9, 30).getTime(), paid: 54 }, // +50 top-up
-    { ts: new Date(2026, 5, 7, 9, 45).getTime(), paid: 51 }
-  ];
-  assert.equal(computeConsumption(snaps, NOW).todaySpend, 9);
-});
-
-test('computeConsumption: only today counted for todaySpend, month spans the month', () => {
-  const y = (d, h) => new Date(2026, 5, d, h, 0, 0).getTime();
-  const snaps = [{ ts: y(5, 9), paid: 10 }, { ts: y(5, 10), paid: 8 }, { ts: y(7, 9), paid: 8 }, { ts: y(7, 10), paid: 5 }];
-  const r = computeConsumption(snaps, NOW);
-  assert.equal(r.todaySpend, 3); // only the 8->5 drop on the 7th
-  assert.equal(r.monthSpend, 5); // 2 (on 5th) + 3 (on 7th)
-});
-
-test('computeConsumption: monthSinceTracking false when earliest snapshot predates month start', () => {
-  const may = new Date(2026, 4, 31, 23, 0, 0).getTime();
-  const r = computeConsumption([{ ts: may, paid: 10 }, { ts: at(9), paid: 9 }], NOW);
-  assert.equal(r.monthSinceTracking, false);
-});
-
-test('computeConsumption: rounds to cents', () => {
-  const snaps = [{ ts: at(8), paid: 10 }, { ts: at(9), paid: 9.999 }];
-  assert.equal(computeConsumption(snaps, NOW).todaySpend, 0); // 0.001 rounds to 0.00
-});
-
 const { recordConsumption } = require('../../src/shared/deepseekBalanceHistory');
 
 function memoryStore(initial = {}) {
@@ -154,6 +99,61 @@ test('recordConsumption: migrates repeated legacy snapshots into compact daily s
   assert.equal(result.todaySpend, 3);
   assert.equal(result.allTimeSpend, 3);
   assert.equal(store.writes(), 1);
+});
+
+test('recordConsumption: migrates the legacy file into the v2 path without modifying the old file', () => {
+  const t0 = new Date(2026, 5, 7, 8, 0, 0).getTime();
+  const t1 = new Date(2026, 5, 7, 9, 0, 0).getTime();
+  const files = {
+    '/legacy.json': {
+      k: {
+        currency: 'CNY',
+        snapshots: [
+          { ts: t0, paid: 10 },
+          { ts: t1, paid: 7 }
+        ]
+      }
+    }
+  };
+  const writes = [];
+  const deps = {
+    readJson: (filePath, fallback) => (
+      Object.hasOwn(files, filePath)
+        ? JSON.parse(JSON.stringify(files[filePath]))
+        : fallback
+    ),
+    writeJsonAtomic: (filePath, value) => {
+      files[filePath] = JSON.parse(JSON.stringify(value));
+      writes.push(filePath);
+    }
+  };
+
+  const result = recordConsumption({
+    accountKey: 'k',
+    currency: 'CNY',
+    paid: 7,
+    now: t1 + 1000,
+    storePath: '/v2.json',
+    legacyStorePath: '/legacy.json'
+  }, deps);
+
+  assert.deepEqual(writes, ['/v2.json']);
+  assert.equal(files['/legacy.json'].k.snapshots.length, 2);
+  assert.equal(files['/v2.json'].k.version, 2);
+  assert.equal(files['/v2.json'].k.allTimeSpend, 3);
+  assert.equal(result.allTimeSpend, 3);
+});
+
+test('recordConsumption: a top-up resets the anchor without counting as spend', () => {
+  const store = memoryStore();
+  const t0 = new Date(2026, 5, 7, 8, 0, 0).getTime();
+  recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 10, now: t0, storePath: '/x' }, store);
+  recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 60, now: t0 + 1000, storePath: '/x' }, store);
+  const result = recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 57, now: t0 + 2000, storePath: '/x' }, store);
+
+  assert.equal(result.todaySpend, 3);
+  assert.equal(result.allTimeSpend, 3);
+  assert.equal(store.peek().k.lastPaid, 57);
 });
 
 test('recordConsumption: unchanged balances are idempotent and do not rewrite the store', () => {

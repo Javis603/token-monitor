@@ -86,6 +86,40 @@ test('fetchDeepSeekLimits returns ok with balance + spend, never leaks the key',
   assert.ok(!JSON.stringify(r).includes('sk-secret-123'));
 });
 
+test('fetchDeepSeekLimits migrates the legacy default store into the versioned path', async () => {
+  const files = { '/shared/deepseek-balance.json': {} };
+  const reads = [];
+  const writes = [];
+  const r = await fetchDeepSeekLimits({}, {
+    env: {
+      DEEPSEEK_API_KEY: 'sk-migrate',
+      TOKEN_MONITOR_SHARED_DIR: '/shared'
+    },
+    now: () => new Date(2026, 5, 7, 8, 0, 0).getTime(),
+    fetch: async () => balanceResponse([
+      { currency: 'CNY', total_balance: '4.61', topped_up_balance: '4.61' }
+    ]),
+    readJson: (filePath, fallback) => {
+      reads.push(filePath);
+      return Object.hasOwn(files, filePath)
+        ? JSON.parse(JSON.stringify(files[filePath]))
+        : fallback;
+    },
+    writeJsonAtomic: (filePath, value) => {
+      files[filePath] = JSON.parse(JSON.stringify(value));
+      writes.push(filePath);
+    }
+  });
+
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(reads, [
+    '/shared/deepseek-balance-v2.json',
+    '/shared/deepseek-balance.json'
+  ]);
+  assert.deepEqual(writes, ['/shared/deepseek-balance-v2.json']);
+  assert.deepEqual(files['/shared/deepseek-balance.json'], {});
+});
+
 test('fetchDeepSeekLimits prefers the widget settings API key over env fallback', async () => {
   let authorization = '';
   const r = await fetchDeepSeekLimits(

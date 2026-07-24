@@ -28,18 +28,6 @@ function startOfLocalMonth(ms) {
   return d.getTime();
 }
 
-function sameLocalDay(a, b) {
-  const x = new Date(a);
-  const y = new Date(b);
-  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
-}
-
-function sameLocalMonth(a, b) {
-  const x = new Date(a);
-  const y = new Date(b);
-  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth();
-}
-
 function localDayKey(ms) {
   const date = new Date(ms);
   const year = date.getFullYear();
@@ -58,36 +46,6 @@ function localDayStartFromKey(key) {
   const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
   const value = date.getTime();
   return Number.isFinite(value) && localDayKey(value) === key ? value : null;
-}
-
-// snapshots: [{ ts: epochMs, paid: number }] — single currency.
-// Spend = sum of paid drops (increases are top-ups -> 0), bucketed by interval-end local time.
-function computeConsumption(snapshots, nowMs) {
-  const sorted = [...(snapshots || [])]
-    .map((s) => ({ ts: validDateMs(s.ts), paid: Number(s.paid) }))
-    .filter((s) => s.ts !== null && Number.isFinite(s.paid))
-    .sort((a, b) => a.ts - b.ts);
-
-  let todaySpend = 0;
-  let monthSpend = 0;
-  let allTimeSpend = 0;
-  for (let i = 1; i < sorted.length; i += 1) {
-    const drop = Math.max(0, sorted[i - 1].paid - sorted[i].paid);
-    if (drop <= 0) continue;
-    const ts = sorted[i].ts;
-    allTimeSpend += drop;
-    if (sameLocalDay(ts, nowMs)) todaySpend += drop;
-    if (sameLocalMonth(ts, nowMs)) monthSpend += drop;
-  }
-
-  const earliest = sorted.length ? sorted[0].ts : nowMs;
-  return {
-    todaySpend: round2(todaySpend),
-    monthSpend: round2(monthSpend),
-    allTimeSpend: round2(allTimeSpend),
-    trackingSince: new Date(earliest).toISOString(),
-    monthSinceTracking: earliest > startOfLocalMonth(nowMs)
-  };
 }
 
 function addDailySpend(dailySpend, timestamp, amount) {
@@ -186,20 +144,35 @@ function computeCompactConsumption(entry, now) {
   };
 }
 
+function loadStore(read, storePath, legacyStorePath) {
+  const current = read(storePath, null);
+  if (current && typeof current === 'object' && !Array.isArray(current)) {
+    return { store: current, migrated: false };
+  }
+  if (legacyStorePath && legacyStorePath !== storePath) {
+    const legacy = read(legacyStorePath, null);
+    if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+      return { store: legacy, migrated: true };
+    }
+  }
+  return { store: {}, migrated: false };
+}
+
 // deps: { readJson, writeJsonAtomic } injectable for tests.
-function recordConsumption({ accountKey, currency, paid, now, storePath }, deps = {}) {
+function recordConsumption({ accountKey, currency, paid, now, storePath, legacyStorePath }, deps = {}) {
   const read = deps.readJson || readJson;
   const write = deps.writeJsonAtomic || writeJsonAtomic;
-  const store = read(storePath, {}) || {};
   const nowMs = validDateMs(now);
   const paidAmount = Number(paid);
-  if (!accountKey || !currency || nowMs === null || !Number.isFinite(paidAmount)) {
+  if (!accountKey || !currency || !storePath || nowMs === null || !Number.isFinite(paidAmount)) {
     throw new TypeError('invalid DeepSeek balance observation');
   }
 
+  const loaded = loadStore(read, storePath, legacyStorePath);
+  const store = loaded.store;
   const normalized = normalizedCompactEntry(store[accountKey], currency, nowMs);
   const entry = normalized.entry;
-  let changed = normalized.changed;
+  let changed = loaded.migrated || normalized.changed;
 
   if (entry.lastPaid == null) {
     entry.lastPaid = paidAmount;
@@ -224,7 +197,6 @@ function recordConsumption({ accountKey, currency, paid, now, storePath }, deps 
 }
 
 module.exports = {
-  computeConsumption,
   recordConsumption,
   round2,
   startOfLocalDay,
