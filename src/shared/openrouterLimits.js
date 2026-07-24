@@ -30,10 +30,15 @@ function finiteNumber(value) {
 }
 
 function openrouterProfileName(value) {
-  const raw = String(value || '').trim();
-  if (!raw || raw.length > 64 || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
-  const clean = raw.replace(/[^a-z0-9 ._-]/gi, '').replace(/\s+/g, ' ').trim();
-  if (clean !== raw || clean.toLowerCase() === OPENROUTER_ENV_ACCOUNT_NAME) return '';
+  const raw = String(value || '').trim().normalize('NFC');
+  if (!raw || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
+  const clean = raw.replace(/\s+/gu, ' ').trim();
+  if (
+    !clean
+    || [...clean].length > 64
+    || !/^[\p{L}\p{M}\p{N} ._-]+$/u.test(clean)
+    || clean.toLowerCase() === OPENROUTER_ENV_ACCOUNT_NAME
+  ) return '';
   return clean;
 }
 

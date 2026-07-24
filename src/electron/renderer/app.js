@@ -3116,7 +3116,9 @@ function renderOpenCodeAccountGroup(label, providers, color) {
 }
 
 function openrouterAccountTitle(provider, index) {
-  return String(provider?.accountName || provider?.accountLabel || '').trim() || `Account ${index + 1}`;
+  const accountName = String(provider?.accountName || provider?.accountLabel || '').trim();
+  if (accountName.toLowerCase() === 'environment') return t('settings.openrouter.environment');
+  return accountName || `Account ${index + 1}`;
 }
 
 function renderOpenRouterAccountGroup(label, providers, color) {
@@ -9031,6 +9033,12 @@ function updateOpenRouterProfilesStatus() {
     : t('settings.openrouter.statusNotSet');
 }
 
+function openrouterProfileErrorText(result) {
+  if (result?.errorCode === 'invalidName') return t('settings.openrouter.invalidName');
+  if (result?.errorCode === 'missingApiKey') return t('settings.openrouter.statusNotSet');
+  return result?.error || t('settings.openrouter.saveFailedShort');
+}
+
 function renderOpenRouterProfiles() {
   const listEl = document.getElementById('openrouterProfileList');
   if (!listEl || !window.tokenMonitor.openrouter) return;
@@ -9051,7 +9059,7 @@ function renderOpenRouterProfiles() {
       return;
     }
 
-    const appendRow = (name, profile, { env = false } = {}) => {
+    const appendRow = ({ name = '', profile = { enabled: true }, env = false } = {}) => {
       const item = document.createElement('div');
       item.className = 'opencode-profile-item';
       if (!env) {
@@ -9099,7 +9107,16 @@ function renderOpenRouterProfiles() {
           const nextName = nameInput.value.trim();
           if (save && nextName && nextName !== name) {
             const result = await api.renameProfile(name, nextName);
-            if (result?.ok) renderOpenRouterProfiles();
+            if (result?.ok) {
+              renderOpenRouterProfiles();
+            } else {
+              nameInput.value = name;
+              const errorEl = document.getElementById('openrouterErrorMessage');
+              if (errorEl) {
+                errorEl.textContent = openrouterProfileErrorText(result);
+                errorEl.classList.remove('hidden');
+              }
+            }
           }
         };
         renameBtn.addEventListener('click', () => {
@@ -9152,8 +9169,8 @@ function renderOpenRouterProfiles() {
       listEl.append(item);
     };
 
-    for (const [name, profile] of entries) appendRow(name, profile);
-    if (hasEnvVar) appendRow('default (env)', { enabled: true }, { env: true });
+    for (const [name, profile] of entries) appendRow({ name, profile });
+    if (hasEnvVar) appendRow({ env: true });
     updateOpenRouterProfilesStatus();
     renderSettingsSummaries();
   }).catch(() => {
@@ -9666,7 +9683,7 @@ function setupCursorAccountUI() {
         renderOpenRouterProfiles();
         await refreshStats({ force: true });
       } else if (errorEl) {
-        errorEl.textContent = result?.error || t('settings.openrouter.saveFailedShort');
+        errorEl.textContent = openrouterProfileErrorText(result);
         errorEl.classList.remove('hidden');
       }
     });

@@ -46,6 +46,7 @@ test('OpenRouter account statuses settle when refreshed stats arrive', () => {
 });
 
 test('OpenRouter credentials stay in the main process and renderer receives configured state only', () => {
+  const app = read('src/electron/renderer/app.js');
   const main = read('src/electron/main.js');
   const credentials = read('src/shared/credentialStore.js');
 
@@ -60,6 +61,9 @@ test('OpenRouter credentials stay in the main process and renderer receives conf
   assert.match(main, /AbortSignal\.timeout\(15_000\)/);
   assert.match(main, /openrouterLimits\.openrouterProfileName\(rawName\)/);
   assert.match(main, /openrouterLimits\.openrouterProfileName\(rawNewName\)/);
+  assert.match(main, /errorCode: 'invalidName'/);
+  assert.match(app, /function openrouterProfileErrorText\(result\)/);
+  assert.match(app, /t\('settings\.openrouter\.invalidName'\)/);
 });
 
 test('OpenRouter Limits presentation shows a real balance meter and compact spend tooltip', () => {
@@ -107,6 +111,8 @@ test('OpenRouter settings status uses collision-free row identity and a stable e
   assert.match(app, /info\.dataset\.openrouterProfileName = name/);
   assert.match(app, /info\.dataset\.openrouterEnvironment = 'true'/);
   assert.match(app, /byName\.get\('environment'\)/);
+  assert.match(app, /accountName\.toLowerCase\(\) === 'environment'/);
+  assert.doesNotMatch(app, /appendRow\('default \(env\)'/);
   assert.doesNotMatch(app, /openrouter-info-\$\{/);
 });
 

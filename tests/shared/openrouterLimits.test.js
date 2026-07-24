@@ -46,9 +46,15 @@ test('openrouterToken prefers explicit, then Token Monitor env, then standard en
 
 test('OpenRouter profile names preserve provider-safe identities and reserve the environment account', () => {
   assert.equal(openrouterProfileName('work 2'), 'work 2');
+  assert.equal(openrouterProfileName('工作'), '工作');
+  assert.equal(openrouterProfileName('ワーク'), 'ワーク');
+  assert.equal(openrouterProfileName('업무'), '업무');
+  assert.equal(openrouterProfileName('a  b'), 'a b');
+  assert.equal(openrouterProfileName('Cafe\u0301'), 'Café');
   assert.equal(openrouterProfileName('default (env)'), '');
   assert.equal(openrouterProfileName('Environment'), '');
   assert.equal(openrouterProfileName('name@example.com'), '');
+  assert.equal(openrouterProfileName('a/b'), '');
   assert.equal(openrouterProfileName('x'.repeat(65)), '');
 });
 

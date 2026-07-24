@@ -4484,7 +4484,8 @@ app.whenReady().then(() => {
   ipcMain.handle('openrouter:saveProfile', async (_event, rawName, rawApiKey) => {
     const name = openrouterLimits.openrouterProfileName(rawName);
     const apiKey = openrouterLimits.openrouterToken({}, rawApiKey);
-    if (!name || !apiKey) return { ok: false, error: 'Empty name or API key' };
+    if (!name) return { ok: false, errorCode: 'invalidName' };
+    if (!apiKey) return { ok: false, errorCode: 'missingApiKey' };
     try {
       const provider = await openrouterLimits.fetchOpenRouterAccount(name, apiKey, {
         env: process.env,
@@ -4525,7 +4526,7 @@ app.whenReady().then(() => {
     const oldName = String(rawOldName || '').trim();
     const newName = openrouterLimits.openrouterProfileName(rawNewName);
     const profiles = { ...(settings.openrouterProfiles || {}) };
-    if (!newName || oldName === newName) return { ok: false, error: 'Invalid name' };
+    if (!newName || oldName === newName) return { ok: false, errorCode: 'invalidName' };
     if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
     if (profiles[newName]) return { ok: false, error: 'Profile name already exists' };
     profiles[newName] = profiles[oldName];
