@@ -68,6 +68,32 @@ function codexManagedAccountMatchesIdentity(account, identity) {
   return Boolean(accountEmail && accountEmail === identityEmail);
 }
 
+function upgradeCodexManagedAccountIdentity(account, identity) {
+  if (!account || typeof account !== 'object' || !identity) return account;
+  const accountEmail = normalizeEmail(account.email || account.accountEmail);
+  const identityEmail = normalizeEmail(identity.email || identity.accountEmail);
+  if (accountEmail && identityEmail && accountEmail !== identityEmail) return account;
+
+  const accountWorkspaceId = managedAccountWorkspaceId(account);
+  const identityWorkspaceId = normalizeWorkspaceId(
+    identity.workspaceAccountId
+    || identity.providerAccountId
+  );
+  if (accountWorkspaceId && identityWorkspaceId && accountWorkspaceId !== identityWorkspaceId) {
+    return account;
+  }
+
+  const identityKey = String(identity.accountKey || '').trim();
+  if (!identityKey) return account;
+  return {
+    ...account,
+    email: identityEmail || accountEmail,
+    accountKey: identityKey,
+    accountLabel: String(identity.accountLabel || account.accountLabel || '').trim(),
+    workspaceAccountId: identityWorkspaceId || accountWorkspaceId
+  };
+}
+
 function decodeJwtPayload(token) {
   const parts = String(token || '').split('.');
   if (parts.length < 2 || !parts[1]) return {};
@@ -122,6 +148,7 @@ function codexAuthIdentity(auth) {
 
 module.exports = {
   codexManagedAccountMatchesIdentity,
+  upgradeCodexManagedAccountIdentity,
   decodeJwtPayload,
   codexAuthIdentity,
   codexAccountKey,

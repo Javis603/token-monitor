@@ -37,7 +37,8 @@ const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlow
 const {
   codexAuthIdentity,
   codexManagedAccountMatchesIdentity,
-  hashAccountKey
+  hashAccountKey,
+  upgradeCodexManagedAccountIdentity
 } = require('../shared/codexAuth');
 const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
 const {
@@ -584,6 +585,22 @@ function normalizeCodexManagedAccounts(value) {
     });
   }
   return accounts;
+}
+
+function hydrateCodexManagedAccounts(value) {
+  const accounts = normalizeCodexManagedAccounts(value).map((account) => {
+    try {
+      const auth = JSON.parse(readRegularFileNoFollow(account.authPath, {
+        fs,
+        description: 'Managed Codex auth',
+        encoding: 'utf8'
+      }));
+      return upgradeCodexManagedAccountIdentity(account, codexAuthIdentity(auth));
+    } catch (_) {
+      return account;
+    }
+  });
+  return normalizeCodexManagedAccounts(accounts);
 }
 
 function codexAccountsForRenderer() {
@@ -1308,7 +1325,17 @@ function floatingBubblePayload() {
 function ensureSettingsLoaded() {
   if (settings) return settings;
   settings = readSettings();
+  const persistedCodexAccounts = settings.codexManagedAccounts;
+  const hydratedCodexAccounts = hydrateCodexManagedAccounts(persistedCodexAccounts);
   persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+  if (JSON.stringify(hydratedCodexAccounts) !== JSON.stringify(persistedCodexAccounts)) {
+    settings.codexManagedAccounts = hydratedCodexAccounts;
+    if (!saveSettings()) {
+      // Keep the runtime identity coherent even if the migration cannot be
+      // persisted yet; the next ordinary settings save will retry it.
+      settings.codexManagedAccounts = hydratedCodexAccounts;
+    }
+  }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
   return settings;
 }

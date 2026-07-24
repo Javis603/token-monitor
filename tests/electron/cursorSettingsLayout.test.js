@@ -491,6 +491,12 @@ test('Codex system account switching is exposed from limits account rows', () =>
   const findExistingBody = functionBody(main, 'findExistingCodexAccount', 'codexAccountId');
   assert.match(findExistingBody, /codexManagedAccountMatchesIdentity\(account, identity\)/);
   assert.match(main, /codexManagedAccountMatchesIdentity/);
+  const hydrateAccountsBody = functionBody(main, 'hydrateCodexManagedAccounts', 'codexAccountsForRenderer');
+  assert.match(hydrateAccountsBody, /readRegularFileNoFollow\(account\.authPath/);
+  assert.match(hydrateAccountsBody, /upgradeCodexManagedAccountIdentity\(account, codexAuthIdentity\(auth\)\)/);
+  const ensureSettingsBody = functionBody(main, 'ensureSettingsLoaded', 'updateRendererViewState');
+  assert.match(ensureSettingsBody, /hydrateCodexManagedAccounts\(persistedCodexAccounts\)/);
+  assert.match(ensureSettingsBody, /saveSettings\(\)/);
   const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
   assert.match(refreshBody, /deviceRuntimeHandle\.refreshLimits\(\{/);
   assert.match(refreshBody, /provider: 'codex'/);

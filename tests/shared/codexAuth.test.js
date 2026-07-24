@@ -7,7 +7,8 @@ const {
   codexManagedAccountMatchesIdentity,
   decodeJwtPayload,
   codexAuthIdentity,
-  hashAccountKey
+  hashAccountKey,
+  upgradeCodexManagedAccountIdentity
 } = require('../../src/shared/codexAuth');
 
 function jwt(payload) {
@@ -152,4 +153,50 @@ test('codexManagedAccountMatchesIdentity upgrades legacy workspace-only keys saf
     ...legacy,
     email: 'other@example.com'
   }, identity), false);
+});
+
+test('upgradeCodexManagedAccountIdentity migrates legacy keys from the account auth identity', () => {
+  const identity = codexAuthIdentity({
+    tokens: {
+      account_id: 'workspace-team',
+      id_token: jwt({
+        email: 'member@example.com',
+        chatgpt_plan_type: 'team'
+      })
+    }
+  });
+  const upgraded = upgradeCodexManagedAccountIdentity({
+    id: 'legacy',
+    email: 'member@example.com',
+    accountKey: hashAccountKey('member@example.com'),
+    accountLabel: 'plus',
+    workspaceAccountId: '',
+    workspaceLabel: 'Acme Team'
+  }, identity);
+
+  assert.equal(upgraded.accountKey, identity.accountKey);
+  assert.equal(upgraded.accountLabel, 'team');
+  assert.equal(upgraded.workspaceAccountId, 'workspace-team');
+  assert.equal(upgraded.workspaceLabel, 'Acme Team');
+});
+
+test('upgradeCodexManagedAccountIdentity fails closed on conflicting stored identity', () => {
+  const identity = codexAuthIdentity({
+    tokens: {
+      account_id: 'workspace-team',
+      id_token: jwt({ email: 'member@example.com' })
+    }
+  });
+  const wrongEmail = {
+    email: 'other@example.com',
+    accountKey: 'sha256:old'
+  };
+  const wrongWorkspace = {
+    email: 'member@example.com',
+    workspaceAccountId: 'workspace-personal',
+    accountKey: 'sha256:old'
+  };
+
+  assert.equal(upgradeCodexManagedAccountIdentity(wrongEmail, identity), wrongEmail);
+  assert.equal(upgradeCodexManagedAccountIdentity(wrongWorkspace, identity), wrongWorkspace);
 });
