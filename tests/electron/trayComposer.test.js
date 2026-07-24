@@ -13,10 +13,22 @@ const {
 function layoutWithIds(...ids) {
   return {
     version: trayLayoutApi.VERSION,
-    items: ids.map((id) => ({
-      ...trayLayoutApi.createTrayLayoutItem('tokens', { idFactory: () => id }),
-      period: id === 'selected' ? 'month' : 'today'
-    }))
+    items: ids.map((id) => {
+      const item = trayLayoutApi.createTrayLayoutItem('tokens', { idFactory: () => id });
+      if (id !== 'selected') return item;
+      return {
+        ...item,
+        fontStyle: 'compactMono',
+        period: 'month',
+        source: {
+          provider: 'claude',
+          accountMode: 'specific',
+          accountKey: 'team',
+          window: 'weekly',
+          valueMode: 'used'
+        }
+      };
+    })
   };
 }
 
@@ -32,8 +44,11 @@ test('duplicating an item copies its configuration under a fresh id', () => {
     'last',
     'duplicate'
   ]);
-  assert.equal(duplicated.items.at(-1).style, 'tokens');
-  assert.equal(duplicated.items.at(-1).period, 'month');
+  const selected = trayLayoutApi.normalizeTrayLayout(layout).items[1];
+  assert.deepEqual(duplicated.items.at(-1), {
+    ...selected,
+    id: 'duplicate'
+  });
 });
 
 test('duplicating at the item limit leaves every configured item unchanged', () => {
