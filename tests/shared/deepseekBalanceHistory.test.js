@@ -102,6 +102,8 @@ test('recordConsumption: migrates repeated legacy snapshots into compact daily s
 });
 
 test('recordConsumption: migrates the legacy file into the v2 path without modifying the old file', () => {
+  const old0 = new Date(2026, 3, 1, 8, 0, 0).getTime();
+  const old1 = new Date(2026, 3, 2, 8, 0, 0).getTime();
   const t0 = new Date(2026, 5, 7, 8, 0, 0).getTime();
   const t1 = new Date(2026, 5, 7, 9, 0, 0).getTime();
   const files = {
@@ -111,6 +113,13 @@ test('recordConsumption: migrates the legacy file into the v2 path without modif
         snapshots: [
           { ts: t0, paid: 10 },
           { ts: t1, paid: 7 }
+        ]
+      },
+      retired: {
+        currency: 'CNY',
+        snapshots: [
+          { ts: old0, paid: 9 },
+          { ts: old1, paid: 5 }
         ]
       }
     }
@@ -139,8 +148,17 @@ test('recordConsumption: migrates the legacy file into the v2 path without modif
 
   assert.deepEqual(writes, ['/v2.json']);
   assert.equal(files['/legacy.json'].k.snapshots.length, 2);
+  assert.equal(files['/legacy.json'].retired.snapshots.length, 2);
   assert.equal(files['/v2.json'].k.version, 2);
   assert.equal(files['/v2.json'].k.allTimeSpend, 3);
+  assert.deepEqual(files['/v2.json'].retired, {
+    version: 2,
+    currency: 'CNY',
+    trackingSince: old0,
+    lastPaid: 5,
+    allTimeSpend: 4,
+    dailySpend: {}
+  });
   assert.equal(result.allTimeSpend, 3);
 });
 

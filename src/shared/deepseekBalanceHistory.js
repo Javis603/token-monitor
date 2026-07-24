@@ -128,6 +128,20 @@ function pruneDailySpend(dailySpend, now) {
   return pruned;
 }
 
+function compactLegacyEntries(store, now) {
+  const compacted = { ...store };
+  let changed = false;
+  for (const [accountKey, entry] of Object.entries(store || {})) {
+    const currency = String(entry?.currency || '').trim();
+    if (!currency || !Array.isArray(entry?.snapshots)) continue;
+    const compactEntry = compactLegacyEntry(entry, currency, now);
+    compactEntry.dailySpend = pruneDailySpend(compactEntry.dailySpend, now);
+    compacted[accountKey] = compactEntry;
+    changed = true;
+  }
+  return { store: compacted, changed };
+}
+
 function computeCompactConsumption(entry, now) {
   const todayKey = localDayKey(now);
   const monthKey = localMonthKey(now);
@@ -169,10 +183,11 @@ function recordConsumption({ accountKey, currency, paid, now, storePath, legacyS
   }
 
   const loaded = loadStore(read, storePath, legacyStorePath);
-  const store = loaded.store;
+  const compacted = compactLegacyEntries(loaded.store, nowMs);
+  const store = compacted.store;
   const normalized = normalizedCompactEntry(store[accountKey], currency, nowMs);
   const entry = normalized.entry;
-  let changed = loaded.migrated || normalized.changed;
+  let changed = loaded.migrated || compacted.changed || normalized.changed;
 
   if (entry.lastPaid == null) {
     entry.lastPaid = paidAmount;
