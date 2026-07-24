@@ -86,7 +86,7 @@ test('Codex managed home paths reject traversal outside the managed root', () =>
   const main = read(path.join(electronDir, 'main.js'));
   const helper = main.slice(
     main.indexOf('function codexManagedHomePath'),
-    main.indexOf('function codexEmailDerivedAccountKey')
+    main.indexOf('function findExistingCodexAccount')
   );
   const addAccount = main.slice(
     main.indexOf('async function addCodexManagedAccount'),
@@ -98,6 +98,36 @@ test('Codex managed home paths reject traversal outside the managed root', () =>
   assert.match(helper, /resolvedHome\.startsWith\(`\$\{resolvedRoot\}\$\{path\.sep\}`\)/);
   assert.match(addAccount, /const homePath = codexManagedHomePath\(codexAccountId\(identity, existing\)\);/);
   assert.match(addAccount, /if \(!homePath\) return \{ ok: false, error:/);
+});
+
+test('Codex managed login selects and persists a workspace before account commit', () => {
+  const main = read(path.join(electronDir, 'main.js'));
+  const preload = read(path.join(electronDir, 'preload.js'));
+  const html = read(path.join(rendererDir, 'index.html'));
+  const app = read(path.join(rendererDir, 'app.js'));
+  const resolver = main.slice(
+    main.indexOf('async function resolveCodexWorkspaceAfterLogin'),
+    main.indexOf('// Best practice: each account gets its own OAuth grant')
+  );
+  const addAccount = main.slice(
+    main.indexOf('async function addCodexManagedAccount'),
+    main.indexOf('async function removeCodexManagedAccount')
+  );
+
+  assert.match(resolver, /listCodexWorkspaces\(auth/);
+  assert.match(resolver, /options\.selectWorkspace/);
+  assert.match(resolver, /authWithSelectedCodexWorkspace/);
+  assert.match(resolver, /writeCodexAuthFile/);
+  assert.ok(
+    addAccount.indexOf('resolveCodexWorkspaceAfterLogin') < addAccount.indexOf('findExistingCodexAccount'),
+    'workspace identity must be resolved before account matching'
+  );
+  assert.match(main, /ipcMain\.handle\('codex:selectWorkspace'/);
+  assert.match(preload, /selectWorkspace: \(options = \{\}\) => ipcRenderer\.invoke\('codex:selectWorkspace', options\)/);
+  assert.match(html, /id="codexWorkspaceSelection"/);
+  assert.match(html, /id="codexWorkspaceSelect"/);
+  assert.match(app, /status\.phase === 'workspaceSelection'/);
+  assert.match(app, /window\.tokenMonitor\.codex\.selectWorkspace\(\{ flowId, workspaceId \}\)/);
 });
 
 test('Codex login renderer ignores stale flows and exposes explicit URL actions', () => {

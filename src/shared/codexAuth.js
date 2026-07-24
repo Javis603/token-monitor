@@ -11,6 +11,63 @@ function hashAccountKey(seed) {
   return `sha256:${hash.digest('hex')}`;
 }
 
+function codexAccountKey(email, providerAccountId) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedProviderAccountId = String(providerAccountId || '').trim().toLowerCase();
+  if (normalizedEmail && normalizedProviderAccountId) {
+    return hashAccountKey(`${normalizedEmail}\0${normalizedProviderAccountId}`);
+  }
+  return hashAccountKey(normalizedProviderAccountId || normalizedEmail);
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeWorkspaceId(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function managedAccountWorkspaceId(account) {
+  return normalizeWorkspaceId(
+    account?.workspaceAccountId
+    || account?.providerAccountId
+  );
+}
+
+function codexManagedAccountMatchesIdentity(account, identity) {
+  if (!account || !identity) return false;
+  const accountEmail = normalizeEmail(account.email || account.accountEmail);
+  const identityEmail = normalizeEmail(identity.email || identity.accountEmail);
+  if (accountEmail && identityEmail && accountEmail !== identityEmail) return false;
+
+  const accountWorkspaceId = managedAccountWorkspaceId(account);
+  const identityWorkspaceId = normalizeWorkspaceId(
+    identity.workspaceAccountId
+    || identity.providerAccountId
+  );
+  if (accountWorkspaceId && identityWorkspaceId) {
+    return accountWorkspaceId === identityWorkspaceId
+      && Boolean(accountEmail ? accountEmail === identityEmail : identityEmail);
+  }
+
+  const accountKey = String(account.accountKey || '').trim();
+  const identityKey = String(identity.accountKey || '').trim();
+  if (accountKey && identityKey && accountKey === identityKey) return true;
+
+  if (identityWorkspaceId) {
+    // Migrate records created before workspace-aware composite keys. Those
+    // records hashed only the workspace id, so email must also match.
+    return Boolean(
+      accountEmail
+      && accountEmail === identityEmail
+      && accountKey === hashAccountKey(identityWorkspaceId)
+    );
+  }
+  if (accountKey && identityKey) return false;
+  return Boolean(accountEmail && accountEmail === identityEmail);
+}
+
 function decodeJwtPayload(token) {
   const parts = String(token || '').split('.');
   if (parts.length < 2 || !parts[1]) return {};
@@ -43,24 +100,30 @@ function codexAuthIdentity(auth) {
     ''
   ).trim();
   const providerAccountId = String(
+    tokens.account_id ||
+    tokens.accountId ||
+    auth?.account_id ||
+    auth?.accountId ||
     payload.chatgpt_account_id ||
     nested.chatgpt_account_id ||
-    payload.sub ||
     ''
-  ).trim();
-  // Key on the stable provider account id so the same account dedupes across
-  // refreshes/devices; fall back to email only when no account id is available.
-  const seed = providerAccountId || email;
+  ).trim().toLowerCase();
+  // A workspace id is shared by every member of that workspace, while one user
+  // can belong to several workspaces. Use the composite identity so both cases
+  // remain distinct; email-only auth stays a legacy fallback.
   return {
     email,
     accountLabel,
     providerAccountId,
-    accountKey: hashAccountKey(seed)
+    workspaceAccountId: providerAccountId,
+    accountKey: codexAccountKey(email, providerAccountId)
   };
 }
 
 module.exports = {
+  codexManagedAccountMatchesIdentity,
   decodeJwtPayload,
   codexAuthIdentity,
+  codexAccountKey,
   hashAccountKey
 };

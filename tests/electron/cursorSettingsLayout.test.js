@@ -253,7 +253,9 @@ test('Codex account panel supports per-account enable toggles without showing ti
   assert.match(body, /input\.checked = account\.enabled !== false/);
   assert.match(body, /window\.tokenMonitor\.codex\.setAccountEnabled\(account\.id, input\.checked\)/);
   assert.match(body, /info\.className = 'managed-account-info'/);
-  assert.match(body, /info\.textContent = enabled \? limitProviderPresentationApi\.limitProviderDisplayLabel\(account\.accountLabel\) : t\('settings\.codex\.disabled'\);/);
+  assert.match(body, /account\.workspaceLabel/);
+  assert.match(body, /enabled \? limitProviderPresentationApi\.limitProviderDisplayLabel\(account\.accountLabel\) : t\('settings\.codex\.disabled'\)/);
+  assert.match(body, /info\.textContent = accountMetadata\.join\(' · '\);/);
   assert.match(body, /right\.append\(info, remove\)/);
   assert.match(body, /row\.append\(input, main, right\)/);
   assert.doesNotMatch(
@@ -487,8 +489,8 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(preserveBody, /persist: false/);
   assert.match(preserveBody, /rollback: \(\) => restoreCodexAuthFileSnapshot/);
   const findExistingBody = functionBody(main, 'findExistingCodexAccount', 'codexAccountId');
-  assert.match(findExistingBody, /if \(identity\.accountKey && account\.accountKey && !codexEmailDerivedAccountKey\(account, identity\)\)/);
-  assert.match(main, /function codexEmailDerivedAccountKey\(account, identity\)/);
+  assert.match(findExistingBody, /codexManagedAccountMatchesIdentity\(account, identity\)/);
+  assert.match(main, /codexManagedAccountMatchesIdentity/);
   const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
   assert.match(refreshBody, /deviceRuntimeHandle\.refreshLimits\(\{/);
   assert.match(refreshBody, /provider: 'codex'/);

@@ -968,6 +968,27 @@ span.settings-note.settings-item-desc {
   gap: 6px;
 }
 .managed-account-list:empty { display: none; }
+.codex-workspace-selection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+.codex-workspace-selection.hidden { display: none; }
+.codex-workspace-selection label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.codex-workspace-selection button {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
 .managed-account-row {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
@@ -1012,7 +1033,7 @@ span.settings-note.settings-item-desc {
   min-width: 0;
 }
 .managed-account-info {
-  max-width: 72px;
+  max-width: 112px;
   overflow: hidden;
   color: var(--muted);
   font-size: 9px;

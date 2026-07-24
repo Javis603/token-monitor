@@ -3,7 +3,12 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { decodeJwtPayload, codexAuthIdentity } = require('../../src/shared/codexAuth');
+const {
+  codexManagedAccountMatchesIdentity,
+  decodeJwtPayload,
+  codexAuthIdentity,
+  hashAccountKey
+} = require('../../src/shared/codexAuth');
 
 function jwt(payload) {
   const seg = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -54,6 +59,21 @@ test('codexAuthIdentity reads nested OpenAI auth claims', () => {
   assert.equal(identity.providerAccountId, 'acct_nested');
 });
 
+test('codexAuthIdentity prefers the selected workspace from tokens.account_id', () => {
+  const identity = codexAuthIdentity({
+    tokens: {
+      account_id: ' WORKSPACE-TEAM ',
+      id_token: jwt({
+        email: 'member@example.com',
+        sub: 'user-stable',
+        chatgpt_account_id: 'workspace-personal'
+      })
+    }
+  });
+  assert.equal(identity.providerAccountId, 'workspace-team');
+  assert.equal(identity.workspaceAccountId, 'workspace-team');
+});
+
 test('codexAuthIdentity keys on the stable provider account id, not the rotating id_token', () => {
   const first = codexAuthIdentity({
     tokens: { id_token: jwt({ email: 'same@example.com', chatgpt_account_id: 'acct_stable' }) }
@@ -62,6 +82,28 @@ test('codexAuthIdentity keys on the stable provider account id, not the rotating
     tokens: { id_token: jwt({ email: 'same@example.com', chatgpt_account_id: 'acct_stable', nonce: 'rotated' }) }
   });
   assert.equal(first.accountKey, afterRefresh.accountKey);
+});
+
+test('codexAuthIdentity separates same-email workspaces and same-workspace members', () => {
+  const personal = codexAuthIdentity({
+    tokens: { account_id: 'workspace-personal', id_token: jwt({ email: 'same@example.com' }) }
+  });
+  const team = codexAuthIdentity({
+    tokens: { account_id: 'workspace-team', id_token: jwt({ email: 'same@example.com' }) }
+  });
+  const teammate = codexAuthIdentity({
+    tokens: { account_id: 'workspace-team', id_token: jwt({ email: 'other@example.com' }) }
+  });
+  assert.notEqual(personal.accountKey, team.accountKey);
+  assert.notEqual(team.accountKey, teammate.accountKey);
+});
+
+test('codexAuthIdentity does not treat JWT subject as a workspace id', () => {
+  const identity = codexAuthIdentity({
+    tokens: { id_token: jwt({ email: 'same@example.com', sub: 'user-stable' }) }
+  });
+  assert.equal(identity.providerAccountId, '');
+  assert.equal(identity.workspaceAccountId, '');
 });
 
 test('codexAuthIdentity falls back to the account email when no id_token is present', () => {
@@ -77,5 +119,37 @@ test('codexAuthIdentity returns empty identity when nothing is resolvable', () =
   assert.equal(identity.email, '');
   assert.equal(identity.accountLabel, '');
   assert.equal(identity.providerAccountId, '');
+  assert.equal(identity.workspaceAccountId, '');
   assert.equal(identity.accountKey, '');
+});
+
+test('codexManagedAccountMatchesIdentity keeps same-email workspaces distinct', () => {
+  const team = codexAuthIdentity({
+    tokens: { account_id: 'workspace-team', id_token: jwt({ email: 'same@example.com' }) }
+  });
+  assert.equal(codexManagedAccountMatchesIdentity({
+    email: 'same@example.com',
+    workspaceAccountId: 'workspace-personal',
+    accountKey: 'sha256:personal'
+  }, team), false);
+  assert.equal(codexManagedAccountMatchesIdentity({
+    email: 'same@example.com',
+    workspaceAccountId: 'workspace-team',
+    accountKey: team.accountKey
+  }, team), true);
+});
+
+test('codexManagedAccountMatchesIdentity upgrades legacy workspace-only keys safely', () => {
+  const identity = codexAuthIdentity({
+    tokens: { account_id: 'workspace-team', id_token: jwt({ email: 'member@example.com' }) }
+  });
+  const legacy = {
+    email: 'member@example.com',
+    accountKey: hashAccountKey('workspace-team')
+  };
+  assert.equal(codexManagedAccountMatchesIdentity(legacy, identity), true);
+  assert.equal(codexManagedAccountMatchesIdentity({
+    ...legacy,
+    email: 'other@example.com'
+  }, identity), false);
 });

@@ -387,10 +387,10 @@ function providerWindowRank(provider) {
 
 function codexProviderIdentityKeys(provider) {
   if (provider?.provider !== 'codex') return [];
-  const keys = [];
-  if (provider.accountKey) keys.push(`key:${provider.accountKey}`);
-  if (provider.accountEmail) keys.push(`email:${provider.accountEmail}`);
-  return keys;
+  return [
+    provider.accountKey ? `key:${provider.accountKey}` : '',
+    provider.accountEmail ? `email:${provider.accountEmail}` : ''
+  ].filter(Boolean);
 }
 
 function hasProviderWindows(provider) {
@@ -450,7 +450,11 @@ function mergeCodexTransientWindows(previousInput, currentInput, nowMs = Date.no
     eligiblePreviousCodexProviders.push(eligibleProvider);
     for (const key of codexProviderIdentityKeys(eligibleProvider)) {
       const existing = previousByIdentity.get(key);
-      if (!existing || providerUpdatedAt >= timestampMs(existing.updatedAt)) previousByIdentity.set(key, eligibleProvider);
+      if (existing === undefined) {
+        previousByIdentity.set(key, eligibleProvider);
+      } else if (existing && existing !== eligibleProvider) {
+        previousByIdentity.set(key, null);
+      }
     }
   }
 

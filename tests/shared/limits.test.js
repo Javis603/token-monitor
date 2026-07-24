@@ -76,6 +76,26 @@ test('aggregateLimits preserves distinct Codex accounts by hashed account key', 
   );
 });
 
+test('aggregateLimits preserves same-email Codex workspaces by hashed account key', () => {
+  const aggregate = aggregateLimits([{
+    deviceId: 'macbook',
+    limits: {
+      updatedAt: '2026-06-14T10:01:00.000Z',
+      providers: [
+        codexProvider('sha256:personal', 'member@example.com', 18, '2026-06-14T10:00:00.000Z'),
+        codexProvider('sha256:team', 'member@example.com', 72, '2026-06-14T10:01:00.000Z')
+      ]
+    }
+  }], 0, Date.parse('2026-06-14T10:02:00.000Z'));
+
+  const codexProviders = aggregate.providers.filter((provider) => provider.provider === 'codex');
+  assert.equal(codexProviders.length, 2);
+  assert.deepEqual(
+    new Set(codexProviders.map((provider) => provider.accountKey)),
+    new Set(['sha256:personal', 'sha256:team'])
+  );
+});
+
 test('aggregateLimits preserves distinct MiMo accounts by hashed account key', () => {
   const aggregate = aggregateLimits([
     {

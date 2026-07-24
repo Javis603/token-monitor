@@ -121,7 +121,12 @@ function buildTrayMenuTemplate(options = {}) {
   const codexItem = codexAccounts.length >= 2 ? (() => {
     const labelFor = (account, index) => {
       const email = String(account?.email || '').trim();
-      if (email) return state.maskAccountEmails ? maskEmailAddress(email) : email;
+      const workspace = String(account?.workspaceLabel || '').trim();
+      if (email) {
+        const visibleEmail = state.maskAccountEmails ? maskEmailAddress(email) : email;
+        return workspace ? `${visibleEmail} · ${workspace}` : visibleEmail;
+      }
+      if (workspace) return workspace;
       return t('trayMenu.codexAccountFallback', { number: index + 1 });
     };
     const activeIndex = codexAccounts.findIndex((account) => account.id === state.activeCodexAccountId);

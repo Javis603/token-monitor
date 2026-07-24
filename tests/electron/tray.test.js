@@ -183,8 +183,8 @@ test('tray context menu switches between enabled Codex accounts', () => {
       trayContent: 'tokens',
       trayMode: true,
       codexAccounts: [
-        { id: 'one', email: 'primary.user@example.com' },
-        { id: 'two', email: 'secondary.user@example.com' }
+        { id: 'one', email: 'primary.user@example.com', workspaceLabel: 'Personal' },
+        { id: 'two', email: 'secondary.user@example.com', workspaceLabel: 'Team' }
       ],
       activeCodexAccountId: 'one',
       maskAccountEmails: true
@@ -192,10 +192,10 @@ test('tray context menu switches between enabled Codex accounts', () => {
     onSwitchCodexAccount: (id) => calls.push(id)
   });
 
-  assert.equal(template[2].label, 'Codex Account · p***r@example.com');
+  assert.equal(template[2].label, 'Codex Account · p***r@example.com · Personal');
   assert.deepEqual(template[2].submenu.map((item) => [item.label, item.checked]), [
-    ['p***r@example.com', true],
-    ['s***r@example.com', false]
+    ['p***r@example.com · Personal', true],
+    ['s***r@example.com · Team', false]
   ]);
   template[2].submenu[0].click();
   template[2].submenu[1].click();

@@ -380,6 +380,38 @@ test('fetchCodexLimits returns one provider per managed Codex account', async ()
   assert.deepEqual(providers.map((provider) => provider.sourceDetail), ['managed', 'managed']);
 });
 
+test('fetchCodexLimits preserves same-email workspaces by account key', async () => {
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [
+      {
+        id: 'personal',
+        accountKey: 'sha256:personal',
+        email: 'member@example.com',
+        workspaceAccountId: 'workspace-personal',
+        workspaceLabel: 'Personal',
+        homePath: '/tmp/token-monitor-codex/personal'
+      },
+      {
+        id: 'team',
+        accountKey: 'sha256:team',
+        email: 'member@example.com',
+        workspaceAccountId: 'workspace-team',
+        workspaceLabel: 'Team',
+        homePath: '/tmp/token-monitor-codex/team'
+      }
+    ]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readCodexRpc: async () => codexPayload('member@example.com')
+  });
+
+  assert.equal(providers.length, 2);
+  assert.deepEqual(providers.map((provider) => provider.accountKey), ['sha256:personal', 'sha256:team']);
+  assert.deepEqual(providers.map((provider) => provider.accountName), ['Personal', 'Team']);
+});
+
 test('fetchCodexLimits can refresh only the requested managed Codex account', async () => {
   const seenHomes = [];
   const providers = await fetchCodexLimits({

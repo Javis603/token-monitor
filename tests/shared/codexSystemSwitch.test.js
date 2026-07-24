@@ -38,6 +38,34 @@ test('managed Codex accounts match identities by stable key or lower-cased email
   assert.equal(findMatchingCodexAccount(accounts, { email: 'SECOND@example.com' })?.id, 'second');
 });
 
+test('managed Codex accounts keep same-email workspaces distinct', () => {
+  const accounts = [
+    {
+      id: 'personal',
+      accountKey: 'sha256:personal',
+      email: 'shared@example.com',
+      workspaceAccountId: 'workspace-personal'
+    },
+    {
+      id: 'team',
+      accountKey: 'sha256:team',
+      email: 'shared@example.com',
+      workspaceAccountId: 'workspace-team'
+    }
+  ];
+
+  assert.equal(codexAccountMatchesIdentity(accounts[0], {
+    accountKey: 'sha256:team',
+    email: 'shared@example.com',
+    workspaceAccountId: 'workspace-team'
+  }), false);
+  assert.equal(findMatchingCodexAccount(accounts, {
+    accountKey: 'sha256:team',
+    email: 'shared@example.com',
+    workspaceAccountId: 'workspace-team'
+  })?.id, 'team');
+});
+
 test('Codex auth files are written atomically with private permissions and readable identity', async () => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'token-monitor-codex-switch-'));
   const authPath = path.join(root, 'live', 'auth.json');

@@ -1505,6 +1505,7 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
     provider: 'codex',
     accountKey: meta.accountKey || '',
     accountLabel: meta.accountLabel || codexAccountLabel(payload),
+    accountName: meta.accountName || '',
     accountEmail: meta.accountEmail || payload.account?.email || '',
     source: meta.source || 'rpc',
     sourceDetail: meta.sourceDetail || payload.sourceDetail,
@@ -2051,6 +2052,8 @@ function normalizeCodexManagedAccounts(value) {
       email: String(account.email || '').trim().toLowerCase(),
       accountKey: String(account.accountKey || '').trim(),
       accountLabel: String(account.accountLabel || account.plan || '').trim(),
+      workspaceAccountId: String(account.workspaceAccountId || account.providerAccountId || '').trim().toLowerCase(),
+      workspaceLabel: String(account.workspaceLabel || '').trim(),
       enabled: account.enabled !== false
     };
   }).filter(Boolean);
@@ -2074,15 +2077,17 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
     codexAuthPath: account.authPath || pathApi.join(account.homePath, 'auth.json')
   };
   const reader = deps.readCodexRpc || readCodexRpc;
-  const accountKeySeed = account.accountKey || account.email || account.id || account.homePath;
+  const authIdentity = readLiveCodexIdentity(accountDeps);
+  const accountKeySeed = authIdentity.accountKey || account.accountKey || account.email || account.id || account.homePath;
   try {
     const payload = await withCodexOAuthResetCredits(await reader(accountDeps), accountDeps);
-    const email = payload.account?.email || account.email;
-    const identity = account.accountKey || email || account.id || account.homePath;
+    const email = authIdentity.email || payload.account?.email || account.email;
+    const identity = authIdentity.accountKey || account.accountKey || email || account.id || account.homePath;
     return mapCodexRateLimitsToProvider(payload, {
       accountKey: codexAccountKeyFromSeed(identity),
       accountEmail: email,
       accountLabel: account.accountLabel || codexAccountLabel(payload),
+      accountName: account.workspaceLabel,
       updatedAt: nowIso(nowMs),
       source: 'rpc',
       sourceDetail: 'managed'
@@ -2093,6 +2098,7 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
       accountKey: codexAccountKeyFromSeed(accountKeySeed),
       accountEmail: account.email,
       accountLabel: account.accountLabel,
+      accountName: account.workspaceLabel,
       source: 'rpc',
       sourceDetail: 'managed',
       status: providerStatusFromError(error),
@@ -2102,10 +2108,10 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
   }
 }
 
-// Reads the live login's identity (email + stable account id) from its
+// Reads the live login's identity (email + selected workspace id) from its
 // auth.json. The RPC `account/read` often omits the email, so the JWT in
-// auth.json is the reliable source — and keying on the account id keeps the
-// live account consistent with managed accounts for cross-device dedup.
+// auth.json is the reliable source. The shared composite key keeps the live
+// account consistent with managed accounts for cross-device dedup.
 function readLiveCodexIdentity(deps = {}) {
   const read = deps.readFileSync || fs.readFileSync;
   const authPath = deps.codexAuthPath || codexAuthPath(deps.env || process.env);
@@ -2163,15 +2169,14 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   }
 
   const providers = [];
-  // Dedupe by account id (accountKey) first, then email — so signing in the
-  // account that's already the live login shows ONE row, even if one side has
-  // no email. Both paths key on the stable account id, so the same account
-  // matches regardless of how it was added.
+  // Prefer the composite account key; use email only for legacy providers that
+  // do not expose one. This keeps same-email workspaces distinct while still
+  // collapsing the live and managed views of the exact same login.
   const seen = new Set();
-  const identityKeys = (provider) => [
-    provider.accountKey ? `key:${provider.accountKey}` : '',
-    provider.accountEmail ? `email:${provider.accountEmail}` : ''
-  ].filter(Boolean);
+  const identityKeys = (provider) => {
+    if (provider.accountKey) return [`key:${provider.accountKey}`];
+    return provider.accountEmail ? [`email:${provider.accountEmail}`] : [];
+  };
   const markSeen = (provider) => { for (const key of identityKeys(provider)) seen.add(key); };
   const alreadySeen = (provider) => identityKeys(provider).some((key) => seen.has(key));
   // The live system account (the one the Codex app/CLI is currently signed into)
