@@ -214,8 +214,10 @@
                       <option value="barsWeekly" data-i18n="settings.tray.barsWeekly">Limit bars: lowest weekly remaining</option>
                       <option value="barsAllSessions" data-i18n="settings.tray.barsAllSessions">Limit bars: first two tools' primary quotas</option>
                       <option value="bars" data-i18n="settings.tray.barsWindow">Limit bars: lowest remaining limit</option>
+                      <option value="custom" data-i18n="settings.tray.custom">Custom…</option>
                     </select>
                   </label>
+                  <div id="floatingBubbleComposer" class="tray-composer hidden" data-surface="floatingBubble"></div>
                 </div>
               </div>
               <div class="presence-feature">
@@ -235,8 +237,10 @@
                       <option value="barsAllSessions" data-i18n="settings.tray.barsAllSessions">Limit bars: first two tools' primary quotas</option>
                       <option value="bars" data-i18n="settings.tray.barsWindow">Limit bars: lowest remaining limit</option>
                       <option value="icon" data-i18n="settings.tray.iconOnly">Icon only</option>
+                      <option value="custom" data-i18n="settings.tray.custom">Custom…</option>
                     </select>
                   </label>
+                  <div id="trayComposer" class="tray-composer hidden" data-surface="tray"></div>
                   <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayProviderBadge">Show Token Monitor badge on provider icons</span></span><input id="showTrayProviderBadgeInput" type="checkbox" /></label>
                   <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayMode">Tray-only mode</span></span><input id="trayModeInput" type="checkbox" /></label>
                   <div id="trayOptions" class="presence-feature-body hidden">
@@ -1083,10 +1087,12 @@
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/trayText.js"></script>
+    <script src="../../shared/trayLayout.js"></script>
     <script src="../motionPreference.js"></script>
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>
     <script src="glassRendering.js"></script>
+    <script src="trayComposer.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

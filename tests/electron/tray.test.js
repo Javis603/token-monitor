@@ -158,7 +158,10 @@ test('tray context menu uses the selected locale for every visible level', () =>
   ]);
   assert.equal(template[1].submenu[0].label, '主頁');
   assert.equal(template[3].submenu[0].label, '今日 Tokens');
-  assert.equal(template[3].submenu.at(-1).label, '僅顯示 App 圖示');
+  assert.deepEqual(template[3].submenu.slice(-2).map((item) => item.label), [
+    '僅顯示 App 圖示',
+    '自訂'
+  ]);
   assert.equal(template[4].submenu[0].label, '托盤彈出視窗');
   assert.equal(template[4].submenu.at(-1).label, '固定於桌面');
 });
@@ -304,7 +307,7 @@ test('usage tray icon returns null when the top client has no available icon', (
 });
 
 test('macOS templates provider icons unless the colored badge is enabled', () => {
-  for (const id of ['bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'limitsAllSessions']) {
+  for (const id of ['bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'limitsAllSessions', 'custom']) {
     assert.equal(isGeneratedTrayIconMode(id), true, `${id} should be classified as a generated image`);
     assert.equal(shouldUseTemplateTrayIcon(id, 'darwin', false), true, `${id} should follow the menu bar tint`);
     assert.equal(shouldUseTemplateTrayIcon(id, 'darwin', true), true, `${id} should stay a generated template`);

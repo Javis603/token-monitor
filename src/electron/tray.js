@@ -90,7 +90,8 @@ const TRAY_CONTENT_MENU_ITEMS = [
   ['barsWeekly', 'trayMenu.content.weeklyLimitBar'],
   ['barsAllSessions', 'trayMenu.content.allToolsLimitBars'],
   ['bars', 'trayMenu.content.lowestRemainingLimitBar'],
-  ['icon', 'trayMenu.content.appIconOnly']
+  ['icon', 'trayMenu.content.appIconOnly'],
+  ['custom', 'trayMenu.content.custom']
 ];
 
 const WINDOW_PRESENTATION_MENU_ITEMS = [

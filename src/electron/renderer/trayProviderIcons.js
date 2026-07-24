@@ -7,13 +7,16 @@
 })(typeof window !== 'undefined' ? window : null, function createTrayProviderIconsApi() {
   const SPECIAL_ICON_SOURCES = {
     claude: '../../../assets/icons/tray-claude.svg',
+    'claude-brand': '../../../assets/icons/claude.svg',
     codex: '../../../assets/icons/tray-codex.svg',
+    chatgpt: '../../../assets/icons/codex.svg',
     hermes: '../../../assets/icons/hermes-agent.svg',
     kimi: '../../../assets/icons/moonshot.svg',
     mimo: '../../../assets/icons/xiaomi.svg',
     grok: '../../../assets/icons/grok.svg',
     micode: '../../../assets/icons/xiaomi.svg',
-    zcode: '../../../assets/icons/zai.svg'
+    zcode: '../../../assets/icons/zai.svg',
+    zaiteam: '../../../assets/icons/zai.svg'
   };
 
   function trayProviderIconSources(clientIds) {
@@ -39,6 +42,29 @@
     };
   }
 
+  function trayProviderOpticalLayout(bounds, size = 44, opticalRatio = 0.78) {
+    const boxSize = Math.max(1, Number(size) || 44);
+    const width = Math.max(1, Number(bounds?.width) || 1);
+    const height = Math.max(1, Number(bounds?.height) || 1);
+    const ratio = Math.max(0.5, Math.min(1, Number(opticalRatio) || 0.78));
+    const scale = (boxSize * ratio) / Math.max(width, height);
+    const drawWidth = width * scale;
+    const drawHeight = height * scale;
+    return {
+      x: (boxSize - drawWidth) / 2,
+      y: (boxSize - drawHeight) / 2,
+      width: drawWidth,
+      height: drawHeight
+    };
+  }
+
+  function trayProviderOpticalRatio(providerId) {
+    // Claude Code's intentionally wide mark already uses the full horizontal
+    // viewBox with balanced vertical breathing room. Cropping it into the
+    // shared square optical box makes it noticeably smaller than its peers.
+    return providerId === 'claude' ? 1 : 0.78;
+  }
+
   function createTrayProviderIconDeliveryGuard() {
     let latestDeliveryId = 0;
     return {
@@ -52,5 +78,11 @@
     };
   }
 
-  return { createTrayProviderIconDeliveryGuard, trayProviderIconSources, trayProviderBadgeLayout };
+  return {
+    createTrayProviderIconDeliveryGuard,
+    trayProviderIconSources,
+    trayProviderBadgeLayout,
+    trayProviderOpticalLayout,
+    trayProviderOpticalRatio
+  };
 });

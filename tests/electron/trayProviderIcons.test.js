@@ -8,7 +8,9 @@ const test = require('node:test');
 const {
   createTrayProviderIconDeliveryGuard,
   trayProviderIconSources,
-  trayProviderBadgeLayout
+  trayProviderBadgeLayout,
+  trayProviderOpticalLayout,
+  trayProviderOpticalRatio
 } = require('../../src/electron/renderer/trayProviderIcons');
 
 const CURRENT_TOOLS = ['claude', 'codex', 'hermes', 'opencode', 'openclaw', 'cursor', 'antigravity', 'cline', 'grok'];
@@ -29,11 +31,14 @@ test('tray provider icon sources keep optimized menubar icons where available', 
   const sources = trayProviderIconSources(CURRENT_TOOLS);
   assert.equal(sources.claude, '../../../assets/icons/tray-claude.svg');
   assert.equal(sources.codex, '../../../assets/icons/tray-codex.svg');
+  assert.equal(trayProviderIconSources(['claude-brand'])['claude-brand'], '../../../assets/icons/claude.svg');
+  assert.equal(trayProviderIconSources(['chatgpt']).chatgpt, '../../../assets/icons/codex.svg');
   assert.equal(sources.hermes, '../../../assets/icons/hermes-agent.svg');
   assert.equal(sources.grok, '../../../assets/icons/grok.svg');
   assert.equal(trayProviderIconSources(['micode']).micode, '../../../assets/icons/xiaomi.svg');
   assert.equal(trayProviderIconSources(['mimo']).mimo, '../../../assets/icons/xiaomi.svg');
   assert.equal(trayProviderIconSources(['zcode']).zcode, '../../../assets/icons/zai.svg');
+  assert.equal(trayProviderIconSources(['zaiteam']).zaiteam, '../../../assets/icons/zai.svg');
   // CodeBuddy/WorkBuddy have their own brand svg, so they fall through to the id-named default.
   assert.equal(trayProviderIconSources(['codebuddy']).codebuddy, '../../../assets/icons/codebuddy.svg');
   assert.equal(trayProviderIconSources(['workbuddy']).workbuddy, '../../../assets/icons/workbuddy.svg');
@@ -56,6 +61,27 @@ test('tray provider badge stays legible at renderer and native tray sizes', () =
     radius: 3,
     borderWidth: 2
   });
+});
+
+test('tray provider optical layout gives differently padded artwork one shared visible box', () => {
+  assert.deepEqual(trayProviderOpticalLayout({ width: 128, height: 128 }, 44), {
+    x: 4.84,
+    y: 4.84,
+    width: 34.32,
+    height: 34.32
+  });
+  assert.deepEqual(trayProviderOpticalLayout({ width: 96, height: 48 }, 44), {
+    x: 4.84,
+    y: 13.42,
+    width: 34.32,
+    height: 17.16
+  });
+});
+
+test('Claude Code keeps its intentional wide mark while other providers use the shared optical box', () => {
+  assert.equal(trayProviderOpticalRatio('claude'), 1);
+  assert.equal(trayProviderOpticalRatio('claude-brand'), 0.78);
+  assert.equal(trayProviderOpticalRatio('codex'), 0.78);
 });
 
 test('tray provider icon delivery guard invalidates older async work', () => {

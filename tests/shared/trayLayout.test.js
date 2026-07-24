@@ -1,0 +1,421 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  accountOptions,
+  appendTrayLayoutItem,
+  createDefaultTrayLayout,
+  createTrayLayoutItem,
+  formatResetCountdown,
+  moveTrayLayoutItem,
+  normalizeTrayLayout,
+  removeTrayLayoutItem,
+  replaceTrayLayoutItem,
+  resolveTrayLayout,
+  selectSource,
+  sourceWindowOptions,
+  windowKey,
+  windowOptions
+} = require('../../src/shared/trayLayout');
+
+const now = Date.parse('2026-07-23T08:00:00.000Z');
+const stats = {
+  periods: {
+    today: { totalTokens: 1_240_000, costUsd: 4.25 },
+    month: { totalTokens: 9_500_000, costUsd: 31 },
+    allTime: { totalTokens: 226_934_966, costUsd: 194.5 }
+  },
+  limits: {
+    providers: [
+      {
+        provider: 'codex',
+        status: 'ok',
+        sourceDetail: 'app',
+        accountKey: 'active',
+        accountEmail: 'active@example.com',
+        windows: [
+          { kind: 'session', label: '5-hour', remainingPercent: 72, resetsAt: '2026-07-23T08:42:00.000Z' },
+          { kind: 'weekly', label: 'Weekly', remainingPercent: 64, resetsAt: '2026-07-29T10:00:00.000Z' }
+        ]
+      },
+      {
+        provider: 'codex',
+        status: 'ok',
+        sourceDetail: 'managed',
+        accountKey: 'managed',
+        accountEmail: 'managed@example.com',
+        windows: [
+          { kind: 'weekly', label: 'Weekly', remainingPercent: 18, resetsAt: '2026-07-24T11:07:00.000Z' }
+        ]
+      },
+      {
+        provider: 'claude',
+        status: 'ok',
+        accountKey: 'claude',
+        accountLabel: 'Max',
+        windows: [
+          { kind: 'session', remainingPercent: 42, resetsAt: '2026-07-23T11:07:00.000Z' },
+          { kind: 'weekly', remainingPercent: 81, resetsAt: '2026-07-29T10:00:00.000Z' }
+        ]
+      }
+    ]
+  }
+};
+
+test('tray layouts normalize to a versioned and bounded shape', () => {
+  const malformed = {
+    version: 99,
+    items: [
+      { id: 'one', type: 'icon', icon: 'provider', source: { provider: 'CODEX', accountMode: 'bad' } },
+      { id: 'two', type: 'bars', rows: [{ provider: 'claude' }, { provider: 'codex' }, { provider: 'ignored' }] },
+      { id: 'three', type: 'unknown' }
+    ]
+  };
+
+  assert.deepEqual(normalizeTrayLayout(malformed), {
+    version: 2,
+    items: [
+      {
+        id: 'one',
+        type: 'icon',
+        style: 'providerIcon',
+        icon: 'provider',
+        source: { provider: 'codex', accountMode: 'lowest', accountKey: '', window: 'primary', valueMode: 'remaining' }
+      },
+      {
+        id: 'two',
+        type: 'bars',
+        style: 'doubleBar',
+        icon: 'first',
+        rows: [
+          { provider: 'claude', accountMode: 'lowest', accountKey: '', window: 'primary', valueMode: 'remaining' },
+          { provider: 'codex', accountMode: 'lowest', accountKey: '', window: 'secondary', valueMode: 'remaining' }
+        ]
+      }
+    ]
+  });
+});
+
+test('tray layout editing keeps item ids stable and supports add, move, update and remove', () => {
+  let layout = createDefaultTrayLayout();
+  layout = appendTrayLayoutItem(layout, 'percentReset', { idFactory: () => 'quota' });
+  layout = appendTrayLayoutItem(layout, 'doubleBar', { idFactory: () => 'bars' });
+  assert.deepEqual(layout.items.map((item) => item.id), ['app-icon', 'quota', 'bars']);
+
+  layout = moveTrayLayoutItem(layout, 'bars', 0);
+  assert.deepEqual(layout.items.map((item) => item.id), ['bars', 'app-icon', 'quota']);
+
+  layout = replaceTrayLayoutItem(layout, 'quota', {
+    metric: 'reset',
+    source: { provider: 'codex', accountMode: 'active', window: 'weekly' }
+  });
+  assert.equal(layout.items[2].id, 'quota');
+  assert.equal(layout.items[2].metric, 'reset');
+  assert.equal(layout.items[2].source.accountMode, 'active');
+
+  layout = removeTrayLayoutItem(layout, 'app-icon');
+  assert.deepEqual(layout.items.map((item) => item.id), ['bars', 'quota']);
+});
+
+test('tray layouts support optional shared icons, stacked values and configurable spacers', () => {
+  const normalized = normalizeTrayLayout({
+    version: 1,
+    items: [
+      {
+        id: 'bars',
+        type: 'bars',
+        icon: 'none',
+        rows: [{ provider: 'codex' }, { provider: 'claude' }]
+      },
+      {
+        id: 'stack',
+        type: 'stack',
+        metric: 'reset',
+        icon: 'second',
+        fontStyle: 'menubar',
+        alignment: 'left',
+        rows: [{ provider: 'codex' }, { provider: 'claude' }]
+      },
+      {
+        id: 'space',
+        type: 'spacer',
+        variant: 'dot',
+        size: 'narrow'
+      }
+    ]
+  });
+
+  assert.equal(normalized.version, 2);
+  assert.equal(normalized.items[0].icon, 'none');
+  assert.equal(normalized.items[1].style, 'doubleReset');
+  assert.equal(normalized.items[1].icon, 'second');
+  assert.equal(normalized.items[1].fontStyle, 'menubar');
+  assert.equal(normalized.items[1].alignment, 'left');
+  assert.equal(normalized.items[2].style, 'separatorDot');
+  assert.equal(normalized.items[2].variant, 'dot');
+  assert.equal(normalized.items[2].size, 'narrow');
+
+  assert.equal(createTrayLayoutItem('doublePercent').metric, 'percent');
+  assert.equal(createTrayLayoutItem('doublePercent').fontStyle, 'normal');
+  assert.equal(createTrayLayoutItem('doublePercent').alignment, 'right');
+  assert.equal(createTrayLayoutItem('doubleReset').metric, 'reset');
+  assert.equal(createTrayLayoutItem('doubleReset').alignment, 'left');
+  assert.equal(createTrayLayoutItem('doubleInfo').metric, 'mixed');
+  assert.deepEqual(createTrayLayoutItem('doubleInfo').rows.map((row) => row.metric), ['percent', 'reset']);
+  assert.equal(normalizeTrayLayout({
+    items: [{ id: 'info', type: 'stack', style: 'doubleInfo', rows: [] }]
+  }).items[0].metric, 'mixed');
+  assert.equal(createTrayLayoutItem('separatorDot').variant, 'dot');
+  assert.equal(createTrayLayoutItem('spacer').size, 'regular');
+  assert.equal(createTrayLayoutItem('tokens').fontStyle, 'normal');
+  assert.equal(createTrayLayoutItem('customText').text, 'Text');
+  assert.deepEqual(createTrayLayoutItem('doubleCustomText').lines, ['Text', 'Text']);
+  assert.equal(createTrayLayoutItem('doubleCustomText').alignment, 'left');
+  assert.equal(createTrayLayoutItem('doubleCustomText').icon, 'none');
+  assert.equal(normalizeTrayLayout({
+    items: [{ id: 'text', type: 'text', metric: 'tokens', fontStyle: 'invalid' }]
+  }).items[0].fontStyle, 'normal');
+  assert.equal(normalizeTrayLayout({
+    items: [{ id: 'compact-font', type: 'text', metric: 'tokens', fontStyle: 'compactMono' }]
+  }).items[0].fontStyle, 'compactMono');
+  assert.equal(normalizeTrayLayout({
+    items: [{ id: 'unreleased-font', type: 'text', metric: 'tokens', fontStyle: 'mono' }]
+  }).items[0].fontStyle, 'normal');
+  assert.equal(normalizeTrayLayout({
+    items: [{ id: 'app-bars', type: 'bars', icon: 'app', rows: [{ provider: 'codex' }] }]
+  }).items[0].icon, 'app');
+
+  const customizedReset = normalizeTrayLayout({
+    items: [{
+      id: 'custom-reset',
+      type: 'stack',
+      metric: 'reset',
+      alignment: 'right',
+      alignmentCustomized: true,
+      rows: [{ provider: 'codex' }, { provider: 'claude' }]
+    }]
+  }).items[0];
+  assert.equal(customizedReset.alignment, 'right');
+  assert.equal(customizedReset.alignmentCustomized, true);
+});
+
+test('two-line information resolves independently selected existing metrics', () => {
+  const item = createTrayLayoutItem('doubleInfo', { idFactory: () => 'info' });
+  item.rows[0] = {
+    ...item.rows[0],
+    provider: 'codex',
+    accountMode: 'active',
+    metric: 'percent'
+  };
+  item.rows[1] = {
+    ...item.rows[1],
+    metric: 'tokens',
+    period: 'month'
+  };
+
+  const normalized = normalizeTrayLayout({ version: 2, items: [item] });
+  assert.equal(normalized.items[0].style, 'doubleInfo');
+  assert.equal(normalized.items[0].metric, 'mixed');
+  assert.deepEqual(normalized.items[0].rows.map((row) => row.metric), ['percent', 'tokens']);
+  assert.deepEqual(normalized.items[0].rows.map((row) => row.period), ['today', 'month']);
+
+  const [resolved] = resolveTrayLayout(normalized, stats, { nowMs: now }).items;
+  assert.deepEqual(resolved.rows.map((row) => row.text), ['72%', '9.5M']);
+  assert.equal(resolved.rows[0].selection.provider, 'codex');
+  assert.equal(resolved.rows[1].selection, null);
+});
+
+test('custom text items normalize and resolve without quota data', () => {
+  const single = createTrayLayoutItem('customText', { idFactory: () => 'single-copy' });
+  single.text = '  Build green  ';
+  const stacked = createTrayLayoutItem('doubleCustomText', { idFactory: () => 'stacked-copy' });
+  stacked.lines = ['Primary', 'Secondary'];
+  stacked.alignment = 'right';
+  stacked.alignmentCustomized = true;
+  stacked.fontStyle = 'compactMono';
+
+  const normalized = normalizeTrayLayout({ version: 2, items: [single, stacked] });
+  assert.equal(normalized.items[0].style, 'customText');
+  assert.equal(normalized.items[0].metric, 'custom');
+  assert.equal(normalized.items[0].text, 'Build green');
+  assert.equal(normalized.items[1].style, 'doubleCustomText');
+  assert.deepEqual(normalized.items[1].lines, ['Primary', 'Secondary']);
+  assert.equal(normalized.items[1].alignment, 'right');
+  assert.equal(normalized.items[1].fontStyle, 'compactMono');
+
+  const resolved = resolveTrayLayout(normalized, {}, { nowMs: now });
+  assert.equal(resolved.items[0].text, 'Build green');
+  assert.equal(resolved.items[0].available, true);
+  assert.deepEqual(resolved.items[1].rows.map((row) => row.text), ['Primary', 'Secondary']);
+  assert.equal(resolved.items[1].available, true);
+});
+
+test('active Codex account selection excludes managed accounts while lowest mode keeps them eligible', () => {
+  assert.equal(selectSource(stats, {
+    provider: 'codex',
+    accountMode: 'active',
+    window: 'primary'
+  }).providerRecord.accountKey, 'active');
+
+  assert.equal(selectSource(stats, {
+    provider: 'codex',
+    accountMode: 'lowest',
+    window: 'primary'
+  }).providerRecord.accountKey, 'managed');
+
+  assert.equal(selectSource(stats, {
+    provider: 'codex',
+    accountMode: 'active',
+    window: 'primary'
+  }, {
+    activeAccountKeys: { codex: 'managed' }
+  }).providerRecord.accountKey, 'managed');
+
+  assert.equal(selectSource(stats, {
+    provider: 'claude',
+    accountMode: 'active',
+    window: 'primary'
+  }).providerRecord.accountKey, 'claude');
+});
+
+test('specific account and exact window selectors do not silently fall back', () => {
+  const weekly = stats.limits.providers[0].windows[1];
+  assert.equal(selectSource(stats, {
+    provider: 'codex',
+    accountMode: 'specific',
+    accountKey: 'active',
+    window: windowKey(weekly)
+  }).window.label, 'Weekly');
+
+  assert.equal(selectSource(stats, {
+    provider: 'codex',
+    accountMode: 'specific',
+    accountKey: 'missing',
+    window: 'primary'
+  }), null);
+});
+
+test('reset countdown formatting follows the compact issue 133 contract', () => {
+  assert.equal(formatResetCountdown('2026-07-23T08:42:00.000Z', now), '42m');
+  assert.equal(formatResetCountdown('2026-07-23T11:07:00.000Z', now), '3h 07m');
+  assert.equal(formatResetCountdown('2026-07-29T10:00:00.000Z', now), '6d 2h');
+  assert.equal(formatResetCountdown('not-a-date', now), '');
+});
+
+test('layout resolution uses real period, quota, reset and account data', () => {
+  const layout = {
+    version: 1,
+    items: [
+      createTrayLayoutItem('tokens', { idFactory: () => 'tokens' }),
+      {
+        ...createTrayLayoutItem('percentReset', { idFactory: () => 'quota' }),
+        source: {
+          provider: 'codex',
+          accountMode: 'active',
+          accountKey: '',
+          window: 'primary',
+          valueMode: 'remaining'
+        }
+      },
+      {
+        ...createTrayLayoutItem('account', { idFactory: () => 'account' }),
+        source: {
+          provider: 'codex',
+          accountMode: 'specific',
+          accountKey: 'managed',
+          window: 'primary',
+          valueMode: 'remaining'
+        }
+      }
+    ]
+  };
+
+  const resolved = resolveTrayLayout(layout, stats, { currency: 'HKD', nowMs: now });
+  assert.equal(resolved.items[0].text, '1.2M');
+  assert.equal(resolved.items[1].text, '72% · 42m');
+  assert.equal(resolved.items[2].text, 'managed@example.com');
+});
+
+test('stacked quota values resolve two percentages or reset times independently', () => {
+  const percent = createTrayLayoutItem('doublePercent', { idFactory: () => 'percent-stack' });
+  percent.rows = [
+    { ...percent.rows[0], provider: 'codex', accountMode: 'active', window: 'primary' },
+    { ...percent.rows[1], provider: 'claude', accountMode: 'active', window: 'primary' }
+  ];
+  const reset = createTrayLayoutItem('doubleReset', { idFactory: () => 'reset-stack' });
+  reset.rows = percent.rows;
+  const spacer = createTrayLayoutItem('spacer', { idFactory: () => 'space' });
+
+  const resolved = resolveTrayLayout({
+    version: 2,
+    items: [percent, reset, spacer]
+  }, stats, { nowMs: now });
+
+  assert.deepEqual(resolved.items[0].rows.map((row) => row.text), ['72%', '42%']);
+  assert.deepEqual(resolved.items[1].rows.map((row) => row.text), ['42m', '3h 07m']);
+  assert.equal(resolved.items[2].available, true);
+});
+
+test('automatic provider icons use the internal primary quota without exposing another setting', () => {
+  const icon = createTrayLayoutItem('providerIcon', { idFactory: () => 'provider-icon' });
+  const resolved = resolveTrayLayout({
+    version: 2,
+    items: [icon]
+  }, stats, { nowMs: now });
+
+  assert.equal(icon.source.window, 'primary');
+  assert.equal(resolved.items[0].provider, 'codex');
+  assert.equal(resolved.items[0].available, true);
+});
+
+test('fixed provider icons remain available without live quota data', () => {
+  const icon = createTrayLayoutItem('providerIcon', { idFactory: () => 'fixed-provider-icon' });
+  icon.source.provider = 'kimi';
+  const resolved = resolveTrayLayout({
+    version: 2,
+    items: [icon]
+  }, stats, { nowMs: now });
+
+  assert.equal(resolved.items[0].provider, 'kimi');
+  assert.equal(resolved.items[0].available, true);
+  assert.equal(resolved.items[0].selection, null);
+});
+
+test('provider account and window choices expose live data for visual pickers', () => {
+  assert.deepEqual(accountOptions(stats, 'codex').map((option) => [option.value, option.label]), [
+    ['active', 'active@example.com'],
+    ['managed', 'managed@example.com']
+  ]);
+  assert.deepEqual(windowOptions(stats, 'codex', 'active').map((option) => [option.kind, option.label]), [
+    ['session', '5-hour'],
+    ['weekly', 'Weekly']
+  ]);
+});
+
+test('source window choices show each real provider window once and prioritize the current selection', () => {
+  const primary = sourceWindowOptions(stats, {
+    provider: 'claude',
+    accountMode: 'lowest',
+    window: 'primary'
+  });
+  assert.deepEqual(primary.map((option) => option.kind), ['session', 'weekly']);
+
+  const secondary = sourceWindowOptions(stats, {
+    provider: 'claude',
+    accountMode: 'lowest',
+    window: 'secondary'
+  });
+  assert.deepEqual(secondary.map((option) => option.kind), ['weekly', 'session']);
+
+  const automatic = sourceWindowOptions(stats, {
+    provider: 'auto',
+    accountMode: 'lowest',
+    window: 'primary'
+  });
+  const identities = automatic.map((option) => (
+    `${option.selection.provider}|${option.selection.providerRecord.accountKey}|${windowKey(option.window)}`
+  ));
+  assert.equal(new Set(identities).size, identities.length);
+});

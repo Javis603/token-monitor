@@ -85,6 +85,25 @@ const LIMIT_PROVIDERS = [
   { id: 'kimi', label: 'Kimi' },
   { id: 'ollama', label: 'Ollama' }
 ];
+const TRAY_ICON_VARIANTS = [
+  { id: 'claude-brand', label: 'Claude', after: 'claude' },
+  { id: 'chatgpt', label: 'ChatGPT', after: 'codex' }
+];
+const trayIconProviderIds = new Set([
+  ...clientsWithIcon,
+  ...TRAY_ICON_VARIANTS.map((provider) => provider.id)
+]);
+const TRAY_ICON_PROVIDERS = [
+  ...KNOWN_CLIENTS.flatMap((provider) => [
+    provider,
+    ...TRAY_ICON_VARIANTS.filter((variant) => variant.after === provider.id)
+  ]),
+  ...LIMIT_PROVIDERS
+]
+  .filter((provider, index, providers) => (
+    trayIconProviderIds.has(provider.id)
+    && providers.findIndex((entry) => entry.id === provider.id) === index
+  ));
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
@@ -101,6 +120,7 @@ const homeModulePreferencesApi = window.TokenMonitorHomeModulePreferences;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
+const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
@@ -237,7 +257,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
   viewBackRow: document.getElementById('viewBackRow'),
@@ -5158,7 +5178,7 @@ function applyFloatingBubbleState(payload = {}) {
   renderFloatingBubbleContent();
 }
 
-const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions'];
+const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'custom'];
 function normalizeTrayContentValue(value) {
   return BUBBLE_CONTENT_VALUES.includes(value) ? value : 'icon';
 }
@@ -5189,7 +5209,8 @@ function renderFloatingBubbleContent() {
     const dataUrl = state.stats
       ? trayDataUrlForMode(mode, 44, floatingBubbleGeneratedColors(), {
           contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
-          providerContrastHalo: true
+          providerContrastHalo: true,
+          layout: mode === 'custom' ? state.settings?.floatingBubbleCustomLayout : undefined
         })
       : null;
     if (dataUrl) {
@@ -5605,12 +5626,13 @@ function syncSettingsForm() {
   if (els.showTrayIconInput) els.showTrayIconInput.checked = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
   els.trayModeInput.checked = showTrayIcon && Boolean(state.settings.trayMode);
-  els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
+  els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
   els.trayContentInput.disabled = !showTrayIcon;
   els.showTrayProviderBadgeInput.checked = state.settings.showTrayProviderBadge === true;
   els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !state.settings.trayMode);
+  syncTrayComposerVisibility();
   syncWindowShortcutStatus();
   if (els.startAtLoginInput) {
     els.startAtLoginInput.disabled = !state.appInfo?.loginItemSupported;
@@ -7387,6 +7409,8 @@ els.floatingBubbleInput.addEventListener('change', () => {
 });
 els.floatingBubbleTriggerInput?.addEventListener('change', () => saveSettings({ floatingBubbleTrigger: els.floatingBubbleTriggerInput.value }));
 els.floatingBubbleContentInput?.addEventListener('change', async () => {
+  state.settings.floatingBubbleContent = els.floatingBubbleContentInput.value;
+  syncTrayComposerVisibility();
   await saveSettings({ floatingBubbleContent: els.floatingBubbleContentInput.value });
   renderFloatingBubbleContent();
 });
@@ -7404,7 +7428,11 @@ els.trayModeInput.addEventListener('change', () => {
   els.trayOptions?.classList.toggle('hidden', !els.showTrayIconInput?.checked || !els.trayModeInput.checked);
   saveSettings({ trayMode: els.trayModeInput.checked });
 });
-els.trayContentInput.addEventListener('change', () => saveSettings({ trayContent: els.trayContentInput.value }));
+els.trayContentInput.addEventListener('change', () => {
+  state.settings.trayContent = els.trayContentInput.value;
+  syncTrayComposerVisibility();
+  saveSettings({ trayContent: els.trayContentInput.value });
+});
 els.showTrayProviderBadgeInput.addEventListener('change', () => saveSettings({ showTrayProviderBadge: els.showTrayProviderBadgeInput.checked }));
 els.windowToggleShortcutValue?.addEventListener('click', startWindowShortcutRecording);
 els.windowToggleShortcutClearButton?.addEventListener('click', () => setWindowToggleShortcut('').catch(() => {}));
@@ -7662,18 +7690,98 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 }
 
 const trayProviderImages = {};
+const trayProviderImageIds = new WeakMap();
+const trayProviderImageOpticalSamples = new WeakMap();
 const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
+const trayComposers = {};
+let customTrayClockTimer = null;
 
-function drawProviderImage(ctx, image, x, y, size, contrastHalo = false) {
+function providerImageOpticalSample(image) {
+  const cached = trayProviderImageOpticalSamples.get(image);
+  if (cached) return cached;
+
+  const sampleSize = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = sampleSize;
+  canvas.height = sampleSize;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, sampleSize, sampleSize);
+
+  let bounds = { x: 0, y: 0, width: sampleSize, height: sampleSize };
+  try {
+    const pixels = ctx.getImageData(0, 0, sampleSize, sampleSize).data;
+    let minX = sampleSize;
+    let minY = sampleSize;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < sampleSize; y += 1) {
+      for (let x = 0; x < sampleSize; x += 1) {
+        if (pixels[(y * sampleSize + x) * 4 + 3] <= 12) continue;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    if (maxX >= minX && maxY >= minY) {
+      bounds = {
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1
+      };
+    }
+  } catch (_) {
+    // Keep the original frame if a future non-local image cannot be inspected.
+  }
+
+  const sample = { canvas, bounds };
+  trayProviderImageOpticalSamples.set(image, sample);
+  return sample;
+}
+
+function paintProviderImage(ctx, image, x, y, size, templateColor = '') {
+  const {
+    trayProviderOpticalLayout,
+    trayProviderOpticalRatio
+  } = window.TokenMonitorTrayProviderIcons;
+  const sample = providerImageOpticalSample(image);
+  const opticalRatio = trayProviderOpticalRatio(trayProviderImageIds.get(image));
+  const layout = trayProviderOpticalLayout(sample.bounds, size, opticalRatio);
+  const maskSize = Math.max(1, Math.round(size));
+  const mask = document.createElement('canvas');
+  mask.width = maskSize;
+  mask.height = maskSize;
+  const maskCtx = mask.getContext('2d');
+  maskCtx.drawImage(
+    sample.canvas,
+    sample.bounds.x,
+    sample.bounds.y,
+    sample.bounds.width,
+    sample.bounds.height,
+    layout.x,
+    layout.y,
+    layout.width,
+    layout.height
+  );
+  if (templateColor) {
+    maskCtx.globalCompositeOperation = 'source-in';
+    maskCtx.fillStyle = templateColor;
+    maskCtx.fillRect(0, 0, maskSize, maskSize);
+  }
+  ctx.drawImage(mask, x, y, size, size);
+}
+
+function drawProviderImage(ctx, image, x, y, size, contrastHalo = false, templateColor = '') {
   if (contrastHalo) {
     const lightSurface = themePresetsApi.isLightHex(resolvedThemeColor('bg'));
     ctx.save();
     ctx.shadowColor = lightSurface ? 'rgba(0, 0, 0, 0.58)' : 'rgba(255, 255, 255, 0.82)';
     ctx.shadowBlur = Math.max(2, Math.round(size * 0.1));
-    ctx.drawImage(image, x, y, size, size);
+    paintProviderImage(ctx, image, x, y, size, templateColor);
     ctx.restore();
   }
-  ctx.drawImage(image, x, y, size, size);
+  paintProviderImage(ctx, image, x, y, size, templateColor);
 }
 
 function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors = {}, options = {}) {
@@ -7833,6 +7941,352 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
   return canvas.toDataURL('image/png');
 }
 
+function trayComposerSampleStats() {
+  const resetSoon = new Date(Date.now() + 3 * 60 * 60 * 1000 + 7 * 60 * 1000).toISOString();
+  const resetLater = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString();
+  return {
+    periods: {
+      today: { totalTokens: 1_240_000, costUsd: 12.34 },
+      month: { totalTokens: 18_600_000, costUsd: 184.2 },
+      allTime: { totalTokens: 225_437_666, costUsd: 1502.72 }
+    },
+    limits: {
+      providers: [
+        {
+          provider: 'codex',
+          status: 'ok',
+          accountKey: 'preview-codex',
+          accountEmail: 'you@example.com',
+          sourceDetail: 'app',
+          windows: [
+            { kind: 'session', label: '', remainingPercent: 64, resetsAt: resetSoon },
+            { kind: 'weekly', label: '', remainingPercent: 42, resetsAt: resetLater }
+          ]
+        },
+        {
+          provider: 'claude',
+          status: 'ok',
+          accountKey: 'preview-claude',
+          accountEmail: 'work@example.com',
+          sourceDetail: 'oauth',
+          windows: [
+            { kind: 'session', label: '', remainingPercent: 78, resetsAt: resetSoon },
+            { kind: 'weekly', label: '', remainingPercent: 57, resetsAt: resetLater }
+          ]
+        }
+      ]
+    }
+  };
+}
+
+function statsForTrayComposer() {
+  const sample = trayComposerSampleStats();
+  const liveProviders = state.stats?.limits?.providers;
+  return {
+    ...sample,
+    ...state.stats,
+    periods: {
+      ...sample.periods,
+      ...(state.stats?.periods || {})
+    },
+    limits: Array.isArray(liveProviders) && liveProviders.some((provider) => provider?.status === 'ok' && !provider?.stale)
+      ? state.stats.limits
+      : sample.limits
+  };
+}
+
+function drawTrayFallbackMark(ctx, value, x, y, size, color) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `600 ${Math.round(size * 0.46)}px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(value === 'app' ? 'Σ' : String(value || '?').slice(0, 1).toUpperCase(), x + size / 2, y + size / 2 + 1);
+  ctx.restore();
+}
+
+function trayTextCanvasFont(item, fontSize, defaultWeight) {
+  const style = item?.fontStyle || 'normal';
+  const family = style === 'compactMono'
+    ? 'ui-monospace, ".AppleSystemUIFontMonospaced", "SFMono-Regular", "SF Mono", Menlo, monospace'
+    : '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif';
+  const weight = style === 'menubar' ? 700 : style === 'compactMono' ? 600 : defaultWeight;
+  return `${weight} ${fontSize}px ${family}`;
+}
+
+function trayTextHorizontalScale(item) {
+  if (item?.fontStyle === 'condensed') return 0.86;
+  if (item?.fontStyle === 'menubar') return 0.92;
+  return 1;
+}
+
+function trayTextSpaceScale(item) {
+  return item?.fontStyle === 'compactMono' ? 0.55 : 1;
+}
+
+function trayTextRuns(ctx, text, item) {
+  const spaceScale = trayTextSpaceScale(item);
+  return (String(text).match(/\s+|\S+/g) || ['']).map((value) => {
+    const blank = /^\s+$/.test(value);
+    return {
+      value,
+      blank,
+      width: ctx.measureText(value).width * (blank ? spaceScale : 1)
+    };
+  });
+}
+
+function measureTrayText(ctx, text, item, horizontalScale = 1) {
+  return trayTextRuns(ctx, text, item)
+    .reduce((width, run) => width + run.width, 0) * horizontalScale;
+}
+
+function drawTrayText(ctx, text, x, y, item, horizontalScale = 1) {
+  const spaceScale = trayTextSpaceScale(item);
+  if (spaceScale === 1 && horizontalScale === 1) {
+    ctx.fillText(text, x, y);
+    return;
+  }
+
+  const runs = trayTextRuns(ctx, text, item);
+  const rawWidth = runs.reduce((width, run) => width + run.width, 0);
+  const alignment = ctx.textAlign;
+  const startX = alignment === 'right' || alignment === 'end'
+    ? -rawWidth
+    : alignment === 'center'
+      ? -rawWidth / 2
+      : 0;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(horizontalScale, 1);
+  ctx.textAlign = 'left';
+  let cursor = startX;
+  for (const run of runs) {
+    if (!run.blank) ctx.fillText(run.value, cursor, 0);
+    cursor += run.width;
+  }
+  ctx.restore();
+}
+
+function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}) {
+  const trackColor = colors.track || 'rgba(0, 0, 0, 0.32)';
+  const fillColor = colors.fill || 'rgba(0, 0, 0, 1)';
+  const textColor = colors.text || fillColor;
+  const h = Math.max(16, Math.round(height));
+
+  if (item.type === 'spacer') {
+    const isDot = item.variant === 'dot';
+    const ratios = isDot
+      ? { narrow: 0.18, regular: 0.24, wide: 0.34 }
+      : { narrow: 0.07, regular: 0.14, wide: 0.27 };
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(2, Math.round(h * (ratios[item.size] || ratios.regular)));
+    canvas.height = h;
+    if (isDot) {
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = textColor;
+      ctx.beginPath();
+      ctx.arc(canvas.width / 2, h / 2, Math.max(1, h * 0.055), 0, Math.PI * 2);
+      ctx.fill();
+    } else if (options.spacerGuide) {
+      const ctx = canvas.getContext('2d');
+      ctx.strokeStyle = trackColor;
+      ctx.setLineDash([1, 2]);
+      ctx.beginPath();
+      ctx.moveTo(0.5, h * 0.2);
+      ctx.lineTo(0.5, h * 0.8);
+      ctx.moveTo(canvas.width - 0.5, h * 0.2);
+      ctx.lineTo(canvas.width - 0.5, h * 0.8);
+      ctx.stroke();
+    }
+    return canvas;
+  }
+
+  if (item.type === 'icon') {
+    const canvas = document.createElement('canvas');
+    canvas.width = h;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const provider = item.provider || 'app';
+    const providerImage = trayProviderImages[provider];
+    if (providerImage) {
+      drawProviderImage(
+        ctx,
+        providerImage,
+        0,
+        0,
+        h,
+        options.providerContrastHalo === true,
+        options.templateIconColor || ''
+      );
+    } else {
+      drawTrayFallbackMark(ctx, provider, 0, 0, h, textColor);
+    }
+    return canvas;
+  }
+
+  if (item.type === 'bars') {
+    const { trayBarFillWidth, trayBarsLayout } = window.TokenMonitorTrayBars;
+    const showIcon = item.icon !== 'none';
+    const barLayout = trayBarsLayout(h, { contentOnly: !showIcon });
+    const canvas = document.createElement('canvas');
+    canvas.width = barLayout.width;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const rows = item.rows.length > 1 ? item.rows.slice(0, 2) : item.rows.slice(0, 1);
+    const drawBar = (row, y) => {
+      roundedRectPath(ctx, barLayout.barsX, y, barLayout.barsWidth, barLayout.barHeight, barLayout.radius);
+      ctx.fillStyle = trackColor;
+      ctx.fill();
+      const fillWidth = trayBarFillWidth(row.percent, barLayout.barsWidth);
+      if (!fillWidth) return;
+      ctx.save();
+      roundedRectPath(ctx, barLayout.barsX, y, barLayout.barsWidth, barLayout.barHeight, barLayout.radius);
+      ctx.clip();
+      ctx.fillStyle = fillColor;
+      ctx.fillRect(barLayout.barsX, y, fillWidth, barLayout.barHeight);
+      ctx.restore();
+    };
+    if (showIcon) {
+      const preferredIndex = item.icon === 'second' ? 1 : 0;
+      const iconRow = rows[preferredIndex]?.selection ? rows[preferredIndex] : rows.find((row) => row.selection);
+      const provider = item.icon === 'app' ? 'app' : iconRow?.selection?.provider || '';
+      const providerImage = trayProviderImages[provider];
+      if (providerImage) {
+        drawProviderImage(
+          ctx,
+          providerImage,
+          barLayout.padX,
+          barLayout.iconY,
+          barLayout.iconSize,
+          options.providerContrastHalo === true,
+          options.templateIconColor || ''
+        );
+      } else {
+        drawTrayFallbackMark(ctx, provider || '?', barLayout.padX, barLayout.iconY, barLayout.iconSize, textColor);
+      }
+    }
+    const ys = rows.length > 1
+      ? [barLayout.barsStartY, barLayout.barsStartY + barLayout.barHeight + barLayout.barGap]
+      : [Math.round((h - barLayout.barHeight) / 2)];
+    rows.forEach((row, index) => {
+      drawBar(row, ys[index]);
+    });
+    return canvas;
+  }
+
+  if (item.type === 'stack') {
+    const rows = item.rows.slice(0, 2);
+    const showIcon = item.icon !== 'none';
+    const preferredIndex = item.icon === 'second' ? 1 : 0;
+    const iconRow = rows[preferredIndex]?.selection ? rows[preferredIndex] : rows.find((row) => row.selection);
+    const provider = item.icon === 'app' ? 'app' : iconRow?.selection?.provider || '';
+    const iconSize = h;
+    const iconGap = Math.max(2, Math.round(h * 0.08));
+    const fontSize = Math.max(8, Math.round(h * 0.43));
+    const font = trayTextCanvasFont(item, fontSize, 600);
+    const horizontalScale = trayTextHorizontalScale(item);
+    const measure = document.createElement('canvas').getContext('2d');
+    measure.font = font;
+    const textWidth = Math.max(
+      ...rows.map((row) => measureTrayText(measure, row.text || '--', item, horizontalScale)),
+      1
+    );
+    const padX = Math.max(1, Math.round(h * 0.04));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(textWidth) + padX * 2 + (showIcon ? iconSize + iconGap : 0);
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const alignment = item.alignment === 'left' ? 'left' : 'right';
+    let textX = alignment === 'right' ? canvas.width - padX : padX;
+    if (showIcon) {
+      const providerImage = trayProviderImages[provider];
+      if (providerImage) {
+        drawProviderImage(
+          ctx,
+          providerImage,
+          0,
+          0,
+          iconSize,
+          options.providerContrastHalo === true,
+          options.templateIconColor || ''
+        );
+      } else {
+        drawTrayFallbackMark(ctx, provider || '?', 0, 0, iconSize, textColor);
+      }
+      if (alignment === 'left') textX += iconSize + iconGap;
+    }
+    ctx.font = font;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = alignment;
+    const textBaselineOffset = Math.max(1, Math.round(h * 0.025));
+    rows.forEach((row, index) => {
+      ctx.fillStyle = row.available === false ? trackColor : textColor;
+      drawTrayText(
+        ctx,
+        row.text || '--',
+        textX,
+        h * (index === 0 ? 0.28 : 0.72) + textBaselineOffset,
+        item,
+        horizontalScale
+      );
+    });
+    return canvas;
+  }
+
+  const text = item.text || '--';
+  const fontSize = Math.round(h * 0.68);
+  const font = trayTextCanvasFont(item, fontSize, 500);
+  const horizontalScale = trayTextHorizontalScale(item);
+  const measure = document.createElement('canvas').getContext('2d');
+  measure.font = font;
+  const padX = Math.max(1, Math.round(h * 0.04));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(measureTrayText(measure, text, item, horizontalScale)) + padX * 2);
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.font = font;
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = item.available === false ? trackColor : textColor;
+  drawTrayText(ctx, text, padX, h / 2 + 1, item, horizontalScale);
+  return canvas;
+}
+
+function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options = {}) {
+  const activeCodex = localLiveCodexProvider();
+  const activeCodexKey = activeCodex?.accountKey
+    && (stats?.limits?.providers || []).some((provider) => (
+      provider?.provider === 'codex' && provider?.accountKey === activeCodex.accountKey
+    ))
+    ? activeCodex.accountKey
+    : '';
+  const resolved = trayLayoutApi.resolveTrayLayout(layout, stats, {
+    currency: currentCurrency(),
+    nowMs: Date.now(),
+    activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {}
+  });
+  const items = resolved.items.map((item) => (
+    item.type === 'text'
+      && item.metric === 'account'
+      && state.settings?.maskLimitAccountEmails
+      ? { ...item, text: accountIdentityApi.maskEmailAddress(item.text) }
+      : item
+  ));
+  const segments = items.map((item) => renderCustomTrayItemCanvas(item, height, colors, options));
+  if (!segments.length) return null;
+  const gap = Math.max(1, Math.round(height * 0.03));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, segments.reduce((width, segment) => width + segment.width, 0) + gap * Math.max(0, segments.length - 1));
+  canvas.height = Math.max(16, Math.round(height));
+  const ctx = canvas.getContext('2d');
+  let x = 0;
+  for (const segment of segments) {
+    ctx.drawImage(segment, x, 0);
+    x += segment.width + gap;
+  }
+  return canvas.toDataURL('image/png');
+}
+
 function barsDataUrlForMode(mode, size = 44, colors, options = {}) {
   if (mode === 'barsAllSessions') return renderAllSessionsIcon(state.stats, size, configuredLimitProviderOrder(), colors, options);
   const pickers = { barsSession: pickWorstSessionProvider, barsWeekly: pickWorstWeeklyProvider };
@@ -7840,16 +8294,195 @@ function barsDataUrlForMode(mode, size = 44, colors, options = {}) {
 }
 
 function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
+  if (mode === 'custom') {
+    return renderCustomTrayLayout(
+      options.stats || state.stats || statsForTrayComposer(),
+      options.layout || state.settings?.trayCustomLayout,
+      size,
+      colors,
+      options
+    );
+  }
   if (mode === 'limitsAllSessions') return renderLimitSessionsIcon(state.stats, size, configuredLimitProviderOrder(), colors, options);
   return barsDataUrlForMode(mode, size, colors, options);
 }
 
-async function maybeUpdateBarsIcon() {
+async function maybeUpdateBarsIcon(options = {}) {
+  if (options.refreshComposers !== false) refreshTrayComposers();
   const mode = state.settings?.trayContent;
   if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
   if (!window.tokenMonitor.setTrayIcons) return;
   const dataUrl = trayDataUrlForMode(mode, 44);
   try { await window.tokenMonitor.setTrayIcons({ [mode]: dataUrl || null }); } catch (_) {}
+}
+
+function trayComposerProviderIcon(provider) {
+  const id = provider === 'auto' ? 'app' : provider;
+  const cached = trayProviderImages[id];
+  if (cached) {
+    try {
+      return providerImageToPngDataUrl(cached, 44, false, {
+        templateColor: floatingBubbleGeneratedColors().text
+      });
+    } catch (_) {}
+  }
+  if (id === 'app') return '../../../assets/icons/tray-token-monitor.png';
+  return window.TokenMonitorTrayProviderIcons.trayProviderIconSources([id])[id] || '';
+}
+
+function trayComposerProviderChoices(currentProviders = [], options = {}) {
+  const current = new Set(
+    (Array.isArray(currentProviders) ? currentProviders : [currentProviders])
+      .map((provider) => String(provider || '').trim().toLowerCase())
+      .filter((provider) => provider && provider !== 'auto')
+  );
+  const available = new Set(
+    trayLayoutApi.providerOptions(state.stats || {}).map((entry) => entry.value)
+  );
+  const includeAll = options.includeAll === true;
+  const catalogue = includeAll ? TRAY_ICON_PROVIDERS : LIMIT_PROVIDERS;
+  return [
+    {
+      value: 'auto',
+      label: t('trayComposer.provider.auto'),
+      detail: t('trayComposer.provider.autoDetail'),
+      icon: trayComposerProviderIcon('auto')
+    },
+    ...catalogue
+      .filter((provider) => includeAll || available.has(provider.id) || current.has(provider.id))
+      .map((provider) => ({
+        value: provider.id,
+        label: provider.label,
+        detail: includeAll || available.has(provider.id) ? '' : t('trayComposer.provider.unavailable'),
+        icon: trayComposerProviderIcon(provider.id)
+      }))
+  ];
+}
+
+function trayComposerAccountChoices(provider) {
+  const stats = state.stats || {};
+  const raw = provider === 'auto'
+    ? LIMIT_PROVIDERS.flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id))
+    : trayLayoutApi.accountOptions(stats, provider);
+  return raw.map((entry) => ({
+    value: entry.value,
+    label: entry.label,
+    detail: LIMIT_PROVIDERS.find((providerEntry) => providerEntry.id === entry.provider?.provider)?.label || entry.provider?.provider || '',
+    icon: trayComposerProviderIcon(entry.provider?.provider)
+  }));
+}
+
+function trayComposerSourcePreview(source) {
+  const item = trayLayoutApi.createTrayLayoutItem('singleBar');
+  item.rows = [{ ...item.rows[0], ...source }];
+  return renderCustomTrayLayout(
+    statsForTrayComposer(),
+    { version: trayLayoutApi.VERSION, items: [item] },
+    32,
+    floatingBubbleGeneratedColors(),
+    { templateIconColor: floatingBubbleGeneratedColors().text }
+  );
+}
+
+function trayComposerWindowChoices(source) {
+  const choices = trayLayoutApi.sourceWindowOptions(
+    state.stats || {},
+    source
+  ).map((entry) => ({
+    value: entry.value,
+    label: trayComposerWindowLabel(entry),
+    preview: trayComposerSourcePreview({ ...source, window: entry.value })
+  }));
+  if (choices.length) return choices;
+  return [{
+    value: 'primary',
+    label: t('trayComposer.window.primary'),
+    preview: trayComposerSourcePreview({ ...source, window: 'primary' })
+  }];
+}
+
+function trayComposerWindowLabel(entry) {
+  const kind = String(entry.kind || 'other').toLowerCase();
+  const kindKey = `trayComposer.window.${kind}`;
+  const translatedKind = t(kindKey);
+  const kindLabel = translatedKind === kindKey ? t('trayComposer.window.primary') : translatedKind;
+  const rawLabel = String(entry.label || '').trim();
+  const normalizedLabel = rawLabel.toLowerCase();
+  const redundantLabels = new Set([kind, 'session', 'weekly', 'billing', 'total']);
+  if (!rawLabel || redundantLabels.has(normalizedLabel)) return kindLabel;
+  return `${kindLabel} · ${rawLabel}`;
+}
+
+function previewItemForStyle(style) {
+  return trayLayoutApi.createTrayLayoutItem(style);
+}
+
+function renderTrayComposerItem(item, options = {}) {
+  return renderCustomTrayLayout(
+    statsForTrayComposer(),
+    { version: trayLayoutApi.VERSION, items: [item] },
+    36,
+    floatingBubbleGeneratedColors(),
+    { templateIconColor: floatingBubbleGeneratedColors().text, ...options }
+  );
+}
+
+function renderTrayComposerFontPreview(item, fontStyle) {
+  return renderTrayComposerItem({ ...item, fontStyle });
+}
+
+function createTrayComposer(surface) {
+  const isTray = surface === 'tray';
+  const root = isTray ? els.trayComposer : els.floatingBubbleComposer;
+  const layoutKey = isTray ? 'trayCustomLayout' : 'floatingBubbleCustomLayout';
+  return window.TokenMonitorTrayComposer.createTrayComposer({
+    root,
+    surface,
+    layoutApi: trayLayoutApi,
+    getLayout: () => state.settings?.[layoutKey],
+    getStylePreview: (style) => renderTrayComposerItem(
+      previewItemForStyle(style),
+      { spacerGuide: style === 'spacer' }
+    ),
+    getFontStylePreview: renderTrayComposerFontPreview,
+    renderItem: renderTrayComposerItem,
+    providerChoices: trayComposerProviderChoices,
+    accountChoices: trayComposerAccountChoices,
+    windowChoices: trayComposerWindowChoices,
+    label: t,
+    onLayoutChange: (nextLayout, { commit }) => {
+      state.settings[layoutKey] = trayLayoutApi.normalizeTrayLayout(nextLayout);
+      if (isTray) void maybeUpdateBarsIcon({ refreshComposers: commit });
+      else renderFloatingBubbleContent();
+      if (commit) void saveSettings({ [layoutKey]: state.settings[layoutKey] });
+    }
+  });
+}
+
+function syncTrayComposerVisibility() {
+  const surfaces = [
+    { id: 'tray', root: els.trayComposer, visible: state.settings?.trayContent === 'custom' },
+    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleContent === 'custom' }
+  ];
+  for (const surface of surfaces) {
+    surface.root?.classList.toggle('hidden', !surface.visible);
+    if (surface.visible && !trayComposers[surface.id]) trayComposers[surface.id] = createTrayComposer(surface.id);
+  }
+  const clockNeeded = surfaces.some((surface) => surface.visible);
+  if (clockNeeded && !customTrayClockTimer) {
+    customTrayClockTimer = setInterval(() => {
+      void maybeUpdateBarsIcon({ refreshComposers: false });
+      renderFloatingBubbleContent();
+    }, 30 * 1000);
+  } else if (!clockNeeded && customTrayClockTimer) {
+    clearInterval(customTrayClockTimer);
+    customTrayClockTimer = null;
+  }
+}
+
+function refreshTrayComposers() {
+  syncTrayComposerVisibility();
+  Object.values(trayComposers).forEach((composer) => composer?.refresh());
 }
 
 function loadImage(src) {
@@ -7861,7 +8494,7 @@ function loadImage(src) {
   });
 }
 
-function providerImageToPngDataUrl(img, size, showBadge = false) {
+function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
   const { trayProviderBadgeLayout } = window.TokenMonitorTrayProviderIcons;
   const layout = trayProviderBadgeLayout(size);
   const canvas = document.createElement('canvas');
@@ -7874,10 +8507,18 @@ function providerImageToPngDataUrl(img, size, showBadge = false) {
     ctx.save();
     ctx.shadowColor = 'rgba(255, 255, 255, 0.95)';
     ctx.shadowBlur = Math.max(2, Math.round(layout.iconSize * 0.1));
-    ctx.drawImage(img, imageInset, imageInset, imageSize, imageSize);
+    paintProviderImage(ctx, img, imageInset, imageInset, imageSize);
     ctx.restore();
   }
-  ctx.drawImage(img, imageInset, imageInset, imageSize, imageSize);
+  drawProviderImage(
+    ctx,
+    img,
+    imageInset,
+    imageInset,
+    imageSize,
+    false,
+    showBadge ? '' : options.templateColor || ''
+  );
 
   if (!showBadge) return canvas.toDataURL('image/png');
 
@@ -7912,12 +8553,14 @@ function providerImageToPngDataUrl(img, size, showBadge = false) {
 async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProviderBadge === true) {
   if (!window.tokenMonitor.setTrayIcons) return;
   const deliveryId = trayProviderIconDeliveryGuard.begin();
-  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(clientsWithIcon);
+  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(trayIconProviderIds);
+  sources.app = '../../../assets/icons/tray-token-monitor.png';
   const icons = {};
   for (const [id, path] of Object.entries(sources)) {
     try {
       const img = await loadImage(path);
       trayProviderImages[id] = img;
+      trayProviderImageIds.set(img, id);
       icons[id] = providerImageToPngDataUrl(img, 44, showBadge);
     } catch (_) { /* skip missing */ }
   }

@@ -16,7 +16,7 @@
   }
 
   function isGeneratedTrayIconMode(contentMode) {
-    return contentMode === 'limitsAllSessions' || isBarsTrayIconMode(contentMode);
+    return contentMode === 'limitsAllSessions' || contentMode === 'custom' || isBarsTrayIconMode(contentMode);
   }
 
   function formatCompactNumber(value) {
@@ -228,7 +228,7 @@
   }
 
   function formatTrayText(stats, contentMode = 'tokens', currencyCode = 'USD', options = {}) {
-    if (contentMode === 'icon') return '';
+    if (contentMode === 'icon' || contentMode === 'custom') return '';
     if (contentMode === 'limitsAllSessions') return formatConfiguredSessionLimits(stats, options);
     if (isBarsTrayIconMode(contentMode)) {
       // Icon carries all the info; only show text if we have no limit data at all.

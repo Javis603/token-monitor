@@ -19,6 +19,7 @@ const {
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
+const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
 
 // Install EPIPE suppression before anything that might log. Without this,
@@ -190,7 +191,7 @@ const CSP_HEADER = [
   "form-action 'none'",
   "frame-ancestors 'none'"
 ].join('; ');
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon']);
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'interval']);
@@ -261,6 +262,7 @@ function defaultSettings() {
     floatingBubbleEnabled: false,
     floatingBubbleTrigger: 'click',
     floatingBubbleContent: 'icon',
+    floatingBubbleCustomLayout: createDefaultTrayLayout(),
     floatingBubbleBounds: null,
     lastViewState: { period: 'today', breakdown: 'tool' },
     discordRpcEnabled: false,
@@ -308,6 +310,7 @@ function defaultSettings() {
     showTrayIcon: true,
     trayMode: false,
     trayContent: 'tokens',
+    trayCustomLayout: createDefaultTrayLayout(),
     showTrayProviderBadge: false,
     windowToggleShortcut: '',
     currency: normalizeCurrency(process.env.TOKEN_MONITOR_CURRENCY || 'USD'),
@@ -1678,6 +1681,8 @@ function readSettings() {
     delete merged.edgeDrawerEnabled;
     merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
     merged.floatingBubbleContent = normalizeTrayContent(merged.floatingBubbleContent, 'icon');
+    merged.floatingBubbleCustomLayout = normalizeTrayLayout(merged.floatingBubbleCustomLayout);
+    merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
     merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
     merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
     // 如果设置了 opencodeCookie 但没有 profiles，自动迁移
@@ -2347,14 +2352,15 @@ function updateTrayDisplay() {
   // while the current stats still have quota text; otherwise it can outlive
   // the provider data that generated it.
   const trayImageMode = mode === 'limitsAllSessions' && Boolean(limitText) && providerTrayIcons[mode];
-  const text = trayImageMode ? '' : limitText;
+  const customImageMode = mode === 'custom' && providerTrayIcons.custom;
+  const text = trayImageMode || customImageMode ? '' : limitText;
   if (process.platform === 'darwin') tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
   const tip = formatTrayText(latestStats, 'both', currency);
   tray.setToolTip(`Token Monitor - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
-  if (barsImageMode || trayImageMode) {
+  if (barsImageMode || trayImageMode || customImageMode) {
     icon = providerTrayIcons[mode];
   } else {
     const usageIconId = pickUsageTrayIconId(latestStats, mode, Object.keys(providerTrayIcons));
@@ -3841,6 +3847,8 @@ app.whenReady().then(() => {
     const previousShowTrayIcon = settings.showTrayIcon;
     const previousTrayMode = settings.trayMode;
     const previousTrayContent = settings.trayContent;
+    const previousTrayCustomLayout = JSON.stringify(settings.trayCustomLayout || {});
+    const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousCurrency = settings.currency;
     const previousStartAtLogin = settings.startAtLogin;
@@ -3930,8 +3938,10 @@ app.whenReady().then(() => {
         trayMode: patch.trayMode ?? settings.trayMode
       }),
       trayContent: normalizeTrayContent(patch.trayContent ?? settings.trayContent),
+      trayCustomLayout: normalizeTrayLayout(patch.trayCustomLayout ?? settings.trayCustomLayout),
       showTrayProviderBadge: parseBoolean(patch.showTrayProviderBadge ?? settings.showTrayProviderBadge, false),
       floatingBubbleContent: normalizeTrayContent(patch.floatingBubbleContent ?? settings.floatingBubbleContent, 'icon'),
+      floatingBubbleCustomLayout: normalizeTrayLayout(patch.floatingBubbleCustomLayout ?? settings.floatingBubbleCustomLayout),
       windowToggleShortcut: normalizeWindowToggleShortcut(patch.windowToggleShortcut ?? settings.windowToggleShortcut),
       currency: normalizedCurrency,
       currencyRates: patch.currencyRates !== undefined ? normalizeCurrencyOverrides(patch.currencyRates) : normalizeCurrencyOverrides(settings.currencyRates),
@@ -4026,6 +4036,8 @@ app.whenReady().then(() => {
       else exitTrayMode();
     } else if (
       settings.trayContent !== previousTrayContent ||
+      JSON.stringify(settings.trayCustomLayout || {}) !== previousTrayCustomLayout ||
+      JSON.stringify(settings.floatingBubbleCustomLayout || {}) !== previousFloatingBubbleCustomLayout ||
       settings.showTrayProviderBadge !== previousShowTrayProviderBadge ||
       settings.currency !== previousCurrency
     ) {
