@@ -2723,6 +2723,7 @@ html.is-windows .settings-panel select option {
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
+.row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/newapi.svg);         mask-image: url(../../../assets/icons/newapi.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
@@ -2811,6 +2812,10 @@ html.is-windows .settings-panel select option {
 .limit-icon-mimo {
   -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
   mask-image: url(../../../assets/icons/xiaomi.svg);
+}
+.limit-icon-thirdparty {
+  -webkit-mask-image: url(../../../assets/icons/newapi.svg);
+  mask-image: url(../../../assets/icons/newapi.svg);
 }
 .row-label {
   display: grid;
@@ -3910,6 +3915,13 @@ html.is-windows .limit-live-badge {
 #copilotManualDetails.hidden,
 #cursorErrorMessage.hidden,
 #opencodeErrorMessage.hidden,
+#openrouterErrorMessage.hidden,
+#thirdpartyErrorMessage.hidden,
+#thirdpartyAccessTokenRow.hidden,
+#thirdpartyUserIdRow.hidden,
+#thirdpartyApiKeyRow.hidden,
+#thirdpartyModeField.hidden,
+#thirdpartyCustomConfig.hidden,
 #deepseekErrorMessage.hidden,
 #minimaxErrorMessage.hidden,
 #zaiErrorMessage.hidden,
@@ -3952,6 +3964,19 @@ html.is-windows .limit-live-badge {
 #cursorManualPanel textarea,
 #opencodeManualPanel textarea,
 #openrouterApiKeyInput,
+#thirdpartyPlatformInput,
+#thirdpartyModeInput,
+#thirdpartyAuthModeInput,
+#thirdpartyBaseUrlInput,
+#thirdpartyAccessTokenInput,
+#thirdpartyUserIdInput,
+#thirdpartyApiKeyInput,
+#thirdpartyEndpointPathInput,
+#thirdpartyRemainingPathInput,
+#thirdpartyUsedPathInput,
+#thirdpartyTotalPathInput,
+#thirdpartyCurrencyInput,
+#thirdpartyDivisorInput,
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,
@@ -3971,6 +3996,16 @@ html.is-windows .limit-live-badge {
 #cursorManualPanel textarea,
 #opencodeManualPanel textarea,
 #openrouterApiKeyInput,
+#thirdpartyBaseUrlInput,
+#thirdpartyAccessTokenInput,
+#thirdpartyUserIdInput,
+#thirdpartyApiKeyInput,
+#thirdpartyEndpointPathInput,
+#thirdpartyRemainingPathInput,
+#thirdpartyUsedPathInput,
+#thirdpartyTotalPathInput,
+#thirdpartyCurrencyInput,
+#thirdpartyDivisorInput,
 #deepseekManualPanel input,
 #minimaxManualPanel input,
 #zaiManualPanel input,
@@ -4430,12 +4465,17 @@ html.is-windows .limit-live-badge {
   padding: 0;
 }
 .opencode-profile-item .profile-name-box {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr);
+  grid-template-areas:
+    "name rename ."
+    "detail detail detail";
   align-items: center;
-  gap: 4px;
+  gap: 1px 4px;
   min-width: 0;
 }
 .opencode-profile-item .profile-name {
+  grid-area: name;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4444,11 +4484,22 @@ html.is-windows .limit-live-badge {
   font-size: 11px;
   line-height: 1.2;
 }
+.opencode-profile-item .profile-detail {
+  grid-area: detail;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+}
 .opencode-profile-item .profile-name.hidden,
 .opencode-profile-item .profile-name-input.hidden {
   display: none;
 }
 .opencode-profile-item .profile-name-input {
+  grid-area: name;
   min-width: 60px;
   font-size: 11px;
   line-height: 1.2;
@@ -4460,6 +4511,7 @@ html.is-windows .limit-live-badge {
   outline: none;
 }
 .opencode-profile-item .profile-rename-btn {
+  grid-area: rename;
   flex: 0 0 auto;
   background: none;
   border: none;
@@ -4473,6 +4525,10 @@ html.is-windows .limit-live-badge {
 }
 .opencode-profile-item:hover .profile-rename-btn {
   opacity: 0.6;
+}
+.opencode-profile-item .profile-rename-btn:focus-visible,
+.opencode-profile-item .profile-delete:focus-visible {
+  opacity: 1;
 }
 .opencode-profile-item .profile-rename-btn:hover {
   opacity: 1;
@@ -4586,6 +4642,82 @@ html.is-windows .limit-live-badge {
   box-sizing: border-box;
   font-family: monospace;
   font-size: 12px;
+}
+
+.thirdparty-add-body {
+  gap: 9px;
+}
+.thirdparty-add-body .thirdparty-intro {
+  line-height: 1.45;
+}
+.thirdparty-choice-grid,
+.thirdparty-credential-grid,
+.thirdparty-custom-request-grid,
+.thirdparty-custom-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+.thirdparty-choice-grid.single-field,
+.thirdparty-credential-grid.single-field {
+  grid-template-columns: minmax(0, 1fr);
+}
+.thirdparty-field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.thirdparty-field label {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+.thirdparty-field :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  font-size: 11px;
+}
+.thirdparty-mode-hint {
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
+  border-radius: 5px;
+  background: rgba(var(--accent-rgb), 0.055);
+  line-height: 1.4;
+}
+#thirdpartyApiKeyRow {
+  grid-column: 1 / -1;
+}
+.thirdparty-custom-config {
+  display: grid;
+  gap: 8px;
+}
+.thirdparty-custom-mapping {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), 0.025);
+}
+.thirdparty-custom-mapping-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  font-size: 10px;
+}
+.thirdparty-custom-mapping-heading span:last-child {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Custom tray/bubble composer ------------------------------------------------

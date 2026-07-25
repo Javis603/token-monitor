@@ -974,7 +974,7 @@ test('Copilot env token is documented in env example, not the README overview', 
   assert.doesNotMatch(readmeTw, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
 });
 
-test('Accounts summary counts all managed account groups including OpenRouter, MiMo, and Ollama', () => {
+test('Accounts summary counts all managed account groups including Third-party API, MiMo, and Ollama', () => {
   const app = readRendererFile('app.js');
   const mimoLinkedBody = functionBody(app, 'mimoAccountLinked', 'renderMimoStatus');
   const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
@@ -988,6 +988,7 @@ test('Accounts summary counts all managed account groups including OpenRouter, M
   assert.match(summaryBody, /const kimiLinked = externalProviderAccountLinked\('kimi'\);/);
   assert.match(summaryBody, /const ollamaLinked = externalProviderAccountLinked\('ollama'\);/);
   assert.match(summaryBody, /const openrouterCount = state\.openrouterProfileCount \|\| 0;/);
+  assert.match(summaryBody, /const thirdpartyCount = state\.thirdPartyProfileCount \|\| 0;/);
   assert.match(summaryBody, /const mimoLinked = mimoAccountLinked\(\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
@@ -998,9 +999,10 @@ test('Accounts summary counts all managed account groups including OpenRouter, M
   assert.match(summaryBody, /\(kimiLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(ollamaLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(openrouterCount > 0 \? 1 : 0\)/);
+  assert.match(summaryBody, /\(thirdpartyCount > 0 \? 1 : 0\)/);
   assert.match(summaryBody, /\(mimoLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 14/);
+  assert.match(summaryBody, /total: 15/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
@@ -1115,6 +1117,19 @@ test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () 
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'openrouter', status: 'unauthorized' }),
     { label: 'Update API key', tone: 'setup' }
+  );
+});
+
+test('third-party API uses credential setup copy and self-hosted capability tags', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'thirdparty', source: 'api' }), 'API');
+  assert.deepEqual(presentation.limitProviderCapabilityTags('thirdparty'), ['Self-hosted', 'API']);
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'thirdparty', status: 'notConfigured' }),
+    { label: 'Add credential', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'thirdparty', status: 'unauthorized' }),
+    { label: 'Update credential', tone: 'setup' }
   );
 });
 

@@ -539,7 +539,8 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
   assert.doesNotMatch(refreshBody, /collectLimitsOnce/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  assert.match(renderLimits, /id === 'codex' \? \{\s*accountTitle: true,\s*allowSystemSwitch: true\s*\} : undefined/s);
+  assert.match(renderLimits, /const rowOptions = id === 'codex'\s*\? \{ accountTitle: true, allowSystemSwitch: true \}/s);
+  assert.match(renderLimits, /renderLimitProviderRow\(id, label, provider, color, rowOptions\)/);
   assert.doesNotMatch(
     renderLimits,
     /renderLimitProviderRow\(id, label, provider, color, id === 'codex' \? \{[\s\S]*?showActiveBadge: true/

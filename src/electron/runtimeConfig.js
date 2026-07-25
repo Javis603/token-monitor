@@ -41,7 +41,8 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   ollama: ['ollamaCookie'],
   codex: ['codexManagedAccounts'],
-  mimo: ['mimoManagedAccounts']
+  mimo: ['mimoManagedAccounts'],
+  thirdparty: ['thirdPartyProfiles']
 });
 
 function equalSetting(left, right) {
@@ -104,7 +105,8 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     kimiWebAccessToken: settings.kimiWebAccessToken || '',
     ollamaCookie: settings.ollamaCookie || '',
     codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
-    mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? []
+    mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? [],
+    thirdPartyProfiles: settings.thirdPartyProfiles || {}
   };
 }
 

@@ -32,6 +32,15 @@ test('stores credential settings in a versioned provider document', (t) => {
     kimiWebAccessToken: 'kimi-web-token',
     opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
     openrouterProfiles: { personal: { apiKey: 'sk-or-secret', enabled: true } },
+    thirdPartyProfiles: {
+      relay: {
+        adapter: 'newapi-account',
+        baseUrl: 'https://api.example.com',
+        accessToken: 'system-access',
+        userId: '42',
+        enabled: true
+      }
+    },
     zaiTeamOrganizationId: 'organization-id',
     qoderCookie: ''
   });
@@ -44,6 +53,9 @@ test('stores credential settings in a versioned provider document', (t) => {
   assert.equal(document.credentials.providers.kimi.webAccessToken, 'kimi-web-token');
   assert.equal(document.credentials.providers.opencode.profiles.work.cookie, 'auth=secret');
   assert.equal(document.credentials.providers.openrouter.profiles.personal.apiKey, 'sk-or-secret');
+  assert.equal(document.credentials.providers.thirdparty.profiles.relay.accessToken, 'system-access');
+  assert.equal(document.credentials.providers.thirdparty.profiles.relay.userId, '42');
+  assert.equal(document.credentials.providers.thirdparty.profiles.relay.baseUrl, 'https://api.example.com');
   assert.equal(document.credentials.providers.zaiTeam.organizationId, 'organization-id');
   assert.equal(document.credentials.providers.qoder, undefined);
   assert.equal(document.migrations.settings, 1);
@@ -53,6 +65,15 @@ test('stores credential settings in a versioned provider document', (t) => {
     secret: 'client-secret',
     opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
     openrouterProfiles: { personal: { apiKey: 'sk-or-secret', enabled: true } },
+    thirdPartyProfiles: {
+      relay: {
+        adapter: 'newapi-account',
+        baseUrl: 'https://api.example.com',
+        accessToken: 'system-access',
+        userId: '42',
+        enabled: true
+      }
+    },
     deepseekApiKey: 'deepseek-key',
     kimiWebAccessToken: 'kimi-web-token',
     zaiTeamOrganizationId: 'organization-id'
@@ -64,13 +85,17 @@ test('removes credential fields from settings without mutating runtime state', (
     language: 'auto',
     deepseekApiKey: 'secret',
     opencodeProfiles: { a: { cookie: 'secret' } },
-    openrouterProfiles: { b: { apiKey: 'secret' } }
+    openrouterProfiles: { b: { apiKey: 'secret' } },
+    thirdPartyProfiles: {
+      c: { adapter: 'newapi-token', baseUrl: 'https://api.example.com', apiKey: 'secret' }
+    }
   };
   const clean = stripCredentialSettings(settings);
   assert.deepEqual(clean, { language: 'auto' });
   assert.equal(settings.deepseekApiKey, 'secret');
   assert.equal(settings.opencodeProfiles.a.cookie, 'secret');
   assert.equal(settings.openrouterProfiles.b.apiKey, 'secret');
+  assert.equal(settings.thirdPartyProfiles.c.apiKey, 'secret');
   assert.equal(hasCredentialSettings(settings), true);
   assert.equal(hasCredentialSettings(clean), false);
 });
@@ -81,7 +106,10 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
     secret: 'client-secret',
     deepseekApiKey: 'provider-secret',
     opencodeProfiles: { work: { cookie: 'auth=secret' } },
-    openrouterProfiles: { personal: { apiKey: 'sk-or-secret' } }
+    openrouterProfiles: { personal: { apiKey: 'sk-or-secret' } },
+    thirdPartyProfiles: {
+      relay: { adapter: 'newapi-token', baseUrl: 'https://api.example.com', apiKey: 'sk-newapi-secret' }
+    }
   };
   const redacted = credentialSettingsForRenderer(settings, { expose: ['hubHostSecret', 'secret'] });
   assert.equal(redacted.hubHostSecret, 'host-secret');
@@ -89,6 +117,7 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
   assert.equal(redacted.deepseekApiKey, '');
   assert.equal(redacted.opencodeProfiles, '');
   assert.equal(redacted.openrouterProfiles, '');
+  assert.equal(redacted.thirdPartyProfiles, '');
   assert.equal(redacted.kimiApiKey, '');
   assert.equal(redacted.kimiWebAccessToken, '');
 });

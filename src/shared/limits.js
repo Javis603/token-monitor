@@ -3,7 +3,7 @@
 const { staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
-const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama']);
+const VALID_PROVIDERS = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama', 'thirdparty']);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
@@ -46,17 +46,17 @@ function normalizeSourceDetail(value) {
 }
 
 function normalizeAccountLabel(value) {
-  const raw = String(value || '').trim();
-  if (!raw || raw.length > 32 || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
-  const clean = raw.replace(/[^a-z0-9 +._-]/gi, '').replace(/\s+/g, ' ').trim();
-  return clean.length <= 32 ? clean : '';
+  const raw = String(value || '').trim().normalize('NFC');
+  if (!raw || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
+  const clean = raw.replace(/\s+/gu, ' ').trim();
+  return [...clean].length <= 32 && /^[\p{L}\p{M}\p{N} +._-]+$/u.test(clean) ? clean : '';
 }
 
 function normalizeAccountName(value) {
-  const raw = String(value || '').trim();
-  if (!raw || raw.length > 64 || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
-  const clean = raw.replace(/[^a-z0-9 ._-]/gi, '').replace(/\s+/g, ' ').trim();
-  return clean.length <= 64 ? clean : '';
+  const raw = String(value || '').trim().normalize('NFC');
+  if (!raw || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
+  const clean = raw.replace(/\s+/gu, ' ').trim();
+  return [...clean].length <= 64 && /^[\p{L}\p{M}\p{N} ._-]+$/u.test(clean) ? clean : '';
 }
 
 function normalizeAccountEmail(value) {
@@ -159,6 +159,10 @@ function normalizeProviderBalance(input) {
   const weekSpend = numberOrNull(input.weekSpend ?? input.week_spend);
   const monthSpend = numberOrNull(input.monthSpend ?? input.month_spend);
   const allTimeSpend = numberOrNull(input.allTimeSpend ?? input.all_time_spend);
+  const requestCountRaw = numberOrNull(input.requestCount ?? input.request_count);
+  const requestCount = requestCountRaw === null ? null : Math.max(0, Math.trunc(requestCountRaw));
+  const quotaGroup = String(input.quotaGroup ?? input.quota_group ?? '').trim().slice(0, 64);
+  const expiresAt = normalizeIsoTimestamp(input.expiresAt ?? input.expires_at);
   const trackingSince = normalizeIsoTimestamp(input.trackingSince ?? input.tracking_since);
   const monthSinceTracking = input.monthSinceTracking ?? input.month_since_tracking;
   const giftBalance = numberOrNull(input.giftBalance ?? input.gift_balance);
@@ -181,6 +185,9 @@ function normalizeProviderBalance(input) {
     && weekSpend === null
     && monthSpend === null
     && allTimeSpend === null
+    && requestCount === null
+    && !quotaGroup
+    && !expiresAt
     && !trackingSince
     && monthSinceTracking === undefined
     && giftBalance === null
@@ -202,6 +209,9 @@ function normalizeProviderBalance(input) {
     weekSpend,
     monthSpend,
     allTimeSpend,
+    requestCount,
+    quotaGroup,
+    expiresAt,
     trackingSince,
     monthSinceTracking: Boolean(monthSinceTracking),
     giftBalance,
@@ -374,6 +384,7 @@ function providerCollapseKey(provider) {
     (provider.provider === 'codex'
       || provider.provider === 'opencode'
       || provider.provider === 'openrouter'
+      || provider.provider === 'thirdparty'
       || provider.provider === 'mimo')
     && isConfiguredProvider(provider)
   ) {
@@ -557,7 +568,11 @@ function publicLimits(limits) {
       planLabel,
       workspaceKind,
       ...provider
-    }) => provider)
+    }) => {
+      if (!provider.balance) return provider;
+      const { quotaGroup, ...publicBalance } = provider.balance;
+      return { ...provider, balance: publicBalance };
+    })
   };
 }
 

@@ -26,7 +26,8 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   qoderCookie: ['providers', 'qoder', 'cookie'],
   kimiApiKey: ['providers', 'kimi', 'apiKey'],
   kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
-  ollamaCookie: ['providers', 'ollama', 'cookie']
+  ollamaCookie: ['providers', 'ollama', 'cookie'],
+  thirdPartyProfiles: ['providers', 'thirdparty', 'profiles']
 });
 
 function emptyDocument() {

@@ -3,7 +3,13 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { aggregateLimits, mergeCodexTransientWindows, publicLimits, syncLimits } = require('../../src/shared/limits');
+const {
+  aggregateLimits,
+  mergeCodexTransientWindows,
+  normalizeLimitProvider,
+  publicLimits,
+  syncLimits
+} = require('../../src/shared/limits');
 const { collectLimitsOnce } = require('../../src/shared/limitCollector');
 const { codexAccountKey } = require('../../src/shared/codexAuth');
 
@@ -210,6 +216,55 @@ test('aggregateLimits preserves distinct OpenRouter accounts and public stats sc
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountKey')));
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountName')));
   assert.ok(publicPayload.providers.every((provider) => provider.windows[0].metric === 'credits'));
+});
+
+test('aggregateLimits preserves distinct Third-party API accounts while keeping Base URLs off the wire', () => {
+  const providers = ['工作', 'personal'].map((accountName, index) => normalizeLimitProvider({
+    provider: 'thirdparty',
+    accountKey: `sha256:thirdparty-${index}`,
+    accountName,
+    accountLabel: accountName,
+    planLabel: `token-${index}`,
+    status: 'ok',
+    source: 'api',
+    updatedAt: `2026-07-24T10:0${index}:00.000Z`,
+    windows: [{
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Token quota',
+      used: index,
+      limit: 50,
+      remaining: 50 - index
+    }],
+    balance: {
+      amount: 50 - index,
+      currency: 'USD',
+      allTimeSpend: index,
+      requestCount: index + 10,
+      quotaGroup: index === 0 ? 'default' : 'vip',
+      expiresAt: '2027-01-15T08:00:00.000Z'
+    }
+  }));
+  const aggregate = aggregateLimits([{
+    deviceId: 'macbook',
+    limits: { updatedAt: '2026-07-24T10:02:00.000Z', providers }
+  }], 0, Date.parse('2026-07-24T10:03:00.000Z'));
+  const thirdparty = aggregate.providers.filter((provider) => provider.provider === 'thirdparty');
+  assert.equal(thirdparty.length, 2);
+  assert.deepEqual(new Set(thirdparty.map((provider) => provider.accountName)), new Set(['工作', 'personal']));
+  const work = thirdparty.find((provider) => provider.accountName === '工作');
+  assert.equal(work.balance.requestCount, 10);
+  assert.equal(work.balance.quotaGroup, 'default');
+  assert.equal(work.balance.expiresAt, '2027-01-15T08:00:00.000Z');
+  assert.equal(JSON.stringify(thirdparty).includes('http'), false);
+
+  const publicPayload = publicLimits({ providers: thirdparty });
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountKey')));
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountName')));
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountLabel')));
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'planLabel')));
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider.balance, 'quotaGroup')));
+  assert.ok(publicPayload.providers.every((provider) => Object.hasOwn(provider.balance, 'requestCount')));
 });
 
 test('publicLimits preserves MiMo plan status while removing account identity', () => {

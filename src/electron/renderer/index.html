@@ -984,6 +984,117 @@
                 <div id="copilotErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="thirdpartyAccountGroup" class="settings-group cursor-account-group">
+              <button id="thirdpartySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="thirdpartySettingsDetails">
+                <span data-i18n="settings.thirdparty.title">Third-party API Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="thirdpartyStatus" class="cursor-status-pill" data-i18n="settings.thirdparty.statusNotSet">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="thirdpartySettingsDetails" class="cursor-settings-details hidden">
+                <div id="thirdpartyProfileList" class="opencode-profile-list thirdparty-profile-list"></div>
+                <div id="thirdpartyAddForm" class="opencode-add-form">
+                  <button id="thirdpartyAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="thirdpartyAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.thirdparty.addProfile">Add account</span>
+                  </button>
+                  <div id="thirdpartyAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body thirdparty-add-body">
+                      <p class="settings-note thirdparty-intro" data-i18n="settings.thirdparty.note">Connect a compatible self-hosted API. Credentials stay on this device and are sent only to the Base URL below.</p>
+                      <div id="thirdpartyChoiceGrid" class="thirdparty-choice-grid">
+                        <div class="thirdparty-field">
+                          <label for="thirdpartyPlatformInput" data-i18n="settings.thirdparty.preset">Preset</label>
+                          <select id="thirdpartyPlatformInput">
+                            <option value="newapi" data-i18n="settings.thirdparty.presetNewApi">New API-compatible</option>
+                            <option value="custom" data-i18n="settings.thirdparty.presetCustom">Custom</option>
+                          </select>
+                        </div>
+                        <div id="thirdpartyModeField" class="thirdparty-field">
+                          <label for="thirdpartyModeInput" data-i18n="settings.thirdparty.scope">Balance scope</label>
+                          <select id="thirdpartyModeInput">
+                            <option value="account" data-i18n="settings.thirdparty.scopeAccount">Account</option>
+                            <option value="token" data-i18n="settings.thirdparty.scopeApiKey">API key</option>
+                          </select>
+                        </div>
+                      </div>
+                      <p id="thirdpartyModeHint" class="settings-note thirdparty-mode-hint" data-i18n="settings.thirdparty.hintNewApiAccount">Shows the whole account balance. New API requires a User ID; compatible One API forks can leave it blank.</p>
+                      <div class="thirdparty-field">
+                        <label for="thirdpartyProfileName" data-i18n="settings.thirdparty.profileName">Account name</label>
+                        <input id="thirdpartyProfileName" type="text" data-i18n-placeholder="settings.thirdparty.profileNamePlaceholder" placeholder="e.g. work, personal">
+                      </div>
+                      <div class="thirdparty-field">
+                        <label for="thirdpartyBaseUrlInput" data-i18n="settings.thirdparty.baseUrl">Base URL</label>
+                        <input id="thirdpartyBaseUrlInput" type="url" inputmode="url" spellcheck="false" data-i18n-placeholder="settings.thirdparty.baseUrlPlaceholder" placeholder="https://api.example.com">
+                      </div>
+                      <div id="thirdpartyCredentialGrid" class="thirdparty-credential-grid">
+                        <div id="thirdpartyAccessTokenRow" class="thirdparty-field">
+                          <label for="thirdpartyAccessTokenInput" data-i18n="settings.thirdparty.accessToken">Access token</label>
+                          <input id="thirdpartyAccessTokenInput" type="password" spellcheck="false" data-i18n-placeholder="settings.thirdparty.accessTokenPlaceholder" placeholder="Account access token">
+                        </div>
+                        <div id="thirdpartyUserIdRow" class="thirdparty-field">
+                          <label for="thirdpartyUserIdInput" data-i18n="settings.thirdparty.userId">User ID (New API only)</label>
+                          <input id="thirdpartyUserIdInput" type="text" inputmode="numeric" spellcheck="false" data-i18n-placeholder="settings.thirdparty.userIdPlaceholder" placeholder="e.g. 1">
+                        </div>
+                        <div id="thirdpartyApiKeyRow" class="thirdparty-field hidden">
+                          <label for="thirdpartyApiKeyInput" data-i18n="settings.thirdparty.apiKey">API key</label>
+                          <input id="thirdpartyApiKeyInput" type="password" spellcheck="false" data-i18n-placeholder="settings.thirdparty.apiKeyPlaceholder" placeholder="sk-...">
+                        </div>
+                      </div>
+                      <div id="thirdpartyCustomConfig" class="thirdparty-custom-config hidden">
+                        <div class="thirdparty-custom-request-grid">
+                          <div class="thirdparty-field">
+                            <label for="thirdpartyEndpointPathInput" data-i18n="settings.thirdparty.endpointPath">Endpoint path</label>
+                            <input id="thirdpartyEndpointPathInput" type="text" spellcheck="false" value="/user/balance" data-i18n-placeholder="settings.thirdparty.endpointPathPlaceholder" placeholder="/user/balance">
+                          </div>
+                          <div class="thirdparty-field">
+                            <label for="thirdpartyAuthModeInput" data-i18n="settings.thirdparty.authMode">Authentication</label>
+                            <select id="thirdpartyAuthModeInput">
+                              <option value="bearer" data-i18n="settings.thirdparty.authBearer">Bearer token</option>
+                              <option value="x-api-key" data-i18n="settings.thirdparty.authXApiKey">x-api-key header</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div class="thirdparty-custom-mapping">
+                          <div class="thirdparty-custom-mapping-heading">
+                            <span data-i18n="settings.thirdparty.responseMapping">Response mapping</span>
+                            <span data-i18n="settings.thirdparty.responseMappingHint">Dot-separated JSON paths</span>
+                          </div>
+                          <div class="thirdparty-custom-mapping-grid">
+                            <div class="thirdparty-field">
+                              <label for="thirdpartyRemainingPathInput" data-i18n="settings.thirdparty.remainingPath">Remaining balance</label>
+                              <input id="thirdpartyRemainingPathInput" type="text" spellcheck="false" data-i18n-placeholder="settings.thirdparty.remainingPathPlaceholder" placeholder="data.balance">
+                            </div>
+                            <div class="thirdparty-field">
+                              <label for="thirdpartyUsedPathInput" data-i18n="settings.thirdparty.usedPath">Used amount (optional)</label>
+                              <input id="thirdpartyUsedPathInput" type="text" spellcheck="false" data-i18n-placeholder="settings.thirdparty.usedPathPlaceholder" placeholder="data.used">
+                            </div>
+                            <div class="thirdparty-field">
+                              <label for="thirdpartyTotalPathInput" data-i18n="settings.thirdparty.totalPath">Total quota (optional)</label>
+                              <input id="thirdpartyTotalPathInput" type="text" spellcheck="false" data-i18n-placeholder="settings.thirdparty.totalPathPlaceholder" placeholder="data.total">
+                            </div>
+                            <div class="thirdparty-field">
+                              <label for="thirdpartyDivisorInput" data-i18n="settings.thirdparty.divisor">Divisor</label>
+                              <input id="thirdpartyDivisorInput" type="number" min="0.000000000000001" max="1000000000000000" step="any" value="1" inputmode="decimal">
+                            </div>
+                            <div class="thirdparty-field">
+                              <label for="thirdpartyCurrencyInput" data-i18n="settings.thirdparty.currency">Currency</label>
+                              <input id="thirdpartyCurrencyInput" type="text" maxlength="8" value="USD" spellcheck="false" data-i18n-placeholder="settings.thirdparty.currencyPlaceholder" placeholder="USD">
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="settings-actions">
+                        <button id="thirdpartyProfileSubmit" data-i18n="settings.thirdparty.saveProfile">Save account</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="thirdpartyErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
           </div>
         </div>
 

@@ -168,7 +168,7 @@ function grpcBillingResponse({ usedPercent = 42.5, resetEpoch = 1_800_000_000 } 
 test('parseLimitProviders includes grok and ollama in the default provider set', () => {
   assert.deepEqual(
     parseLimitProviders(),
-    ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama']
+    ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama', 'thirdparty']
   );
 });
 

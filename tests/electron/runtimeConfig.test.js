@@ -18,6 +18,15 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
     limitsRefreshMs: 60000,
     kimiApiKey: 'secret',
     openrouterProfiles: { work: { apiKey: 'openrouter-secret', enabled: true } },
+    thirdPartyProfiles: {
+      relay: {
+        adapter: 'newapi-account',
+        baseUrl: 'https://api.example.com',
+        accessToken: 'access-secret',
+        userId: '42',
+        enabled: true
+      }
+    },
     zaiApiRegion: 'bigmodel-cn'
   };
   const usage = usageConfigFromSettings(settings, {
@@ -33,6 +42,15 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
   assert.equal(Object.hasOwn(usage, 'kimiApiKey'), false);
   assert.equal(limits.kimiApiKey, 'secret');
   assert.deepEqual(limits.openrouterProfiles, { work: { apiKey: 'openrouter-secret', enabled: true } });
+  assert.deepEqual(limits.thirdPartyProfiles, {
+    relay: {
+      adapter: 'newapi-account',
+      baseUrl: 'https://api.example.com',
+      accessToken: 'access-secret',
+      userId: '42',
+      enabled: true
+    }
+  });
   assert.equal(Object.hasOwn(limits, 'clients'), false);
   assert.deepEqual(envelope, {
     deviceId: 'device-1',
@@ -92,4 +110,20 @@ test('OpenRouter profile changes invalidate only the OpenRouter limits lane', ()
     { openrouterProfiles: { work: { apiKey: 'new', enabled: true } } }
   );
   assert.deepEqual(classification.limitScopes, [{ provider: 'openrouter' }]);
+});
+
+test('third-party profile changes invalidate only the third-party limits lane', () => {
+  const classification = classifySettingsChange(
+    {
+      thirdPartyProfiles: {
+        work: { adapter: 'newapi-token', baseUrl: 'https://old.example', apiKey: 'old', enabled: true }
+      }
+    },
+    {
+      thirdPartyProfiles: {
+        work: { adapter: 'newapi-token', baseUrl: 'https://new.example', apiKey: 'new', enabled: true }
+      }
+    }
+  );
+  assert.deepEqual(classification.limitScopes, [{ provider: 'thirdparty' }]);
 });
