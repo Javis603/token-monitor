@@ -136,6 +136,93 @@ test('Claude limits read Windows Credential Manager credentials when credential 
   assert.equal(provider.windows[0].usedPercent, 12);
 });
 
+test('Claude OAuth profile provides stable cross-device account identity and metadata', async () => {
+  async function collect(credentialPath, accountUuid, organizationUuid) {
+    return fetchClaudeLimits({}, {
+      platform: 'linux',
+      now: () => Date.parse('2026-07-25T00:00:00Z'),
+      claudeCredentialPath: credentialPath,
+      stat: async () => ({ mtimeMs: 1 }),
+      readFile: async () => JSON.stringify({
+        claudeAiOauth: {
+          accessToken: `access-${credentialPath}`,
+          refreshToken: `refresh-${credentialPath}`,
+          expiresAt: Date.parse('2026-07-26T00:00:00Z'),
+          subscriptionType: 'max',
+          rateLimitTier: 'default_claude_max_5x'
+        }
+      }),
+      fetch: async (url) => ({
+        ok: true,
+        json: async () => url.endsWith('/api/oauth/profile')
+          ? {
+              account: {
+                uuid: accountUuid,
+                email: 'Owner@Example.com'
+              },
+              organization: {
+                uuid: organizationUuid,
+                name: 'Example Workspace'
+              }
+            }
+          : {
+              five_hour: {
+                utilization: 12,
+                resets_at: '2026-07-25T05:00:00Z'
+              }
+            }
+      })
+    });
+  }
+
+  const mac = await collect('/Users/test/.claude/.credentials.json', 'account-a', 'organization-a');
+  const windows = await collect('C:\\Users\\test\\.claude\\.credentials.json', 'account-a', 'organization-a');
+  const other = await collect('/home/other/.claude/.credentials.json', 'account-b', 'organization-b');
+
+  assert.equal(mac.accountKey, windows.accountKey);
+  assert.notEqual(mac.accountKey, other.accountKey);
+  assert.equal(mac.accountEmail, 'owner@example.com');
+  assert.equal(mac.accountName, 'Example Workspace');
+  assert.equal(mac.accountLabel, 'Max 5x');
+});
+
+test('Claude OAuth identity falls back to credential material instead of plan or credential path', async () => {
+  async function collect(refreshToken) {
+    return fetchClaudeLimits({}, {
+      platform: 'linux',
+      now: () => Date.parse('2026-07-25T00:00:00Z'),
+      claudeCredentialPath: '/same/path/.credentials.json',
+      stat: async () => ({ mtimeMs: 1 }),
+      readFile: async () => JSON.stringify({
+        claudeAiOauth: {
+          accessToken: `access-${refreshToken}`,
+          refreshToken,
+          expiresAt: Date.parse('2026-07-26T00:00:00Z'),
+          subscriptionType: 'max',
+          rateLimitTier: 'default_claude_max_5x'
+        }
+      }),
+      fetch: async (url) => ({
+        ok: !url.endsWith('/api/oauth/profile'),
+        status: url.endsWith('/api/oauth/profile') ? 503 : 200,
+        json: async () => ({
+          five_hour: {
+            utilization: 12,
+            resets_at: '2026-07-25T05:00:00Z'
+          }
+        })
+      })
+    });
+  }
+
+  const first = await collect('refresh-account-a');
+  const second = await collect('refresh-account-b');
+
+  assert.notEqual(first.accountKey, second.accountKey);
+  assert.equal(first.accountEmail, '');
+  assert.equal(first.accountName, '');
+});
+
 test('Claude OAuth usage mapping accepts camelCase response fields', async () => {
   const provider = await fetchClaudeLimits({}, {
     platform: 'linux',
@@ -349,6 +436,27 @@ test('Claude CLI usage parses compact PTY reset lines', () => {
   assert.equal(weekly.resetDescription, 'Resets Jun 19 at 6pm');
   assert.equal(typeof session.resetsAt, 'string');
   assert.equal(typeof weekly.resetsAt, 'string');
+});
+
+test('Claude CLI usage carries account email and organization into the provider identity', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '95% left',
+    'Resets 6pm',
+    'Current week',
+    '80% left',
+    'Resets Jul 30',
+    'Account: owner@example.com',
+    'Organization: Example Team',
+    'Plan: Max'
+  ].join('\n'), {
+    now: new Date('2026-07-25T00:00:00Z'),
+    updatedAt: '2026-07-25T00:00:00Z'
+  });
+
+  assert.equal(provider.accountEmail, 'owner@example.com');
+  assert.equal(provider.accountName, 'Example Team');
+  assert.equal(provider.accountLabel, 'Max');
 });
 
 test('Claude CLI usage maps out-of-order PTY reset lines by window shape', () => {

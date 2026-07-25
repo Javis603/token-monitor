@@ -51,6 +51,66 @@ function mimoProvider(accountKey, accountName, usedPercent, updatedAt) {
   };
 }
 
+function claudeProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
+  return {
+    provider: 'claude',
+    accountKey,
+    accountName: accountEmail.split('@')[0],
+    accountEmail,
+    accountLabel: 'Max 5x',
+    status: 'ok',
+    source: 'oauth',
+    updatedAt,
+    windows: [{
+      kind: 'session',
+      usedPercent: 100 - remainingPercent,
+      remainingPercent,
+      resetsAt: '2026-07-25T15:00:00.000Z',
+      windowMinutes: 300
+    }]
+  };
+}
+
+test('aggregateLimits keeps distinct Claude accounts and dedupes each one across devices', () => {
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'macbook',
+      limits: {
+        updatedAt: '2026-07-25T10:01:00.000Z',
+        providers: [
+          claudeProvider('sha256:claude-a', 'a@example.com', 18, '2026-07-25T10:00:00.000Z'),
+          claudeProvider('sha256:claude-b', 'b@example.com', 72, '2026-07-25T10:01:00.000Z')
+        ]
+      }
+    },
+    {
+      deviceId: 'desktop',
+      limits: {
+        updatedAt: '2026-07-25T10:05:00.000Z',
+        providers: [
+          claudeProvider('sha256:claude-a', 'a@example.com', 48, '2026-07-25T10:04:00.000Z'),
+          claudeProvider('sha256:claude-b', 'b@example.com', 82, '2026-07-25T10:05:00.000Z')
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-07-25T10:06:00.000Z'));
+
+  const providers = aggregate.providers.filter((provider) => provider.provider === 'claude');
+  assert.equal(providers.length, 2);
+  assert.deepEqual(
+    new Set(providers.map((provider) => provider.accountKey)),
+    new Set(['sha256:claude-a', 'sha256:claude-b'])
+  );
+  assert.equal(
+    providers.find((provider) => provider.accountKey === 'sha256:claude-a').windows[0].remainingPercent,
+    48
+  );
+  assert.equal(
+    providers.find((provider) => provider.accountKey === 'sha256:claude-b').windows[0].remainingPercent,
+    82
+  );
+});
+
 test('aggregateLimits preserves distinct Codex accounts by hashed account key', () => {
   const aggregate = aggregateLimits([
     {

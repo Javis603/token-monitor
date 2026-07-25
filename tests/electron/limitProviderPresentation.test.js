@@ -447,6 +447,18 @@ test('Codex limits render as one provider group with account subrows', () => {
   assert.match(styles, /\.limit-account-row\s*\{/);
 });
 
+test('Claude limits render as one provider group with account subrows', () => {
+  const app = readRendererFile('app.js');
+  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  const renderGroup = functionBody(app, 'renderClaudeAccountGroup', 'mimoAccountTitle');
+
+  assert.match(renderLimits, /renderClaudeAccountGroup\(/);
+  assert.match(renderGroup, /claudeAccountTitle\(provider, index\)/);
+  assert.match(renderGroup, /planText: `\$\{providers\.length\} accounts`/);
+  assert.match(renderGroup, /accountRow: true/);
+  assert.match(renderGroup, /showIcon: false/);
+});
+
 test('tray primary-limit modes use the shared provider-aware resolver', () => {
   const app = readRendererFile('app.js');
   const pickConfigured = functionBody(app, 'pickConfiguredSessionProviders', 'renderAllSessionsIcon');

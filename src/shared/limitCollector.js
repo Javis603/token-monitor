@@ -58,6 +58,7 @@ const DEFAULT_PROVIDER_PHYSICAL_BOUND_MS = 120_000;
 const PROVIDER_CLEANUP_GRACE_MS = 5_000;
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
+const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
@@ -640,6 +641,8 @@ function mapClaudeUsageToProvider(usage, meta = {}) {
     provider: 'claude',
     accountKey: meta.accountKey || '',
     accountLabel: meta.accountLabel || '',
+    accountName: meta.accountName || '',
+    accountEmail: meta.accountEmail || '',
     source: meta.source || 'oauth',
     status: 'ok',
     updatedAt: meta.updatedAt,
@@ -730,6 +733,50 @@ function callClaudeUsage(accessToken, deps = {}) {
   }, deps);
 }
 
+function callClaudeProfile(accessToken, deps = {}) {
+  return fetchJson(CLAUDE_PROFILE_URL, {
+    accept: 'application/json',
+    authorization: `Bearer ${accessToken}`,
+    'user-agent': TOKEN_MONITOR_USER_AGENT
+  }, deps);
+}
+
+function claudeOauthAccountIdentity(profile, credentials) {
+  const account = profile?.account && typeof profile.account === 'object' ? profile.account : {};
+  const organization = profile?.organization && typeof profile.organization === 'object'
+    ? profile.organization
+    : {};
+  const accountId = String(account.uuid || account.id || profile?.account_uuid || '').trim();
+  const organizationId = String(
+    organization.uuid || organization.id || profile?.organization_uuid || ''
+  ).trim();
+  const accountEmail = String(
+    account.email || account.email_address || profile?.email || profile?.email_address || ''
+  ).trim().toLowerCase();
+  const accountName = String(
+    account.display_name
+      || account.name
+      || organization.display_name
+      || organization.name
+      || ''
+  ).trim();
+  const canonicalIdentity = [
+    accountId ? `account:${accountId}` : '',
+    organizationId ? `organization:${organizationId}` : ''
+  ].filter(Boolean).join('|');
+  const credentialIdentity = credentials.refreshToken
+    ? `refresh:${credentials.refreshToken}`
+    : credentials.accessToken
+      ? `access:${credentials.accessToken}`
+      : credentials.identity;
+
+  return {
+    accountKey: hashKey('claude-account', canonicalIdentity || accountEmail || credentialIdentity),
+    accountEmail,
+    accountName
+  };
+}
+
 async function delegatedClaudeRefresh(currentCredentials, deps = {}) {
   // Spawn `claude /status` in a PTY and let Claude Code itself refresh the token.
   // Matches CodexBar's strategy — Claude Code is a native Anthropic application,
@@ -778,8 +825,10 @@ async function fetchClaudeLimits(_options = {}, deps = {}) {
       usage = await callClaudeUsage(credentials.accessToken, deps);
     }
 
+    const profile = await callClaudeProfile(credentials.accessToken, deps).catch(() => null);
+    const identity = claudeOauthAccountIdentity(profile, credentials);
     const provider = mapClaudeUsageToProvider(usage, {
-      accountKey: hashKey('claude', credentials.identity),
+      ...identity,
       accountLabel: credentials.accountLabel,
       updatedAt: nowIso(nowMs),
       source: 'oauth'
@@ -954,6 +1003,8 @@ function parseClaudeCliUsageText(text, now = new Date()) {
     secondaryResetDescription,
     primaryResetsAt: parseClaudeResetDate(primaryResetDescription, now),
     secondaryResetsAt: parseClaudeResetDate(secondaryResetDescription, now),
+    accountEmail,
+    accountName: accountOrganization,
     accountLabel,
     accountKey: [accountEmail, accountOrganization].filter(Boolean).join('|') || 'claude-cli'
   };
@@ -980,6 +1031,8 @@ function mapClaudeCliUsageToProvider(text, meta = {}) {
     provider: 'claude',
     accountKey: hashKey('claude-cli', parsed.accountKey),
     accountLabel: parsed.accountLabel,
+    accountName: parsed.accountName,
+    accountEmail: parsed.accountEmail,
     source: 'cli',
     status: 'ok',
     updatedAt: meta.updatedAt,

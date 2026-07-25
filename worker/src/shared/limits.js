@@ -374,7 +374,8 @@ function isConfiguredProvider(provider) {
 
 function providerCollapseKey(provider) {
   if (
-    (provider.provider === 'codex'
+    (provider.provider === 'claude'
+      || provider.provider === 'codex'
       || provider.provider === 'opencode'
       || provider.provider === 'openrouter'
       || provider.provider === 'mimo')

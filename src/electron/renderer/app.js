@@ -3082,6 +3082,34 @@ function renderCodexAccountGroup(label, providers, color) {
   return row;
 }
 
+function claudeAccountTitle(provider, index) {
+  const email = String(provider?.accountEmail || '').trim();
+  if (email) return state.settings?.maskLimitAccountEmails ? accountIdentityApi.maskEmailAddress(email) : email;
+  const name = String(provider?.accountName || '').trim();
+  return name || `Account ${index + 1}`;
+}
+
+function renderClaudeAccountGroup(label, providers, color) {
+  const row = document.createElement('div');
+  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+  const groupProvider = { provider: 'claude', status: 'ok', windows: [] };
+  const head = renderLimitProviderHead('claude', label, groupProvider, color, {
+    planText: `${providers.length} accounts`,
+    hideMeta: true
+  });
+  const accountList = document.createElement('div');
+  accountList.className = 'limit-account-list';
+  providers.forEach((provider, index) => {
+    accountList.append(renderLimitProviderRow('claude', claudeAccountTitle(provider, index), provider, color, {
+      accountRow: true,
+      accountTitle: true,
+      showIcon: false
+    }));
+  });
+  row.append(head, accountList);
+  return row;
+}
+
 function mimoAccountTitle(provider, index) {
   const email = String(provider?.accountEmail || '').trim();
   if (email) return state.settings?.maskLimitAccountEmails ? accountIdentityApi.maskEmailAddress(email) : email;
@@ -3207,6 +3235,10 @@ function renderLimits() {
       ? providerEntries
       : { provider: id, status: 'disabled', windows: [] };
     const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
+    if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderClaudeAccountGroup(label, visibleProviders, color));
+      continue;
+    }
     if (id === 'codex' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderCodexAccountGroup(label, visibleProviders, color));
       continue;
