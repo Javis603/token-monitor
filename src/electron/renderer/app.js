@@ -4830,6 +4830,7 @@ async function refreshStats(options = {}) {
     updateOpenRouterProfilesStatus();
     renderDeepseekStatus();
     renderMinimaxStatus();
+    renderExternalProviderStatus('claude');
     renderExternalProviderStatus('zai');
     renderExternalProviderStatus('zaiteam');
     renderExternalProviderStatus('volcengine');
@@ -5861,6 +5862,7 @@ function syncSettingsForm() {
   syncSliderRows();
   renderDeepseekStatus();
   renderMinimaxStatus();
+  renderExternalProviderStatus('claude');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
@@ -7866,6 +7868,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     updateOpenRouterProfilesStatus();
     renderDeepseekStatus();
     renderMinimaxStatus();
+    renderExternalProviderStatus('claude');
     renderExternalProviderStatus('zai');
     renderExternalProviderStatus('zaiteam');
     renderExternalProviderStatus('volcengine');

@@ -140,7 +140,7 @@ function normalizeClaudeWebCookie(value) {
 function claudeWebCookie(env = process.env, options = {}) {
   const explicit = normalizeClaudeWebCookie(options.claudeWebCookie);
   if (explicit) return explicit;
-  for (const name of ['TOKEN_MONITOR_CLAUDE_WEB_COOKIE', 'CLAUDE_WEB_COOKIE']) {
+  for (const name of ['CLAUDE_WEB_COOKIE', 'TOKEN_MONITOR_CLAUDE_WEB_COOKIE']) {
     const cookie = normalizeClaudeWebCookie(env[name]);
     if (cookie) return cookie;
   }
@@ -870,7 +870,14 @@ async function fetchClaudeWebLimits(cookie, deps = {}) {
   });
 }
 
-function claudeOauthAccountIdentity(profile, credentials) {
+function claudeIdentityUnavailable(message, cause) {
+  const error = errorWithStatus('unavailable', message);
+  error.code = 'CLAUDE_IDENTITY_UNAVAILABLE';
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function claudeOauthAccountIdentity(profile) {
   const account = profile?.account && typeof profile.account === 'object' ? profile.account : {};
   const organization = profile?.organization && typeof profile.organization === 'object'
     ? profile.organization
@@ -893,14 +900,13 @@ function claudeOauthAccountIdentity(profile, credentials) {
     accountId ? `account:${accountId}` : '',
     organizationId ? `organization:${organizationId}` : ''
   ].filter(Boolean).join('|');
-  const credentialIdentity = credentials.refreshToken
-    ? `refresh:${credentials.refreshToken}`
-    : credentials.accessToken
-      ? `access:${credentials.accessToken}`
-      : credentials.identity;
+  const stableIdentity = canonicalIdentity || accountEmail;
+  if (!stableIdentity) {
+    throw claudeIdentityUnavailable('Claude profile did not include a stable account identity');
+  }
 
   return {
-    accountKey: hashKey('claude-account', canonicalIdentity || accountEmail || credentialIdentity),
+    accountKey: hashKey('claude-account', stableIdentity),
     accountEmail,
     accountName
   };
@@ -956,8 +962,13 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
       usage = await callClaudeUsage(credentials.accessToken, deps);
     }
 
-    const profile = await callClaudeProfile(credentials.accessToken, deps).catch(() => null);
-    const identity = claudeOauthAccountIdentity(profile, credentials);
+    let profile;
+    try {
+      profile = await callClaudeProfile(credentials.accessToken, deps);
+    } catch (error) {
+      throw claudeIdentityUnavailable('Claude profile lookup failed', error);
+    }
+    const identity = claudeOauthAccountIdentity(profile);
     const provider = mapClaudeUsageToProvider(usage, {
       ...identity,
       accountLabel: credentials.accountLabel,
@@ -966,6 +977,10 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     });
     return provider;
   } catch (error) {
+    // A successful quota response without a stable account identity must not
+    // create a new row keyed by rotating OAuth credential material. Let
+    // LimitsRuntime retain the previous account row as temporarily unavailable.
+    if (error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE') throw error;
     if (!shouldTryClaudeCliFallback(error)) throw error;
     try {
       const text = await runClaudeUsageCli(deps);

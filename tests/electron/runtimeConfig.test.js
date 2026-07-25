@@ -98,7 +98,10 @@ test('OpenRouter profile changes invalidate only the OpenRouter limits lane', ()
 
 test('Claude Web cookie falls back to env and invalidates only the Claude limits lane', () => {
   const limits = limitsConfigFromSettings({}, {
-    env: { TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=env-secret' }
+    env: {
+      CLAUDE_WEB_COOKIE: 'sessionKey=env-secret',
+      TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=legacy-secret'
+    }
   });
   assert.equal(limits.claudeWebCookie, 'sessionKey=env-secret');
 

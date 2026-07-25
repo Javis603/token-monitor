@@ -24,14 +24,19 @@ async function claudeProviderForCredentials(oauth) {
     claudeCredentialPath: '/tmp/claude-credentials.json',
     stat: async () => ({ mtimeMs: 1 }),
     readFile: async () => JSON.stringify({ claudeAiOauth: { accessToken: 'access-token', ...oauth } }),
-    fetch: async () => ({
+    fetch: async (url) => ({
       ok: true,
-      json: async () => ({
-        five_hour: {
-          utilization: 18,
-          resets_at: '2026-06-01T00:00:00Z'
-        }
-      })
+      json: async () => url.endsWith('/api/oauth/profile')
+        ? {
+            account: { uuid: 'account-plan-test', email: 'owner@example.com' },
+            organization: { uuid: 'organization-plan-test', name: 'Plan Test' }
+          }
+        : {
+            five_hour: {
+              utilization: 18,
+              resets_at: '2026-06-01T00:00:00Z'
+            }
+          }
     })
   });
 }

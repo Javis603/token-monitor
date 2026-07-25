@@ -38,7 +38,7 @@ const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sess
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
 const opencodeCookie = String(process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '').trim();
 const claudeWebCookie = String(
-  process.env.TOKEN_MONITOR_CLAUDE_WEB_COOKIE || process.env.CLAUDE_WEB_COOKIE || ''
+  process.env.CLAUDE_WEB_COOKIE || process.env.TOKEN_MONITOR_CLAUDE_WEB_COOKIE || ''
 ).trim();
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);

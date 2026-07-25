@@ -29,6 +29,24 @@ function fakeSpawnForClaudeUsage(expectedCommand = 'claude.cmd') {
   };
 }
 
+const DEFAULT_CLAUDE_PROFILE = {
+  account: {
+    uuid: 'account-default',
+    email: 'owner@example.com'
+  },
+  organization: {
+    uuid: 'organization-default',
+    name: 'Example Workspace'
+  }
+};
+
+function fakeClaudeOauthFetch(usage, profile = DEFAULT_CLAUDE_PROFILE) {
+  return async (url) => ({
+    ok: true,
+    json: async () => url.endsWith('/api/oauth/profile') ? profile : usage
+  });
+}
+
 test('Claude Web cookie accepts a full header or a bare sessionKey value', () => {
   assert.equal(
     claudeWebCookie({}, { claudeWebCookie: 'Cookie: sessionKey=secret; other=value' }),
@@ -39,8 +57,15 @@ test('Claude Web cookie accepts a full header or a bare sessionKey value', () =>
     'sessionKey=sk-ant-sid01-example'
   );
   assert.equal(
-    claudeWebCookie({ TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=from-env' }),
+    claudeWebCookie({
+      CLAUDE_WEB_COOKIE: 'sessionKey=from-env',
+      TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=legacy-env'
+    }),
     'sessionKey=from-env'
+  );
+  assert.equal(
+    claudeWebCookie({ TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=legacy-env' }),
+    'sessionKey=legacy-env'
   );
 });
 
@@ -207,16 +232,18 @@ test('Claude limits read Windows Credential Manager credentials when credential 
         }
       });
     },
-    fetch: async (_url, options) => {
+    fetch: async (url, options) => {
       assert.equal(options.headers.authorization, 'Bearer credential-manager-token');
       return {
         ok: true,
-        json: async () => ({
-          five_hour: {
-            utilization: 12,
-            resets_at: '2026-06-11T05:00:00Z'
-          }
-        })
+        json: async () => url.endsWith('/api/oauth/profile')
+          ? DEFAULT_CLAUDE_PROFILE
+          : {
+              five_hour: {
+                utilization: 12,
+                resets_at: '2026-06-11T05:00:00Z'
+              }
+            }
       };
     }
   });
@@ -278,7 +305,8 @@ test('Claude OAuth profile provides stable cross-device account identity and met
   assert.equal(mac.accountLabel, 'Max 5x');
 });
 
-test('Claude OAuth identity falls back to credential material instead of plan or credential path', async () => {
+test('Claude OAuth profile failures never derive account identity from rotating credentials', async () => {
+  let cliCalls = 0;
   async function collect(refreshToken) {
     return fetchClaudeLimits({}, {
       platform: 'linux',
@@ -303,16 +331,21 @@ test('Claude OAuth identity falls back to credential material instead of plan or
             resets_at: '2026-07-25T05:00:00Z'
           }
         })
-      })
+      }),
+      runClaudeUsageCli: async () => {
+        cliCalls += 1;
+        throw new Error('profile identity failures must retain the previous limits row');
+      }
     });
   }
 
-  const first = await collect('refresh-account-a');
-  const second = await collect('refresh-account-b');
-
-  assert.notEqual(first.accountKey, second.accountKey);
-  assert.equal(first.accountEmail, '');
-  assert.equal(first.accountName, '');
+  for (const refreshToken of ['refresh-before-rotation', 'refresh-after-rotation']) {
+    await assert.rejects(
+      collect(refreshToken),
+      (error) => error?.status === 'unavailable' && error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE'
+    );
+  }
+  assert.equal(cliCalls, 0);
 });
 
 test('Claude OAuth usage mapping accepts camelCase response fields', async () => {
@@ -327,18 +360,15 @@ test('Claude OAuth usage mapping accepts camelCase response fields', async () =>
         expiresAt: Date.parse('2026-06-12T00:00:00Z')
       }
     }),
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({
-        fiveHour: {
-          utilization: 34,
-          resetsAt: '2026-06-11T05:00:00Z'
-        },
-        sevenDay: {
-          utilization: 56,
-          resetsAt: '2026-06-18T00:00:00Z'
-        }
-      })
+    fetch: fakeClaudeOauthFetch({
+      fiveHour: {
+        utilization: 34,
+        resetsAt: '2026-06-11T05:00:00Z'
+      },
+      sevenDay: {
+        utilization: 56,
+        resetsAt: '2026-06-18T00:00:00Z'
+      }
     })
   });
 
@@ -363,18 +393,15 @@ test('Claude OAuth usage mapping preserves fractional percentage utilization val
         expiresAt: Date.parse('2026-06-12T00:00:00Z')
       }
     }),
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({
-        fiveHour: {
-          utilization: 0.99,
-          resetsAt: '2026-06-11T08:00:00Z'
-        },
-        sevenDay: {
-          utilization: 0,
-          resetsAt: '2026-06-18T10:00:00Z'
-        }
-      })
+    fetch: fakeClaudeOauthFetch({
+      fiveHour: {
+        utilization: 0.99,
+        resetsAt: '2026-06-11T08:00:00Z'
+      },
+      sevenDay: {
+        utilization: 0,
+        resetsAt: '2026-06-18T10:00:00Z'
+      }
     }),
     runClaudeUsageCli: async () => {
       cliCalls += 1;
@@ -426,18 +453,15 @@ test('Claude limits keep successful OAuth quota on macOS instead of replacing it
         expiresAt: Date.parse('2026-06-12T00:00:00Z')
       }
     }),
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({
-        fiveHour: {
-          utilization: 100,
-          resetsAt: '2026-06-11T08:00:00Z'
-        },
-        sevenDay: {
-          utilization: 0,
-          resetsAt: '2026-06-18T10:00:00Z'
-        }
-      })
+    fetch: fakeClaudeOauthFetch({
+      fiveHour: {
+        utilization: 100,
+        resetsAt: '2026-06-11T08:00:00Z'
+      },
+      sevenDay: {
+        utilization: 0,
+        resetsAt: '2026-06-18T10:00:00Z'
+      }
     }),
     runClaudeUsageCli: async () => {
       cliCalls += 1;
@@ -476,18 +500,15 @@ test('Claude successful OAuth keeps plan label without probing CLI', async () =>
         rateLimitTier: 'default_claude_max_5x'
       }
     }),
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({
-        fiveHour: {
-          utilization: 100,
-          resetsAt: '2026-06-11T08:00:00Z'
-        },
-        sevenDay: {
-          utilization: 0,
-          resetsAt: '2026-06-18T10:00:00Z'
-        }
-      })
+    fetch: fakeClaudeOauthFetch({
+      fiveHour: {
+        utilization: 100,
+        resetsAt: '2026-06-11T08:00:00Z'
+      },
+      sevenDay: {
+        utilization: 0,
+        resetsAt: '2026-06-18T10:00:00Z'
+      }
     }),
     runClaudeUsageCli: async () => {
       cliCalls += 1;
