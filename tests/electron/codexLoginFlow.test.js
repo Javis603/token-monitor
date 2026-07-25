@@ -153,6 +153,7 @@ test('Codex startup hydrates missing managed workspace labels without blocking s
   assert.match(hydration, /mapWithConcurrency/);
   assert.match(hydration, /listCodexWorkspaces\(auth, \{ env: process\.env \}\)/);
   assert.match(hydration, /workspaceAccountId !== resolved\.workspaceAccountId/);
+  assert.match(hydration, /account\.enabled === false/);
   assert.match(hydration, /workspaceLabel: resolved\.label/);
   assert.match(hydration, /workspaceKind: resolved\.workspaceKind/);
   assert.match(hydration, /queueLimitInvalidation\(\{ provider: 'codex' \}, 'workspace-label-hydrated'\)/);

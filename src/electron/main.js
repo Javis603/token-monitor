@@ -689,6 +689,7 @@ function hydrateCodexManagedWorkspaceLabels() {
         !resolved
         || account.workspaceLabel
         || account.workspaceKind
+        || account.enabled === false
         || account.workspaceAccountId !== resolved.workspaceAccountId
       ) return account;
       changed = true;
