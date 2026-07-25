@@ -11,6 +11,7 @@ const MIMO_MIGRATION_VERSION = 1;
 const CREDENTIAL_SETTING_PATHS = Object.freeze({
   hubHostSecret: ['hub', 'hostSecret'],
   secret: ['hub', 'clientSecret'],
+  claudeWebCookie: ['providers', 'claude', 'webCookie'],
   opencodeCookie: ['providers', 'opencode', 'cookie'],
   opencodeProfiles: ['providers', 'opencode', 'profiles'],
   openrouterProfiles: ['providers', 'openrouter', 'profiles'],

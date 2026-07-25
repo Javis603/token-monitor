@@ -16,6 +16,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
     clients: 'claude,cursor',
     collectionIntervalMs: 300000,
     limitsRefreshMs: 60000,
+    claudeWebCookie: 'sessionKey=settings-secret',
     kimiApiKey: 'secret',
     openrouterProfiles: { work: { apiKey: 'openrouter-secret', enabled: true } },
     zaiApiRegion: 'bigmodel-cn'
@@ -31,6 +32,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
 
   assert.equal(usage.intervalMs, 120000);
   assert.equal(Object.hasOwn(usage, 'kimiApiKey'), false);
+  assert.equal(limits.claudeWebCookie, 'sessionKey=settings-secret');
   assert.equal(limits.kimiApiKey, 'secret');
   assert.deepEqual(limits.openrouterProfiles, { work: { apiKey: 'openrouter-secret', enabled: true } });
   assert.equal(Object.hasOwn(limits, 'clients'), false);
@@ -92,4 +94,18 @@ test('OpenRouter profile changes invalidate only the OpenRouter limits lane', ()
     { openrouterProfiles: { work: { apiKey: 'new', enabled: true } } }
   );
   assert.deepEqual(classification.limitScopes, [{ provider: 'openrouter' }]);
+});
+
+test('Claude Web cookie falls back to env and invalidates only the Claude limits lane', () => {
+  const limits = limitsConfigFromSettings({}, {
+    env: { TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=env-secret' }
+  });
+  assert.equal(limits.claudeWebCookie, 'sessionKey=env-secret');
+
+  const classification = classifySettingsChange(
+    { claudeWebCookie: '' },
+    { claudeWebCookie: 'sessionKey=settings-secret' }
+  );
+  assert.deepEqual(classification.limitScopes, [{ provider: 'claude' }]);
+  assert.equal(classification.limitsReconfigure, false);
 });

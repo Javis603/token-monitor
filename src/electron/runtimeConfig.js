@@ -29,6 +29,7 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
+  claude: ['claudeWebCookie'],
   opencode: ['opencodeCookie', 'opencodeProfiles'],
   openrouter: ['openrouterProfiles'],
   deepseek: ['deepseekApiKey'],
@@ -83,6 +84,10 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
+    claudeWebCookie: settings.claudeWebCookie
+      || env.TOKEN_MONITOR_CLAUDE_WEB_COOKIE
+      || env.CLAUDE_WEB_COOKIE
+      || '',
     opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     openrouterProfiles: settings.openrouterProfiles || {},

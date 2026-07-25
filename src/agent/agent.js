@@ -37,6 +37,9 @@ const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? pr
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
 const opencodeCookie = String(process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '').trim();
+const claudeWebCookie = String(
+  process.env.TOKEN_MONITOR_CLAUDE_WEB_COOKIE || process.env.CLAUDE_WEB_COOKIE || ''
+).trim();
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
 
@@ -64,6 +67,7 @@ const limitsOptions = {
   limitsEnabled,
   limitProviders,
   limitsRefreshMs,
+  claudeWebCookie,
   opencodeCookie
 };
 let sessionUsageArchive;

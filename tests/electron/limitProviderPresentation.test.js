@@ -192,7 +192,7 @@ test('Limits and Home share reset expiry while preserving the existing reset cop
 });
 
 test('capability tags explain how each provider is collected in settings', () => {
-  assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI']);
+  assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'App/CLI RPC']);
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Manual login', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['App/CLI must be open', 'RPC']);
@@ -275,6 +275,11 @@ test('undetected settings tags include status and supported collection hints', (
 });
 
 test('detected settings tags show only current source after status', () => {
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'claude', status: 'ok', source: 'web' })
+      .map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'cursor', status: 'ok', source: 'web' })
       .map((tag) => tag.label),
@@ -986,12 +991,13 @@ test('Copilot env token is documented in env example, not the README overview', 
   assert.doesNotMatch(readmeTw, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
 });
 
-test('Accounts summary counts all managed account groups including OpenRouter, MiMo, and Ollama', () => {
+test('Accounts summary counts all managed account groups including Claude Web, OpenRouter, MiMo, and Ollama', () => {
   const app = readRendererFile('app.js');
   const mimoLinkedBody = functionBody(app, 'mimoAccountLinked', 'renderMimoStatus');
   const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
 
   assert.match(mimoLinkedBody, /return \(state\.settings\?\.mimoManagedAccounts \|\| \[\]\)\.length > 0;/);
+  assert.match(summaryBody, /const claudeLinked = externalProviderAccountLinked\('claude'\);/);
   assert.match(summaryBody, /const minimaxLinked = minimaxAccountLinked\(\);/);
   assert.match(summaryBody, /const zaiLinked = externalProviderAccountLinked\('zai'\);/);
   assert.match(summaryBody, /const zaiteamLinked = externalProviderAccountLinked\('zaiteam'\);/);
@@ -1003,6 +1009,7 @@ test('Accounts summary counts all managed account groups including OpenRouter, M
   assert.match(summaryBody, /const mimoLinked = mimoAccountLinked\(\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
+  assert.match(summaryBody, /\(claudeLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(zaiLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(zaiteamLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
@@ -1012,7 +1019,7 @@ test('Accounts summary counts all managed account groups including OpenRouter, M
   assert.match(summaryBody, /\(openrouterCount > 0 \? 1 : 0\)/);
   assert.match(summaryBody, /\(mimoLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 14/);
+  assert.match(summaryBody, /total: 15/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { claudeCommandCandidates, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider } = require('../../src/shared/limitCollector');
+const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider } = require('../../src/shared/limitCollector');
 
 function fakeSpawnForClaudeUsage(expectedCommand = 'claude.cmd') {
   return (command, args) => {
@@ -28,6 +28,98 @@ function fakeSpawnForClaudeUsage(expectedCommand = 'claude.cmd') {
     return child;
   };
 }
+
+test('Claude Web cookie accepts a full header or a bare sessionKey value', () => {
+  assert.equal(
+    claudeWebCookie({}, { claudeWebCookie: 'Cookie: sessionKey=secret; other=value' }),
+    'sessionKey=secret; other=value'
+  );
+  assert.equal(
+    claudeWebCookie({}, { claudeWebCookie: 'sk-ant-sid01-example' }),
+    'sessionKey=sk-ant-sid01-example'
+  );
+  assert.equal(
+    claudeWebCookie({ TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=from-env' }),
+    'sessionKey=from-env'
+  );
+});
+
+test('Claude Web source takes precedence and carries stable account metadata', async () => {
+  async function collect(cookie) {
+    const requests = [];
+    const provider = await fetchClaudeLimits({ claudeWebCookie: cookie }, {
+      now: () => Date.parse('2026-07-25T00:00:00Z'),
+      stat: async () => {
+        throw new Error('OAuth credentials must not be read when Web is configured');
+      },
+      fetch: async (url, options) => {
+        requests.push({ url, options });
+        if (url.endsWith('/api/organizations')) {
+          return {
+            ok: true,
+            json: async () => [{ uuid: 'organization-web', name: 'Example Workspace' }]
+          };
+        }
+        if (url.endsWith('/api/organizations/organization-web/usage')) {
+          return {
+            ok: true,
+            json: async () => ({
+              five_hour: {
+                utilization: 21,
+                resets_at: '2026-07-25T05:00:00Z'
+              },
+              seven_day: {
+                utilization: 35,
+                resets_at: '2026-08-01T00:00:00Z'
+              }
+            })
+          };
+        }
+        assert.ok(url.endsWith('/api/account'));
+        return {
+          ok: true,
+          json: async () => ({
+            uuid: 'account-web',
+            email_address: 'Owner@Example.com',
+            memberships: [{
+              organization: { uuid: 'organization-web', name: 'Example Workspace' },
+              seat_tier: 'max',
+              rate_limit_tier: 'default_claude_max_20x'
+            }]
+          })
+        };
+      }
+    });
+    return { provider, requests };
+  }
+
+  const first = await collect('sessionKey=first-cookie');
+  const second = await collect('sessionKey=rotated-cookie');
+
+  assert.equal(first.provider.source, 'web');
+  assert.equal(first.provider.accountKey, second.provider.accountKey);
+  assert.equal(first.provider.accountEmail, 'owner@example.com');
+  assert.equal(first.provider.accountName, 'Example Workspace');
+  assert.equal(first.provider.accountLabel, 'Max 20x');
+  assert.deepEqual(first.provider.windows.map((window) => window.kind), ['session', 'weekly']);
+  assert.equal(first.requests.length, 3);
+  assert.equal(first.requests[0].options.headers.cookie, 'sessionKey=first-cookie');
+});
+
+test('Claude Web authentication failure does not silently fall back to another local account', async () => {
+  let spawned = false;
+  await assert.rejects(
+    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=expired' }, {
+      fetch: async () => ({ ok: false, status: 401 }),
+      spawn: () => {
+        spawned = true;
+        throw new Error('must not spawn');
+      }
+    }),
+    (error) => error?.status === 'unauthorized'
+  );
+  assert.equal(spawned, false);
+});
 
 test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is unavailable', async () => {
   const provider = await fetchClaudeLimits({}, {

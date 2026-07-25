@@ -59,6 +59,7 @@ const PROVIDER_CLEANUP_GRACE_MS = 5_000;
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
+const CLAUDE_WEB_BASE_URL = 'https://claude.ai';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
@@ -116,6 +117,34 @@ function errorWithStatus(status, message) {
 
 function shouldTryClaudeCliFallback(error) {
   return ['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
+}
+
+function cleanClaudeWebSecret(value) {
+  let raw = typeof value === 'string' ? value.trim() : '';
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  return raw;
+}
+
+function normalizeClaudeWebCookie(value) {
+  let raw = cleanClaudeWebSecret(value);
+  if (!raw) return '';
+  raw = raw.replace(/^cookie\s*:\s*/i, '').trim();
+  if (!raw || /[\r\n]/.test(raw)) return '';
+  if (/^sessionKey=/i.test(raw) || raw.includes(';')) return raw;
+  if (raw.includes('=')) return raw;
+  return `sessionKey=${raw}`;
+}
+
+function claudeWebCookie(env = process.env, options = {}) {
+  const explicit = normalizeClaudeWebCookie(options.claudeWebCookie);
+  if (explicit) return explicit;
+  for (const name of ['TOKEN_MONITOR_CLAUDE_WEB_COOKIE', 'CLAUDE_WEB_COOKIE']) {
+    const cookie = normalizeClaudeWebCookie(env[name]);
+    if (cookie) return cookie;
+  }
+  return '';
 }
 
 async function readJsonFile(filePath, deps) {
@@ -569,7 +598,11 @@ async function fetchJson(url, headers, deps = {}) {
   try {
     const response = await fetchFn(url, { headers, ...(controller ? { signal: controller.signal } : {}) });
     if (!response.ok) {
-      const status = response.status === 401 ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+      const status = response.status === 401 || response.status === 403
+        ? 'unauthorized'
+        : response.status === 429
+          ? 'sourceRateLimited'
+          : 'unavailable';
       throw errorWithStatus(status, `${url} returned ${response.status}`);
     }
     return response.json();
@@ -741,6 +774,102 @@ function callClaudeProfile(accessToken, deps = {}) {
   }, deps);
 }
 
+function claudeWebOrganizations(body) {
+  if (Array.isArray(body)) return body;
+  if (Array.isArray(body?.organizations)) return body.organizations;
+  if (Array.isArray(body?.data)) return body.data;
+  return [];
+}
+
+function claudeWebOrganizationId(organization) {
+  return String(organization?.uuid || organization?.id || organization?.organization_uuid || '').trim();
+}
+
+function claudeWebMembership(accountBody, organizationId) {
+  const account = accountBody?.account && typeof accountBody.account === 'object'
+    ? accountBody.account
+    : accountBody;
+  const memberships = Array.isArray(account?.memberships)
+    ? account.memberships
+    : Array.isArray(accountBody?.memberships)
+      ? accountBody.memberships
+      : [];
+  return memberships.find((membership) => (
+    claudeWebOrganizationId(membership?.organization || membership) === organizationId
+  )) || memberships[0] || null;
+}
+
+function claudeWebAccountIdentity(accountBody, organization, cookie) {
+  const organizationId = claudeWebOrganizationId(organization);
+  const membership = claudeWebMembership(accountBody, organizationId);
+  const account = accountBody?.account && typeof accountBody.account === 'object'
+    ? accountBody.account
+    : accountBody || {};
+  const memberOrganization = membership?.organization && typeof membership.organization === 'object'
+    ? membership.organization
+    : {};
+  const accountId = String(account.uuid || account.id || account.account_uuid || '').trim();
+  const accountEmail = String(
+    account.email_address || account.email || accountBody?.email_address || accountBody?.email || ''
+  ).trim().toLowerCase();
+  const accountName = String(
+    memberOrganization.name
+      || memberOrganization.display_name
+      || organization?.name
+      || organization?.display_name
+      || account.name
+      || account.display_name
+      || ''
+  ).trim();
+  const canonicalIdentity = [
+    accountId ? `account:${accountId}` : '',
+    organizationId ? `organization:${organizationId}` : ''
+  ].filter(Boolean).join('|');
+  const accountLabel = claudePlanLabelFromParts(
+    membership?.seat_tier || membership?.billing_type || account?.subscription_type,
+    membership?.rate_limit_tier || account?.rate_limit_tier
+  );
+  return {
+    accountKey: hashKey(
+      'claude-account',
+      canonicalIdentity || accountEmail || `web-cookie:${cookie}`
+    ),
+    accountEmail,
+    accountName,
+    accountLabel
+  };
+}
+
+async function fetchClaudeWebLimits(cookie, deps = {}) {
+  const nowMs = (deps.now || Date.now)();
+  const baseUrl = String(deps.claudeWebBaseUrl || CLAUDE_WEB_BASE_URL).replace(/\/$/, '');
+  const headers = {
+    accept: 'application/json',
+    cookie,
+    origin: baseUrl,
+    referer: `${baseUrl}/settings/usage`,
+    'user-agent': TOKEN_MONITOR_USER_AGENT
+  };
+  const organizations = claudeWebOrganizations(
+    await fetchJson(`${baseUrl}/api/organizations`, headers, deps)
+  );
+  const organization = organizations.find((candidate) => claudeWebOrganizationId(candidate));
+  const organizationId = claudeWebOrganizationId(organization);
+  if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
+  const usage = await fetchJson(
+    `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage`,
+    headers,
+    deps
+  );
+  const accountBody = await fetchJson(`${baseUrl}/api/account`, headers, deps).catch(() => null);
+  const identity = claudeWebAccountIdentity(accountBody, organization, cookie);
+  return mapClaudeUsageToProvider(usage, {
+    ...identity,
+    updatedAt: nowIso(nowMs),
+    source: 'web'
+  });
+}
+
 function claudeOauthAccountIdentity(profile, credentials) {
   const account = profile?.account && typeof profile.account === 'object' ? profile.account : {};
   const organization = profile?.organization && typeof profile.organization === 'object'
@@ -801,9 +930,11 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}) {
   return { ...currentCredentials, ...refreshed };
 }
 
-async function fetchClaudeLimits(_options = {}, deps = {}) {
+async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const platform = deps.platform || process.platform;
+  const webCookie = claudeWebCookie(deps.env || process.env, options);
+  if (webCookie) return fetchClaudeWebLimits(webCookie, deps);
   try {
     let credentials = await readClaudeCredentials(deps);
 
@@ -2959,6 +3090,7 @@ module.exports = {
   fetchOpenCodeLimits,
   fetchOpenRouterLimits: openrouterLimits.fetchOpenRouterLimits,
   fetchSingleOpenCodeProfile,
+  claudeWebCookie,
   fetchClaudeLimits,
   fetchCodexLimits,
   fetchCursorLimits,

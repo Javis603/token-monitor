@@ -28,6 +28,7 @@ test('stores credential settings in a versioned provider document', (t) => {
   store.replaceSettingsCredentials({
     hubHostSecret: 'host-secret',
     secret: 'client-secret',
+    claudeWebCookie: 'sessionKey=claude-secret',
     deepseekApiKey: 'deepseek-key',
     kimiWebAccessToken: 'kimi-web-token',
     opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
@@ -40,6 +41,7 @@ test('stores credential settings in a versioned provider document', (t) => {
   assert.equal(document.version, 1);
   assert.equal(document.credentials.hub.hostSecret, 'host-secret');
   assert.equal(document.credentials.hub.clientSecret, 'client-secret');
+  assert.equal(document.credentials.providers.claude.webCookie, 'sessionKey=claude-secret');
   assert.equal(document.credentials.providers.deepseek.apiKey, 'deepseek-key');
   assert.equal(document.credentials.providers.kimi.webAccessToken, 'kimi-web-token');
   assert.equal(document.credentials.providers.opencode.profiles.work.cookie, 'auth=secret');
@@ -51,6 +53,7 @@ test('stores credential settings in a versioned provider document', (t) => {
   assert.deepEqual(store.settingsCredentials(), {
     hubHostSecret: 'host-secret',
     secret: 'client-secret',
+    claudeWebCookie: 'sessionKey=claude-secret',
     opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
     openrouterProfiles: { personal: { apiKey: 'sk-or-secret', enabled: true } },
     deepseekApiKey: 'deepseek-key',
@@ -79,6 +82,7 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
   const settings = {
     hubHostSecret: 'host-secret',
     secret: 'client-secret',
+    claudeWebCookie: 'sessionKey=claude-secret',
     deepseekApiKey: 'provider-secret',
     opencodeProfiles: { work: { cookie: 'auth=secret' } },
     openrouterProfiles: { personal: { apiKey: 'sk-or-secret' } }
@@ -86,6 +90,7 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
   const redacted = credentialSettingsForRenderer(settings, { expose: ['hubHostSecret', 'secret'] });
   assert.equal(redacted.hubHostSecret, 'host-secret');
   assert.equal(redacted.secret, 'client-secret');
+  assert.equal(redacted.claudeWebCookie, '');
   assert.equal(redacted.deepseekApiKey, '');
   assert.equal(redacted.opencodeProfiles, '');
   assert.equal(redacted.openrouterProfiles, '');
