@@ -38,6 +38,7 @@
   const STACK_METRICS = new Set(['percent', 'reset', 'mixed', 'custom']);
   const STACK_ALIGNMENTS = new Set(['left', 'right']);
   const FONT_STYLES = new Set(['normal', 'condensed', 'menubar', 'compactMono']);
+  const ICON_AUTO_MODES = new Set(['lowestLimit', 'tokens', 'cost']);
   const BAR_ICON_MODES = new Set(['app', 'first', 'second', 'none']);
   const SPACER_SIZES = new Set(['narrow', 'regular', 'wide']);
   const SPACER_VARIANTS = new Set(['space', 'dot']);
@@ -139,6 +140,11 @@
     return FONT_STYLES.has(style) ? style : 'normal';
   }
 
+  function normalizeIconAutoMode(value) {
+    const mode = clean(value, 24);
+    return ICON_AUTO_MODES.has(mode) ? mode : 'lowestLimit';
+  }
+
   function normalizeSpacerSize(value) {
     const size = clean(value, 24);
     return SPACER_SIZES.has(size) ? size : 'regular';
@@ -158,8 +164,28 @@
   function createTrayLayoutItem(style, options = {}) {
     const id = nextItemId(options.idFactory);
     const styleId = STYLE_SET.has(style) ? style : 'singleBar';
-    if (styleId === 'appIcon') return { id, type: 'icon', style: styleId, icon: 'app', source: sourceDefaults() };
-    if (styleId === 'providerIcon') return { id, type: 'icon', style: styleId, icon: 'provider', source: sourceDefaults() };
+    if (styleId === 'appIcon') {
+      return {
+        id,
+        type: 'icon',
+        style: styleId,
+        icon: 'app',
+        autoMode: 'lowestLimit',
+        period: 'today',
+        source: sourceDefaults()
+      };
+    }
+    if (styleId === 'providerIcon') {
+      return {
+        id,
+        type: 'icon',
+        style: styleId,
+        icon: 'provider',
+        autoMode: 'lowestLimit',
+        period: 'today',
+        source: sourceDefaults()
+      };
+    }
     if (styleId === 'singleBar') {
       return { id, type: 'bars', style: styleId, icon: 'first', rows: [sourceDefaults('primary')] };
     }
@@ -271,6 +297,8 @@
         type,
         style,
         icon: input.icon === 'provider' ? 'provider' : 'app',
+        autoMode: normalizeIconAutoMode(input.autoMode),
+        period: PERIODS.has(input.period) ? input.period : 'today',
         source: normalizeSource(input.source)
       };
     }
@@ -731,12 +759,34 @@
       items: normalized.items.map((item) => {
         if (item.type === 'icon') {
           if (item.icon === 'app') return { ...item, available: true, provider: 'app', selection: null };
-          const selection = selectSource(stats, item.source, options);
           const fixedProvider = item.source.provider !== 'auto' ? item.source.provider : '';
+          if (fixedProvider) {
+            return {
+              ...item,
+              available: true,
+              provider: fixedProvider,
+              selection: null
+            };
+          }
+          if (item.autoMode === 'tokens' || item.autoMode === 'cost') {
+            const provider = trayTextApi?.pickUsageProviderId?.(
+              stats,
+              item.autoMode,
+              item.period,
+              options.availableProviderIds
+            ) || 'app';
+            return {
+              ...item,
+              available: true,
+              provider,
+              selection: null
+            };
+          }
+          const selection = selectSource(stats, item.source, options);
           return {
             ...item,
-            available: Boolean(fixedProvider || selection),
-            provider: fixedProvider || selection?.provider || '',
+            available: true,
+            provider: selection?.provider || 'app',
             selection
           };
         }

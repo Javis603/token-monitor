@@ -5383,6 +5383,7 @@ function renderFloatingBubbleContent() {
       ? trayDataUrlForMode(mode, 44, floatingBubbleGeneratedColors(), {
           contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
           providerContrastHalo: true,
+          showProviderBadge: false,
           layout: mode === 'custom' ? state.settings?.floatingBubbleCustomLayout : undefined
         })
       : null;
@@ -8243,6 +8244,66 @@ function drawTrayText(ctx, text, x, y, item, horizontalScale = 1) {
   ctx.restore();
 }
 
+function drawCustomTrayProviderBadge(ctx, x, y, size, color) {
+  const { trayProviderBadgeLayout } = window.TokenMonitorTrayProviderIcons;
+  const layout = trayProviderBadgeLayout(size);
+  const badgeX = x + layout.x;
+  const badgeY = y + layout.y;
+  const { badgeSize, radius, borderWidth } = layout;
+  ctx.save();
+  roundedRectPath(ctx, badgeX, badgeY, badgeSize, badgeSize, radius);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = borderWidth;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+
+  // Custom tray images remain macOS template images. Cut the sigma out of the
+  // badge alpha so the mark survives the menu-bar tint as negative space.
+  const left = badgeX + badgeSize * 0.29;
+  const right = badgeX + badgeSize * 0.72;
+  const top = badgeY + badgeSize * 0.27;
+  const middle = badgeY + badgeSize * 0.5;
+  const bottom = badgeY + badgeSize * 0.73;
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.beginPath();
+  ctx.moveTo(right, top);
+  ctx.lineTo(left, top);
+  ctx.lineTo(badgeX + badgeSize * 0.56, middle);
+  ctx.lineTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.lineWidth = Math.max(1, badgeSize * 0.13);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#000000';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCustomTrayProviderImage(ctx, img, provider, x, y, size, options = {}) {
+  const showBadge = options.showProviderBadge === true && provider && provider !== 'app';
+  const inset = showBadge ? Math.max(1, Math.round(size * 0.07)) : 0;
+  const imageSize = size - inset * 2;
+  drawProviderImage(
+    ctx,
+    img,
+    x + inset,
+    y + inset,
+    imageSize,
+    options.providerContrastHalo === true,
+    options.templateIconColor || ''
+  );
+  if (showBadge) {
+    drawCustomTrayProviderBadge(
+      ctx,
+      x,
+      y,
+      size,
+      options.templateIconColor || options.textColor || '#000000'
+    );
+  }
+}
+
 function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}) {
   const trackColor = colors.track || 'rgba(0, 0, 0, 0.32)';
   const fillColor = colors.fill || 'rgba(0, 0, 0, 1)';
@@ -8285,14 +8346,14 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
     const provider = item.provider || 'app';
     const providerImage = trayProviderImages[provider];
     if (providerImage) {
-      drawProviderImage(
+      drawCustomTrayProviderImage(
         ctx,
         providerImage,
+        provider,
         0,
         0,
         h,
-        options.providerContrastHalo === true,
-        options.templateIconColor || ''
+        { ...options, textColor }
       );
     } else {
       drawTrayFallbackMark(ctx, provider, 0, 0, h, textColor);
@@ -8328,14 +8389,14 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
       const provider = item.icon === 'app' ? 'app' : iconRow?.selection?.provider || '';
       const providerImage = trayProviderImages[provider];
       if (providerImage) {
-        drawProviderImage(
+        drawCustomTrayProviderImage(
           ctx,
           providerImage,
+          provider,
           barLayout.padX,
           barLayout.iconY,
           barLayout.iconSize,
-          options.providerContrastHalo === true,
-          options.templateIconColor || ''
+          { ...options, textColor }
         );
       } else {
         drawTrayFallbackMark(ctx, provider || '?', barLayout.padX, barLayout.iconY, barLayout.iconSize, textColor);
@@ -8377,14 +8438,14 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
     if (showIcon) {
       const providerImage = trayProviderImages[provider];
       if (providerImage) {
-        drawProviderImage(
+        drawCustomTrayProviderImage(
           ctx,
           providerImage,
+          provider,
           0,
           0,
           iconSize,
-          options.providerContrastHalo === true,
-          options.templateIconColor || ''
+          { ...options, textColor }
         );
       } else {
         drawTrayFallbackMark(ctx, provider || '?', 0, 0, iconSize, textColor);
@@ -8438,7 +8499,8 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
   const resolved = trayLayoutApi.resolveTrayLayout(layout, stats, {
     currency: currentCurrency(),
     nowMs: Date.now(),
-    activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {}
+    activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {},
+    availableProviderIds: Object.keys(trayProviderImages)
   });
   const items = resolved.items.map((item) => (
     item.type === 'text'
@@ -8475,7 +8537,10 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
       options.layout || state.settings?.trayCustomLayout,
       size,
       colors,
-      options
+      {
+        showProviderBadge: state.settings?.showTrayProviderBadge === true,
+        ...options
+      }
     );
   }
   if (mode === 'limitsAllSessions') return renderLimitSessionsIcon(state.stats, size, configuredLimitProviderOrder(), colors, options);
@@ -8602,8 +8667,8 @@ function renderTrayComposerItem(item, options = {}) {
   );
 }
 
-function renderTrayComposerFontPreview(item, fontStyle) {
-  return renderTrayComposerItem({ ...item, fontStyle });
+function renderTrayComposerFontPreview(item, fontStyle, options = {}) {
+  return renderTrayComposerItem({ ...item, fontStyle }, options);
 }
 
 function createTrayComposer(surface) {
@@ -8617,10 +8682,17 @@ function createTrayComposer(surface) {
     getLayout: () => state.settings?.[layoutKey],
     getStylePreview: (style) => renderTrayComposerItem(
       previewItemForStyle(style),
-      { spacerGuide: style === 'spacer' }
+      {
+        showProviderBadge: isTray && state.settings?.showTrayProviderBadge === true,
+        spacerGuide: style === 'spacer'
+      }
     ),
-    getFontStylePreview: renderTrayComposerFontPreview,
-    renderItem: renderTrayComposerItem,
+    getFontStylePreview: (item, fontStyle) => renderTrayComposerFontPreview(item, fontStyle, {
+      showProviderBadge: isTray && state.settings?.showTrayProviderBadge === true
+    }),
+    renderItem: (item) => renderTrayComposerItem(item, {
+      showProviderBadge: isTray && state.settings?.showTrayProviderBadge === true
+    }),
     providerChoices: trayComposerProviderChoices,
     accountChoices: trayComposerAccountChoices,
     windowChoices: trayComposerWindowChoices,

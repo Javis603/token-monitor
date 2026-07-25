@@ -1,7 +1,13 @@
 'use strict';
 
 const path = require('node:path');
-const { formatTrayText, isBarsTrayIconMode, isGeneratedTrayIconMode, pickWorstLimit } = require('../shared/trayText');
+const {
+  formatTrayText,
+  isBarsTrayIconMode,
+  isGeneratedTrayIconMode,
+  pickUsageProviderId,
+  pickWorstLimit
+} = require('../shared/trayText');
 const { codexAccountDisplayLabel } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
@@ -25,30 +31,11 @@ function trayUsagePeriod(contentMode) {
   return null;
 }
 
-function topClientFromMetric(values) {
-  let top = null;
-  let topValue = 0;
-  for (const [client, rawValue] of Object.entries(values || {})) {
-    const value = Number(rawValue);
-    if (!Number.isFinite(value) || value <= 0) continue;
-    if (!top || value > topValue) {
-      top = client;
-      topValue = value;
-    }
-  }
-  return top;
-}
-
 function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = []) {
   const periodKey = trayUsagePeriod(contentMode);
   if (!periodKey) return null;
-  const period = stats?.periods?.[periodKey] || {};
-  const costMode = contentMode === 'cost' || contentMode === 'costAll';
-  const costClient = costMode ? topClientFromMetric(period.clientCosts) : null;
-  const client = costClient || topClientFromMetric(period.clients);
-  if (!client) return null;
-  const available = new Set(availableIconIds);
-  return available.has(client) ? client : null;
+  const metric = contentMode === 'cost' || contentMode === 'costAll' ? 'cost' : 'tokens';
+  return pickUsageProviderId(stats, metric, periodKey, availableIconIds);
 }
 
 function shouldUseTemplateTrayIcon(id, platform = process.platform, showProviderBadge = false) {

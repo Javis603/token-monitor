@@ -24,9 +24,24 @@ const {
 const now = Date.parse('2026-07-23T08:00:00.000Z');
 const stats = {
   periods: {
-    today: { totalTokens: 1_240_000, costUsd: 4.25 },
-    month: { totalTokens: 9_500_000, costUsd: 31 },
-    allTime: { totalTokens: 226_934_966, costUsd: 194.5 }
+    today: {
+      totalTokens: 1_240_000,
+      costUsd: 4.25,
+      clients: { claude: 300_000, codex: 940_000 },
+      clientCosts: { claude: 3.25, codex: 1 }
+    },
+    month: {
+      totalTokens: 9_500_000,
+      costUsd: 31,
+      clients: { claude: 4_000_000, codex: 5_500_000 },
+      clientCosts: { claude: 10, codex: 21 }
+    },
+    allTime: {
+      totalTokens: 226_934_966,
+      costUsd: 194.5,
+      clients: { claude: 150_000_000, codex: 76_934_966 },
+      clientCosts: { claude: 70, codex: 124.5 }
+    }
   },
   limits: {
     providers: [
@@ -83,6 +98,8 @@ test('tray layouts normalize to a versioned and bounded shape', () => {
         type: 'icon',
         style: 'providerIcon',
         icon: 'provider',
+        autoMode: 'lowestLimit',
+        period: 'today',
         source: { provider: 'codex', accountMode: 'lowest', accountKey: '', window: 'primary', valueMode: 'remaining' }
       },
       {
@@ -416,7 +433,7 @@ test('tray layout clock runs only when displayed values contain a countdown', ()
   assert.equal(trayLayoutNeedsClock({ version: 2, items: [dynamicInfo] }), true);
 });
 
-test('automatic provider icons use the internal primary quota without exposing another setting', () => {
+test('automatic provider icons default to the lowest internal primary quota', () => {
   const icon = createTrayLayoutItem('providerIcon', { idFactory: () => 'provider-icon' });
   const resolved = resolveTrayLayout({
     version: 2,
@@ -426,6 +443,54 @@ test('automatic provider icons use the internal primary quota without exposing a
   assert.equal(icon.source.window, 'primary');
   assert.equal(resolved.items[0].provider, 'codex');
   assert.equal(resolved.items[0].available, true);
+});
+
+test('automatic provider icons can follow token or cost leaders for each period', () => {
+  const icon = createTrayLayoutItem('providerIcon', { idFactory: () => 'usage-provider-icon' });
+  icon.autoMode = 'tokens';
+  icon.period = 'today';
+  let resolved = resolveTrayLayout({ version: 2, items: [icon] }, stats, {
+    availableProviderIds: ['claude', 'codex']
+  });
+  assert.equal(resolved.items[0].provider, 'codex');
+
+  icon.period = 'allTime';
+  resolved = resolveTrayLayout({ version: 2, items: [icon] }, stats, {
+    availableProviderIds: ['claude', 'codex']
+  });
+  assert.equal(resolved.items[0].provider, 'claude');
+
+  icon.autoMode = 'cost';
+  icon.period = 'today';
+  resolved = resolveTrayLayout({ version: 2, items: [icon] }, stats, {
+    availableProviderIds: ['claude', 'codex']
+  });
+  assert.equal(resolved.items[0].provider, 'claude');
+
+  icon.period = 'month';
+  resolved = resolveTrayLayout({ version: 2, items: [icon] }, stats, {
+    availableProviderIds: ['claude', 'codex']
+  });
+  assert.equal(resolved.items[0].provider, 'codex');
+});
+
+test('automatic provider icons keep a stable app fallback without matching data or artwork', () => {
+  const icon = createTrayLayoutItem('providerIcon', { idFactory: () => 'fallback-provider-icon' });
+  icon.autoMode = 'tokens';
+
+  const unavailable = resolveTrayLayout({ version: 2, items: [icon] }, {
+    periods: { today: { clients: { unknown: 10, codex: 5 } } }
+  }, {
+    availableProviderIds: ['codex']
+  });
+  assert.equal(unavailable.items[0].provider, 'app');
+  assert.equal(unavailable.items[0].available, true);
+
+  const empty = resolveTrayLayout({ version: 2, items: [icon] }, {}, {
+    availableProviderIds: ['codex']
+  });
+  assert.equal(empty.items[0].provider, 'app');
+  assert.equal(empty.items[0].available, true);
 });
 
 test('fixed provider icons remain available without live quota data', () => {

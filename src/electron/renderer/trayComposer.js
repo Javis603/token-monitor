@@ -46,6 +46,24 @@
     return { ...item, source: { ...item.source, ...patch } };
   }
 
+  function periodItemPatch(item, rowIndex, period) {
+    if (Array.isArray(item.rows)) return sourcePatch(item, rowIndex, { period });
+    return { ...item, period };
+  }
+
+  function accountModeSourcePatch(source, accounts, accountMode) {
+    if (accountMode !== 'specific') {
+      return { accountMode, accountKey: '', window: source.window };
+    }
+    const currentAccount = accounts.find((account) => account.value === source.accountKey);
+    const firstAccount = accounts.find((account) => !account.disabled);
+    return {
+      accountMode,
+      accountKey: currentAccount?.value || firstAccount?.value || '',
+      window: 'primary'
+    };
+  }
+
   function duplicateTrayLayoutItem(layoutApi, currentLayout, itemId, options = {}) {
     const current = layoutApi.normalizeTrayLayout(currentLayout);
     const item = current.items.find((entry) => entry.id === itemId);
@@ -580,6 +598,14 @@
       ].map((entry) => ({ ...entry, label: styleTitle(entry.style) }));
     }
 
+    function periodChoices() {
+      return [
+        { value: 'today', label: l('trayComposer.period.today', 'Today') },
+        { value: 'month', label: l('trayComposer.period.month', 'This month') },
+        { value: 'allTime', label: l('trayComposer.period.allTime', 'All time') }
+      ];
+    }
+
     function sourceEditor(item, rowIndex, title = '', options = {}) {
       const source = sourceForItem(item, rowIndex);
       const section = document.createElement('section');
@@ -601,23 +627,26 @@
       }
 
       if (metric === 'tokens' || metric === 'cost') {
-        const periods = [
-          { value: 'today', label: l('trayComposer.period.today', 'Today') },
-          { value: 'month', label: l('trayComposer.period.month', 'This month') },
-          { value: 'allTime', label: l('trayComposer.period.allTime', 'All time') }
-        ];
+        const currentPeriod = Array.isArray(item.rows) ? source.period : item.period;
         section.append(picker(
           l('trayComposer.period', 'Period'),
-          periods,
-          source.period,
-          (period) => updateItem(item, sourcePatch(item, rowIndex, { period }))
+          periodChoices(),
+          currentPeriod,
+          (period) => updateItem(item, periodItemPatch(item, rowIndex, period))
         ));
         return section;
       }
 
-      const providers = providerChoices(source.provider, {
+      let providers = providerChoices(source.provider, {
         includeAll: options.includeAllProviders === true
       });
+      if (options.includeAutoCondition === true) {
+        providers = providers.map((choice) => (
+          choice.value === 'auto'
+            ? { ...choice, detail: l('trayComposer.provider.autoConfigDetail', 'Choose a condition below') }
+            : choice
+        ));
+      }
       section.append(picker(
         l('trayComposer.provider', 'AI tool'),
         providers,
@@ -629,6 +658,37 @@
           window: 'primary'
         }))
       ));
+
+      if (options.includeAutoCondition === true && source.provider === 'auto') {
+        const autoModes = [
+          {
+            value: 'lowestLimit',
+            label: l('trayComposer.iconAuto.lowestLimit', 'Lowest remaining quota')
+          },
+          {
+            value: 'tokens',
+            label: l('trayComposer.iconAuto.tokens', 'Highest Tokens')
+          },
+          {
+            value: 'cost',
+            label: l('trayComposer.iconAuto.cost', 'Highest cost')
+          }
+        ];
+        section.append(picker(
+          l('trayComposer.iconAuto', 'Automatic condition'),
+          autoModes,
+          item.autoMode,
+          (autoMode) => updateItem(item, { ...item, autoMode })
+        ));
+        if (item.autoMode === 'tokens' || item.autoMode === 'cost') {
+          section.append(picker(
+            l('trayComposer.period', 'Period'),
+            periodChoices(),
+            item.period,
+            (period) => updateItem(item, { ...item, period })
+          ));
+        }
+      }
 
       const includeAccount = options.includeAccount !== false;
       const accounts = includeAccount && source.provider !== 'auto'
@@ -644,22 +704,31 @@
           l('trayComposer.account', 'Account'),
           modes,
           source.accountMode,
-          (accountMode) => updateItem(item, sourcePatch(item, rowIndex, {
-            accountMode,
-            accountKey: accountMode === 'specific' ? source.accountKey : ''
-          }))
+          (accountMode) => updateItem(
+            item,
+            sourcePatch(item, rowIndex, accountModeSourcePatch(source, accounts, accountMode))
+          )
         ));
       }
 
       if (includeAccount && source.accountMode === 'specific') {
-        const accountOptions = accounts.length
+        const hasSelectedAccount = accounts.some((account) => account.value === source.accountKey);
+        const unavailableAccount = {
+          value: source.accountKey || '',
+          label: l('trayComposer.account.none', 'No matching account'),
+          disabled: true
+        };
+        const accountOptions = hasSelectedAccount
           ? accounts
-          : [{ value: '', label: l('trayComposer.account.none', 'No matching account'), disabled: true }];
+          : [unavailableAccount, ...accounts];
         section.append(picker(
           l('trayComposer.account.specificLabel', 'Choose account'),
           accountOptions,
           source.accountKey,
-          (accountKey) => updateItem(item, sourcePatch(item, rowIndex, { accountKey }))
+          (accountKey) => updateItem(item, sourcePatch(item, rowIndex, {
+            accountKey,
+            window: 'primary'
+          }))
         ));
       }
 
@@ -785,6 +854,7 @@
           popover.append(sourceEditor(item, 0, '', {
             includeAccount: false,
             includeAllProviders: true,
+            includeAutoCondition: true,
             includeValue: false,
             includeWindow: false
           }));
@@ -1132,9 +1202,11 @@
   }
 
   return {
+    accountModeSourcePatch,
     createTrayComposer,
     duplicateTrayLayoutItem,
     moveTrayLayoutItemByKey,
+    periodItemPatch,
     syncTrayComposerSurfaces
   };
 });

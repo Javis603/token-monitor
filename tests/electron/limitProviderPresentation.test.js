@@ -523,6 +523,9 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
   assert.match(providerImage, /if \(!showBadge\) return canvas\.toDataURL\('image\/png'\)/);
   assert.match(providerImage, /shadowColor = 'rgba\(255, 255, 255, 0\.95\)'/);
   assert.match(providerImage, /shadowBlur = Math\.max/);
+  assert.match(app, /function drawCustomTrayProviderImage/);
+  assert.match(app, /showProviderBadge: state\.settings\?\.showTrayProviderBadge === true/);
+  assert.match(app, /globalCompositeOperation = 'destination-out'/);
 });
 
 test('Grok renders its single Monthly billing window full-width instead of an empty session/weekly pair', () => {

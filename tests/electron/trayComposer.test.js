@@ -5,8 +5,10 @@ const test = require('node:test');
 
 const trayLayoutApi = require('../../src/shared/trayLayout');
 const {
+  accountModeSourcePatch,
   duplicateTrayLayoutItem,
   moveTrayLayoutItemByKey,
+  periodItemPatch,
   syncTrayComposerSurfaces
 } = require('../../src/electron/renderer/trayComposer');
 
@@ -62,6 +64,38 @@ test('duplicating at the item limit leaves every configured item unchanged', () 
   assert.deepEqual(duplicated, before);
   assert.equal(duplicated.items.at(-1).id, 'selected');
   assert.equal(duplicated.items.at(-1).period, 'month');
+});
+
+test('choosing a specific account commits the account shown by the picker immediately', () => {
+  const accounts = [
+    { value: 'personal', label: 'personal@example.com' },
+    { value: 'team', label: 'Team' }
+  ];
+  assert.deepEqual(
+    accountModeSourcePatch({ accountKey: '', window: 'secondary' }, accounts, 'specific'),
+    { accountMode: 'specific', accountKey: 'personal', window: 'primary' }
+  );
+  assert.deepEqual(
+    accountModeSourcePatch({ accountKey: 'team', window: 'weekly' }, accounts, 'specific'),
+    { accountMode: 'specific', accountKey: 'team', window: 'primary' }
+  );
+  assert.deepEqual(
+    accountModeSourcePatch({ accountKey: 'team', window: 'weekly' }, accounts, 'lowest'),
+    { accountMode: 'lowest', accountKey: '', window: 'weekly' }
+  );
+});
+
+test('period updates target the item for single text and the source for stacked text', () => {
+  const single = trayLayoutApi.createTrayLayoutItem('tokens', { idFactory: () => 'single' });
+  const stacked = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked' });
+
+  const singleUpdated = periodItemPatch(single, 0, 'month');
+  assert.equal(singleUpdated.period, 'month');
+  assert.equal(singleUpdated.source.period, undefined);
+
+  const stackedUpdated = periodItemPatch(stacked, 1, 'allTime');
+  assert.equal(stackedUpdated.rows[0].period, 'today');
+  assert.equal(stackedUpdated.rows[1].period, 'allTime');
 });
 
 test('keyboard movement returns the reordered layout and respects boundaries', () => {
