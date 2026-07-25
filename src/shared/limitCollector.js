@@ -63,6 +63,9 @@ const CLAUDE_WEB_BASE_URL = 'https://claude.ai';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
+const CLAUDE_IDENTITY_CACHE_TTL_MS = 60 * 60 * 1000;
+const CLAUDE_IDENTITY_CACHE_MAX_ENTRIES = 16;
+const CLAUDE_IDENTITY_CACHE_STATE_KEY = 'claude.identity-cache';
 const CLAUDE_SESSION_WINDOW_MINUTES = 5 * 60;
 const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 const CODEX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api';
@@ -135,6 +138,17 @@ function normalizeClaudeWebCookie(value) {
   if (/^sessionKey=/i.test(raw) || raw.includes(';')) return raw;
   if (raw.includes('=')) return raw;
   return `sessionKey=${raw}`;
+}
+
+function normalizeClaudeWebCookieInput(value) {
+  const raw = typeof value === 'string' ? value : String(value || '');
+  const normalized = normalizeClaudeWebCookie(raw);
+  if (raw.trim() && !normalized) {
+    const error = new Error('Claude Web Cookie must be a single-line value');
+    error.code = 'INVALID_CLAUDE_WEB_COOKIE';
+    throw error;
+  }
+  return normalized;
 }
 
 function claudeWebCookie(env = process.env, options = {}) {
@@ -586,7 +600,7 @@ function runProcessText(command, args = [], options = {}) {
   });
 }
 
-async function fetchJson(url, headers, deps = {}) {
+async function fetchJson(url, headers, deps = {}, options = {}) {
   const fetchFn = deps.fetch || fetch;
   const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -594,7 +608,7 @@ async function fetchJson(url, headers, deps = {}) {
   try {
     const response = await fetchFn(url, { headers, ...(controller ? { signal: controller.signal } : {}) });
     if (!response.ok) {
-      const status = response.status === 401 || response.status === 403
+      const status = response.status === 401 || (options.forbiddenIsUnauthorized && response.status === 403)
         ? 'unauthorized'
         : response.status === 429
           ? 'sourceRateLimited'
@@ -608,6 +622,10 @@ async function fetchJson(url, headers, deps = {}) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function fetchClaudeWebJson(url, headers, deps = {}) {
+  return fetchJson(url, headers, deps, { forbiddenIsUnauthorized: true });
 }
 
 function valueFromAliases(object, aliases) {
@@ -795,7 +813,13 @@ function claudeWebMembership(accountBody, organizationId) {
   )) || memberships[0] || null;
 }
 
-function claudeWebAccountIdentity(accountBody, organization, cookie) {
+function claudeStableIdentity(accountId, organizationId, accountEmail) {
+  if (accountId) return `account:${accountId}`;
+  if (organizationId) return `organization:${organizationId}`;
+  return accountEmail;
+}
+
+function claudeWebAccountIdentity(accountBody, organization) {
   const organizationId = claudeWebOrganizationId(organization);
   const membership = claudeWebMembership(accountBody, organizationId);
   const account = accountBody?.account && typeof accountBody.account === 'object'
@@ -817,23 +841,88 @@ function claudeWebAccountIdentity(accountBody, organization, cookie) {
       || account.display_name
       || ''
   ).trim();
-  const canonicalIdentity = [
-    accountId ? `account:${accountId}` : '',
-    organizationId ? `organization:${organizationId}` : ''
-  ].filter(Boolean).join('|');
+  const stableIdentity = claudeStableIdentity(accountId, organizationId, accountEmail);
+  if (!stableIdentity) {
+    throw claudeIdentityUnavailable('Claude Web account did not include a stable account identity');
+  }
   const accountLabel = claudePlanLabelFromParts(
     membership?.seat_tier || membership?.billing_type || account?.subscription_type,
     membership?.rate_limit_tier || account?.rate_limit_tier
   );
   return {
-    accountKey: hashKey(
-      'claude-account',
-      canonicalIdentity || accountEmail || `web-cookie:${cookie}`
-    ),
+    accountKey: hashKey('claude-account', stableIdentity),
     accountEmail,
     accountName,
     accountLabel
   };
+}
+
+function claudeIdentityCache(deps = {}) {
+  if (!(deps.providerRuntimeState instanceof Map)) return null;
+  let cache = deps.providerRuntimeState.get(CLAUDE_IDENTITY_CACHE_STATE_KEY);
+  if (!(cache instanceof Map)) {
+    cache = new Map();
+    deps.providerRuntimeState.set(CLAUDE_IDENTITY_CACHE_STATE_KEY, cache);
+  }
+  return cache;
+}
+
+function claudeIdentityCacheTtlMs(deps = {}) {
+  const configured = Number(deps.claudeIdentityCacheTtlMs);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : CLAUDE_IDENTITY_CACHE_TTL_MS;
+}
+
+function claudeCachedIdentity(fingerprint, deps = {}, options = {}) {
+  const cache = claudeIdentityCache(deps);
+  if (!cache || !fingerprint) return null;
+  const entry = cache.get(fingerprint);
+  if (!entry) return null;
+  cache.delete(fingerprint);
+  cache.set(fingerprint, entry);
+  if (options.allowStale) return entry;
+  const nowMs = (deps.now || Date.now)();
+  return nowMs - entry.resolvedAt <= claudeIdentityCacheTtlMs(deps) ? entry : null;
+}
+
+function cacheClaudeIdentity(fingerprint, entry, deps = {}) {
+  const cache = claudeIdentityCache(deps);
+  if (!cache || !fingerprint || !entry?.identity?.accountKey) return entry;
+  const previous = cache.get(fingerprint);
+  const resolved = {
+    ...entry,
+    identity: {
+      ...entry.identity,
+      ...(previous?.identity?.accountKey ? { accountKey: previous.identity.accountKey } : {})
+    },
+    resolvedAt: (deps.now || Date.now)()
+  };
+  cache.delete(fingerprint);
+  cache.set(fingerprint, resolved);
+  while (cache.size > CLAUDE_IDENTITY_CACHE_MAX_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+  return resolved;
+}
+
+function claudeWebIdentityFingerprint(cookie) {
+  return cookie ? hashKey('claude-web-identity-cache', cookie) : '';
+}
+
+function claudeOauthIdentityFingerprint(credentials) {
+  const secret = credentials?.refreshToken || credentials?.accessToken;
+  return secret
+    ? hashKey('claude-oauth-identity-cache', credentials?.source || '', secret)
+    : '';
+}
+
+function carryClaudeCachedIdentity(previousCredentials, nextCredentials, deps = {}) {
+  const previousFingerprint = claudeOauthIdentityFingerprint(previousCredentials);
+  const nextFingerprint = claudeOauthIdentityFingerprint(nextCredentials);
+  if (!previousFingerprint || !nextFingerprint || previousFingerprint === nextFingerprint) return;
+  const cached = claudeCachedIdentity(previousFingerprint, deps, { allowStale: true });
+  if (cached) cacheClaudeIdentity(nextFingerprint, cached, deps);
 }
 
 async function fetchClaudeWebLimits(cookie, deps = {}) {
@@ -846,21 +935,35 @@ async function fetchClaudeWebLimits(cookie, deps = {}) {
     referer: `${baseUrl}/settings/usage`,
     'user-agent': TOKEN_MONITOR_USER_AGENT
   };
-  const organizations = claudeWebOrganizations(
-    await fetchJson(`${baseUrl}/api/organizations`, headers, deps)
-  );
-  const organization = organizations.find((candidate) => claudeWebOrganizationId(candidate));
-  const organizationId = claudeWebOrganizationId(organization);
-  if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
-  const usage = await fetchJson(
-    `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage`,
+  const fingerprint = claudeWebIdentityFingerprint(cookie);
+  let context = claudeCachedIdentity(fingerprint, deps);
+  if (!context) {
+    const stale = claudeCachedIdentity(fingerprint, deps, { allowStale: true });
+    try {
+      const [organizationsBody, accountBody] = await Promise.all([
+        fetchClaudeWebJson(`${baseUrl}/api/organizations`, headers, deps),
+        fetchClaudeWebJson(`${baseUrl}/api/account`, headers, deps)
+      ]);
+      const organizations = claudeWebOrganizations(organizationsBody);
+      const organization = organizations.find((candidate) => claudeWebOrganizationId(candidate));
+      const organizationId = claudeWebOrganizationId(organization);
+      if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
+      context = cacheClaudeIdentity(fingerprint, {
+        organizationId,
+        identity: claudeWebAccountIdentity(accountBody, organization)
+      }, deps);
+    } catch (error) {
+      if (!stale) throw error;
+      context = stale;
+    }
+  }
+  const usage = await fetchClaudeWebJson(
+    `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage`,
     headers,
     deps
   );
-  const accountBody = await fetchJson(`${baseUrl}/api/account`, headers, deps).catch(() => null);
-  const identity = claudeWebAccountIdentity(accountBody, organization, cookie);
   return mapClaudeUsageToProvider(usage, {
-    ...identity,
+    ...context.identity,
     updatedAt: nowIso(nowMs),
     source: 'web'
   });
@@ -887,16 +990,13 @@ function claudeOauthAccountIdentity(profile) {
   ).trim().toLowerCase();
   const accountName = String(
     account.display_name
+      || account.full_name
       || account.name
       || organization.display_name
       || organization.name
       || ''
   ).trim();
-  const canonicalIdentity = [
-    accountId ? `account:${accountId}` : '',
-    organizationId ? `organization:${organizationId}` : ''
-  ].filter(Boolean).join('|');
-  const stableIdentity = canonicalIdentity || accountEmail;
+  const stableIdentity = claudeStableIdentity(accountId, organizationId, accountEmail);
   if (!stableIdentity) {
     throw claudeIdentityUnavailable('Claude profile did not include a stable account identity');
   }
@@ -906,6 +1006,23 @@ function claudeOauthAccountIdentity(profile) {
     accountEmail,
     accountName
   };
+}
+
+async function resolveClaudeOauthIdentity(credentials, deps = {}) {
+  const fingerprint = claudeOauthIdentityFingerprint(credentials);
+  const fresh = claudeCachedIdentity(fingerprint, deps);
+  if (fresh) return fresh.identity;
+  const stale = claudeCachedIdentity(fingerprint, deps, { allowStale: true });
+  try {
+    const identity = claudeOauthAccountIdentity(
+      await callClaudeProfile(credentials.accessToken, deps)
+    );
+    return cacheClaudeIdentity(fingerprint, { identity }, deps).identity;
+  } catch (error) {
+    if (stale) return stale.identity;
+    if (error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE') throw error;
+    throw claudeIdentityUnavailable('Claude profile lookup failed', error);
+  }
 }
 
 async function delegatedClaudeRefresh(currentCredentials, deps = {}) {
@@ -937,15 +1054,23 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
   const platform = deps.platform || process.platform;
   const webCookie = claudeWebCookie(deps.env || process.env, options);
   if (webCookie) return fetchClaudeWebLimits(webCookie, deps);
+  let oauthIdentity = null;
   try {
     let credentials = await readClaudeCredentials(deps);
+    oauthIdentity = claudeCachedIdentity(
+      claudeOauthIdentityFingerprint(credentials),
+      deps,
+      { allowStale: true }
+    )?.identity || null;
 
     // Proactive refresh only on non-darwin: mac uses delegated (spawning Claude Code)
     // which is expensive; CodexBar's design likewise refreshes reactively, not on expiry.
     if (platform !== 'darwin' && credentials.refreshToken && credentials.expiresAt
       && credentials.expiresAt - nowMs < CLAUDE_REFRESH_LEEWAY_MS) {
       try {
+        const previousCredentials = credentials;
         credentials = await refreshClaudeCredentials(credentials, deps);
+        carryClaudeCachedIdentity(previousCredentials, credentials, deps);
       } catch (_) { /* fall through; reactive retry below may still succeed */ }
     }
 
@@ -954,19 +1079,23 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
       usage = await callClaudeUsage(credentials.accessToken, deps);
     } catch (error) {
       if (error?.status !== 'unauthorized') throw error;
+      const previousCredentials = credentials;
       credentials = await refreshClaudeCredentials(credentials, deps);
+      carryClaudeCachedIdentity(previousCredentials, credentials, deps);
       usage = await callClaudeUsage(credentials.accessToken, deps);
     }
 
-    let profile;
     try {
-      profile = await callClaudeProfile(credentials.accessToken, deps);
+      oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
     } catch (error) {
-      throw claudeIdentityUnavailable('Claude profile lookup failed', error);
+      if (error?.cause?.status !== 'unauthorized') throw error;
+      const previousCredentials = credentials;
+      credentials = await refreshClaudeCredentials(credentials, deps);
+      carryClaudeCachedIdentity(previousCredentials, credentials, deps);
+      oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
     }
-    const identity = claudeOauthAccountIdentity(profile);
     const provider = mapClaudeUsageToProvider(usage, {
-      ...identity,
+      ...oauthIdentity,
       accountLabel: credentials.accountLabel,
       updatedAt: nowIso(nowMs),
       source: 'oauth'
@@ -974,16 +1103,23 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     return provider;
   } catch (error) {
     // A successful quota response without a stable account identity must not
-    // create a new row keyed by rotating OAuth credential material. Let
-    // LimitsRuntime retain the previous account row as temporarily unavailable.
+    // create a new row keyed by credential storage location or a different
+    // fallback source. Let LimitsRuntime retain the previous account row.
     if (error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE') throw error;
     if (!shouldTryClaudeCliFallback(error)) throw error;
     try {
       const text = await runClaudeUsageCli(deps);
-      return mapClaudeCliUsageToProvider(text, {
+      const provider = mapClaudeCliUsageToProvider(text, {
         updatedAt: nowIso(nowMs),
         now: new Date(nowMs)
       });
+      if (!oauthIdentity) return provider;
+      return {
+        ...provider,
+        accountKey: oauthIdentity.accountKey,
+        accountEmail: oauthIdentity.accountEmail,
+        accountName: oauthIdentity.accountName
+      };
     } catch (_) {
       throw error;
     }
@@ -3102,6 +3238,7 @@ module.exports = {
   fetchOpenRouterLimits: openrouterLimits.fetchOpenRouterLimits,
   fetchSingleOpenCodeProfile,
   claudeWebCookie,
+  normalizeClaudeWebCookieInput,
   fetchClaudeLimits,
   fetchCodexLimits,
   fetchCursorLimits,

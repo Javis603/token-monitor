@@ -3095,7 +3095,7 @@ function renderClaudeAccountGroup(label, providers, color) {
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
   const groupProvider = { provider: 'claude', status: 'ok', windows: [] };
   const head = renderLimitProviderHead('claude', label, groupProvider, color, {
-    planText: `${providers.length} accounts`,
+    planText: t('settings.limits.nAccounts', { count: providers.length }),
     hideMeta: true
   });
   const accountList = document.createElement('div');
@@ -10819,7 +10819,12 @@ function setupCursorAccountUI() {
       const errorEl = document.getElementById('claudeErrorMessage');
       errorEl.classList.add('hidden');
       if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.claude.statusNotSet');
+        errorEl.textContent = t('settings.claude.cookieRequired');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      if (/[\r\n]/.test(input.value)) {
+        errorEl.textContent = t('settings.claude.cookieInvalidFormat');
         errorEl.classList.remove('hidden');
         return;
       }

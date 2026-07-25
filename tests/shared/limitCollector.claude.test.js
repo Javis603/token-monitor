@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider } = require('../../src/shared/limitCollector');
+const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limitCollector');
 
 function fakeSpawnForClaudeUsage(expectedCommand = 'claude.cmd') {
   return (command, args) => {
@@ -60,6 +60,11 @@ test('Claude Web cookie accepts a full header or a bare sessionKey value', () =>
     claudeWebCookie({ CLAUDE_WEB_COOKIE: 'sessionKey=from-env' }),
     'sessionKey=from-env'
   );
+  assert.throws(
+    () => normalizeClaudeWebCookieInput('sessionKey=first\nother=value'),
+    (error) => error?.code === 'INVALID_CLAUDE_WEB_COOKIE'
+  );
+  assert.equal(normalizeClaudeWebCookieInput(''), '');
 });
 
 test('Claude Web source takes precedence and carries stable account metadata', async () => {
@@ -122,6 +127,78 @@ test('Claude Web source takes precedence and carries stable account metadata', a
   assert.deepEqual(first.provider.windows.map((window) => window.kind), ['session', 'weekly']);
   assert.equal(first.requests.length, 3);
   assert.equal(first.requests[0].options.headers.cookie, 'sessionKey=first-cookie');
+});
+
+test('Claude Web caches stable identity and reuses it when account lookup is transiently unavailable', async () => {
+  const providerRuntimeState = new Map();
+  let nowMs = Date.parse('2026-07-25T00:00:00Z');
+  let accountAvailable = true;
+  let utilization = 12;
+  const requests = [];
+  const deps = {
+    now: () => nowMs,
+    claudeIdentityCacheTtlMs: 1000,
+    providerRuntimeState,
+    fetch: async (url) => {
+      requests.push(url);
+      if (url.endsWith('/api/organizations')) {
+        return { ok: true, json: async () => [{ uuid: 'organization-web', name: 'Workspace' }] };
+      }
+      if (url.endsWith('/api/account')) {
+        return accountAvailable
+          ? { ok: true, json: async () => ({ uuid: 'account-web', email: 'owner@example.com' }) }
+          : { ok: false, status: 503 };
+      }
+      return {
+        ok: true,
+        json: async () => ({ five_hour: { utilization, resets_at: '2026-07-25T05:00:00Z' } })
+      };
+    }
+  };
+
+  const first = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=stable' }, deps);
+  requests.length = 0;
+  utilization = 23;
+  const cached = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=stable' }, deps);
+  assert.equal(cached.accountKey, first.accountKey);
+  assert.equal(cached.windows[0].usedPercent, 23);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].endsWith('/usage'), true);
+
+  requests.length = 0;
+  nowMs += 2000;
+  accountAvailable = false;
+  utilization = 37;
+  const second = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=stable' }, deps);
+
+  assert.equal(second.accountKey, first.accountKey);
+  assert.equal(second.windows[0].usedPercent, 37);
+  assert.equal(requests.some((url) => url.endsWith('/api/account')), true);
+  assert.equal(requests.some((url) => url.endsWith('/usage')), true);
+});
+
+test('Claude Web requires the account endpoint on a cold identity cache', async () => {
+  await assert.rejects(
+    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=cold' }, {
+      providerRuntimeState: new Map(),
+      fetch: async (url) => {
+        if (url.endsWith('/api/organizations')) {
+          return { ok: true, json: async () => [{ uuid: 'organization-web' }] };
+        }
+        return { ok: false, status: 503 };
+      }
+    }),
+    (error) => error?.status === 'unavailable'
+  );
+});
+
+test('Claude Web maps 403 to unauthorized without changing shared provider semantics', async () => {
+  await assert.rejects(
+    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=expired' }, {
+      fetch: async () => ({ ok: false, status: 403 })
+    }),
+    (error) => error?.status === 'unauthorized'
+  );
 });
 
 test('Claude Web authentication failure does not silently fall back to another local account', async () => {
@@ -288,8 +365,8 @@ test('Claude OAuth profile provides stable cross-device account identity and met
   }
 
   const mac = await collect('/Users/test/.claude/.credentials.json', 'account-a', 'organization-a');
-  const windows = await collect('C:\\Users\\test\\.claude\\.credentials.json', 'account-a', 'organization-a');
-  const other = await collect('/home/other/.claude/.credentials.json', 'account-b', 'organization-b');
+  const windows = await collect('C:\\Users\\test\\.claude\\.credentials.json', 'account-a', 'organization-changed');
+  const other = await collect('/home/other/.claude/.credentials.json', 'account-b', 'organization-a');
 
   assert.equal(mac.accountKey, windows.accountKey);
   assert.notEqual(mac.accountKey, other.accountKey);
@@ -339,6 +416,49 @@ test('Claude OAuth profile failures never derive account identity from rotating 
     );
   }
   assert.equal(cliCalls, 0);
+});
+
+test('Claude OAuth keeps fresh quota with cached identity when profile lookup is transiently unavailable', async () => {
+  const providerRuntimeState = new Map();
+  let nowMs = Date.parse('2026-07-25T00:00:00Z');
+  let profileAvailable = true;
+  let utilization = 12;
+  const deps = {
+    platform: 'linux',
+    now: () => nowMs,
+    claudeIdentityCacheTtlMs: 1000,
+    providerRuntimeState,
+    claudeCredentialPath: '/same/path/.credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'stable-access',
+        refreshToken: 'stable-refresh',
+        expiresAt: Date.parse('2026-07-26T00:00:00Z')
+      }
+    }),
+    fetch: async (url) => {
+      if (url.endsWith('/api/oauth/profile')) {
+        return profileAvailable
+          ? { ok: true, json: async () => DEFAULT_CLAUDE_PROFILE }
+          : { ok: false, status: 503 };
+      }
+      return {
+        ok: true,
+        json: async () => ({ five_hour: { utilization, resets_at: '2026-07-25T05:00:00Z' } })
+      };
+    }
+  };
+
+  const first = await fetchClaudeLimits({}, deps);
+  nowMs += 2000;
+  profileAvailable = false;
+  utilization = 44;
+  const second = await fetchClaudeLimits({}, deps);
+
+  assert.equal(second.accountKey, first.accountKey);
+  assert.equal(second.windows[0].usedPercent, 44);
+  assert.equal(second.source, 'oauth');
 });
 
 test('Claude OAuth usage mapping accepts camelCase response fields', async () => {

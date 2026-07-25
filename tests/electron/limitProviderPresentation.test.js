@@ -459,7 +459,7 @@ test('Claude limits render as one provider group with account subrows', () => {
 
   assert.match(renderLimits, /renderClaudeAccountGroup\(/);
   assert.match(renderGroup, /claudeAccountTitle\(provider, index\)/);
-  assert.match(renderGroup, /planText: `\$\{providers\.length\} accounts`/);
+  assert.match(renderGroup, /planText: t\('settings\.limits\.nAccounts', \{ count: providers\.length \}\)/);
   assert.match(renderGroup, /accountRow: true/);
   assert.match(renderGroup, /showIcon: false/);
 });

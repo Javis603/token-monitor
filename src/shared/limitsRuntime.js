@@ -161,6 +161,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     : DEFAULT_LIMITS_RETRY_MAX_MS;
   const autoRetry = deps.autoRetry !== false;
   const random = deps.random || Math.random;
+  const providerRuntimeState = deps.providerRuntimeState instanceof Map
+    ? deps.providerRuntimeState
+    : new Map();
 
   let config = cloneValue(initialOptions);
   let enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
@@ -520,7 +523,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
             if (!Number.isFinite(parsed) || parsed <= 0) return;
             reportedRetryAfterMs = Math.max(reportedRetryAfterMs || 0, parsed);
           }
-        }, deps),
+        }, { ...deps, providerRuntimeState }),
         { deadlineMs }
       );
       const committed = commitRows(lane, dispatch, rows);

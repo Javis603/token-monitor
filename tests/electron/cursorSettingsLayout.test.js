@@ -740,7 +740,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     /<div id="claudeAccountGroup"[\s\S]*?<div id="claudeErrorMessage" class="settings-note error hidden"><\/div>/
   )?.[0] || '';
   assert.match(details, /data-i18n="settings\.claude\.title">Claude Web login<\/span>/);
-  assert.match(details, /settings\.claude\.note[\s\S]*Claude Code OAuth and CLI remain automatic/);
+  assert.match(details, /settings\.claude\.note[\s\S]*detected automatically when Web login is not configured/);
   assert.match(details, /settings\.claude\.step2[\s\S]*Network[\s\S]*organizations request/);
   assert.match(details, /settings\.claude\.step3[\s\S]*sessionKey/);
   assert.match(details, /<textarea id="claudeWebCookieInput" rows="3" autocomplete="off"[\s\S]*placeholder="sessionKey=\.\.\."/);
@@ -748,6 +748,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /if \(\/\[\\r\\n\]\/\.test\(input\.value\)\)[\s\S]*settings\.claude\.cookieInvalidFormat/);
   assert.match(setupBody, /saveSettings\(\{\s*claudeWebCookie: input\.value,[\s\S]*?limitProviders: limitProviderSelectionIncluding\('claude'\),[\s\S]*?limitsEnabled: true/);
   assert.match(setupBody, /saveSettings\(\{ claudeWebCookie: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(claudePlatformUrl\(\)\)/);
@@ -758,6 +759,16 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.match(urlBody, /return 'https:\/\/claude\.ai\/settings\/usage';/);
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  assert.match(main, /function normalizeClaudeWebCookie\(value\) \{\s*return normalizeClaudeWebCookieInput\(value\);\s*\}/);
+  const updateHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('appearance:preview'")
+  );
+  assert.ok(
+    updateHandler.indexOf('normalizeClaudeWebCookie(patch.claudeWebCookie)')
+      < updateHandler.indexOf('saveSettings({ throwOnError: true })'),
+    'invalid Claude cookies must be rejected before the existing credential can be persisted over'
+  );
   const rendererSettings = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
   assert.match(rendererSettings, /claudeWebCookie: settings\?\.claudeWebCookie \? 'set' : ''/);
   assert.match(rendererSettings, /claudeWebCookieConfigured: Boolean\(currentClaudeWebCookie\(\)\)/);

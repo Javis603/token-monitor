@@ -109,6 +109,24 @@ test('same-scope A to B supersession discards A and runs B as the trailing job',
   runtime.stop();
 });
 
+test('provider probes share runtime-local state across refreshes', async () => {
+  const runtimeStates = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['claude'] }, runtimeDeps({
+    probeProvider: async (_provider, _config, _context, deps) => {
+      runtimeStates.push(deps.providerRuntimeState);
+      return [providerRow('claude', 'account', 'Claude')];
+    }
+  }));
+
+  await runtime.refresh({}, 'first');
+  await runtime.refresh({}, 'second');
+
+  assert.equal(runtimeStates.length, 2);
+  assert.equal(runtimeStates[0] instanceof Map, true);
+  assert.equal(runtimeStates[1], runtimeStates[0]);
+  runtime.stop();
+});
+
 test('different account scopes stay independent inside one provider lane', async () => {
   const jobs = [];
   const runtime = createLimitsRuntime({ limitProviders: ['mimo'] }, runtimeDeps({

@@ -151,6 +151,16 @@ test('fetchDeepSeekLimits maps HTTP 401 to unauthorized', async () => {
   assert.equal(r.status, 'unauthorized');
 });
 
+test('fetchDeepSeekLimits keeps HTTP 403 as unavailable', async () => {
+  const r = await fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: 'sk-x' },
+    deepseekStorePath: '/tmp/ds-403.json',
+    fetch: async () => ({ ok: false, status: 403, json: async () => ({}) }),
+    ...memStoreDeps()
+  });
+  assert.equal(r.status, 'unavailable');
+});
+
 test('fetchDeepSeekLimits maps unexpected body shape to unavailable', async () => {
   const r = await fetchDeepSeekLimits({}, {
     env: { DEEPSEEK_API_KEY: 'sk-x' },
