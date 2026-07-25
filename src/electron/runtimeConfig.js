@@ -86,7 +86,6 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
     claudeWebCookie: settings.claudeWebCookie
       || env.CLAUDE_WEB_COOKIE
-      || env.TOKEN_MONITOR_CLAUDE_WEB_COOKIE
       || '',
     opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},

@@ -57,15 +57,8 @@ test('Claude Web cookie accepts a full header or a bare sessionKey value', () =>
     'sessionKey=sk-ant-sid01-example'
   );
   assert.equal(
-    claudeWebCookie({
-      CLAUDE_WEB_COOKIE: 'sessionKey=from-env',
-      TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=legacy-env'
-    }),
+    claudeWebCookie({ CLAUDE_WEB_COOKIE: 'sessionKey=from-env' }),
     'sessionKey=from-env'
-  );
-  assert.equal(
-    claudeWebCookie({ TOKEN_MONITOR_CLAUDE_WEB_COOKIE: 'sessionKey=legacy-env' }),
-    'sessionKey=legacy-env'
   );
 });
 

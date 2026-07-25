@@ -140,11 +140,7 @@ function normalizeClaudeWebCookie(value) {
 function claudeWebCookie(env = process.env, options = {}) {
   const explicit = normalizeClaudeWebCookie(options.claudeWebCookie);
   if (explicit) return explicit;
-  for (const name of ['CLAUDE_WEB_COOKIE', 'TOKEN_MONITOR_CLAUDE_WEB_COOKIE']) {
-    const cookie = normalizeClaudeWebCookie(env[name]);
-    if (cookie) return cookie;
-  }
-  return '';
+  return normalizeClaudeWebCookie(env.CLAUDE_WEB_COOKIE);
 }
 
 async function readJsonFile(filePath, deps) {
