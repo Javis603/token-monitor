@@ -103,6 +103,9 @@ test('listCodexWorkspaces composes caller cancellation with its timeout', async 
 });
 
 test('listCodexWorkspaces still times out when a caller signal is supplied', async () => {
+  // AbortSignal.timeout() intentionally uses an unref'ed timer in Node 22.
+  // Keep this test alive long enough to observe that timeout deterministically.
+  const keepAlive = setTimeout(() => {}, 100);
   const pending = listCodexWorkspaces({
     tokens: { access_token: 'access' }
   }, {
@@ -113,7 +116,11 @@ test('listCodexWorkspaces still times out when a caller signal is supplied', asy
     })
   });
 
-  await assert.rejects(pending, { name: 'TimeoutError' });
+  try {
+    await assert.rejects(pending, { name: 'TimeoutError' });
+  } finally {
+    clearTimeout(keepAlive);
+  }
 });
 
 test('listCodexWorkspaces returns no workspaces without OAuth credentials', async () => {
