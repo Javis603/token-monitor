@@ -24,13 +24,22 @@
     return String(account?.workspaceLabel || account?.accountName || '').trim();
   }
 
-  function codexAccountDisplayLabel(account, accounts = [], options = {}) {
+  function codexAccountStableId(account) {
+    const raw = String(
+      account?.accountKey
+      || account?.workspaceAccountId
+      || account?.providerAccountId
+      || account?.id
+      || ''
+    ).trim().replace(/^sha256:/i, '');
+    return raw.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  }
+
+  function codexAccountBaseDisplayLabel(account, peers, maskEmail) {
     const email = codexAccountEmail(account);
     const workspace = codexAccountWorkspace(account);
     if (!email) return workspace;
 
-    const peers = Array.isArray(accounts) && accounts.length > 0 ? accounts : [account];
-    const maskEmail = options.maskEmail === true;
     const visibleEmail = maskEmail ? maskEmailAddress(email) : email;
     const normalizedEmail = email.toLowerCase();
     const normalizedVisibleEmail = visibleEmail.toLowerCase();
@@ -45,6 +54,33 @@
     return workspace && (duplicateEmail || maskedCollision)
       ? `${visibleEmail} · ${workspace}`
       : visibleEmail;
+  }
+
+  function codexAccountUniqueStableSuffix(account, peers) {
+    const stableId = codexAccountStableId(account);
+    if (!stableId) return '';
+    const peerIds = peers.map(codexAccountStableId);
+    for (let length = Math.min(6, stableId.length); length <= stableId.length; length += 1) {
+      const prefix = stableId.slice(0, length);
+      if (peerIds.filter((candidate) => candidate.slice(0, length) === prefix).length === 1) {
+        return prefix;
+      }
+    }
+    return stableId;
+  }
+
+  function codexAccountDisplayLabel(account, accounts = [], options = {}) {
+    const peers = Array.isArray(accounts) && accounts.length > 0 ? accounts : [account];
+    const maskEmail = options.maskEmail === true;
+    const label = codexAccountBaseDisplayLabel(account, peers, maskEmail);
+    if (!label) return '';
+
+    const collidingPeers = peers.filter(
+      (peer) => codexAccountBaseDisplayLabel(peer, peers, maskEmail).toLowerCase() === label.toLowerCase()
+    );
+    if (collidingPeers.length <= 1) return label;
+    const stableSuffix = codexAccountUniqueStableSuffix(account, collidingPeers);
+    return stableSuffix ? `${label} · #${stableSuffix}` : label;
   }
 
   function codexAccountMatchesProvider(account, provider) {

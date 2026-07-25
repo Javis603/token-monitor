@@ -58,6 +58,27 @@ test('Codex account labels add workspace context only when identity labels colli
     codexAccountDisplayLabel({ accountName: 'Workspace without email' }, unique),
     'Workspace without email'
   );
+
+  const duplicateWorkspaceNames = [
+    {
+      accountEmail: 'member@example.com',
+      accountName: 'Acme Team',
+      accountKey: 'sha256:abcdef123456'
+    },
+    {
+      accountEmail: 'member@example.com',
+      accountName: 'Acme Team',
+      accountKey: 'sha256:abcdef654321'
+    }
+  ];
+  assert.equal(
+    codexAccountDisplayLabel(duplicateWorkspaceNames[0], duplicateWorkspaceNames),
+    'member@example.com · Acme Team · #abcdef1'
+  );
+  assert.equal(
+    codexAccountDisplayLabel(duplicateWorkspaceNames[1], duplicateWorkspaceNames),
+    'member@example.com · Acme Team · #abcdef6'
+  );
 });
 
 test('Codex account identity matches by key or normalized email fields', () => {

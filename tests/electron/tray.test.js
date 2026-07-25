@@ -234,6 +234,32 @@ test('tray Codex account labels keep unique emails compact and disambiguate dupl
     'member@example.com · Personal',
     'member@example.com · Team'
   ]);
+
+  const duplicateWorkspaceNames = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        {
+          id: 'team-one',
+          email: 'member@example.com',
+          workspaceLabel: 'Acme Team',
+          accountKey: 'sha256:abcdef123456'
+        },
+        {
+          id: 'team-two',
+          email: 'member@example.com',
+          workspaceLabel: 'Acme Team',
+          accountKey: 'sha256:abcdef654321'
+        }
+      ],
+      activeCodexAccountId: 'team-one'
+    }
+  });
+  assert.deepEqual(duplicateWorkspaceNames[2].submenu.map((item) => item.label), [
+    'member@example.com · Acme Team · #abcdef1',
+    'member@example.com · Acme Team · #abcdef6'
+  ]);
 });
 
 test('tray context menu hides Codex switching until two accounts are enabled', () => {
