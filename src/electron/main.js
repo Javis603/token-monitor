@@ -547,6 +547,7 @@ let codexLoginController = null;
 let codexLoginFlowId = '';
 let codexLoginCanCancel = false;
 let codexWorkspaceSelection = null;
+let codexWorkspaceLabelHydrationPromise = null;
 let copilotLoginController = null;
 let copilotLoginFlowId = '';
 
@@ -601,6 +602,61 @@ function hydrateCodexManagedAccounts(value) {
     }
   });
   return normalizeCodexManagedAccounts(accounts);
+}
+
+function hydrateCodexManagedWorkspaceLabels() {
+  if (codexWorkspaceLabelHydrationPromise) return codexWorkspaceLabelHydrationPromise;
+  const candidates = normalizeCodexManagedAccounts(settings?.codexManagedAccounts)
+    .filter((account) => account.workspaceAccountId && !account.workspaceLabel);
+  if (candidates.length === 0) return Promise.resolve(false);
+
+  const task = Promise.all(candidates.map(async (account) => {
+    try {
+      const auth = JSON.parse(readRegularFileNoFollow(account.authPath, {
+        fs,
+        description: 'Managed Codex auth',
+        encoding: 'utf8'
+      }));
+      const workspaces = await listCodexWorkspaces(auth, { env: process.env });
+      const workspace = workspaces.find((entry) => entry.id === account.workspaceAccountId);
+      return workspace?.label
+        ? { id: account.id, workspaceAccountId: account.workspaceAccountId, label: workspace.label }
+        : null;
+    } catch (_) {
+      return null;
+    }
+  })).then((results) => {
+    const labels = new Map(
+      results.filter(Boolean).map((result) => [result.id, result])
+    );
+    if (labels.size === 0) return false;
+    let changed = false;
+    const accounts = normalizeCodexManagedAccounts(settings?.codexManagedAccounts).map((account) => {
+      const resolved = labels.get(account.id);
+      if (
+        !resolved
+        || account.workspaceLabel
+        || account.workspaceAccountId !== resolved.workspaceAccountId
+      ) return account;
+      changed = true;
+      return {
+        ...account,
+        workspaceLabel: resolved.label,
+        updatedAt: new Date().toISOString()
+      };
+    });
+    if (!changed) return false;
+    settings.codexManagedAccounts = accounts;
+    saveSettings();
+    pushSettingsToRenderer();
+    void queueLimitInvalidation({ provider: 'codex' }, 'workspace-label-hydrated');
+    return true;
+  });
+
+  codexWorkspaceLabelHydrationPromise = task.finally(() => {
+    codexWorkspaceLabelHydrationPromise = null;
+  });
+  return codexWorkspaceLabelHydrationPromise;
 }
 
 function codexAccountsForRenderer() {
@@ -3940,6 +3996,7 @@ app.whenReady().then(() => {
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
   startMode();
+  void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
   applyEffectiveRates();                 // use cache/defaults immediately, avoid first-paint gap

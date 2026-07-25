@@ -118,8 +118,10 @@ test('Codex managed login selects and persists a workspace before account commit
   assert.match(resolver, /options\.selectWorkspace/);
   assert.match(resolver, /authWithSelectedCodexWorkspace/);
   assert.match(resolver, /writeCodexAuthFile/);
+  const workspaceIndex = addAccount.indexOf('resolveCodexWorkspaceAfterLogin');
+  const matchingIndex = addAccount.indexOf('findExistingCodexAccount');
   assert.ok(
-    addAccount.indexOf('resolveCodexWorkspaceAfterLogin') < addAccount.indexOf('findExistingCodexAccount'),
+    workspaceIndex !== -1 && matchingIndex !== -1 && workspaceIndex < matchingIndex,
     'workspace identity must be resolved before account matching'
   );
   assert.match(main, /ipcMain\.handle\('codex:selectWorkspace'/);
@@ -128,6 +130,25 @@ test('Codex managed login selects and persists a workspace before account commit
   assert.match(html, /id="codexWorkspaceSelect"/);
   assert.match(app, /status\.phase === 'workspaceSelection'/);
   assert.match(app, /window\.tokenMonitor\.codex\.selectWorkspace\(\{ flowId, workspaceId \}\)/);
+});
+
+test('Codex startup hydrates missing managed workspace labels without blocking startup', () => {
+  const main = read(path.join(electronDir, 'main.js'));
+  const hydration = main.slice(
+    main.indexOf('function hydrateCodexManagedWorkspaceLabels'),
+    main.indexOf('function codexAccountsForRenderer')
+  );
+  const ready = main.slice(
+    main.indexOf('app.whenReady().then'),
+    main.indexOf("ipcMain.handle('settings:get'")
+  );
+
+  assert.match(hydration, /filter\(\(account\) => account\.workspaceAccountId && !account\.workspaceLabel\)/);
+  assert.match(hydration, /listCodexWorkspaces\(auth, \{ env: process\.env \}\)/);
+  assert.match(hydration, /workspaceAccountId !== resolved\.workspaceAccountId/);
+  assert.match(hydration, /workspaceLabel: resolved\.label/);
+  assert.match(hydration, /queueLimitInvalidation\(\{ provider: 'codex' \}, 'workspace-label-hydrated'\)/);
+  assert.match(ready, /void hydrateCodexManagedWorkspaceLabels\(\);/);
 });
 
 test('Codex login renderer ignores stale flows and exposes explicit URL actions', () => {

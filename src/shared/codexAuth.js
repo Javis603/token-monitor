@@ -48,7 +48,7 @@ function codexManagedAccountMatchesIdentity(account, identity) {
   );
   if (accountWorkspaceId && identityWorkspaceId) {
     return accountWorkspaceId === identityWorkspaceId
-      && Boolean(accountEmail ? accountEmail === identityEmail : identityEmail);
+      && Boolean(accountEmail && identityEmail && accountEmail === identityEmail);
   }
 
   const accountKey = String(account.accountKey || '').trim();
@@ -83,14 +83,20 @@ function upgradeCodexManagedAccountIdentity(account, identity) {
     return account;
   }
 
+  const accountKey = String(account.accountKey || '').trim();
   const identityKey = String(identity.accountKey || '').trim();
-  if (!identityKey) return account;
+  const resolvedEmail = identityEmail || accountEmail;
+  const resolvedWorkspaceId = identityWorkspaceId || accountWorkspaceId;
+  const resolvedKey = resolvedEmail && resolvedWorkspaceId
+    ? codexAccountKey(resolvedEmail, resolvedWorkspaceId)
+    : accountKey || identityKey;
+  if (!resolvedKey) return account;
   return {
     ...account,
-    email: identityEmail || accountEmail,
-    accountKey: identityKey,
+    email: resolvedEmail,
+    accountKey: resolvedKey,
     accountLabel: String(identity.accountLabel || account.accountLabel || '').trim(),
-    workspaceAccountId: identityWorkspaceId || accountWorkspaceId
+    workspaceAccountId: resolvedWorkspaceId
   };
 }
 

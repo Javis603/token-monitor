@@ -51,7 +51,15 @@ async function listCodexWorkspaces(auth, deps = {}) {
   const credentials = codexOAuthCredentials(auth);
   if (!credentials) return [];
   const fetchFn = createOutboundFetch(deps.env || process.env, deps);
-  const signal = deps.signal || AbortSignal.timeout(Number(deps.timeoutMs || DEFAULT_TIMEOUT_MS));
+  const timeoutMs = Number(deps.timeoutMs || DEFAULT_TIMEOUT_MS);
+  const timeoutSignal = AbortSignal.timeout(
+    Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? Math.trunc(timeoutMs)
+      : DEFAULT_TIMEOUT_MS
+  );
+  const signal = deps.signal
+    ? AbortSignal.any([deps.signal, timeoutSignal])
+    : timeoutSignal;
   const headers = {
     Authorization: `Bearer ${credentials.accessToken}`,
     Accept: 'application/json',

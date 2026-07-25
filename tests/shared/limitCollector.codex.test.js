@@ -5,7 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { codexCommandCandidates, codexCommandSourceDetail, createLimitsCollector, fetchCodexLimits, mapCodexRateLimitsToProvider } = require('../../src/shared/limitCollector');
-const { hashAccountKey } = require('../../src/shared/codexAuth');
+const { codexAccountKey, hashAccountKey } = require('../../src/shared/codexAuth');
 
 function dirent(name, directory = true) {
   return {
@@ -408,8 +408,87 @@ test('fetchCodexLimits preserves same-email workspaces by account key', async ()
   });
 
   assert.equal(providers.length, 2);
-  assert.deepEqual(providers.map((provider) => provider.accountKey), ['sha256:personal', 'sha256:team']);
+  assert.deepEqual(providers.map((provider) => provider.accountKey), [
+    codexAccountKey('member@example.com', 'workspace-personal'),
+    codexAccountKey('member@example.com', 'workspace-team')
+  ]);
   assert.deepEqual(providers.map((provider) => provider.accountName), ['Personal', 'Team']);
+});
+
+test('fetchCodexLimits keeps same-workspace members distinct when auth omits email', async () => {
+  const idToken = makeIdToken({ chatgpt_plan_type: 'team' });
+  const accounts = [
+    {
+      id: 'one',
+      email: 'one@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/one',
+      authPath: '/tmp/token-monitor-codex/one/auth.json'
+    },
+    {
+      id: 'two',
+      email: 'two@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/two',
+      authPath: '/tmp/token-monitor-codex/two/auth.json'
+    }
+  ];
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: accounts
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: { account_id: 'workspace-team', id_token: idToken }
+    }),
+    readCodexRpc: async (deps) => codexPayload(
+      deps.env.CODEX_HOME.endsWith('/one') ? 'one@example.com' : 'two@example.com'
+    )
+  });
+
+  assert.equal(providers.length, 2);
+  assert.deepEqual(providers.map((provider) => provider.accountKey), [
+    codexAccountKey('one@example.com', 'workspace-team'),
+    codexAccountKey('two@example.com', 'workspace-team')
+  ]);
+});
+
+test('fetchCodexLimits error rows keep same-workspace members distinct', async () => {
+  const idToken = makeIdToken({ chatgpt_plan_type: 'team' });
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [
+      {
+        id: 'one',
+        email: 'one@example.com',
+        workspaceAccountId: 'workspace-team',
+        homePath: '/tmp/token-monitor-codex/one'
+      },
+      {
+        id: 'two',
+        email: 'two@example.com',
+        workspaceAccountId: 'workspace-team',
+        homePath: '/tmp/token-monitor-codex/two'
+      }
+    ]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: { account_id: 'workspace-team', id_token: idToken }
+    }),
+    readCodexRpc: async () => {
+      throw Object.assign(new Error('temporary failure'), { status: 'unavailable' });
+    }
+  });
+
+  assert.equal(providers.length, 2);
+  assert.deepEqual(providers.map((provider) => provider.accountKey), [
+    codexAccountKey('one@example.com', 'workspace-team'),
+    codexAccountKey('two@example.com', 'workspace-team')
+  ]);
+  assert.deepEqual(providers.map((provider) => provider.status), ['unavailable', 'unavailable']);
 });
 
 test('fetchCodexLimits can refresh only the requested managed Codex account', async () => {
@@ -703,6 +782,36 @@ test('fetchCodexLimits does not show the live account twice when it is also mana
   assert.equal(providers.length, 1);
   assert.equal(providers[0].accountEmail, 'a@example.com');
   assert.equal(providers[0].sourceDetail, 'app');
+});
+
+test('fetchCodexLimits carries the managed workspace label into the live account', async () => {
+  const idToken = makeIdToken({ email: 'member@example.com' });
+  const providers = await fetchCodexLimits({
+    codexManagedAccounts: [
+      {
+        id: 'team',
+        email: 'member@example.com',
+        workspaceAccountId: 'workspace-team',
+        workspaceLabel: 'Acme Team',
+        homePath: '/tmp/token-monitor-codex/team'
+      }
+    ]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    codexAuthPath: '/fake/.codex/auth.json',
+    readFileSync: () => JSON.stringify({
+      tokens: { account_id: 'workspace-team', id_token: idToken }
+    }),
+    readCodexRpc: async (deps) => codexPayload(
+      'member@example.com',
+      deps.env.CODEX_HOME ? undefined : 'app'
+    )
+  });
+
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].sourceDetail, 'app');
+  assert.equal(providers[0].accountName, 'Acme Team');
 });
 
 test('fetchCodexLimits dedups the live account against the same managed account by account id (no email needed)', async () => {

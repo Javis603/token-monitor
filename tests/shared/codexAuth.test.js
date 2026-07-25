@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  codexAccountKey,
   codexManagedAccountMatchesIdentity,
   decodeJwtPayload,
   codexAuthIdentity,
@@ -140,6 +141,25 @@ test('codexManagedAccountMatchesIdentity keeps same-email workspaces distinct', 
   }, team), true);
 });
 
+test('codexManagedAccountMatchesIdentity rejects incomplete same-workspace identities', () => {
+  const identity = codexAuthIdentity({
+    tokens: { account_id: 'workspace-team', id_token: jwt({ email: 'member@example.com' }) }
+  });
+  assert.equal(codexManagedAccountMatchesIdentity({
+    email: '',
+    workspaceAccountId: 'workspace-team',
+    accountKey: hashAccountKey('workspace-team')
+  }, identity), false);
+  assert.equal(codexManagedAccountMatchesIdentity({
+    email: 'member@example.com',
+    workspaceAccountId: 'workspace-team',
+    accountKey: identity.accountKey
+  }, {
+    ...identity,
+    email: ''
+  }), false);
+});
+
 test('codexManagedAccountMatchesIdentity upgrades legacy workspace-only keys safely', () => {
   const identity = codexAuthIdentity({
     tokens: { account_id: 'workspace-team', id_token: jwt({ email: 'member@example.com' }) }
@@ -178,6 +198,23 @@ test('upgradeCodexManagedAccountIdentity migrates legacy keys from the account a
   assert.equal(upgraded.accountLabel, 'team');
   assert.equal(upgraded.workspaceAccountId, 'workspace-team');
   assert.equal(upgraded.workspaceLabel, 'Acme Team');
+});
+
+test('upgradeCodexManagedAccountIdentity preserves stored email in a composite workspace key', () => {
+  const stored = {
+    id: 'member',
+    email: 'member@example.com',
+    accountKey: codexAccountKey('member@example.com', 'workspace-team'),
+    workspaceAccountId: 'workspace-team'
+  };
+  const identityWithoutEmail = codexAuthIdentity({
+    tokens: { account_id: 'workspace-team' }
+  });
+  const upgraded = upgradeCodexManagedAccountIdentity(stored, identityWithoutEmail);
+
+  assert.equal(upgraded.email, 'member@example.com');
+  assert.equal(upgraded.workspaceAccountId, 'workspace-team');
+  assert.equal(upgraded.accountKey, codexAccountKey('member@example.com', 'workspace-team'));
 });
 
 test('upgradeCodexManagedAccountIdentity fails closed on conflicting stored identity', () => {

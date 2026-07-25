@@ -55,7 +55,7 @@ test('listCodexWorkspaces uses the selected account header without exposing cred
       account_id: 'workspace-current'
     }
   }, {
-    signal: {},
+    signal: new AbortController().signal,
     fetch: async (url, options) => {
       request = { url, options };
       return {
@@ -79,6 +79,41 @@ test('listCodexWorkspaces uses the selected account header without exposing cred
     { id: 'workspace-current', label: 'Current Team' },
     { id: 'workspace-other', label: 'Other Team' }
   ]);
+});
+
+test('listCodexWorkspaces composes caller cancellation with its timeout', async () => {
+  const caller = new AbortController();
+  let requestSignal = null;
+  const pending = listCodexWorkspaces({
+    tokens: { access_token: 'access' }
+  }, {
+    signal: caller.signal,
+    timeoutMs: 10_000,
+    fetch: async (_url, options) => {
+      requestSignal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      });
+    }
+  });
+
+  assert.notEqual(requestSignal, caller.signal);
+  caller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+});
+
+test('listCodexWorkspaces still times out when a caller signal is supplied', async () => {
+  const pending = listCodexWorkspaces({
+    tokens: { access_token: 'access' }
+  }, {
+    signal: new AbortController().signal,
+    timeoutMs: 5,
+    fetch: async (_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    })
+  });
+
+  await assert.rejects(pending, { name: 'TimeoutError' });
 });
 
 test('listCodexWorkspaces returns no workspaces without OAuth credentials', async () => {

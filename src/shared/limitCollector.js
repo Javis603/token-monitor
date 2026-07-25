@@ -21,7 +21,7 @@ const opencodeWeb = require('./opencodeWeb');
 const openrouterLimits = require('./openrouterLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
-const { codexAuthIdentity } = require('./codexAuth');
+const { codexAccountKey, codexAuthIdentity } = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
 const mimoLimits = require('./mimoLimits');
@@ -2064,6 +2064,31 @@ function codexAccountKeyFromSeed(seed) {
   return raw.startsWith('sha256:') ? raw : hashKey('codex', raw || 'account');
 }
 
+function resolvedCodexAccountKey(email, workspaceAccountId, fallbackSeed) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedWorkspaceAccountId = String(workspaceAccountId || '').trim().toLowerCase();
+  if (normalizedEmail && normalizedWorkspaceAccountId) {
+    return codexAccountKey(normalizedEmail, normalizedWorkspaceAccountId);
+  }
+  return codexAccountKeyFromSeed(fallbackSeed || normalizedEmail || normalizedWorkspaceAccountId);
+}
+
+function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') {
+  const email = String(resolvedEmail || authIdentity.email || account.email || '').trim().toLowerCase();
+  const workspaceAccountId = String(
+    authIdentity.workspaceAccountId
+    || authIdentity.providerAccountId
+    || account.workspaceAccountId
+    || account.providerAccountId
+    || ''
+  ).trim().toLowerCase();
+  return resolvedCodexAccountKey(
+    email,
+    workspaceAccountId,
+    account.accountKey || authIdentity.accountKey || email || account.id || account.homePath
+  );
+}
+
 async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const env = {
@@ -2078,13 +2103,11 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
   };
   const reader = deps.readCodexRpc || readCodexRpc;
   const authIdentity = readLiveCodexIdentity(accountDeps);
-  const accountKeySeed = authIdentity.accountKey || account.accountKey || account.email || account.id || account.homePath;
   try {
     const payload = await withCodexOAuthResetCredits(await reader(accountDeps), accountDeps);
     const email = authIdentity.email || payload.account?.email || account.email;
-    const identity = authIdentity.accountKey || account.accountKey || email || account.id || account.homePath;
     return mapCodexRateLimitsToProvider(payload, {
-      accountKey: codexAccountKeyFromSeed(identity),
+      accountKey: managedCodexAccountKey(account, authIdentity, email),
       accountEmail: email,
       accountLabel: account.accountLabel || codexAccountLabel(payload),
       accountName: account.workspaceLabel,
@@ -2093,10 +2116,11 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
       sourceDetail: 'managed'
     });
   } catch (error) {
+    const email = authIdentity.email || account.email;
     return normalizeLimitProvider({
       provider: 'codex',
-      accountKey: codexAccountKeyFromSeed(accountKeySeed),
-      accountEmail: account.email,
+      accountKey: managedCodexAccountKey(account, authIdentity, email),
+      accountEmail: email,
       accountLabel: account.accountLabel,
       accountName: account.workspaceLabel,
       source: 'rpc',
@@ -2122,16 +2146,25 @@ function readLiveCodexIdentity(deps = {}) {
   }
 }
 
-async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now()) {
+async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now(), managedAccounts = []) {
   const reader = deps.readCodexRpc || readCodexRpc;
   const payload = await withCodexOAuthResetCredits(await reader(deps), deps);
   const authIdentity = readLiveCodexIdentity(deps);
   const email = authIdentity.email || payload.account?.email || '';
   const fallbackSeed = payload.account?.email || `${payload.account?.type || 'account'}:${payload.account?.planType || ''}:${deps.codexAuthPath || codexAuthPath(deps.env || process.env)}`;
+  const accountKey = resolvedCodexAccountKey(
+    email,
+    authIdentity.workspaceAccountId || authIdentity.providerAccountId,
+    authIdentity.accountKey || fallbackSeed
+  );
+  const matchingManagedAccount = managedAccounts.find(
+    (account) => managedCodexAccountKey(account, {}, account.email) === accountKey
+  );
   return mapCodexRateLimitsToProvider(payload, {
-    accountKey: authIdentity.accountKey || hashKey('codex', fallbackSeed),
+    accountKey,
     accountEmail: email,
     accountLabel: codexAccountLabel(payload),
+    accountName: matchingManagedAccount?.workspaceLabel || '',
     updatedAt: nowIso(nowMs),
     source: 'rpc',
     sourceDetail: payload.sourceDetail
@@ -2148,7 +2181,7 @@ async function fetchCodexLimits(options = {}, deps = {}) {
     .filter((account) => {
       if (!scope) return true;
       if (scope.sourceDetail && scope.sourceDetail !== 'managed') return false;
-      const accountKey = codexAccountKeyFromSeed(account.accountKey || account.email || account.id || account.homePath);
+      const accountKey = managedCodexAccountKey(account, {}, account.email);
       if (scope.accountKey) return accountKey === scope.accountKey;
       if (scope.accountEmail) return account.email === scope.accountEmail;
       if (scope.accountLabel) return account.accountLabel === scope.accountLabel;
@@ -2185,7 +2218,7 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   // only live account just drops out, leaving the managed accounts.
   if (includeLiveAccount) {
     try {
-      const live = await fetchLiveCodexAccount(deps, nowMs);
+      const live = await fetchLiveCodexAccount(deps, nowMs, managedAccounts);
       providers.push(live);
       markSeen(live);
     } catch (_) {}
