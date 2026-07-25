@@ -7,7 +7,10 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
-const { maskEmailAddress } = require('../../src/electron/renderer/accountIdentity');
+const {
+  codexAccountDisplayLabel,
+  maskEmailAddress
+} = require('../../src/electron/renderer/accountIdentity');
 
 function readRendererFile(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
@@ -329,7 +332,7 @@ test('Codex account email masking is an opt-in display-only setting', () => {
       app,
       ['codexAccountTitle'],
       "codexAccountTitle({ accountEmail: 'primary.user@example.com' }, 0)",
-      { accountIdentityApi: { maskEmailAddress }, state: { settings: { maskLimitAccountEmails: false } } }
+      { accountIdentityApi: { codexAccountDisplayLabel }, state: { settings: { maskLimitAccountEmails: false } } }
     ),
     'primary.user@example.com'
   );
@@ -338,7 +341,7 @@ test('Codex account email masking is an opt-in display-only setting', () => {
       app,
       ['codexAccountTitle'],
       "codexAccountTitle({ accountEmail: 'primary.user@example.com' }, 0)",
-      { accountIdentityApi: { maskEmailAddress }, state: { settings: { maskLimitAccountEmails: true } } }
+      { accountIdentityApi: { codexAccountDisplayLabel }, state: { settings: { maskLimitAccountEmails: true } } }
     ),
     'p***r@example.com'
   );

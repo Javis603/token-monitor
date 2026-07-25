@@ -3026,14 +3026,11 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
   return row;
 }
 
-function codexAccountTitle(provider, index) {
-  const email = String(provider?.accountEmail || '').trim();
-  const workspace = String(provider?.accountName || '').trim();
-  if (email) {
-    const visibleEmail = state.settings?.maskLimitAccountEmails ? accountIdentityApi.maskEmailAddress(email) : email;
-    return workspace ? `${visibleEmail} · ${workspace}` : visibleEmail;
-  }
-  if (workspace) return workspace;
+function codexAccountTitle(provider, index, providers = [provider]) {
+  const label = accountIdentityApi.codexAccountDisplayLabel(provider, providers, {
+    maskEmail: state.settings?.maskLimitAccountEmails
+  });
+  if (label) return label;
   // Never fall back to the plan label here — "Plus" as a title reads like an
   // account name. The plan still shows on the right via limitProviderPlan().
   return `Account ${index + 1}`;
@@ -3050,7 +3047,7 @@ function renderCodexAccountGroup(label, providers, color) {
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
   providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('codex', codexAccountTitle(provider, index), provider, color, {
+    accountList.append(renderLimitProviderRow('codex', codexAccountTitle(provider, index, providers), provider, color, {
       accountRow: true,
       accountTitle: true,
       allowSystemSwitch: true,
@@ -3923,8 +3920,8 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   return { module, body };
 }
 
-function homeLimitAccountTitle(id, provider, index) {
-  if (id === 'codex') return codexAccountTitle(provider, index);
+function homeLimitAccountTitle(id, provider, index, providerEntries = [provider]) {
+  if (id === 'codex') return codexAccountTitle(provider, index, providerEntries);
   if (id === 'mimo') return mimoAccountTitle(provider, index);
   if (id === 'opencode') return opencodeAccountTitle(provider, index);
   return String(provider?.accountEmail || provider?.accountName || '').trim() || `Account ${index + 1}`;
@@ -3951,7 +3948,7 @@ function homeLimitRows() {
       const option = providerOptions.find((entry) => entry.id === id);
       const providerTitle = option?.label || id;
       if (providerEntries.length > 1) {
-        const accountTitle = homeLimitAccountTitle(id, provider, index);
+        const accountTitle = homeLimitAccountTitle(id, provider, index, providerEntries);
         return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
           ? `${providerTitle} · ${accountTitle}`
           : accountTitle;

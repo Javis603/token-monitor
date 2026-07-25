@@ -56,7 +56,7 @@ test('Home multi-account provider names are opt-in and persist through the setti
   assert.match(main, /merged\.showHomeLimitProviderNames = parseBoolean\(merged\.showHomeLimitProviderNames, false\)/);
   assert.match(main, /showHomeLimitProviderNames:\s*parseBoolean\(patch\.showHomeLimitProviderNames \?\? settings\.showHomeLimitProviderNames, false\)/);
   assert.match(app, /providerEntries\.length > 1/);
-  assert.match(app, /homeLimitAccountTitle\(id, provider, index\)/);
+  assert.match(app, /homeLimitAccountTitle\(id, provider, index, providerEntries\)/);
   assert.match(app, /state\.settings\?\.showHomeLimitProviderNames === true \|\| state\.settings\?\.showToolIcons === false/);
   assert.match(app, /`\$\{providerTitle\} · \$\{accountTitle\}`/);
   assert.match(app, /const providerNamesRequired = state\.settings\?\.showToolIcons === false/);

@@ -36,8 +36,10 @@ const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollam
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
   codexAuthIdentity,
+  codexManagedAccountIdentityKey,
   codexManagedAccountMatchesIdentity,
   hashAccountKey,
+  preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
 } = require('../shared/codexAuth');
 const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
@@ -560,15 +562,18 @@ function normalizeCodexManagedAccounts(value) {
     const id = String(account.id || '').trim();
     const homePath = String(account.homePath || '').trim();
     if (!id || !homePath) continue;
-    const accountKey = String(account.accountKey || '').trim();
     const email = String(account.email || '').trim().toLowerCase();
     const workspaceAccountId = normalizeWorkspaceId(
       account.workspaceAccountId
       || account.providerAccountId
     );
-    const dedupe = workspaceAccountId && email
-      ? `workspace:${workspaceAccountId}:email:${email}`
-      : accountKey || email || id;
+    const accountKey = String(account.accountKey || '').trim();
+    const dedupe = codexManagedAccountIdentityKey({
+      id,
+      accountKey,
+      email,
+      workspaceAccountId
+    });
     if (seen.has(dedupe)) continue;
     seen.add(dedupe);
     accounts.push({
@@ -589,7 +594,8 @@ function normalizeCodexManagedAccounts(value) {
 }
 
 function hydrateCodexManagedAccounts(value) {
-  const accounts = normalizeCodexManagedAccounts(value).map((account) => {
+  const storedAccounts = normalizeCodexManagedAccounts(value);
+  const hydratedAccounts = storedAccounts.map((account) => {
     try {
       const auth = JSON.parse(readRegularFileNoFollow(account.authPath, {
         fs,
@@ -601,7 +607,11 @@ function hydrateCodexManagedAccounts(value) {
       return account;
     }
   });
-  return normalizeCodexManagedAccounts(accounts);
+  const resolvedAccounts = preserveCodexManagedHydrationCollisions(storedAccounts, hydratedAccounts);
+  if (resolvedAccounts.some((account, index) => account !== hydratedAccounts[index])) {
+    console.warn('[codex] Managed account identity hydration found a collision; preserved stored identities.');
+  }
+  return resolvedAccounts;
 }
 
 function hydrateCodexManagedWorkspaceLabels() {

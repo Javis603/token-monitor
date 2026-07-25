@@ -5,10 +5,12 @@ const test = require('node:test');
 
 const {
   codexAccountKey,
+  codexManagedAccountIdentityKey,
   codexManagedAccountMatchesIdentity,
   decodeJwtPayload,
   codexAuthIdentity,
   hashAccountKey,
+  preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
 } = require('../../src/shared/codexAuth');
 
@@ -236,4 +238,64 @@ test('upgradeCodexManagedAccountIdentity fails closed on conflicting stored iden
 
   assert.equal(upgradeCodexManagedAccountIdentity(wrongEmail, identity), wrongEmail);
   assert.equal(upgradeCodexManagedAccountIdentity(wrongWorkspace, identity), wrongWorkspace);
+});
+
+test('managed Codex hydration preserves legacy identities when upgrades collide', () => {
+  const stored = [
+    {
+      id: 'legacy-personal',
+      email: 'member@example.com',
+      accountKey: 'sha256:legacy-personal'
+    },
+    {
+      id: 'legacy-team',
+      email: 'member@example.com',
+      accountKey: 'sha256:legacy-team'
+    },
+    {
+      id: 'other',
+      email: 'other@example.com',
+      accountKey: 'sha256:other'
+    }
+  ];
+  const hydrated = [
+    {
+      ...stored[0],
+      workspaceAccountId: 'workspace-personal',
+      accountKey: codexAccountKey('member@example.com', 'workspace-personal')
+    },
+    {
+      ...stored[1],
+      workspaceAccountId: 'workspace-personal',
+      accountKey: codexAccountKey('member@example.com', 'workspace-personal')
+    },
+    {
+      ...stored[2],
+      workspaceAccountId: 'workspace-other',
+      accountKey: codexAccountKey('other@example.com', 'workspace-other')
+    }
+  ];
+
+  const resolved = preserveCodexManagedHydrationCollisions(stored, hydrated);
+  assert.equal(resolved[0], stored[0]);
+  assert.equal(resolved[1], stored[1]);
+  assert.equal(resolved[2], hydrated[2]);
+  assert.equal(new Set(resolved.map(codexManagedAccountIdentityKey)).size, stored.length);
+});
+
+test('managed Codex hydration resolves cascading collisions without dropping accounts', () => {
+  const stored = [
+    { id: 'a', accountKey: 'a' },
+    { id: 'b', accountKey: 'b' },
+    { id: 'c', accountKey: 'c' }
+  ];
+  const hydrated = [
+    { ...stored[0], accountKey: 'x' },
+    { ...stored[1], accountKey: 'x' },
+    { ...stored[2], accountKey: 'a' }
+  ];
+
+  const resolved = preserveCodexManagedHydrationCollisions(stored, hydrated);
+  assert.deepEqual(resolved, stored);
+  assert.equal(new Set(resolved.map(codexManagedAccountIdentityKey)).size, stored.length);
 });

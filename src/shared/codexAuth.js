@@ -35,6 +35,48 @@ function managedAccountWorkspaceId(account) {
   );
 }
 
+function codexManagedAccountIdentityKey(account) {
+  const id = String(account?.id || '').trim();
+  const accountKey = String(account?.accountKey || '').trim();
+  const email = normalizeEmail(account?.email || account?.accountEmail);
+  const workspaceAccountId = managedAccountWorkspaceId(account);
+  return workspaceAccountId && email
+    ? `workspace:${workspaceAccountId}:email:${email}`
+    : accountKey || email || id;
+}
+
+function preserveCodexManagedHydrationCollisions(storedAccounts, hydratedAccounts) {
+  if (!Array.isArray(storedAccounts) || !Array.isArray(hydratedAccounts)) return [];
+  if (storedAccounts.length !== hydratedAccounts.length) return storedAccounts.slice();
+
+  const resolved = hydratedAccounts.slice();
+  for (let pass = 0; pass <= storedAccounts.length; pass += 1) {
+    const indexesByKey = new Map();
+    resolved.forEach((account, index) => {
+      const key = codexManagedAccountIdentityKey(account);
+      const indexes = indexesByKey.get(key) || [];
+      indexes.push(index);
+      indexesByKey.set(key, indexes);
+    });
+    const collisions = Array.from(indexesByKey.values()).filter((indexes) => indexes.length > 1);
+    if (collisions.length === 0) return resolved;
+
+    let reverted = false;
+    for (const indexes of collisions) {
+      for (const index of indexes) {
+        if (resolved[index] === storedAccounts[index]) continue;
+        resolved[index] = storedAccounts[index];
+        reverted = true;
+      }
+    }
+    if (!reverted) break;
+  }
+
+  // Stored accounts were normalized before hydration, so falling back to them
+  // is always safer than returning a set that would be deduped on the next save.
+  return storedAccounts.slice();
+}
+
 function codexManagedAccountMatchesIdentity(account, identity) {
   if (!account || !identity) return false;
   const accountEmail = normalizeEmail(account.email || account.accountEmail);
@@ -153,7 +195,9 @@ function codexAuthIdentity(auth) {
 }
 
 module.exports = {
+  codexManagedAccountIdentityKey,
   codexManagedAccountMatchesIdentity,
+  preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity,
   decodeJwtPayload,
   codexAuthIdentity,

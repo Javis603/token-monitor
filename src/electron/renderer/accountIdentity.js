@@ -16,6 +16,37 @@
     return `${first}***${last}@${domain}`;
   }
 
+  function codexAccountEmail(account) {
+    return String(account?.email || account?.accountEmail || '').trim();
+  }
+
+  function codexAccountWorkspace(account) {
+    return String(account?.workspaceLabel || account?.accountName || '').trim();
+  }
+
+  function codexAccountDisplayLabel(account, accounts = [], options = {}) {
+    const email = codexAccountEmail(account);
+    const workspace = codexAccountWorkspace(account);
+    if (!email) return workspace;
+
+    const peers = Array.isArray(accounts) && accounts.length > 0 ? accounts : [account];
+    const maskEmail = options.maskEmail === true;
+    const visibleEmail = maskEmail ? maskEmailAddress(email) : email;
+    const normalizedEmail = email.toLowerCase();
+    const normalizedVisibleEmail = visibleEmail.toLowerCase();
+    const duplicateEmail = peers.filter(
+      (peer) => codexAccountEmail(peer).toLowerCase() === normalizedEmail
+    ).length > 1;
+    const maskedCollision = maskEmail && peers.filter((peer) => {
+      const peerEmail = codexAccountEmail(peer);
+      return peerEmail && maskEmailAddress(peerEmail).toLowerCase() === normalizedVisibleEmail;
+    }).length > 1;
+
+    return workspace && (duplicateEmail || maskedCollision)
+      ? `${visibleEmail} · ${workspace}`
+      : visibleEmail;
+  }
+
   function codexAccountMatchesProvider(account, provider) {
     if (!account || !provider || provider.provider !== 'codex') return false;
     const accountKey = String(account.accountKey || '').trim();
@@ -52,6 +83,7 @@
   }
 
   return {
+    codexAccountDisplayLabel,
     codexAccountIdForProvider,
     codexAccountMatchesProvider,
     isCodexLiveAccount,

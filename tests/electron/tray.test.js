@@ -184,7 +184,7 @@ test('tray context menu switches between enabled Codex accounts', () => {
       trayMode: true,
       codexAccounts: [
         { id: 'one', email: 'primary.user@example.com', workspaceLabel: 'Personal' },
-        { id: 'two', email: 'secondary.user@example.com', workspaceLabel: 'Team' }
+        { id: 'two', email: 'power@example.com', workspaceLabel: 'Team' }
       ],
       activeCodexAccountId: 'one',
       maskAccountEmails: true
@@ -195,11 +195,45 @@ test('tray context menu switches between enabled Codex accounts', () => {
   assert.equal(template[2].label, 'Codex Account · p***r@example.com · Personal');
   assert.deepEqual(template[2].submenu.map((item) => [item.label, item.checked]), [
     ['p***r@example.com · Personal', true],
-    ['s***r@example.com · Team', false]
+    ['p***r@example.com · Team', false]
   ]);
   template[2].submenu[0].click();
   template[2].submenu[1].click();
   assert.deepEqual(calls, ['two']);
+});
+
+test('tray Codex account labels keep unique emails compact and disambiguate duplicate emails', () => {
+  const unique = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        { id: 'one', email: 'one@example.com', workspaceLabel: 'Personal' },
+        { id: 'two', email: 'two@example.com', workspaceLabel: 'Team' }
+      ],
+      activeCodexAccountId: 'one'
+    }
+  });
+  assert.deepEqual(unique[2].submenu.map((item) => item.label), [
+    'one@example.com',
+    'two@example.com'
+  ]);
+
+  const duplicate = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        { id: 'personal', email: 'member@example.com', workspaceLabel: 'Personal' },
+        { id: 'team', email: 'member@example.com', workspaceLabel: 'Team' }
+      ],
+      activeCodexAccountId: 'personal'
+    }
+  });
+  assert.deepEqual(duplicate[2].submenu.map((item) => item.label), [
+    'member@example.com · Personal',
+    'member@example.com · Team'
+  ]);
 });
 
 test('tray context menu hides Codex switching until two accounts are enabled', () => {
