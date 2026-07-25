@@ -280,6 +280,10 @@ function normalizeRegion(value) {
   return raw.length <= 16 ? raw : '';
 }
 
+function normalizeWorkspaceKind(value) {
+  return String(value || '').trim().toLowerCase() === 'personal' ? 'personal' : '';
+}
+
 function normalizeLimitProvider(input) {
   if (!input || typeof input !== 'object') return null;
   const provider = normalizeProviderId(input.provider);
@@ -307,6 +311,7 @@ function normalizeLimitProvider(input) {
     planLabel: normalizeAccountLabel(input.planLabel),
     accountName: normalizeAccountName(input.accountName ?? input.accountLogin ?? input.login),
     accountEmail: normalizeAccountEmail(input.accountEmail ?? input.email),
+    workspaceKind: normalizeWorkspaceKind(input.workspaceKind),
     status: normalizeStatus(input.status),
     source: normalizeSource(input.source),
     sourceDetail: normalizeSourceDetail(input.sourceDetail ?? input.source_detail),
@@ -547,7 +552,15 @@ function publicLimits(limits) {
   return {
     updatedAt: normalized.updatedAt,
     refreshMs: normalized.refreshMs,
-    providers: normalized.providers.map(({ accountKey, accountEmail, accountName, accountLabel, planLabel, ...provider }) => provider)
+    providers: normalized.providers.map(({
+      accountKey,
+      accountEmail,
+      accountName,
+      accountLabel,
+      planLabel,
+      workspaceKind,
+      ...provider
+    }) => provider)
   };
 }
 

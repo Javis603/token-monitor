@@ -41,6 +41,21 @@ test('Codex account labels add workspace context only when identity labels colli
     'member@example.com · Acme Team'
   );
 
+  const semanticPersonal = [
+    { accountEmail: 'member@example.com', workspaceKind: 'personal' },
+    { accountEmail: 'member@example.com', accountName: 'Acme Team' }
+  ];
+  assert.equal(
+    codexAccountDisplayLabel(semanticPersonal[0], semanticPersonal),
+    'member@example.com · Personal'
+  );
+  assert.equal(
+    codexAccountDisplayLabel(semanticPersonal[0], semanticPersonal, {
+      personalWorkspaceLabel: '個人'
+    }),
+    'member@example.com · 個人'
+  );
+
   const maskedCollision = [
     { accountEmail: 'primary.user@example.com', accountName: 'Personal' },
     { accountEmail: 'power@example.com', accountName: 'Acme Team' }

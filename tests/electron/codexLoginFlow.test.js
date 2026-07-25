@@ -143,10 +143,18 @@ test('Codex startup hydrates missing managed workspace labels without blocking s
     main.indexOf("ipcMain.handle('settings:get'")
   );
 
-  assert.match(hydration, /filter\(\(account\) => account\.workspaceAccountId && !account\.workspaceLabel\)/);
+  assert.match(hydration, /settings\?\.limitsEnabled === false/);
+  assert.match(hydration, /parseLimitProviders\(settings\?\.limitProviders\)\.includes\('codex'\)/);
+  assert.match(hydration, /account\.enabled !== false/);
+  assert.match(hydration, /!account\.workspaceLabel/);
+  assert.match(hydration, /!account\.workspaceKind/);
+  assert.doesNotMatch(hydration, /workspaceLabel === 'Personal'|legacyPersonalLabel/);
+  assert.match(hydration, /CODEX_WORKSPACE_LABEL_HYDRATION_CONCURRENCY/);
+  assert.match(hydration, /mapWithConcurrency/);
   assert.match(hydration, /listCodexWorkspaces\(auth, \{ env: process\.env \}\)/);
   assert.match(hydration, /workspaceAccountId !== resolved\.workspaceAccountId/);
   assert.match(hydration, /workspaceLabel: resolved\.label/);
+  assert.match(hydration, /workspaceKind: resolved\.workspaceKind/);
   assert.match(hydration, /queueLimitInvalidation\(\{ provider: 'codex' \}, 'workspace-label-hydrated'\)/);
   assert.match(ready, /void hydrateCodexManagedWorkspaceLabels\(\);/);
 });

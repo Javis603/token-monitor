@@ -555,6 +555,24 @@ let codexWorkspaceSelection = null;
 let codexWorkspaceLabelHydrationPromise = null;
 let copilotLoginController = null;
 let copilotLoginFlowId = '';
+const CODEX_WORKSPACE_LABEL_HYDRATION_CONCURRENCY = 3;
+
+// Startup label hydration is a small one-shot map. LimitsRuntime's bounded
+// executor owns lane-aware provider refresh state, so it is not reusable here.
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  const workerCount = Math.min(items.length, Math.max(1, Math.trunc(concurrency) || 1));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
 
 function normalizeCodexManagedAccounts(value) {
   if (!Array.isArray(value)) return [];
@@ -570,6 +588,8 @@ function normalizeCodexManagedAccounts(value) {
       account.workspaceAccountId
       || account.providerAccountId
     );
+    const rawWorkspaceLabel = String(account.workspaceLabel || '').trim();
+    const workspaceKind = account.workspaceKind === 'personal' ? 'personal' : '';
     const accountKey = String(account.accountKey || '').trim();
     const dedupe = codexManagedAccountIdentityKey({
       id,
@@ -585,7 +605,8 @@ function normalizeCodexManagedAccounts(value) {
       accountKey,
       accountLabel: String(account.accountLabel || '').trim(),
       workspaceAccountId,
-      workspaceLabel: String(account.workspaceLabel || '').trim(),
+      workspaceLabel: workspaceKind ? '' : rawWorkspaceLabel,
+      workspaceKind,
       homePath,
       authPath: String(account.authPath || path.join(homePath, 'auth.json')).trim(),
       addedAt: account.addedAt || new Date().toISOString(),
@@ -619,26 +640,44 @@ function hydrateCodexManagedAccounts(value) {
 
 function hydrateCodexManagedWorkspaceLabels() {
   if (codexWorkspaceLabelHydrationPromise) return codexWorkspaceLabelHydrationPromise;
+  if (
+    settings?.limitsEnabled === false
+    || !parseLimitProviders(settings?.limitProviders).includes('codex')
+  ) return Promise.resolve(false);
   const candidates = normalizeCodexManagedAccounts(settings?.codexManagedAccounts)
-    .filter((account) => account.workspaceAccountId && !account.workspaceLabel);
+    .filter((account) => (
+      account.enabled !== false
+      && account.workspaceAccountId
+      && !account.workspaceLabel
+      && !account.workspaceKind
+    ));
   if (candidates.length === 0) return Promise.resolve(false);
 
-  const task = Promise.all(candidates.map(async (account) => {
-    try {
-      const auth = JSON.parse(readRegularFileNoFollow(account.authPath, {
-        fs,
-        description: 'Managed Codex auth',
-        encoding: 'utf8'
-      }));
-      const workspaces = await listCodexWorkspaces(auth, { env: process.env });
-      const workspace = workspaces.find((entry) => entry.id === account.workspaceAccountId);
-      return workspace?.label
-        ? { id: account.id, workspaceAccountId: account.workspaceAccountId, label: workspace.label }
-        : null;
-    } catch (_) {
-      return null;
+  const task = mapWithConcurrency(
+    candidates,
+    CODEX_WORKSPACE_LABEL_HYDRATION_CONCURRENCY,
+    async (account) => {
+      try {
+        const auth = JSON.parse(readRegularFileNoFollow(account.authPath, {
+          fs,
+          description: 'Managed Codex auth',
+          encoding: 'utf8'
+        }));
+        const workspaces = await listCodexWorkspaces(auth, { env: process.env });
+        const workspace = workspaces.find((entry) => entry.id === account.workspaceAccountId);
+        return workspace
+          ? {
+              id: account.id,
+              workspaceAccountId: account.workspaceAccountId,
+              label: workspace.label,
+              workspaceKind: workspace.workspaceKind
+            }
+          : null;
+      } catch (_) {
+        return null;
+      }
     }
-  })).then((results) => {
+  ).then((results) => {
     const labels = new Map(
       results.filter(Boolean).map((result) => [result.id, result])
     );
@@ -649,12 +688,14 @@ function hydrateCodexManagedWorkspaceLabels() {
       if (
         !resolved
         || account.workspaceLabel
+        || account.workspaceKind
         || account.workspaceAccountId !== resolved.workspaceAccountId
       ) return account;
       changed = true;
       return {
         ...account,
         workspaceLabel: resolved.label,
+        workspaceKind: resolved.workspaceKind,
         updatedAt: new Date().toISOString()
       };
     });
@@ -674,7 +715,7 @@ function hydrateCodexManagedWorkspaceLabels() {
 
 function codexAccountsForRenderer() {
   return normalizeCodexManagedAccounts(settings?.codexManagedAccounts).map(({
-    id, email, accountKey, accountLabel, workspaceAccountId, workspaceLabel, addedAt, updatedAt, enabled
+    id, email, accountKey, accountLabel, workspaceAccountId, workspaceLabel, workspaceKind, addedAt, updatedAt, enabled
   }) => ({
     id,
     email,
@@ -682,6 +723,7 @@ function codexAccountsForRenderer() {
     accountLabel,
     workspaceAccountId,
     workspaceLabel,
+    workspaceKind,
     addedAt,
     updatedAt,
     enabled
@@ -887,6 +929,7 @@ function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
     accountLabel: identity.accountLabel,
     workspaceAccountId: identity.workspaceAccountId || identity.providerAccountId || '',
     workspaceLabel: String(identity.workspaceLabel || '').trim(),
+    workspaceKind: identity.workspaceKind === 'personal' ? 'personal' : '',
     homePath,
     authPath: path.join(homePath, 'auth.json'),
     addedAt: existing?.addedAt || now,
@@ -1034,7 +1077,8 @@ async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
     auth: selectedAuth,
     identity: {
       ...codexAuthIdentity(selectedAuth),
-      workspaceLabel: selected.label
+      workspaceLabel: selected.label,
+      workspaceKind: selected.workspaceKind
     }
   };
 }
@@ -4809,7 +4853,7 @@ app.whenReady().then(() => {
             phase: 'workspaceSelection',
             email,
             currentWorkspaceId,
-            workspaces: workspaces.map(({ id, label }) => ({ id, label }))
+            workspaces: workspaces.map(({ id, label, workspaceKind }) => ({ id, label, workspaceKind }))
           });
         }),
         onCommit: () => {

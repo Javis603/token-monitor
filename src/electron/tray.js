@@ -122,7 +122,8 @@ function buildTrayMenuTemplate(options = {}) {
   const codexItem = codexAccounts.length >= 2 ? (() => {
     const labelFor = (account, index) => {
       return codexAccountDisplayLabel(account, codexAccounts, {
-        maskEmail: state.maskAccountEmails
+        maskEmail: state.maskAccountEmails,
+        personalWorkspaceLabel: t('settings.codex.personalWorkspace')
       }) || t('trayMenu.codexAccountFallback', { number: index + 1 });
     };
     const activeIndex = codexAccounts.findIndex((account) => account.id === state.activeCodexAccountId);

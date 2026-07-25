@@ -7,6 +7,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const { createHub, resolveBindHost } = require('../../src/hub/server');
+const { codexAccountKey } = require('../../src/shared/codexAuth');
 
 function tempDataFile() {
   return path.join(os.tmpdir(), `tm-hub-test-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
@@ -59,6 +60,64 @@ test('getStats exposes the effective staleness threshold', () => {
   const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', staleAfterMs: 123456, dataFile, logger: { error() {} } });
   try {
     assert.equal(hub.getStats().staleAfterMs, 123456);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('Hub keeps same-email Codex Personal and Team workspaces distinct across devices', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', staleAfterMs: 0, dataFile, logger: { error() {} } });
+  const email = 'member@example.com';
+  const personalKey = codexAccountKey(email, 'workspace-personal');
+  const teamKey = codexAccountKey(email, 'workspace-team');
+  const provider = (accountKey, remainingPercent, updatedAt) => ({
+    provider: 'codex',
+    accountKey,
+    accountEmail: email,
+    status: 'ok',
+    source: 'rpc',
+    sourceDetail: 'managed',
+    updatedAt,
+    windows: [{ kind: 'weekly', usedPercent: 100 - remainingPercent, remainingPercent }]
+  });
+  try {
+    hub.ingest({
+      deviceId: 'macbook',
+      limits: {
+        updatedAt: '2026-07-24T10:01:00.000Z',
+        providers: [
+          provider(personalKey, 18, '2026-07-24T10:00:00.000Z'),
+          provider(teamKey, 72, '2026-07-24T10:01:00.000Z')
+        ]
+      }
+    });
+    hub.ingest({
+      deviceId: 'desktop',
+      limits: {
+        updatedAt: '2026-07-24T10:05:00.000Z',
+        providers: [
+          provider(personalKey, 48, '2026-07-24T10:04:00.000Z'),
+          provider(teamKey, 82, '2026-07-24T10:05:00.000Z')
+        ]
+      }
+    });
+
+    const codexProviders = hub.getStats().limits.providers.filter((entry) => entry.provider === 'codex');
+    assert.equal(codexProviders.length, 2);
+    assert.deepEqual(
+      new Set(codexProviders.map((entry) => entry.accountKey)),
+      new Set([personalKey, teamKey])
+    );
+    assert.equal(
+      codexProviders.find((entry) => entry.accountKey === personalKey).windows[0].remainingPercent,
+      48
+    );
+    assert.equal(
+      codexProviders.find((entry) => entry.accountKey === teamKey).windows[0].remainingPercent,
+      82
+    );
+    assert.ok(codexProviders.every((entry) => entry.sourceDeviceId === 'desktop'));
   } finally {
     fs.rmSync(dataFile, { force: true });
   }

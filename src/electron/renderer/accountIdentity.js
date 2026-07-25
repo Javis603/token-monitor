@@ -20,8 +20,12 @@
     return String(account?.email || account?.accountEmail || '').trim();
   }
 
-  function codexAccountWorkspace(account) {
-    return String(account?.workspaceLabel || account?.accountName || '').trim();
+  function codexAccountWorkspace(account, personalWorkspaceLabel = 'Personal') {
+    const workspace = String(account?.workspaceLabel || account?.accountName || '').trim();
+    if (workspace) return workspace;
+    return account?.workspaceKind === 'personal'
+      ? String(personalWorkspaceLabel || '').trim()
+      : '';
   }
 
   function codexAccountStableId(account) {
@@ -35,9 +39,10 @@
     return raw.replace(/[^a-z0-9]/gi, '').toLowerCase();
   }
 
-  function codexAccountBaseDisplayLabel(account, peers, maskEmail) {
+  function codexAccountBaseDisplayLabel(account, peers, options) {
     const email = codexAccountEmail(account);
-    const workspace = codexAccountWorkspace(account);
+    const workspace = codexAccountWorkspace(account, options.personalWorkspaceLabel);
+    const maskEmail = options.maskEmail === true;
     if (!email) return workspace;
 
     const visibleEmail = maskEmail ? maskEmailAddress(email) : email;
@@ -71,12 +76,11 @@
 
   function codexAccountDisplayLabel(account, accounts = [], options = {}) {
     const peers = Array.isArray(accounts) && accounts.length > 0 ? accounts : [account];
-    const maskEmail = options.maskEmail === true;
-    const label = codexAccountBaseDisplayLabel(account, peers, maskEmail);
+    const label = codexAccountBaseDisplayLabel(account, peers, options);
     if (!label) return '';
 
     const collidingPeers = peers.filter(
-      (peer) => codexAccountBaseDisplayLabel(peer, peers, maskEmail).toLowerCase() === label.toLowerCase()
+      (peer) => codexAccountBaseDisplayLabel(peer, peers, options).toLowerCase() === label.toLowerCase()
     );
     if (collidingPeers.length <= 1) return label;
     const stableSuffix = codexAccountUniqueStableSuffix(account, collidingPeers);

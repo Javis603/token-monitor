@@ -227,14 +227,15 @@ test('tray Codex account labels keep unique emails compact and disambiguate dupl
       trayContent: 'tokens',
       trayMode: true,
       codexAccounts: [
-        { id: 'personal', email: 'member@example.com', workspaceLabel: 'Personal' },
+        { id: 'personal', email: 'member@example.com', workspaceKind: 'personal' },
         { id: 'team', email: 'member@example.com', workspaceLabel: 'Team' }
       ],
       activeCodexAccountId: 'personal'
-    }
+    },
+    translate: (key, params) => translate('zh-TW', key, params)
   });
   assert.deepEqual(duplicate[2].submenu.map((item) => item.label), [
-    'member@example.com · Personal',
+    'member@example.com · 個人',
     'member@example.com · Team'
   ]);
 

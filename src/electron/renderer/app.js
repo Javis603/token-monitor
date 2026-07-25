@@ -3048,7 +3048,10 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
 
 function codexAccountTitle(provider, index, providers = [provider]) {
   const label = accountIdentityApi.codexAccountDisplayLabel(provider, providers, {
-    maskEmail: state.settings?.maskLimitAccountEmails
+    maskEmail: state.settings?.maskLimitAccountEmails,
+    // Limits presents raw account data such as email and Plus/Pro labels, so
+    // keep the provider's canonical English workspace name on this surface.
+    personalWorkspaceLabel: 'Personal'
   });
   if (label) return label;
   // Never fall back to the plan label here — "Plus" as a title reads like an
@@ -8832,7 +8835,9 @@ function renderCodexLoginStatus() {
   workspaceSelect.replaceChildren(...state.codexWorkspaceChoices.map((workspace) => {
     const option = document.createElement('option');
     option.value = workspace.id;
-    option.textContent = workspace.label || workspace.id;
+    option.textContent = workspace.workspaceKind === 'personal'
+      ? t('settings.codex.personalWorkspace')
+      : workspace.label || workspace.id;
     option.selected = workspace.id === state.codexWorkspaceId;
     return option;
   }));
@@ -8898,8 +8903,11 @@ function renderCodexAccounts() {
       right.className = 'managed-account-right';
       const info = document.createElement('span');
       info.className = 'managed-account-info';
+      const workspaceLabel = account.workspaceKind === 'personal'
+        ? t('settings.codex.personalWorkspace')
+        : account.workspaceLabel;
       const accountMetadata = [
-        account.workspaceLabel,
+        workspaceLabel,
         enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.codex.disabled')
       ].filter((value, index, values) => value && values.indexOf(value) === index);
       info.textContent = accountMetadata.join(' · ');

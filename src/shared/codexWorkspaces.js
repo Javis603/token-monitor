@@ -41,7 +41,8 @@ function normalizeCodexWorkspaces(payload) {
     const name = nonEmptyString(item?.name);
     workspaces.push({
       id,
-      label: name || 'Personal'
+      label: name,
+      workspaceKind: name ? '' : 'personal'
     });
   }
   return workspaces;
@@ -76,7 +77,18 @@ async function listCodexWorkspaces(auth, deps = {}) {
     error.status = response?.status;
     throw error;
   }
-  return normalizeCodexWorkspaces(await response.json());
+  const payload = await response.json();
+  const workspaces = normalizeCodexWorkspaces(payload);
+  const isLegitimateEmptyList = Array.isArray(payload?.items) && payload.items.length === 0;
+  if (workspaces.length === 0 && !isLegitimateEmptyList) {
+    const topLevelKeys = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? Object.keys(payload).slice(0, 20)
+      : [];
+    (deps.logger || console).warn(
+      `[codex] Workspace lookup returned no usable accounts; top-level keys: ${topLevelKeys.join(', ') || '(none)'}`
+    );
+  }
+  return workspaces;
 }
 
 function authWithSelectedCodexWorkspace(auth, workspaceId) {

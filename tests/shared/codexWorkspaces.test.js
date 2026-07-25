@@ -42,8 +42,8 @@ test('normalizeCodexWorkspaces dedupes ids and labels unnamed personal workspace
       { id: '', name: 'invalid' }
     ]
   }), [
-    { id: 'workspace-one', label: 'Team One' },
-    { id: 'personal', label: 'Personal' }
+    { id: 'workspace-one', label: 'Team One', workspaceKind: '' },
+    { id: 'personal', label: '', workspaceKind: 'personal' }
   ]);
 });
 
@@ -76,9 +76,44 @@ test('listCodexWorkspaces uses the selected account header without exposing cred
   assert.equal(request.options.headers['ChatGPT-Account-Id'], 'workspace-current');
   assert.equal(request.options.headers['User-Agent'], 'codex-cli');
   assert.deepEqual(workspaces, [
-    { id: 'workspace-current', label: 'Current Team' },
-    { id: 'workspace-other', label: 'Other Team' }
+    { id: 'workspace-current', label: 'Current Team', workspaceKind: '' },
+    { id: 'workspace-other', label: 'Other Team', workspaceKind: '' }
   ]);
+});
+
+test('listCodexWorkspaces warns diagnostically when a successful response has no usable accounts', async () => {
+  const warnings = [];
+  const workspaces = await listCodexWorkspaces({
+    tokens: { access_token: 'secret-access-token' }
+  }, {
+    logger: { warn: (message) => warnings.push(message) },
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ accounts: [], request_id: 'private-value' })
+    })
+  });
+
+  assert.deepEqual(workspaces, []);
+  assert.deepEqual(warnings, [
+    '[codex] Workspace lookup returned no usable accounts; top-level keys: accounts, request_id'
+  ]);
+  assert.doesNotMatch(warnings[0], /secret-access-token|private-value/);
+});
+
+test('listCodexWorkspaces accepts a legitimate empty account list without warning', async () => {
+  const warnings = [];
+  const workspaces = await listCodexWorkspaces({
+    tokens: { access_token: 'secret-access-token' }
+  }, {
+    logger: { warn: (message) => warnings.push(message) },
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ items: [] })
+    })
+  });
+
+  assert.deepEqual(workspaces, []);
+  assert.deepEqual(warnings, []);
 });
 
 test('listCodexWorkspaces composes caller cancellation with its timeout', async () => {

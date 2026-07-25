@@ -389,7 +389,7 @@ test('fetchCodexLimits preserves same-email workspaces by account key', async ()
         accountKey: 'sha256:personal',
         email: 'member@example.com',
         workspaceAccountId: 'workspace-personal',
-        workspaceLabel: 'Personal',
+        workspaceKind: 'personal',
         homePath: '/tmp/token-monitor-codex/personal'
       },
       {
@@ -412,7 +412,8 @@ test('fetchCodexLimits preserves same-email workspaces by account key', async ()
     codexAccountKey('member@example.com', 'workspace-personal'),
     codexAccountKey('member@example.com', 'workspace-team')
   ]);
-  assert.deepEqual(providers.map((provider) => provider.accountName), ['Personal', 'Team']);
+  assert.deepEqual(providers.map((provider) => provider.accountName), ['', 'Team']);
+  assert.deepEqual(providers.map((provider) => provider.workspaceKind), ['personal', '']);
 });
 
 test('fetchCodexLimits keeps same-workspace members distinct when auth omits email', async () => {

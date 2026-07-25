@@ -256,6 +256,8 @@ test('Codex account panel supports per-account enable toggles without showing ti
   assert.match(body, /input\.checked = account\.enabled !== false/);
   assert.match(body, /window\.tokenMonitor\.codex\.setAccountEnabled\(account\.id, input\.checked\)/);
   assert.match(body, /info\.className = 'managed-account-info'/);
+  assert.match(body, /account\.workspaceKind === 'personal'/);
+  assert.match(body, /t\('settings\.codex\.personalWorkspace'\)/);
   assert.match(body, /account\.workspaceLabel/);
   assert.match(body, /enabled \? limitProviderPresentationApi\.limitProviderDisplayLabel\(account\.accountLabel\) : t\('settings\.codex\.disabled'\)/);
   assert.match(body, /info\.textContent = accountMetadata\.join\(' · '\);/);
@@ -332,7 +334,11 @@ test('Codex account email masking is an opt-in display-only setting', () => {
       app,
       ['codexAccountTitle'],
       "codexAccountTitle({ accountEmail: 'primary.user@example.com' }, 0)",
-      { accountIdentityApi: { codexAccountDisplayLabel }, state: { settings: { maskLimitAccountEmails: false } } }
+      {
+        accountIdentityApi: { codexAccountDisplayLabel },
+        state: { settings: { maskLimitAccountEmails: false } },
+        t: (key) => key === 'settings.codex.personalWorkspace' ? 'Personal' : key
+      }
     ),
     'primary.user@example.com'
   );
@@ -341,9 +347,33 @@ test('Codex account email masking is an opt-in display-only setting', () => {
       app,
       ['codexAccountTitle'],
       "codexAccountTitle({ accountEmail: 'primary.user@example.com' }, 0)",
-      { accountIdentityApi: { codexAccountDisplayLabel }, state: { settings: { maskLimitAccountEmails: true } } }
+      {
+        accountIdentityApi: { codexAccountDisplayLabel },
+        state: { settings: { maskLimitAccountEmails: true } },
+        t: (key) => key === 'settings.codex.personalWorkspace' ? 'Personal' : key
+      }
     ),
     'p***r@example.com'
+  );
+  assert.equal(
+    runRendererFunctions(
+      app,
+      ['codexAccountTitle'],
+      `codexAccountTitle(
+        { accountEmail: 'member@example.com', workspaceKind: 'personal' },
+        0,
+        [
+          { accountEmail: 'member@example.com', workspaceKind: 'personal' },
+          { accountEmail: 'member@example.com', accountName: 'Acme Team' }
+        ]
+      )`,
+      {
+        accountIdentityApi: { codexAccountDisplayLabel },
+        state: { settings: { maskLimitAccountEmails: false } },
+        t: (key) => key === 'settings.codex.personalWorkspace' ? '個人' : key
+      }
+    ),
+    'member@example.com · Personal'
   );
 });
 

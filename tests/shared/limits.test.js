@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const { aggregateLimits, mergeCodexTransientWindows, publicLimits, syncLimits } = require('../../src/shared/limits');
 const { collectLimitsOnce } = require('../../src/shared/limitCollector');
+const { codexAccountKey } = require('../../src/shared/codexAuth');
 
 function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
   return {
@@ -94,6 +95,50 @@ test('aggregateLimits preserves same-email Codex workspaces by hashed account ke
     new Set(codexProviders.map((provider) => provider.accountKey)),
     new Set(['sha256:personal', 'sha256:team'])
   );
+});
+
+test('aggregateLimits dedupes same-email Personal and Team workspaces independently across devices', () => {
+  const email = 'member@example.com';
+  const personalKey = codexAccountKey(email, 'workspace-personal');
+  const teamKey = codexAccountKey(email, 'workspace-team');
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'macbook',
+      limits: {
+        updatedAt: '2026-07-24T10:01:00.000Z',
+        providers: [
+          codexProvider(personalKey, email, 18, '2026-07-24T10:00:00.000Z'),
+          codexProvider(teamKey, email, 72, '2026-07-24T10:01:00.000Z')
+        ]
+      }
+    },
+    {
+      deviceId: 'desktop',
+      limits: {
+        updatedAt: '2026-07-24T10:05:00.000Z',
+        providers: [
+          codexProvider(personalKey, email, 48, '2026-07-24T10:04:00.000Z'),
+          codexProvider(teamKey, email, 82, '2026-07-24T10:05:00.000Z')
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-07-24T10:06:00.000Z'));
+
+  const codexProviders = aggregate.providers.filter((provider) => provider.provider === 'codex');
+  assert.equal(codexProviders.length, 2);
+  assert.deepEqual(
+    new Set(codexProviders.map((provider) => provider.accountKey)),
+    new Set([personalKey, teamKey])
+  );
+  assert.equal(
+    codexProviders.find((provider) => provider.accountKey === personalKey).windows[0].remainingPercent,
+    48
+  );
+  assert.equal(
+    codexProviders.find((provider) => provider.accountKey === teamKey).windows[0].remainingPercent,
+    82
+  );
+  assert.ok(codexProviders.every((provider) => provider.sourceDeviceId === 'desktop'));
 });
 
 test('aggregateLimits preserves distinct MiMo accounts by hashed account key', () => {
@@ -549,6 +594,7 @@ test('syncLimits carries Codex account identity and legacy plan label to the aut
     providers: [
       {
         ...codexProvider('sha256:codex-a', 'a@example.com', 18, '2026-06-14T10:00:00.000Z'),
+        workspaceKind: 'personal',
         resetCredits: {
           availableCount: 2,
           nextExpiresAt: '2026-07-18T23:00:00Z',
@@ -568,6 +614,7 @@ test('syncLimits carries Codex account identity and legacy plan label to the aut
   assert.equal(payload.providers[0].accountEmail, 'a@example.com');
   assert.equal(payload.providers[0].accountLabel, 'Plus');
   assert.equal(payload.providers[0].planLabel, '');
+  assert.equal(payload.providers[0].workspaceKind, 'personal');
   assert.deepEqual(payload.providers[0].resetCredits, {
     availableCount: 2,
     nextExpiresAt: '2026-07-18T23:00:00.000Z',
@@ -582,7 +629,10 @@ test('publicLimits strips Codex account identity fields', () => {
   const payload = publicLimits({
     updatedAt: '2026-06-14T10:00:00.000Z',
     providers: [
-      codexProvider('sha256:codex-a', 'a@example.com', 18, '2026-06-14T10:00:00.000Z')
+      {
+        ...codexProvider('sha256:codex-a', 'a@example.com', 18, '2026-06-14T10:00:00.000Z'),
+        workspaceKind: 'personal'
+      }
     ]
   });
 
@@ -593,6 +643,7 @@ test('publicLimits strips Codex account identity fields', () => {
   assert.equal(Object.hasOwn(payload.providers[0], 'accountEmail'), false);
   assert.equal(Object.hasOwn(payload.providers[0], 'accountLabel'), false);
   assert.equal(Object.hasOwn(payload.providers[0], 'planLabel'), false);
+  assert.equal(Object.hasOwn(payload.providers[0], 'workspaceKind'), false);
 });
 
 test('OpenCode sync keeps the legacy profile label and explicit plan while public stats scrub both', () => {

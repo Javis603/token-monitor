@@ -1507,6 +1507,7 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
     accountLabel: meta.accountLabel || codexAccountLabel(payload),
     accountName: meta.accountName || '',
     accountEmail: meta.accountEmail || payload.account?.email || '',
+    workspaceKind: meta.workspaceKind || '',
     source: meta.source || 'rpc',
     sourceDetail: meta.sourceDetail || payload.sourceDetail,
     status: 'ok',
@@ -2054,6 +2055,7 @@ function normalizeCodexManagedAccounts(value) {
       accountLabel: String(account.accountLabel || account.plan || '').trim(),
       workspaceAccountId: String(account.workspaceAccountId || account.providerAccountId || '').trim().toLowerCase(),
       workspaceLabel: String(account.workspaceLabel || '').trim(),
+      workspaceKind: account.workspaceKind === 'personal' ? 'personal' : '',
       enabled: account.enabled !== false
     };
   }).filter(Boolean);
@@ -2111,6 +2113,7 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
       accountEmail: email,
       accountLabel: account.accountLabel || codexAccountLabel(payload),
       accountName: account.workspaceLabel,
+      workspaceKind: account.workspaceKind,
       updatedAt: nowIso(nowMs),
       source: 'rpc',
       sourceDetail: 'managed'
@@ -2123,6 +2126,7 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
       accountEmail: email,
       accountLabel: account.accountLabel,
       accountName: account.workspaceLabel,
+      workspaceKind: account.workspaceKind,
       source: 'rpc',
       sourceDetail: 'managed',
       status: providerStatusFromError(error),
@@ -2165,6 +2169,7 @@ async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now(), managedAccou
     accountEmail: email,
     accountLabel: codexAccountLabel(payload),
     accountName: matchingManagedAccount?.workspaceLabel || '',
+    workspaceKind: matchingManagedAccount?.workspaceKind || '',
     updatedAt: nowIso(nowMs),
     source: 'rpc',
     sourceDetail: payload.sourceDetail
