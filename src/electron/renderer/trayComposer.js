@@ -663,19 +663,19 @@
         const autoModes = [
           {
             value: 'lowestLimit',
-            label: l('trayComposer.iconAuto.lowestLimit', 'Lowest remaining quota')
+            label: l('trayComposer.icon.auto.lowestLimit', 'Lowest remaining quota')
           },
           {
             value: 'tokens',
-            label: l('trayComposer.iconAuto.tokens', 'Highest Tokens')
+            label: l('trayComposer.icon.auto.tokens', 'Highest Tokens')
           },
           {
             value: 'cost',
-            label: l('trayComposer.iconAuto.cost', 'Highest cost')
+            label: l('trayComposer.icon.auto.cost', 'Highest cost')
           }
         ];
         section.append(picker(
-          l('trayComposer.iconAuto', 'Automatic condition'),
+          l('trayComposer.icon.auto', 'Automatic condition'),
           autoModes,
           item.autoMode,
           (autoMode) => updateItem(item, { ...item, autoMode })
@@ -969,14 +969,9 @@
         ));
         popover.append(fontStyleEditor(item));
         if (item.metric === 'tokens' || item.metric === 'cost') {
-          const periods = [
-            { value: 'today', label: l('trayComposer.period.today', 'Today') },
-            { value: 'month', label: l('trayComposer.period.month', 'This month') },
-            { value: 'allTime', label: l('trayComposer.period.allTime', 'All time') }
-          ];
           popover.append(picker(
             l('trayComposer.period', 'Period'),
-            periods,
+            periodChoices(),
             item.period,
             (period) => updateItem(item, { ...item, period })
           ));
