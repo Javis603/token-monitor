@@ -8453,7 +8453,10 @@ function createTrayComposer(surface) {
     onLayoutChange: (nextLayout, { commit }) => {
       state.settings[layoutKey] = trayLayoutApi.normalizeTrayLayout(nextLayout);
       if (isTray) void maybeUpdateBarsIcon({ refreshComposers: commit });
-      else renderFloatingBubbleContent();
+      else {
+        renderFloatingBubbleContent();
+        if (commit) syncTrayComposerVisibility();
+      }
       if (commit) void saveSettings({ [layoutKey]: state.settings[layoutKey] });
     }
   });
@@ -8464,10 +8467,17 @@ function syncTrayComposerVisibility() {
     { id: 'tray', root: els.trayComposer, visible: state.settings?.trayContent === 'custom' },
     { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleContent === 'custom' }
   ];
-  const clockNeeded = window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
+  window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,
     trayComposers,
     createTrayComposer
+  );
+  const clockNeeded = (
+    state.settings?.trayContent === 'custom'
+      && trayLayoutApi.trayLayoutNeedsClock(state.settings?.trayCustomLayout)
+  ) || (
+    state.settings?.floatingBubbleContent === 'custom'
+      && trayLayoutApi.trayLayoutNeedsClock(state.settings?.floatingBubbleCustomLayout)
   );
   if (clockNeeded && !customTrayClockTimer) {
     customTrayClockTimer = setInterval(() => {

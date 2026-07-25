@@ -677,6 +677,19 @@
     return `${days}d ${hours % 24}h`;
   }
 
+  function trayLayoutNeedsClock(layout) {
+    return normalizeTrayLayout(layout).items.some((item) => {
+      if (item.type === 'text') {
+        return item.metric === 'reset' || item.metric === 'percentReset';
+      }
+      if (item.type !== 'stack') return false;
+      if (item.metric === 'reset') return true;
+      return item.metric === 'mixed' && item.rows.some((row) => (
+        row.metric === 'reset' || row.metric === 'percentReset'
+      ));
+    });
+  }
+
   function formatCompactNumber(value) {
     if (trayTextApi?.formatCompactNumber) return trayTextApi.formatCompactNumber(value);
     const number = Math.round(Number(value) || 0);
@@ -807,6 +820,7 @@
     resolveTrayLayout,
     selectSource,
     sourceWindowOptions,
+    trayLayoutNeedsClock,
     windowKey,
     windowOptions
   };

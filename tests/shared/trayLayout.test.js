@@ -16,6 +16,7 @@ const {
   resolveTrayLayout,
   selectSource,
   sourceWindowOptions,
+  trayLayoutNeedsClock,
   windowKey,
   windowOptions
 } = require('../../src/shared/trayLayout');
@@ -377,6 +378,42 @@ test('stacked quota values resolve two percentages or reset times independently'
   assert.deepEqual(resolved.items[0].rows.map((row) => row.text), ['72%', '42%']);
   assert.deepEqual(resolved.items[1].rows.map((row) => row.text), ['42m', '3h 07m']);
   assert.equal(resolved.items[2].available, true);
+});
+
+test('tray layout clock runs only when displayed values contain a countdown', () => {
+  const staticItems = [
+    createTrayLayoutItem('appIcon'),
+    createTrayLayoutItem('providerIcon'),
+    createTrayLayoutItem('singleBar'),
+    createTrayLayoutItem('doubleBar'),
+    createTrayLayoutItem('doublePercent'),
+    createTrayLayoutItem('percent'),
+    createTrayLayoutItem('tokens'),
+    createTrayLayoutItem('cost'),
+    createTrayLayoutItem('customText'),
+    createTrayLayoutItem('doubleCustomText'),
+    createTrayLayoutItem('spacer'),
+    createTrayLayoutItem('separatorDot')
+  ];
+  assert.equal(trayLayoutNeedsClock({ version: 2, items: staticItems }), false);
+  assert.equal(trayLayoutNeedsClock(null), false);
+
+  for (const style of ['reset', 'percentReset', 'doubleReset']) {
+    assert.equal(
+      trayLayoutNeedsClock({ version: 2, items: [createTrayLayoutItem(style)] }),
+      true,
+      style
+    );
+  }
+
+  const staticInfo = createTrayLayoutItem('doubleInfo');
+  staticInfo.rows[0].metric = 'tokens';
+  staticInfo.rows[1].metric = 'cost';
+  assert.equal(trayLayoutNeedsClock({ version: 2, items: [staticInfo] }), false);
+
+  const dynamicInfo = createTrayLayoutItem('doubleInfo');
+  dynamicInfo.rows[1].metric = 'percentReset';
+  assert.equal(trayLayoutNeedsClock({ version: 2, items: [dynamicInfo] }), true);
 });
 
 test('automatic provider icons use the internal primary quota without exposing another setting', () => {
