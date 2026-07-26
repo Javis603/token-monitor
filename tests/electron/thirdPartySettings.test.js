@@ -104,7 +104,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /limitDetailInfoNode\(entries, 'limit-spend-info-wrap'\)/);
   assert.match(app, /function renderThirdPartyAccountGroup/);
   assert.match(app, /renderNamedApiAccountGroup\('thirdparty'/);
-  assert.match(presentation, /thirdparty: \['Self-hosted', 'API'\]/);
+  assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
   assert.match(styles, /\.limit-icon-thirdparty/);
   assert.match(colors, /thirdparty: '#DD2E57'/);
 });

@@ -65,7 +65,7 @@
     qoder: ['Manual login', 'Web'],
     kimi: ['Membership/Coding Plan', 'Web/API'],
     ollama: ['Manual login', 'Web'],
-    thirdparty: ['Self-hosted', 'API']
+    thirdparty: ['Relay', 'API']
   };
 
   // Capability hint -> the status label it would duplicate. When that status is

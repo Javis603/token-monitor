@@ -157,7 +157,7 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Token Plan': 'settings.limits.capability.tokenPlan',
   'Coding Plan': 'settings.limits.capability.codingPlan',
   'Membership/Coding Plan': 'settings.limits.capability.membershipCodingPlan',
-  'Self-hosted': 'settings.limits.capability.selfHosted',
+  Relay: 'settings.limits.capability.relay',
   'API key': 'settings.limits.capability.apiKey',
   'AK/SK': 'settings.limits.capability.akSk',
   'GitHub OAuth': 'settings.limits.capability.githubOAuth',

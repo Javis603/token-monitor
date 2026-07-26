@@ -1122,7 +1122,7 @@ test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () 
 
 test('third-party API uses credential setup copy and self-hosted capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'thirdparty', source: 'api' }), 'API');
-  assert.deepEqual(presentation.limitProviderCapabilityTags('thirdparty'), ['Self-hosted', 'API']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('thirdparty'), ['Relay', 'API']);
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'thirdparty', status: 'notConfigured' }),
     { label: 'Add credential', tone: 'setup' }
