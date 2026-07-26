@@ -53,9 +53,13 @@
     const amount = creditsAmount(provider, window);
     if (amount === null) return null;
     const funds = Math.max(0, amount);
+    // No money left is 0% remaining, even before any spend has been observed.
+    // Falling back to "full" here would paint a freshly tracked exhausted
+    // account as healthy on Home and in the tray.
+    if (funds === 0) return 0;
     const spend = Math.max(0, finiteNumber(provider?.balance?.monthSpend) ?? 0);
-    const total = funds + spend;
-    return total > 0 ? clampPercent((funds / total) * 100) : 100;
+    // An untouched positive balance has no observed spend, so it reads as full.
+    return clampPercent((funds / (funds + spend)) * 100);
   }
 
   function formatMoney(value, currency) {

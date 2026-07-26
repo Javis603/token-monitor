@@ -49,7 +49,12 @@ test('creditsMeterPercent treats an untouched balance as full', () => {
 
 test('creditsMeterPercent reports an exhausted balance as empty, and nothing without an amount', () => {
   assert.equal(creditsMeterPercent({ balance: { amount: 0, monthSpend: 12 } }, {}), 0);
-  assert.equal(creditsMeterPercent({ balance: { amount: 0, monthSpend: 0 } }, {}), 100);
+  // A freshly tracked account can be exhausted before any spend is observed.
+  // Reading that as "full" would paint it healthy on Home and in the tray.
+  assert.equal(creditsMeterPercent({ balance: { amount: 0, monthSpend: 0 } }, {}), 0);
+  assert.equal(creditsMeterPercent({ balance: { amount: 0 } }, {}), 0);
+  // An overdrawn balance is still nothing left, not a negative meter.
+  assert.equal(creditsMeterPercent({ balance: { amount: -5, monthSpend: 0 } }, {}), 0);
   assert.equal(creditsMeterPercent({ balance: {} }, {}), null);
   assert.equal(creditsMeterPercent({}, {}), null);
 });
