@@ -122,42 +122,22 @@ function shouldTryClaudeCliFallback(error) {
   return ['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
 }
 
-function cleanClaudeWebSecret(value) {
-  let raw = typeof value === 'string' ? value.trim() : '';
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
-function claudeWebCookieHasSessionKey(value) {
-  return /(?:^|;\s*)sessionKey\s*=/i.test(String(value || ''));
-}
-
 function normalizeClaudeWebCookie(value) {
-  let raw = cleanClaudeWebSecret(value);
+  const raw = typeof value === 'string' ? value.trim() : '';
   if (!raw) return '';
-  raw = raw.replace(/^cookie\s*:\s*/i, '').trim();
-  if (!raw || /[\r\n]/.test(raw)) return '';
-  if (claudeWebCookieHasSessionKey(raw)) return raw;
-  if (raw.includes('=') || raw.includes(';')) return '';
-  return `sessionKey=${raw}`;
+  if (/[\s;]/.test(raw)) return '';
+  const sessionKey = raw.startsWith('sessionKey=') ? raw.slice('sessionKey='.length) : raw;
+  return sessionKey.startsWith('sk-ant-') && sessionKey.length > 'sk-ant-'.length
+    ? `sessionKey=${sessionKey}`
+    : '';
 }
 
 function normalizeClaudeWebCookieInput(value) {
   const raw = typeof value === 'string' ? value : String(value || '');
-  const cleaned = cleanClaudeWebSecret(raw).replace(/^cookie\s*:\s*/i, '').trim();
-  if (cleaned && !/[\r\n]/.test(cleaned)
-    && (cleaned.includes('=') || cleaned.includes(';'))
-    && !claudeWebCookieHasSessionKey(cleaned)) {
-    const error = new Error('Claude Web Cookie is missing sessionKey');
-    error.code = 'CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY';
-    throw error;
-  }
   const normalized = normalizeClaudeWebCookie(raw);
   if (raw.trim() && !normalized) {
-    const error = new Error('Claude Web Cookie must be a single-line value');
-    error.code = 'INVALID_CLAUDE_WEB_COOKIE';
+    const error = new Error('Claude Web sessionKey must be an sk-ant- value');
+    error.code = 'INVALID_CLAUDE_WEB_SESSION_KEY';
     throw error;
   }
   return normalized;
@@ -619,13 +599,19 @@ async function fetchJson(url, headers, deps = {}, options = {}) {
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
     const response = await fetchFn(url, { headers, ...(controller ? { signal: controller.signal } : {}) });
+    if (typeof options.onResponse === 'function') await options.onResponse(response);
     if (!response.ok) {
-      const status = response.status === 401 || (options.forbiddenIsUnauthorized && response.status === 403)
+      const sourceChallenge = response.status === 403
+        && String(response.headers?.get?.('cf-mitigated') || '').toLowerCase() === 'challenge';
+      const status = response.status === 401
+        || (options.forbiddenIsUnauthorized && response.status === 403 && !sourceChallenge)
         ? 'unauthorized'
         : response.status === 429
           ? 'sourceRateLimited'
           : 'unavailable';
-      throw errorWithStatus(status, `${url} returned ${response.status}`);
+      const error = errorWithStatus(status, `${url} returned ${response.status}`);
+      if (sourceChallenge) error.code = 'CLAUDE_WEB_SOURCE_CHALLENGE';
+      throw error;
     }
     return response.json();
   } catch (error) {
@@ -636,8 +622,14 @@ async function fetchJson(url, headers, deps = {}, options = {}) {
   }
 }
 
-function fetchClaudeWebJson(url, headers, deps = {}) {
-  return fetchJson(url, headers, deps, { forbiddenIsUnauthorized: true });
+function fetchClaudeWebJson(url, headers, deps = {}, options = {}) {
+  const webDeps = typeof deps.claudeWebFetch === 'function'
+    ? { ...deps, fetch: deps.claudeWebFetch }
+    : deps;
+  return fetchJson(url, headers, webDeps, {
+    forbiddenIsUnauthorized: true,
+    onResponse: options.onResponse
+  });
 }
 
 function valueFromAliases(object, aliases) {
@@ -946,6 +938,54 @@ function claudeWebIdentityFingerprint(cookie) {
   return cookie ? hashKey('claude-web-identity-cache', cookie) : '';
 }
 
+function claudeWebSessionKey(cookie) {
+  return String(cookie || '').slice('sessionKey='.length);
+}
+
+function claudeWebSetCookieValues(response) {
+  const headers = response?.headers;
+  if (!headers) return [];
+  if (typeof headers.getSetCookie === 'function') {
+    const values = headers.getSetCookie();
+    if (Array.isArray(values)) return values;
+  }
+  const value = typeof headers.get === 'function' ? headers.get('set-cookie') : '';
+  return value ? [value] : [];
+}
+
+function claudeWebRenewedSessionKey(response) {
+  if (!response?.ok) return '';
+  let latest = '';
+  for (const header of claudeWebSetCookieValues(response)) {
+    const pattern = /(?:^|[,\r\n])\s*sessionKey=([^;,\r\n]+)/ig;
+    for (const match of String(header || '').matchAll(pattern)) {
+      const value = String(match[1] || '').trim();
+      if (value.startsWith('sk-ant-')) latest = value;
+    }
+  }
+  return latest;
+}
+
+function createClaudeWebSession(cookie) {
+  const initialCookie = normalizeClaudeWebCookieInput(cookie);
+  let sessionKey = claudeWebSessionKey(initialCookie);
+  return {
+    headers() {
+      return {
+        accept: 'application/json',
+        cookie: `sessionKey=${sessionKey}`
+      };
+    },
+    observe(response) {
+      sessionKey = claudeWebRenewedSessionKey(response) || sessionKey;
+    },
+    cookie() {
+      return `sessionKey=${sessionKey}`;
+    },
+    initialCookie
+  };
+}
+
 function claudeOauthIdentityFingerprint(credentials) {
   const secret = credentials?.refreshToken || credentials?.accessToken;
   return secret
@@ -964,40 +1004,57 @@ function carryClaudeCachedIdentity(previousCredentials, nextCredentials, deps = 
 async function fetchClaudeWebLimits(cookie, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const baseUrl = String(deps.claudeWebBaseUrl || CLAUDE_WEB_BASE_URL).replace(/\/$/, '');
-  const headers = {
-    accept: 'application/json',
-    cookie,
-    origin: baseUrl,
-    referer: `${baseUrl}/settings/usage`,
-    'user-agent': TOKEN_MONITOR_USER_AGENT
-  };
+  const session = createClaudeWebSession(cookie);
+  const fetchWebJson = (url) => fetchClaudeWebJson(url, session.headers(), deps, {
+    onResponse: (response) => session.observe(response)
+  });
   const fingerprint = claudeWebIdentityFingerprint(cookie);
   let context = claudeCachedIdentity(fingerprint, deps);
+  let usage;
   if (!context) {
     const stale = claudeCachedIdentity(fingerprint, deps, { allowStale: true });
+    const organizationsBody = await fetchWebJson(`${baseUrl}/api/organizations`);
+    const organizations = claudeWebOrganizations(organizationsBody);
+    const organization = selectClaudeWebOrganization(organizations);
+    const organizationId = claudeWebOrganizationId(organization);
+    if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
+    usage = await fetchWebJson(
+      `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage`
+    );
     try {
-      const [organizationsBody, accountBody] = await Promise.all([
-        fetchClaudeWebJson(`${baseUrl}/api/organizations`, headers, deps),
-        fetchClaudeWebJson(`${baseUrl}/api/account`, headers, deps)
-      ]);
-      const organizations = claudeWebOrganizations(organizationsBody);
-      const organization = selectClaudeWebOrganization(organizations);
-      const organizationId = claudeWebOrganizationId(organization);
-      if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
+      const accountBody = await fetchWebJson(`${baseUrl}/api/account`);
       context = cacheClaudeIdentity(fingerprint, {
         organizationId,
         identity: claudeWebAccountIdentity(accountBody, organization)
       }, deps);
     } catch (error) {
-      if (!stale) throw error;
-      context = stale;
+      if (!stale) {
+        throw claudeIdentityUnavailable('Claude Web usage is available, but stable account identity could not be resolved', error);
+      }
+      context = {
+        organizationId,
+        identity: stale.identity,
+        resolvedAt: stale.resolvedAt
+      };
+    }
+  } else {
+    usage = await fetchWebJson(
+      `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage`
+    );
+  }
+  const renewedCookie = session.cookie();
+  if (renewedCookie !== session.initialCookie) {
+    const renewedFingerprint = claudeWebIdentityFingerprint(renewedCookie);
+    if (renewedFingerprint !== fingerprint) cacheClaudeIdentity(renewedFingerprint, context, deps);
+    try {
+      await deps.onClaudeWebCookieRenewed?.({
+        previousCookie: session.initialCookie,
+        cookie: renewedCookie
+      });
+    } catch (error) {
+      deps.logger?.(`[limits] Claude Web session renewal could not be persisted: ${error.message}`);
     }
   }
-  const usage = await fetchClaudeWebJson(
-    `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage`,
-    headers,
-    deps
-  );
   return mapClaudeUsageToProvider(usage, {
     ...context.identity,
     updatedAt: nowIso(nowMs),

@@ -47,36 +47,30 @@ function fakeClaudeOauthFetch(usage, profile = DEFAULT_CLAUDE_PROFILE) {
   });
 }
 
-test('Claude Web cookie accepts a full header or a bare sessionKey value', () => {
+test('Claude Web accepts only a bare or canonical sk-ant sessionKey', () => {
   assert.equal(
-    claudeWebCookie({}, { claudeWebCookie: 'Cookie: sessionKey=secret; other=value' }),
-    'sessionKey=secret; other=value'
-  );
-  assert.equal(
-    claudeWebCookie({}, {
-      claudeWebCookie: 'Cookie: anthropic-device-id=device; sessionKey=secret; other=value'
-    }),
-    'anthropic-device-id=device; sessionKey=secret; other=value'
+    claudeWebCookie({}, { claudeWebCookie: 'sessionKey=sk-ant-sid01-example' }),
+    'sessionKey=sk-ant-sid01-example'
   );
   assert.equal(
     claudeWebCookie({}, { claudeWebCookie: 'sk-ant-sid01-example' }),
     'sessionKey=sk-ant-sid01-example'
   );
   assert.equal(
-    claudeWebCookie({ CLAUDE_WEB_COOKIE: 'sessionKey=from-env' }),
-    'sessionKey=from-env'
+    claudeWebCookie({ CLAUDE_WEB_COOKIE: 'sessionKey=sk-ant-from-env' }),
+    'sessionKey=sk-ant-from-env'
   );
   assert.throws(
-    () => normalizeClaudeWebCookieInput('sessionKey=first\nother=value'),
-    (error) => error?.code === 'INVALID_CLAUDE_WEB_COOKIE'
+    () => normalizeClaudeWebCookieInput('Cookie: sessionKey=sk-ant-secret; other=value'),
+    (error) => error?.code === 'INVALID_CLAUDE_WEB_SESSION_KEY'
   );
   assert.throws(
     () => normalizeClaudeWebCookieInput('anthropic-device-id=device; other=value'),
-    (error) => error?.code === 'CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY'
+    (error) => error?.code === 'INVALID_CLAUDE_WEB_SESSION_KEY'
   );
   assert.throws(
-    () => normalizeClaudeWebCookieInput('Cookie: anthropic-device-id=device'),
-    (error) => error?.code === 'CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY'
+    () => normalizeClaudeWebCookieInput('not-a-session-key'),
+    (error) => error?.code === 'INVALID_CLAUDE_WEB_SESSION_KEY'
   );
   assert.equal(normalizeClaudeWebCookieInput(''), '');
 });
@@ -130,8 +124,8 @@ test('Claude Web source takes precedence and carries stable account metadata', a
     return { provider, requests };
   }
 
-  const first = await collect('sessionKey=first-cookie');
-  const second = await collect('sessionKey=rotated-cookie');
+  const first = await collect('sessionKey=sk-ant-first-cookie');
+  const second = await collect('sessionKey=sk-ant-rotated-cookie');
 
   assert.equal(first.provider.source, 'web');
   assert.equal(first.provider.accountKey, second.provider.accountKey);
@@ -140,7 +134,65 @@ test('Claude Web source takes precedence and carries stable account metadata', a
   assert.equal(first.provider.accountLabel, 'Max 20x');
   assert.deepEqual(first.provider.windows.map((window) => window.kind), ['session', 'weekly']);
   assert.equal(first.requests.length, 3);
-  assert.equal(first.requests[0].options.headers.cookie, 'sessionKey=first-cookie');
+  assert.equal(first.requests[0].options.headers.cookie, 'sessionKey=sk-ant-first-cookie');
+  assert.deepEqual(first.requests[0].options.headers, {
+    accept: 'application/json',
+    cookie: 'sessionKey=sk-ant-first-cookie'
+  });
+  assert.equal(first.requests[0].url.endsWith('/api/organizations'), true);
+  assert.equal(first.requests[1].url.endsWith('/api/organizations/organization-web/usage'), true);
+  assert.equal(first.requests[2].url.endsWith('/api/account'), true);
+});
+
+test('Claude Web follows a renewed sessionKey across sequential requests and reports it for persistence', async () => {
+  const requests = [];
+  const renewals = [];
+  const provider = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-old' }, {
+    providerRuntimeState: new Map(),
+    onClaudeWebCookieRenewed: (renewal) => renewals.push(renewal),
+    fetch: async (url, options) => {
+      requests.push({ url, cookie: options.headers.cookie });
+      if (url.endsWith('/api/organizations')) {
+        return {
+          ok: true,
+          headers: {
+            getSetCookie: () => ['sessionKey=sk-ant-renewed; Path=/; Secure; HttpOnly']
+          },
+          json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
+        };
+      }
+      if (url.endsWith('/usage')) {
+        return {
+          ok: true,
+          json: async () => ({
+            five_hour: {
+              utilization: 21,
+              resets_at: '2026-07-25T05:00:00Z'
+            }
+          })
+        };
+      }
+      assert.ok(url.endsWith('/api/account'));
+      return {
+        ok: true,
+        json: async () => ({
+          uuid: 'account-web',
+          email_address: 'owner@example.com'
+        })
+      };
+    }
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(requests.map((request) => request.cookie), [
+    'sessionKey=sk-ant-old',
+    'sessionKey=sk-ant-renewed',
+    'sessionKey=sk-ant-renewed'
+  ]);
+  assert.deepEqual(renewals, [{
+    previousCookie: 'sessionKey=sk-ant-old',
+    cookie: 'sessionKey=sk-ant-renewed'
+  }]);
 });
 
 test('Claude Web prefers chat-capable organizations, then non-API-only organizations', async () => {
@@ -183,21 +235,21 @@ test('Claude Web prefers chat-capable organizations, then non-API-only organizat
       { uuid: 'organization-api', capabilities: ['API'] },
       { uuid: 'organization-non-api', capabilities: ['files'] },
       { uuid: 'organization-chat', capabilities: ['CHAT', 'files'] }
-    ], 'sessionKey=chat'),
+    ], 'sessionKey=sk-ant-chat'),
     'organization-chat'
   );
   assert.equal(
     await selectedUsageOrganization([
       { uuid: 'organization-api', capabilities: ['api'] },
       { uuid: 'organization-non-api', capabilities: ['files'] }
-    ], 'sessionKey=non-api'),
+    ], 'sessionKey=sk-ant-non-api'),
     'organization-non-api'
   );
   assert.equal(
     await selectedUsageOrganization([
       { uuid: 'organization-api-first', capabilities: ['api'] },
       { uuid: 'organization-api-second', capabilities: ['api'] }
-    ], 'sessionKey=first'),
+    ], 'sessionKey=sk-ant-first'),
     'organization-api-first'
   );
 });
@@ -229,10 +281,10 @@ test('Claude Web caches stable identity and reuses it when account lookup is tra
     }
   };
 
-  const first = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=stable' }, deps);
+  const first = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-stable' }, deps);
   requests.length = 0;
   utilization = 23;
-  const cached = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=stable' }, deps);
+  const cached = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-stable' }, deps);
   assert.equal(cached.accountKey, first.accountKey);
   assert.equal(cached.windows[0].usedPercent, 23);
   assert.equal(requests.length, 1);
@@ -242,7 +294,7 @@ test('Claude Web caches stable identity and reuses it when account lookup is tra
   nowMs += 2000;
   accountAvailable = false;
   utilization = 37;
-  const second = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=stable' }, deps);
+  const second = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-stable' }, deps);
 
   assert.equal(second.accountKey, first.accountKey);
   assert.equal(second.windows[0].usedPercent, 37);
@@ -252,32 +304,65 @@ test('Claude Web caches stable identity and reuses it when account lookup is tra
 
 test('Claude Web requires the account endpoint on a cold identity cache', async () => {
   await assert.rejects(
-    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=cold' }, {
+    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-cold' }, {
       providerRuntimeState: new Map(),
       fetch: async (url) => {
         if (url.endsWith('/api/organizations')) {
           return { ok: true, json: async () => [{ uuid: 'organization-web' }] };
         }
-        return { ok: false, status: 503 };
+        if (url.endsWith('/usage')) {
+          return {
+            ok: true,
+            json: async () => ({
+              five_hour: {
+                utilization: 21,
+                resets_at: '2026-07-25T05:00:00Z'
+              }
+            })
+          };
+        }
+        return { ok: false, status: 403 };
       }
     }),
-    (error) => error?.status === 'unavailable'
+    (error) => (
+      error?.status === 'unavailable'
+      && error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE'
+      && error?.cause?.status === 'unauthorized'
+    )
   );
 });
 
 test('Claude Web maps 403 to unauthorized without changing shared provider semantics', async () => {
   await assert.rejects(
-    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=expired' }, {
+    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-expired' }, {
       fetch: async () => ({ ok: false, status: 403 })
     }),
     (error) => error?.status === 'unauthorized'
   );
 });
 
+test('Claude Web reports a Cloudflare challenge as unavailable instead of invalid credentials', async () => {
+  await assert.rejects(
+    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-valid' }, {
+      fetch: async () => ({
+        ok: false,
+        status: 403,
+        headers: {
+          get: (name) => String(name).toLowerCase() === 'cf-mitigated' ? 'challenge' : ''
+        }
+      })
+    }),
+    (error) => (
+      error?.status === 'unavailable'
+      && error?.code === 'CLAUDE_WEB_SOURCE_CHALLENGE'
+    )
+  );
+});
+
 test('Claude Web authentication failure does not silently fall back to another local account', async () => {
   let spawned = false;
   await assert.rejects(
-    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=expired' }, {
+    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-expired' }, {
       fetch: async () => ({ ok: false, status: 401 }),
       spawn: () => {
         spawned = true;

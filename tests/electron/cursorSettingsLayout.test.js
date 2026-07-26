@@ -807,15 +807,17 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
 
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   assert.match(setupBody, /if \(\/\[\\r\\n\]\/\.test\(input\.value\)\)[\s\S]*settings\.claude\.cookieInvalidFormat/);
-  assert.match(setupBody, /window\.tokenMonitor\.claude\.validateCookie\(input\.value\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.claude\.saveCookie\(input\.value\)/);
   assert.ok(
-    setupBody.indexOf('window.tokenMonitor.claude.validateCookie(input.value)')
-      < setupBody.indexOf('saveSettings({\n          claudeWebCookie: input.value'),
+    setupBody.indexOf('window.tokenMonitor.claude.saveCookie(input.value)')
+      < setupBody.indexOf("limitProviders: limitProviderSelectionIncluding('claude')"),
     'Claude Web cookies must be validated before they are persisted'
   );
-  assert.match(setupBody, /CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY[\s\S]*settings\.claude\.cookieMissingSessionKey/);
-  assert.match(setupBody, /validation\?\.status === 'unauthorized'[\s\S]*settings\.claude\.cookieRejected/);
-  assert.match(setupBody, /saveSettings\(\{\s*claudeWebCookie: input\.value,[\s\S]*?limitProviders: limitProviderSelectionIncluding\('claude'\),[\s\S]*?limitsEnabled: true/);
+  assert.match(setupBody, /INVALID_CLAUDE_WEB_SESSION_KEY[\s\S]*settings\.claude\.cookieInvalidFormat/);
+  assert.match(setupBody, /CLAUDE_WEB_SOURCE_CHALLENGE[\s\S]*settings\.claude\.sourceChallenge/);
+  assert.match(setupBody, /result\?\.status === 'unauthorized'[\s\S]*settings\.claude\.cookieRejected/);
+  assert.match(setupBody, /saveSettings\(\{\s*limitProviders: limitProviderSelectionIncluding\('claude'\),[\s\S]*?limitsEnabled: true/);
+  assert.doesNotMatch(setupBody, /saveSettings\(\{\s*claudeWebCookie: input\.value/);
   assert.match(setupBody, /saveSettings\(\{ claudeWebCookie: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(claudePlatformUrl\(\)\)/);
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
@@ -827,9 +829,10 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   assert.match(main, /function normalizeClaudeWebCookie\(value\) \{\s*return normalizeClaudeWebCookieInput\(value\);\s*\}/);
-  assert.match(main, /ipcMain\.handle\('claude:validateCookie'[\s\S]*fetchClaudeLimits\([\s\S]*providerRuntimeState: new Map\(\)/);
+  assert.match(main, /ipcMain\.handle\('claude:saveCookie'[\s\S]*fetchClaudeLimits\([\s\S]*providerRuntimeState: new Map\(\)/);
+  assert.match(main, /settings\.claudeWebCookie = cookieToPersist;[\s\S]*saveSettings\(\{ throwOnError: true \}\)/);
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
-  assert.match(preload, /claude: \{\s*validateCookie: \(cookie\) => ipcRenderer\.invoke\('claude:validateCookie', cookie\)/);
+  assert.match(preload, /claude: \{\s*saveCookie: \(cookie\) => ipcRenderer\.invoke\('claude:saveCookie', cookie\)/);
   const updateHandler = main.slice(
     main.indexOf("ipcMain.handle('settings:update'"),
     main.indexOf("ipcMain.handle('appearance:preview'")
@@ -1271,10 +1274,13 @@ test('main collectors share one live GUI limit credential resolver in every widg
   ];
   for (const collector of collectors) {
     assert.match(collector, /limitsOptions: electronLimitsConfig\(\)/);
-    assert.match(collector, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
+    assert.match(collector, /limitsDeps: electronLimitsDeps\(\)/);
   }
+  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
+  assert.match(limitsDeps, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
+  assert.match(limitsDeps, /onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal/);
   for (const key of [
-    'zaiApiKey', 'zaiApiRegion', 'volcengineAccessKeyId', 'volcengineSecretAccessKey',
+    'claudeWebCookie', 'zaiApiKey', 'zaiApiRegion', 'volcengineAccessKeyId', 'volcengineSecretAccessKey',
     'volcengineRegion', 'qoderCookie', 'qoderSite', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
   ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
 });

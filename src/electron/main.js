@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, Notification, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const {
@@ -21,11 +21,13 @@ const { appVersion } = require('../shared/appVersion');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
+const { createClaudeWebFetch } = require('./claudeWebFetch');
 
 // Install EPIPE suppression before anything that might log. Without this,
 // a closed parent pipe turns the next log call into an unhandled 'error'
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
+const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
@@ -448,6 +450,31 @@ function normalizeClaudeWebCookie(value) {
 
 function currentClaudeWebCookie() {
   return settings?.claudeWebCookie || claudeWebCookie(process.env);
+}
+
+function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
+  if (!settings?.claudeWebCookie) return false;
+  let expected;
+  let renewed;
+  try {
+    expected = normalizeClaudeWebCookie(previousCookie);
+    renewed = normalizeClaudeWebCookie(cookie);
+  } catch (_) {
+    return false;
+  }
+  if (!renewed || normalizeClaudeWebCookie(settings.claudeWebCookie) !== expected) return false;
+  if (settings.claudeWebCookie === renewed) return true;
+  settings.claudeWebCookie = renewed;
+  saveSettings({ throwOnError: true });
+  return true;
+}
+
+function electronLimitsDeps() {
+  return {
+    claudeWebFetch: electronClaudeWebFetch,
+    resolveConfigSnapshot: () => electronLimitsConfig(),
+    onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal
+  };
 }
 
 function normalizeDeepSeekApiKey(value) {
@@ -2413,7 +2440,7 @@ function startSyncCollector() {
     sink,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
-    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
+    limitsDeps: electronLimitsDeps()
   });
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
@@ -2457,7 +2484,7 @@ function startHostCollector() {
     sink,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
-    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
+    limitsDeps: electronLimitsDeps()
   });
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
@@ -2652,7 +2679,7 @@ function startLocalCollector() {
     },
     onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
   }, {
-    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
+    limitsDeps: electronLimitsDeps()
   });
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
@@ -4524,7 +4551,7 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('claude:validateCookie', async (_event, raw) => {
+  ipcMain.handle('claude:saveCookie', async (_event, raw) => {
     let cookie;
     try {
       cookie = normalizeClaudeWebCookie(raw);
@@ -4532,24 +4559,40 @@ app.whenReady().then(() => {
       return {
         ok: false,
         status: 'invalid',
-        errorCode: error?.code || 'INVALID_CLAUDE_WEB_COOKIE'
+        errorCode: error?.code || 'INVALID_CLAUDE_WEB_SESSION_KEY'
       };
     }
     if (!cookie) {
       return {
         ok: false,
         status: 'notConfigured',
-        errorCode: 'INVALID_CLAUDE_WEB_COOKIE'
+        errorCode: 'INVALID_CLAUDE_WEB_SESSION_KEY'
       };
     }
     try {
+      let cookieToPersist = cookie;
       const provider = await fetchClaudeLimits(
         { claudeWebCookie: cookie },
-        { providerRuntimeState: new Map() }
+        {
+          claudeWebFetch: electronClaudeWebFetch,
+          providerRuntimeState: new Map(),
+          onClaudeWebCookieRenewed: ({ cookie: renewedCookie }) => {
+            cookieToPersist = renewedCookie;
+          }
+        }
       );
+      if (provider?.status !== 'ok') {
+        return {
+          ok: false,
+          status: provider?.status || 'error'
+        };
+      }
+      settings.claudeWebCookie = cookieToPersist;
+      saveSettings({ throwOnError: true });
+      void queueLimitInvalidation({ provider: 'claude' }, 'login', { clear: true });
       return {
-        ok: provider?.status === 'ok',
-        status: provider?.status || 'error'
+        ok: true,
+        status: 'ok'
       };
     } catch (error) {
       return {

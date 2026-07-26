@@ -10833,11 +10833,13 @@ function setupCursorAccountUI() {
       submitButton.disabled = true;
       submitButton.textContent = t('settings.common.checking');
       try {
-        const validation = await window.tokenMonitor.claude.validateCookie(input.value);
-        if (!validation?.ok) {
-          if (validation?.errorCode === 'CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY') {
-            errorEl.textContent = t('settings.claude.cookieMissingSessionKey');
-          } else if (validation?.status === 'unauthorized') {
+        const result = await window.tokenMonitor.claude.saveCookie(input.value);
+        if (!result?.ok) {
+          if (result?.errorCode === 'INVALID_CLAUDE_WEB_SESSION_KEY') {
+            errorEl.textContent = t('settings.claude.cookieInvalidFormat');
+          } else if (result?.errorCode === 'CLAUDE_WEB_SOURCE_CHALLENGE') {
+            errorEl.textContent = t('settings.claude.sourceChallenge');
+          } else if (result?.status === 'unauthorized') {
             errorEl.textContent = t('settings.claude.cookieRejected');
           } else {
             errorEl.textContent = t('settings.claude.cookieCheckFailed');
@@ -10847,7 +10849,6 @@ function setupCursorAccountUI() {
         }
         markExternalProviderCheckPending('claude');
         await saveSettings({
-          claudeWebCookie: input.value,
           limitProviders: limitProviderSelectionIncluding('claude'),
           limitsEnabled: true
         });
