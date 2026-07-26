@@ -92,9 +92,11 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(app, /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(app, /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.match(app, /summary\.className = 'limit-spend-summary'/);
+  assert.match(app, /function limitDetailInfoNode\(entries, extraClass = ''\)/);
   assert.match(app, /tooltip\.className = 'limit-detail-tooltip'/);
   assert.match(app, /info\.tabIndex = 0/);
-  assert.match(app, /const releaseSpendTooltip = \(\) => \{\s*requestAnimationFrame\(\(\) => \{\s*if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
+  assert.match(app, /const release = \(\) => \{\s*requestAnimationFrame\(\(\) => \{\s*if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
+  assert.match(app, /entries\.map\(\(\[entryLabel, value\]\) => \[entryLabel, formatMoney\(value, currency\)\]\)/);
   assert.match(app, /function openrouterCreditsWindow\(provider\)/);
   assert.match(app, /windows\.find\(\(window\) => window\?\.metric === 'credits'\)/);
   assert.match(app, /windows\.find\(\(window\) => !window\?\.metric && window\?\.label === 'Credits'\)/);
@@ -134,10 +136,11 @@ test('OpenRouter is documented with its supplied icon in every supported-tools t
 
 test('OpenRouter settings status uses collision-free row identity and a stable env account name', () => {
   const app = read('src/electron/renderer/app.js');
-  assert.match(app, /info\.dataset\.openrouterProfileName = name/);
-  assert.match(app, /info\.dataset\.openrouterEnvironment = 'true'/);
+  assert.match(app, /info\.dataset\.managedProfileProvider = providerId/);
+  assert.match(app, /info\.dataset\.managedProfileName = name/);
+  assert.match(app, /info\.dataset\.managedProfileEnvironment = 'true'/);
   assert.match(app, /byName\.get\('environment'\)/);
-  assert.match(app, /accountName\.toLowerCase\(\) === 'environment'/);
+  assert.match(app, /function namedApiAccountTitle/);
   assert.doesNotMatch(app, /appendRow\('default \(env\)'/);
   assert.doesNotMatch(app, /openrouter-info-\$\{/);
 });

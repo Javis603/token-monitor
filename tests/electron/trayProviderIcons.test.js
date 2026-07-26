@@ -39,6 +39,9 @@ test('tray provider icon sources keep optimized menubar icons where available', 
   assert.equal(trayProviderIconSources(['mimo']).mimo, '../../../assets/icons/xiaomi.svg');
   assert.equal(trayProviderIconSources(['zcode']).zcode, '../../../assets/icons/zai.svg');
   assert.equal(trayProviderIconSources(['zaiteam']).zaiteam, '../../../assets/icons/zai.svg');
+  const thirdPartySource = trayProviderIconSources(['thirdparty']).thirdparty;
+  assert.equal(thirdPartySource, '../../../assets/icons/newapi.svg');
+  assert.equal(fs.existsSync(assetPathFromRendererSource(thirdPartySource)), true);
   // CodeBuddy/WorkBuddy have their own brand svg, so they fall through to the id-named default.
   assert.equal(trayProviderIconSources(['codebuddy']).codebuddy, '../../../assets/icons/codebuddy.svg');
   assert.equal(trayProviderIconSources(['workbuddy']).workbuddy, '../../../assets/icons/workbuddy.svg');

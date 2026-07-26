@@ -2,6 +2,8 @@
 
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 let trackingApi = {};
@@ -10,6 +12,29 @@ try {
 } catch (_) {}
 
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = trackingApi;
+const rootDir = path.join(__dirname, '..', '..');
+
+function rendererClientIds() {
+  const app = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/app.js'), 'utf8');
+  const block = app.slice(app.indexOf('const KNOWN_CLIENTS = ['), app.indexOf('const LIMIT_PROVIDERS'));
+  return [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
+}
+
+function readmeTrackedClientIds() {
+  const iconToClient = {
+    'hermes-agent': 'hermes',
+    xai: 'grok',
+    'mimo-code': 'micode'
+  };
+  return fs.readFileSync(path.join(rootDir, 'README.md'), 'utf8')
+    .split('\n')
+    .filter((line) => line.startsWith('| <img'))
+    .filter((line) => line.split('|').map((cell) => cell.trim())[4] === '✅')
+    .map((line) => {
+      const icon = line.match(/tools-icon\/([^".]+)\.[a-z]+"/i)?.[1] || '';
+      return iconToClient[icon] || icon;
+    });
+}
 
 test('clientsCsvForSetting uses defaults only for missing settings', () => {
   assert.equal(typeof DEFAULT_CLIENTS, 'string');
@@ -39,6 +64,13 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
   for (const client of DEFAULT_CLIENTS.split(',')) {
     assert.ok(known.includes(client), `${client} (default-tracked) must also be known`);
   }
+});
+
+test('tracked client defaults, renderer, and README share one display order', () => {
+  const known = KNOWN_CLIENTS.split(',');
+  assert.deepEqual(rendererClientIds(), known);
+  assert.deepEqual(readmeTrackedClientIds(), known);
+  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => client !== 'micode'));
 });
 
 test('default tracked clients are accepted by bundled tokscale', () => {

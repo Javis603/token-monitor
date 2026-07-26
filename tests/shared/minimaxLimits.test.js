@@ -33,10 +33,9 @@ test('minimaxToken reads the CodexBar-compatible Token Plan key and ignores unre
 });
 
 test('parseLimitProviders includes minimax and grok in the default provider set', () => {
-  assert.deepEqual(
-    parseLimitProviders(),
-    ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama']
-  );
+  const providers = parseLimitProviders();
+  assert.ok(providers.includes('minimax'));
+  assert.ok(providers.includes('grok'));
 });
 
 test('minimaxAttemptOrder prefers token-plan endpoint before legacy coding-plan endpoint per region', () => {

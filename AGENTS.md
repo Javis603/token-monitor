@@ -68,7 +68,7 @@ The default client CSV lives in **one** place: `DEFAULT_CLIENTS` in `src/shared/
 | Default client list | `DEFAULT_CLIENTS` in `src/shared/clientTracking.js` |
 | Watch paths | the `add(...)` call in `clientWatchCandidates()` (`src/shared/collector.js`) |
 | Name normalization | the `normalizeClientName()` branch in `src/shared/usage.js` |
-| Renderer maps | `clientLabels` / `clientsWithIcon` / `KNOWN_CLIENTS` in `src/electron/renderer/app.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
+| Renderer maps | `clientLabels` / `clientsWithIcon` / `KNOWN_CLIENTS` in `src/electron/renderer/app.js`; provider artwork in `src/electron/renderer/trayProviderIcons.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
 | Discord RPC | `KNOWN_CLIENT_ASSETS` / `CLIENT_LABELS` in `src/electron/discordRpc.js` |
 | Row icon CSS | the `.row-icon-<id>` rule in `src/electron/renderer/styles.css` |
 | Icon assets | `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` |
@@ -79,6 +79,7 @@ The default client CSV lives in **one** place: `DEFAULT_CLIENTS` in `src/shared/
 One caveat on top of the table:
 
 - Self-synced clients (cursor/antigravity) additionally go in `SELF_SYNCED_CLIENTS`; parse-local clients must NOT.
+- Limits-only providers must keep `LIMIT_PROVIDER_IDS` in `src/shared/limitCollector.js` aligned with renderer `LIMIT_PROVIDERS`, account settings when applicable, tray artwork, and every README table. `LIMIT_PROVIDER_IDS` defines the new-install order; a changed default must not overwrite a saved custom order.
 
 ### Data flow contract
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
@@ -9,7 +9,7 @@ const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama'
+  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama', 'thirdparty'
 ]);
 
 function osIconFor(platform) {
@@ -46,8 +46,8 @@ function iconKindFor(rowData, breakdown) {
 const KNOWN_CLIENTS = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
-  { id: 'hermes', label: 'Hermes' },
   { id: 'opencode', label: 'OpenCode' },
+  { id: 'hermes', label: 'Hermes Agent' },
   { id: 'openclaw', label: 'OpenClaw' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'antigravity', label: 'Antigravity' },
@@ -69,22 +69,23 @@ const KNOWN_CLIENTS = [
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
+  { id: 'opencode', label: 'OpenCode' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'antigravity', label: 'Antigravity' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'openrouter', label: 'OpenRouter' },
-  { id: 'deepseek', label: 'DeepSeek' },
-  { id: 'minimax', label: 'Minimax' },
-  { id: 'mimo', label: 'MiMo' },
+  { id: 'kimi', label: 'Kimi' },
   { id: 'grok', label: 'Grok' },
   { id: 'copilot', label: 'GitHub Copilot' },
-  { id: 'kiro', label: 'Kiro' },
+  { id: 'mimo', label: 'MiMo' },
   { id: 'zai', label: 'GLM' },
   { id: 'zaiteam', label: 'GLM Team' },
+  { id: 'kiro', label: 'Kiro' },
+  { id: 'deepseek', label: 'DeepSeek' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'qoder', label: 'Qoder' },
-  { id: 'kimi', label: 'Kimi' },
-  { id: 'ollama', label: 'Ollama' }
+  { id: 'ollama', label: 'Ollama' },
+  { id: 'thirdparty', label: 'Third-party APIs' }
 ];
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
@@ -156,6 +157,7 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Token Plan': 'settings.limits.capability.tokenPlan',
   'Coding Plan': 'settings.limits.capability.codingPlan',
   'Membership/Coding Plan': 'settings.limits.capability.membershipCodingPlan',
+  Relay: 'settings.limits.capability.relay',
   'API key': 'settings.limits.capability.apiKey',
   'AK/SK': 'settings.limits.capability.akSk',
   'GitHub OAuth': 'settings.limits.capability.githubOAuth',
@@ -240,7 +242,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -438,6 +440,7 @@ function translatedLimitProviderTag(tagInfo) {
 function applySettingsTranslations() {
   if (els.languageInput) els.languageInput.value = currentLanguage();
   i18n.applyTranslations(document, currentLocale());
+  setThirdPartyAdapterFields();
 }
 
 function applySettingsSectionDom(id, open) {
@@ -525,6 +528,18 @@ function setupSettingsSections() {
   els.settingsPanel?.addEventListener('keydown', cancelSettingsScrollAnchorOnKeydown);
 }
 
+function orderAccountProviderGroups() {
+  const container = document.getElementById('accountsSettingsDetails');
+  if (!container) return;
+  for (const provider of LIMIT_PROVIDERS) {
+    const groupId = provider.id === 'opencode'
+      ? 'opencodeCookieGroup'
+      : `${provider.id}AccountGroup`;
+    const group = document.getElementById(groupId);
+    if (group?.parentElement === container) container.append(group);
+  }
+}
+
 function refreshIntervalLabel(value) {
   const ms = Number(value) || 300000;
   const minutes = Math.max(1, Math.round(ms / 60000));
@@ -556,6 +571,7 @@ function settingsSectionSummary(section) {
     const cursorLinked = Boolean(state.cursorAccount.status?.loggedIn) && !state.cursorAccount.status?.expired;
     const opencodeCount = state.opencodeProfileCount || 0;
     const openrouterCount = state.openrouterProfileCount || 0;
+    const thirdpartyCount = state.thirdPartyProfileCount || 0;
     const deepseekLinked = deepseekAccountLinked();
     const minimaxLinked = minimaxAccountLinked();
     const zaiLinked = externalProviderAccountLinked('zai');
@@ -568,8 +584,8 @@ function settingsSectionSummary(section) {
     const copilotLinked = copilotAccountLinked();
     const codexLinked = (state.settings?.codexManagedAccounts || []).length > 0;
     return t('settings.summary.accounts', {
-      linked: (claudeLinked ? 1 : 0) + (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (openrouterCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (zaiLinked ? 1 : 0) + (zaiteamLinked ? 1 : 0) + (volcengineLinked ? 1 : 0) + (qoderLinked ? 1 : 0) + (kimiLinked ? 1 : 0) + (ollamaLinked ? 1 : 0) + (mimoLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
-      total: 15
+      linked: (claudeLinked ? 1 : 0) + (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (openrouterCount > 0 ? 1 : 0) + (thirdpartyCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (zaiLinked ? 1 : 0) + (zaiteamLinked ? 1 : 0) + (volcengineLinked ? 1 : 0) + (qoderLinked ? 1 : 0) + (kimiLinked ? 1 : 0) + (ollamaLinked ? 1 : 0) + (mimoLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
+      total: 16
     });
   }
   if (section === 'limits') {
@@ -2166,6 +2182,52 @@ function openrouterSpendEntries(balance) {
   ].filter(([, value]) => value !== null);
 }
 
+function limitDetailInfoNode(entries, extraClass = '') {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const infoWrap = document.createElement('span');
+  infoWrap.className = ['limit-detail-tooltip-wrap', extraClass].filter(Boolean).join(' ');
+  infoWrap.classList.toggle('has-opened', state.limitDetailTooltipHasOpened);
+  const info = document.createElement('span');
+  info.className = 'limit-detail-tooltip-trigger';
+  info.textContent = 'i';
+  info.tabIndex = 0;
+  info.setAttribute(
+    'aria-label',
+    entries.map(([entryLabel, value]) => `${entryLabel}: ${value}`).join(', ')
+  );
+  const tooltip = document.createElement('span');
+  tooltip.className = 'limit-detail-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  entries.forEach(([entryLabel, value]) => {
+    const row = document.createElement('span');
+    row.className = 'limit-detail-tooltip-row';
+    const tooltipLabel = document.createElement('span');
+    tooltipLabel.textContent = entryLabel;
+    const tooltipValue = document.createElement('span');
+    tooltipValue.textContent = value;
+    row.append(tooltipLabel, tooltipValue);
+    tooltip.append(row);
+  });
+  const markOpened = () => {
+    state.limitDetailTooltipHasOpened = true;
+    state.limitDetailTooltipActive = true;
+    infoWrap.classList.add('has-opened');
+  };
+  const release = () => {
+    requestAnimationFrame(() => {
+      if (limitDetailTooltipShouldHoldRender()) return;
+      state.limitDetailTooltipActive = false;
+      flushPendingLimitDetailTooltipRender();
+    });
+  };
+  infoWrap.addEventListener('pointerenter', markOpened);
+  infoWrap.addEventListener('focusin', markOpened);
+  infoWrap.addEventListener('pointerleave', release);
+  infoWrap.addEventListener('focusout', release);
+  infoWrap.append(info, tooltip);
+  return infoWrap;
+}
+
 function openrouterSpendNode(balance) {
   const entries = openrouterSpendEntries(balance);
   if (entries.length === 0) return null;
@@ -2190,48 +2252,10 @@ function openrouterSpendNode(balance) {
   right.append(summary);
 
   if (entries.length > summaryEntries.length) {
-    const infoWrap = document.createElement('span');
-    infoWrap.className = 'limit-detail-tooltip-wrap limit-spend-info-wrap';
-    infoWrap.classList.toggle('has-opened', state.limitDetailTooltipHasOpened);
-    const info = document.createElement('span');
-    info.className = 'limit-detail-tooltip-trigger';
-    info.textContent = 'i';
-    info.tabIndex = 0;
-    info.setAttribute(
-      'aria-label',
-      entries.map(([entryLabel, value]) => `${entryLabel}: ${formatMoney(value, currency)}`).join(', ')
-    );
-    const tooltip = document.createElement('span');
-    tooltip.className = 'limit-detail-tooltip';
-    tooltip.setAttribute('role', 'tooltip');
-    entries.forEach(([entryLabel, value]) => {
-      const row = document.createElement('span');
-      row.className = 'limit-detail-tooltip-row';
-      const tooltipLabel = document.createElement('span');
-      tooltipLabel.textContent = entryLabel;
-      const tooltipValue = document.createElement('span');
-      tooltipValue.textContent = formatMoney(value, currency);
-      row.append(tooltipLabel, tooltipValue);
-      tooltip.append(row);
-    });
-    const markSpendTooltipOpened = () => {
-      state.limitDetailTooltipHasOpened = true;
-      state.limitDetailTooltipActive = true;
-      infoWrap.classList.add('has-opened');
-    };
-    const releaseSpendTooltip = () => {
-      requestAnimationFrame(() => {
-        if (limitDetailTooltipShouldHoldRender()) return;
-        state.limitDetailTooltipActive = false;
-        flushPendingLimitDetailTooltipRender();
-      });
-    };
-    infoWrap.addEventListener('pointerenter', markSpendTooltipOpened);
-    infoWrap.addEventListener('focusin', markSpendTooltipOpened);
-    infoWrap.addEventListener('pointerleave', releaseSpendTooltip);
-    infoWrap.addEventListener('focusout', releaseSpendTooltip);
-    infoWrap.append(info, tooltip);
-    right.append(infoWrap);
+    right.append(limitDetailInfoNode(
+      entries.map(([entryLabel, value]) => [entryLabel, formatMoney(value, currency)]),
+      'limit-spend-info-wrap'
+    ));
   }
 
   line.append(label, right);
@@ -2243,13 +2267,79 @@ function openrouterSpendNode(balance) {
   return item;
 }
 
+function thirdPartySpendNode(provider, quotaWindow) {
+  const balance = provider?.balance || null;
+  const currency = balance?.currency || 'USD';
+  const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
+  const entries = [];
+  const total = optionalFiniteNumber(quotaWindow?.limit);
+  const requestCount = optionalFiniteNumber(balance?.requestCount);
+  const quotaGroup = String(balance?.quotaGroup || '').trim();
+  const expiresAt = balance?.expiresAt ? new Date(balance.expiresAt) : null;
+  if (total !== null) entries.push([t('settings.thirdparty.totalQuota'), formatMoney(total, currency)]);
+  if (requestCount !== null) {
+    entries.push([t('settings.thirdparty.requests'), Math.max(0, Math.trunc(requestCount)).toLocaleString()]);
+  }
+  if (quotaGroup) entries.push([t('settings.thirdparty.group'), quotaGroup]);
+  if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
+    entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
+  }
+  if (allTimeSpend === null && entries.length === 0) return null;
+
+  const item = document.createElement('div');
+  item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
+  const line = document.createElement('div');
+  line.className = 'limit-window-text limit-spend-line';
+  const label = document.createElement('span');
+  label.textContent = allTimeSpend === null ? 'Details' : 'Spend';
+  const right = document.createElement('span');
+  right.className = 'limit-spend-right';
+  if (allTimeSpend !== null) {
+    const summary = document.createElement('span');
+    summary.className = 'limit-spend-summary';
+    summary.textContent = `All time ${formatMoney(allTimeSpend, currency)}`;
+    right.append(summary);
+  }
+  const infoNode = limitDetailInfoNode(entries, 'limit-spend-info-wrap');
+  if (infoNode) right.append(infoNode);
+  line.append(label, right);
+  item.append(line);
+  item.setAttribute(
+    'aria-label',
+    [
+      allTimeSpend === null ? 'Details' : 'Spend',
+      ...(allTimeSpend === null ? [] : [`All time ${formatMoney(allTimeSpend, currency)}`]),
+      ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
+    ].join(', ')
+  );
+  return item;
+}
+
 const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' };
+
+function normalizeMoneyCurrencyCode(value) {
+  const code = String(value || '').toUpperCase();
+  return /^[A-Z]{3,8}$/.test(code) ? code : 'USD';
+}
 
 function formatMoney(value, currency) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '';
-  const symbol = CURRENCY_SYMBOLS[String(currency || '').toUpperCase()] || '$';
-  return `${symbol}${number.toFixed(2)}`;
+  const code = normalizeMoneyCurrencyCode(currency);
+  const symbol = CURRENCY_SYMBOLS[code];
+  return symbol ? `${symbol}${number.toFixed(2)}` : `${code} ${number.toFixed(2)}`;
+}
+
+function formatCompactMoney(value, currency) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '';
+  if (Math.abs(number) < 100_000) return formatMoney(number, currency);
+  const code = normalizeMoneyCurrencyCode(currency);
+  const prefix = CURRENCY_SYMBOLS[code] || `${code} `;
+  return `${prefix}${new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 2
+  }).format(number)}`;
 }
 
 function optionalFiniteNumber(value) {
@@ -2265,6 +2355,11 @@ function openrouterCreditsWindow(provider) {
   return windows.find((window) => window?.metric === 'credits')
     || windows.find((window) => !window?.metric && window?.label === 'Credits')
     || null;
+}
+
+function thirdPartyQuotaWindow(provider) {
+  const windows = Array.isArray(provider?.windows) ? provider.windows : [];
+  return windows.find((window) => window?.metric === 'credits') || null;
 }
 
 function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
@@ -2826,6 +2921,39 @@ function renderProviderWindows(provider, color) {
     }
     const spendNode = openrouterSpendNode(balance);
     if (spendNode) windows.append(spendNode);
+  } else if (provider.provider === 'thirdparty') {
+    windows.classList.add('limit-windows-thirdparty');
+    const balance = provider.balance || null;
+    const currency = balance?.currency || 'USD';
+    const balanceAmount = optionalFiniteNumber(balance?.amount);
+    const quotaWindow = thirdPartyQuotaWindow(provider);
+    const balanceLabel = quotaWindow?.label || 'Balance';
+    if (balanceAmount !== null) {
+      const balanceNode = limitWindowNode(
+        balanceLabel,
+        { ...(quotaWindow || { showMeter: false }), label: balanceLabel },
+        color,
+        0.95,
+        `${formatMoney(balanceAmount, currency)} left`
+      );
+      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(balanceNode);
+    } else if (quotaWindow?.showMeter === false && quotaWindow.detail) {
+      const value = String(quotaWindow.detail).toLowerCase() === 'unlimited'
+        ? t('settings.thirdparty.unlimited')
+        : quotaWindow.detail;
+      const balanceNode = limitWindowNode(
+        balanceLabel,
+        { ...quotaWindow, label: balanceLabel },
+        color,
+        0.95,
+        value
+      );
+      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(balanceNode);
+    }
+    const spendNode = thirdPartySpendNode(provider, quotaWindow);
+    if (spendNode) windows.append(spendNode);
   } else if (provider.provider === 'deepseek') {
     // DeepSeek does not expose a fixed quota denominator. This intentionally
     // visualizes the balance relative to this month's inferred starting funds:
@@ -3179,30 +3307,61 @@ function renderOpenCodeAccountGroup(label, providers, color) {
   return row;
 }
 
-function openrouterAccountTitle(provider, index) {
+function namedApiAccountTitle(provider, index, providerId) {
   const accountName = String(provider?.accountName || provider?.accountLabel || '').trim();
-  if (accountName.toLowerCase() === 'environment') return t('settings.openrouter.environment');
+  if (accountName.toLowerCase() === 'environment') return t(`settings.${providerId}.environment`);
   return accountName || `Account ${index + 1}`;
 }
 
-function renderOpenRouterAccountGroup(label, providers, color) {
+function thirdPartyPlanText(provider) {
+  if (provider?.status !== 'ok') return undefined;
+  const planLabel = String(provider?.planLabel || '').toLowerCase();
+  if (planLabel === 'account') return 'Account';
+  if (planLabel === 'api key') return 'API key';
+  if (planLabel === 'custom') return 'Custom';
+  return undefined;
+}
+
+function renderNamedApiAccountGroup(providerId, label, providers, color, options = {}) {
   const row = document.createElement('div');
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'openrouter', status: 'ok', windows: [] };
-  const head = renderLimitProviderHead('openrouter', label, groupProvider, color, {
-    planText: t('settings.openrouter.nAccounts', { count: providers.length }),
+  const groupProvider = { provider: providerId, status: 'ok', windows: [] };
+  const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
+    planText: options.groupPlanText,
     hideMeta: true
   });
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
   providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('openrouter', openrouterAccountTitle(provider, index), provider, color, {
-      accountRow: true,
-      showIcon: false
-    }));
+    accountList.append(renderLimitProviderRow(
+      providerId,
+      namedApiAccountTitle(provider, index, providerId),
+      provider,
+      color,
+      {
+        accountRow: true,
+        showIcon: false,
+        ...(options.planTextForProvider
+          ? { planText: options.planTextForProvider(provider) }
+          : {})
+      }
+    ));
   });
   row.append(head, accountList);
   return row;
+}
+
+function renderOpenRouterAccountGroup(label, providers, color) {
+  return renderNamedApiAccountGroup('openrouter', label, providers, color, {
+    groupPlanText: t('settings.openrouter.nAccounts', { count: providers.length })
+  });
+}
+
+function renderThirdPartyAccountGroup(label, providers, color) {
+  return renderNamedApiAccountGroup('thirdparty', label, providers, color, {
+    groupPlanText: t('settings.thirdparty.nAccounts', { count: providers.length }),
+    planTextForProvider: thirdPartyPlanText
+  });
 }
 
 function renderLimits() {
@@ -3252,15 +3411,21 @@ function renderLimits() {
       nodes.push(renderOpenRouterAccountGroup(label, visibleProviders, color));
       continue;
     }
+    if (id === 'thirdparty' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderThirdPartyAccountGroup(label, visibleProviders, color));
+      continue;
+    }
     if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
-    nodes.push(renderLimitProviderRow(id, label, provider, color, id === 'codex' ? {
-      accountTitle: true,
-      allowSystemSwitch: true
-    } : undefined));
+    const rowOptions = id === 'codex'
+      ? { accountTitle: true, allowSystemSwitch: true }
+      : id === 'thirdparty'
+        ? { planText: thirdPartyPlanText(provider) }
+        : undefined;
+    nodes.push(renderLimitProviderRow(id, label, provider, color, rowOptions));
   }
   els.limitsPanel.replaceChildren(...nodes);
 }
@@ -4828,6 +4993,7 @@ async function refreshStats(options = {}) {
     renderToolPreferences();
     renderWslPanel();
     updateOpenRouterProfilesStatus();
+    updateThirdPartyProfilesStatus();
     renderDeepseekStatus();
     renderMinimaxStatus();
     renderExternalProviderStatus('claude');
@@ -5877,6 +6043,7 @@ function syncSettingsForm() {
   renderSettingsSummaries();
   renderOpenCodeProfiles();
   renderOpenRouterProfiles();
+  renderThirdPartyProfiles();
   applyVendorColorOverrides(state.settings.vendorColors);
   applyAppearanceSettings(state.settings);
   buildAppearanceColorControls();
@@ -7866,6 +8033,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     renderToolPreferences();
     renderWslPanel();
     updateOpenRouterProfilesStatus();
+    updateThirdPartyProfilesStatus();
     renderDeepseekStatus();
     renderMinimaxStatus();
     renderExternalProviderStatus('claude');
@@ -8895,6 +9063,57 @@ function setOpenrouterAccountExpanded(expanded) {
   setAccountGroupExpanded('openrouter', expanded, 'openrouterAccountExpanded');
 }
 
+function setThirdPartyAccountExpanded(expanded) {
+  setAccountGroupExpanded('thirdparty', expanded, 'thirdPartyAccountExpanded');
+}
+
+function selectedThirdPartyAdapter() {
+  const platform = String(document.getElementById('thirdpartyPlatformInput')?.value || 'newapi');
+  const mode = String(document.getElementById('thirdpartyModeInput')?.value || 'account');
+  if (platform === 'custom') return 'custom';
+  return mode === 'token' ? 'newapi-token' : 'newapi-account';
+}
+
+function updateThirdPartyHttpWarning() {
+  const input = document.getElementById('thirdpartyBaseUrlInput');
+  const warning = document.getElementById('thirdpartyHttpWarning');
+  if (!warning) return;
+  let insecure;
+  try {
+    insecure = new URL(String(input?.value || '').trim()).protocol === 'http:';
+  } catch {
+    warning.classList.add('hidden');
+    return;
+  }
+  warning.classList.toggle('hidden', !insecure);
+}
+
+function setThirdPartyAdapterFields() {
+  const adapter = selectedThirdPartyAdapter();
+  const customMode = adapter === 'custom';
+  const accountMode = adapter === 'newapi-account';
+  const newApiAccountMode = adapter === 'newapi-account';
+  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', customMode);
+  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', customMode);
+  document.getElementById('thirdpartyCredentialGrid')?.classList.toggle(
+    'single-field',
+    !newApiAccountMode
+  );
+  document.getElementById('thirdpartyAccessTokenRow')?.classList.toggle('hidden', !accountMode);
+  document.getElementById('thirdpartyUserIdRow')?.classList.toggle('hidden', !newApiAccountMode);
+  document.getElementById('thirdpartyApiKeyRow')?.classList.toggle('hidden', accountMode);
+  document.getElementById('thirdpartyCustomConfig')?.classList.toggle('hidden', !customMode);
+  const hint = document.getElementById('thirdpartyModeHint');
+  if (hint) {
+    const hintKey = customMode
+      ? 'settings.thirdparty.hintCustom'
+      : adapter === 'newapi-token'
+      ? 'settings.thirdparty.hintNewApiToken'
+      : 'settings.thirdparty.hintNewApiAccount';
+    hint.textContent = t(hintKey);
+  }
+}
+
 function setDeepseekAccountExpanded(expanded) {
   setAccountGroupExpanded('deepseek', expanded, 'deepseekAccountExpanded');
 }
@@ -9806,11 +10025,13 @@ async function updateOpenCodeProfilesStatus() {
   }
 }
 
-function openrouterProfileStatusText(provider, enabled = true) {
-  if (!enabled) return t('settings.opencode.disabled');
-  if (!provider) return t('settings.openrouter.checking');
-  if (provider.status === 'unauthorized') return t('settings.openrouter.invalidKey');
-  if (provider.status !== 'ok') return t('settings.openrouter.unavailable');
+function openrouterProfileStatusText(provider, options = {}) {
+  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
+  if (status === 'disabled') return t('settings.profiles.disabled');
+  if (status === 'hidden') return '';
+  if (status === 'checking') return t('settings.openrouter.checking');
+  if (status === 'invalid') return t('settings.openrouter.invalidKey');
+  if (status !== 'linked') return t('settings.openrouter.unavailable');
   const balance = optionalFiniteNumber(provider.balance?.amount);
   if (balance !== null) return `✓ ${formatMoney(balance, 'USD')}`;
   const quota = (provider.windows || []).find((window) => window?.showMeter !== false);
@@ -9819,24 +10040,72 @@ function openrouterProfileStatusText(provider, enabled = true) {
   return '✓';
 }
 
-function updateOpenRouterProfilesStatus() {
-  const providers = localProviderStatuses('openrouter');
-  const byName = new Map(providers.map((provider) => [String(provider.accountName || provider.accountLabel || ''), provider]));
-  for (const infoEl of document.querySelectorAll('[data-openrouter-profile-name]')) {
-    const name = infoEl.dataset.openrouterProfileName || '';
-    const profile = state.settings?.openrouterProfiles?.[name];
-    infoEl.textContent = openrouterProfileStatusText(byName.get(name), profile?.enabled !== false);
-  }
-  const envInfo = document.querySelector('[data-openrouter-environment]');
-  if (envInfo) envInfo.textContent = openrouterProfileStatusText(byName.get('environment'));
+function thirdPartyProfileStatusText(provider, options = {}) {
+  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
+  if (status === 'disabled') return t('settings.profiles.disabled');
+  if (status === 'hidden') return '';
+  if (status === 'checking') return t('settings.thirdparty.checking');
+  if (status === 'invalid') return t('settings.thirdparty.invalidKey');
+  if (status !== 'linked') return t('settings.thirdparty.unavailable');
+  const balance = optionalFiniteNumber(provider.balance?.amount);
+  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD')}`;
+  const unlimited = (provider.windows || []).some((window) => (
+    window?.showMeter === false && String(window?.detail || '').toLowerCase() === 'unlimited'
+  ));
+  return unlimited ? `✓ ${t('settings.thirdparty.unlimited')}` : '✓';
+}
 
-  const statusEl = document.getElementById('openrouterStatus');
+function updateNamedApiProfilesStatus({
+  providerId,
+  profileSettingsKey,
+  profileCountStateKey,
+  statusText
+}) {
+  const providerEnabled = limitProviderEnabled(providerId);
+  const providers = localProviderStatuses(providerId);
+  const byName = new Map(providers.map((provider) => [
+    String(provider.accountName || provider.accountLabel || ''),
+    provider
+  ]));
+  for (const infoEl of document.querySelectorAll(`[data-managed-profile-provider="${providerId}"][data-managed-profile-name]`)) {
+    const name = infoEl.dataset.managedProfileName || '';
+    const profile = state.settings?.[profileSettingsKey]?.[name];
+    infoEl.textContent = statusText(byName.get(name), {
+      providerEnabled,
+      profileEnabled: profile?.enabled !== false
+    });
+  }
+  const envInfo = document.querySelector(
+    `[data-managed-profile-provider="${providerId}"][data-managed-profile-environment]`
+  );
+  if (envInfo) envInfo.textContent = statusText(byName.get('environment'), { providerEnabled });
+  const statusEl = document.getElementById(`${providerId}Status`);
   if (!statusEl) return;
-  const total = state.openrouterProfileCount || 0;
+  const total = state[profileCountStateKey] || 0;
   const linked = providers.filter((provider) => provider.status === 'ok').length;
-  statusEl.textContent = total > 0
-    ? t('settings.openrouter.connected', { linked, total })
-    : t('settings.openrouter.statusNotSet');
+  statusEl.textContent = total === 0
+    ? t(`settings.${providerId}.statusNotSet`)
+    : !providerEnabled
+      ? t(`settings.${providerId}.nAccounts`, { count: total })
+      : t(`settings.${providerId}.connected`, { linked, total });
+}
+
+function updateOpenRouterProfilesStatus() {
+  updateNamedApiProfilesStatus({
+    providerId: 'openrouter',
+    profileSettingsKey: 'openrouterProfiles',
+    profileCountStateKey: 'openrouterProfileCount',
+    statusText: openrouterProfileStatusText
+  });
+}
+
+function updateThirdPartyProfilesStatus() {
+  updateNamedApiProfilesStatus({
+    providerId: 'thirdparty',
+    profileSettingsKey: 'thirdPartyProfiles',
+    profileCountStateKey: 'thirdPartyProfileCount',
+    statusText: thirdPartyProfileStatusText
+  });
 }
 
 function openrouterProfileErrorText(result) {
@@ -9845,143 +10114,256 @@ function openrouterProfileErrorText(result) {
   return result?.error || t('settings.openrouter.saveFailedShort');
 }
 
-function renderOpenRouterProfiles() {
-  const listEl = document.getElementById('openrouterProfileList');
-  if (!listEl || !window.tokenMonitor.openrouter) return;
-  const api = window.tokenMonitor.openrouter;
+function thirdPartyProfileErrorText(result) {
+  if (result?.errorCode === 'invalidName') return t('settings.thirdparty.invalidName');
+  if (result?.errorCode === 'invalidAdapter') return t('settings.thirdparty.invalidAdapter');
+  if (result?.errorCode === 'invalidBaseUrl') return t('settings.thirdparty.invalidBaseUrl');
+  if (result?.errorCode === 'missingAccessToken') return t('settings.thirdparty.missingAccessToken');
+  if (result?.errorCode === 'missingApiKey') return t('settings.thirdparty.missingApiKey');
+  if (result?.errorCode === 'invalidEndpointPath') return t('settings.thirdparty.invalidEndpointPath');
+  if (result?.errorCode === 'invalidAuthMode') return t('settings.thirdparty.invalidAuthMode');
+  if (result?.errorCode === 'invalidJsonPath') return t('settings.thirdparty.invalidJsonPath');
+  if (result?.errorCode === 'invalidCurrency') return t('settings.thirdparty.invalidCurrency');
+  if (result?.errorCode === 'invalidDivisor') return t('settings.thirdparty.invalidDivisor');
+  if (result?.errorCode === 'invalidCredential') return t('settings.thirdparty.invalidCredential');
+  if (result?.errorCode === 'unavailable') return t('settings.thirdparty.unavailable');
+  return result?.error || t('settings.thirdparty.saveFailedShort');
+}
+
+function appendNamedApiProfileRow(listEl, config) {
+  const {
+    api,
+    providerId,
+    name = '',
+    profile = { enabled: true },
+    env = false,
+    rerender,
+    updateStatus,
+    errorText,
+    detail = ''
+  } = config;
+  const item = document.createElement('div');
+  item.className = 'opencode-profile-item';
+  if (!env) {
+    const toggle = document.createElement('input');
+    toggle.className = 'profile-toggle';
+    toggle.type = 'checkbox';
+    toggle.checked = profile.enabled !== false;
+    toggle.setAttribute('aria-label', name);
+    toggle.addEventListener('change', async () => {
+      const previousEnabled = profile.enabled !== false;
+      profile.enabled = toggle.checked;
+      toggle.disabled = true;
+      updateStatus();
+      try {
+        const result = await api.setProfileEnabled(name, toggle.checked);
+        if (!result?.ok) {
+          toggle.checked = previousEnabled;
+          profile.enabled = previousEnabled;
+          updateStatus();
+        }
+      } catch (_) {
+        toggle.checked = previousEnabled;
+        profile.enabled = previousEnabled;
+        updateStatus();
+      } finally {
+        toggle.disabled = false;
+        renderSettingsSummaries();
+      }
+    });
+    item.append(toggle);
+  } else {
+    const spacer = document.createElement('span');
+    spacer.className = 'profile-toggle';
+    spacer.setAttribute('aria-hidden', 'true');
+    item.append(spacer);
+  }
+
+  const nameBox = document.createElement('span');
+  nameBox.className = 'profile-name-box';
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'profile-name';
+  nameSpan.textContent = env ? t(`settings.${providerId}.environment`) : name;
+  nameBox.append(nameSpan);
+  if (detail) {
+    const detailSpan = document.createElement('span');
+    detailSpan.className = 'profile-detail';
+    detailSpan.textContent = detail;
+    detailSpan.title = detail;
+    nameBox.append(detailSpan);
+  }
+
+  if (!env) {
+    const nameInput = document.createElement('input');
+    nameInput.className = 'profile-name-input hidden';
+    nameInput.type = 'text';
+    nameInput.value = name;
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'profile-rename-btn';
+    renameBtn.textContent = '✎';
+    renameBtn.title = t('settings.profiles.rename');
+    let editing = false;
+    const finishRename = async (save) => {
+      if (!editing) return;
+      editing = false;
+      nameInput.classList.add('hidden');
+      nameSpan.classList.remove('hidden');
+      const nextName = nameInput.value.trim();
+      if (save && nextName && nextName !== name) {
+        const result = await api.renameProfile(name, nextName);
+        if (result?.ok) {
+          rerender();
+        } else {
+          nameInput.value = name;
+          const errorEl = document.getElementById(`${providerId}ErrorMessage`);
+          if (errorEl) {
+            errorEl.textContent = errorText(result);
+            errorEl.classList.remove('hidden');
+          }
+        }
+      }
+    };
+    renameBtn.addEventListener('click', () => {
+      editing = true;
+      nameSpan.classList.add('hidden');
+      nameInput.classList.remove('hidden');
+      nameInput.focus();
+      nameInput.select();
+    });
+    nameInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') void finishRename(true);
+      if (event.key === 'Escape') void finishRename(false);
+    });
+    nameInput.addEventListener('blur', () => void finishRename(true));
+    nameBox.append(nameInput, renameBtn);
+  }
+
+  const rightBox = document.createElement('span');
+  rightBox.className = 'profile-right';
+  const info = document.createElement('span');
+  info.className = 'profile-info';
+  info.dataset.managedProfileProvider = providerId;
+  if (env) info.dataset.managedProfileEnvironment = 'true';
+  else info.dataset.managedProfileName = name;
+  info.textContent = t(`settings.${providerId}.checking`);
+  rightBox.append(info);
+
+  if (!env) {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'profile-delete';
+    deleteBtn.textContent = '✕';
+    deleteBtn.title = t('settings.profiles.delete');
+    let confirming = false;
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirming) {
+        confirming = true;
+        deleteBtn.classList.add('confirming');
+        deleteBtn.textContent = '✓';
+        deleteBtn.title = t('settings.profiles.deleteConfirm', { name });
+        return;
+      }
+      const result = await api.deleteProfile(name);
+      if (result?.ok) rerender();
+    });
+    rightBox.append(deleteBtn);
+  }
+  item.append(nameBox, rightBox);
+  listEl.append(item);
+}
+
+function renderNamedApiProfiles(config) {
+  const {
+    providerId,
+    profileSettingsKey,
+    envConfiguredKey,
+    profileCountStateKey,
+    api,
+    rerender,
+    updateStatus,
+    errorText,
+    detailForProfile = () => ''
+  } = config;
+  const listEl = document.getElementById(`${providerId}ProfileList`);
+  if (!listEl || !api) return;
   api.getProfiles().then(({ profiles, hasEnvVar }) => {
     listEl.replaceChildren();
-    state.settings.openrouterProfiles = profiles;
-    state.settings.openrouterEnvConfigured = Boolean(hasEnvVar);
+    state.settings[profileSettingsKey] = profiles;
+    state.settings[envConfiguredKey] = Boolean(hasEnvVar);
     const entries = Object.entries(profiles);
-    state.openrouterProfileCount = entries.length + (hasEnvVar ? 1 : 0);
-    if (state.openrouterProfileCount === 0) {
+    state[profileCountStateKey] = entries.length + (hasEnvVar ? 1 : 0);
+    if (state[profileCountStateKey] === 0) {
       const empty = document.createElement('div');
       empty.className = 'opencode-empty';
-      empty.textContent = t('settings.openrouter.emptyList');
+      empty.textContent = t(`settings.${providerId}.emptyList`);
       listEl.append(empty);
-      updateOpenRouterProfilesStatus();
+      updateStatus();
       renderSettingsSummaries();
       return;
     }
 
-    const appendRow = ({ name = '', profile = { enabled: true }, env = false } = {}) => {
-      const item = document.createElement('div');
-      item.className = 'opencode-profile-item';
-      if (!env) {
-        const toggle = document.createElement('input');
-        toggle.className = 'profile-toggle';
-        toggle.type = 'checkbox';
-        toggle.checked = profile.enabled !== false;
-        toggle.setAttribute('aria-label', name);
-        toggle.addEventListener('change', async () => {
-          const result = await api.setProfileEnabled(name, toggle.checked);
-          if (!result?.ok) toggle.checked = !toggle.checked;
-          updateOpenRouterProfilesStatus();
-          renderSettingsSummaries();
-        });
-        item.append(toggle);
-      } else {
-        const spacer = document.createElement('span');
-        spacer.className = 'profile-toggle';
-        spacer.setAttribute('aria-hidden', 'true');
-        item.append(spacer);
-      }
-
-      const nameBox = document.createElement('span');
-      nameBox.className = 'profile-name-box';
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'profile-name';
-      nameSpan.textContent = env ? t('settings.openrouter.environment') : name;
-      nameBox.append(nameSpan);
-
-      if (!env) {
-        const nameInput = document.createElement('input');
-        nameInput.className = 'profile-name-input hidden';
-        nameInput.type = 'text';
-        nameInput.value = name;
-        const renameBtn = document.createElement('button');
-        renameBtn.className = 'profile-rename-btn';
-        renameBtn.textContent = '✎';
-        renameBtn.title = t('settings.opencode.rename');
-        let editing = false;
-        const finishRename = async (save) => {
-          if (!editing) return;
-          editing = false;
-          nameInput.classList.add('hidden');
-          nameSpan.classList.remove('hidden');
-          const nextName = nameInput.value.trim();
-          if (save && nextName && nextName !== name) {
-            const result = await api.renameProfile(name, nextName);
-            if (result?.ok) {
-              renderOpenRouterProfiles();
-            } else {
-              nameInput.value = name;
-              const errorEl = document.getElementById('openrouterErrorMessage');
-              if (errorEl) {
-                errorEl.textContent = openrouterProfileErrorText(result);
-                errorEl.classList.remove('hidden');
-              }
-            }
-          }
-        };
-        renameBtn.addEventListener('click', () => {
-          editing = true;
-          nameSpan.classList.add('hidden');
-          nameInput.classList.remove('hidden');
-          nameInput.focus();
-          nameInput.select();
-        });
-        nameInput.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter') void finishRename(true);
-          if (event.key === 'Escape') void finishRename(false);
-        });
-        nameInput.addEventListener('blur', () => void finishRename(true));
-        nameBox.append(nameInput, renameBtn);
-      }
-
-      const rightBox = document.createElement('span');
-      rightBox.className = 'profile-right';
-      const info = document.createElement('span');
-      info.className = 'profile-info';
-      if (env) {
-        info.dataset.openrouterEnvironment = 'true';
-      } else {
-        info.dataset.openrouterProfileName = name;
-      }
-      info.textContent = t('settings.openrouter.checking');
-      rightBox.append(info);
-
-      if (!env) {
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'profile-delete';
-        deleteBtn.textContent = '✕';
-        deleteBtn.title = t('settings.opencode.delete');
-        let confirming = false;
-        deleteBtn.addEventListener('click', async () => {
-          if (!confirming) {
-            confirming = true;
-            deleteBtn.classList.add('confirming');
-            deleteBtn.textContent = '✓';
-            deleteBtn.title = t('settings.opencode.deleteConfirm', { name });
-            return;
-          }
-          const result = await api.deleteProfile(name);
-          if (result?.ok) renderOpenRouterProfiles();
-        });
-        rightBox.append(deleteBtn);
-      }
-      item.append(nameBox, rightBox);
-      listEl.append(item);
-    };
-
-    for (const [name, profile] of entries) appendRow({ name, profile });
-    if (hasEnvVar) appendRow({ env: true });
-    updateOpenRouterProfilesStatus();
+    for (const [name, profile] of entries) {
+      appendNamedApiProfileRow(listEl, {
+        api,
+        providerId,
+        name,
+        profile,
+        rerender,
+        updateStatus,
+        errorText,
+        detail: detailForProfile(profile)
+      });
+    }
+    if (hasEnvVar) {
+      appendNamedApiProfileRow(listEl, {
+        api,
+        providerId,
+        env: true,
+        rerender,
+        updateStatus,
+        errorText
+      });
+    }
+    updateStatus();
     renderSettingsSummaries();
   }).catch(() => {
-    const statusEl = document.getElementById('openrouterStatus');
-    if (statusEl) statusEl.textContent = t('settings.openrouter.unavailable');
+    const statusEl = document.getElementById(`${providerId}Status`);
+    if (statusEl) statusEl.textContent = t(`settings.${providerId}.unavailable`);
+  });
+}
+
+function renderOpenRouterProfiles() {
+  renderNamedApiProfiles({
+    providerId: 'openrouter',
+    profileSettingsKey: 'openrouterProfiles',
+    envConfiguredKey: 'openrouterEnvConfigured',
+    profileCountStateKey: 'openrouterProfileCount',
+    api: window.tokenMonitor.openrouter,
+    rerender: renderOpenRouterProfiles,
+    updateStatus: updateOpenRouterProfilesStatus,
+    errorText: openrouterProfileErrorText
+  });
+}
+
+function renderThirdPartyProfiles() {
+  renderNamedApiProfiles({
+    providerId: 'thirdparty',
+    profileSettingsKey: 'thirdPartyProfiles',
+    envConfiguredKey: 'thirdPartyEnvConfigured',
+    profileCountStateKey: 'thirdPartyProfileCount',
+    api: window.tokenMonitor.thirdparty,
+    rerender: renderThirdPartyProfiles,
+    updateStatus: updateThirdPartyProfilesStatus,
+    errorText: thirdPartyProfileErrorText,
+    detailForProfile: (profile) => {
+      const adapter = profile?.adapter === 'newapi-token'
+        ? t('settings.thirdparty.detailNewApiKey')
+        : profile?.adapter === 'custom'
+          ? t('settings.thirdparty.detailCustom')
+          : t('settings.thirdparty.detailNewApiAccount');
+      let host = '';
+      try { host = new URL(String(profile?.baseUrl || '')).host; } catch (_) {}
+      return [adapter, host].filter(Boolean).join(' · ');
+    }
   });
 }
 
@@ -10531,6 +10913,89 @@ function setupCursorAccountUI() {
         await refreshStats({ force: true });
       } else if (errorEl) {
         errorEl.textContent = openrouterProfileErrorText(result);
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const thirdpartyToggle = document.getElementById('thirdpartySettingsToggle');
+  if (thirdpartyToggle) {
+    thirdpartyToggle.addEventListener('click', () => {
+      const expanding = !state.thirdPartyAccountExpanded;
+      setThirdPartyAccountExpanded(expanding);
+      if (expanding) renderThirdPartyProfiles();
+    });
+    setThirdPartyAccountExpanded(false);
+
+    const addToggle = document.getElementById('thirdpartyAddToggle');
+    const addDetails = document.getElementById('thirdpartyAddDetails');
+    const platformInput = document.getElementById('thirdpartyPlatformInput');
+    const modeInput = document.getElementById('thirdpartyModeInput');
+    const baseUrlInput = document.getElementById('thirdpartyBaseUrlInput');
+    platformInput?.addEventListener('change', setThirdPartyAdapterFields);
+    modeInput?.addEventListener('change', setThirdPartyAdapterFields);
+    baseUrlInput?.addEventListener('input', updateThirdPartyHttpWarning);
+    setThirdPartyAdapterFields();
+    updateThirdPartyHttpWarning();
+    addToggle?.addEventListener('click', () => {
+      const expanded = addDetails?.classList.contains('hidden');
+      addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      addDetails?.classList.toggle('hidden', !expanded);
+      document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', expanded);
+    });
+    document.getElementById('thirdpartyProfileSubmit')?.addEventListener('click', async () => {
+      const nameInput = document.getElementById('thirdpartyProfileName');
+      const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
+      const userIdInput = document.getElementById('thirdpartyUserIdInput');
+      const keyInput = document.getElementById('thirdpartyApiKeyInput');
+      const endpointPathInput = document.getElementById('thirdpartyEndpointPathInput');
+      const authModeInput = document.getElementById('thirdpartyAuthModeInput');
+      const remainingPathInput = document.getElementById('thirdpartyRemainingPathInput');
+      const usedPathInput = document.getElementById('thirdpartyUsedPathInput');
+      const totalPathInput = document.getElementById('thirdpartyTotalPathInput');
+      const currencyInput = document.getElementById('thirdpartyCurrencyInput');
+      const divisorInput = document.getElementById('thirdpartyDivisorInput');
+      const errorEl = document.getElementById('thirdpartyErrorMessage');
+      const name = String(nameInput?.value || '').trim() || 'default';
+      const adapter = selectedThirdPartyAdapter();
+      const baseUrl = String(baseUrlInput?.value || '').trim();
+      const accessToken = String(accessTokenInput?.value || '').trim();
+      const userId = String(userIdInput?.value || '').trim();
+      const apiKey = String(keyInput?.value || '').trim();
+      errorEl?.classList.add('hidden');
+      const result = await window.tokenMonitor.thirdparty.saveProfile({
+        name,
+        adapter,
+        baseUrl,
+        accessToken,
+        userId,
+        apiKey,
+        endpointPath: String(endpointPathInput?.value || '').trim(),
+        authMode: String(authModeInput?.value || '').trim(),
+        remainingPath: String(remainingPathInput?.value || '').trim(),
+        usedPath: String(usedPathInput?.value || '').trim(),
+        totalPath: String(totalPathInput?.value || '').trim(),
+        currency: String(currencyInput?.value || '').trim(),
+        divisor: String(divisorInput?.value || '').trim()
+      });
+      if (result?.ok) {
+        nameInput.value = '';
+        baseUrlInput.value = '';
+        updateThirdPartyHttpWarning();
+        accessTokenInput.value = '';
+        userIdInput.value = '';
+        keyInput.value = '';
+        endpointPathInput.value = '/user/balance';
+        authModeInput.value = 'bearer';
+        remainingPathInput.value = '';
+        usedPathInput.value = '';
+        totalPathInput.value = '';
+        currencyInput.value = 'USD';
+        divisorInput.value = '1';
+        renderThirdPartyProfiles();
+        await refreshStats({ force: true });
+      } else if (errorEl) {
+        errorEl.textContent = thirdPartyProfileErrorText(result);
         errorEl.classList.remove('hidden');
       }
     });
@@ -11308,6 +11773,7 @@ function initSettingsAnimationWrappers() {
   });
 }
 
+orderAccountProviderGroups();
 initSettingsAnimationWrappers();
 setupSettingsSections();
 setupCursorAccountUI();

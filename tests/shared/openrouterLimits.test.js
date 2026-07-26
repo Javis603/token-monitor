@@ -55,6 +55,9 @@ test('OpenRouter profile names preserve provider-safe identities and reserve the
   assert.equal(openrouterProfileName('Environment'), '');
   assert.equal(openrouterProfileName('name@example.com'), '');
   assert.equal(openrouterProfileName('a/b'), '');
+  assert.equal(openrouterProfileName('__proto__'), '');
+  assert.equal(openrouterProfileName('prototype'), '');
+  assert.equal(openrouterProfileName('constructor'), '');
   assert.equal(openrouterProfileName('x'.repeat(65)), '');
 });
 

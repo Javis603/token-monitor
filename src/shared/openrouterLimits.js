@@ -3,6 +3,7 @@
 const { createOutboundFetch } = require('./outboundFetch');
 const { hashKey } = require('./hashKey');
 const { normalizeLimitProvider } = require('./limits');
+const { normalizeNamedProfileName } = require('./namedProfile');
 
 const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/key';
 const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
@@ -30,16 +31,9 @@ function finiteNumber(value) {
 }
 
 function openrouterProfileName(value) {
-  const raw = String(value || '').trim().normalize('NFC');
-  if (!raw || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
-  const clean = raw.replace(/\s+/gu, ' ').trim();
-  if (
-    !clean
-    || [...clean].length > 64
-    || !/^[\p{L}\p{M}\p{N} ._-]+$/u.test(clean)
-    || clean.toLowerCase() === OPENROUTER_ENV_ACCOUNT_NAME
-  ) return '';
-  return clean;
+  return normalizeNamedProfileName(value, {
+    reservedNames: [OPENROUTER_ENV_ACCOUNT_NAME, 'default (env)']
+  });
 }
 
 function statusForHttp(code) {

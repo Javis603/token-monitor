@@ -10,7 +10,7 @@ const KNOWN_CLIENT_ASSETS = new Set([
   'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma'
 ]);
 const CLIENT_LABELS = {
-  claude: 'Claude', codex: 'Codex', hermes: 'Hermes',
+  claude: 'Claude', codex: 'Codex', hermes: 'Hermes Agent',
   gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw',
   antigravity: 'Antigravity', cline: 'Cline',
   kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot',

@@ -21,7 +21,7 @@ const {
 const clients = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
-  { id: 'hermes', label: 'Hermes' },
+  { id: 'hermes', label: 'Hermes Agent' },
   { id: 'opencode', label: 'OpenCode' }
 ];
 

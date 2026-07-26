@@ -27,6 +27,82 @@ const supportedToolCounts = (text, file) => {
   return counts;
 };
 
+const supportedToolNames = (text) => text
+  .split('\n')
+  .filter((line) => line.startsWith('| <img'))
+  .map((row) => row.split('|')[2].trim());
+
+const supportedToolIds = (text, file) => text
+  .split('\n')
+  .filter((line) => line.startsWith('| <img'))
+  .map((row) => {
+    const id = row.match(/tools-icon\/([^".]+)\.[a-z]+"/i)?.[1];
+    assert.ok(id, `${file}: no tool icon id found in row: ${row}`);
+    return id;
+  });
+
+const supportedToolOrder = [
+  'Claude Code',
+  'Codex',
+  'OpenCode',
+  'Hermes Agent',
+  'OpenClaw',
+  'Cursor',
+  'Antigravity',
+  'Cline',
+  'Kimi CLI / Kimi Code',
+  'Qwen CLI',
+  'Grok Build',
+  'GitHub Copilot',
+  'Pi',
+  'Zed',
+  'Kilo Code',
+  'MiMo Code',
+  'ZCode / GLM',
+  'Kiro',
+  'CodeBuddy',
+  'WorkBuddy',
+  'Proma',
+  'DeepSeek',
+  'OpenRouter',
+  'Minimax',
+  'Volcengine',
+  'Qoder',
+  'Ollama',
+  'Third-party APIs'
+];
+
+const supportedToolIdOrder = [
+  'claude',
+  'codex',
+  'opencode',
+  'hermes-agent',
+  'openclaw',
+  'cursor',
+  'antigravity',
+  'cline',
+  'kimi',
+  'qwen',
+  'xai',
+  'copilot',
+  'pi',
+  'zed',
+  'kilocode',
+  'mimo-code',
+  'zcode',
+  'kiro',
+  'codebuddy',
+  'workbuddy',
+  'proma',
+  'deepseek',
+  'openrouter',
+  'minimax',
+  'volcengine',
+  'qoder',
+  'ollama',
+  'newapi'
+];
+
 // Exact counts, not "at least": a floor check would still pass after new tools land, which is
 // the staleness this guards. Reword a claim and the missing match fails loudly on purpose.
 const countClaims = {
@@ -72,9 +148,13 @@ test('configuration reference env keys all exist in .env.example', () => {
 });
 
 test('localized READMEs list the same supported tools', () => {
-  const baseline = supportedToolCounts(read('README.md'), 'README.md');
+  const baselineText = read('README.md');
+  const baseline = supportedToolCounts(baselineText, 'README.md');
+  assert.deepEqual(supportedToolNames(baselineText), supportedToolOrder);
   for (const file of localizedReadmes) {
-    assert.deepEqual(supportedToolCounts(read(file), file), baseline, file);
+    const text = read(file);
+    assert.deepEqual(supportedToolCounts(text, file), baseline, file);
+    assert.deepEqual(supportedToolIds(text, file), supportedToolIdOrder, file);
   }
 });
 

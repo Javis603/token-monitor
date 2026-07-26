@@ -94,6 +94,7 @@ const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
 const openrouterLimits = require('../shared/openrouterLimits');
+const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
@@ -339,6 +340,7 @@ function defaultSettings() {
     opencodeCookie: '',
     opencodeProfiles: {},
     openrouterProfiles: {},
+    thirdPartyProfiles: {},
     deepseekApiKey: '',
     minimaxApiKey: '',
     copilotApiToken: '',
@@ -2821,9 +2823,39 @@ function redactOpencodeProfilesForRenderer(profiles) {
 
 function redactOpenRouterProfilesForRenderer(profiles) {
   if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = {};
+  const out = Object.create(null);
   for (const [name, profile] of Object.entries(profiles)) {
     out[name] = { enabled: profile?.enabled !== false, apiKey: profile?.apiKey ? 'set' : '' };
+  }
+  return out;
+}
+
+function redactThirdPartyProfilesForRenderer(profiles) {
+  if (!profiles || typeof profiles !== 'object') return profiles;
+  const out = Object.create(null);
+  for (const [name, profile] of Object.entries(profiles)) {
+    const adapter = thirdPartyLimits.normalizeAdapterId(profile?.adapter);
+    out[name] = {
+      enabled: profile?.enabled !== false,
+      adapter,
+      baseUrl: thirdPartyLimits.normalizeThirdPartyBaseUrl(profile?.baseUrl, {
+        stripTerminalV1: adapter !== thirdPartyLimits.CUSTOM_BALANCE_ADAPTER
+      }),
+      userId: String(profile?.userId || '').trim(),
+      ...(adapter === thirdPartyLimits.CUSTOM_BALANCE_ADAPTER
+        ? {
+            endpointPath: thirdPartyLimits.normalizeCustomEndpointPath(profile?.endpointPath),
+            authMode: thirdPartyLimits.normalizeCustomAuthMode(profile?.authMode),
+            remainingPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.remainingPath),
+            usedPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.usedPath),
+            totalPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.totalPath),
+            currency: thirdPartyLimits.normalizeCustomCurrency(profile?.currency),
+            divisor: thirdPartyLimits.normalizeCustomDivisor(profile?.divisor)
+          }
+        : {}),
+      accessToken: profile?.accessToken ? 'set' : '',
+      apiKey: profile?.apiKey ? 'set' : ''
+    };
   }
   return out;
 }
@@ -2909,7 +2941,11 @@ function settingsForRenderer() {
     ...(settings?.openrouterProfiles
       ? { openrouterProfiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles) }
       : {}),
+    ...(settings?.thirdPartyProfiles
+      ? { thirdPartyProfiles: redactThirdPartyProfilesForRenderer(settings.thirdPartyProfiles) }
+      : {}),
     openrouterEnvConfigured: Boolean(openrouterLimits.openrouterToken(process.env)),
+    thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
@@ -4155,6 +4191,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
     delete normalizedPatch.openrouterProfiles;
+    delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
@@ -4911,6 +4948,145 @@ app.whenReady().then(() => {
       return { ok: false, error: error?.message || 'Could not persist OpenRouter profile state' };
     }
     void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-state', {
+      clear: !enabled,
+      refresh: Boolean(enabled)
+    });
+    return { ok: true };
+  });
+  ipcMain.handle('thirdparty:getProfiles', async () => {
+    return {
+      profiles: redactThirdPartyProfilesForRenderer(settings.thirdPartyProfiles || {}),
+      hasEnvVar: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0
+    };
+  });
+  ipcMain.handle('thirdparty:saveProfile', async (_event, rawProfile = {}) => {
+    const name = thirdPartyLimits.thirdPartyProfileName(rawProfile.name);
+    const adapter = thirdPartyLimits.normalizeAdapterId(rawProfile.adapter);
+    const customAdapter = adapter === thirdPartyLimits.CUSTOM_BALANCE_ADAPTER;
+    const baseUrl = thirdPartyLimits.normalizeThirdPartyBaseUrl(rawProfile.baseUrl, {
+      stripTerminalV1: !customAdapter
+    });
+    if (!name) return { ok: false, errorCode: 'invalidName' };
+    if (!adapter) return { ok: false, errorCode: 'invalidAdapter' };
+    if (!baseUrl) return { ok: false, errorCode: 'invalidBaseUrl' };
+    if (
+      adapter === thirdPartyLimits.NEWAPI_ACCOUNT_ADAPTER
+      && !thirdPartyLimits.newapiAccessToken({}, rawProfile.accessToken)
+    ) return { ok: false, errorCode: 'missingAccessToken' };
+    if (
+      [thirdPartyLimits.NEWAPI_TOKEN_ADAPTER, thirdPartyLimits.CUSTOM_BALANCE_ADAPTER].includes(adapter)
+      && !thirdPartyLimits.newapiApiKey({}, rawProfile.apiKey)
+    ) return { ok: false, errorCode: 'missingApiKey' };
+    if (
+      customAdapter
+      && !thirdPartyLimits.normalizeCustomEndpointPath(rawProfile.endpointPath)
+    ) return { ok: false, errorCode: 'invalidEndpointPath' };
+    if (
+      customAdapter
+      && !thirdPartyLimits.normalizeCustomAuthMode(rawProfile.authMode)
+    ) return { ok: false, errorCode: 'invalidAuthMode' };
+    if (
+      customAdapter
+      && (
+        !thirdPartyLimits.normalizeCustomJsonPath(rawProfile.remainingPath)
+        || (
+          String(rawProfile.usedPath || '').trim()
+          && !thirdPartyLimits.normalizeCustomJsonPath(rawProfile.usedPath)
+        )
+        || (
+          String(rawProfile.totalPath || '').trim()
+          && !thirdPartyLimits.normalizeCustomJsonPath(rawProfile.totalPath)
+        )
+      )
+    ) return { ok: false, errorCode: 'invalidJsonPath' };
+    if (
+      customAdapter
+      && !thirdPartyLimits.normalizeCustomCurrency(rawProfile.currency)
+    ) return { ok: false, errorCode: 'invalidCurrency' };
+    if (
+      customAdapter
+      && thirdPartyLimits.normalizeCustomDivisor(rawProfile.divisor) === null
+    ) return { ok: false, errorCode: 'invalidDivisor' };
+    const profile = thirdPartyLimits.normalizeThirdPartyProfile({
+      ...rawProfile,
+      adapter,
+      baseUrl,
+      enabled: true
+    });
+    if (!profile) return { ok: false, errorCode: 'invalidCredential' };
+    try {
+      const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, {
+        env: process.env,
+        signal: AbortSignal.timeout(15_000)
+      });
+      if (provider?.status !== 'ok') {
+        return {
+          ok: false,
+          errorCode: provider?.status === 'unauthorized' ? 'invalidCredential' : 'unavailable'
+        };
+      }
+      settings.thirdPartyProfiles = {
+        ...(settings.thirdPartyProfiles || {}),
+        [name]: profile
+      };
+      saveSettings({ throwOnError: true });
+      void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-save');
+      return { ok: true };
+    } catch (_) {
+      return { ok: false, errorCode: 'unavailable' };
+    }
+  });
+  ipcMain.handle('thirdparty:deleteProfile', async (_event, rawName) => {
+    const name = String(rawName || '').trim();
+    const profiles = { ...(settings.thirdPartyProfiles || {}) };
+    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
+    delete profiles[name];
+    settings.thirdPartyProfiles = profiles;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist third-party API profile deletion' };
+    }
+    void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-delete', {
+      clear: true,
+      refresh: false
+    });
+    return { ok: true };
+  });
+  ipcMain.handle('thirdparty:renameProfile', async (_event, rawOldName, rawNewName) => {
+    const oldName = String(rawOldName || '').trim();
+    const newName = thirdPartyLimits.thirdPartyProfileName(rawNewName);
+    const profiles = { ...(settings.thirdPartyProfiles || {}) };
+    if (!newName || oldName === newName) return { ok: false, errorCode: 'invalidName' };
+    if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
+    if (profiles[newName]) return { ok: false, error: 'Profile name already exists' };
+    profiles[newName] = profiles[oldName];
+    delete profiles[oldName];
+    settings.thirdPartyProfiles = profiles;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist third-party API profile rename' };
+    }
+    void queueLimitInvalidation({ provider: 'thirdparty', accountName: oldName }, 'profile-rename', {
+      clear: true,
+      refresh: false
+    });
+    void queueLimitInvalidation({ provider: 'thirdparty', accountName: newName }, 'profile-rename');
+    return { ok: true };
+  });
+  ipcMain.handle('thirdparty:setProfileEnabled', async (_event, rawName, enabled) => {
+    const name = String(rawName || '').trim();
+    const profiles = { ...(settings.thirdPartyProfiles || {}) };
+    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
+    profiles[name] = { ...profiles[name], enabled: Boolean(enabled) };
+    settings.thirdPartyProfiles = profiles;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist third-party API profile state' };
+    }
+    void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-state', {
       clear: !enabled,
       refresh: Boolean(enabled)
     });

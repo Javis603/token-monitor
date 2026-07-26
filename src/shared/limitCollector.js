@@ -19,6 +19,7 @@ const antigravityProbe = require('./antigravityProbe');
 const opencodeLimits = require('./opencodeLimits');
 const opencodeWeb = require('./opencodeWeb');
 const openrouterLimits = require('./openrouterLimits');
+const thirdPartyLimits = require('./thirdPartyLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
 const { codexAccountKey, codexAuthIdentity } = require('./codexAuth');
@@ -53,7 +54,7 @@ const {
   fetchGrokLimits
 } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'cursor', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam', 'kimi', 'ollama'];
+const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'antigravity', 'kimi', 'grok', 'copilot', 'mimo', 'zai', 'zaiteam', 'kiro', 'deepseek', 'openrouter', 'minimax', 'volcengine', 'qoder', 'ollama', 'thirdparty'];
 const DEFAULT_PROVIDER_PHYSICAL_BOUND_MS = 120_000;
 const PROVIDER_CLEANUP_GRACE_MS = 5_000;
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
@@ -3030,6 +3031,7 @@ function providerFetchers(deps = {}) {
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
     ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
+    thirdparty: (providerOptions, probeDeps) => thirdPartyLimits.fetchThirdPartyLimits(providerOptions, probeDeps),
     ...(deps.providerFetchers || {})
   };
 }
@@ -3338,6 +3340,7 @@ module.exports = {
   fetchAntigravityLimits,
   fetchOpenCodeLimits,
   fetchOpenRouterLimits: openrouterLimits.fetchOpenRouterLimits,
+  fetchThirdPartyLimits: thirdPartyLimits.fetchThirdPartyLimits,
   fetchSingleOpenCodeProfile,
   claudeWebCookie,
   normalizeClaudeWebCookieInput,

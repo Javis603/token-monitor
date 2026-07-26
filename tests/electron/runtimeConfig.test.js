@@ -19,6 +19,15 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
     claudeWebCookie: 'sessionKey=settings-secret',
     kimiApiKey: 'secret',
     openrouterProfiles: { work: { apiKey: 'openrouter-secret', enabled: true } },
+    thirdPartyProfiles: {
+      relay: {
+        adapter: 'newapi-account',
+        baseUrl: 'https://api.example.com',
+        accessToken: 'access-secret',
+        userId: '42',
+        enabled: true
+      }
+    },
     zaiApiRegion: 'bigmodel-cn'
   };
   const usage = usageConfigFromSettings(settings, {
@@ -35,6 +44,15 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
   assert.equal(limits.claudeWebCookie, 'sessionKey=settings-secret');
   assert.equal(limits.kimiApiKey, 'secret');
   assert.deepEqual(limits.openrouterProfiles, { work: { apiKey: 'openrouter-secret', enabled: true } });
+  assert.deepEqual(limits.thirdPartyProfiles, {
+    relay: {
+      adapter: 'newapi-account',
+      baseUrl: 'https://api.example.com',
+      accessToken: 'access-secret',
+      userId: '42',
+      enabled: true
+    }
+  });
   assert.equal(Object.hasOwn(limits, 'clients'), false);
   assert.deepEqual(envelope, {
     deviceId: 'device-1',
@@ -108,4 +126,20 @@ test('Claude Web cookie falls back to env and invalidates only the Claude limits
   );
   assert.deepEqual(classification.limitScopes, [{ provider: 'claude' }]);
   assert.equal(classification.limitsReconfigure, false);
+});
+
+test('third-party profile changes invalidate only the third-party limits lane', () => {
+  const classification = classifySettingsChange(
+    {
+      thirdPartyProfiles: {
+        work: { adapter: 'newapi-token', baseUrl: 'https://old.example', apiKey: 'old', enabled: true }
+      }
+    },
+    {
+      thirdPartyProfiles: {
+        work: { adapter: 'newapi-token', baseUrl: 'https://new.example', apiKey: 'new', enabled: true }
+      }
+    }
+  );
+  assert.deepEqual(classification.limitScopes, [{ provider: 'thirdparty' }]);
 });

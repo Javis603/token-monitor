@@ -17,6 +17,7 @@ const {
   limitProviderCompactWindowPeriodLabel,
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
+  namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
   limitProviderSettingsTags
@@ -246,6 +247,44 @@ test('API key account status distinguishes pending checks from completed failure
   assert.equal(apiKeyAccountStatus({ status: 'unavailable' }, true), 'unavailable');
   assert.equal(apiKeyAccountStatus({ status: 'error' }, true), 'error');
   assert.equal(apiKeyAccountStatus({ status: 'disabled' }, true), 'notChecked');
+});
+
+test('named API profile status prioritizes provider and profile disablement over pending checks', () => {
+  assert.equal(namedApiProfileStatus(null), 'checking');
+  assert.equal(namedApiProfileStatus(null, { providerEnabled: false }), 'hidden');
+  assert.equal(namedApiProfileStatus(null, { profileEnabled: false }), 'disabled');
+  assert.equal(namedApiProfileStatus({ status: 'ok' }), 'linked');
+  assert.equal(namedApiProfileStatus({ status: 'ok' }, { providerEnabled: false }), 'hidden');
+  assert.equal(namedApiProfileStatus({ status: 'ok' }, { profileEnabled: false }), 'disabled');
+  assert.equal(
+    namedApiProfileStatus({ status: 'ok' }, { providerEnabled: false, profileEnabled: false }),
+    'disabled'
+  );
+  assert.equal(namedApiProfileStatus({ status: 'unauthorized' }), 'invalid');
+});
+
+test('named API profile rows hide global disablement while the group preserves configured account count', () => {
+  const app = readRendererFile('app.js');
+  const updater = functionBody(app, 'updateNamedApiProfilesStatus', 'updateOpenRouterProfilesStatus');
+
+  assert.match(app, /if \(status === 'hidden'\) return '';/);
+  assert.match(updater, /const providerEnabled = limitProviderEnabled\(providerId\)/);
+  assert.match(updater, /statusText\(byName\.get\(name\), \{\s*providerEnabled,\s*profileEnabled: profile\?\.enabled !== false\s*\}\)/);
+  assert.match(updater, /statusText\(byName\.get\('environment'\), \{ providerEnabled \}\)/);
+  assert.match(updater, /!providerEnabled\s*\? t\(`settings\.\$\{providerId\}\.nAccounts`, \{ count: total \}\)/);
+  assert.match(updater, /: t\(`settings\.\$\{providerId\}\.connected`, \{ linked, total \}\)/);
+});
+
+test('named API profile toggles update immediately and roll back failed persistence', () => {
+  const app = readRendererFile('app.js');
+  const row = functionBody(app, 'appendNamedApiProfileRow', 'renderNamedApiProfiles');
+  const optimisticUpdate = row.indexOf('profile.enabled = toggle.checked;');
+  const save = row.indexOf('await api.setProfileEnabled(name, toggle.checked);');
+
+  assert.ok(optimisticUpdate >= 0 && optimisticUpdate < save);
+  assert.match(row, /profile\.enabled = toggle\.checked;\s*toggle\.disabled = true;\s*updateStatus\(\)/);
+  assert.match(row, /toggle\.checked = previousEnabled;\s*profile\.enabled = previousEnabled;\s*updateStatus\(\)/);
+  assert.match(row, /finally \{\s*toggle\.disabled = false;\s*renderSettingsSummaries\(\)/);
 });
 
 test('undetected settings tags include status and supported collection hints', () => {
@@ -991,7 +1030,7 @@ test('Copilot env token is documented in env example, not the README overview', 
   assert.doesNotMatch(readmeTw, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
 });
 
-test('Accounts summary counts all managed account groups including Claude Web, OpenRouter, MiMo, and Ollama', () => {
+test('Accounts summary counts all managed account groups including Claude Web and Third-party API', () => {
   const app = readRendererFile('app.js');
   const mimoLinkedBody = functionBody(app, 'mimoAccountLinked', 'renderMimoStatus');
   const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
@@ -1006,6 +1045,7 @@ test('Accounts summary counts all managed account groups including Claude Web, O
   assert.match(summaryBody, /const kimiLinked = externalProviderAccountLinked\('kimi'\);/);
   assert.match(summaryBody, /const ollamaLinked = externalProviderAccountLinked\('ollama'\);/);
   assert.match(summaryBody, /const openrouterCount = state\.openrouterProfileCount \|\| 0;/);
+  assert.match(summaryBody, /const thirdpartyCount = state\.thirdPartyProfileCount \|\| 0;/);
   assert.match(summaryBody, /const mimoLinked = mimoAccountLinked\(\);/);
   assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
   assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
@@ -1017,9 +1057,10 @@ test('Accounts summary counts all managed account groups including Claude Web, O
   assert.match(summaryBody, /\(kimiLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(ollamaLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(openrouterCount > 0 \? 1 : 0\)/);
+  assert.match(summaryBody, /\(thirdpartyCount > 0 \? 1 : 0\)/);
   assert.match(summaryBody, /\(mimoLinked \? 1 : 0\)/);
   assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 15/);
+  assert.match(summaryBody, /total: 16/);
 });
 
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
@@ -1134,6 +1175,19 @@ test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () 
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'openrouter', status: 'unauthorized' }),
     { label: 'Update API key', tone: 'setup' }
+  );
+});
+
+test('third-party API uses credential setup copy and relay capability tags', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'thirdparty', source: 'api' }), 'API');
+  assert.deepEqual(presentation.limitProviderCapabilityTags('thirdparty'), ['Relay', 'API']);
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'thirdparty', status: 'notConfigured' }),
+    { label: 'Add credential', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'thirdparty', status: 'unauthorized' }),
+    { label: 'Update credential', tone: 'setup' }
   );
 });
 
