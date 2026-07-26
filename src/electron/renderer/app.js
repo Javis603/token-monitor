@@ -8246,8 +8246,11 @@ function renderAllSessionsIcon(stats, height = 44, configOrder, colors = {}, opt
     ctx.restore();
   }
 
-  drawBar(layout.barsStartY, picks[0].primaryWindow.remainingPercent);
-  drawBar(layout.barsStartY + layout.barHeight + layout.barGap, picks[1].primaryWindow.remainingPercent);
+  // The picker's resolved remaining percentage, not the raw window: drawBar
+  // applies the used-mode flip itself, and a balance window has no wire
+  // percentage to read.
+  drawBar(layout.barsStartY, picks[0].remaining);
+  drawBar(layout.barsStartY + layout.barHeight + layout.barGap, picks[1].remaining);
   return canvas.toDataURL('image/png');
 }
 
