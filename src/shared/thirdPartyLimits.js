@@ -11,7 +11,6 @@ const THIRD_PARTY_ENV_ACCOUNT_NAME = 'environment';
 const NEWAPI_ACCOUNT_ADAPTER = 'newapi-account';
 const NEWAPI_TOKEN_ADAPTER = 'newapi-token';
 const CUSTOM_BALANCE_ADAPTER = 'custom';
-const DEFAULT_THIRD_PARTY_ADAPTER = NEWAPI_ACCOUNT_ADAPTER;
 const THIRD_PARTY_ADAPTER_IDS = Object.freeze([
   NEWAPI_ACCOUNT_ADAPTER,
   NEWAPI_TOKEN_ADAPTER,
@@ -33,8 +32,8 @@ function cleanValue(value) {
   return raw;
 }
 
-function normalizeAdapterId(value, fallback = '') {
-  const adapter = cleanValue(value) || fallback;
+function normalizeAdapterId(value) {
+  const adapter = cleanValue(value);
   return THIRD_PARTY_ADAPTER_IDS.includes(adapter) ? adapter : '';
 }
 
@@ -138,7 +137,7 @@ function readCustomJsonPath(payload, path) {
 
 function thirdPartyProfileName(value) {
   return normalizeNamedProfileName(value, {
-    reservedNames: [THIRD_PARTY_ENV_ACCOUNT_NAME, 'default (env)']
+    reservedNames: [THIRD_PARTY_ENV_ACCOUNT_NAME]
   });
 }
 
@@ -464,9 +463,9 @@ async function requestJson(url, options = {}, deps = {}) {
   return response.json();
 }
 
-function normalizeThirdPartyProfile(profile = {}, options = {}) {
+function normalizeThirdPartyProfile(profile = {}) {
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
-  const adapter = normalizeAdapterId(profile.adapter, options.defaultAdapter || '');
+  const adapter = normalizeAdapterId(profile.adapter);
   const baseUrl = normalizeThirdPartyBaseUrl(profile.baseUrl, {
     stripTerminalV1: adapter !== CUSTOM_BALANCE_ADAPTER
   });
@@ -621,7 +620,6 @@ module.exports = {
   DEFAULT_CUSTOM_CURRENCY,
   DEFAULT_CUSTOM_DIVISOR,
   DEFAULT_CUSTOM_ENDPOINT_PATH,
-  DEFAULT_THIRD_PARTY_ADAPTER,
   NEWAPI_ACCOUNT_ADAPTER,
   NEWAPI_ACCOUNT_PATH,
   NEWAPI_STATUS_PATH,

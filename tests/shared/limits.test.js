@@ -295,6 +295,27 @@ test('limit provider normalization strips upstream punctuation while preserving 
   assert.equal(provider.planLabel, 'Pro Trial 工作');
 });
 
+test('limit provider normalization rejects Unicode emails and embedded endpoint text', () => {
+  for (const value of [
+    'user＠example.com',
+    'Plan https://relay.example/path',
+    '前綴 ＨＴＴＰＳ：／／relay.example/path'
+  ]) {
+    const provider = normalizeLimitProvider({
+      provider: 'thirdparty',
+      accountLabel: value,
+      accountName: value,
+      planLabel: value,
+      status: 'ok',
+      source: 'api',
+      windows: []
+    });
+    assert.equal(provider.accountLabel, '');
+    assert.equal(provider.accountName, '');
+    assert.equal(provider.planLabel, '');
+  }
+});
+
 test('publicLimits preserves MiMo plan status while removing account identity', () => {
   const payload = publicLimits({
     providers: [{

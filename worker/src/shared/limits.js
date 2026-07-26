@@ -50,13 +50,17 @@ function normalizeSourceDetail(value) {
   return VALID_SOURCE_DETAILS.has(raw) ? raw : '';
 }
 
+function containsSensitiveAccountText(value) {
+  const normalized = value.normalize('NFKC');
+  return normalized.includes('@') || /https?:\/\//i.test(normalized);
+}
+
 function normalizeAccountLabel(value) {
   const raw = String(value || '').trim();
   if (
     !raw
     || raw.length > MAX_ACCOUNT_LABEL_INPUT_LENGTH
-    || raw.includes('@')
-    || /^https?:\/\//i.test(raw)
+    || containsSensitiveAccountText(raw)
   ) return '';
   const clean = raw
     .normalize('NFC')
@@ -71,8 +75,7 @@ function normalizeAccountName(value) {
   if (
     !raw
     || raw.length > MAX_ACCOUNT_NAME_INPUT_LENGTH
-    || raw.includes('@')
-    || /^https?:\/\//i.test(raw)
+    || containsSensitiveAccountText(raw)
   ) return '';
   const clean = raw
     .normalize('NFC')

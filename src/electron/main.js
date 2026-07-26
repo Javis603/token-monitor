@@ -4851,10 +4851,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('thirdparty:saveProfile', async (_event, rawProfile = {}) => {
     const name = thirdPartyLimits.thirdPartyProfileName(rawProfile.name);
-    const adapter = thirdPartyLimits.normalizeAdapterId(
-      rawProfile.adapter,
-      thirdPartyLimits.DEFAULT_THIRD_PARTY_ADAPTER
-    );
+    const adapter = thirdPartyLimits.normalizeAdapterId(rawProfile.adapter);
     const customAdapter = adapter === thirdPartyLimits.CUSTOM_BALANCE_ADAPTER;
     const baseUrl = thirdPartyLimits.normalizeThirdPartyBaseUrl(rawProfile.baseUrl, {
       stripTerminalV1: !customAdapter

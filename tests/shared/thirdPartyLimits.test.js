@@ -159,6 +159,10 @@ test('custom balance configuration is declarative and rejects unsafe paths', () 
     currency: 'USD',
     divisor: 1
   }).baseUrl, 'https://api.example.com/v1');
+  assert.equal(normalizeThirdPartyProfile({
+    baseUrl: 'https://api.example.com',
+    accessToken: 'secret'
+  }), null);
 });
 
 test('third-party profile names support Unicode and reserve the environment identity', () => {

@@ -69,6 +69,7 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.match(main, /ipcMain\.handle\('thirdparty:setProfileEnabled'/);
   assert.match(main, /thirdPartyLimits\.fetchThirdPartyAccount\(\{ name, \.\.\.profile \}/);
   assert.match(main, /thirdPartyLimits\.CUSTOM_BALANCE_ADAPTER/);
+  assert.doesNotMatch(main, /DEFAULT_THIRD_PARTY_ADAPTER/);
   assert.doesNotMatch(main, /ONEAPI_ACCOUNT_ADAPTER/);
   assert.doesNotMatch(main, /errorCode: 'missingUserId'/);
 });
