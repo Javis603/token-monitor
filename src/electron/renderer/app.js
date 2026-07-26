@@ -11254,6 +11254,7 @@ function initSettingsAnimationWrappers() {
     '.cursor-settings-details',
     '.hub-mode-fields',
     '.presence-feature-body',
+    '#claudeManualPanel',
     '#cursorManualPanel',
     '#opencodeManualPanel',
     '#deepseekManualPanel',

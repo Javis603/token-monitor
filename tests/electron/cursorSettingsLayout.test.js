@@ -578,6 +578,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
+  assert.match(animationBody, /'#claudeManualPanel',\n\s*'#cursorManualPanel'/);
   assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#kimiManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
@@ -586,11 +587,11 @@ test('API key account entries share styling and Copilot uses the folded token en
   assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
   assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#claudeManualPanel,\n#cursorManualPanel,[\s\S]*#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#claudeManualPanel > \.accordion-animation-inner,\n#cursorManualPanel > \.accordion-animation-inner,[\s\S]*#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;[\s\S]*?gap: 8px;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#claudeManualPanel textarea,\n#cursorManualPanel textarea,[\s\S]*#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#claudeManualPanel textarea,\n#cursorManualPanel textarea,[\s\S]*#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -739,12 +740,17 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   const details = html.match(
     /<div id="claudeAccountGroup"[\s\S]*?<div id="claudeErrorMessage" class="settings-note error hidden"><\/div>/
   )?.[0] || '';
-  assert.match(details, /data-i18n="settings\.claude\.title">Claude Web login<\/span>/);
+  assert.match(details, /data-i18n="settings\.claude\.title">Claude Account<\/span>/);
+  assert.match(details, /data-i18n="settings\.claude\.openBrowser">Open Claude usage in browser<\/button>/);
   assert.match(details, /settings\.claude\.note[\s\S]*detected automatically when Web login is not configured/);
   assert.match(details, /settings\.claude\.step2[\s\S]*Network[\s\S]*organizations request/);
   assert.match(details, /settings\.claude\.step3[\s\S]*sessionKey/);
   assert.match(details, /<textarea id="claudeWebCookieInput" rows="3" autocomplete="off"[\s\S]*placeholder="sessionKey=\.\.\."/);
   assert.match(details, /<button id="claudeWebCookieSubmit"[\s\S]*data-i18n="settings\.claude\.saveCookie">/);
+  assert.ok(
+    html.indexOf('id="claudeAccountGroup"') < html.indexOf('id="codexAccountGroup"'),
+    'Claude should follow the AI Limits provider order and appear before Codex'
+  );
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');

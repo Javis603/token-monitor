@@ -3920,6 +3920,7 @@ html.is-windows .limit-live-badge {
 #kimiErrorMessage.hidden,
 #copilotErrorMessage.hidden,
 #copilotLoginStatus.hidden { display: none; }
+#claudeManualPanel,
 #cursorManualPanel,
 #opencodeManualPanel,
 #deepseekManualPanel,
@@ -3934,6 +3935,7 @@ html.is-windows .limit-live-badge {
 #copilotManualPanel {
   min-width: 0;
 }
+#claudeManualPanel > .accordion-animation-inner,
 #cursorManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
 #deepseekManualPanel > .accordion-animation-inner,
@@ -3949,6 +3951,7 @@ html.is-windows .limit-live-badge {
   min-width: 0;
   gap: 8px;
 }
+#claudeManualPanel textarea,
 #cursorManualPanel textarea,
 #opencodeManualPanel textarea,
 #openrouterApiKeyInput,
@@ -3968,6 +3971,7 @@ html.is-windows .limit-live-badge {
   width: 100%;
   font-size: 12px;
 }
+#claudeManualPanel textarea,
 #cursorManualPanel textarea,
 #opencodeManualPanel textarea,
 #openrouterApiKeyInput,
