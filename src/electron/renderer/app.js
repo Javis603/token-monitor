@@ -2315,32 +2315,11 @@ function thirdPartySpendNode(provider, quotaWindow) {
   return item;
 }
 
-const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' };
-
-function normalizeMoneyCurrencyCode(value) {
-  const code = String(value || '').toUpperCase();
-  return /^[A-Z]{3,8}$/.test(code) ? code : 'USD';
-}
-
-function formatMoney(value, currency) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '';
-  const code = normalizeMoneyCurrencyCode(currency);
-  const symbol = CURRENCY_SYMBOLS[code];
-  return symbol ? `${symbol}${number.toFixed(2)}` : `${code} ${number.toFixed(2)}`;
-}
-
-function formatCompactMoney(value, currency) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '';
-  if (Math.abs(number) < 100_000) return formatMoney(number, currency);
-  const code = normalizeMoneyCurrencyCode(currency);
-  const prefix = CURRENCY_SYMBOLS[code] || `${code} `;
-  return `${prefix}${new Intl.NumberFormat('en-US', {
-    notation: 'compact',
-    maximumFractionDigits: 2
-  }).format(number)}`;
-}
+const {
+  creditsMeterPercent,
+  formatCompactMoney,
+  formatMoney
+} = window.TokenMonitorLimitBalanceDisplay;
 
 function optionalFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -2376,19 +2355,18 @@ function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
 
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
-  if (window?.kind === 'balance') {
-    return formatMoney(window.amount, window.currency);
+  // A credits window's headline value is money. Its percentage denominator is
+  // lifetime spend, which reads as a quota but isn't one.
+  if (window?.metric === 'credits') {
+    if (window.remaining == null) {
+      return String(window.detail || '').toLowerCase() === 'unlimited'
+        ? t('settings.thirdparty.unlimited')
+        : (window.detail || '--');
+    }
+    return formatCompactMoney(window.remaining, window.currency);
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
-}
-
-function balanceRemainingWindow(balance) {
-  const amount = Math.max(0, Number(balance?.amount || 0));
-  const spend = Math.max(0, Number(balance?.monthSpend || 0));
-  const total = amount + spend;
-  const remainingPercent = total > 0 ? (amount / total) * 100 : 100;
-  return { remainingPercent };
 }
 
 function mimoTokenPlanWindowFromBalance(balance) {
@@ -2963,8 +2941,13 @@ function renderProviderWindows(provider, color) {
     const balance = provider.balance || null;
     if (balance) {
       const currency = balance.currency;
-      const balanceNode = limitWindowNode('Balance', balanceRemainingWindow(balance), color, 0.95,
-        formatMoney(balance.amount, currency));
+      const balanceNode = limitWindowNode(
+        'Balance',
+        { remainingPercent: creditsMeterPercent(provider, null) },
+        color,
+        0.95,
+        formatMoney(balance.amount, currency)
+      );
       balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
       windows.append(balanceNode);
 
@@ -4207,7 +4190,6 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
     monthly: 'home.limit.monthly'
   }[window.kind];
   if (key) return t(key);
-  if (window?.kind === 'balance') return 'Balance';
   return window.label;
 }
 
@@ -8186,7 +8168,7 @@ function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors =
   const fillColor = colors.fill || 'rgba(0, 0, 0, 1)';
   const selection = picker(stats);
   if (!selection) return null;
-  const { providerRecord, primaryWindow, secondaryWindow } = selection;
+  const { providerRecord } = selection;
   const providerImage = trayProviderImages[providerRecord.provider];
   const { trayBarFillWidth, trayBarsLayout } = window.TokenMonitorTrayBars;
   const layout = trayBarsLayout(height);
@@ -8216,8 +8198,10 @@ function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors =
     ctx.restore();
   }
 
-  drawBar(layout.barsStartY, primaryWindow?.remainingPercent);
-  drawBar(layout.barsStartY + layout.barHeight + layout.barGap, secondaryWindow?.remainingPercent);
+  // Read the selection's resolved percentages, not the raw windows: a balance
+  // window carries no wire percentage and would draw an empty (exhausted) bar.
+  drawBar(layout.barsStartY, selection.primaryPercent);
+  drawBar(layout.barsStartY + layout.barHeight + layout.barGap, selection.secondaryPercent);
   return canvas.toDataURL('image/png');
 }
 
@@ -8280,22 +8264,23 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
   const padX = options.contentOnly === true ? 0 : layout.padX;
   const fontSize = Math.round(height * 0.68);
   const font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif`;
-  const showUsed = Boolean(state.settings?.showLimitUsed);
 
   const measureCanvas = document.createElement('canvas');
   const measureCtx = measureCanvas.getContext('2d');
   measureCtx.font = font;
+  // `percent` / `secondaryPercent` are already mode-adjusted by the picker and
+  // handle balance windows, which carry no wire percentage of their own.
   const visiblePicks = picks.length === 1
     ? [{
         ...picks[0],
-        text: [picks[0].primaryWindow, picks[0].secondaryWindow]
-          .filter(Boolean)
-          .map((window) => formatPercent(limitFillPercent(window.remainingPercent, window.usedPercent, showUsed)))
+        text: [picks[0].percent, picks[0].secondaryPercent]
+          .filter((percent) => percent !== null && percent !== undefined)
+          .map((percent) => formatPercent(percent))
           .join(separator)
       }]
     : picks.map((pick) => ({
         ...pick,
-        text: formatPercent(limitFillPercent(pick.primaryWindow.remainingPercent, pick.primaryWindow.usedPercent, showUsed))
+        text: formatPercent(pick.percent)
       }));
   const entries = visiblePicks.map((pick) => {
     const text = pick.text;

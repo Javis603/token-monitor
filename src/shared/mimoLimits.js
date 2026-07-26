@@ -264,6 +264,18 @@ async function fetchMimoAccount(account, deps = {}) {
         resetsAt: detail.resetsAt
       });
     }
+    // The wallet balance is money, not a metered quota, so it ships as a
+    // credits window with no wire percentage — it sits beside the Token Plan
+    // rather than replacing it.
+    if (balance.amount !== null) {
+      windows.push({
+        kind: 'billing',
+        metric: 'credits',
+        label: 'Balance',
+        remaining: balance.amount,
+        currency: balance.currency
+      });
+    }
     return normalizeLimitProvider({
       provider: 'mimo',
       source: 'web',

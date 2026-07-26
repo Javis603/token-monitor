@@ -3,11 +3,14 @@
 (function exposeTrayLayout(root, factory) {
   const api = factory(
     typeof module === 'object' && module.exports ? require('./currency') : root?.TokenMonitorCurrency,
-    typeof module === 'object' && module.exports ? require('./trayText') : root?.TokenMonitorTrayText
+    typeof module === 'object' && module.exports ? require('./trayText') : root?.TokenMonitorTrayText,
+    typeof module === 'object' && module.exports
+      ? require('./limitBalanceDisplay')
+      : root?.TokenMonitorLimitBalanceDisplay
   );
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayLayout = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi) {
+})(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay) {
   const VERSION = 2;
   const MAX_ITEMS = 12;
   const STYLE_IDS = Object.freeze([
@@ -72,6 +75,14 @@
 
   function remainingPercent(window) {
     return displayPercent(window, 'remaining');
+  }
+
+  // Credits windows carry money, not a wire percentage. Derive one so they can
+  // still fill a bar and take part in "which quota is tightest" comparisons.
+  function windowPercent(provider, window) {
+    return balanceDisplay.isCreditsWindow(window)
+      ? balanceDisplay.creditsMeterPercent(provider, window)
+      : remainingPercent(window);
   }
 
   function normalizeWindowSelector(value, fallback = 'primary') {
@@ -543,7 +554,7 @@
       if (id && id !== 'auto' && providerId(provider) !== id) continue;
       if (key && clean(provider.accountKey) !== key) continue;
       for (const window of provider.windows || []) {
-        if (!window || window.showMeter === false || remainingPercent(window) === null) continue;
+        if (!window || window.showMeter === false || windowPercent(provider, window) === null) continue;
         const value = windowKey(window);
         if (seen.has(value)) continue;
         seen.add(value);
@@ -612,7 +623,7 @@
 
   function meteredWindows(provider) {
     return (provider?.windows || []).filter((window) => (
-      window && window.showMeter !== false && remainingPercent(window) !== null
+      window && window.showMeter !== false && windowPercent(provider, window) !== null
     ));
   }
 
@@ -624,7 +635,7 @@
         : new Set(['']);
     return windows.find((window) => canonicalLabels.has(clean(window.label).toLowerCase()))
       || windows.reduce((pick, window) => (
-        !pick || remainingPercent(window) < remainingPercent(pick) ? window : pick
+        !pick || windowPercent(provider, window) < windowPercent(provider, pick) ? window : pick
       ), null);
   }
 
@@ -672,14 +683,25 @@
     for (const provider of candidates) {
       const window = selectWindow(provider, normalized.window);
       if (!window) continue;
-      const remaining = remainingPercent(window);
+      const remaining = windowPercent(provider, window);
       if (!selected || remaining < selected.remaining) {
+        const credits = balanceDisplay.isCreditsWindow(window);
         selected = {
           provider: providerId(provider),
           providerRecord: provider,
           window,
           remaining,
-          percent: displayPercent(window, normalized.valueMode),
+          percent: credits
+            ? (normalized.valueMode === 'used' ? 100 - remaining : remaining)
+            : displayPercent(window, normalized.valueMode),
+          // A balance's headline value is money; percent styles print this
+          // instead of a percentage derived from lifetime spend.
+          moneyText: credits
+            ? balanceDisplay.formatCompactMoney(
+                balanceDisplay.creditsAmount(provider, window),
+                balanceDisplay.creditsCurrency(provider, window)
+              )
+            : '',
           source: normalized
         };
       }
@@ -744,9 +766,10 @@
     const selection = selectSource(stats, item.source, options);
     if (!selection) return { ...item, available: false, text: '--', selection: null };
     const reset = formatResetCountdown(selection.window.resetsAt, options.nowMs);
+    const headline = selection.moneyText || formatPercent(selection.percent);
     let text;
-    if (item.metric === 'percent') text = formatPercent(selection.percent);
-    else if (item.metric === 'percentReset') text = [formatPercent(selection.percent), reset].filter(Boolean).join(' · ');
+    if (item.metric === 'percent') text = headline;
+    else if (item.metric === 'percentReset') text = [headline, reset].filter(Boolean).join(' · ');
     else if (item.metric === 'reset') text = reset || '--';
     else text = accountLabel(selection.providerRecord) || selection.provider;
     return { ...item, available: Boolean(text && text !== '--'), text: text || '--', selection };

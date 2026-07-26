@@ -168,6 +168,7 @@ test('zero total credits remains a real empty balance meter', async () => {
     windowMinutes: null,
     resetDescription: '',
     detail: '',
+    currency: null,
     showMeter: true
   }]);
 });

@@ -3,6 +3,9 @@
   if (root) root.TokenMonitorHomeOverview = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null, function createHomeOverviewApi() {
+  const balanceDisplay = (typeof require === 'function')
+    ? require('../../shared/limitBalanceDisplay')
+    : (typeof window !== 'undefined' ? window.TokenMonitorLimitBalanceDisplay : null);
   const windowPriority = new Map([
     ['session', 0],
     ['weekly', 1],
@@ -39,22 +42,6 @@
     return remaining == null ? null : 100 - remaining;
   }
 
-  function balanceWindow(balance) {
-    if (!balance) return null;
-    const amount = Math.max(0, Number(balance?.amount || 0));
-    if (!Number.isFinite(amount)) return null;
-    const spend = Math.max(0, Number(balance?.monthSpend || 0));
-    const total = amount + spend;
-    const percent = total > 0 ? (amount / total) * 100 : 100;
-    return {
-      kind: 'balance',
-      label: '',
-      remainingPercent: clampPercent(percent),
-      amount,
-      currency: balance?.currency || ''
-    };
-  }
-
   function mimoPlanWindow(balance) {
     if (!balance || balance.planStatus === 'expired') return null;
     const used = finiteNumber(balance.planUsed);
@@ -72,23 +59,25 @@
     };
   }
 
+  // Balance quotas arrive from the collectors as `credits` windows, so the only
+  // thing left to synthesize here is MiMo's Token Plan placeholder.
+  function isPlanWindow(window) {
+    return String(window?.kind || '').trim().toLowerCase() === 'billing'
+      && !balanceDisplay.isCreditsWindow(window);
+  }
+
   function accountWindows(account) {
     const providerId = String(account?.providerId || '').trim().toLowerCase();
     const windows = Array.isArray(account?.windows) ? [...account.windows] : [];
     if (providerId === 'mimo' && account?.balance?.planStatus === 'expired') {
-      const withoutStalePlan = windows.filter((window) => String(window?.kind || '').trim().toLowerCase() !== 'billing');
-      withoutStalePlan.push({ kind: 'billing', label: 'Token Plan', showMeter: false, planStatus: 'expired' });
-      const balance = balanceWindow(account.balance);
-      if (balance) withoutStalePlan.push(balance);
+      const withoutStalePlan = windows.filter((window) => !isPlanWindow(window));
+      // Keep the plan ahead of the balance, matching the live-plan ordering.
+      withoutStalePlan.unshift({ kind: 'billing', label: 'Token Plan', showMeter: false, planStatus: 'expired' });
       return withoutStalePlan;
     }
-    if (providerId === 'mimo' && !windows.some((window) => String(window?.kind || '').trim().toLowerCase() === 'billing')) {
+    if (providerId === 'mimo' && !windows.some(isPlanWindow)) {
       const plan = mimoPlanWindow(account.balance);
-      if (plan) windows.push(plan);
-    }
-    if (providerId === 'deepseek' || providerId === 'mimo') {
-      const balance = balanceWindow(account.balance);
-      if (balance) windows.push(balance);
+      if (plan) windows.unshift(plan);
     }
     return windows;
   }
@@ -98,23 +87,34 @@
       .map((account, index) => {
         const providerId = String(account?.providerId || '').trim().toLowerCase();
         const windows = accountWindows(account)
-          .map((window, windowIndex) => ({
-            kind: String(window.kind || '').trim().toLowerCase(),
-            label: window.label || window.kind || '',
-            remainingPercent: remainingPercent(window),
-            resetsAt: window.resetsAt,
-            resetDescription: window.resetDescription || '',
-            value: window.value || '',
-            planStatus: window.planStatus || '',
-            showMeter: window.showMeter !== false,
-            amount: finiteNumber(window.amount),
-            currency: window.currency || '',
-            index: windowIndex
-          }))
+          .map((window, windowIndex) => {
+            const credits = balanceDisplay.isCreditsWindow(window);
+            return {
+              kind: String(window.kind || '').trim().toLowerCase(),
+              metric: window.metric || '',
+              label: window.label || window.kind || '',
+              // Credits windows carry money; their meter percentage is derived
+              // here rather than read off the wire.
+              remainingPercent: credits
+                ? balanceDisplay.creditsMeterPercent(account, window)
+                : remainingPercent(window),
+              remaining: credits
+                ? balanceDisplay.creditsAmount(account, window)
+                : finiteNumber(window.remaining),
+              currency: credits ? balanceDisplay.creditsCurrency(account, window) : '',
+              resetsAt: window.resetsAt,
+              resetDescription: window.resetDescription || '',
+              value: window.value || '',
+              planStatus: window.planStatus || '',
+              showMeter: window.showMeter !== false,
+              detail: window.detail || '',
+              index: windowIndex
+            };
+          })
           .filter((window) => window.remainingPercent != null
             || window.planStatus === 'expired'
             || window.value
-            || (window.kind === 'balance' && window.amount != null))
+            || (window.metric === 'credits' && (window.remaining != null || window.detail)))
           .sort((a, b) => {
             if (providerId === 'antigravity') return a.index - b.index;
             const aPriority = windowPriority.get(a.kind) ?? 10;

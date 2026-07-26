@@ -167,3 +167,31 @@ test('fetchDeepSeekLimits maps unexpected body shape to unavailable', async () =
   });
   assert.equal(r.status, 'unavailable');
 });
+
+test('fetchDeepSeekLimits exposes the balance as a credits window', async () => {
+  const provider = await fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: 'sk-secret-123' },
+    deepseekStorePath: '/tmp/ds-credits-window.json',
+    now: () => new Date(2026, 6, 26, 8, 0, 0).getTime(),
+    fetch: async () => balanceResponse([
+      { currency: 'CNY', total_balance: '4.00', topped_up_balance: '4.00' }
+    ]),
+    ...memStoreDeps()
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows.length, 1);
+  const [window] = provider.windows;
+  assert.equal(window.kind, 'billing');
+  assert.equal(window.metric, 'credits');
+  assert.equal(window.label, 'Balance');
+  assert.equal(window.remaining, 4);
+  assert.equal(window.currency, 'CNY');
+  assert.equal(window.showMeter, true);
+  // The derived percentage is display-only and must never reach the wire.
+  assert.equal(window.usedPercent, null);
+  assert.equal(window.remainingPercent, null);
+  // The balance block is untouched.
+  assert.equal(provider.balance.amount, 4);
+  assert.equal(provider.balance.currency, 'CNY');
+});

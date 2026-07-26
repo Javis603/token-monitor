@@ -42,6 +42,8 @@ Usage and limits have independent lifecycles under `src/shared/deviceRuntime.js`
 
 `DeviceState` composes both outputs into the unchanged device wire record, buffering limits until usage exists and cold-start previews until a complete usage baseline exists; limits-only updates preserve the usage `updatedAt`. Provider dispatch starts in `src/shared/limitCollector.js`, with provider-specific implementations split between that file and `src/shared/*Limits.js`; shared normalization remains in `src/shared/limits.js`. The hub and Worker receive the composed record and never need provider credentials.
 
+Balance-style quotas are marked with `windows[].metric === 'credits'`: their headline value is money (`remaining` + `currency`), not a percentage. `src/shared/limitBalanceDisplay.js` is the single formatting/derivation entry point shared by Home, the tray and the limits page — key off that marker, never a provider whitelist. The meter percentage for a top-up balance (`amount / (amount + monthSpend)`) is a **display-layer derivation** and is deliberately kept out of the wire shape; don't push it back into a collector.
+
 ### Widget mode switching
 
 `main.js` chooses the data path from `settings.hubMode` (`local` / `client` / `host`, set in the GUI's Multi-device Sync section). In `client` mode (a `hubUrl` is set) it: stops the local collector, opens an SSE stream to `/api/stats/stream`, and *also* runs a sync-collector to post this device's own usage. In `host` mode it additionally runs an embedded hub (`startEmbeddedHub()`) so other devices can connect. In `local` mode it runs only the local collector and emits stats over IPC to the renderer.

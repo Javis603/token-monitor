@@ -26,7 +26,9 @@ test('normalizeLimitProvider accepts deepseek + api source + balance block', () 
   });
   assert.equal(p.provider, 'deepseek');
   assert.equal(p.source, 'api');
-  assert.deepEqual(p.windows, []);
+  // A record with no windows is the pre-credits-window shape; normalization
+  // restores the balance window so every renderer still sees the row.
+  assert.deepEqual(p.windows.map((window) => [window.metric, window.remaining]), [['credits', 4.61]]);
   assert.equal(p.balance.amount, 4.61);
   assert.equal(p.balance.currency, 'CNY');
   assert.equal(p.balance.todaySpend, 0.32);

@@ -144,3 +144,76 @@ test('composer visibility destroys hidden surfaces and creates newly visible sur
     ['floatingBubble', 'hidden', false]
   ]);
 });
+
+const balanceStats = {
+  periods: { today: {}, month: {}, allTime: {} },
+  limits: {
+    providers: [{
+      provider: 'deepseek',
+      accountKey: 'ds1',
+      accountLabel: 'Pay-as-you-go',
+      status: 'ok',
+      stale: false,
+      windows: [{
+        kind: 'billing',
+        metric: 'credits',
+        label: 'Balance',
+        remaining: 4,
+        currency: 'CNY',
+        showMeter: true
+      }],
+      balance: { amount: 4, currency: 'CNY', monthSpend: 6 }
+    }]
+  }
+};
+
+function balanceSource() {
+  return {
+    provider: 'deepseek',
+    accountMode: 'lowest',
+    accountKey: '',
+    window: 'primary',
+    valueMode: 'remaining'
+  };
+}
+
+test('a balance-only provider is offered in the tray window picker', () => {
+  const options = trayLayoutApi.windowOptions(balanceStats, 'deepseek');
+  assert.equal(options.length, 1);
+  assert.equal(options[0].kind, 'billing');
+  assert.equal(options[0].label, 'Balance');
+});
+
+test('a tray percent item prints a balance as compact money', () => {
+  const resolved = trayLayoutApi.resolveTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ id: 'a', type: 'text', metric: 'percent', source: balanceSource() }]
+  }, balanceStats, {});
+
+  assert.equal(resolved.items[0].available, true);
+  assert.equal(resolved.items[0].text, '¥4.00');
+});
+
+test('a tray bar item meters a balance against its derived percentage', () => {
+  const resolved = trayLayoutApi.resolveTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ id: 'a', type: 'bars', rows: [balanceSource()] }]
+  }, balanceStats, {});
+
+  // 4 / (4 + 6) = 40%
+  assert.equal(resolved.items[0].rows[0].percent, 40);
+});
+
+test('a balance selection carries resolved percentages so tray icons never fabricate 0%', () => {
+  const { compactLimitSelection, pickConfiguredLimitProviders } = require('../../src/shared/trayText');
+
+  const provider = balanceStats.limits.providers[0];
+  const selection = compactLimitSelection(provider);
+  // 4 / (4 + 6) = 40% — the raw window carries no percentage at all.
+  assert.equal(selection.primaryWindow.remainingPercent, undefined);
+  assert.equal(selection.primaryPercent, 40);
+  assert.equal(selection.secondaryPercent, null);
+
+  const [pick] = pickConfiguredLimitProviders(balanceStats, {});
+  assert.equal(pick.percent, 40);
+});

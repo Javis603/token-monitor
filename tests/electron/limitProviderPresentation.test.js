@@ -152,6 +152,10 @@ function readRendererFile(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
 }
 
+function readSharedFile(name) {
+  return fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', name), 'utf8');
+}
+
 function functionBody(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} function should exist`);
@@ -525,8 +529,8 @@ test('tray primary-limit modes use the shared provider-aware resolver', () => {
 
   assert.match(pickConfigured, /pickConfiguredLimitProviders\(stats/);
   assert.match(pickSession, /pickLimitProviderByKindPriority\(stats, \['session', 'weekly'\]\)/);
-  assert.match(renderBars, /primaryWindow/);
-  assert.match(renderBars, /secondaryWindow/);
+  assert.match(renderBars, /selection\.primaryPercent/);
+  assert.match(renderBars, /selection\.secondaryPercent/);
   assert.doesNotMatch(renderBars, /\.find\(\(w\) => w\.kind/);
   assert.match(renderAllSessions, /trayBarsLayout\(height, \{ contentOnly: true \}\)/);
   assert.match(renderAllSessions, /function renderAllSessionsIcon\(stats, height = 44, configOrder, colors = \{\}, options = \{\}\)/);
@@ -545,8 +549,8 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /trayBarsLayout\(height/);
   assert.match(renderLimitSessionsIcon, /layout\.iconSize/);
   assert.match(renderLimitSessionsIcon, /picks\.length === 1/);
-  assert.match(renderLimitSessionsIcon, /primaryWindow/);
-  assert.match(renderLimitSessionsIcon, /secondaryWindow/);
+  assert.match(renderLimitSessionsIcon, /picks\[0\]\.percent/);
+  assert.match(renderLimitSessionsIcon, /picks\[0\]\.secondaryPercent/);
   assert.match(renderLimitSessionsIcon, /trayProviderImages\[pick\.providerRecord\.provider\]/);
   assert.match(renderLimitSessionsIcon, /drawProviderImage\(ctx, entry\.image/);
   assert.match(drawProviderImage, /shadowColor/);
@@ -559,7 +563,10 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(app, /function applyThemeColors\(overrides\)[\s\S]*renderFloatingBubbleContent\(\);/);
   assert.match(app, /function resolvedThemeColor\(key\)[\s\S]*appliedThemeOverrides\[key\]/);
   assert.match(renderLimitSessionsIcon, /`500 \$\{fontSize\}px/);
-  assert.match(renderLimitSessionsIcon, /formatPercent\(limitFillPercent/);
+  // The picker already resolved and mode-adjusted these, including for balance
+  // windows that carry no wire percentage of their own.
+  assert.match(renderLimitSessionsIcon, /formatPercent\(pick\.percent\)/);
+  assert.doesNotMatch(renderLimitSessionsIcon, /limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);
   assert.match(maybeUpdateBarsIcon, /TokenMonitorTrayText\.isGeneratedTrayIconMode\(mode\)/);
   assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44\)/);
@@ -794,7 +801,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   const homeLabel = functionBody(app, 'homeLimitWindowLabel', 'renderHomeLimitModule');
   const homeRows = functionBody(app, 'homeLimitRows', 'homeLimitWindowLabel');
   const homeModule = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
-  const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'balanceRemainingWindow');
+  const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'mimoTokenPlanWindowFromBalance');
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
@@ -802,12 +809,16 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);
-  assert.match(homeLabel, /if \(window\?\.kind === 'balance'\) return 'Balance';/);
+  // Balance windows arrive as real `billing` windows carrying their own label
+  // ('Balance' / 'Token quota'), so the label branch above already covers them
+  // and no synthesized 'balance' kind is left to special-case.
+  assert.doesNotMatch(homeLabel, /kind === 'balance'/);
   assert.match(homeModule, /const showUsed = Boolean\(state\.settings\?\.showLimitUsed\);/);
   assert.match(homeModule, /value\.textContent = window\.value \|\| formatHomeLimitWindowValue\(window, showUsed\);/);
   assert.match(homeModule, /limitProviderCompactWindowPeriodLabel\(row\.providerId, window, row\.windows\)/);
   assert.match(homeModule, /`\$\{periodLabel\} · \$\{resetLabel\}`/);
-  assert.match(valueFormatter, /return formatMoney\(window\.amount, window\.currency\);/);
+  assert.match(valueFormatter, /if \(window\?\.metric === 'credits'\) \{/);
+  assert.match(valueFormatter, /return formatCompactMoney\(window\.remaining, window\.currency\);/);
   assert.match(valueFormatter, /`\$\{formatPercent\(percent\)\} \$\{limitModeSuffix\(showUsed\)\}`/);
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);
 });
@@ -816,8 +827,11 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
   const app = readRendererFile('app.js');
   const renderBarsIcon = functionBody(app, 'renderBarsIcon', 'renderAllSessionsIcon');
 
-  assert.match(renderBarsIcon, /primaryWindow\?\.remainingPercent/);
-  assert.match(renderBarsIcon, /secondaryWindow\?\.remainingPercent/);
+  // Resolved percentages, not raw windows: a balance window carries no wire
+  // percentage and re-deriving from it draws a fabricated empty bar.
+  assert.match(renderBarsIcon, /drawBar\(layout\.barsStartY, selection\.primaryPercent\)/);
+  assert.match(renderBarsIcon, /selection\.secondaryPercent\)/);
+  assert.doesNotMatch(renderBarsIcon, /Window\?\.remainingPercent/);
   assert.equal((renderBarsIcon.match(/drawBar\(/g) || []).length, 3);
   assert.doesNotMatch(renderBarsIcon, /\.find\(\(w\) => w\.kind/);
 });
@@ -825,16 +839,17 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
 test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const balanceWindow = functionBody(app, 'balanceRemainingWindow', 'mimoTokenPlanWindowFromBalance');
+  const balanceWindow = readSharedFile('limitBalanceDisplay.js');
   const styles = readRendererFile('styles.css');
 
-  assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\('Balance', balanceRemainingWindow\(balance\), color, 0\.95,/);
+  assert.match(renderProviderWindows, /\{ remainingPercent: creditsMeterPercent\(provider, null\) \},/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
   assert.match(renderProviderWindows, /const spendNode = limitWindowNode\('Spend', \{ showMeter: false \}, color, 0\.6,/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
   assert.doesNotMatch(renderProviderWindows, /monthSinceTracking \? 'Month \(since tracking\)' : 'Month'/);
-  assert.match(balanceWindow, /remainingPercent/);
-  assert.match(balanceWindow, /amount \+ spend/);
+  // The month-spend denominator now lives in the shared balance module.
+  assert.match(balanceWindow, /funds \+ spend/);
+  assert.match(balanceWindow, /provider\?\.balance\?\.monthSpend/);
   assert.doesNotMatch(renderProviderWindows, /formatMoney\(balance\.amount, currency\)\} left/);
   assert.match(styles, /\.limit-window-no-reset \.limit-reset\s*\{/);
 });

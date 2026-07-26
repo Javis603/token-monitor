@@ -7,6 +7,7 @@ const {
   aggregateLimits,
   mergeCodexTransientWindows,
   normalizeLimitProvider,
+  normalizeLimitWindow,
   publicLimits,
   syncLimits
 } = require('../../src/shared/limits');
@@ -928,4 +929,74 @@ test('the local device raw limits still carry the unauthorized row the aggregate
   const localGrok = thisMac.limits.providers.find((provider) => provider.provider === 'grok');
   assert.equal(localGrok.status, 'unauthorized');
   assert.equal(localGrok.accountKey, 'sha256:local-bad-key');
+});
+
+test('normalizeLimitWindow normalizes the window currency', () => {
+  assert.equal(normalizeLimitWindow({ kind: 'billing', currency: ' cny ' }).currency, 'CNY');
+  assert.equal(normalizeLimitWindow({ kind: 'billing', currency: 'usd' }).currency, 'USD');
+  assert.equal(normalizeLimitWindow({ kind: 'billing', currency: 'verylongcurrencycode' }).currency, 'VERYLONG');
+  assert.equal(normalizeLimitWindow({ kind: 'billing', currency: '   ' }).currency, null);
+  assert.equal(normalizeLimitWindow({ kind: 'billing' }).currency, null);
+});
+
+test('normalizeLimitProvider restores a balance window for pre-credits-window devices', () => {
+  // An older device posts DeepSeek as a balance with no windows at all.
+  const legacy = normalizeLimitProvider({
+    provider: 'deepseek',
+    accountKey: 'ds1',
+    status: 'ok',
+    source: 'api',
+    updatedAt: '2026-07-26T00:00:00.000Z',
+    windows: [],
+    balance: { amount: 4, currency: 'CNY', monthSpend: 6 }
+  });
+
+  assert.equal(legacy.windows.length, 1);
+  assert.equal(legacy.windows[0].metric, 'credits');
+  assert.equal(legacy.windows[0].label, 'Balance');
+  assert.equal(legacy.windows[0].remaining, 4);
+  assert.equal(legacy.windows[0].currency, 'CNY');
+  // Only the amount is restored — no percentage is invented on the wire.
+  assert.equal(legacy.windows[0].usedPercent, null);
+  assert.equal(legacy.windows[0].remainingPercent, null);
+});
+
+test('normalizeLimitProvider never duplicates an existing credits window', () => {
+  const current = normalizeLimitProvider({
+    provider: 'thirdparty',
+    accountKey: 'tp1',
+    status: 'ok',
+    updatedAt: '2026-07-26T00:00:00.000Z',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Token quota', remaining: 12.5 }],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+
+  assert.equal(current.windows.length, 1);
+  assert.equal(current.windows[0].label, 'Token quota');
+});
+
+test('normalizeLimitProvider leaves percentage-only providers alone', () => {
+  const claude = normalizeLimitProvider({
+    provider: 'claude',
+    accountKey: 'c1',
+    status: 'ok',
+    updatedAt: '2026-07-26T00:00:00.000Z',
+    windows: [{ kind: 'session', usedPercent: 8 }]
+  });
+
+  assert.equal(claude.windows.length, 1);
+  assert.equal(claude.windows[0].metric, undefined);
+});
+
+test('normalizeLimitProvider keeps a restored balance behind the MiMo token plan', () => {
+  const mimo = normalizeLimitProvider({
+    provider: 'mimo',
+    accountKey: 'm1',
+    status: 'ok',
+    updatedAt: '2026-07-26T00:00:00.000Z',
+    windows: [{ kind: 'billing', label: 'Token Plan', used: 22, limit: 100 }],
+    balance: { amount: 12.5, currency: 'CNY' }
+  });
+
+  assert.deepEqual(mimo.windows.map((window) => window.label), ['Token Plan', 'Balance']);
 });

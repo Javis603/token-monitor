@@ -2989,7 +2989,15 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
       source: 'api',
       status: 'ok',
       updatedAt: nowIso(now),
-      windows: [],
+      // DeepSeek has no rate-limit windows. The balance is the only quota it
+      // exposes, so it ships as a credits window: money, no wire percentage.
+      windows: [{
+        kind: 'billing',
+        metric: 'credits',
+        label: 'Balance',
+        remaining: row.amount,
+        currency: row.currency
+      }],
       balance: {
         amount: row.amount,
         currency: row.currency,

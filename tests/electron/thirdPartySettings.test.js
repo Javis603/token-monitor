@@ -90,6 +90,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   const app = read('src/electron/renderer/app.js');
   const i18n = read('src/electron/renderer/i18n.js');
   const presentation = read('src/electron/renderer/limitProviderPresentation.js');
+  const balanceDisplay = read('src/shared/limitBalanceDisplay.js');
   const styles = read('src/electron/renderer/styles.css');
   const colors = read('src/electron/renderer/usageCharts.js');
 
@@ -109,7 +110,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /if \(allTimeSpend === null && entries\.length === 0\) return null/);
   assert.match(app, /if \(allTimeSpend !== null\)/);
   assert.match(app, /label\.textContent = allTimeSpend === null \? 'Details' : 'Spend'/);
-  assert.match(app, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
+  assert.match(balanceDisplay, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
   assert.match(app, /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
   assert.match(app, /function renderNamedApiAccountGroup[\s\S]*?planText: options\.groupPlanText/);
   assert.match(app, /groupPlanText: t\('settings\.openrouter\.nAccounts', \{ count: providers\.length \}\)/);
@@ -124,24 +125,14 @@ test('third-party Limits presentation uses compact scope labels and a details to
 });
 
 test('third-party money formatting preserves supported custom units', () => {
-  const app = read('src/electron/renderer/app.js');
-  const start = app.indexOf('function normalizeMoneyCurrencyCode');
-  const end = app.indexOf('function optionalFiniteNumber', start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  const source = app.slice(start, end);
-  const result = vm.runInNewContext(
-    `${source}
-    JSON.stringify([
-      formatMoney(12.5, 'USD'),
-      formatMoney(12.5, 'USDT'),
-      formatMoney(12.5, 'POINTS'),
-      formatMoney(12.5, 'US$'),
-      formatCompactMoney(1_250_000, 'USDT')
-    ]);`,
-    { CURRENCY_SYMBOLS: { CNY: '¥', USD: '$' } }
-  );
-  assert.deepEqual(JSON.parse(result), [
+  const { formatMoney, formatCompactMoney } = require('../../src/shared/limitBalanceDisplay');
+  assert.deepEqual([
+    formatMoney(12.5, 'USD'),
+    formatMoney(12.5, 'USDT'),
+    formatMoney(12.5, 'POINTS'),
+    formatMoney(12.5, 'US$'),
+    formatCompactMoney(1_250_000, 'USDT')
+  ], [
     '$12.50',
     'USDT 12.50',
     'POINTS 12.50',
@@ -189,7 +180,7 @@ test('third-party profile rows keep metadata on line two and rename on line one'
   assert.match(styles, /\.thirdparty-field \{[\s\S]*?display: grid;/);
   assert.match(app, /new URL\(String\(profile\?\.baseUrl \|\| ''\)\)\.host/);
   assert.match(app, /settings\.thirdparty\.detailCustom/);
-  assert.match(app, /function formatCompactMoney/);
+  assert.match(app, /formatCompactMoney,?[\s\S]{0,120}?\} = window\.TokenMonitorLimitBalanceDisplay/);
   assert.match(app, /formatCompactMoney\(balance, provider\.balance\?\.currency \|\| 'USD'\)/);
 });
 

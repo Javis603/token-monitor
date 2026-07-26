@@ -237,6 +237,7 @@ test('New API account adapter exposes whole-account balance and cumulative usage
     windowMinutes: null,
     resetDescription: '',
     detail: '',
+    currency: null,
     showMeter: true
   }]);
   const publicJson = JSON.stringify(provider);

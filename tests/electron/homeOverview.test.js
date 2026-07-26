@@ -175,7 +175,7 @@ test('homeLimitAccountsForProviders includes Grok billing and DeepSeek balance r
       {
         provider: 'deepseek',
         balance: { amount: 4.61, monthSpend: 0, currency: 'CNY' },
-        windows: []
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.61, currency: 'CNY' }]
       }
     ],
     providerOptions: [
@@ -191,8 +191,8 @@ test('homeLimitAccountsForProviders includes Grok billing and DeepSeek balance r
   assert.deepEqual(rows[0].windows.map((window) => [window.kind, window.label, window.remainingPercent]), [
     ['billing', 'Monthly', 100]
   ]);
-  assert.deepEqual(rows[1].windows.map((window) => [window.kind, window.label, window.remainingPercent, window.amount, window.currency, window.value]), [
-    ['balance', 'balance', 100, 4.61, 'CNY', '']
+  assert.deepEqual(rows[1].windows.map((window) => [window.kind, window.metric, window.label, window.remainingPercent, window.remaining, window.currency, window.value]), [
+    ['billing', 'credits', 'Balance', 100, 4.61, 'CNY', '']
   ]);
 });
 
@@ -201,12 +201,15 @@ test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance'
     providers: [
       {
         provider: 'mimo',
-        windows: [],
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 7.51, currency: 'CNY' }],
         balance: { amount: 7.51, currency: 'CNY', planStatus: 'active', planUsed: 250, planLimit: 1000 }
       },
       {
         provider: 'mimo',
-        windows: [{ kind: 'billing', label: 'Token Plan', remainingPercent: 100 }],
+        windows: [
+          { kind: 'billing', label: 'Token Plan', remainingPercent: 100 },
+          { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 7.51, currency: 'CNY' }
+        ],
         balance: { amount: 7.51, currency: 'CNY', planStatus: 'expired' }
       }
     ],
@@ -216,12 +219,12 @@ test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance'
     limit: 5
   });
 
-  assert.deepEqual(rows[0].windows.map((window) => window.kind), ['billing', 'balance']);
+  assert.deepEqual(rows[0].windows.map((window) => window.metric), ['', 'credits']);
   assert.equal(rows[0].windows[0].remainingPercent, 75);
-  assert.equal(rows[0].windows[1].amount, 7.51);
-  assert.deepEqual(rows[1].windows.map((window) => [window.kind, window.planStatus]), [
-    ['billing', 'expired'],
-    ['balance', '']
+  assert.equal(rows[0].windows[1].remaining, 7.51);
+  assert.deepEqual(rows[1].windows.map((window) => [window.metric, window.planStatus]), [
+    ['', 'expired'],
+    ['credits', '']
   ]);
 });
 
@@ -231,7 +234,7 @@ test('MiMo balance without plan data does not synthesize a Token Plan meter', ()
       provider: 'mimo',
       accountKey: 'mimo-no-plan',
       status: 'ok',
-      windows: [],
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.61, currency: 'CNY' }],
       balance: {
         amount: 9.61,
         currency: 'CNY',
@@ -248,9 +251,9 @@ test('MiMo balance without plan data does not synthesize a Token Plan meter', ()
   });
 
   assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0].windows.map((window) => window.kind), ['balance']);
-  assert.equal(rows[0].windows.some((window) => window.kind === 'billing'), false);
-  assert.equal(rows[0].windows[0].amount, 9.61);
+  // Only the balance survives — no Token Plan meter was invented for it.
+  assert.deepEqual(rows[0].windows.map((window) => window.metric), ['credits']);
+  assert.equal(rows[0].windows[0].remaining, 9.61);
 });
 
 test('MiMo empty plan values do not synthesize a Token Plan meter', () => {
@@ -259,7 +262,7 @@ test('MiMo empty plan values do not synthesize a Token Plan meter', () => {
       key: 'mimo-empty-plan',
       providerId: 'mimo',
       name: 'MiMo',
-      windows: [],
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.83, currency: 'CNY' }],
       balance: {
         amount: 4.83,
         currency: 'CNY',
@@ -271,7 +274,8 @@ test('MiMo empty plan values do not synthesize a Token Plan meter', () => {
   ]);
 
   assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0].windows.map((window) => window.kind), ['balance']);
+  // Only the balance survives — no Token Plan meter was invented for it.
+  assert.deepEqual(rows[0].windows.map((window) => window.metric), ['credits']);
 });
 
 test('MiMo active unused plan keeps a real 100 percent remaining meter', () => {
@@ -629,4 +633,90 @@ test('shouldFetchHomeHistory never polls a zero-usage account', () => {
   // Requested once, still nothing to identify a history by — don't poll on every render.
   assert.equal(shouldFetchHomeHistory({ requested: true, stats: { historyPreview: emptyHistory } }), false);
   assert.equal(shouldFetchHomeHistory({ requested: true, stats: null }), false);
+});
+
+test('Home carries credits windows through as money, not a percentage', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'thirdparty:0',
+    providerId: 'thirdparty',
+    name: 'production',
+    windows: [{
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Balance',
+      remaining: 25,
+      currency: 'USD',
+      used: 75,
+      limit: 100,
+      usedPercent: 75,
+      remainingPercent: 25
+    }]
+  }]);
+
+  const [window] = row.windows;
+  assert.equal(window.metric, 'credits');
+  assert.equal(window.remaining, 25);
+  assert.equal(window.currency, 'USD');
+});
+
+test('Home no longer synthesizes a balance window for DeepSeek', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'deepseek',
+    providerId: 'deepseek',
+    name: 'DeepSeek',
+    windows: [{
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Balance',
+      remaining: 4,
+      currency: 'CNY'
+    }],
+    balance: { amount: 4, currency: 'CNY', monthSpend: 0 }
+  }]);
+
+  assert.equal(row.windows.length, 1);
+  assert.equal(row.windows[0].kind, 'billing');
+  assert.equal(row.windows[0].metric, 'credits');
+  assert.equal(row.windows[0].remaining, 4);
+});
+
+test('Home shows a MiMo token plan and balance side by side', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'mimo',
+    providerId: 'mimo',
+    name: 'MiMo',
+    windows: [
+      { kind: 'billing', label: 'Token Plan', usedPercent: 22, remainingPercent: 78 },
+      { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, currency: 'CNY' }
+    ],
+    balance: { amount: 12.5, currency: 'CNY', monthSpend: 0 }
+  }]);
+
+  assert.equal(row.windows.length, 2);
+  assert.equal(row.windows[0].label, 'Token Plan');
+  assert.equal(row.windows[0].remainingPercent, 78);
+  assert.equal(row.windows[1].metric, 'credits');
+  assert.equal(row.windows[1].remaining, 12.5);
+});
+
+test('Home sorts a nearly drained balance ahead of a healthy percentage quota', () => {
+  const rows = homeLimitAccounts([
+    {
+      key: 'claude',
+      providerId: 'claude',
+      name: 'Claude',
+      windows: [{ kind: 'session', usedPercent: 8, remainingPercent: 92 }]
+    },
+    {
+      key: 'deepseek',
+      providerId: 'deepseek',
+      name: 'DeepSeek',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 1, currency: 'CNY' }],
+      balance: { amount: 1, currency: 'CNY', monthSpend: 99 }
+    }
+  ]);
+
+  // 1 / (1 + 99) = 1% remaining, so DeepSeek must sort first.
+  assert.equal(rows[0].key, 'deepseek');
+  assert.equal(rows[1].key, 'claude');
 });

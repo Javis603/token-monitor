@@ -108,6 +108,10 @@ function normalizeWindowDetail(value) {
   return raw.slice(0, 96);
 }
 
+function normalizeWindowCurrency(value) {
+  return String(value || '').trim().toUpperCase().slice(0, 8) || null;
+}
+
 function normalizeIsoTimestamp(value) {
   if (value === null || value === undefined || value === '') return null;
   let date;
@@ -163,6 +167,7 @@ function normalizeLimitWindow(input) {
     windowMinutes: numberOrNull(input.windowMinutes ?? input.window_minutes ?? input.windowDurationMins),
     resetDescription: input.resetDescription ? String(input.resetDescription) : '',
     detail: normalizeWindowDetail(input.detail ?? input.detailText ?? input.detail_text),
+    currency: normalizeWindowCurrency(input.currency),
     showMeter: input.showMeter !== false && input.meter !== false
   };
 }
@@ -334,6 +339,22 @@ function normalizeLimitProvider(input) {
   } else {
     windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
   }
+  const balance = normalizeProviderBalance(input.balance);
+  // Compatibility shim: devices older than the credits-window change post a
+  // balance with no window at all, so every renderer would drop the row.
+  // Synthesize the window here — the one funnel both the local collector and
+  // hub ingest pass through — so no surface has to remember to do it. Only the
+  // amount is restored; the meter percentage stays a display-layer derivation.
+  // Removable once no supported device predates that change.
+  if (balance && balance.amount !== null && !windows.some((window) => window.metric === 'credits')) {
+    windows.push(normalizeLimitWindow({
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Balance',
+      remaining: balance.amount,
+      currency: balance.currency
+    }));
+  }
   return {
     provider,
     accountKey: input.accountKey ? String(input.accountKey) : '',
@@ -348,7 +369,7 @@ function normalizeLimitProvider(input) {
     updatedAt: normalizeIsoTimestamp(input.updatedAt) || normalizeIsoTimestamp(input.checkedAt),
     windows,
     balanceUsd: numberOrNull(input.balanceUsd),
-    balance: normalizeProviderBalance(input.balance),
+    balance,
     resetCredits: normalizeProviderResetCredits(input.resetCredits ?? input.rateLimitResetCredits ?? input.rate_limit_reset_credits),
     region: normalizeRegion(input.region)
   };

@@ -29,6 +29,12 @@ function managed(cookieHeader = COOKIE, overrides = {}) {
   };
 }
 
+// Every funded MiMo account ships a `credits` balance window. The Token Plan
+// assertions below are about metered quota only, so they look past it.
+function planWindows(provider) {
+  return (provider.windows || []).filter((window) => window.metric !== 'credits');
+}
+
 test('normalizeMimoCookieHeader keeps only the required MiMo allowlist', () => {
   assert.equal(
     normalizeMimoCookieHeader(COOKIE),
@@ -149,7 +155,7 @@ test('fetchMimoLimits requests fixed official endpoints concurrently with minimi
   });
   assert.equal(result.length, 1);
   assert.equal(result[0].status, 'ok');
-  assert.equal(result[0].windows[0].usedPercent, 10);
+  assert.equal(planWindows(result[0])[0].usedPercent, 10);
   assert.deepEqual(calls.map(({ url }) => new URL(url).pathname).sort(), [
     '/api/v1/balance', '/api/v1/tokenPlan/detail', '/api/v1/tokenPlan/usage', '/api/v1/userProfile'
   ]);
@@ -168,7 +174,7 @@ test('fetchMimoLimits keeps balance when optional Token Plan endpoints fail', as
   });
   assert.equal(provider.status, 'ok');
   assert.equal(provider.balance.amount, 7.51);
-  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(planWindows(provider), []);
 });
 
 test('fetchMimoLimits does not synthesize a Token Plan from zero-valued no-plan responses', async () => {
@@ -180,7 +186,7 @@ test('fetchMimoLimits does not synthesize a Token Plan from zero-valued no-plan 
     }
   });
   assert.equal(provider.status, 'ok');
-  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(planWindows(provider), []);
   assert.equal(provider.balance.amount, 0);
   assert.equal(provider.balance.planUsed, null);
   assert.equal(provider.balance.planLimit, null);
@@ -201,7 +207,7 @@ test('fetchMimoLimits does not activate a default plan with positive quota', asy
       return response({ code: 0, data: {} });
     }
   });
-  assert.equal(provider.windows.length, 0);
+  assert.equal(planWindows(provider).length, 0);
   assert.equal(provider.balance.planUsed, null);
   assert.equal(provider.balance.planLimit, null);
   assert.equal(provider.balance.planPercent, null);
@@ -230,7 +236,7 @@ test('fetchMimoLimits does not infer a Token Plan from quota without detail evid
       return response({ code: 0, data: {} });
     }
   });
-  assert.equal(provider.windows.length, 0);
+  assert.equal(planWindows(provider).length, 0);
 });
 
 test('fetchMimoLimits activates an explicitly active Token Plan', async () => {
@@ -246,8 +252,8 @@ test('fetchMimoLimits activates an explicitly active Token Plan', async () => {
       return response({ code: 0, data: {} });
     }
   });
-  assert.equal(provider.windows.length, 1);
-  assert.equal(provider.windows[0].remainingPercent, 90);
+  assert.equal(planWindows(provider).length, 1);
+  assert.equal(planWindows(provider)[0].remainingPercent, 90);
   assert.equal(provider.balance.planUsed, 100);
   assert.equal(provider.balance.planLimit, 1000);
 });
@@ -265,8 +271,8 @@ test('fetchMimoLimits keeps an explicitly active exhausted plan at zero remainin
       return response({ code: 0, data: {} });
     }
   });
-  assert.equal(provider.windows[0].remaining, 0);
-  assert.equal(provider.windows[0].remainingPercent, 0);
+  assert.equal(planWindows(provider)[0].remaining, 0);
+  assert.equal(planWindows(provider)[0].remainingPercent, 0);
 });
 
 test('fetchMimoLimits keeps expired Token Plan behavior', async () => {
@@ -282,7 +288,7 @@ test('fetchMimoLimits keeps expired Token Plan behavior', async () => {
       return response({ code: 0, data: {} });
     }
   });
-  assert.equal(provider.windows.length, 0);
+  assert.equal(planWindows(provider).length, 0);
   assert.equal(provider.balance.planStatus, 'expired');
 });
 
@@ -520,4 +526,44 @@ test('fetchMimoLimits times out one account without blocking the others', async 
   assert.equal(result.length, 2);
   assert.equal(result.find((provider) => provider.accountKey === 'sha256:mimo-1').status, 'unavailable');
   assert.equal(result.find((provider) => provider.accountKey === 'sha256:mimo-2').status, 'ok');
+});
+
+test('MiMo exposes the balance as a credits window alongside the token plan', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    now: () => Date.parse('2026-07-26T00:00:00Z'),
+    fetch: async (url) => {
+      if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '12.50', currency: 'CNY' } });
+      if (url.endsWith('/userProfile')) return response({ code: 0, data: { email: 'user@example.com' } });
+      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: { planCode: 'standard', currentPeriodEnd: '2099-01-01 00:00:00', expired: false } });
+      return response({ code: 0, data: { monthUsage: { items: [{ name: 'month_total_token', used: 22, limit: 100, percent: 0.22 }] } } });
+    }
+  });
+
+  const plan = provider.windows.find((window) => window.label === 'Token Plan');
+  const balance = provider.windows.find((window) => window.metric === 'credits');
+
+  // The token plan is a real metered quota and keeps its percentage.
+  assert.ok(plan);
+  assert.equal(plan.usedPercent, 22);
+
+  // The balance is money and carries no wire percentage.
+  assert.ok(balance);
+  assert.equal(balance.kind, 'billing');
+  assert.equal(balance.label, 'Balance');
+  assert.equal(balance.remaining, provider.balance.amount);
+  assert.equal(balance.currency, provider.balance.currency);
+  assert.equal(balance.usedPercent, null);
+  assert.equal(balance.remainingPercent, null);
+});
+
+test('MiMo without a token plan still exposes the balance window', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url) => url.endsWith('/balance')
+      ? response({ code: 0, data: { balance: '7.51', currency: 'CNY' } })
+      : response({}, 500)
+  });
+
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].metric, 'credits');
+  assert.equal(provider.windows[0].remaining, 7.51);
 });
