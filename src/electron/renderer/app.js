@@ -9967,11 +9967,13 @@ async function updateOpenCodeProfilesStatus() {
   }
 }
 
-function openrouterProfileStatusText(provider, enabled = true) {
-  if (!enabled) return t('settings.profiles.disabled');
-  if (!provider) return t('settings.openrouter.checking');
-  if (provider.status === 'unauthorized') return t('settings.openrouter.invalidKey');
-  if (provider.status !== 'ok') return t('settings.openrouter.unavailable');
+function openrouterProfileStatusText(provider, options = {}) {
+  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
+  if (status === 'disabled') return t('settings.profiles.disabled');
+  if (status === 'hidden') return '';
+  if (status === 'checking') return t('settings.openrouter.checking');
+  if (status === 'invalid') return t('settings.openrouter.invalidKey');
+  if (status !== 'linked') return t('settings.openrouter.unavailable');
   const balance = optionalFiniteNumber(provider.balance?.amount);
   if (balance !== null) return `✓ ${formatMoney(balance, 'USD')}`;
   const quota = (provider.windows || []).find((window) => window?.showMeter !== false);
@@ -9980,11 +9982,13 @@ function openrouterProfileStatusText(provider, enabled = true) {
   return '✓';
 }
 
-function thirdPartyProfileStatusText(provider, enabled = true) {
-  if (!enabled) return t('settings.profiles.disabled');
-  if (!provider) return t('settings.thirdparty.checking');
-  if (provider.status === 'unauthorized') return t('settings.thirdparty.invalidKey');
-  if (provider.status !== 'ok') return t('settings.thirdparty.unavailable');
+function thirdPartyProfileStatusText(provider, options = {}) {
+  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
+  if (status === 'disabled') return t('settings.profiles.disabled');
+  if (status === 'hidden') return '';
+  if (status === 'checking') return t('settings.thirdparty.checking');
+  if (status === 'invalid') return t('settings.thirdparty.invalidKey');
+  if (status !== 'linked') return t('settings.thirdparty.unavailable');
   const balance = optionalFiniteNumber(provider.balance?.amount);
   if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD')}`;
   const unlimited = (provider.windows || []).some((window) => (
@@ -9999,6 +10003,7 @@ function updateNamedApiProfilesStatus({
   profileCountStateKey,
   statusText
 }) {
+  const providerEnabled = limitProviderEnabled(providerId);
   const providers = localProviderStatuses(providerId);
   const byName = new Map(providers.map((provider) => [
     String(provider.accountName || provider.accountLabel || ''),
@@ -10007,19 +10012,24 @@ function updateNamedApiProfilesStatus({
   for (const infoEl of document.querySelectorAll(`[data-managed-profile-provider="${providerId}"][data-managed-profile-name]`)) {
     const name = infoEl.dataset.managedProfileName || '';
     const profile = state.settings?.[profileSettingsKey]?.[name];
-    infoEl.textContent = statusText(byName.get(name), profile?.enabled !== false);
+    infoEl.textContent = statusText(byName.get(name), {
+      providerEnabled,
+      profileEnabled: profile?.enabled !== false
+    });
   }
   const envInfo = document.querySelector(
     `[data-managed-profile-provider="${providerId}"][data-managed-profile-environment]`
   );
-  if (envInfo) envInfo.textContent = statusText(byName.get('environment'));
+  if (envInfo) envInfo.textContent = statusText(byName.get('environment'), { providerEnabled });
   const statusEl = document.getElementById(`${providerId}Status`);
   if (!statusEl) return;
   const total = state[profileCountStateKey] || 0;
   const linked = providers.filter((provider) => provider.status === 'ok').length;
-  statusEl.textContent = total > 0
-    ? t(`settings.${providerId}.connected`, { linked, total })
-    : t(`settings.${providerId}.statusNotSet`);
+  statusEl.textContent = total === 0
+    ? t(`settings.${providerId}.statusNotSet`)
+    : !providerEnabled
+      ? t(`settings.${providerId}.nAccounts`, { count: total })
+      : t(`settings.${providerId}.connected`, { linked, total });
 }
 
 function updateOpenRouterProfilesStatus() {
@@ -10083,10 +10093,25 @@ function appendNamedApiProfileRow(listEl, config) {
     toggle.checked = profile.enabled !== false;
     toggle.setAttribute('aria-label', name);
     toggle.addEventListener('change', async () => {
-      const result = await api.setProfileEnabled(name, toggle.checked);
-      if (!result?.ok) toggle.checked = !toggle.checked;
+      const previousEnabled = profile.enabled !== false;
+      profile.enabled = toggle.checked;
+      toggle.disabled = true;
       updateStatus();
-      renderSettingsSummaries();
+      try {
+        const result = await api.setProfileEnabled(name, toggle.checked);
+        if (!result?.ok) {
+          toggle.checked = previousEnabled;
+          profile.enabled = previousEnabled;
+          updateStatus();
+        }
+      } catch (_) {
+        toggle.checked = previousEnabled;
+        profile.enabled = previousEnabled;
+        updateStatus();
+      } finally {
+        toggle.disabled = false;
+        renderSettingsSummaries();
+      }
     });
     item.append(toggle);
   } else {

@@ -17,6 +17,7 @@ const {
   limitProviderCompactWindowPeriodLabel,
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
+  namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
   limitProviderSettingsTags
@@ -246,6 +247,44 @@ test('API key account status distinguishes pending checks from completed failure
   assert.equal(apiKeyAccountStatus({ status: 'unavailable' }, true), 'unavailable');
   assert.equal(apiKeyAccountStatus({ status: 'error' }, true), 'error');
   assert.equal(apiKeyAccountStatus({ status: 'disabled' }, true), 'notChecked');
+});
+
+test('named API profile status prioritizes provider and profile disablement over pending checks', () => {
+  assert.equal(namedApiProfileStatus(null), 'checking');
+  assert.equal(namedApiProfileStatus(null, { providerEnabled: false }), 'hidden');
+  assert.equal(namedApiProfileStatus(null, { profileEnabled: false }), 'disabled');
+  assert.equal(namedApiProfileStatus({ status: 'ok' }), 'linked');
+  assert.equal(namedApiProfileStatus({ status: 'ok' }, { providerEnabled: false }), 'hidden');
+  assert.equal(namedApiProfileStatus({ status: 'ok' }, { profileEnabled: false }), 'disabled');
+  assert.equal(
+    namedApiProfileStatus({ status: 'ok' }, { providerEnabled: false, profileEnabled: false }),
+    'disabled'
+  );
+  assert.equal(namedApiProfileStatus({ status: 'unauthorized' }), 'invalid');
+});
+
+test('named API profile rows hide global disablement while the group preserves configured account count', () => {
+  const app = readRendererFile('app.js');
+  const updater = functionBody(app, 'updateNamedApiProfilesStatus', 'updateOpenRouterProfilesStatus');
+
+  assert.match(app, /if \(status === 'hidden'\) return '';/);
+  assert.match(updater, /const providerEnabled = limitProviderEnabled\(providerId\)/);
+  assert.match(updater, /statusText\(byName\.get\(name\), \{\s*providerEnabled,\s*profileEnabled: profile\?\.enabled !== false\s*\}\)/);
+  assert.match(updater, /statusText\(byName\.get\('environment'\), \{ providerEnabled \}\)/);
+  assert.match(updater, /!providerEnabled\s*\? t\(`settings\.\$\{providerId\}\.nAccounts`, \{ count: total \}\)/);
+  assert.match(updater, /: t\(`settings\.\$\{providerId\}\.connected`, \{ linked, total \}\)/);
+});
+
+test('named API profile toggles update immediately and roll back failed persistence', () => {
+  const app = readRendererFile('app.js');
+  const row = functionBody(app, 'appendNamedApiProfileRow', 'renderNamedApiProfiles');
+  const optimisticUpdate = row.indexOf('profile.enabled = toggle.checked;');
+  const save = row.indexOf('await api.setProfileEnabled(name, toggle.checked);');
+
+  assert.ok(optimisticUpdate >= 0 && optimisticUpdate < save);
+  assert.match(row, /profile\.enabled = toggle\.checked;\s*toggle\.disabled = true;\s*updateStatus\(\)/);
+  assert.match(row, /toggle\.checked = previousEnabled;\s*profile\.enabled = previousEnabled;\s*updateStatus\(\)/);
+  assert.match(row, /finally \{\s*toggle\.disabled = false;\s*renderSettingsSummaries\(\)/);
 });
 
 test('undetected settings tags include status and supported collection hints', () => {

@@ -292,6 +292,14 @@
     return 'error';
   }
 
+  function namedApiProfileStatus(provider, options = {}) {
+    const providerEnabled = options.providerEnabled !== false;
+    const profileEnabled = options.profileEnabled !== false;
+    if (!profileEnabled) return 'disabled';
+    if (!providerEnabled) return 'hidden';
+    return apiKeyAccountStatus(provider, true, true);
+  }
+
   function usableProviderCandidate(provider) {
     const status = statusId(provider);
     return status !== 'disabled' && status !== 'notConfigured';
@@ -405,6 +413,7 @@
     limitProviderCompactWindows,
     limitProviderDisplayLabel,
     limitProviderMainDeviceLabel,
+    namedApiProfileStatus,
     limitProviderProvenance,
     limitResetRemainingMs,
     limitProviderSourceLabel,
