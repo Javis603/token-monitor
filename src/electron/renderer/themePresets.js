@@ -72,7 +72,7 @@
   const VENDOR_LABELS = {
     claude: 'Claude Code',
     codex: 'Codex',
-    hermes: 'Hermes',
+    hermes: 'Hermes Agent',
     opencode: 'OpenCode',
     openrouter: 'OpenRouter',
     openclaw: 'OpenClaw',

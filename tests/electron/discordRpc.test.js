@@ -60,9 +60,9 @@ test('Discord Rich Presence uses Cline label and uploaded asset key', () => {
   assert.equal(payload.smallImageText, 'Cline');
 });
 
-test('Discord Rich Presence uses labels and asset keys for new tokscale clients', () => {
+test('Discord Rich Presence uses labels and asset keys for tracked clients', () => {
   const buildPayload = loadBuildPayload();
-  for (const [client, label] of [['kimi', 'Kimi'], ['qwen', 'Qwen'], ['grok', 'Grok Build'], ['copilot', 'GitHub Copilot']]) {
+  for (const [client, label] of [['hermes', 'Hermes Agent'], ['kimi', 'Kimi'], ['qwen', 'Qwen'], ['grok', 'Grok Build'], ['copilot', 'GitHub Copilot']]) {
     const payload = buildPayload({
       periods: {
         today: {
