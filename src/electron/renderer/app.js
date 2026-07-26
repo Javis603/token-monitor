@@ -10834,6 +10834,7 @@ function setupCursorAccountUI() {
       submitButton.textContent = t('settings.common.checking');
       try {
         const result = await window.tokenMonitor.claude.saveCookie(input.value);
+        if (result?.superseded) return;
         if (!result?.ok) {
           if (result?.errorCode === 'INVALID_CLAUDE_WEB_SESSION_KEY') {
             errorEl.textContent = t('settings.claude.cookieInvalidFormat');

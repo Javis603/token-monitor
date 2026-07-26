@@ -77,6 +77,12 @@ test('agent history collection defaults to enabled, matching the widget', () => 
   assert.match(configDoc, /TOKEN_MONITOR_HISTORY_ENABLED=/);
 });
 
+test('headless agent leaves Claude Web credentials to the widget transport', () => {
+  const agent = read('src', 'agent', 'agent.js');
+  assert.match(agent, /claudeWebCookie: ''/);
+  assert.doesNotMatch(agent, /CLAUDE_WEB_COOKIE|claudeWebCookieRuntime/);
+});
+
 test('dashboard.html wires the shared modules and the two panels', () => {
   const html = read('src', 'electron', 'renderer', 'dashboard.html');
   assert.match(html, /<link rel="stylesheet" href="styles\.css" \/>/);

@@ -3895,6 +3895,7 @@ html.is-windows .limit-live-badge {
   .service-status-panel { display: none; }
 }
 
+#claudeManualPanel.hidden,
 #cursorManualPanel.hidden,
 #opencodeManualPanel.hidden,
 #deepseekManualPanel.hidden,

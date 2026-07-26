@@ -60,6 +60,13 @@ test('Claude Web accepts only a bare or canonical sk-ant sessionKey', () => {
     claudeWebCookie({ CLAUDE_WEB_COOKIE: 'sessionKey=sk-ant-from-env' }),
     'sessionKey=sk-ant-from-env'
   );
+  assert.equal(
+    claudeWebCookie(
+      { CLAUDE_WEB_COOKIE: 'sessionKey=sk-ant-from-env' },
+      { claudeWebCookie: '' }
+    ),
+    ''
+  );
   assert.throws(
     () => normalizeClaudeWebCookieInput('Cookie: sessionKey=sk-ant-secret; other=value'),
     (error) => error?.code === 'INVALID_CLAUDE_WEB_SESSION_KEY'
@@ -189,6 +196,51 @@ test('Claude Web follows a renewed sessionKey across sequential requests and rep
     'sessionKey=sk-ant-renewed',
     'sessionKey=sk-ant-renewed'
   ]);
+  assert.deepEqual(renewals, [{
+    previousCookie: 'sessionKey=sk-ant-old',
+    cookie: 'sessionKey=sk-ant-renewed'
+  }]);
+});
+
+test('Claude Web reports a renewed sessionKey even when a later request fails', async () => {
+  const renewals = [];
+  await assert.rejects(
+    fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-old' }, {
+      providerRuntimeState: new Map(),
+      onClaudeWebCookieRenewed: (renewal) => renewals.push(renewal),
+      fetch: async (url) => {
+        if (url.endsWith('/api/organizations')) {
+          return {
+            ok: true,
+            headers: {
+              getSetCookie: () => ['sessionKey=sk-ant-renewed; Path=/; Secure; HttpOnly']
+            },
+            json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
+          };
+        }
+        if (url.endsWith('/usage')) {
+          return {
+            ok: true,
+            json: async () => ({
+              five_hour: {
+                utilization: 21,
+                resets_at: '2026-07-25T05:00:00Z'
+              }
+            })
+          };
+        }
+        assert.ok(url.endsWith('/api/account'));
+        return {
+          ok: false,
+          status: 503,
+          headers: { get: () => '' },
+          json: async () => ({})
+        };
+      }
+    }),
+    (error) => error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE'
+  );
+
   assert.deepEqual(renewals, [{
     previousCookie: 'sessionKey=sk-ant-old',
     cookie: 'sessionKey=sk-ant-renewed'

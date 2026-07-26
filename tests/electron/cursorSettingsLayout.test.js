@@ -781,6 +781,8 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   );
 
   const css = readRendererFile('styles.css');
+  const hiddenPanelRules = cssRulesForSelector(css, '#claudeManualPanel.hidden');
+  assert.ok(hiddenPanelRules.some(rule => declaration(rule, 'display') === 'none'));
   const panelRules = cssRulesForSelector(css, '#claudeManualPanel');
   assert.ok(panelRules.some(rule => declaration(rule, 'min-width') === '0'));
   const innerRules = cssRulesForSelector(css, '#claudeManualPanel > .accordion-animation-inner');
@@ -808,6 +810,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   assert.match(setupBody, /if \(\/\[\\r\\n\]\/\.test\(input\.value\)\)[\s\S]*settings\.claude\.cookieInvalidFormat/);
   assert.match(setupBody, /window\.tokenMonitor\.claude\.saveCookie\(input\.value\)/);
+  assert.match(setupBody, /if \(result\?\.superseded\) return;/);
   assert.ok(
     setupBody.indexOf('window.tokenMonitor.claude.saveCookie(input.value)')
       < setupBody.indexOf("limitProviders: limitProviderSelectionIncluding('claude')"),
@@ -830,6 +833,8 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   assert.match(main, /function normalizeClaudeWebCookie\(value\) \{\s*return normalizeClaudeWebCookieInput\(value\);\s*\}/);
   assert.match(main, /ipcMain\.handle\('claude:saveCookie'[\s\S]*fetchClaudeLimits\([\s\S]*providerRuntimeState: new Map\(\)/);
+  assert.match(main, /const requestRevision = \+\+claudeWebCookieMutationRevision;/);
+  assert.match(main, /claudeWebCookieMutationRevision !== requestRevision[\s\S]*superseded: true/);
   assert.match(main, /settings\.claudeWebCookie = cookieToPersist;[\s\S]*saveSettings\(\{ throwOnError: true \}\)/);
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
   assert.match(preload, /claude: \{\s*saveCookie: \(cookie\) => ipcRenderer\.invoke\('claude:saveCookie', cookie\)/);
@@ -1279,6 +1284,14 @@ test('main collectors share one live GUI limit credential resolver in every widg
   const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
   assert.match(limitsDeps, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
   assert.match(limitsDeps, /onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal/);
+  const renewalPersistence = functionBody(
+    main,
+    'persistClaudeWebCookieRenewal',
+    'electronLimitsDeps'
+  );
+  assert.match(renewalPersistence, /settings\.claudeWebCookie === renewed\) return true/);
+  assert.match(renewalPersistence, /saveSettings\(\{ throwOnError: true \}\)/);
+  assert.doesNotMatch(renewalPersistence, /queueLimitInvalidation|classifySettingsChange/);
   for (const key of [
     'claudeWebCookie', 'zaiApiKey', 'zaiApiRegion', 'volcengineAccessKeyId', 'volcengineSecretAccessKey',
     'volcengineRegion', 'qoderCookie', 'qoderSite', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'

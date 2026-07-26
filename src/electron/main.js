@@ -223,6 +223,7 @@ let mainWindow = null;
 let dashboardWindow = null;
 let settingsPath = null;
 let settings = null;
+let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
@@ -4132,6 +4133,7 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('settings:update', (_event, patch) => {
+    if (patch?.claudeWebCookie !== undefined) claudeWebCookieMutationRevision += 1;
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousNativeMaterial = nativeBlurEnabled();
@@ -4552,6 +4554,7 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('claude:saveCookie', async (_event, raw) => {
+    const requestRevision = ++claudeWebCookieMutationRevision;
     let cookie;
     try {
       cookie = normalizeClaudeWebCookie(raw);
@@ -4585,6 +4588,13 @@ app.whenReady().then(() => {
         return {
           ok: false,
           status: provider?.status || 'error'
+        };
+      }
+      if (claudeWebCookieMutationRevision !== requestRevision) {
+        return {
+          ok: false,
+          status: 'superseded',
+          superseded: true
         };
       }
       settings.claudeWebCookie = cookieToPersist;

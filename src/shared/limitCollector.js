@@ -144,8 +144,9 @@ function normalizeClaudeWebCookieInput(value) {
 }
 
 function claudeWebCookie(env = process.env, options = {}) {
-  const explicit = normalizeClaudeWebCookie(options.claudeWebCookie);
-  if (explicit) return explicit;
+  if (Object.prototype.hasOwnProperty.call(options, 'claudeWebCookie')) {
+    return normalizeClaudeWebCookie(options.claudeWebCookie);
+  }
   return normalizeClaudeWebCookie(env.CLAUDE_WEB_COOKIE);
 }
 
@@ -939,7 +940,7 @@ function claudeWebIdentityFingerprint(cookie) {
 }
 
 function claudeWebSessionKey(cookie) {
-  return String(cookie || '').slice('sessionKey='.length);
+  return String(cookie || '').replace(/^sessionKey=/, '');
 }
 
 function claudeWebSetCookieValues(response) {
@@ -1005,8 +1006,24 @@ async function fetchClaudeWebLimits(cookie, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const baseUrl = String(deps.claudeWebBaseUrl || CLAUDE_WEB_BASE_URL).replace(/\/$/, '');
   const session = createClaudeWebSession(cookie);
+  let reportedCookie = session.initialCookie;
+  const observeResponse = async (response) => {
+    session.observe(response);
+    const renewedCookie = session.cookie();
+    if (renewedCookie === reportedCookie) return;
+    const previousCookie = reportedCookie;
+    reportedCookie = renewedCookie;
+    try {
+      await deps.onClaudeWebCookieRenewed?.({
+        previousCookie,
+        cookie: renewedCookie
+      });
+    } catch (error) {
+      deps.logger?.(`[limits] Claude Web session renewal could not be persisted: ${error.message}`);
+    }
+  };
   const fetchWebJson = (url) => fetchClaudeWebJson(url, session.headers(), deps, {
-    onResponse: (response) => session.observe(response)
+    onResponse: observeResponse
   });
   const fingerprint = claudeWebIdentityFingerprint(cookie);
   let context = claudeCachedIdentity(fingerprint, deps);
@@ -1046,14 +1063,6 @@ async function fetchClaudeWebLimits(cookie, deps = {}) {
   if (renewedCookie !== session.initialCookie) {
     const renewedFingerprint = claudeWebIdentityFingerprint(renewedCookie);
     if (renewedFingerprint !== fingerprint) cacheClaudeIdentity(renewedFingerprint, context, deps);
-    try {
-      await deps.onClaudeWebCookieRenewed?.({
-        previousCookie: session.initialCookie,
-        cookie: renewedCookie
-      });
-    } catch (error) {
-      deps.logger?.(`[limits] Claude Web session renewal could not be persisted: ${error.message}`);
-    }
   }
   return mapClaudeUsageToProvider(usage, {
     ...context.identity,
