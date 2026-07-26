@@ -13,6 +13,8 @@ const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']
 const WINDOW_ORDER = ['session', 'weekly', 'billing'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
+const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
+const MAX_ACCOUNT_NAME_INPUT_LENGTH = 512;
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -49,16 +51,26 @@ function normalizeSourceDetail(value) {
 }
 
 function normalizeAccountLabel(value) {
-  const raw = String(value || '').trim().normalize('NFC');
-  if (!raw || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
-  const clean = raw.replace(/\s+/gu, ' ').trim();
+  const raw = String(value || '').trim();
+  if (
+    !raw
+    || raw.length > MAX_ACCOUNT_LABEL_INPUT_LENGTH
+    || raw.includes('@')
+    || /^https?:\/\//i.test(raw)
+  ) return '';
+  const clean = raw.normalize('NFC').replace(/\s+/gu, ' ').trim();
   return [...clean].length <= 32 && /^[\p{L}\p{M}\p{N} +._-]+$/u.test(clean) ? clean : '';
 }
 
 function normalizeAccountName(value) {
-  const raw = String(value || '').trim().normalize('NFC');
-  if (!raw || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
-  const clean = raw.replace(/\s+/gu, ' ').trim();
+  const raw = String(value || '').trim();
+  if (
+    !raw
+    || raw.length > MAX_ACCOUNT_NAME_INPUT_LENGTH
+    || raw.includes('@')
+    || /^https?:\/\//i.test(raw)
+  ) return '';
+  const clean = raw.normalize('NFC').replace(/\s+/gu, ' ').trim();
   return [...clean].length <= 64 && /^[\p{L}\p{M}\p{N} ._-]+$/u.test(clean) ? clean : '';
 }
 

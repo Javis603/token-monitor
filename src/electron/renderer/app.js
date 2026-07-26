@@ -2258,7 +2258,6 @@ function thirdPartySpendNode(provider, quotaWindow) {
   const balance = provider?.balance || null;
   const currency = balance?.currency || 'USD';
   const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
-  if (allTimeSpend === null) return null;
   const entries = [];
   const total = optionalFiniteNumber(quotaWindow?.limit);
   const requestCount = optionalFiniteNumber(balance?.requestCount);
@@ -2272,19 +2271,22 @@ function thirdPartySpendNode(provider, quotaWindow) {
   if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
     entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
   }
+  if (allTimeSpend === null && entries.length === 0) return null;
 
   const item = document.createElement('div');
   item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
   const line = document.createElement('div');
   line.className = 'limit-window-text limit-spend-line';
   const label = document.createElement('span');
-  label.textContent = 'Spend';
+  label.textContent = allTimeSpend === null ? 'Details' : 'Spend';
   const right = document.createElement('span');
   right.className = 'limit-spend-right';
-  const summary = document.createElement('span');
-  summary.className = 'limit-spend-summary';
-  summary.textContent = `All time ${formatMoney(allTimeSpend, currency)}`;
-  right.append(summary);
+  if (allTimeSpend !== null) {
+    const summary = document.createElement('span');
+    summary.className = 'limit-spend-summary';
+    summary.textContent = `All time ${formatMoney(allTimeSpend, currency)}`;
+    right.append(summary);
+  }
   const infoNode = limitDetailInfoNode(entries, 'limit-spend-info-wrap');
   if (infoNode) right.append(infoNode);
   line.append(label, right);
@@ -2292,8 +2294,8 @@ function thirdPartySpendNode(provider, quotaWindow) {
   item.setAttribute(
     'aria-label',
     [
-      'Spend',
-      `All time ${formatMoney(allTimeSpend, currency)}`,
+      allTimeSpend === null ? 'Details' : 'Spend',
+      ...(allTimeSpend === null ? [] : [`All time ${formatMoney(allTimeSpend, currency)}`]),
       ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
     ].join(', ')
   );
@@ -2305,16 +2307,22 @@ const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' };
 function formatMoney(value, currency) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '';
-  const symbol = CURRENCY_SYMBOLS[String(currency || '').toUpperCase()] || '$';
-  return `${symbol}${number.toFixed(2)}`;
+  const code = /^[A-Z]{3}$/.test(String(currency || '').toUpperCase())
+    ? String(currency).toUpperCase()
+    : 'USD';
+  const symbol = CURRENCY_SYMBOLS[code];
+  return symbol ? `${symbol}${number.toFixed(2)}` : `${code} ${number.toFixed(2)}`;
 }
 
 function formatCompactMoney(value, currency) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '';
   if (Math.abs(number) < 100_000) return formatMoney(number, currency);
-  const symbol = CURRENCY_SYMBOLS[String(currency || '').toUpperCase()] || '$';
-  return `${symbol}${new Intl.NumberFormat('en-US', {
+  const code = /^[A-Z]{3}$/.test(String(currency || '').toUpperCase())
+    ? String(currency).toUpperCase()
+    : 'USD';
+  const prefix = CURRENCY_SYMBOLS[code] || `${code} `;
+  return `${prefix}${new Intl.NumberFormat('en-US', {
     notation: 'compact',
     maximumFractionDigits: 2
   }).format(number)}`;

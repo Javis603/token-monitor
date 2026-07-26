@@ -1,11 +1,19 @@
 'use strict';
 
+const DEFAULT_RESERVED_NAMES = ['__proto__', 'prototype', 'constructor'];
+const MAX_NAMED_PROFILE_INPUT_LENGTH = 256;
+
 function normalizeNamedProfileName(value, options = {}) {
-  const raw = String(value || '').trim().normalize('NFC');
-  if (!raw || raw.includes('@') || /^https?:\/\//i.test(raw)) return '';
-  const clean = raw.replace(/\s+/gu, ' ').trim();
+  const raw = String(value || '').trim();
+  if (
+    !raw
+    || raw.length > MAX_NAMED_PROFILE_INPUT_LENGTH
+    || raw.includes('@')
+    || /^https?:\/\//i.test(raw)
+  ) return '';
+  const clean = raw.normalize('NFC').replace(/\s+/gu, ' ').trim();
   const reserved = new Set(
-    (options.reservedNames || [])
+    [...DEFAULT_RESERVED_NAMES, ...(options.reservedNames || [])]
       .map((name) => String(name || '').trim().toLocaleLowerCase('en-US'))
       .filter(Boolean)
   );

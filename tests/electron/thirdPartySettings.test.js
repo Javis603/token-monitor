@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
-const { VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
+const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
@@ -51,6 +51,7 @@ test('third-party credentials stay local while renderer metadata is redacted', (
 
   assert.match(credentials, /thirdPartyProfiles: \['providers', 'thirdparty', 'profiles'\]/);
   assert.match(main, /function redactThirdPartyProfilesForRenderer/);
+  assert.match(main, /function redactThirdPartyProfilesForRenderer[\s\S]*?const out = Object\.create\(null\)/);
   assert.match(main, /const adapter = thirdPartyLimits\.normalizeAdapterId\(profile\?\.adapter\)/);
   assert.match(main, /baseUrl: thirdPartyLimits\.normalizeThirdPartyBaseUrl\(profile\?\.baseUrl, \{/);
   assert.match(main, /accessToken: profile\?\.accessToken \? 'set' : ''/);
@@ -98,7 +99,10 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /function thirdPartySpendNode/);
   assert.match(app, /balance\?\.requestCount/);
   assert.match(app, /settings\.thirdparty\.requests/);
-  assert.match(app, /label\.textContent = 'Spend'/);
+  assert.match(app, /if \(allTimeSpend === null && entries\.length === 0\) return null/);
+  assert.match(app, /if \(allTimeSpend !== null\)/);
+  assert.match(app, /label\.textContent = allTimeSpend === null \? 'Details' : 'Spend'/);
+  assert.match(app, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
   assert.match(app, /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
   assert.match(app, /planText: `\$\{providers\.length\} accounts`/);
   assert.match(app, /limitDetailInfoNode\(entries, 'limit-spend-info-wrap'\)/);
@@ -166,6 +170,9 @@ test('third-party fallback stays last after named providers across product surfa
   );
   assert.ok(iconProviders.lastIndexOf("'thirdparty'") > iconProviders.lastIndexOf("'ollama'"));
   assert.equal(VENDOR_ORDER.at(-1), 'thirdparty');
+  assert.ok(
+    Object.keys(VENDOR_LABELS).indexOf('thirdparty') > Object.keys(VENDOR_LABELS).indexOf('ollama')
+  );
 
   const env = read('.env.example');
   const envProviderList = env.slice(
@@ -177,6 +184,7 @@ test('third-party fallback stays last after named providers across product surfa
 
   const api = read('docs/API.md');
   const providerContract = api.split('\n').find((line) => line.startsWith('`limits.providers[].provider`'));
+  assert.ok(providerContract, 'docs/API.md must document the limits provider enum');
   assert.ok(providerContract.lastIndexOf('`thirdparty`') > providerContract.lastIndexOf('`ollama`'));
 
   for (const file of ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md']) {

@@ -163,9 +163,9 @@ function newapiUserId(env = process.env, explicitUserId = '') {
 }
 
 function finiteNumber(value) {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string' && value.trim() === '') return null;
-  const parsed = Number(value);
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const parsed = Number(value.trim());
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -470,6 +470,7 @@ async function requestJson(url, options = {}, deps = {}) {
 }
 
 function normalizeThirdPartyProfile(profile = {}, options = {}) {
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
   const adapter = normalizeAdapterId(profile.adapter, options.defaultAdapter || '');
   const baseUrl = normalizeThirdPartyBaseUrl(profile.baseUrl, {
     stripTerminalV1: adapter !== CUSTOM_BALANCE_ADAPTER

@@ -267,6 +267,19 @@ test('aggregateLimits preserves distinct Third-party API accounts while keeping 
   assert.ok(publicPayload.providers.every((provider) => Object.hasOwn(provider.balance, 'requestCount')));
 });
 
+test('limit provider normalization rejects oversized account text before Unicode normalization', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'thirdparty',
+    accountLabel: 'x'.repeat(257),
+    accountName: 'x'.repeat(513),
+    status: 'ok',
+    source: 'api',
+    windows: []
+  });
+  assert.equal(provider.accountLabel, '');
+  assert.equal(provider.accountName, '');
+});
+
 test('publicLimits preserves MiMo plan status while removing account identity', () => {
   const payload = publicLimits({
     providers: [{

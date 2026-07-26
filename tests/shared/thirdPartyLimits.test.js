@@ -15,6 +15,7 @@ const {
   THIRD_PARTY_ADAPTERS,
   THIRD_PARTY_ENV_ACCOUNT_NAME,
   configuredAccounts,
+  customBalanceQuota,
   fetchThirdPartyLimits,
   newapiAccessToken,
   newapiApiKey,
@@ -168,10 +169,13 @@ test('third-party profile names support Unicode and reserve the environment iden
   assert.equal(thirdPartyProfileName('Cafe\u0301'), 'Café');
   assert.equal(thirdPartyProfileName('environment'), '');
   assert.equal(thirdPartyProfileName('a/b'), '');
+  assert.equal(thirdPartyProfileName('__proto__'), '');
+  assert.equal(thirdPartyProfileName('prototype'), '');
+  assert.equal(thirdPartyProfileName('constructor'), '');
   assert.equal(thirdPartyProfileName('x'.repeat(65)), '');
 });
 
-test('quota conversion uses the instance setting and keeps zero values real', () => {
+test('quota conversion uses the instance setting and falls back to the default on zero', () => {
   assert.equal(quotaPerUnit({ data: { quota_per_unit: 1_000_000 } }), 1_000_000);
   assert.equal(quotaPerUnit({ data: { quota_per_unit: 0 } }), DEFAULT_QUOTA_PER_UNIT);
 });
@@ -489,7 +493,7 @@ test('invalid or unauthorized adapter responses fail closed', async () => {
   });
   assert.equal(rejectedEnvelope[0].status, 'unavailable');
 
-  const missingCustomBalance = await fetchThirdPartyLimits({
+  const nonNumericCustomBalance = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
       custom: {
         adapter: CUSTOM_BALANCE_ADAPTER,
@@ -506,8 +510,16 @@ test('invalid or unauthorized adapter responses fail closed', async () => {
     env: {},
     fetch: async () => response(200, { data: { remaining: 'not-a-number' } })
   });
-  assert.equal(missingCustomBalance[0].status, 'unavailable');
-  assert.deepEqual(missingCustomBalance[0].windows, []);
+  assert.equal(nonNumericCustomBalance[0].status, 'unavailable');
+  assert.deepEqual(nonNumericCustomBalance[0].windows, []);
+  assert.equal(customBalanceQuota(
+    { data: { remaining: true } },
+    { divisor: 1, remainingPath: 'data.remaining' }
+  ), null);
+  assert.equal(customBalanceQuota(
+    { data: { remaining: [12] } },
+    { divisor: 1, remainingPath: 'data.remaining' }
+  ), null);
 });
 
 test('configured accounts deduplicate exact adapter identities but keep distinct modes', () => {
@@ -535,7 +547,8 @@ test('configured accounts deduplicate exact adapter identities but keep distinct
         baseUrl: 'https://disabled.example',
         apiKey: 'disabled',
         enabled: false
-      }
+      },
+      malformed: null
     }
   }, { env: {} });
 

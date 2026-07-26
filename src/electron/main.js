@@ -2786,7 +2786,7 @@ function redactOpencodeProfilesForRenderer(profiles) {
 
 function redactOpenRouterProfilesForRenderer(profiles) {
   if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = {};
+  const out = Object.create(null);
   for (const [name, profile] of Object.entries(profiles)) {
     out[name] = { enabled: profile?.enabled !== false, apiKey: profile?.apiKey ? 'set' : '' };
   }
@@ -2795,7 +2795,7 @@ function redactOpenRouterProfilesForRenderer(profiles) {
 
 function redactThirdPartyProfilesForRenderer(profiles) {
   if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = {};
+  const out = Object.create(null);
   for (const [name, profile] of Object.entries(profiles)) {
     const adapter = thirdPartyLimits.normalizeAdapterId(profile?.adapter);
     out[name] = {

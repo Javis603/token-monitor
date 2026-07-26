@@ -75,7 +75,6 @@
     hermes: 'Hermes',
     opencode: 'OpenCode',
     openrouter: 'OpenRouter',
-    thirdparty: 'Third-party APIs',
     openclaw: 'OpenClaw',
     cline: 'Cline',
     cursor: 'Cursor',
@@ -108,6 +107,7 @@
     volcengine: 'Volcengine',
     qoder: 'Qoder',
     ollama: 'Ollama',
+    thirdparty: 'Third-party APIs',
     default: 'Default'
   };
 
