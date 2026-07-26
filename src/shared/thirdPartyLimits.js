@@ -260,7 +260,7 @@ function newapiAccountQuota(accountData, unit) {
   const rawQuota = finiteNumber(accountData?.quota);
   const unlimited = accountData?.unlimited_quota === true || rawQuota === -1;
   return quotaResult({
-    label: 'Account balance',
+    label: 'Balance',
     remaining: unlimited ? null : quotaAmount(rawQuota, unit),
     used: quotaAmount(accountData?.used_quota, unit),
     unlimited,

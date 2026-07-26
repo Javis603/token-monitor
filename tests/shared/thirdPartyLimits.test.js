@@ -227,7 +227,7 @@ test('New API account adapter exposes whole-account balance and cumulative usage
   assert.deepEqual(provider.windows, [{
     kind: 'billing',
     metric: 'credits',
-    label: 'Account balance',
+    label: 'Balance',
     used: 10,
     limit: 60,
     remaining: 50,
