@@ -55,8 +55,12 @@ function normalizeAccountLabel(value) {
     || raw.includes('@')
     || /^https?:\/\//i.test(raw)
   ) return '';
-  const clean = raw.normalize('NFC').replace(/\s+/gu, ' ').trim();
-  return [...clean].length <= 32 && /^[\p{L}\p{M}\p{N} +._-]+$/u.test(clean) ? clean : '';
+  const clean = raw
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{M}\p{N} +._-]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  return clean && [...clean].length <= 32 ? clean : '';
 }
 
 function normalizeAccountName(value) {
@@ -67,8 +71,12 @@ function normalizeAccountName(value) {
     || raw.includes('@')
     || /^https?:\/\//i.test(raw)
   ) return '';
-  const clean = raw.normalize('NFC').replace(/\s+/gu, ' ').trim();
-  return [...clean].length <= 64 && /^[\p{L}\p{M}\p{N} ._-]+$/u.test(clean) ? clean : '';
+  const clean = raw
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{M}\p{N} ._-]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  return clean && [...clean].length <= 64 ? clean : '';
 }
 
 function normalizeAccountEmail(value) {

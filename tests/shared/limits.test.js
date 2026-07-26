@@ -280,6 +280,21 @@ test('limit provider normalization rejects oversized account text before Unicode
   assert.equal(provider.accountName, '');
 });
 
+test('limit provider normalization strips upstream punctuation while preserving Unicode text', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'thirdparty',
+    accountLabel: 'Coding Plan/Pro',
+    accountName: 'Team: Enterprise',
+    planLabel: 'Pro (Trial) 工作',
+    status: 'ok',
+    source: 'api',
+    windows: []
+  });
+  assert.equal(provider.accountLabel, 'Coding PlanPro');
+  assert.equal(provider.accountName, 'Team Enterprise');
+  assert.equal(provider.planLabel, 'Pro Trial 工作');
+});
+
 test('publicLimits preserves MiMo plan status while removing account identity', () => {
   const payload = publicLimits({
     providers: [{

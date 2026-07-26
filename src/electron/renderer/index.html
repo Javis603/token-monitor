@@ -1003,7 +1003,7 @@
                   </button>
                   <div id="thirdpartyAddDetails" class="opencode-add-details accordion-animated-container hidden">
                     <div class="accordion-animation-inner opencode-add-body thirdparty-add-body">
-                      <p class="settings-note thirdparty-intro" data-i18n="settings.thirdparty.note">Connect a compatible self-hosted API. Credentials stay on this device and are sent only to the Base URL below.</p>
+                      <p class="settings-note thirdparty-intro" data-i18n="settings.thirdparty.note">Connect a compatible relay or balance API. Credentials stay on this device and are sent only to the Base URL below.</p>
                       <div id="thirdpartyChoiceGrid" class="thirdparty-choice-grid">
                         <div class="thirdparty-field">
                           <label for="thirdpartyPlatformInput" data-i18n="settings.thirdparty.preset">Preset</label>
@@ -1029,6 +1029,7 @@
                         <label for="thirdpartyBaseUrlInput" data-i18n="settings.thirdparty.baseUrl">Base URL</label>
                         <input id="thirdpartyBaseUrlInput" type="url" inputmode="url" spellcheck="false" data-i18n-placeholder="settings.thirdparty.baseUrlPlaceholder" placeholder="https://api.example.com">
                       </div>
+                      <p id="thirdpartyHttpWarning" class="settings-note hub-warning hidden" role="status" data-i18n="settings.thirdparty.httpWarning">HTTP sends credentials without transport encryption. Use HTTPS unless you trust the network.</p>
                       <div id="thirdpartyCredentialGrid" class="thirdparty-credential-grid">
                         <div id="thirdpartyAccessTokenRow" class="thirdparty-field">
                           <label for="thirdpartyAccessTokenInput" data-i18n="settings.thirdparty.accessToken">Access token</label>

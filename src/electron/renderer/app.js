@@ -2304,12 +2304,15 @@ function thirdPartySpendNode(provider, quotaWindow) {
 
 const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' };
 
+function normalizeMoneyCurrencyCode(value) {
+  const code = String(value || '').toUpperCase();
+  return /^[A-Z]{3,8}$/.test(code) ? code : 'USD';
+}
+
 function formatMoney(value, currency) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '';
-  const code = /^[A-Z]{3}$/.test(String(currency || '').toUpperCase())
-    ? String(currency).toUpperCase()
-    : 'USD';
+  const code = normalizeMoneyCurrencyCode(currency);
   const symbol = CURRENCY_SYMBOLS[code];
   return symbol ? `${symbol}${number.toFixed(2)}` : `${code} ${number.toFixed(2)}`;
 }
@@ -2318,9 +2321,7 @@ function formatCompactMoney(value, currency) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '';
   if (Math.abs(number) < 100_000) return formatMoney(number, currency);
-  const code = /^[A-Z]{3}$/.test(String(currency || '').toUpperCase())
-    ? String(currency).toUpperCase()
-    : 'USD';
+  const code = normalizeMoneyCurrencyCode(currency);
   const prefix = CURRENCY_SYMBOLS[code] || `${code} `;
   return `${prefix}${new Intl.NumberFormat('en-US', {
     notation: 'compact',
@@ -3274,11 +3275,10 @@ function namedApiAccountTitle(provider, index, providerId) {
 function thirdPartyPlanText(provider) {
   if (provider?.status !== 'ok') return undefined;
   const planLabel = String(provider?.planLabel || '').toLowerCase();
-  const quotaLabel = String(thirdPartyQuotaWindow(provider)?.label || '').toLowerCase();
+  if (planLabel === 'account') return 'Account';
+  if (planLabel === 'api key') return 'API key';
   if (planLabel === 'custom') return 'Custom';
-  return planLabel === 'api key' || planLabel.includes('token') || quotaLabel.includes('token')
-    ? 'API key'
-    : 'Account';
+  return undefined;
 }
 
 function renderNamedApiAccountGroup(providerId, label, providers, color, options = {}) {
@@ -3286,7 +3286,7 @@ function renderNamedApiAccountGroup(providerId, label, providers, color, options
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
   const groupProvider = { provider: providerId, status: 'ok', windows: [] };
   const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
-    planText: `${providers.length} accounts`,
+    planText: options.groupPlanText,
     hideMeta: true
   });
   const accountList = document.createElement('div');
@@ -3311,11 +3311,14 @@ function renderNamedApiAccountGroup(providerId, label, providers, color, options
 }
 
 function renderOpenRouterAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('openrouter', label, providers, color);
+  return renderNamedApiAccountGroup('openrouter', label, providers, color, {
+    groupPlanText: t('settings.openrouter.nAccounts', { count: providers.length })
+  });
 }
 
 function renderThirdPartyAccountGroup(label, providers, color) {
   return renderNamedApiAccountGroup('thirdparty', label, providers, color, {
+    groupPlanText: t('settings.thirdparty.nAccounts', { count: providers.length }),
     planTextForProvider: thirdPartyPlanText
   });
 }
@@ -9023,6 +9026,20 @@ function selectedThirdPartyAdapter() {
   return mode === 'token' ? 'newapi-token' : 'newapi-account';
 }
 
+function updateThirdPartyHttpWarning() {
+  const input = document.getElementById('thirdpartyBaseUrlInput');
+  const warning = document.getElementById('thirdpartyHttpWarning');
+  if (!warning) return;
+  let insecure;
+  try {
+    insecure = new URL(String(input?.value || '').trim()).protocol === 'http:';
+  } catch {
+    warning.classList.add('hidden');
+    return;
+  }
+  warning.classList.toggle('hidden', !insecure);
+}
+
 function setThirdPartyAdapterFields() {
   const adapter = selectedThirdPartyAdapter();
   const customMode = adapter === 'custom';
@@ -10831,9 +10848,12 @@ function setupCursorAccountUI() {
     const addDetails = document.getElementById('thirdpartyAddDetails');
     const platformInput = document.getElementById('thirdpartyPlatformInput');
     const modeInput = document.getElementById('thirdpartyModeInput');
+    const baseUrlInput = document.getElementById('thirdpartyBaseUrlInput');
     platformInput?.addEventListener('change', setThirdPartyAdapterFields);
     modeInput?.addEventListener('change', setThirdPartyAdapterFields);
+    baseUrlInput?.addEventListener('input', updateThirdPartyHttpWarning);
     setThirdPartyAdapterFields();
+    updateThirdPartyHttpWarning();
     addToggle?.addEventListener('click', () => {
       const expanded = addDetails?.classList.contains('hidden');
       addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
@@ -10842,7 +10862,6 @@ function setupCursorAccountUI() {
     });
     document.getElementById('thirdpartyProfileSubmit')?.addEventListener('click', async () => {
       const nameInput = document.getElementById('thirdpartyProfileName');
-      const baseUrlInput = document.getElementById('thirdpartyBaseUrlInput');
       const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
       const userIdInput = document.getElementById('thirdpartyUserIdInput');
       const keyInput = document.getElementById('thirdpartyApiKeyInput');
@@ -10879,6 +10898,7 @@ function setupCursorAccountUI() {
       if (result?.ok) {
         nameInput.value = '';
         baseUrlInput.value = '';
+        updateThirdPartyHttpWarning();
         accessTokenInput.value = '';
         userIdInput.value = '';
         keyInput.value = '';

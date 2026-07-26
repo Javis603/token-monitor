@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
@@ -24,6 +25,7 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(html, /id="thirdpartyModeHint"/);
   assert.match(html, /<label for="thirdpartyBaseUrlInput"[^>]*data-i18n="settings\.thirdparty\.baseUrl"/);
   assert.match(html, /<input id="thirdpartyBaseUrlInput" type="url"/);
+  assert.match(html, /id="thirdpartyHttpWarning"[^>]*role="status"[^>]*data-i18n="settings\.thirdparty\.httpWarning"/);
   assert.match(html, /<input id="thirdpartyAccessTokenInput" type="password"/);
   assert.match(html, /<input id="thirdpartyUserIdInput" type="text"/);
   assert.match(html, /data-i18n="settings\.thirdparty\.userId">User ID \(New API only\)/);
@@ -41,6 +43,8 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(app, /if \(platform === 'custom'\) return 'custom'/);
   assert.match(app, /thirdpartyCustomConfig[\s\S]*?classList\.toggle\('hidden', !customMode\)/);
   assert.match(app, /thirdpartyCredentialGrid[\s\S]*?classList\.toggle\([\s\S]*?'single-field'/);
+  assert.match(app, /baseUrlInput\?\.addEventListener\('input', updateThirdPartyHttpWarning\)/);
+  assert.match(app, /new URL\(String\(input\?\.value \|\| ''\)\.trim\(\)\)\.protocol === 'http:'/);
   assert.match(read('src/electron/renderer/styles.css'), /\.thirdparty-choice-grid\.single-field,[\s\S]*?\.thirdparty-credential-grid\.single-field \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(preload, /saveProfile: \(profile\) => ipcRenderer\.invoke\('thirdparty:saveProfile', profile\)/);
 });
@@ -83,6 +87,7 @@ test('third-party profile rows share the named-account component with OpenRouter
 
 test('third-party Limits presentation uses compact scope labels and a details tooltip', () => {
   const app = read('src/electron/renderer/app.js');
+  const i18n = read('src/electron/renderer/i18n.js');
   const presentation = read('src/electron/renderer/limitProviderPresentation.js');
   const styles = read('src/electron/renderer/styles.css');
   const colors = read('src/electron/renderer/usageCharts.js');
@@ -93,9 +98,10 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /quotaWindow\?\.label \|\| 'Balance'/);
   assert.match(app, /function thirdPartyPlanText/);
   assert.match(app, /if \(provider\?\.status !== 'ok'\) return undefined/);
+  assert.match(app, /if \(planLabel === 'account'\) return 'Account'/);
+  assert.match(app, /if \(planLabel === 'api key'\) return 'API key'/);
   assert.match(app, /if \(planLabel === 'custom'\) return 'Custom'/);
-  assert.match(app, /\? 'API key'\s*: 'Account'/);
-  assert.match(app, /planLabel\.includes\('token'\) \|\| quotaLabel\.includes\('token'\)/);
+  assert.doesNotMatch(app, /planLabel\.includes\('token'\) \|\| quotaLabel\.includes\('token'\)/);
   assert.match(app, /function thirdPartySpendNode/);
   assert.match(app, /balance\?\.requestCount/);
   assert.match(app, /settings\.thirdparty\.requests/);
@@ -104,13 +110,63 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /label\.textContent = allTimeSpend === null \? 'Details' : 'Spend'/);
   assert.match(app, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
   assert.match(app, /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
-  assert.match(app, /planText: `\$\{providers\.length\} accounts`/);
+  assert.match(app, /function renderNamedApiAccountGroup[\s\S]*?planText: options\.groupPlanText/);
+  assert.match(app, /groupPlanText: t\('settings\.openrouter\.nAccounts', \{ count: providers\.length \}\)/);
+  assert.match(app, /groupPlanText: t\('settings\.thirdparty\.nAccounts', \{ count: providers\.length \}\)/);
+  assert.doesNotMatch(i18n, /settings\.thirdparty\.(?:spend|allTime)/);
   assert.match(app, /limitDetailInfoNode\(entries, 'limit-spend-info-wrap'\)/);
   assert.match(app, /function renderThirdPartyAccountGroup/);
   assert.match(app, /renderNamedApiAccountGroup\('thirdparty'/);
   assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
   assert.match(styles, /\.limit-icon-thirdparty/);
   assert.match(colors, /thirdparty: '#DD2E57'/);
+});
+
+test('third-party money formatting preserves supported custom units', () => {
+  const app = read('src/electron/renderer/app.js');
+  const start = app.indexOf('function normalizeMoneyCurrencyCode');
+  const end = app.indexOf('function optionalFiniteNumber', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const source = app.slice(start, end);
+  const result = vm.runInNewContext(
+    `${source}
+    JSON.stringify([
+      formatMoney(12.5, 'USD'),
+      formatMoney(12.5, 'USDT'),
+      formatMoney(12.5, 'POINTS'),
+      formatMoney(12.5, 'US$'),
+      formatCompactMoney(1_250_000, 'USDT')
+    ]);`,
+    { CURRENCY_SYMBOLS: { CNY: '¥', USD: '$' } }
+  );
+  assert.deepEqual(JSON.parse(result), [
+    '$12.50',
+    'USDT 12.50',
+    'POINTS 12.50',
+    '$12.50',
+    'USDT 1.25M'
+  ]);
+});
+
+test('third-party scope labels do not infer adapters from display text', () => {
+  const app = read('src/electron/renderer/app.js');
+  const start = app.indexOf('function thirdPartyPlanText');
+  const end = app.indexOf('function renderNamedApiAccountGroup', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const source = app.slice(start, end);
+  const result = vm.runInNewContext(
+    `${source}
+    JSON.stringify([
+      thirdPartyPlanText({ status: 'ok', planLabel: 'Account' }),
+      thirdPartyPlanText({ status: 'ok', planLabel: 'API key' }),
+      thirdPartyPlanText({ status: 'ok', planLabel: 'Custom' }),
+      thirdPartyPlanText({ status: 'ok', planLabel: 'Token deluxe' }) ?? null,
+      thirdPartyPlanText({ status: 'unavailable', planLabel: 'Account' }) ?? null
+    ]);`
+  );
+  assert.deepEqual(JSON.parse(result), ['Account', 'API key', 'Custom', null, null]);
 });
 
 test('third-party profile rows keep metadata on line two and rename on line one', () => {

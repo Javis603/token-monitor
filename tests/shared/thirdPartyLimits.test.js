@@ -402,7 +402,7 @@ test('unlimited account and token quota never invent a zero balance', async () =
   assert.equal(providers[1].balance.allTimeSpend, 5);
 });
 
-test('status failure falls back to the documented New API conversion unit', async () => {
+test('status request failure fails closed instead of guessing the conversion unit', async () => {
   const [provider] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
       fallback: {
@@ -419,6 +419,31 @@ test('status failure falls back to the documented New API conversion unit', asyn
         accessToken: 'access',
         userId: '8',
         statusStatus: 500,
+        accountBody: { quota: 500_000, used_quota: 500_000 }
+      }
+    })
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.deepEqual(provider.windows, []);
+});
+
+test('successful status response without a unit uses the documented New API default', async () => {
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      fallback: {
+        adapter: NEWAPI_ACCOUNT_ADAPTER,
+        baseUrl: 'https://fallback.example',
+        accessToken: 'access',
+        userId: '8'
+      }
+    }
+  }, {
+    env: {},
+    fetch: apiFetch({
+      'https://fallback.example': {
+        accessToken: 'access',
+        userId: '8',
+        statusBody: {},
         accountBody: { quota: 500_000, used_quota: 500_000 }
       }
     })
@@ -569,6 +594,51 @@ test('configured accounts deduplicate exact adapter identities but keep distinct
       enabled: true
     }
   ]);
+});
+
+test('custom account identity stays stable across mapping and display changes', async () => {
+  const common = {
+    adapter: CUSTOM_BALANCE_ADAPTER,
+    baseUrl: 'https://custom.example',
+    apiKey: 'custom-key',
+    endpointPath: '/balance',
+    authMode: 'bearer'
+  };
+  const fetch = async () => response(200, {
+    data: {
+      remaining: 12,
+      balance: 12_000,
+      used: 3
+    }
+  });
+  const [original] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      custom: {
+        ...common,
+        remainingPath: 'data.remaining',
+        usedPath: 'data.used',
+        currency: 'USD',
+        divisor: 1
+      }
+    }
+  }, { env: {}, fetch });
+  const [remapped] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      custom: {
+        ...common,
+        remainingPath: 'data.balance',
+        currency: 'USDT',
+        divisor: 1_000
+      }
+    }
+  }, { env: {}, fetch });
+
+  assert.equal(original.status, 'ok');
+  assert.equal(remapped.status, 'ok');
+  assert.equal(original.accountKey, remapped.accountKey);
+  assert.equal(original.balance.currency, 'USD');
+  assert.equal(remapped.balance.currency, 'USDT');
+  assert.equal(original.balance.amount, remapped.balance.amount);
 });
 
 test('environment configuration prefers account quota and falls back to token quota', () => {

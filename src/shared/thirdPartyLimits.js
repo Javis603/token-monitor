@@ -414,12 +414,7 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
         account.baseUrl,
         account.endpointPath,
         account.authMode,
-        account.apiKey,
-        account.remainingPath,
-        account.usedPath,
-        account.totalPath,
-        account.currency,
-        account.divisor
+        account.apiKey
       ];
     },
     request(account) {
@@ -566,6 +561,13 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     return normalizeLimitProvider({
       ...common,
       status: quotaResponse.reason?.status || 'unavailable',
+      windows: []
+    });
+  }
+  if (statusRequest && statusResponse.status === 'rejected') {
+    return normalizeLimitProvider({
+      ...common,
+      status: 'unavailable',
       windows: []
     });
   }
