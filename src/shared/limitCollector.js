@@ -1012,12 +1012,12 @@ async function fetchClaudeWebLimits(cookie, deps = {}) {
     const renewedCookie = session.cookie();
     if (renewedCookie === reportedCookie) return;
     const previousCookie = reportedCookie;
-    reportedCookie = renewedCookie;
     try {
-      await deps.onClaudeWebCookieRenewed?.({
+      const persisted = await deps.onClaudeWebCookieRenewed?.({
         previousCookie,
         cookie: renewedCookie
       });
+      if (persisted !== false) reportedCookie = renewedCookie;
     } catch (error) {
       deps.logger?.(`[limits] Claude Web session renewal could not be persisted: ${error.message}`);
     }

@@ -247,6 +247,64 @@ test('Claude Web reports a renewed sessionKey even when a later request fails', 
   }]);
 });
 
+test('Claude Web retries later rotation from the last persisted sessionKey after CAS rejection', async () => {
+  const renewals = [];
+  await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-old' }, {
+    providerRuntimeState: new Map(),
+    onClaudeWebCookieRenewed: (renewal) => {
+      renewals.push(renewal);
+      return renewals.length > 1;
+    },
+    fetch: async (url, options) => {
+      if (url.endsWith('/api/organizations')) {
+        assert.equal(options.headers.cookie, 'sessionKey=sk-ant-old');
+        return {
+          ok: true,
+          headers: {
+            getSetCookie: () => ['sessionKey=sk-ant-first-renewal; Path=/; Secure; HttpOnly']
+          },
+          json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
+        };
+      }
+      if (url.endsWith('/usage')) {
+        assert.equal(options.headers.cookie, 'sessionKey=sk-ant-first-renewal');
+        return {
+          ok: true,
+          headers: {
+            getSetCookie: () => ['sessionKey=sk-ant-second-renewal; Path=/; Secure; HttpOnly']
+          },
+          json: async () => ({
+            five_hour: {
+              utilization: 21,
+              resets_at: '2026-07-25T05:00:00Z'
+            }
+          })
+        };
+      }
+      assert.ok(url.endsWith('/api/account'));
+      assert.equal(options.headers.cookie, 'sessionKey=sk-ant-second-renewal');
+      return {
+        ok: true,
+        json: async () => ({
+          uuid: 'account-web',
+          email_address: 'owner@example.com'
+        })
+      };
+    }
+  });
+
+  assert.deepEqual(renewals, [
+    {
+      previousCookie: 'sessionKey=sk-ant-old',
+      cookie: 'sessionKey=sk-ant-first-renewal'
+    },
+    {
+      previousCookie: 'sessionKey=sk-ant-old',
+      cookie: 'sessionKey=sk-ant-second-renewal'
+    }
+  ]);
+});
+
 test('Claude Web prefers chat-capable organizations, then non-API-only organizations', async () => {
   async function selectedUsageOrganization(organizations, cookie) {
     let usageOrganizationId = '';
