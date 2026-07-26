@@ -807,7 +807,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.match(homeModule, /value\.textContent = window\.value \|\| formatHomeLimitWindowValue\(window, showUsed\);/);
   assert.match(homeModule, /limitProviderCompactWindowPeriodLabel\(row\.providerId, window, row\.windows\)/);
   assert.match(homeModule, /`\$\{periodLabel\} · \$\{resetLabel\}`/);
-  assert.match(valueFormatter, /`\$\{formatMoney\(window\.amount, window\.currency\)\} left`/);
+  assert.match(valueFormatter, /return formatMoney\(window\.amount, window\.currency\);/);
   assert.match(valueFormatter, /`\$\{formatPercent\(percent\)\} \$\{limitModeSuffix\(showUsed\)\}`/);
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);
 });
@@ -835,7 +835,17 @@ test('DeepSeek main Limits row preserves the intentional month-spend balance met
   assert.doesNotMatch(renderProviderWindows, /monthSinceTracking \? 'Month \(since tracking\)' : 'Month'/);
   assert.match(balanceWindow, /remainingPercent/);
   assert.match(balanceWindow, /amount \+ spend/);
+  assert.doesNotMatch(renderProviderWindows, /formatMoney\(balance\.amount, currency\)\} left/);
   assert.match(styles, /\.limit-window-no-reset \.limit-reset\s*\{/);
+});
+
+test('Balance values omit the redundant left suffix without changing quota copy', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+
+  assert.match(renderProviderWindows, /'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \},\s*color,\s*0\.95,\s*formatMoney\(balanceAmount, currency\)/);
+  assert.match(renderProviderWindows, /String\(balanceLabel\)\.trim\(\)\.toLowerCase\(\) === 'balance'\s*\? balanceValue\s*: `\$\{balanceValue\} left`/);
+  assert.doesNotMatch(renderProviderWindows, /`\$\{formatMoney\(balanceAmount, currency\)\} left`/);
 });
 
 test('MiMo main Limits row falls back to balance plan fields for Token Plan', () => {

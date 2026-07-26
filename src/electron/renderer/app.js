@@ -2377,7 +2377,7 @@ function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
   if (window?.kind === 'balance') {
-    return `${formatMoney(window.amount, window.currency)} left`;
+    return formatMoney(window.amount, window.currency);
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
@@ -2894,7 +2894,7 @@ function renderProviderWindows(provider, color) {
         { ...balanceWindow, label: 'Balance' },
         color,
         0.95,
-        `${formatMoney(balanceAmount, currency)} left`
+        formatMoney(balanceAmount, currency)
       );
       balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
       windows.append(balanceNode);
@@ -2929,12 +2929,15 @@ function renderProviderWindows(provider, color) {
     const quotaWindow = thirdPartyQuotaWindow(provider);
     const balanceLabel = quotaWindow?.label || 'Balance';
     if (balanceAmount !== null) {
+      const balanceValue = formatMoney(balanceAmount, currency);
       const balanceNode = limitWindowNode(
         balanceLabel,
         { ...(quotaWindow || { showMeter: false }), label: balanceLabel },
         color,
         0.95,
-        `${formatMoney(balanceAmount, currency)} left`
+        String(balanceLabel).trim().toLowerCase() === 'balance'
+          ? balanceValue
+          : `${balanceValue} left`
       );
       balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
       windows.append(balanceNode);
@@ -2963,7 +2966,7 @@ function renderProviderWindows(provider, color) {
     if (balance) {
       const currency = balance.currency;
       const balanceNode = limitWindowNode('Balance', balanceRemainingWindow(balance), color, 0.95,
-        `${formatMoney(balance.amount, currency)} left`);
+        formatMoney(balance.amount, currency));
       balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
       windows.append(balanceNode);
 
