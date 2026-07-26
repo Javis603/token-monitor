@@ -53,6 +53,12 @@ test('Claude Web cookie accepts a full header or a bare sessionKey value', () =>
     'sessionKey=secret; other=value'
   );
   assert.equal(
+    claudeWebCookie({}, {
+      claudeWebCookie: 'Cookie: anthropic-device-id=device; sessionKey=secret; other=value'
+    }),
+    'anthropic-device-id=device; sessionKey=secret; other=value'
+  );
+  assert.equal(
     claudeWebCookie({}, { claudeWebCookie: 'sk-ant-sid01-example' }),
     'sessionKey=sk-ant-sid01-example'
   );
@@ -63,6 +69,14 @@ test('Claude Web cookie accepts a full header or a bare sessionKey value', () =>
   assert.throws(
     () => normalizeClaudeWebCookieInput('sessionKey=first\nother=value'),
     (error) => error?.code === 'INVALID_CLAUDE_WEB_COOKIE'
+  );
+  assert.throws(
+    () => normalizeClaudeWebCookieInput('anthropic-device-id=device; other=value'),
+    (error) => error?.code === 'CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY'
+  );
+  assert.throws(
+    () => normalizeClaudeWebCookieInput('Cookie: anthropic-device-id=device'),
+    (error) => error?.code === 'CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY'
   );
   assert.equal(normalizeClaudeWebCookieInput(''), '');
 });

@@ -130,18 +130,30 @@ function cleanClaudeWebSecret(value) {
   return raw;
 }
 
+function claudeWebCookieHasSessionKey(value) {
+  return /(?:^|;\s*)sessionKey\s*=/i.test(String(value || ''));
+}
+
 function normalizeClaudeWebCookie(value) {
   let raw = cleanClaudeWebSecret(value);
   if (!raw) return '';
   raw = raw.replace(/^cookie\s*:\s*/i, '').trim();
   if (!raw || /[\r\n]/.test(raw)) return '';
-  if (/^sessionKey=/i.test(raw) || raw.includes(';')) return raw;
-  if (raw.includes('=')) return raw;
+  if (claudeWebCookieHasSessionKey(raw)) return raw;
+  if (raw.includes('=') || raw.includes(';')) return '';
   return `sessionKey=${raw}`;
 }
 
 function normalizeClaudeWebCookieInput(value) {
   const raw = typeof value === 'string' ? value : String(value || '');
+  const cleaned = cleanClaudeWebSecret(raw).replace(/^cookie\s*:\s*/i, '').trim();
+  if (cleaned && !/[\r\n]/.test(cleaned)
+    && (cleaned.includes('=') || cleaned.includes(';'))
+    && !claudeWebCookieHasSessionKey(cleaned)) {
+    const error = new Error('Claude Web Cookie is missing sessionKey');
+    error.code = 'CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY';
+    throw error;
+  }
   const normalized = normalizeClaudeWebCookie(raw);
   if (raw.trim() && !normalized) {
     const error = new Error('Claude Web Cookie must be a single-line value');

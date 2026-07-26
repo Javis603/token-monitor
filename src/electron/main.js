@@ -32,7 +32,7 @@ const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { claudeWebCookie, deepseekToken, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -4522,6 +4522,41 @@ app.whenReady().then(() => {
       return { ok: true, email: probeResult.user.email };
     } catch (err) {
       return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('claude:validateCookie', async (_event, raw) => {
+    let cookie;
+    try {
+      cookie = normalizeClaudeWebCookie(raw);
+    } catch (error) {
+      return {
+        ok: false,
+        status: 'invalid',
+        errorCode: error?.code || 'INVALID_CLAUDE_WEB_COOKIE'
+      };
+    }
+    if (!cookie) {
+      return {
+        ok: false,
+        status: 'notConfigured',
+        errorCode: 'INVALID_CLAUDE_WEB_COOKIE'
+      };
+    }
+    try {
+      const provider = await fetchClaudeLimits(
+        { claudeWebCookie: cookie },
+        { providerRuntimeState: new Map() }
+      );
+      return {
+        ok: provider?.status === 'ok',
+        status: provider?.status || 'error'
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: error?.status || 'error',
+        errorCode: error?.code || ''
+      };
     }
   });
   ipcMain.handle('ollama:validateCookie', async (_event, raw) => {

@@ -10816,6 +10816,7 @@ function setupCursorAccountUI() {
 
     document.getElementById('claudeWebCookieSubmit').addEventListener('click', async () => {
       const input = document.getElementById('claudeWebCookieInput');
+      const submitButton = document.getElementById('claudeWebCookieSubmit');
       const errorEl = document.getElementById('claudeErrorMessage');
       errorEl.classList.add('hidden');
       if (!String(input.value || '').trim()) {
@@ -10828,7 +10829,22 @@ function setupCursorAccountUI() {
         errorEl.classList.remove('hidden');
         return;
       }
+      if (submitButton.disabled) return;
+      submitButton.disabled = true;
+      submitButton.textContent = t('settings.common.checking');
       try {
+        const validation = await window.tokenMonitor.claude.validateCookie(input.value);
+        if (!validation?.ok) {
+          if (validation?.errorCode === 'CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY') {
+            errorEl.textContent = t('settings.claude.cookieMissingSessionKey');
+          } else if (validation?.status === 'unauthorized') {
+            errorEl.textContent = t('settings.claude.cookieRejected');
+          } else {
+            errorEl.textContent = t('settings.claude.cookieCheckFailed');
+          }
+          errorEl.classList.remove('hidden');
+          return;
+        }
         markExternalProviderCheckPending('claude');
         await saveSettings({
           claudeWebCookie: input.value,
@@ -10844,6 +10860,9 @@ function setupCursorAccountUI() {
         clearExternalProviderCheckPending('claude');
         errorEl.textContent = t('settings.claude.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = t('settings.claude.saveCookie');
       }
     });
   }

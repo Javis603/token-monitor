@@ -23,6 +23,16 @@ function cssRule(source, selector) {
   return match[1];
 }
 
+function cssRulesForSelector(source, selector) {
+  const rules = [];
+  for (const match of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = match[1].split(',').map(candidate => candidate.trim());
+    if (selectors.includes(selector)) rules.push(match[2]);
+  }
+  assert.ok(rules.length > 0, `${selector} rule should exist`);
+  return rules;
+}
+
 function declaration(rule, property) {
   const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = rule.match(new RegExp(`${escaped}\\s*:\\s*([^;]+);`));
@@ -578,7 +588,6 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#claudeManualPanel',\n\s*'#cursorManualPanel'/);
   assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#kimiManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
@@ -587,11 +596,11 @@ test('API key account entries share styling and Copilot uses the folded token en
   assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
   assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#claudeManualPanel,\n#cursorManualPanel,[\s\S]*#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#claudeManualPanel > \.accordion-animation-inner,\n#cursorManualPanel > \.accordion-animation-inner,[\s\S]*#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;[\s\S]*?gap: 8px;/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#claudeManualPanel textarea,\n#cursorManualPanel textarea,[\s\S]*#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#claudeManualPanel textarea,\n#cursorManualPanel textarea,[\s\S]*#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -743,8 +752,8 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.match(details, /data-i18n="settings\.claude\.title">Claude Account<\/span>/);
   assert.match(details, /data-i18n="settings\.claude\.openBrowser">Open Claude usage in browser<\/button>/);
   assert.match(details, /settings\.claude\.note[\s\S]*detected automatically when Web login is not configured/);
-  assert.match(details, /settings\.claude\.step2[\s\S]*Network[\s\S]*organizations request/);
-  assert.match(details, /settings\.claude\.step3[\s\S]*sessionKey/);
+  assert.match(details, /settings\.claude\.step2[\s\S]*Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);
+  assert.match(details, /settings\.claude\.step3[\s\S]*Copy the sessionKey value/);
   assert.match(details, /<textarea id="claudeWebCookieInput" rows="3" autocomplete="off"[\s\S]*placeholder="sessionKey=\.\.\."/);
   assert.match(details, /<button id="claudeWebCookieSubmit"[\s\S]*data-i18n="settings\.claude\.saveCookie">/);
   assert.ok(
@@ -753,19 +762,74 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   );
 
   const app = readRendererFile('app.js');
+  const queriedDocument = {
+    selectors: '',
+    querySelectorAll(selectors) {
+      this.selectors = selectors;
+      return [];
+    }
+  };
+  runRendererFunctions(
+    app,
+    ['initSettingsAnimationWrappers'],
+    'initSettingsAnimationWrappers();',
+    { document: queriedDocument }
+  );
+  assert.ok(
+    queriedDocument.selectors.split(',').map(selector => selector.trim()).includes('#claudeManualPanel'),
+    'Claude manual panel should receive the shared accordion wrapper'
+  );
+
+  const css = readRendererFile('styles.css');
+  const panelRules = cssRulesForSelector(css, '#claudeManualPanel');
+  assert.ok(panelRules.some(rule => declaration(rule, 'min-width') === '0'));
+  const innerRules = cssRulesForSelector(css, '#claudeManualPanel > .accordion-animation-inner');
+  assert.ok(innerRules.some(rule => (
+    declaration(rule, 'display') === 'grid'
+      && declaration(rule, 'gap') === '8px'
+  )));
+  const textareaRules = cssRulesForSelector(css, '#claudeManualPanel textarea');
+  assert.ok(textareaRules.some(rule => (
+    declaration(rule, 'width') === '100%'
+      && declaration(rule, 'font-size') === '12px'
+  )));
+  assert.ok(textareaRules.some(rule => declaration(rule, 'font-family') === 'monospace'));
+  const collapsedRules = cssRulesForSelector(css, '.accordion-animated-container.hidden');
+  assert.ok(collapsedRules.some(rule => (
+    declaration(rule, 'grid-template-rows') === '0fr'
+      && declaration(rule, 'pointer-events') === 'none'
+  )));
+  const collapsedInnerRules = cssRulesForSelector(
+    css,
+    '.accordion-animated-container.hidden > .accordion-animation-inner'
+  );
+  assert.ok(collapsedInnerRules.some(rule => declaration(rule, 'opacity') === '0'));
+
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   assert.match(setupBody, /if \(\/\[\\r\\n\]\/\.test\(input\.value\)\)[\s\S]*settings\.claude\.cookieInvalidFormat/);
+  assert.match(setupBody, /window\.tokenMonitor\.claude\.validateCookie\(input\.value\)/);
+  assert.ok(
+    setupBody.indexOf('window.tokenMonitor.claude.validateCookie(input.value)')
+      < setupBody.indexOf('saveSettings({\n          claudeWebCookie: input.value'),
+    'Claude Web cookies must be validated before they are persisted'
+  );
+  assert.match(setupBody, /CLAUDE_WEB_COOKIE_MISSING_SESSION_KEY[\s\S]*settings\.claude\.cookieMissingSessionKey/);
+  assert.match(setupBody, /validation\?\.status === 'unauthorized'[\s\S]*settings\.claude\.cookieRejected/);
   assert.match(setupBody, /saveSettings\(\{\s*claudeWebCookie: input\.value,[\s\S]*?limitProviders: limitProviderSelectionIncluding\('claude'\),[\s\S]*?limitsEnabled: true/);
   assert.match(setupBody, /saveSettings\(\{ claudeWebCookie: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(claudePlatformUrl\(\)\)/);
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
   assert.match(statusBody, /const canClearConfiguredClaude = providerName === 'claude' && configured;/);
+  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
   assert.match(statusBody, /source !== 'settings' \|\| \(!linked && !canClearConfiguredClaude\)/);
   const urlBody = functionBody(app, 'claudePlatformUrl', 'selectedQoderSite');
   assert.match(urlBody, /return 'https:\/\/claude\.ai\/settings\/usage';/);
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   assert.match(main, /function normalizeClaudeWebCookie\(value\) \{\s*return normalizeClaudeWebCookieInput\(value\);\s*\}/);
+  assert.match(main, /ipcMain\.handle\('claude:validateCookie'[\s\S]*fetchClaudeLimits\([\s\S]*providerRuntimeState: new Map\(\)/);
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  assert.match(preload, /claude: \{\s*validateCookie: \(cookie\) => ipcRenderer\.invoke\('claude:validateCookie', cookie\)/);
   const updateHandler = main.slice(
     main.indexOf("ipcMain.handle('settings:update'"),
     main.indexOf("ipcMain.handle('appearance:preview'")
