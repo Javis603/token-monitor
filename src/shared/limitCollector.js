@@ -799,6 +799,30 @@ function claudeWebOrganizationId(organization) {
   return String(organization?.uuid || organization?.id || organization?.organization_uuid || '').trim();
 }
 
+function claudeWebOrganizationCapabilities(organization) {
+  if (!Array.isArray(organization?.capabilities)) return new Set();
+  return new Set(
+    organization.capabilities
+      .map((capability) => String(capability || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function selectClaudeWebOrganization(organizations) {
+  const candidates = organizations.filter((candidate) => claudeWebOrganizationId(candidate));
+  const hasChatCapability = (candidate) => (
+    claudeWebOrganizationCapabilities(candidate).has('chat')
+  );
+  const isApiOnly = (candidate) => {
+    const capabilities = claudeWebOrganizationCapabilities(candidate);
+    return capabilities.size === 1 && capabilities.has('api');
+  };
+  return candidates.find(hasChatCapability)
+    || candidates.find((candidate) => !isApiOnly(candidate))
+    || candidates[0]
+    || null;
+}
+
 function claudeWebMembership(accountBody, organizationId) {
   const account = accountBody?.account && typeof accountBody.account === 'object'
     ? accountBody.account
@@ -945,7 +969,7 @@ async function fetchClaudeWebLimits(cookie, deps = {}) {
         fetchClaudeWebJson(`${baseUrl}/api/account`, headers, deps)
       ]);
       const organizations = claudeWebOrganizations(organizationsBody);
-      const organization = organizations.find((candidate) => claudeWebOrganizationId(candidate));
+      const organization = selectClaudeWebOrganization(organizations);
       const organizationId = claudeWebOrganizationId(organization);
       if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
       context = cacheClaudeIdentity(fingerprint, {

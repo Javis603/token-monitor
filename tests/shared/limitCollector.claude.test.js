@@ -129,6 +129,65 @@ test('Claude Web source takes precedence and carries stable account metadata', a
   assert.equal(first.requests[0].options.headers.cookie, 'sessionKey=first-cookie');
 });
 
+test('Claude Web prefers chat-capable organizations, then non-API-only organizations', async () => {
+  async function selectedUsageOrganization(organizations, cookie) {
+    let usageOrganizationId = '';
+    await fetchClaudeLimits({ claudeWebCookie: cookie }, {
+      providerRuntimeState: new Map(),
+      fetch: async (url) => {
+        if (url.endsWith('/api/organizations')) {
+          return { ok: true, json: async () => organizations };
+        }
+        if (url.endsWith('/api/account')) {
+          return {
+            ok: true,
+            json: async () => ({
+              uuid: 'account-web',
+              email_address: 'owner@example.com'
+            })
+          };
+        }
+        const match = url.match(/\/api\/organizations\/([^/]+)\/usage$/);
+        assert.ok(match);
+        usageOrganizationId = decodeURIComponent(match[1]);
+        return {
+          ok: true,
+          json: async () => ({
+            five_hour: {
+              utilization: 21,
+              resets_at: '2026-07-25T05:00:00Z'
+            }
+          })
+        };
+      }
+    });
+    return usageOrganizationId;
+  }
+
+  assert.equal(
+    await selectedUsageOrganization([
+      { uuid: 'organization-api', capabilities: ['API'] },
+      { uuid: 'organization-non-api', capabilities: ['files'] },
+      { uuid: 'organization-chat', capabilities: ['CHAT', 'files'] }
+    ], 'sessionKey=chat'),
+    'organization-chat'
+  );
+  assert.equal(
+    await selectedUsageOrganization([
+      { uuid: 'organization-api', capabilities: ['api'] },
+      { uuid: 'organization-non-api', capabilities: ['files'] }
+    ], 'sessionKey=non-api'),
+    'organization-non-api'
+  );
+  assert.equal(
+    await selectedUsageOrganization([
+      { uuid: 'organization-api-first', capabilities: ['api'] },
+      { uuid: 'organization-api-second', capabilities: ['api'] }
+    ], 'sessionKey=first'),
+    'organization-api-first'
+  );
+});
+
 test('Claude Web caches stable identity and reuses it when account lookup is transiently unavailable', async () => {
   const providerRuntimeState = new Map();
   let nowMs = Date.parse('2026-07-25T00:00:00Z');
