@@ -7,11 +7,18 @@
 // client — one click to enable in Settings → tools — until tokscale dedups upstream.
 const DEFAULT_CLIENTS = 'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,zcode,kiro,codebuddy,workbuddy,proma';
 
+function insertClientBefore(clientsCsv, clientId, beforeClientId) {
+  const clients = clientsCsv.split(',');
+  const index = clients.indexOf(beforeClientId);
+  clients.splice(index >= 0 ? index : clients.length, 0, clientId);
+  return clients.join(',');
+}
+
 // Every wired client id, including opt-in ones kept out of DEFAULT_CLIENTS (micode).
 // Display-preference normalization (hide/pin/reorder) keys off this list, so an opt-in
 // client's prefs survive a round-trip instead of being silently dropped. Mirror the
 // renderer's KNOWN_CLIENTS; add any future opt-in ids here too.
-const KNOWN_CLIENTS = 'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,micode,zcode,kiro,codebuddy,workbuddy,proma';
+const KNOWN_CLIENTS = insertClientBefore(DEFAULT_CLIENTS, 'micode', 'zcode');
 
 function normalizeClientsCsv(value) {
   return String(value ?? '').split(',').map((client) => client.trim().toLowerCase()).filter(Boolean).join(',');
