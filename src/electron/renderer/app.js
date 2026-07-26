@@ -3193,7 +3193,7 @@ function renderCodexAccountGroup(label, providers, color) {
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
   const groupProvider = { provider: 'codex', status: 'ok', windows: [] };
   const head = renderLimitProviderHead('codex', label, groupProvider, color, {
-    planText: `${providers.length} accounts`,
+    planText: t('settings.codex.nAccounts', { count: providers.length }),
     hideMeta: true
   });
   const accountList = document.createElement('div');
@@ -3223,7 +3223,7 @@ function renderClaudeAccountGroup(label, providers, color) {
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
   const groupProvider = { provider: 'claude', status: 'ok', windows: [] };
   const head = renderLimitProviderHead('claude', label, groupProvider, color, {
-    planText: t('settings.limits.nAccounts', { count: providers.length }),
+    planText: t('settings.claude.nAccounts', { count: providers.length }),
     hideMeta: true
   });
   const accountList = document.createElement('div');
@@ -3254,7 +3254,7 @@ function renderMimoAccountGroup(label, providers, color) {
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
   const groupProvider = { provider: 'mimo', status: 'ok', windows: [] };
   const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
-    planText: `${providers.length} accounts`,
+    planText: t('settings.mimo.nAccounts', { count: providers.length }),
     hideMeta: true
   });
   const accountList = document.createElement('div');

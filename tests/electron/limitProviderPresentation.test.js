@@ -483,9 +483,11 @@ test('Codex limits render as one provider group with account subrows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  const renderGroup = functionBody(app, 'renderCodexAccountGroup', 'claudeAccountTitle');
 
   assert.match(renderLimits, /providersByLimitProviderId\(state\.stats\?\.limits\?\.providers \|\| \[\]\)/);
   assert.match(renderLimits, /renderCodexAccountGroup\(/);
+  assert.match(renderGroup, /planText: t\('settings\.codex\.nAccounts', \{ count: providers\.length \}\)/);
   assert.doesNotMatch(renderLimits, /new Map\(\(state\.stats\?\.limits\?\.providers \|\| \[\]\)\.map\(\(provider\) => \[provider\.provider, provider\]\)\)/);
   assert.match(styles, /\.limit-account-list\s*\{/);
   assert.match(styles, /\.limit-account-row\s*\{/);
@@ -498,9 +500,20 @@ test('Claude limits render as one provider group with account subrows', () => {
 
   assert.match(renderLimits, /renderClaudeAccountGroup\(/);
   assert.match(renderGroup, /claudeAccountTitle\(provider, index\)/);
-  assert.match(renderGroup, /planText: t\('settings\.limits\.nAccounts', \{ count: providers\.length \}\)/);
+  assert.match(renderGroup, /planText: t\('settings\.claude\.nAccounts', \{ count: providers\.length \}\)/);
   assert.match(renderGroup, /accountRow: true/);
   assert.match(renderGroup, /showIcon: false/);
+});
+
+test('every multi-account Limits group uses its provider-localized account count', () => {
+  const app = readRendererFile('app.js');
+  for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
+    assert.match(
+      app,
+      new RegExp(`settings\\.${provider}\\.nAccounts`)
+    );
+  }
+  assert.doesNotMatch(app, /settings\.limits\.nAccounts|accountCountText/);
 });
 
 test('tray primary-limit modes use the shared provider-aware resolver', () => {
