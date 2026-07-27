@@ -1057,9 +1057,6 @@ test('main settings normalize the Z.ai API region', () => {
     main.indexOf("ipcMain.handle('customPricing:list'")
   );
   assert.match(handler, /if \(patch\.zaiApiRegion !== undefined\) normalizedPatch\.zaiApiRegion = normalizeZaiApiRegion\(patch\.zaiApiRegion\);/);
-  assert.match(handler, /const runtimeChange = classifySettingsChange\(previousRuntimeSettings, settings\);/);
-  assert.match(handler, /for \(const scope of runtimeChange\.limitScopes\)/);
-  assert.match(handler, /queueLimitInvalidation\(scope, 'settings-change'/);
 });
 
 test('main settings migration preserves explicit AI limit provider selections', () => {

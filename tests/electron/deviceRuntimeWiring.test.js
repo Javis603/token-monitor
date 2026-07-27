@@ -3,7 +3,11 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { runManualDeviceRefresh } = require('../../src/electron/deviceRuntimeCoordinator');
+const {
+  runLimitInvalidation,
+  runManualDeviceRefresh,
+  settingsLimitInvalidationPlan
+} = require('../../src/electron/deviceRuntimeCoordinator');
 
 function deferred() {
   let resolve;
@@ -50,4 +54,66 @@ test('manual refresh reports a late limits failure without rejecting completed u
   await runManualDeviceRefresh(runtime, { onLimitsError: (error) => errors.push(error.message) });
   await Promise.resolve();
   assert.deepEqual(errors, ['quota offline']);
+});
+
+test('settings changes plan scoped clear-before-refresh invalidations', () => {
+  const scopes = [{ provider: 'deepseek' }, { provider: 'zai', accountKey: 'work' }];
+  assert.deepEqual(settingsLimitInvalidationPlan({ limitScopes: scopes }), [
+    {
+      scope: scopes[0],
+      reason: 'settings-change',
+      options: { clear: true }
+    },
+    {
+      scope: scopes[1],
+      reason: 'settings-change',
+      options: { clear: true }
+    }
+  ]);
+  assert.deepEqual(settingsLimitInvalidationPlan(), []);
+});
+
+test('limit invalidation clears the scoped lane before refreshing it', async () => {
+  const calls = [];
+  const scope = { provider: 'deepseek' };
+  const runtime = {
+    clearLimits(nextScope, reason) {
+      calls.push(['clear', nextScope, reason]);
+    },
+    refreshLimits(nextScope, reason) {
+      calls.push(['refresh', nextScope, reason]);
+      return { refreshed: true };
+    }
+  };
+
+  const result = await runLimitInvalidation(runtime, scope, 'settings-change', { clear: true });
+
+  assert.deepEqual(calls, [
+    ['clear', scope, 'settings-change'],
+    ['refresh', scope, 'settings-change']
+  ]);
+  assert.deepEqual(result, { refreshed: true });
+});
+
+test('limit invalidation can clear without scheduling a refresh', async () => {
+  const calls = [];
+  const scope = { provider: 'deepseek' };
+  const runtime = {
+    clearLimits(nextScope, reason) {
+      calls.push(['clear', nextScope, reason]);
+    },
+    refreshLimits() {
+      calls.push(['refresh']);
+    }
+  };
+
+  const result = await runLimitInvalidation(
+    runtime,
+    scope,
+    'settings-change',
+    { clear: true, refresh: false }
+  );
+
+  assert.deepEqual(calls, [['clear', scope, 'settings-change']]);
+  assert.deepEqual(result, { cleared: true });
 });

@@ -157,7 +157,11 @@ const {
   limitsConfigFromSettings,
   usageConfigFromSettings
 } = require('./runtimeConfig');
-const { runManualDeviceRefresh } = require('./deviceRuntimeCoordinator');
+const {
+  runLimitInvalidation,
+  runManualDeviceRefresh,
+  settingsLimitInvalidationPlan
+} = require('./deviceRuntimeCoordinator');
 const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
 const {
   normalizeWindowToggleShortcut,
@@ -2227,7 +2231,9 @@ function limitInvalidationKey(scope) {
   return account ? `${provider}:${account}` : `${provider}:*`;
 }
 
-function rememberPendingLimitInvalidation(scope, reason, clear = false, refresh = true) {
+function rememberPendingLimitInvalidation(scope, reason, options = {}) {
+  const clear = options.clear === true;
+  const refresh = options.refresh !== false;
   const normalized = { ...scope, provider: String(scope?.provider || '').trim().toLowerCase() };
   const key = limitInvalidationKey(normalized);
   if (key.endsWith(':*')) {
@@ -2242,24 +2248,19 @@ function queueLimitInvalidation(scope, reason = 'credential-change', options = {
   const clear = options.clear === true;
   const refresh = options.refresh !== false;
   if (!deviceRuntimeHandle) {
-    rememberPendingLimitInvalidation(scope, reason, clear, refresh);
+    rememberPendingLimitInvalidation(scope, reason, { clear, refresh });
     return Promise.resolve({ queued: true });
   }
-  if (clear) deviceRuntimeHandle.clearLimits(scope, reason);
-  if (!refresh) return Promise.resolve({ cleared: true });
-  return Promise.resolve(deviceRuntimeHandle.refreshLimits(scope, reason));
+  return runLimitInvalidation(deviceRuntimeHandle, scope, reason, { clear, refresh });
 }
 
 function drainPendingLimitInvalidations(runtime) {
   const pending = [...pendingLimitInvalidations.values()];
   pendingLimitInvalidations.clear();
   for (const entry of pending) {
-    if (entry.clear) runtime.clearLimits(entry.scope, entry.reason);
-    if (entry.refresh) {
-      void Promise.resolve(runtime.refreshLimits(entry.scope, entry.reason)).catch((error) => {
-        console.log(`[limits-runtime] pending refresh failed: ${error.message}`);
-      });
-    }
+    void runLimitInvalidation(runtime, entry.scope, entry.reason, entry).catch((error) => {
+      console.log(`[limits-runtime] pending refresh failed: ${error.message}`);
+    });
   }
 }
 
@@ -4346,22 +4347,23 @@ app.whenReady().then(() => {
       applyNativeMaterial();
     }
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
+    const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
     if (runtimeChange.modeStructural) {
-      for (const scope of runtimeChange.limitScopes) {
-        rememberPendingLimitInvalidation(scope, 'settings-change', true);
+      for (const { scope, reason, options } of limitInvalidations) {
+        rememberPendingLimitInvalidation(scope, reason, options);
       }
       startMode();
     } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
-      for (const scope of runtimeChange.limitScopes) {
-        rememberPendingLimitInvalidation(scope, 'settings-change', true);
+      for (const { scope, reason, options } of limitInvalidations) {
+        rememberPendingLimitInvalidation(scope, reason, options);
       }
       restartDeviceRuntimeForMode();
     } else {
       if (runtimeChange.limitsReconfigure && deviceRuntimeHandle) {
         deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
       }
-      for (const scope of runtimeChange.limitScopes) {
-        void queueLimitInvalidation(scope, 'settings-change', { clear: true }).catch((error) => {
+      for (const { scope, reason, options } of limitInvalidations) {
+        void queueLimitInvalidation(scope, reason, options).catch((error) => {
           console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
         });
       }
