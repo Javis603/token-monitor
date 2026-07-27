@@ -34,7 +34,11 @@ test('atomically replaces the snapshot and removes temporary files', async () =>
     assert.deepEqual(result, { ok: true, path: snapshotPath, changed: true });
     assert.equal(await fs.readFile(snapshotPath, 'utf8'), '{"schemaVersion":1}\n');
     assert.deepEqual(await fs.readdir(path.dirname(snapshotPath)), ['snapshot.json']);
-    assert.equal((await fs.stat(snapshotPath)).mode & 0o777, 0o600);
+    // Windows does not expose POSIX permission bits consistently.
+    // Content replacement and temporary-file cleanup are verified above.
+    if (process.platform !== 'win32') {
+      assert.equal((await fs.stat(snapshotPath)).mode & 0o777, 0o600);
+    }
   });
 });
 

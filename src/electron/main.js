@@ -2933,8 +2933,8 @@ function openMainWindowFromWidget() {
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
+  applyMacSpaceBehavior(false);
   mainWindow.show();
-  mainWindow.focus();
 }
 
 function hidePopover() {
