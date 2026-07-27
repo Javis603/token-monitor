@@ -1657,6 +1657,29 @@ span.settings-note.settings-item-desc {
 .settings-panel .limit-provider-row label.client-checkbox {
   min-width: 0;
 }
+/* The disclosure and the drag handle share one cell, so a provider without
+   options keeps its handle in line with every other row. */
+.limit-provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Provider options hang under their own row, spanning the full width beneath
+   both the label and the actions. The row's spacing is a column gap only: a row
+   gap cannot animate away, so a collapsed panel would still push the row taller.
+   Vertical space comes from the container's own margin, which the accordion
+   already zeroes while hidden. */
+.settings-panel .limit-provider-row {
+  column-gap: 8px;
+  row-gap: 0;
+}
+.settings-panel .limit-provider-row > .accordion-animated-container {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+.settings-panel .limit-provider-settings-list {
+  margin-left: 22px;
+}
 .settings-panel .limit-provider-toggle {
   align-items: flex-start;
 }
