@@ -67,6 +67,11 @@ const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 const CLAUDE_IDENTITY_CACHE_TTL_MS = 60 * 60 * 1000;
 const CLAUDE_IDENTITY_CACHE_MAX_ENTRIES = 16;
 const CLAUDE_IDENTITY_CACHE_STATE_KEY = 'claude.identity-cache';
+// A prepaid credit pool only moves when credits are spent or a grant expires, so
+// it is refreshed far less often than usage. Without this the steady-state Web
+// refresh would cost two requests instead of the documented one.
+const CLAUDE_PREPAID_CACHE_TTL_MS = 10 * 60 * 1000;
+const CLAUDE_PREPAID_CACHE_STATE_KEY = 'claude.prepaid-cache';
 const CLAUDE_SESSION_WINDOW_MINUTES = 5 * 60;
 const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 const CODEX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api';
@@ -142,6 +147,17 @@ function normalizeClaudeWebCookieInput(value) {
     throw error;
   }
   return normalized;
+}
+
+// Reading the prepaid pool is a scope step beyond the quota data the Web cookie
+// was supplied for, so it stays switchable. Default on: the account gate above
+// already limits it to people who deliberately enabled usage credits.
+function claudePrepaidBalanceEnabled(env = process.env, options = {}) {
+  if (Object.prototype.hasOwnProperty.call(options, 'claudePrepaidBalanceEnabled')) {
+    return options.claudePrepaidBalanceEnabled !== false;
+  }
+  const configured = env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE;
+  return configured === undefined || configured === '' ? true : parseBoolean(configured, true);
 }
 
 function claudeWebCookie(env = process.env, options = {}) {
@@ -670,6 +686,71 @@ function claudeFableWeeklyWindow(usage) {
   return null;
 }
 
+// `spend` amounts are self-describing: `{amount_minor, currency, exponent}`.
+function claudeSpendMoney(value) {
+  if (!value || typeof value !== 'object') return null;
+  const minor = Number(valueFromAliases(value, ['amount_minor', 'amountMinor']));
+  if (!Number.isFinite(minor)) return null;
+  const exponent = Number(valueFromAliases(value, ['exponent']));
+  const scale = Number.isFinite(exponent) ? 10 ** exponent : 100;
+  return {
+    amount: minor / scale,
+    currency: String(valueFromAliases(value, ['currency']) || '').trim().toUpperCase() || null
+  };
+}
+
+// `extra_usage` carries bare minor-unit numbers plus one shared `decimal_places`.
+function claudeExtraUsageMoney(extra, key) {
+  const raw = Number(valueFromAliases(extra || {}, [key]));
+  if (!Number.isFinite(raw)) return null;
+  const places = Number(valueFromAliases(extra || {}, ['decimal_places', 'decimalPlaces']));
+  return raw / 10 ** (Number.isFinite(places) && places >= 0 ? places : 2);
+}
+
+// Gate on the enable flags, never on "is there a value": a credits-off account
+// reports used 0, and so does one enabled a minute ago. Also gates the prepaid
+// balance request, which is why it is a named helper.
+function claudeUsageCreditsEnabled(usage) {
+  const spend = valueFromAliases(usage, ['spend']) || null;
+  const extra = valueFromAliases(usage, ['extra_usage', 'extraUsage']) || null;
+  return spend?.enabled === true
+    || valueFromAliases(extra || {}, ['is_enabled', 'isEnabled']) === true;
+}
+
+// Usage credits: `spend` and `extra_usage` are the same money in two spellings
+// (both report 235/2000 on a live account), so this yields one window. `spend`
+// wins because its units are self-describing.
+function claudeUsageCreditsWindow(usage) {
+  if (!claudeUsageCreditsEnabled(usage)) return null;
+  const spend = valueFromAliases(usage, ['spend']) || null;
+  const extra = valueFromAliases(usage, ['extra_usage', 'extraUsage']) || null;
+
+  const spendUsed = claudeSpendMoney(spend?.used);
+  const spendLimit = claudeSpendMoney(spend?.limit);
+  const used = spendUsed ? spendUsed.amount : claudeExtraUsageMoney(extra, 'used_credits');
+  if (used === null) return null;
+  const limit = spendLimit ? spendLimit.amount : claudeExtraUsageMoney(extra, 'monthly_limit');
+  const currency = (spendUsed && spendUsed.currency)
+    || String(valueFromAliases(extra || {}, ['currency']) || 'USD').trim().toUpperCase();
+
+  return {
+    kind: 'billing',
+    // `spend` is the machine-readable role: a `billing` window alone cannot be
+    // told apart from the Balance window, and renderers must not key off a
+    // display label. Headline is money already consumed, not money remaining.
+    metric: 'spend',
+    label: 'Usage credits',
+    used,
+    // A null limit means "no monthly cap". No percentage is passed in either
+    // case: `percentFromWindow` derives it from used/limit when a limit exists,
+    // and `spend.percent` must never be forwarded — it reports 0, not null,
+    // when unlimited, which would paint a 0% meter over real spending.
+    limit,
+    currency,
+    showMeter: limit !== null
+  };
+}
+
 function mapClaudeUsageToProvider(usage, meta = {}) {
   const windows = [];
   const session = valueFromAliases(usage, ['five_hour', 'fiveHour']);
@@ -690,6 +771,8 @@ function mapClaudeUsageToProvider(usage, meta = {}) {
   }
   const fableWeekly = claudeFableWeeklyWindow(usage);
   if (fableWeekly) windows.push(fableWeekly);
+  const usageCredits = claudeUsageCreditsWindow(usage);
+  if (usageCredits) windows.push(usageCredits);
   return normalizeLimitProvider({
     provider: 'claude',
     accountKey: meta.accountKey || '',
@@ -1003,7 +1086,97 @@ function carryClaudeCachedIdentity(previousCredentials, nextCredentials, deps = 
   if (cached) cacheClaudeIdentity(nextFingerprint, cached, deps);
 }
 
-async function fetchClaudeWebLimits(cookie, deps = {}) {
+// claude.ai's prepaid credit pool. Web-session only: the same path under an
+// OAuth bearer returns 403 account_session_invalid, and api.anthropic.com has no
+// equivalent, so this never runs on the OAuth path.
+function claudeTrancheAmount(entry) {
+  const minor = Number(
+    entry?.remaining_amount_minor_units
+    ?? entry?.remainingAmountMinorUnits
+    ?? entry?.amount_minor
+  );
+  return Number.isFinite(minor) ? minor / 100 : null;
+}
+
+function claudePrepaidBalance(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const minor = Number(payload.amount);
+  // A genuine 0 is kept, matching the documented balance contract: an account
+  // that has spent its pool dry still needs the row — that is precisely when it
+  // matters most. Callers gate on whether usage credits are enabled at all.
+  if (!Number.isFinite(minor) || minor < 0) return null;
+  const currency = String(payload.currency || 'USD').trim().toUpperCase();
+  // Purchased and granted credits share one pool in the UI; merge them and let
+  // normalization sort by expiry.
+  const entries = [
+    ...(Array.isArray(payload.tranches) ? payload.tranches : []),
+    ...(Array.isArray(payload.promo_tranches) ? payload.promo_tranches : [])
+  ];
+  const tranches = [];
+  for (const entry of entries) {
+    const amount = claudeTrancheAmount(entry);
+    if (amount === null) continue;
+    tranches.push({
+      amount,
+      currency: String(entry.currency || currency).trim().toUpperCase(),
+      expiresAt: entry.expires_at ?? entry.expiresAt ?? null
+    });
+  }
+  return {
+    amount: minor / 100,
+    currency,
+    expiresAt: payload.next_expires_at ?? payload.nextExpiresAt ?? null,
+    tranches
+  };
+}
+
+function claudePrepaidCache(deps = {}) {
+  if (!(deps.providerRuntimeState instanceof Map)) return null;
+  let cache = deps.providerRuntimeState.get(CLAUDE_PREPAID_CACHE_STATE_KEY);
+  if (!(cache instanceof Map)) {
+    cache = new Map();
+    deps.providerRuntimeState.set(CLAUDE_PREPAID_CACHE_STATE_KEY, cache);
+  }
+  return cache;
+}
+
+// Derived from the limits refresh interval rather than exposed as its own knob:
+// nobody can reason about "should my balance refresh every 10 or 15 minutes",
+// and two competing cadence settings in one panel is worse than one. Doubling
+// the interval keeps the balance off every other refresh at any interval.
+function claudePrepaidCacheTtlMs(deps = {}, options = {}) {
+  const configured = Number(deps.claudePrepaidCacheTtlMs);
+  if (Number.isFinite(configured) && configured >= 0) return configured;
+  const refreshMs = Number(options.limitsRefreshMs ?? options.refreshMs ?? deps.limitsRefreshMs);
+  return Number.isFinite(refreshMs) && refreshMs > 0
+    ? refreshMs * 2
+    : CLAUDE_PREPAID_CACHE_TTL_MS;
+}
+
+// Returns the cached balance when it is still fresh. A cached `null` counts:
+// re-probing an account that has no prepaid credits every refresh would be the
+// same wasted request, just for the majority of users.
+function claudeCachedPrepaid(fingerprint, deps = {}, options = {}) {
+  const cache = claudePrepaidCache(deps);
+  if (!cache || !fingerprint) return null;
+  const entry = cache.get(fingerprint);
+  if (!entry) return null;
+  const nowMs = (deps.now || Date.now)();
+  return nowMs - entry.resolvedAt <= claudePrepaidCacheTtlMs(deps, options) ? entry : null;
+}
+
+function cacheClaudePrepaid(fingerprint, balance, deps = {}) {
+  const cache = claudePrepaidCache(deps);
+  if (!cache || !fingerprint) return balance;
+  cache.delete(fingerprint);
+  cache.set(fingerprint, { balance, resolvedAt: (deps.now || Date.now)() });
+  while (cache.size > CLAUDE_IDENTITY_CACHE_MAX_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+  return balance;
+}
+
+async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
   const nowMs = (deps.now || Date.now)();
   const baseUrl = String(deps.claudeWebBaseUrl || CLAUDE_WEB_BASE_URL).replace(/\/$/, '');
   const session = createClaudeWebSession(cookie);
@@ -1065,10 +1238,49 @@ async function fetchClaudeWebLimits(cookie, deps = {}) {
     const renewedFingerprint = claudeWebIdentityFingerprint(renewedCookie);
     if (renewedFingerprint !== fingerprint) cacheClaudeIdentity(renewedFingerprint, context, deps);
   }
-  return mapClaudeUsageToProvider(usage, {
+  // The prepaid pool is billing data, so it is read only when the account has
+  // actually turned usage credits on — which the usage response above already
+  // tells us. An account that never opted in costs no extra request at all,
+  // and neither does one where the user switched this off.
+  const wantsPrepaid = claudePrepaidBalanceEnabled(deps.env || process.env, options)
+    && claudeUsageCreditsEnabled(usage);
+  // Best-effort and throttled: a 403/404/timeout here must not cost the account
+  // its usage row, and the pool moves too slowly to re-read every refresh.
+  const cachedPrepaid = wantsPrepaid ? claudeCachedPrepaid(fingerprint, deps, options) : null;
+  let balance = cachedPrepaid ? cachedPrepaid.balance : null;
+  if (wantsPrepaid && !cachedPrepaid) {
+    try {
+      const prepaid = await fetchWebJson(
+        `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/prepaid/credits`
+      );
+      balance = cacheClaudePrepaid(fingerprint, claudePrepaidBalance(prepaid), deps);
+    } catch (error) {
+      deps.logger?.(`[limits] Claude prepaid credits unavailable: ${error.message}`);
+    }
+  }
+  const provider = mapClaudeUsageToProvider(usage, {
     ...context.identity,
     updatedAt: nowIso(nowMs),
     source: 'web'
+  });
+  if (!balance) return provider;
+  return normalizeLimitProvider({
+    ...provider,
+    balance,
+    // Emit the credits window ourselves. normalizeLimitProvider synthesizes a
+    // metered one whenever a balance has no credits window, and that meter
+    // derives amount/(amount+monthSpend) — a denominator this pool doesn't have.
+    windows: [
+      ...provider.windows,
+      {
+        kind: 'billing',
+        metric: 'credits',
+        label: 'Balance',
+        remaining: balance.amount,
+        currency: balance.currency,
+        showMeter: false
+      }
+    ]
   });
 }
 
@@ -1156,7 +1368,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const platform = deps.platform || process.platform;
   const webCookie = claudeWebCookie(deps.env || process.env, options);
-  if (webCookie) return fetchClaudeWebLimits(webCookie, deps);
+  if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
   let oauthIdentity = null;
   try {
     let credentials = await readClaudeCredentials(deps);

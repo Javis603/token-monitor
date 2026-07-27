@@ -149,7 +149,7 @@ function normalizeLimitWindow(input) {
   const kind = normalizeWindowKind(input.kind || input.type || input.name || input.window || input.windowKind);
   if (!kind) return null;
   const metricValue = String(input.metric || '').trim().toLowerCase();
-  const metric = metricValue === 'credits' ? metricValue : null;
+  const metric = metricValue === 'credits' || metricValue === 'spend' ? metricValue : null;
   const used = numberOrNull(input.used);
   const limit = numberOrNull(input.limit);
   const remaining = numberOrNull(input.remaining);
@@ -170,6 +170,31 @@ function normalizeLimitWindow(input) {
     currency: normalizeWindowCurrency(input.currency),
     showMeter: input.showMeter !== false && input.meter !== false
   };
+}
+
+// Prepaid credit grants, each with its own expiry. Soonest expiry first so the
+// renderer can list them without re-sorting; grants with no expiry sort last.
+function normalizeBalanceTranches(input) {
+  const raw = input?.tranches;
+  if (!Array.isArray(raw)) return [];
+  const tranches = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const amount = numberOrNull(entry.amount);
+    if (amount === null) continue;
+    tranches.push({
+      amount,
+      currency: String(entry.currency || '').trim().toUpperCase().slice(0, 8) || null,
+      expiresAt: normalizeIsoTimestamp(entry.expiresAt ?? entry.expires_at)
+    });
+  }
+  tranches.sort((a, b) => {
+    if (!a.expiresAt && !b.expiresAt) return 0;
+    if (!a.expiresAt) return 1;
+    if (!b.expiresAt) return -1;
+    return Date.parse(a.expiresAt) - Date.parse(b.expiresAt);
+  });
+  return tranches;
 }
 
 function normalizeProviderBalance(input) {
@@ -206,6 +231,7 @@ function normalizeProviderBalance(input) {
   const latestModelUsageDate = normalizeDateText(input.latestModelUsageDate ?? input.latest_model_usage_date);
   const todayUsageBasis = String(input.todayUsageBasis ?? input.today_usage_basis ?? '').trim().slice(0, 64);
   const snapshotDate = normalizeDateText(input.snapshotDate ?? input.snapshot_date ?? input.date);
+  const tranches = normalizeBalanceTranches(input);
   if (
     amount === null
     && !currency
@@ -229,6 +255,7 @@ function normalizeProviderBalance(input) {
     && !latestModelUsageDate
     && !todayUsageBasis
     && !snapshotDate
+    && tranches.length === 0
   ) return null;
   return {
     amount,
@@ -252,7 +279,8 @@ function normalizeProviderBalance(input) {
     todayUsageDate,
     latestModelUsageDate,
     todayUsageBasis,
-    snapshotDate
+    snapshotDate,
+    ...(tranches.length > 0 ? { tranches } : {})
   };
 }
 
@@ -539,8 +567,28 @@ function mergeCodexTransientWindows(previousInput, currentInput, nowMs = Date.no
   };
 }
 
+// A prepaid balance is an account-level fact that only one device can usually
+// observe — Claude's pool is readable solely through a claude.ai Web session, so
+// the same account collected over OAuth elsewhere reports no balance at all.
+// Without this, the freshest record wins and the balance blinks in and out as
+// devices take turns posting. Carry it onto the winner instead; a stale observer
+// is not carried forward, so an offline device cannot pin an old balance.
+function carryProviderBalance(winner, loser) {
+  if (!loser || winner.balance || !loser.balance || loser.stale) return winner;
+  const creditsWindow = (loser.windows || []).find((window) => window?.metric === 'credits');
+  const windows = creditsWindow && !(winner.windows || []).some((window) => window?.metric === 'credits')
+    ? [...(winner.windows || []), creditsWindow]
+    : winner.windows;
+  return { ...winner, balance: loser.balance, windows };
+}
+
 function pickBetterProvider(current, candidate) {
   if (!current) return candidate;
+  const winner = betterProvider(current, candidate);
+  return carryProviderBalance(winner, winner === current ? candidate : current);
+}
+
+function betterProvider(current, candidate) {
   if (current.stale !== candidate.stale) return current.stale ? candidate : current;
   const rankDiff = statusRank(candidate.status) - statusRank(current.status);
   if (rankDiff !== 0) return rankDiff > 0 ? candidate : current;
@@ -615,7 +663,9 @@ function publicLimits(limits) {
       ...provider
     }) => {
       if (!provider.balance) return provider;
-      const { quotaGroup, ...publicBalance } = provider.balance;
+      // `tranches` carries per-grant amounts and expiry dates — billing detail
+      // with no public value, dropped alongside the custom group label.
+      const { quotaGroup, tranches, ...publicBalance } = provider.balance;
       return { ...provider, balance: publicBalance };
     })
   };

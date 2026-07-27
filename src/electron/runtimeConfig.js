@@ -88,6 +88,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     claudeWebCookie: settings.claudeWebCookie
       || env.CLAUDE_WEB_COOKIE
       || '',
+    claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
     opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     openrouterProfiles: settings.openrouterProfiles || {},

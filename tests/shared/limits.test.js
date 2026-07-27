@@ -1000,3 +1000,125 @@ test('normalizeLimitProvider keeps a restored balance behind the MiMo token plan
 
   assert.deepEqual(mimo.windows.map((window) => window.label), ['Token Plan', 'Balance']);
 });
+
+test('balance tranches normalize, sort by expiry, and drop amountless entries', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'claude',
+    status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 113.44, currency: 'USD', showMeter: false }],
+    balance: {
+      amount: 113.44,
+      currency: 'USD',
+      tranches: [
+        { amount: 100, currency: 'usd', expiresAt: '2026-09-19T00:00:00Z' },
+        { amount: 13.43, currency: 'usd', expires_at: '2026-08-09T00:00:00Z' },
+        { amount: 5, currency: 'usd' },
+        { currency: 'usd', expiresAt: '2026-08-01T00:00:00Z' }
+      ]
+    }
+  });
+  assert.deepEqual(provider.balance.tranches, [
+    { amount: 13.43, currency: 'USD', expiresAt: '2026-08-09T00:00:00.000Z' },
+    { amount: 100, currency: 'USD', expiresAt: '2026-09-19T00:00:00.000Z' },
+    { amount: 5, currency: 'USD', expiresAt: null }
+  ]);
+});
+
+test('balance without tranches omits the field entirely', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'deepseek',
+    status: 'ok',
+    windows: [],
+    balance: { amount: 10, currency: 'CNY' }
+  });
+  assert.equal('tranches' in provider.balance, false);
+});
+
+test('public limits drop per-grant balance tranches but keep the amount', () => {
+  const summary = publicLimits({
+    providers: [{
+      provider: 'claude',
+      accountKey: 'sha256:private',
+      status: 'ok',
+      source: 'web',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 113.44, currency: 'USD', showMeter: false }],
+      balance: {
+        amount: 113.44,
+        currency: 'USD',
+        quotaGroup: 'default',
+        tranches: [{ amount: 13.43, currency: 'USD', expiresAt: '2026-08-09T00:00:00Z' }]
+      }
+    }]
+  });
+  const balance = summary.providers[0].balance;
+  assert.equal(balance.amount, 113.44);
+  assert.equal(balance.currency, 'USD');
+  assert.equal(Object.hasOwn(balance, 'tranches'), false, 'per-grant expiry detail must stay private');
+  assert.equal(Object.hasOwn(balance, 'quotaGroup'), false);
+});
+
+function claudeDeviceRecord({ deviceId, source, agoMs, balance, nowMs }) {
+  const at = new Date(nowMs - agoMs).toISOString();
+  return {
+    deviceId,
+    receivedAt: at,
+    limits: {
+      updatedAt: at,
+      providers: [{
+        provider: 'claude',
+        accountKey: 'sha256:same-account',
+        accountEmail: 'me@example.com',
+        status: 'ok',
+        source,
+        updatedAt: at,
+        windows: [
+          { kind: 'session', usedPercent: 8 },
+          { kind: 'weekly', usedPercent: 49 },
+          { kind: 'billing', label: 'Usage credits', used: 2.35, limit: 20, currency: 'USD' },
+          ...(balance
+            ? [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 113.44, currency: 'USD', showMeter: false }]
+            : [])
+        ],
+        ...(balance ? { balance: { amount: 113.44, currency: 'USD' } } : {})
+      }]
+    }
+  };
+}
+
+// Only a device with a claude.ai Web session can read the prepaid pool. The same
+// account collected over OAuth on another machine reports no balance, and that
+// record is usually the freshest — so without carry-forward the row blinks in
+// and out as devices take turns posting.
+test('a fresher device without a Claude balance does not erase another device\'s', () => {
+  const nowMs = Date.parse('2026-07-27T12:00:00Z');
+  const aggregate = aggregateLimits([
+    claudeDeviceRecord({ deviceId: 'macbook', source: 'web', agoMs: 5000, balance: true, nowMs }),
+    claudeDeviceRecord({ deviceId: 'winbox', source: 'oauth', agoMs: 0, balance: false, nowMs })
+  ], 600_000, nowMs);
+
+  const claude = aggregate.providers.filter((provider) => provider.provider === 'claude');
+  assert.equal(claude.length, 1);
+  assert.equal(claude[0].source, 'oauth', 'the freshest record still wins for usage');
+  assert.equal(claude[0].balance.amount, 113.44, 'but its missing balance is carried over');
+  assert.equal(claude[0].windows.some((window) => window.metric === 'credits'), true);
+});
+
+test('a stale balance observer does not pin an outdated Claude balance', () => {
+  const nowMs = Date.parse('2026-07-27T12:00:00Z');
+  const aggregate = aggregateLimits([
+    claudeDeviceRecord({ deviceId: 'macbook', source: 'web', agoMs: 900_000, balance: true, nowMs }),
+    claudeDeviceRecord({ deviceId: 'winbox', source: 'oauth', agoMs: 0, balance: false, nowMs })
+  ], 600_000, nowMs);
+
+  const claude = aggregate.providers.filter((provider) => provider.provider === 'claude');
+  assert.equal(claude.length, 1);
+  assert.equal(claude[0].balance, null);
+  assert.equal(claude[0].windows.some((window) => window.metric === 'credits'), false);
+});
+
+test('window metric accepts only the documented machine-readable roles', () => {
+  assert.equal(normalizeLimitWindow({ kind: 'billing', metric: 'credits' }).metric, 'credits');
+  assert.equal(normalizeLimitWindow({ kind: 'billing', metric: 'spend' }).metric, 'spend');
+  // Anything else is dropped rather than carried onto the wire as a free-form tag.
+  assert.equal('metric' in normalizeLimitWindow({ kind: 'billing', metric: 'whatever' }), false);
+});
