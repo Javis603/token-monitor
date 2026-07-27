@@ -592,7 +592,7 @@ test('reset boundaries enqueue the exact provider/account scope only once', asyn
     nextLimitsResetBoundary(summary, _now, attempted) {
       if (summary.providers.length === 0 || attempted.has(boundaryKey)) return null;
       return {
-        delayMs: 1,
+        delayMs: 100,
         keys: [boundaryKey],
         scopes: [{ provider: 'mimo', accountKey: 'A' }]
       };
