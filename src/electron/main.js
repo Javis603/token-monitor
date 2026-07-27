@@ -4348,12 +4348,12 @@ app.whenReady().then(() => {
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
     if (runtimeChange.modeStructural) {
       for (const scope of runtimeChange.limitScopes) {
-        rememberPendingLimitInvalidation(scope, 'settings-change');
+        rememberPendingLimitInvalidation(scope, 'settings-change', true);
       }
       startMode();
     } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
       for (const scope of runtimeChange.limitScopes) {
-        rememberPendingLimitInvalidation(scope, 'settings-change');
+        rememberPendingLimitInvalidation(scope, 'settings-change', true);
       }
       restartDeviceRuntimeForMode();
     } else {
