@@ -4361,7 +4361,7 @@ app.whenReady().then(() => {
         deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
       }
       for (const scope of runtimeChange.limitScopes) {
-        void queueLimitInvalidation(scope, 'settings-change').catch((error) => {
+        void queueLimitInvalidation(scope, 'settings-change', { clear: true }).catch((error) => {
           console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
         });
       }

@@ -11202,6 +11202,10 @@ function setupCursorAccountUI() {
         input.value = '';
         renderDeepseekStatus();
         await refreshStats({ force: true });
+        if (!deepseekAccountLinked()) {
+          await new Promise((r) => setTimeout(r, 2500));
+          await refreshStats({ force: true });
+        }
         if (deepseekAccountLinked()) setDeepseekAccountExpanded(false);
         else setDeepseekAccountExpanded(true);
         renderDeepseekStatus();
