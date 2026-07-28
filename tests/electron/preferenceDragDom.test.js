@@ -45,14 +45,16 @@ test('preference drag only selects sortable rows, not nested controls', () => {
   assert.doesNotMatch(body, /querySelectorAll\(`\\\[data-\$\{attr\}\\\]`\)/);
 });
 
-test('preference drag does not animate row transforms during pointer movement', () => {
+// The handle-based lists still reorder by moving DOM nodes as the pointer
+// travels, with no transform animation. The AI Tool Limits list moved to the
+// transform model and carries its own guards in limitProviderDrag.test.js.
+test('handle-based preference drag does not animate row transforms during pointer movement', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   assert.doesNotMatch(app, /animatePreferenceOrderChange/);
   assert.doesNotMatch(app, /translateY\(/);
   assert.doesNotMatch(cssRule(css, '.tool-preference-row'), /transform/);
   assert.doesNotMatch(cssRule(css, '.view-preference-row'), /transform/);
-  assert.doesNotMatch(cssRule(css, '.settings-panel .limit-provider-row'), /transform/);
   assert.doesNotMatch(cssRule(css, '.preference-order-handle'), /transition:\s*transform/);
 });
 
@@ -297,9 +299,14 @@ test('checkbox labels keep semantics without making the whole row a hit target',
   assert.match(css, /\.settings-panel \.client-checkboxes label\.client-checkbox input\[type="checkbox"\]\s*\{[^}]*cursor:\s*pointer/);
 });
 
-test('AI Tool Limits provider rows remain whole-row clickable', () => {
+// The whole row is the drag surface now, so the label must not also be a hit
+// target: every press that starts a drag would otherwise toggle the provider on
+// release. Only the checkbox toggles, which is what every other settings row
+// already does.
+test('AI Tool Limits provider rows toggle only from the checkbox', () => {
   const css = readRendererFile('styles.css');
-  assert.match(css, /\.settings-panel \.limit-provider-list label\.client-checkbox\s*\{[^}]*pointer-events:\s*auto/);
+  assert.doesNotMatch(css, /\.settings-panel \.limit-provider-list label\.client-checkbox\s*\{[^}]*pointer-events:\s*auto/);
+  assert.match(css, /\.settings-panel \.checkbox-label,\s*\.settings-panel label\.client-checkbox\s*\{[^}]*pointer-events:\s*none/);
 });
 
 test('theme code feedback clears when the displayed code changes', () => {

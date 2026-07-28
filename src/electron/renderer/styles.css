@@ -440,11 +440,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-panel label.client-checkbox > input[type="checkbox"] {
   pointer-events: auto;
 }
-/* The AI Tool Limits provider matrix is intentionally row-clickable: its
-   compact provider rows are easier to scan and select as a whole. */
-.settings-panel .limit-provider-list label.client-checkbox {
-  pointer-events: auto;
-}
 .settings-panel .checkbox-label {
   display: flex;
   align-items: center;
@@ -1752,6 +1747,7 @@ span.settings-note.settings-item-desc {
   gap: 6px;
 }
 .settings-panel .limit-provider-row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -1759,7 +1755,17 @@ span.settings-note.settings-item-desc {
   margin: 0 -2px;
   padding: 1px 2px;
   border-radius: 6px;
-  transition: background 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  /* No grab cursor on hover: the row is not a dedicated drag object the way a
+     handle or a canvas is — it also holds a checkbox and a disclosure, and
+     19 rows worth of cursor changes while merely reading is noise. The section
+     note carries the affordance instead. Only the active drag gets a cursor. */
+  touch-action: pan-y;
+  transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
+  transition:
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
 }
 .settings-panel .limit-provider-row label.client-checkbox {
   min-width: 0;
@@ -1784,6 +1790,24 @@ span.settings-note.settings-item-desc {
   grid-column: 1 / -1;
   margin-top: 4px;
 }
+/* The dragged row must track the pointer with zero latency, so it opts out of
+   the transform transition its neighbours use to slide out of the way. */
+.settings-panel .limit-provider-row.dragging {
+  z-index: 2;
+  background: rgba(var(--panel-rgb), 0.96);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.62);
+  cursor: grabbing;
+  scale: 1.02;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+  will-change: transform;
+}
+.limit-provider-list.drag-active .limit-provider-row:not(.dragging) { opacity: 0.78; }
+/* Collapsing must land instantly so the drag snapshot measures settled
+   geometry rather than a mid-animation height. */
+.limit-provider-list.is-reordering .accordion-animated-container { transition: none; }
 .settings-panel .limit-provider-settings-list {
   margin-left: 22px;
 }
@@ -1901,7 +1925,6 @@ span.settings-note.settings-item-desc {
 }
 .tool-preference-row.is-dragging,
 .view-preference-row.is-dragging,
-.settings-panel .limit-provider-row.is-dragging,
 .home-module-preference-row.is-dragging,
 .home-limit-provider-row.is-dragging {
   background: rgba(var(--accent-rgb), 0.08);
@@ -5561,4 +5584,5 @@ html.is-windows .limit-live-badge {
 }
 @media (prefers-reduced-motion: reduce) {
   .tray-composer-item { transition: none; }
+  .settings-panel .limit-provider-row { transition: none; }
 }
