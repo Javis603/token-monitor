@@ -25,6 +25,7 @@ test('recordConsumption: persists a compact balance anchor and daily spend', () 
   recordConsumption({ accountKey: 'sha256:abc', currency: 'CNY', paid: 10, now: t0, storePath: '/x' }, store);
   const r = recordConsumption({ accountKey: 'sha256:abc', currency: 'CNY', paid: 7, now: t1, storePath: '/x' }, store);
   assert.equal(r.todaySpend, 3);
+  assert.equal(r.weekSpend, 3);
   assert.deepEqual(store.peek()['sha256:abc'], {
     version: 2,
     currency: 'CNY',
@@ -66,6 +67,7 @@ test('recordConsumption: keeps an old balance anchor while pruning daily spend o
   assert.equal(store.peek().k.allTimeSpend, 3);
   assert.deepEqual(store.peek().k.dailySpend, { '2026-06-07': 1 });
   assert.equal(result.todaySpend, 1);
+  assert.equal(result.weekSpend, 1);
   assert.equal(result.monthSpend, 1);
   assert.equal(result.allTimeSpend, 3);
   assert.equal(result.trackingSince, new Date(old).toISOString());
@@ -221,4 +223,31 @@ test('recordConsumption: all-time spend survives daily bucket pruning', () => {
   assert.deepEqual(store.peek().k.dailySpend, { '2026-06-07': 1 });
   assert.equal(store.peek().k.allTimeSpend, 13);
   assert.equal(result.allTimeSpend, 13);
+});
+
+test('recordConsumption: week spend covers the latest seven local dates across a month boundary', () => {
+  const now = new Date(2026, 6, 2, 9, 0, 0).getTime();
+  const store = memoryStore({
+    k: {
+      version: 2,
+      currency: 'CNY',
+      trackingSince: new Date(2026, 5, 25, 9, 0, 0).getTime(),
+      lastPaid: 20,
+      allTimeSpend: 15,
+      dailySpend: {
+        '2026-06-25': 1,
+        '2026-06-26': 2,
+        '2026-06-30': 3,
+        '2026-07-01': 4,
+        '2026-07-02': 5
+      }
+    }
+  });
+
+  const result = recordConsumption({ accountKey: 'k', currency: 'CNY', paid: 20, now, storePath: '/x' }, store);
+
+  assert.equal(result.todaySpend, 5);
+  assert.equal(result.weekSpend, 14);
+  assert.equal(result.monthSpend, 9);
+  assert.equal(result.allTimeSpend, 15);
 });

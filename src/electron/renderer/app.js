@@ -2160,7 +2160,7 @@ function codexResetCreditsNode(resetCredits) {
   return item;
 }
 
-function openrouterSpendEntries(balance) {
+function providerSpendEntries(balance) {
   return [
     ['Today', optionalFiniteNumber(balance?.todaySpend)],
     ['Week', optionalFiniteNumber(balance?.weekSpend)],
@@ -2249,8 +2249,8 @@ function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
   return infoWrap;
 }
 
-function openrouterSpendNode(balance) {
-  const entries = openrouterSpendEntries(balance);
+function providerSpendNode(balance) {
+  const entries = providerSpendEntries(balance);
   if (entries.length === 0) return null;
   const currency = balance?.currency || 'USD';
   const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
@@ -2925,7 +2925,7 @@ function renderProviderWindows(provider, color) {
       if (!hasMeter) node.classList.add('limit-window-no-reset');
       windows.append(node);
     }
-    const spendNode = openrouterSpendNode(balance);
+    const spendNode = providerSpendNode(balance);
     if (spendNode) windows.append(spendNode);
   } else if (provider.provider === 'thirdparty') {
     windows.classList.add('limit-windows-thirdparty');
@@ -2979,16 +2979,8 @@ function renderProviderWindows(provider, color) {
       balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
       windows.append(balanceNode);
 
-      const parts = [];
-      if (Number.isFinite(Number(balance.todaySpend))) parts.push(`Today ${formatMoney(balance.todaySpend, currency)}`);
-      if (Number.isFinite(Number(balance.monthSpend))) {
-        parts.push(`Month ${formatMoney(balance.monthSpend, currency)}`);
-      }
-      if (parts.length) {
-        const spendNode = limitWindowNode('Spend', { showMeter: false }, color, 0.6, parts.join(' · '));
-        spendNode.classList.add('limit-window-wide', 'limit-window-note');
-        windows.append(spendNode);
-      }
+      const spendNode = providerSpendNode(balance);
+      if (spendNode) windows.append(spendNode);
     }
   } else if (provider.provider === 'mimo') {
     windows.classList.add('limit-windows-mimo');

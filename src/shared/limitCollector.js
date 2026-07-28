@@ -3351,6 +3351,7 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
         amount: row.amount,
         currency: row.currency,
         todaySpend: spend.todaySpend,
+        weekSpend: spend.weekSpend,
         monthSpend: spend.monthSpend,
         allTimeSpend: spend.allTimeSpend,
         trackingSince: spend.trackingSince,

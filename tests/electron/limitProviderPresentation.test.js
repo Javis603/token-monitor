@@ -746,7 +746,7 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   // Sliced to the next function, not to `renderLimitProviderHead`: the wider slice
   // swept in the shared tooltip builder, so these assertions passed on code that
   // isn't Codex's.
-  const codexResetCreditsNode = functionBody(app, 'codexResetCreditsNode', 'openrouterSpendEntries');
+  const codexResetCreditsNode = functionBody(app, 'codexResetCreditsNode', 'providerSpendEntries');
   const limitDetailTooltipShouldHoldRender = functionBody(app, 'limitDetailTooltipShouldHoldRender', 'flushPendingLimitDetailTooltipRender');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
@@ -872,7 +872,7 @@ test('Claude prepaid grants keep three cells when a grant has no usable expiry',
 test('The detail tooltip widens its grid and pads short rows for three-column entries', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const infoNode = functionBody(app, 'limitDetailInfoNode', 'openrouterSpendNode');
+  const infoNode = functionBody(app, 'limitDetailInfoNode', 'providerSpendNode');
   const grantRows = functionBody(app, 'claudePrepaidGrantRows', 'claudeBalanceNode');
   const balanceNode = functionBody(app, 'claudeBalanceNode', 'optionalFiniteNumber');
 
@@ -938,7 +938,9 @@ test('DeepSeek main Limits row preserves the intentional month-spend balance met
 
   assert.match(renderProviderWindows, /\{ remainingPercent: creditsMeterPercent\(provider, null\) \},/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
-  assert.match(renderProviderWindows, /const spendNode = limitWindowNode\('Spend', \{ showMeter: false \}, color, 0\.6,/);
+  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance\);/);
+  assert.match(app, /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
+  assert.match(app, /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
   assert.doesNotMatch(renderProviderWindows, /monthSinceTracking \? 'Month \(since tracking\)' : 'Month'/);
   // The month-spend denominator now lives in the shared balance module.

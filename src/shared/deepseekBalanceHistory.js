@@ -144,13 +144,20 @@ function compactLegacyEntries(store, now) {
 
 function computeCompactConsumption(entry, now) {
   const todayKey = localDayKey(now);
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - 6);
+  const weekStartKey = localDayKey(weekStart.getTime());
   const monthKey = localMonthKey(now);
+  let weekSpend = 0;
   let monthSpend = 0;
   for (const [key, amount] of Object.entries(entry.dailySpend || {})) {
+    if (key >= weekStartKey && key <= todayKey) weekSpend += Number(amount) || 0;
     if (key.startsWith(monthKey)) monthSpend += Number(amount) || 0;
   }
   return {
     todaySpend: round2(entry.dailySpend?.[todayKey] || 0),
+    weekSpend: round2(weekSpend),
     monthSpend: round2(monthSpend),
     allTimeSpend: round2(entry.allTimeSpend || 0),
     trackingSince: new Date(Number(entry.trackingSince)).toISOString(),

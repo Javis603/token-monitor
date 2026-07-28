@@ -88,7 +88,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
     app,
     /if \(id === 'openrouter' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{\s*nodes\.push\(renderOpenRouterAccountGroup\(label, visibleProviders, color\)\);\s*continue;\s*\}/
   );
-  assert.match(app, /function openrouterSpendEntries\(balance\)/);
+  assert.match(app, /function providerSpendEntries\(balance\)/);
   assert.match(app, /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(app, /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.match(app, /summaryNode\.className = 'limit-spend-summary'/);
@@ -98,6 +98,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(app, /info\.tabIndex = 0/);
   assert.match(app, /const release = \(\) => \{\s*requestAnimationFrame\(\(\) => \{\s*if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
   assert.match(app, /entries\.map\(\(\[entryLabel, value\]\) => \[entryLabel, formatMoney\(value, currency\)\]\)/);
+  assert.match(app, /const spendNode = providerSpendNode\(balance\)/);
   assert.match(app, /function openrouterCreditsWindow\(provider\)/);
   assert.match(app, /windows\.find\(\(window\) => window\?\.metric === 'credits'\)/);
   assert.match(app, /windows\.find\(\(window\) => !window\?\.metric && window\?\.label === 'Credits'\)/);
