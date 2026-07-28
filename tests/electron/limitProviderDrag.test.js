@@ -105,6 +105,49 @@ test('a stats repaint mid-drag is deferred instead of replacing the rows', () =>
   assert.match(app, /if \(limitProviderDrag\) \{\s*limitProviderDrag\.renderPending = true;\s*return;\s*\}/);
 });
 
+// A repaint held back during the drag is flushed on drop, and it sorts from
+// state.settings — which the deferred save has not written yet.
+test('the drop mirrors the new order locally before anything can repaint', () => {
+  const app = readRendererFile('app.js');
+  const start = app.indexOf('function onLimitProviderPointerUp(');
+  const end = app.indexOf('function onLimitProviderDragAbort(', start);
+  assert.ok(start !== -1 && end > start);
+  const body = app.slice(start, end);
+  const mirror = body.indexOf('state.settings = { ...state.settings, limitProviderOrder: value }');
+  const finish = body.indexOf('finishLimitProviderDrag(true);', mirror);
+  assert.ok(mirror !== -1, 'the new order should be mirrored into state.settings');
+  assert.ok(finish > mirror, 'the mirror must land before the drag is finished and repaints flush');
+  // onPreferenceOrderCommit compares against the value just mirrored, so it
+  // would treat the write as a no-op.
+  assert.match(body, /saveSettings\(\{ limitProviderOrder: value \}\)/);
+  assert.doesNotMatch(body, /onPreferenceOrderCommit\(/);
+});
+
+// Below the 4px threshold a press is a click; above it the drag swallows the
+// click. Arming from the row's own controls made that coin-flip decide whether
+// the checkbox and the disclosure worked at all.
+test('a press on the row own controls never arms a drag', () => {
+  const app = readRendererFile('app.js');
+  assert.match(app, /const LIMIT_PROVIDER_DRAG_EXCLUDED = 'button, input, select, textarea, a, \.accordion-animated-container';/);
+  const start = app.indexOf('function startLimitProviderRowDrag(');
+  const body = app.slice(start, app.indexOf('function setLimitProviderDragListeners(', start));
+  const guard = body.indexOf('LIMIT_PROVIDER_DRAG_EXCLUDED');
+  const arm = body.indexOf('limitProviderDrag = {');
+  assert.ok(guard !== -1 && arm > guard, 'the guard must run before the drag state is built');
+});
+
+test('the drag captures the pointer and releases it before the reorder', () => {
+  const app = readRendererFile('app.js');
+  assert.match(app, /rowEl\.setPointerCapture\?\.\(event\.pointerId\)/);
+  assert.match(app, /rowEl\.addEventListener\('lostpointercapture', onLimitProviderDragAbort\)/);
+  const start = app.indexOf('function finishLimitProviderDrag(');
+  const body = app.slice(start, app.indexOf('function suppressNextLimitProviderClick(', start));
+  const release = body.indexOf('releasePointerCapture');
+  const reorder = body.indexOf("applyPreferenceOrder('provider'");
+  assert.ok(release !== -1 && reorder > release, 'capture is released before the node moves');
+  assert.match(body, /removeEventListener\('lostpointercapture', onLimitProviderDragAbort\)/);
+});
+
 test('the drag suppresses the click that would otherwise toggle the checkbox', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function suppressNextLimitProviderClick\(\)/);

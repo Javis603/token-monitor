@@ -6333,6 +6333,12 @@ function limitProviderRowElements() {
   return Array.from(els.limitProviderCheckboxes?.querySelectorAll('.limit-provider-row[data-provider]') || []);
 }
 
+function limitProviderContentTop(el) {
+  const panel = els.settingsPanel;
+  const panelTop = panel ? panel.getBoundingClientRect().top - panel.scrollTop : 0;
+  return el.getBoundingClientRect().top - panelTop;
+}
+
 function limitProviderDragRows() {
   const panel = els.settingsPanel;
   const panelTop = panel ? panel.getBoundingClientRect().top - panel.scrollTop : 0;
@@ -6342,24 +6348,42 @@ function limitProviderDragRows() {
   });
 }
 
+// The row's own controls own their clicks, and so does the options panel that
+// hangs under it. Arming a drag from them lets a few pixels of hand movement
+// swallow the click that was actually intended — on a trackpad that is most
+// clicks, which reads as the control being broken half the time.
+const LIMIT_PROVIDER_DRAG_EXCLUDED = 'button, input, select, textarea, a, .accordion-animated-container';
+
 function startLimitProviderRowDrag(event, id) {
   if (event.button !== 0) return;
+  if (event.target?.closest?.(LIMIT_PROVIDER_DRAG_EXCLUDED)) return;
   if (limitProviderDrag) finishLimitProviderDrag(false);
   if (limitProviderRowElements().length <= 1) return;
+  const rowEl = event.currentTarget;
+  const pressY = limitProviderContentY(event.clientY);
   limitProviderDrag = {
     id,
     pointerId: event.pointerId,
-    startY: limitProviderContentY(event.clientY),
+    // Where in the row the pointer landed. The origin is rebuilt from this once
+    // the rows are measured, so a collapse between press and measurement cannot
+    // leave the row hanging off the cursor.
+    grabOffset: pressY - limitProviderContentTop(rowEl),
+    pressY,
     lastClientY: event.clientY,
     started: false,
     changed: false,
     expandedBefore: state.limitProviderSettingsExpanded,
+    captureEl: rowEl,
     rows: [],
     snapshot: null,
     order: null,
     scrollFrame: 0,
     renderPending: false
   };
+  // Without capture a release outside the window never reaches us, and a stuck
+  // drag keeps the repaint gate closed — the list would stop updating for good.
+  try { rowEl.setPointerCapture?.(event.pointerId); } catch (_) {}
+  rowEl.addEventListener('lostpointercapture', onLimitProviderDragAbort);
   setLimitProviderDragListeners(true);
 }
 
@@ -6384,7 +6408,8 @@ function beginLimitProviderDrag() {
   drag.rows = limitProviderDragRows();
   drag.snapshot = verticalDragSortApi.createVerticalDragSnapshot(
     drag.rows.map(({ id, top, height }) => ({ id, top, height })),
-    drag.id
+    drag.id,
+    drag.grabOffset
   );
   if (drag.snapshot.sourceIndex < 0) {
     finishLimitProviderDrag(false);
@@ -6399,7 +6424,7 @@ function beginLimitProviderDrag() {
 function updateLimitProviderDragPositions() {
   const drag = limitProviderDrag;
   if (!drag?.started) return;
-  const offsetY = limitProviderContentY(drag.lastClientY) - drag.startY;
+  const offsetY = limitProviderContentY(drag.lastClientY) - drag.snapshot.originY;
   const resolved = verticalDragSortApi.resolveVerticalDrag(drag.snapshot, offsetY);
   drag.order = resolved.order;
   drag.changed = resolved.targetIndex !== drag.snapshot.sourceIndex;
@@ -6434,7 +6459,7 @@ function onLimitProviderPointerMove(event) {
   if (!drag || drag.pointerId !== event.pointerId) return;
   drag.lastClientY = event.clientY;
   if (!drag.started) {
-    if (Math.abs(limitProviderContentY(event.clientY) - drag.startY) < LIMIT_PROVIDER_DRAG_THRESHOLD) return;
+    if (Math.abs(limitProviderContentY(event.clientY) - drag.pressY) < LIMIT_PROVIDER_DRAG_THRESHOLD) return;
     if (!beginLimitProviderDrag()) return;
   }
   event.preventDefault();
@@ -6444,16 +6469,27 @@ function onLimitProviderPointerMove(event) {
 function onLimitProviderPointerUp(event) {
   const drag = limitProviderDrag;
   if (!drag || drag.pointerId !== event.pointerId) return;
-  const { started, changed, order, id } = drag;
+  const { started, changed, order } = drag;
+  if (!started || !changed || !order?.length) {
+    finishLimitProviderDrag(true);
+    return;
+  }
+  // Mirror the new order locally before anything can repaint. A stats update
+  // held back during the drag is flushed on drop, and every repaint sorts from
+  // `state.settings` — which the deferred save has not written yet, so without
+  // this the list rebuilds into the old order and flips again a frame later.
+  const value = order.join(',');
+  state.settings = { ...state.settings, limitProviderOrder: value };
   finishLimitProviderDrag(true);
-  if (!started || !changed || !order?.length) return;
-  // The drop itself is already in the DOM. Committing re-renders the whole
+  // The drop itself is already in the DOM. Persisting re-renders the whole
   // settings form, which on a populated install is a long task — run it only
   // once the browser has painted the landed row, or that paint gets swallowed
   // and the drop reads as a freeze. rAF fires before paint, so the timeout
-  // inside it is what lands after.
+  // inside it is what lands after. Saved directly rather than through
+  // `onPreferenceOrderCommit`, whose no-op guard compares against the value we
+  // just mirrored and would drop the write.
   requestAnimationFrame(() => {
-    setTimeout(() => void onPreferenceOrderCommit('provider', order, id), 0);
+    setTimeout(() => void saveSettings({ limitProviderOrder: value }), 0);
   });
 }
 
@@ -6477,6 +6513,13 @@ function finishLimitProviderDrag(commit) {
   if (!drag) return;
   if (drag.scrollFrame) cancelAnimationFrame(drag.scrollFrame);
   setLimitProviderDragListeners(false);
+  // Released before the reorder moves the node: relocating a captured element
+  // fires `lostpointercapture`, which would re-enter this as an abort.
+  const captureEl = drag.captureEl;
+  captureEl?.removeEventListener('lostpointercapture', onLimitProviderDragAbort);
+  try {
+    if (captureEl?.hasPointerCapture?.(drag.pointerId)) captureEl.releasePointerCapture(drag.pointerId);
+  } catch (_) {}
   const list = els.limitProviderCheckboxes;
   if (drag.started) {
     // Moving the nodes discards any transition running on them, so the lifted

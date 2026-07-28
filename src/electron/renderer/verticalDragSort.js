@@ -37,14 +37,20 @@
     return row.height;
   }
 
-  function createVerticalDragSnapshot(rows, draggedId) {
+  // `grabOffset` is how far into the row the pointer landed. Keeping it here
+  // rather than anchoring to the press position is what survives the layout
+  // moving between the press and the measurement: collapsing an expanded row
+  // above the dragged one lifts it by that row's height, and an origin pinned
+  // to the old press position would leave the row that far off the cursor.
+  function createVerticalDragSnapshot(rows, draggedId, grabOffset) {
     const normalized = normalizeRows(rows);
     const dragged = normalizeId(draggedId);
     const sourceIndex = normalized.findIndex((row) => row.id === dragged);
     return {
       rows: normalized,
       sourceIndex,
-      slotHeight: sourceIndex < 0 ? 0 : slotHeightFor(normalized, sourceIndex)
+      slotHeight: sourceIndex < 0 ? 0 : slotHeightFor(normalized, sourceIndex),
+      originY: sourceIndex < 0 ? 0 : normalized[sourceIndex].top + numberOr(grabOffset, 0)
     };
   }
 

@@ -36,6 +36,31 @@ test('createVerticalDragSnapshot reports an unknown id as no source', () => {
   assert.equal(snapshot.slotHeight, 0);
 });
 
+// Collapsing an expanded row above the dragged one lifts every row below it
+// between the press and the measurement. Anchoring to the press position would
+// leave the row that far off the cursor for the whole drag.
+test('createVerticalDragSnapshot anchors the origin to the measured row, not the press', () => {
+  const grabOffset = 12;
+  const pointerY = 60 + grabOffset;
+
+  const atPress = createVerticalDragSnapshot(rows, 'cursor', grabOffset);
+  assert.equal(atPress.originY, pointerY);
+  assert.equal(pointerY - atPress.originY, 0, 'nothing moved, so no compensation');
+
+  // An expanded row above collapses by 70px before the rows are measured.
+  const lifted = rows.map((row, index) => (index === 0 ? row : { ...row, top: row.top - 70 }));
+  const afterCollapse = createVerticalDragSnapshot(lifted, 'cursor', grabOffset);
+
+  assert.equal(afterCollapse.originY, pointerY - 70);
+  // The pointer has not moved, so the transform must absorb the whole lift and
+  // put the row back under the cursor.
+  assert.equal(pointerY - afterCollapse.originY, 70);
+});
+
+test('createVerticalDragSnapshot reports no origin for an unknown id', () => {
+  assert.equal(createVerticalDragSnapshot(rows, 'nope', 12).originY, 0);
+});
+
 test('resolveVerticalDrag leaves everything alone at zero offset', () => {
   const snapshot = createVerticalDragSnapshot(rows, 'cursor');
   const resolved = resolveVerticalDrag(snapshot, 0);
