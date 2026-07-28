@@ -1652,6 +1652,35 @@ test('an unassigned seat is not a plan', async () => {
   assert.equal(provider.accountLabel, 'Team');
 });
 
+async function seatTierLabel(seatTier) {
+  const provider = await fetchClaudeLimits(
+    { claudeWebCookie: 'sessionKey=sk-ant-sid01-seat' },
+    {
+      providerRuntimeState: new Map(),
+      claudeWebFetch: fakeClaudeWebIdentityFetch(
+        { uuid: 'org-team', name: 'Team Org', capabilities: ['chat'], rate_limit_tier: 'default_claude_ai' },
+        {
+          uuid: 'account-seat',
+          email_address: 'owner@example.com',
+          memberships: [{ seat_tier: seatTier, organization: { uuid: 'org-team', name: 'Team Org' } }]
+        }
+      )
+    }
+  );
+  return provider.accountLabel;
+}
+
+test('a seat tier reports its plan, not its seat level', async () => {
+  // OAuth reports `enterprise` and renders "Enterprise"; the Web seat tier is
+  // `<plan>_<seat level>`, and the seat level does not belong in a plan label.
+  assert.equal(await seatTierLabel('enterprise_standard'), 'Enterprise');
+  assert.equal(await seatTierLabel('max_premium'), 'Max');
+});
+
+test('an unrecognized seat tier is passed through rather than guessed at', async () => {
+  assert.equal(await seatTierLabel('bespoke_thing'), 'Bespoke Thing');
+});
+
 test('a billing type is never mistaken for a plan', async () => {
   // `apple_subscription` is how the subscription is paid for, not what it is.
   assert.equal(await personalPlanLabel({

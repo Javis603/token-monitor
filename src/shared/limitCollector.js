@@ -291,21 +291,22 @@ function displayPlanText(raw, maxWords = 3) {
   return visible.map(displayPlanWord).join(' ');
 }
 
+const PLAN_LABEL_ALIASES = {
+  free: 'Free',
+  plus: 'Plus',
+  pro: 'Pro',
+  max: 'Max',
+  team: 'Team',
+  teams: 'Team',
+  enterprise: 'Enterprise',
+  ultra: 'Ultra'
+};
+
 function planLabelFromParts(...parts) {
   const text = parts.map((part) => String(part || '')).find(Boolean) || '';
   const raw = cleanPlanText(text);
   if (!raw || raw.includes('@')) return '';
-  const aliases = {
-    free: 'Free',
-    plus: 'Plus',
-    pro: 'Pro',
-    max: 'Max',
-    team: 'Team',
-    teams: 'Team',
-    enterprise: 'Enterprise',
-    ultra: 'Ultra'
-  };
-  if (aliases[raw]) return aliases[raw];
+  if (PLAN_LABEL_ALIASES[raw]) return PLAN_LABEL_ALIASES[raw];
   return displayPlanText(raw);
 }
 
@@ -916,12 +917,19 @@ function claudeCapabilityPlan(capabilities) {
   return '';
 }
 
-// `unassigned` is the placeholder claude.ai substitutes for a member with no
-// seat (`seat_tier ?? "unassigned"`), not a plan anyone is on. Rendering it
-// would put the word "Unassigned" where the plan belongs.
+// A seat tier is `<plan>_<seat level>` (`enterprise_standard`). Only the plan
+// half belongs in a plan label: keeping the seat level renders "Enterprise
+// Standard" where the same account over OAuth renders "Enterprise". A value
+// whose first word is not a known plan passes through untouched rather than
+// being guessed at.
+//
+// `unassigned` is dropped outright. It is the placeholder claude.ai substitutes
+// for a member holding no seat (`seat_tier ?? "unassigned"`), never a plan.
 function claudeSeatTier(membership) {
-  const seat = String(membership?.seat_tier || '').trim();
-  return seat.toLowerCase() === 'unassigned' ? '' : seat;
+  const seat = cleanPlanText(membership?.seat_tier);
+  if (!seat || seat === 'unassigned') return '';
+  const [plan] = seat.split(' ');
+  return PLAN_LABEL_ALIASES[plan] ? plan : membership.seat_tier;
 }
 
 function selectClaudeWebOrganization(organizations) {
