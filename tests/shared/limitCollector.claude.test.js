@@ -1515,6 +1515,76 @@ test('an exhausted prepaid pool still reports a zero balance', async () => {
   assert.equal(credits[0].showMeter, false);
 });
 
+function fakeClaudeWebIdentityFetch(organization, account) {
+  return async (url) => {
+    const headers = { get: () => '', getSetCookie: () => [] };
+    if (url.endsWith('/api/organizations')) {
+      return { ok: true, status: 200, headers, json: async () => [organization] };
+    }
+    if (url.endsWith('/api/account')) {
+      return { ok: true, status: 200, headers, json: async () => account };
+    }
+    if (url.includes('/prepaid/credits')) {
+      return { ok: true, status: 200, headers, json: async () => ({ amount: 0, currency: 'USD' }) };
+    }
+    return { ok: true, status: 200, headers, json: async () => CREDITS_OFF };
+  };
+}
+
+// What claude.ai actually returns for a personal subscription: the plan is
+// nowhere on the membership, only in the organization's capability list.
+const PERSONAL_ACCOUNT = {
+  uuid: 'account-personal',
+  email_address: 'owner@example.com',
+  memberships: [{
+    role: 'admin',
+    seat_tier: null,
+    organization: { uuid: 'org-personal', name: 'Personal' }
+  }]
+};
+
+async function personalPlanLabel(organization) {
+  const provider = await fetchClaudeLimits(
+    { claudeWebCookie: 'sessionKey=sk-ant-sid01-plan' },
+    {
+      providerRuntimeState: new Map(),
+      claudeWebFetch: fakeClaudeWebIdentityFetch(organization, PERSONAL_ACCOUNT)
+    }
+  );
+  return provider.accountLabel;
+}
+
+test('a personal Pro account takes its plan from the organization capabilities', async () => {
+  assert.equal(await personalPlanLabel({
+    uuid: 'org-personal',
+    name: 'Personal',
+    capabilities: ['chat', 'claude_pro'],
+    rate_limit_tier: 'default_claude_ai',
+    billing_type: 'apple_subscription'
+  }), 'Pro');
+});
+
+test('a personal Max account keeps the rate limit tier refinement', async () => {
+  assert.equal(await personalPlanLabel({
+    uuid: 'org-personal',
+    name: 'Personal',
+    capabilities: ['chat', 'claude_max'],
+    rate_limit_tier: 'default_claude_max_20x',
+    billing_type: 'stripe'
+  }), 'Max 20x');
+});
+
+test('a billing type is never mistaken for a plan', async () => {
+  // `apple_subscription` is how the subscription is paid for, not what it is.
+  assert.equal(await personalPlanLabel({
+    uuid: 'org-personal',
+    name: 'Personal',
+    capabilities: ['chat'],
+    rate_limit_tier: 'default_claude_ai',
+    billing_type: 'apple_subscription'
+  }), '');
+});
+
 test('the prepaid TTL follows the limits refresh interval at twice its length', async () => {
   const providerRuntimeState = new Map();
   let nowMs = Date.parse('2026-07-27T00:00:00Z');

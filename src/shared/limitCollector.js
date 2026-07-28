@@ -902,6 +902,16 @@ function claudeWebOrganizationCapabilities(organization) {
   );
 }
 
+// On a personal claude.ai account the plan is not on the membership at all:
+// `seat_tier` is null and neither `rate_limit_tier` nor `billing_type` exists
+// at that level. The organization's capability list carries it, and it is the
+// same list that already decides which organization to read.
+function claudeCapabilityPlan(capabilities) {
+  if (capabilities.has('claude_max')) return 'max';
+  if (capabilities.has('claude_pro')) return 'pro';
+  return '';
+}
+
 function selectClaudeWebOrganization(organizations) {
   const candidates = organizations.filter((candidate) => claudeWebOrganizationId(candidate));
   const hasChatCapability = (candidate) => (
@@ -963,9 +973,20 @@ function claudeWebAccountIdentity(accountBody, organization) {
   if (!stableIdentity) {
     throw claudeIdentityUnavailable('Claude Web account did not include a stable account identity');
   }
+  // The organization we resolved usage for, not the membership's own copy: the
+  // membership lookup falls back to the first entry when nothing matches, and
+  // that entry can belong to a different organization entirely.
+  const planOrganization = organization && typeof organization === 'object'
+    ? organization
+    : memberOrganization;
+  // `billing_type` is deliberately not consulted. It is a payment method
+  // (`apple_subscription`), never a plan, so reading it would label a Pro
+  // account "Apple subscription".
   const accountLabel = claudePlanLabelFromParts(
-    membership?.seat_tier || membership?.billing_type || account?.subscription_type,
-    membership?.rate_limit_tier || account?.rate_limit_tier
+    membership?.seat_tier
+      || claudeCapabilityPlan(claudeWebOrganizationCapabilities(planOrganization))
+      || account?.subscription_type,
+    membership?.rate_limit_tier || planOrganization?.rate_limit_tier || account?.rate_limit_tier
   );
   return {
     accountKey: hashKey('claude-account', stableIdentity),
