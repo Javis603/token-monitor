@@ -76,9 +76,11 @@ test('no source file hard-codes a browser user-agent', () => {
   // Matching the shared string verbatim would only catch an identical copy,
   // which is the harmless kind. The damage comes from a provider pinning its own
   // Chrome version and silently rotting, so this matches any browser-shaped
-  // literal: there is now exactly one place allowed to hold one.
+  // literal: there is now exactly one place allowed to hold one. The opening
+  // quote is enough to identify a literal, and covering all three kinds matters
+  // because nothing in this repo enforces a quote style.
   const owners = sourceFiles()
-    .filter((file) => /'Mozilla\/5\.0[^']*'|"Mozilla\/5\.0[^"]*"/.test(file.text))
+    .filter((file) => /['"`]Mozilla\/5\.0/.test(file.text))
     .map((file) => file.name)
     .sort();
 
