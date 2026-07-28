@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { hashKey } = require('./hashKey');
 const { normalizeLimitProvider } = require('./limits');
+const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 
 const MIMO_PLATFORM_CONSOLE_URL = 'https://platform.xiaomimimo.com/#/console/balance';
 const MIMO_API_BASE_URL = 'https://platform.xiaomimimo.com/api/v1';
@@ -184,7 +185,7 @@ function requestHeaders(cookieHeader) {
     Cookie: cookieHeader,
     Origin: 'https://platform.xiaomimimo.com',
     Referer: MIMO_PLATFORM_CONSOLE_URL,
-    'User-Agent': 'Mozilla/5.0 AppleWebKit/537.36 Chrome/143 Safari/537.36'
+    'User-Agent': BROWSER_USER_AGENT
   };
 }
 

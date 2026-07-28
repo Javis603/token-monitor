@@ -1,24 +1,21 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
 const { BROWSER_USER_AGENT } = require('../../src/shared/browserUserAgent');
 const { fetchClaudeLimits } = require('../../src/shared/limitCollector');
+const { fetchMimoLimits } = require('../../src/shared/mimoLimits');
 const { fetchOllamaLimits } = require('../../src/shared/ollamaLimits');
 const { fetchQoderLimits } = require('../../src/shared/qoderLimits');
+const cursorProbe = require('../../src/shared/cursorProbe');
 const opencodeWeb = require('../../src/shared/opencodeWeb');
 
 const root = path.join(__dirname, '..', '..');
 
-// Files that deliberately send their own agent instead of the shared one.
-// Changing what a live provider presents to its host is a behaviour change, so
-// they stay listed here rather than being quietly folded in. `cursorProbe` is
-// still on Chrome 120 while the shared agent is on 143 — exactly the drift the
-// scan below exists to surface.
-const OWN_AGENT_FILES = ['src/shared/cursorProbe.js', 'src/shared/mimoLimits.js'];
 const SHARED_AGENT_FILE = 'src/shared/browserUserAgent.js';
 
 function jsFilesUnder(dir) {
@@ -75,17 +72,17 @@ test('the shared browser user-agent reads as a current browser', () => {
   assert.doesNotMatch(BROWSER_USER_AGENT, /token-monitor/i);
 });
 
-test('no source file hard-codes a browser user-agent outside the known set', () => {
+test('no source file hard-codes a browser user-agent', () => {
   // Matching the shared string verbatim would only catch an identical copy,
   // which is the harmless kind. The damage comes from a provider pinning its own
   // Chrome version and silently rotting, so this matches any browser-shaped
-  // literal and requires it to be declared.
+  // literal: there is now exactly one place allowed to hold one.
   const owners = sourceFiles()
     .filter((file) => /'Mozilla\/5\.0[^']*'|"Mozilla\/5\.0[^"]*"/.test(file.text))
     .map((file) => file.name)
     .sort();
 
-  assert.deepEqual(owners, [SHARED_AGENT_FILE, ...OWN_AGENT_FILES].sort());
+  assert.deepEqual(owners, [SHARED_AGENT_FILE]);
 });
 
 test('the shared agent is defined once and never copied verbatim', () => {
@@ -134,6 +131,42 @@ test('Ollama sends the shared agent on the wire', async () => {
     { env: {}, fetch }
   ));
   assert.deepEqual([...new Set(sent)], [BROWSER_USER_AGENT]);
+});
+
+test('MiMo sends the shared agent on the wire', async () => {
+  const sent = await outboundUserAgent((fetch) => fetchMimoLimits(
+    {
+      mimoManagedAccounts: [{
+        id: 'mimo-probe',
+        accountKey: 'sha256:mimo-probe',
+        cookieHeader: 'userId=1; api-platform_serviceToken=probe',
+        enabled: true
+      }]
+    },
+    { fetch }
+  ));
+  assert.deepEqual([...new Set(sent)], [BROWSER_USER_AGENT]);
+});
+
+test('Cursor sends the shared agent on the wire', async () => {
+  // cursorProbe talks through node:https rather than fetch, so its transport is
+  // injected instead. A 401 is the cheapest reply that settles the request.
+  let headers = null;
+  const httpsLib = {
+    request(options, onResponse) {
+      headers = options.headers;
+      queueMicrotask(() => onResponse({ statusCode: 401, on: () => {} }));
+      const request = new EventEmitter();
+      request.setTimeout = () => {};
+      request.destroy = () => {};
+      request.end = () => {};
+      return request;
+    }
+  };
+
+  await cursorProbe.requestJson(cursorProbe.AUTH_ME_URL, 'session-probe', { httpsLib });
+  assert.ok(headers, 'the probe should have issued a request');
+  assert.equal(headers['User-Agent'], BROWSER_USER_AGENT);
 });
 
 test('Qoder sends the shared agent on the wire', async () => {

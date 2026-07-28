@@ -2,6 +2,7 @@
 
 const https = require('node:https');
 const { abortError } = require('./probeDeadline');
+const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 
 const USAGE_SUMMARY_URL = 'https://cursor.com/api/usage-summary';
 const AUTH_ME_URL = 'https://cursor.com/api/auth/me';
@@ -11,7 +12,7 @@ const DEFAULT_HEADERS = {
   'Accept': '*/*',
   'Accept-Language': 'en-US,en;q=0.9',
   'Referer': 'https://www.cursor.com/settings',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  'User-Agent': BROWSER_USER_AGENT
 };
 
 function clampPercent(n) {
