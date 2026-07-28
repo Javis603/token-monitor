@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 
 const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
@@ -20,13 +21,14 @@ function deferred() {
 // buys an amount of wall-clock that depends entirely on how fast the machine is:
 // 100 of them cover barely over a millisecond here, so a runner even slightly
 // quicker exhausted them before a `setTimeout(..., 1)` could fire. Polling on a
-// timer also guarantees the timers phase runs between checks.
+// timer also guarantees the timers phase runs between checks. The 2 s / 5 ms
+// shape and the monotonic clock match the other polling helpers in tests/shared.
 async function waitFor(predicate, message = 'condition', timeoutMs = 2000) {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = performance.now() + timeoutMs;
   for (;;) {
     if (predicate()) return;
-    if (Date.now() >= deadline) assert.fail(`Timed out waiting for ${message} after ${timeoutMs}ms`);
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    if (performance.now() >= deadline) assert.fail(`Timed out waiting for ${message} after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
 
