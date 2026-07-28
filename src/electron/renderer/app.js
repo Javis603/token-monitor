@@ -6356,10 +6356,14 @@ const LIMIT_PROVIDER_DRAG_EXCLUDED = 'button, input, select, textarea, a, .accor
 
 function startLimitProviderRowDrag(event, id) {
   if (event.button !== 0) return;
-  if (event.target?.closest?.(LIMIT_PROVIDER_DRAG_EXCLUDED)) return;
+  const rowEl = event.currentTarget;
+  // Scoped to the row on purpose: `closest` keeps walking past it, and the
+  // whole settings section is itself an `.accordion-animated-container`, so an
+  // unscoped match excludes every row and no drag ever starts.
+  const excluded = event.target?.closest?.(LIMIT_PROVIDER_DRAG_EXCLUDED);
+  if (excluded && rowEl.contains(excluded)) return;
   if (limitProviderDrag) finishLimitProviderDrag(false);
   if (limitProviderRowElements().length <= 1) return;
-  const rowEl = event.currentTarget;
   const pressY = limitProviderContentY(event.clientY);
   limitProviderDrag = {
     id,

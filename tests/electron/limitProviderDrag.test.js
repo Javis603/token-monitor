@@ -134,6 +134,11 @@ test('a press on the row own controls never arms a drag', () => {
   const guard = body.indexOf('LIMIT_PROVIDER_DRAG_EXCLUDED');
   const arm = body.indexOf('limitProviderDrag = {');
   assert.ok(guard !== -1 && arm > guard, 'the guard must run before the drag state is built');
+  // `closest` walks past the row, and setupSettingsSections makes the whole
+  // section an `.accordion-animated-container` — the same class the per-row
+  // options panel uses. Unscoped, the guard matches every row and kills the
+  // drag entirely.
+  assert.match(body, /rowEl\.contains\(excluded\)/);
 });
 
 test('the drag captures the pointer and releases it before the reorder', () => {
