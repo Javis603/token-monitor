@@ -1569,9 +1569,38 @@ test('a personal Max account keeps the rate limit tier refinement', async () => 
     uuid: 'org-personal',
     name: 'Personal',
     capabilities: ['chat', 'claude_max'],
-    rate_limit_tier: 'default_claude_max_20x',
-    billing_type: 'stripe'
+    rate_limit_tier: 'default_claude_max_20x'
   }), 'Max 20x');
+});
+
+test('a membership from another organization never supplies the plan', async () => {
+  const provider = await fetchClaudeLimits(
+    { claudeWebCookie: 'sessionKey=sk-ant-sid01-multi' },
+    {
+      providerRuntimeState: new Map(),
+      claudeWebFetch: fakeClaudeWebIdentityFetch(
+        {
+          uuid: 'org-selected',
+          name: 'Selected Max Org',
+          capabilities: ['chat', 'claude_max'],
+          rate_limit_tier: 'default_claude_max_20x'
+        },
+        {
+          uuid: 'account-multi',
+          email_address: 'owner@example.com',
+          // The account is a member of a different organization than the one
+          // usage was resolved for, so nothing here may describe the plan.
+          memberships: [{
+            seat_tier: 'team',
+            rate_limit_tier: 'default_claude_ai',
+            organization: { uuid: 'org-other', name: 'Unrelated Org', capabilities: ['chat', 'raven'] }
+          }]
+        }
+      )
+    }
+  );
+  assert.equal(provider.accountLabel, 'Max 20x');
+  assert.equal(provider.accountName, 'Selected Max Org');
 });
 
 test('the Max variant comes from the rate limit tier, not the capability', async () => {

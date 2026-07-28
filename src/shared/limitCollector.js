@@ -927,7 +927,13 @@ function selectClaudeWebOrganization(organizations) {
     || null;
 }
 
+// Exact matches only. Everything read off a membership is scoped to its own
+// organization, so falling back to "whichever membership came first" labels the
+// organization we resolved usage for with a different one's plan and name. On a
+// multi-organization account that is not a near miss, it is the wrong answer.
+// The selected organization carries the same fields and is always available.
 function claudeWebMembership(accountBody, organizationId) {
+  if (!organizationId) return null;
   const account = accountBody?.account && typeof accountBody.account === 'object'
     ? accountBody.account
     : accountBody;
@@ -938,7 +944,7 @@ function claudeWebMembership(accountBody, organizationId) {
       : [];
   return memberships.find((membership) => (
     claudeWebOrganizationId(membership?.organization || membership) === organizationId
-  )) || memberships[0] || null;
+  )) || null;
 }
 
 function claudeStableIdentity(accountId, organizationId, accountEmail) {
