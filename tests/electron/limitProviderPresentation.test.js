@@ -181,6 +181,22 @@ function runLocalLiveCodexProvider(source, state) {
   );
 }
 
+function runProviderSpendNode(source, balance) {
+  const optionalNumber = functionBody(source, 'optionalFiniteNumber', 'formatLimitWindowValue');
+  const spendEntries = functionBody(source, 'providerSpendEntries', 'limitNoteRowNode');
+  const spendNode = functionBody(source, 'providerSpendNode', 'thirdPartySpendNode');
+  const context = {
+    formatMoney: (value, currency) => `${currency} ${Number(value).toFixed(2)}`,
+    limitNoteRowNode: (options) => options
+  };
+  vm.runInNewContext(
+    `${optionalNumber}\n${spendEntries}\n${spendNode}\n`
+      + `result = providerSpendNode(${JSON.stringify(balance)});`,
+    context
+  );
+  return JSON.parse(JSON.stringify(context.result));
+}
+
 test('Limits and Home share reset expiry while preserving the existing reset copy', () => {
   const app = readRendererFile('app.js');
   const formatReset = functionBody(app, 'formatReset', 'formatDuration');
@@ -948,6 +964,43 @@ test('DeepSeek main Limits row preserves the intentional month-spend balance met
   assert.match(balanceWindow, /provider\?\.balance\?\.monthSpend/);
   assert.doesNotMatch(renderProviderWindows, /formatMoney\(balance\.amount, currency\)\} left/);
   assert.match(styles, /\.limit-window-no-reset \.limit-reset\s*\{/);
+});
+
+test('shared spend presentation preserves zeroes and omits missing periods', () => {
+  const app = readRendererFile('app.js');
+  const complete = runProviderSpendNode(app, {
+    currency: 'CNY',
+    todaySpend: 0,
+    weekSpend: 1.25,
+    monthSpend: 2.5,
+    allTimeSpend: 3.75
+  });
+
+  assert.equal(complete.label, 'Spend');
+  assert.equal(complete.summary, 'Today CNY 0.00 · Month CNY 2.50');
+  assert.deepEqual(complete.detailEntries, [
+    ['Today', 'CNY 0.00'],
+    ['Week', 'CNY 1.25'],
+    ['Month', 'CNY 2.50'],
+    ['All time', 'CNY 3.75']
+  ]);
+  assert.deepEqual(complete.ariaParts, [
+    'Today CNY 0.00',
+    'Week CNY 1.25',
+    'Month CNY 2.50',
+    'All time CNY 3.75'
+  ]);
+
+  const missingWeek = runProviderSpendNode(app, {
+    currency: 'CNY',
+    todaySpend: 0,
+    weekSpend: null,
+    monthSpend: 2.5,
+    allTimeSpend: 3.75
+  });
+  assert.equal(missingWeek.summary, 'Today CNY 0.00 · Month CNY 2.50');
+  assert.deepEqual(missingWeek.detailEntries.map(([label]) => label), ['Today', 'Month', 'All time']);
+  assert.equal(missingWeek.ariaParts.some((part) => part.startsWith('Week ')), false);
 });
 
 test('Balance and token quota values omit the redundant left suffix', () => {
