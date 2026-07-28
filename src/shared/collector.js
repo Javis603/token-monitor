@@ -1145,6 +1145,7 @@ function startCollector(options) {
   let collectedActivityRevision = 0;
   let initialCollectionComplete = false;
   const watchers = [];
+  let watchedDirectoryKey = null;
 
   // On-disk anchor: persist full-scan snapshots so the collector can reuse
   // month/allTime across restarts. On the first interval tick the anchor is
@@ -1282,6 +1283,7 @@ function startCollector(options) {
         wslStatusAnchor = captured.wslStatus || null;
       }
       await onUpdate?.(summary, reason);
+      if (!anchored) setupWatchers();
       if (Number.isFinite(tickOptions.activityRevision)) {
         collectedActivityRevision = Math.max(collectedActivityRevision, tickOptions.activityRevision);
         initialCollectionComplete = true;
@@ -1295,20 +1297,22 @@ function startCollector(options) {
   }
 
   async function runTick(reason, tickOptions = {}) {
+    const tickActivityRevision = Number.isFinite(tickOptions.activityRevision)
+      ? tickOptions.activityRevision
+      : activityRevision;
+    const effectiveTickOptions = { ...tickOptions, activityRevision: tickActivityRevision };
     if (tickInFlight) {
       tickPending = true;
       pendingForceHistory = pendingForceHistory || Boolean(tickOptions.forceHistory);
       pendingForceCursorSync = pendingForceCursorSync || Boolean(tickOptions.forceCursorSync);
-      if (Number.isFinite(tickOptions.activityRevision)) {
-        pendingActivityRevision = pendingActivityRevision === null
-          ? tickOptions.activityRevision
-          : Math.max(pendingActivityRevision, tickOptions.activityRevision);
-      }
+      pendingActivityRevision = pendingActivityRevision === null
+        ? tickActivityRevision
+        : Math.max(pendingActivityRevision, tickActivityRevision);
       return new Promise((resolve) => pendingWaiters.push(resolve));
     }
     tickInFlight = true;
     try {
-      await performTick(reason, tickOptions);
+      await performTick(reason, effectiveTickOptions);
       while (tickPending && !stopped) {
         const forceHistory = pendingForceHistory;
         const forceCursorSync = pendingForceCursorSync;
@@ -1342,10 +1346,21 @@ function startCollector(options) {
     }, watchDebounceMs);
   }
 
+  function closeWatchers() {
+    for (const watcher of watchers) {
+      try { watcher.close(); } catch (_) {}
+    }
+    watchers.length = 0;
+  }
+
   function setupWatchers() {
     if (!watchEnabled) return;
     const dirs = watchPathsForClients(clients);
+    const directoryKey = dirs.join('\0');
+    if (directoryKey === watchedDirectoryKey) return;
+    closeWatchers();
     if (dirs.length === 0) {
+      watchedDirectoryKey = directoryKey;
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
     }
@@ -1362,12 +1377,19 @@ function startCollector(options) {
       });
       watcher.on('all', (event, filePath) => {
         activityRevision += 1;
+        if (tickPending) {
+          pendingActivityRevision = pendingActivityRevision === null
+            ? activityRevision
+            : Math.max(pendingActivityRevision, activityRevision);
+        }
         if (watchTriggersCollection) scheduleTick(`watch:${event}:${path.basename(filePath || '')}`);
       });
       watcher.on('error', (error) => log(`chokidar error: ${error.message}`));
       watchers.push(watcher);
+      watchedDirectoryKey = directoryKey;
       for (const dir of dirs) log(`Watching ${dir} (${watchUsePolling ? 'polling 2s' : 'native events'})`);
     } catch (error) {
+      watchedDirectoryKey = null;
       log(`Cannot watch ${dirs.join(', ')}: ${error.message}`);
     }
   }
@@ -1407,10 +1429,8 @@ function startCollector(options) {
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
-    for (const watcher of watchers) {
-      try { watcher.close(); } catch (_) {}
-    }
-    watchers.length = 0;
+    closeWatchers();
+    watchedDirectoryKey = null;
   }
 
   setupWatchers();

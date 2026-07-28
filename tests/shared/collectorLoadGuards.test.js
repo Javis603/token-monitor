@@ -1077,7 +1077,7 @@ test('hourly smart reconciliation refreshes WSL-only usage without a host event'
   }
 });
 
-test('hourly smart reconciliation discovers a client directory after a missed event', async () => {
+test('hourly smart reconciliation starts watching a client directory created after startup', async () => {
   const tmp = withTmpHome([]);
   const originalHomedir = os.homedir;
   const originalNow = Date.now;
@@ -1090,9 +1090,13 @@ test('hourly smart reconciliation discovers a client directory after a missed ev
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
   let watchCalls = 0;
+  let watchHandler = null;
   chokidar.watch = () => {
     watchCalls += 1;
-    return { on: () => {}, close: () => {} };
+    return {
+      on: (event, handler) => { if (event === 'all') watchHandler = handler; },
+      close: () => {}
+    };
   };
 
   const childProcess = require('node:child_process');
@@ -1129,12 +1133,79 @@ test('hourly smart reconciliation discovers a client directory after a missed ev
     await waitForCondition(() => updates.length === 2);
     assert.equal(calls.length, 6, 'missed activity is recovered by a full scan');
     assert.equal(updates[1].clientStatus.claude, 'waiting', 'new client directory is discovered');
+    await waitForCondition(() => typeof watchHandler === 'function');
+    assert.equal(watchCalls, 1, 'the successful full scan adds a watcher for the new directory');
+
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'new.jsonl'));
+    await waitForCondition(() => updates.length === 3);
+    assert.equal(calls.length, 7, 'later activity in the new directory uses the smart interval scan');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;
     chokidar.watch = originalWatch;
     os.homedir = originalHomedir;
     Date.now = originalNow;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('smart collection lets a successful manual refresh acknowledge existing activity', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => ({
+    on: (event, handler) => { if (event === 'all') watchHandler = handler; },
+    close: () => {}
+  });
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: false,
+      intervalRequiresActivity: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    watchHandler('change', '/fake/before-manual.jsonl');
+    await handle.tick('manual');
+    assert.deepEqual(updates, ['interval', 'manual']);
+    assert.equal(calls.length, 6, 'startup and manual refresh are full scans');
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(updates, ['interval', 'manual'], 'the next smart interval does not repeat covered activity');
+    assert.equal(calls.length, 6, 'the covered activity does not cause another scan');
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
@@ -1200,6 +1271,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
     spawnDelayMs = 35;
     const manualTick = handle.tick('manual');
     await waitForCondition(() => calls.length === 4);
+    await new Promise((resolve) => setTimeout(resolve, 50));
     watchHandler('change', '/fake/during-manual.jsonl');
 
     await manualTick;
