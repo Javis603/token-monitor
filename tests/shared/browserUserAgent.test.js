@@ -109,6 +109,25 @@ test('OpenCode Zen sends the shared agent on the wire', async () => {
   assert.deepEqual([...new Set(sent)], [BROWSER_USER_AGENT]);
 });
 
+test('OpenCode Go page sends the shared agent on the wire', async () => {
+  // The Go dashboard builds its own headers rather than going through
+  // `buildHeaders`, so the Zen case above does not cover it.
+  const seen = [];
+  const fetch = async (url, init) => {
+    seen.push({ url: String(url), ua: headerValue(init, 'user-agent') });
+    return String(url).includes(opencodeWeb.WORKSPACES_SERVER_ID)
+      ? { ...okResponse, text: async () => '{"id":"wrk_PROBE"}' }
+      : { ...okResponse, text: async () => '' };
+  };
+  try {
+    await opencodeWeb.fetchGoWeb('sess=1', { fetch });
+  } catch (_) { /* the reply is deliberately useless */ }
+
+  const goRequest = seen.find((entry) => entry.url.endsWith('/go'));
+  assert.ok(goRequest, 'the Go dashboard page should have been requested');
+  assert.equal(goRequest.ua, BROWSER_USER_AGENT);
+});
+
 test('Ollama sends the shared agent on the wire', async () => {
   const sent = await outboundUserAgent((fetch) => fetchOllamaLimits(
     { ollamaCookie: 'session=probe' },
