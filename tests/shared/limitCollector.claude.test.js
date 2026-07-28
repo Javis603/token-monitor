@@ -1559,8 +1559,7 @@ test('a personal Pro account takes its plan from the organization capabilities',
     uuid: 'org-personal',
     name: 'Personal',
     capabilities: ['chat', 'claude_pro'],
-    rate_limit_tier: 'default_claude_ai',
-    billing_type: 'apple_subscription'
+    rate_limit_tier: 'default_claude_ai'
   }), 'Pro');
 });
 
