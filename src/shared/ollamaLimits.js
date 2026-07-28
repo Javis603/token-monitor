@@ -2,9 +2,9 @@
 
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
+const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 
 const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
-const OLLAMA_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 const VALIDATION_CACHE_MS = 30 * 1000;
 let validationCache = null;
 const OLLAMA_SESSION_COOKIE_NAMES = new Set([
@@ -202,7 +202,7 @@ async function requestSettings(fetchFn, cookieHeader, controller) {
         ...(shouldAttachOllamaCookie(url) ? { Cookie: cookieHeader } : {}),
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'User-Agent': OLLAMA_USER_AGENT
+        'User-Agent': BROWSER_USER_AGENT
       },
       redirect: 'manual',
       ...(controller ? { signal: controller.signal } : {})

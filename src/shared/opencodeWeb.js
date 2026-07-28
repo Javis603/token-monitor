@@ -1,12 +1,13 @@
 'use strict';
 
+const { BROWSER_USER_AGENT } = require('./browserUserAgent');
+
 const BASE_URL = 'https://opencode.ai';
 const SERVER_URL = 'https://opencode.ai/_server';
 // From codexbar 0.32.4 (its docs/opencode.md): opencode.ai TanStack server-function IDs (build hashes).
 // These can break when opencode.ai redeploys — keep in sync with codexbar if Zen stops resolving.
 const WORKSPACES_SERVER_ID = 'def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f';
 const SUBSCRIPTION_SERVER_ID = '7abeebee372f304e050aaaf92be863f4a86490e382f8c79db68fd94040d691b4';
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 
 const PCT_KEYS = ['usagePercent', 'usedPercent', 'percentUsed', 'percent', 'usage_percent', 'used_percent', 'utilization', 'utilizationPercent', 'utilization_percent', 'usage'];
 const RESET_SEC_KEYS = ['resetInSec', 'resetInSeconds', 'resetSeconds', 'reset_sec', 'reset_in_sec', 'resetsInSec', 'resetsInSeconds', 'resetIn', 'resetSec'];
@@ -39,7 +40,7 @@ function buildHeaders(serverId, cookieHeader, referer) {
     Cookie: cookieHeader,
     'X-Server-Id': serverId,
     'X-Server-Instance': `server-fn:${cryptoUuid()}`,
-    'User-Agent': USER_AGENT,
+    'User-Agent': BROWSER_USER_AGENT,
     Origin: BASE_URL,
     Referer: referer || BASE_URL,
     Accept: 'text/javascript, application/json;q=0.9, */*;q=0.8'
@@ -304,7 +305,7 @@ async function fetchGoPageText(workspaceId, cookieHeader, deps) {
     method: 'GET',
     headers: {
       Cookie: cookieHeader,
-      'User-Agent': USER_AGENT,
+      'User-Agent': BROWSER_USER_AGENT,
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
     }
   });

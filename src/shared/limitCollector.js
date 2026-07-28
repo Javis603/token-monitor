@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { appVersion } = require('./appVersion');
+const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 const {
   DEFAULT_LIMITS_REFRESH_MS,
   normalizeLimitProvider,
@@ -80,15 +81,6 @@ const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
 const CODEX_RPC_TIMEOUT_MS = 20_000;
 const TOKEN_MONITOR_USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
-// claude.ai sits behind Cloudflare, which answers any non-browser user-agent with
-// `403 cf-mitigated: challenge` before the request reaches the API. An honest
-// `token-monitor/<version>` agent is challenged just as hard as sending none at
-// all, so this has to read as a browser. Applied only on the undici path: the
-// widget routes this provider through Electron's `net.request`, whose Chromium
-// agent already passes and, unlike this constant, tracks the bundled Chromium
-// version instead of going stale. Matches the agent the other web-session
-// providers already send.
-const CLAUDE_WEB_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 
 function nowIso(nowMs) {
   return new Date(nowMs).toISOString();
@@ -662,8 +654,10 @@ function fetchClaudeWebJson(url, headers, deps = {}, options = {}) {
   const webDeps = viaChromium ? { ...deps, fetch: deps.claudeWebFetch } : deps;
   // Chromium sends its own browser agent, and setting one here would override it
   // with a version that no longer matches the runtime. undici sends none at all,
-  // which Cloudflare challenges, so that path has to supply one.
-  const webHeaders = viaChromium ? headers : { ...headers, 'user-agent': CLAUDE_WEB_USER_AGENT };
+  // and claude.ai's Cloudflare answers both that and an honest
+  // `token-monitor/<version>` agent with `403 cf-mitigated: challenge`, so that
+  // path has to present as a browser.
+  const webHeaders = viaChromium ? headers : { ...headers, 'user-agent': BROWSER_USER_AGENT };
   return fetchJson(url, webHeaders, webDeps, {
     forbiddenIsUnauthorized: true,
     onResponse: options.onResponse

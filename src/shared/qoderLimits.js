@@ -3,10 +3,9 @@
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
+const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 
 const QODER_FETCH_TIMEOUT_MS = 12_000;
-
-const QODER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 
 function cleanSecret(value) {
   let raw = value;
@@ -222,7 +221,7 @@ async function fetchQoderLimits(options = {}, deps = {}) {
     Cookie: cookie,
     Accept: 'application/json, text/plain, */*',
     'Accept-Language': 'en-US,en;q=0.9',
-    'User-Agent': QODER_USER_AGENT,
+    'User-Agent': BROWSER_USER_AGENT,
     Origin: origin,
     Referer: `${origin}/account/usage`,
     'X-Requested-With': 'XMLHttpRequest',
