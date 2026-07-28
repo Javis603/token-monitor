@@ -1613,55 +1613,17 @@ test('the Max variant comes from the rate limit tier, not the capability', async
   }), 'Max 5x');
 });
 
-test('a team organization is recognized by its raven capability', async () => {
-  // claude.ai names this one itself: `isTeamSubscriber: capabilities.includes("raven")`.
-  // There is no team-specific rate limit tier, so the capability is the only signal.
-  assert.equal(await personalPlanLabel({
-    uuid: 'org-personal',
-    name: 'Personal',
-    capabilities: ['chat', 'raven'],
-    rate_limit_tier: 'default_claude_ai'
-  }), 'Team');
-});
-
-test('an unassigned seat is not a plan', async () => {
+async function planLabelFor(organization, seatTier) {
   const provider = await fetchClaudeLimits(
     { claudeWebCookie: 'sessionKey=sk-ant-sid01-seat' },
     {
       providerRuntimeState: new Map(),
       claudeWebFetch: fakeClaudeWebIdentityFetch(
-        {
-          uuid: 'org-team',
-          name: 'Team Org',
-          capabilities: ['chat', 'raven'],
-          rate_limit_tier: 'default_claude_ai'
-        },
+        { uuid: 'org-1', name: 'Org', ...organization },
         {
           uuid: 'account-seat',
           email_address: 'owner@example.com',
-          memberships: [{
-            // What claude.ai substitutes for a member holding no seat.
-            seat_tier: 'unassigned',
-            organization: { uuid: 'org-team', name: 'Team Org' }
-          }]
-        }
-      )
-    }
-  );
-  assert.equal(provider.accountLabel, 'Team');
-});
-
-async function seatTierLabel(seatTier) {
-  const provider = await fetchClaudeLimits(
-    { claudeWebCookie: 'sessionKey=sk-ant-sid01-seat' },
-    {
-      providerRuntimeState: new Map(),
-      claudeWebFetch: fakeClaudeWebIdentityFetch(
-        { uuid: 'org-team', name: 'Team Org', capabilities: ['chat'], rate_limit_tier: 'default_claude_ai' },
-        {
-          uuid: 'account-seat',
-          email_address: 'owner@example.com',
-          memberships: [{ seat_tier: seatTier, organization: { uuid: 'org-team', name: 'Team Org' } }]
+          memberships: [{ seat_tier: seatTier, organization: { uuid: 'org-1', name: 'Org' } }]
         }
       )
     }
@@ -1669,15 +1631,45 @@ async function seatTierLabel(seatTier) {
   return provider.accountLabel;
 }
 
-test('a seat tier reports its plan, not its seat level', async () => {
-  // OAuth reports `enterprise` and renders "Enterprise"; the Web seat tier is
-  // `<plan>_<seat level>`, and the seat level does not belong in a plan label.
-  assert.equal(await seatTierLabel('enterprise_standard'), 'Enterprise');
-  assert.equal(await seatTierLabel('max_premium'), 'Max');
+const TEAM_ORG = { capabilities: ['chat', 'raven'], raven_type: 'team', rate_limit_tier: 'default_claude_ai' };
+
+test('a team organization is recognized by its raven capability and type', async () => {
+  // `raven` covers Team and Enterprise together, and `raven_type` separates
+  // them. There is no team-specific rate limit tier, so this is the only signal.
+  assert.equal(await planLabelFor(TEAM_ORG, null), 'Team');
+  assert.equal(
+    await planLabelFor({ capabilities: ['chat', 'raven'], raven_type: 'enterprise', rate_limit_tier: 'default_raven' }, null),
+    'Enterprise'
+  );
 });
 
-test('an unrecognized seat tier is passed through rather than guessed at', async () => {
-  assert.equal(await seatTierLabel('bespoke_thing'), 'Bespoke Thing');
+test('a seat level never outranks the plan its organization states', async () => {
+  // A seat says which seat someone holds, not which plan the organization is on.
+  assert.equal(await planLabelFor(TEAM_ORG, 'standard'), 'Team');
+  // `unassigned` is what claude.ai substitutes for a member holding no seat.
+  assert.equal(await planLabelFor(TEAM_ORG, 'unassigned'), 'Team');
+  // And when the two disagree outright, the organization wins: claude.ai
+  // resolves the plan from the organization alone and never from the seat.
+  assert.equal(await planLabelFor(TEAM_ORG, 'enterprise_standard'), 'Team');
+});
+
+test('a seat tier reports its plan when the organization states none', async () => {
+  // Anthropic documents seat tiers as fully qualified `<plan>_<seat level>`
+  // identifiers, of which `enterprise_standard` and `enterprise_tier_1` are two.
+  // OAuth reports a bare `enterprise` and renders "Enterprise"; keeping the seat
+  // level here would render "Enterprise Standard" for the same account.
+  const unnamed = { capabilities: ['chat', 'raven'], raven_type: null, rate_limit_tier: 'default_raven' };
+  assert.equal(await planLabelFor(unnamed, 'enterprise_standard'), 'Enterprise');
+  assert.equal(await planLabelFor(unnamed, 'enterprise_tier_1'), 'Enterprise');
+});
+
+test('nothing is claimed when no source names a plan', async () => {
+  // A bare seat level, an organization whose raven type is missing, and the
+  // `default_raven` tier itself all describe something other than the plan.
+  const unnamed = { capabilities: ['chat', 'raven'], raven_type: null, rate_limit_tier: 'default_raven' };
+  assert.equal(await planLabelFor(unnamed, 'standard'), '');
+  assert.equal(await planLabelFor(unnamed, null), '');
+  assert.equal(await planLabelFor({ capabilities: ['chat'], rate_limit_tier: 'default_claude_ai' }, 'bespoke_thing'), '');
 });
 
 test('a billing type is never mistaken for a plan', async () => {
