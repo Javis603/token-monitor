@@ -15,12 +15,19 @@ function deferred() {
   return { promise, reject, resolve };
 }
 
-async function waitFor(predicate, message = 'condition') {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+// Bounded by elapsed time, not by a poll count. Several of these conditions are
+// reached by a timer the runtime sets, and a fixed number of setImmediate turns
+// buys an amount of wall-clock that depends entirely on how fast the machine is:
+// 100 of them cover barely over a millisecond here, so a runner even slightly
+// quicker exhausted them before a `setTimeout(..., 1)` could fire. Polling on a
+// timer also guarantees the timers phase runs between checks.
+async function waitFor(predicate, message = 'condition', timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
     if (predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
+    if (Date.now() >= deadline) assert.fail(`Timed out waiting for ${message} after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
-  assert.fail(`Timed out waiting for ${message}`);
 }
 
 function providerRow(provider, accountKey, label, options = {}) {
