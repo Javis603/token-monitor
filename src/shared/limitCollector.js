@@ -906,10 +906,22 @@ function claudeWebOrganizationCapabilities(organization) {
 // `seat_tier` is null and neither `rate_limit_tier` nor `billing_type` exists
 // at that level. The organization's capability list carries it, and it is the
 // same list that already decides which organization to read.
+// Returns the shared alias key rather than a display string, so a plan read
+// here renders identically to the same plan read from OAuth credentials.
+// `raven` is claude.ai's own name for a team subscription.
 function claudeCapabilityPlan(capabilities) {
   if (capabilities.has('claude_max')) return 'max';
   if (capabilities.has('claude_pro')) return 'pro';
+  if (capabilities.has('raven')) return 'team';
   return '';
+}
+
+// `unassigned` is the placeholder claude.ai substitutes for a member with no
+// seat (`seat_tier ?? "unassigned"`), not a plan anyone is on. Rendering it
+// would put the word "Unassigned" where the plan belongs.
+function claudeSeatTier(membership) {
+  const seat = String(membership?.seat_tier || '').trim();
+  return seat.toLowerCase() === 'unassigned' ? '' : seat;
 }
 
 function selectClaudeWebOrganization(organizations) {
@@ -989,7 +1001,7 @@ function claudeWebAccountIdentity(accountBody, organization) {
   // (`apple_subscription`), never a plan, so reading it would label a Pro
   // account "Apple subscription".
   const accountLabel = claudePlanLabelFromParts(
-    membership?.seat_tier
+    claudeSeatTier(membership)
       || claudeCapabilityPlan(claudeWebOrganizationCapabilities(planOrganization))
       || account?.subscription_type,
     membership?.rate_limit_tier || planOrganization?.rate_limit_tier || account?.rate_limit_tier

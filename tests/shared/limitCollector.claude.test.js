@@ -1614,6 +1614,44 @@ test('the Max variant comes from the rate limit tier, not the capability', async
   }), 'Max 5x');
 });
 
+test('a team organization is recognized by its raven capability', async () => {
+  // claude.ai names this one itself: `isTeamSubscriber: capabilities.includes("raven")`.
+  // There is no team-specific rate limit tier, so the capability is the only signal.
+  assert.equal(await personalPlanLabel({
+    uuid: 'org-personal',
+    name: 'Personal',
+    capabilities: ['chat', 'raven'],
+    rate_limit_tier: 'default_claude_ai'
+  }), 'Team');
+});
+
+test('an unassigned seat is not a plan', async () => {
+  const provider = await fetchClaudeLimits(
+    { claudeWebCookie: 'sessionKey=sk-ant-sid01-seat' },
+    {
+      providerRuntimeState: new Map(),
+      claudeWebFetch: fakeClaudeWebIdentityFetch(
+        {
+          uuid: 'org-team',
+          name: 'Team Org',
+          capabilities: ['chat', 'raven'],
+          rate_limit_tier: 'default_claude_ai'
+        },
+        {
+          uuid: 'account-seat',
+          email_address: 'owner@example.com',
+          memberships: [{
+            // What claude.ai substitutes for a member holding no seat.
+            seat_tier: 'unassigned',
+            organization: { uuid: 'org-team', name: 'Team Org' }
+          }]
+        }
+      )
+    }
+  );
+  assert.equal(provider.accountLabel, 'Team');
+});
+
 test('a billing type is never mistaken for a plan', async () => {
   // `apple_subscription` is how the subscription is paid for, not what it is.
   assert.equal(await personalPlanLabel({
