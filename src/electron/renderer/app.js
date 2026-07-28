@@ -2144,45 +2144,14 @@ function codexResetCreditsNode(resetCredits) {
     });
     expiryGroup.append(timeline);
     if (expirationDates.length > 1) {
-      const infoWrap = document.createElement('span');
-      infoWrap.className = 'limit-detail-tooltip-wrap';
-      infoWrap.classList.toggle('has-opened', state.limitDetailTooltipHasOpened);
-      const info = document.createElement('span');
-      info.className = 'limit-detail-tooltip-trigger';
-      info.textContent = 'i';
-      info.tabIndex = 0;
-      info.setAttribute('aria-label', expirationDates.map((date, index) => `Reset ${index + 1}: ${codexResetCreditExpiryDetailLabel(date)}`).join(', '));
-      const tooltip = document.createElement('span');
-      tooltip.className = 'limit-detail-tooltip';
-      tooltip.setAttribute('role', 'tooltip');
-      expirationDates.forEach((date) => {
-        const row = document.createElement('span');
-        row.className = 'limit-detail-tooltip-row';
-        const label = document.createElement('span');
-        label.textContent = expiryDateLabel(date);
-        const tooltipExpiry = document.createElement('span');
-        tooltipExpiry.textContent = codexResetCreditExpiryLabel(date);
-        row.append(label, tooltipExpiry);
-        tooltip.append(row);
-      });
-      const markResetCreditsTooltipOpened = () => {
-        state.limitDetailTooltipHasOpened = true;
-        state.limitDetailTooltipActive = true;
-        infoWrap.classList.add('has-opened');
-      };
-      const releaseResetCreditsTooltip = () => {
-        requestAnimationFrame(() => {
-          if (limitDetailTooltipShouldHoldRender()) return;
-          state.limitDetailTooltipActive = false;
-          flushPendingLimitDetailTooltipRender();
-        });
-      };
-      infoWrap.addEventListener('pointerenter', markResetCreditsTooltipOpened);
-      infoWrap.addEventListener('focusin', markResetCreditsTooltipOpened);
-      infoWrap.addEventListener('pointerleave', releaseResetCreditsTooltip);
-      infoWrap.addEventListener('focusout', releaseResetCreditsTooltip);
-      infoWrap.append(info, tooltip);
-      expiryGroup.append(infoWrap);
+      // A date paired with a bare duration doesn't read as `<name>: <value>`, so
+      // the spoken label is supplied rather than derived from the cells.
+      const infoNode = limitDetailInfoNode(
+        expirationDates.map((date) => [expiryDateLabel(date), codexResetCreditExpiryLabel(date)]),
+        '',
+        expirationDates.map((date, index) => `Reset ${index + 1}: ${codexResetCreditExpiryDetailLabel(date)}`).join(', ')
+      );
+      if (infoNode) expiryGroup.append(infoNode);
     }
     line.append(expiryGroup);
   }
@@ -2200,11 +2169,39 @@ function openrouterSpendEntries(balance) {
   ].filter(([, value]) => value !== null);
 }
 
+// The meter-less note row every balance/spend provider draws: a label on the
+// left, then an optional summary and an optional ⓘ tooltip on the right. The
+// wording stays with the callers — each provider says something different about
+// the same layout — so the spoken label is `label` plus whatever parts they pass.
+function limitNoteRowNode({ label, summary = '', detailEntries = null, ariaParts = [] }) {
+  const item = document.createElement('div');
+  item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
+  const line = document.createElement('div');
+  line.className = 'limit-window-text limit-spend-line';
+  const labelNode = document.createElement('span');
+  labelNode.textContent = label;
+  const right = document.createElement('span');
+  right.className = 'limit-spend-right';
+  if (summary) {
+    const summaryNode = document.createElement('span');
+    summaryNode.className = 'limit-spend-summary';
+    summaryNode.textContent = summary;
+    right.append(summaryNode);
+  }
+  const infoNode = detailEntries ? limitDetailInfoNode(detailEntries, 'limit-spend-info-wrap') : null;
+  if (infoNode) right.append(infoNode);
+  line.append(labelNode, right);
+  item.append(line);
+  item.setAttribute('aria-label', [label, ...ariaParts].join(', '));
+  return item;
+}
+
 // Entries are rows of cells: `[label, value]`, or `[label, middle, value]` when
 // a row carries an extra field. Rows are grid cells (`display: contents`), so a
 // short row would slide into the next row's columns — pad every row to the
-// widest one and widen the grid to match.
-function limitDetailInfoNode(entries, extraClass = '') {
+// widest one and widen the grid to match. `ariaLabel` overrides the spoken label
+// for callers whose cells don't read as `<name>: <value>` on their own.
+function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
   if (!Array.isArray(entries) || entries.length === 0) return null;
   const columns = entries.reduce((widest, entry) => Math.max(widest, entry.length), 0);
   const infoWrap = document.createElement('span');
@@ -2216,7 +2213,7 @@ function limitDetailInfoNode(entries, extraClass = '') {
   info.tabIndex = 0;
   info.setAttribute(
     'aria-label',
-    entries.map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`).join(', ')
+    ariaLabel || entries.map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`).join(', ')
   );
   const tooltip = document.createElement('span');
   tooltip.className = ['limit-detail-tooltip', columns > 2 ? 'limit-detail-tooltip-triple' : '']
@@ -2258,37 +2255,16 @@ function openrouterSpendNode(balance) {
   const currency = balance?.currency || 'USD';
   const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
   const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
-  const summaryText = summaryEntries
-    .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
-    .join(' · ');
-
-  const item = document.createElement('div');
-  item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
-  const line = document.createElement('div');
-  line.className = 'limit-window-text limit-spend-line';
-  const label = document.createElement('span');
-  label.textContent = 'Spend';
-  const right = document.createElement('span');
-  right.className = 'limit-spend-right';
-  const summary = document.createElement('span');
-  summary.className = 'limit-spend-summary';
-  summary.textContent = summaryText;
-  right.append(summary);
-
-  if (entries.length > summaryEntries.length) {
-    right.append(limitDetailInfoNode(
-      entries.map(([entryLabel, value]) => [entryLabel, formatMoney(value, currency)]),
-      'limit-spend-info-wrap'
-    ));
-  }
-
-  line.append(label, right);
-  item.append(line);
-  item.setAttribute(
-    'aria-label',
-    ['Spend', ...entries.map(([entryLabel, value]) => `${entryLabel} ${formatMoney(value, currency)}`)].join(', ')
-  );
-  return item;
+  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatMoney(value, currency)]);
+  return limitNoteRowNode({
+    label: 'Spend',
+    summary: summaryEntries
+      .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
+      .join(' · '),
+    // Only worth a tooltip when it would say more than the summary already does.
+    detailEntries: entries.length > summaryEntries.length ? formatted : null,
+    ariaParts: formatted.map(([entryLabel, value]) => `${entryLabel} ${value}`)
+  });
 }
 
 function thirdPartySpendNode(provider, quotaWindow) {
@@ -2309,34 +2285,18 @@ function thirdPartySpendNode(provider, quotaWindow) {
     entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
   }
   if (allTimeSpend === null && entries.length === 0) return null;
-
-  const item = document.createElement('div');
-  item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
-  const line = document.createElement('div');
-  line.className = 'limit-window-text limit-spend-line';
-  const label = document.createElement('span');
-  label.textContent = allTimeSpend === null ? 'Details' : 'Spend';
-  const right = document.createElement('span');
-  right.className = 'limit-spend-right';
-  if (allTimeSpend !== null) {
-    const summary = document.createElement('span');
-    summary.className = 'limit-spend-summary';
-    summary.textContent = `All time ${formatMoney(allTimeSpend, currency)}`;
-    right.append(summary);
-  }
-  const infoNode = limitDetailInfoNode(entries, 'limit-spend-info-wrap');
-  if (infoNode) right.append(infoNode);
-  line.append(label, right);
-  item.append(line);
-  item.setAttribute(
-    'aria-label',
-    [
-      allTimeSpend === null ? 'Details' : 'Spend',
-      ...(allTimeSpend === null ? [] : [`All time ${formatMoney(allTimeSpend, currency)}`]),
+  // Without a spend figure the row has nothing to summarize, so it retitles
+  // itself and leans entirely on the tooltip.
+  const summary = allTimeSpend === null ? '' : `All time ${formatMoney(allTimeSpend, currency)}`;
+  return limitNoteRowNode({
+    label: allTimeSpend === null ? 'Details' : 'Spend',
+    summary,
+    detailEntries: entries,
+    ariaParts: [
+      ...(summary ? [summary] : []),
       ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
-    ].join(', ')
-  );
-  return item;
+    ]
+  });
 }
 
 // One tooltip row per prepaid grant: amount, expiry date, time left, the same
@@ -2374,30 +2334,12 @@ function claudeBalanceNode(provider) {
   const currency = balance?.currency || 'USD';
   const tranches = Array.isArray(balance.tranches) ? balance.tranches : [];
   const grants = claudePrepaidGrantRows(tranches, currency);
-  const entries = grants.map((grant) => grant.cells);
-
-  const item = document.createElement('div');
-  item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
-  const line = document.createElement('div');
-  line.className = 'limit-window-text limit-spend-line';
-  const label = document.createElement('span');
-  label.textContent = 'Balance';
-  const right = document.createElement('span');
-  right.className = 'limit-spend-right';
-  const summary = document.createElement('span');
-  summary.className = 'limit-spend-summary';
-  summary.textContent = formatMoney(amount, currency);
-  right.append(summary);
-  const infoNode = limitDetailInfoNode(entries, 'limit-spend-info-wrap');
-  if (infoNode) right.append(infoNode);
-  line.append(label, right);
-  item.append(line);
-  item.setAttribute('aria-label', [
-    'Balance',
-    formatMoney(amount, currency),
-    ...grants.map((grant) => grant.aria)
-  ].join(', '));
-  return item;
+  return limitNoteRowNode({
+    label: 'Balance',
+    summary: formatMoney(amount, currency),
+    detailEntries: grants.map((grant) => grant.cells),
+    ariaParts: [formatMoney(amount, currency), ...grants.map((grant) => grant.aria)]
+  });
 }
 
 const {

@@ -743,7 +743,10 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   const resetCreditExpiryLabel = functionBody(app, 'codexResetCreditExpiryLabel', 'codexResetCreditExpiryDetailLabel');
   const resetCreditExpiryDetailLabel = functionBody(app, 'codexResetCreditExpiryDetailLabel', 'expiryDateLabel');
   const resetCreditExpiryDateLabel = functionBody(app, 'expiryDateLabel', 'limitDetailTooltipShouldHoldRender');
-  const codexResetCreditsNode = functionBody(app, 'codexResetCreditsNode', 'renderLimitProviderHead');
+  // Sliced to the next function, not to `renderLimitProviderHead`: the wider slice
+  // swept in the shared tooltip builder, so these assertions passed on code that
+  // isn't Codex's.
+  const codexResetCreditsNode = functionBody(app, 'codexResetCreditsNode', 'openrouterSpendEntries');
   const limitDetailTooltipShouldHoldRender = functionBody(app, 'limitDetailTooltipShouldHoldRender', 'flushPendingLimitDetailTooltipRender');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
@@ -767,17 +770,18 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   assert.match(codexResetCreditsNode, /limit-reset-credits-time/);
   assert.match(codexResetCreditsNode, /limit-reset-credits-separator/);
   assert.match(codexResetCreditsNode, /separator\.textContent = '·'/);
-  assert.match(codexResetCreditsNode, /limit-detail-tooltip-wrap/);
-  assert.match(codexResetCreditsNode, /limit-detail-tooltip/);
   assert.match(codexResetCreditsNode, /expirationDates\.slice\(0, 3\)\.map\(codexResetCreditExpiryLabel\)/);
   assert.match(codexResetCreditsNode, /hiddenExpirationCount = expirationDates\.length - summaryParts\.length/);
   assert.match(codexResetCreditsNode, /summaryParts\.push\(`\+\$\{hiddenExpirationCount\}`\)/);
-  assert.match(codexResetCreditsNode, /expirationDates\.forEach/);
-  assert.match(codexResetCreditsNode, /label\.textContent = expiryDateLabel\(date\)/);
-  assert.match(codexResetCreditsNode, /tooltipExpiry\.textContent = codexResetCreditExpiryLabel\(date\)/);
-  assert.match(codexResetCreditsNode, /state\.limitDetailTooltipActive = true/);
-  assert.match(codexResetCreditsNode, /addEventListener\('pointerenter', markResetCreditsTooltipOpened\)/);
-  assert.match(codexResetCreditsNode, /if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
+  // The multi-expiry tooltip is the shared builder, not a second copy of its
+  // hover/focus wiring that has to be kept in step by hand.
+  assert.match(
+    codexResetCreditsNode,
+    /expirationDates\.map\(\(date\) => \[expiryDateLabel\(date\), codexResetCreditExpiryLabel\(date\)\]\)/
+  );
+  assert.match(codexResetCreditsNode, /`Reset \$\{index \+ 1\}: \$\{codexResetCreditExpiryDetailLabel\(date\)\}`/);
+  assert.doesNotMatch(codexResetCreditsNode, /addEventListener/);
+  assert.doesNotMatch(codexResetCreditsNode, /state\.limitDetailTooltip/);
   assert.match(codexResetCreditsNode, /formatCodexResetCreditsValue\(resetCredits\)/);
   assert.match(codexResetCreditsNode, /aria-label/);
   assert.match(limitDetailTooltipShouldHoldRender, /state\.limitDetailTooltipActive/);
