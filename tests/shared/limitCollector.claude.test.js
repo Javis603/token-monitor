@@ -114,7 +114,7 @@ test('Claude Web source takes precedence and carries stable account metadata', a
           };
         }
         if (url.endsWith('/prepaid/credits')) {
-          // The common case: an account with no prepaid credit pool.
+          // The common case: an account that never funded a prepaid pool.
           return { ok: true, json: async () => ({ amount: 0, currency: 'USD' }) };
         }
         assert.ok(url.endsWith('/api/account'));
@@ -144,8 +144,10 @@ test('Claude Web source takes precedence and carries stable account metadata', a
   assert.equal(first.provider.accountName, 'Example Workspace');
   assert.equal(first.provider.accountLabel, 'Max 20x');
   assert.deepEqual(first.provider.windows.map((window) => window.kind), ['session', 'weekly']);
-  // This account has no usage credits, so the prepaid pool is never requested.
-  assert.equal(first.requests.length, 3);
+  // The pool is asked for, comes back unfunded, and so contributes no row.
+  assert.equal(first.provider.balance, null);
+  assert.equal(first.requests.length, 4);
+  assert.equal(first.requests[3].url.endsWith('/prepaid/credits'), true);
   assert.equal(first.requests[0].options.headers.cookie, 'sessionKey=sk-ant-first-cookie');
   assert.deepEqual(first.requests[0].options.headers, {
     accept: 'application/json',
@@ -201,6 +203,7 @@ test('Claude Web follows a renewed sessionKey across sequential requests and rep
   assert.equal(provider.status, 'ok');
   assert.deepEqual(requests.map((request) => request.cookie), [
     'sessionKey=sk-ant-old',
+    'sessionKey=sk-ant-renewed',
     'sessionKey=sk-ant-renewed',
     'sessionKey=sk-ant-renewed'
   ]);
@@ -1262,21 +1265,220 @@ const CREDITS_OFF = {
   spend: { enabled: false, used: { amount_minor: 0, currency: 'USD', exponent: 2 }, limit: null, percent: 0 }
 };
 
-test('an account without usage credits is never asked for its prepaid pool', async () => {
-  const requests = [];
+test('a funded pool is still reported when usage credits are switched off', async () => {
   const provider = await fetchClaudeLimits(
     { claudeWebCookie: 'sessionKey=sk-ant-sid01-off' },
+    { providerRuntimeState: new Map(), claudeWebFetch: fakeClaudeWebFetch(CREDITS_OFF) }
+  );
+  // Switching usage credits off is how you stop a balance you still hold from
+  // being spent; the money and its expiry dates are what you keep watching.
+  assert.equal(provider.balance.amount, 113.44);
+  assert.equal(provider.balance.tranches.length, 2);
+  const kinds = provider.windows.map((window) => window.kind);
+  assert.deepEqual(kinds, ['session', 'weekly', 'billing'], 'no Usage credits window while off');
+  assert.equal(provider.windows.at(-1).metric, 'credits');
+});
+
+test('an unfunded pool on a credits-off account reports no balance', async () => {
+  const provider = await fetchClaudeLimits(
+    { claudeWebCookie: 'sessionKey=sk-ant-sid01-never' },
     {
       providerRuntimeState: new Map(),
-      claudeWebFetch: async (url) => {
-        requests.push(url);
-        return fakeClaudeWebFetch(CREDITS_OFF)(url);
-      }
+      claudeWebFetch: fakeClaudeWebFetch(CREDITS_OFF, {
+        prepaid: { amount: 0, currency: 'USD', tranches: [], promo_tranches: [] }
+      })
     }
   );
-  assert.deepEqual(requests.filter((url) => url.includes('/prepaid/credits')), []);
-  assert.equal(provider.balance, null);
+  assert.equal(provider.balance, null, 'a $0.00 row on an account that never bought credits is noise');
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly']);
+});
+
+test('an unfunded credits-off pool backs off well past the normal TTL', async () => {
+  const providerRuntimeState = new Map();
+  let nowMs = Date.parse('2026-07-27T00:00:00Z');
+  const requests = [];
+  const deps = {
+    now: () => nowMs,
+    providerRuntimeState,
+    claudeWebFetch: async (url) => {
+      requests.push(url);
+      return fakeClaudeWebFetch(CREDITS_OFF, {
+        prepaid: { amount: 0, currency: 'USD', tranches: [], promo_tranches: [] }
+      })(url);
+    }
+  };
+  const options = { claudeWebCookie: 'sessionKey=sk-ant-sid01-idle', limitsRefreshMs: 60_000 };
+
+  await fetchClaudeLimits(options, deps);
+
+  // Three intervals in — well past the 2x TTL a funded pool would use.
+  requests.length = 0;
+  nowMs += 180_000;
+  await fetchClaudeLimits(options, deps);
+  assert.deepEqual(requests.filter((url) => url.includes('/prepaid/credits')), []);
+
+  // Just past the 12x TTL — an hour at the default refresh — it is re-read:
+  // buying credits must still surface without restarting the widget.
+  requests.length = 0;
+  nowMs += 541_000;
+  await fetchClaudeLimits(options, deps);
+  assert.equal(requests.filter((url) => url.includes('/prepaid/credits')).length, 1);
+});
+
+test('enabling usage credits pulls an idle pool back to the normal cadence', async () => {
+  const providerRuntimeState = new Map();
+  let nowMs = Date.parse('2026-07-27T00:00:00Z');
+  let usage = CREDITS_OFF;
+  const requests = [];
+  const deps = {
+    now: () => nowMs,
+    providerRuntimeState,
+    claudeWebFetch: async (url) => {
+      requests.push(url);
+      return fakeClaudeWebFetch(usage, {
+        prepaid: { amount: 0, currency: 'USD', tranches: [], promo_tranches: [] }
+      })(url);
+    }
+  };
+  const options = { claudeWebCookie: 'sessionKey=sk-ant-sid01-reenabled', limitsRefreshMs: 60_000 };
+
+  await fetchClaudeLimits(options, deps);
+
+  // The idle backoff is evaluated per read, not frozen into the cache entry.
+  requests.length = 0;
+  usage = ENABLED_UNLIMITED;
+  nowMs += 121_000;
+  const provider = await fetchClaudeLimits(options, deps);
+  assert.equal(requests.filter((url) => url.includes('/prepaid/credits')).length, 1);
+  assert.equal(provider.balance.amount, 0);
+});
+
+test('a transient prepaid failure keeps the balance and retries next refresh', async () => {
+  const providerRuntimeState = new Map();
+  let nowMs = Date.parse('2026-07-27T00:00:00Z');
+  let prepaidOutcome = 'ok';
+  const requests = [];
+  const deps = {
+    now: () => nowMs,
+    providerRuntimeState,
+    claudeWebFetch: async (url) => {
+      requests.push(url);
+      if (url.includes('/prepaid/credits')) {
+        if (prepaidOutcome === 'timeout') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+        if (prepaidOutcome !== 'ok') {
+          return {
+            ok: false,
+            status: Number(prepaidOutcome),
+            headers: { get: () => '', getSetCookie: () => [] },
+            json: async () => ({})
+          };
+        }
+      }
+      return fakeClaudeWebFetch(CREDITS_OFF)(url);
+    }
+  };
+  const options = { claudeWebCookie: 'sessionKey=sk-ant-sid01-flaky', limitsRefreshMs: 60_000 };
+
+  const first = await fetchClaudeLimits(options, deps);
+  assert.equal(first.balance.amount, 113.44);
+
+  // Neither a 5xx, a 429 nor a timeout says anything about this account, so the
+  // balance a working read produced must survive all three.
+  for (const outcome of ['500', '429', 'timeout']) {
+    prepaidOutcome = outcome;
+    requests.length = 0;
+    nowMs += 121_000;
+    const during = await fetchClaudeLimits(options, deps);
+    assert.equal(requests.filter((url) => url.includes('/prepaid/credits')).length, 1, `retried on ${outcome}`);
+    assert.equal(during.balance.amount, 113.44, `balance survives ${outcome}`);
+    assert.equal(during.balance.tranches.length, 2, `tranches survive ${outcome}`);
+    assert.equal(during.windows.at(-1).remaining, 113.44);
+  }
+
+  prepaidOutcome = 'ok';
+  nowMs += 121_000;
+  const recovered = await fetchClaudeLimits(options, deps);
+  assert.equal(recovered.balance.amount, 113.44);
+});
+
+test('a rotated sessionKey keeps the prepaid balance addressable', async () => {
+  const providerRuntimeState = new Map();
+  let nowMs = Date.parse('2026-07-27T00:00:00Z');
+  let cookie = 'sessionKey=sk-ant-sid01-rotating';
+  let rotate = true;
+  let prepaidStatus = 200;
+  const requests = [];
+  const deps = {
+    now: () => nowMs,
+    providerRuntimeState,
+    onClaudeWebCookieRenewed: ({ cookie: renewed }) => { cookie = renewed; },
+    claudeWebFetch: async (url) => {
+      requests.push(url);
+      const headers = {
+        get: () => '',
+        getSetCookie: () => (rotate && url.endsWith('/api/organizations')
+          ? ['sessionKey=sk-ant-sid01-rotated; Path=/; Secure; HttpOnly']
+          : [])
+      };
+      if (url.endsWith('/api/organizations')) {
+        return { ok: true, status: 200, headers, json: async () => [{ uuid: 'org-1', name: 'Example' }] };
+      }
+      if (url.endsWith('/api/account')) {
+        return { ok: true, status: 200, headers, json: async () => ({ uuid: 'account-1', email_address: 'owner@example.com' }) };
+      }
+      if (url.includes('/prepaid/credits')) {
+        if (prepaidStatus !== 200) return { ok: false, status: prepaidStatus, headers, json: async () => ({}) };
+        return { ok: true, status: 200, headers, json: async () => PREPAID_CREDITS };
+      }
+      return { ok: true, status: 200, headers, json: async () => CREDITS_OFF };
+    }
+  };
+  const options = () => ({ claudeWebCookie: cookie, limitsRefreshMs: 60_000 });
+
+  const first = await fetchClaudeLimits(options(), deps);
+  assert.equal(first.balance.amount, 113.44);
+  assert.equal(cookie, 'sessionKey=sk-ant-sid01-rotated', 'the renewed sessionKey is persisted');
+
+  // The cache is addressed by account, not by the cookie that happened to read
+  // it, so the rotated session must not send the widget back to the endpoint.
+  rotate = false;
+  requests.length = 0;
+  const cached = await fetchClaudeLimits(options(), deps);
+  assert.deepEqual(requests.filter((url) => url.includes('/prepaid/credits')), []);
+  assert.equal(cached.balance.amount, 113.44);
+
+  // And past the TTL, a transient failure under the rotated cookie still finds
+  // the balance the previous cookie read.
+  requests.length = 0;
+  nowMs += 121_000;
+  prepaidStatus = 500;
+  const during = await fetchClaudeLimits(options(), deps);
+  assert.equal(requests.filter((url) => url.includes('/prepaid/credits')).length, 1);
+  assert.equal(during.balance.amount, 113.44);
+  assert.equal(during.balance.tranches.length, 2);
+  assert.equal(during.windows.at(-1).remaining, 113.44);
+});
+
+test('a refused prepaid endpoint is not re-asked every refresh', async () => {
+  const providerRuntimeState = new Map();
+  const requests = [];
+  const deps = {
+    now: () => Date.parse('2026-07-27T00:00:00Z'),
+    providerRuntimeState,
+    claudeWebFetch: async (url) => {
+      requests.push(url);
+      return fakeClaudeWebFetch(ENABLED_UNLIMITED, { prepaidStatus: 403 })(url);
+    }
+  };
+  const options = { claudeWebCookie: 'sessionKey=sk-ant-sid01-refused' };
+
+  await fetchClaudeLimits(options, deps);
+  assert.equal(requests.filter((url) => url.includes('/prepaid/credits')).length, 1);
+
+  requests.length = 0;
+  const second = await fetchClaudeLimits(options, deps);
+  assert.deepEqual(requests.filter((url) => url.includes('/prepaid/credits')), []);
+  assert.equal(second.balance, null);
 });
 
 test('switching the prepaid balance off skips the request entirely', async () => {

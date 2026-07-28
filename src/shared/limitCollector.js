@@ -71,6 +71,7 @@ const CLAUDE_IDENTITY_CACHE_STATE_KEY = 'claude.identity-cache';
 // it is refreshed far less often than usage. Without this the steady-state Web
 // refresh would cost two requests instead of the documented one.
 const CLAUDE_PREPAID_CACHE_TTL_MS = 10 * 60 * 1000;
+const CLAUDE_PREPAID_IDLE_TTL_FACTOR = 6;
 const CLAUDE_PREPAID_CACHE_STATE_KEY = 'claude.prepaid-cache';
 const CLAUDE_SESSION_WINDOW_MINUTES = 5 * 60;
 const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
@@ -628,6 +629,10 @@ async function fetchJson(url, headers, deps = {}, options = {}) {
           ? 'sourceRateLimited'
           : 'unavailable';
       const error = errorWithStatus(status, `${url} returned ${response.status}`);
+      // The normalized status collapses 404 and 5xx into `unavailable`, which
+      // loses the only thing a caller needs to tell a permanent refusal from an
+      // outage. Absent on timeouts and network errors, which are never either.
+      error.httpStatus = response.status;
       if (sourceChallenge) error.code = 'CLAUDE_WEB_SOURCE_CHALLENGE';
       throw error;
     }
@@ -1130,6 +1135,14 @@ function claudePrepaidBalance(payload) {
   };
 }
 
+// "Has this account ever put money in the pool?" An account that never bought
+// credits and one that bought some look identical apart from this.
+function claudePrepaidFunded(balance) {
+  if (!balance) return false;
+  if (Number(balance.amount) > 0) return true;
+  return Array.isArray(balance.tranches) && balance.tranches.length > 0;
+}
+
 function claudePrepaidCache(deps = {}) {
   if (!(deps.providerRuntimeState instanceof Map)) return null;
   let cache = deps.providerRuntimeState.get(CLAUDE_PREPAID_CACHE_STATE_KEY);
@@ -1144,7 +1157,7 @@ function claudePrepaidCache(deps = {}) {
 // nobody can reason about "should my balance refresh every 10 or 15 minutes",
 // and two competing cadence settings in one panel is worse than one. Doubling
 // the interval keeps the balance off every other refresh at any interval.
-function claudePrepaidCacheTtlMs(deps = {}, options = {}) {
+function claudePrepaidBaseTtlMs(deps, options) {
   const configured = Number(deps.claudePrepaidCacheTtlMs);
   if (Number.isFinite(configured) && configured >= 0) return configured;
   const refreshMs = Number(options.limitsRefreshMs ?? options.refreshMs ?? deps.limitsRefreshMs);
@@ -1153,23 +1166,69 @@ function claudePrepaidCacheTtlMs(deps = {}, options = {}) {
     : CLAUDE_PREPAID_CACHE_TTL_MS;
 }
 
+// `idle` is an unfunded pool on an account that is not spending credits either
+// — the shape of everyone who never bought any. Nothing is displayed for them
+// and nothing changes until they buy, so they back off to a request an hour.
+// It is evaluated per read rather than frozen into the entry: enabling usage
+// credits must bring the balance back at the normal cadence.
+function claudePrepaidCacheTtlMs(deps = {}, options = {}, idle = false) {
+  const base = claudePrepaidBaseTtlMs(deps, options);
+  return idle ? base * CLAUDE_PREPAID_IDLE_TTL_FACTOR : base;
+}
+
 // Returns the cached balance when it is still fresh. A cached `null` counts:
 // re-probing an account that has no prepaid credits every refresh would be the
 // same wasted request, just for the majority of users.
-function claudeCachedPrepaid(fingerprint, deps = {}, options = {}) {
+function claudeCachedPrepaid(key, deps = {}, options = {}, creditsEnabled = false) {
   const cache = claudePrepaidCache(deps);
-  if (!cache || !fingerprint) return null;
-  const entry = cache.get(fingerprint);
+  if (!cache || !key) return null;
+  const entry = cache.get(key);
   if (!entry) return null;
   const nowMs = (deps.now || Date.now)();
-  return nowMs - entry.resolvedAt <= claudePrepaidCacheTtlMs(deps, options) ? entry : null;
+  const ttlMs = claudePrepaidCacheTtlMs(deps, options, !creditsEnabled && !entry.funded);
+  return nowMs - entry.resolvedAt <= ttlMs ? entry : null;
 }
 
-function cacheClaudePrepaid(fingerprint, balance, deps = {}) {
+// The prepaid cache is keyed on the resolved account and the organization whose
+// pool it is, never on the cookie digest the identity cache uses. A sessionKey
+// rotates mid-session, and a credential-keyed entry is stranded the moment it
+// does: the next refresh re-reads the pool, and a read that fails then has no
+// last-good balance left to fall back on. Both parts are already hashed or
+// public identifiers — the pool belongs to the organization, and the account
+// decides whether it may be read at all.
+function claudePrepaidKey(context) {
+  const accountKey = context?.identity?.accountKey;
+  if (!accountKey) return '';
+  return `${accountKey}|${context?.organizationId || ''}`;
+}
+
+// The last balance read for this account, however old. Serving it through an
+// outage keeps a real balance on screen instead of blanking the row until the
+// endpoint recovers; the pool moves slowly enough that a stale figure beats no
+// figure, and the next successful read corrects it.
+function staleClaudePrepaid(key, deps = {}) {
   const cache = claudePrepaidCache(deps);
-  if (!cache || !fingerprint) return balance;
-  cache.delete(fingerprint);
-  cache.set(fingerprint, { balance, resolvedAt: (deps.now || Date.now)() });
+  if (!cache || !key) return null;
+  return cache.get(key)?.balance ?? null;
+}
+
+// A refusal this account will get again: reading the pool is not permitted, or
+// there is nothing at that path. A 403 carrying a Cloudflare challenge is not
+// one — that is an interstitial, and it clears.
+function claudePrepaidRefused(error) {
+  if (error?.code === 'CLAUDE_WEB_SOURCE_CHALLENGE') return false;
+  return error?.httpStatus === 403 || error?.httpStatus === 404;
+}
+
+function cacheClaudePrepaid(key, balance, deps = {}) {
+  const cache = claudePrepaidCache(deps);
+  if (!cache || !key) return balance;
+  cache.delete(key);
+  cache.set(key, {
+    balance,
+    funded: claudePrepaidFunded(balance),
+    resolvedAt: (deps.now || Date.now)()
+  });
   while (cache.size > CLAUDE_IDENTITY_CACHE_MAX_ENTRIES) {
     cache.delete(cache.keys().next().value);
   }
@@ -1238,26 +1297,44 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
     const renewedFingerprint = claudeWebIdentityFingerprint(renewedCookie);
     if (renewedFingerprint !== fingerprint) cacheClaudeIdentity(renewedFingerprint, context, deps);
   }
-  // The prepaid pool is billing data, so it is read only when the account has
-  // actually turned usage credits on — which the usage response above already
-  // tells us. An account that never opted in costs no extra request at all,
-  // and neither does one where the user switched this off.
-  const wantsPrepaid = claudePrepaidBalanceEnabled(deps.env || process.env, options)
-    && claudeUsageCreditsEnabled(usage);
+  // The pool is read whenever the setting allows it, deliberately not only when
+  // the account has usage credits switched on: switching them off is what you
+  // do to stop a balance you still hold from being spent, and the money and its
+  // expiry dates are exactly what you want to see while it is off.
+  const wantsPrepaid = claudePrepaidBalanceEnabled(deps.env || process.env, options);
+  const creditsEnabled = claudeUsageCreditsEnabled(usage);
+  const prepaidKey = claudePrepaidKey(context);
   // Best-effort and throttled: a 403/404/timeout here must not cost the account
   // its usage row, and the pool moves too slowly to re-read every refresh.
-  const cachedPrepaid = wantsPrepaid ? claudeCachedPrepaid(fingerprint, deps, options) : null;
+  const cachedPrepaid = wantsPrepaid
+    ? claudeCachedPrepaid(prepaidKey, deps, options, creditsEnabled)
+    : null;
   let balance = cachedPrepaid ? cachedPrepaid.balance : null;
   if (wantsPrepaid && !cachedPrepaid) {
     try {
       const prepaid = await fetchWebJson(
         `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/prepaid/credits`
       );
-      balance = cacheClaudePrepaid(fingerprint, claudePrepaidBalance(prepaid), deps);
+      balance = cacheClaudePrepaid(prepaidKey, claudePrepaidBalance(prepaid), deps);
     } catch (error) {
       deps.logger?.(`[limits] Claude prepaid credits unavailable: ${error.message}`);
+      if (claudePrepaidRefused(error)) {
+        // Cache the refusal. An endpoint that refuses this account refuses it
+        // every refresh, and without an entry there is nothing to back off from.
+        cacheClaudePrepaid(prepaidKey, null, deps);
+      } else {
+        // A timeout, a 429 or a 5xx says nothing about this account. Caching it
+        // as "no balance" would blank a balance that is still there — and on a
+        // credits-off account the idle backoff would hold that blank for an
+        // hour. Keep the last figure and let the next refresh retry.
+        balance = staleClaudePrepaid(prepaidKey, deps);
+      }
     }
   }
+  // A pool nobody ever funded is not a balance. Reporting it would put a $0.00
+  // row on every Web account that has never touched credits. With usage credits
+  // on, a pool spent dry is precisely when the row matters, so zero is kept.
+  if (balance && !creditsEnabled && !claudePrepaidFunded(balance)) balance = null;
   const provider = mapClaudeUsageToProvider(usage, {
     ...context.identity,
     updatedAt: nowIso(nowMs),
