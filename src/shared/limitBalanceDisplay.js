@@ -29,6 +29,21 @@
     return window?.metric === 'credits';
   }
 
+  // The spend meter: money already consumed, the mirror of a `credits` window.
+  // A hub older than the `spend` metric drops it during normalization while
+  // keeping the window itself, so a metric-less billing window carrying the
+  // canonical label is the same thing arriving through one of those. Without
+  // the fallback the row vanishes on new widget → old hub → new renderer.
+  // Removable once no supported hub predates the metric.
+  function spendWindow(provider) {
+    const windows = Array.isArray(provider?.windows) ? provider.windows : [];
+    return windows.find((window) => window?.metric === 'spend')
+      || windows.find((window) => !window?.metric
+        && window?.kind === 'billing'
+        && window?.label === 'Usage credits')
+      || null;
+  }
+
   function creditsAmount(provider, window) {
     const fromWindow = finiteNumber(window?.remaining);
     return fromWindow === null ? finiteNumber(provider?.balance?.amount) : fromWindow;
@@ -88,6 +103,7 @@
     creditsMeterPercent,
     formatCompactMoney,
     formatMoney,
-    isCreditsWindow
+    isCreditsWindow,
+    spendWindow
   };
 });

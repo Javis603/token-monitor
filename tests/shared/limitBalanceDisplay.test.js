@@ -9,7 +9,8 @@ const {
   creditsMeterPercent,
   formatCompactMoney,
   formatMoney,
-  isCreditsWindow
+  isCreditsWindow,
+  spendWindow
 } = require('../../src/shared/limitBalanceDisplay');
 
 test('isCreditsWindow keys off the metric tag only', () => {
@@ -77,4 +78,40 @@ test('formatCompactMoney only abbreviates at or above 100k', () => {
   assert.equal(formatCompactMoney(99_999.99, 'USD'), '$99999.99');
   assert.equal(formatCompactMoney(1_250_000, 'USD'), '$1.25M');
   assert.equal(formatCompactMoney(null, 'USD'), '');
+});
+
+test('spendWindow finds the usage-credit meter by its metric', () => {
+  const provider = {
+    windows: [
+      { kind: 'session', usedPercent: 8 },
+      { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 2.35, limit: 20, currency: 'USD' },
+      { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 113.44, currency: 'USD' }
+    ]
+  };
+  const window = spendWindow(provider);
+  assert.equal(window.used, 2.35);
+  assert.equal(window.metric, 'spend');
+});
+
+// A hub older than the `spend` metric drops it while keeping the window, so the
+// row would silently disappear on new widget -> old hub -> new renderer.
+test('spendWindow still finds the meter after an older hub strips the metric', () => {
+  const asOlderHubWouldStore = {
+    windows: [
+      { kind: 'session', usedPercent: 8 },
+      { kind: 'billing', label: 'Usage credits', used: 2.35, limit: 20, usedPercent: 11.75, currency: 'USD' }
+    ]
+  };
+  const window = spendWindow(asOlderHubWouldStore);
+  assert.equal(window.used, 2.35, 'the legacy label fallback must keep the row visible');
+  assert.equal(window.limit, 20);
+});
+
+test('spendWindow does not mistake a balance row for the spend meter', () => {
+  const provider = {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 113.44, currency: 'USD' }]
+  };
+  assert.equal(spendWindow(provider), null);
+  assert.equal(spendWindow({ windows: [] }), null);
+  assert.equal(spendWindow(null), null);
 });

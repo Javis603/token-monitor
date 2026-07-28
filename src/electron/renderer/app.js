@@ -2368,7 +2368,8 @@ function claudeBalanceNode(provider) {
 const {
   creditsMeterPercent,
   formatCompactMoney,
-  formatMoney
+  formatMoney,
+  spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
 function optionalFiniteNumber(value) {
@@ -3185,7 +3186,7 @@ function renderProviderWindows(provider, color) {
     }
     // Usage credits: "$2.35 / $20.00" with a meter when a monthly spend limit is
     // set, "$2.35 spent" without one. Absent entirely when credits are off.
-    const usageCredits = (provider.windows || []).find((window) => window.metric === 'spend');
+    const usageCredits = spendWindow(provider);
     if (usageCredits) {
       const value = usageCredits.limit === null
         ? `${formatMoney(usageCredits.used, usageCredits.currency)} spent`
