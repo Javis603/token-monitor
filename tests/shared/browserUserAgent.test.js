@@ -31,7 +31,8 @@ test('providers share one browser user-agent instead of copying the string', () 
   const owners = jsFilesUnder(path.join(root, 'src'))
     .concat(jsFilesUnder(path.join(root, 'worker', 'src')))
     .filter((file) => fs.readFileSync(file, 'utf8').includes(BROWSER_USER_AGENT))
-    .map((file) => path.relative(root, file));
+    // Windows would otherwise report `src\shared\...` and never match.
+    .map((file) => path.relative(root, file).split(path.sep).join('/'));
 
   // A second copy is how one collector ends up stranded on a stale Chrome
   // version. `cursorProbe` and `mimoLimits` deliberately send their own, older
