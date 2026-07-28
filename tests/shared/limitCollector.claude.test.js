@@ -1574,6 +1574,17 @@ test('a personal Max account keeps the rate limit tier refinement', async () => 
   }), 'Max 20x');
 });
 
+test('the Max variant comes from the rate limit tier, not the capability', async () => {
+  // There is no `claude_max_5x` capability: claude.ai reports plain `claude_max`
+  // for both variants and separates them on `rate_limit_tier`.
+  assert.equal(await personalPlanLabel({
+    uuid: 'org-personal',
+    name: 'Personal',
+    capabilities: ['chat', 'claude_max'],
+    rate_limit_tier: 'default_claude_max_5x'
+  }), 'Max 5x');
+});
+
 test('a billing type is never mistaken for a plan', async () => {
   // `apple_subscription` is how the subscription is paid for, not what it is.
   assert.equal(await personalPlanLabel({
