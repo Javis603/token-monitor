@@ -1040,7 +1040,10 @@
       window.addEventListener('pointermove', moveDrag, true);
       window.addEventListener('pointerup', endDrag, true);
       window.addEventListener('pointercancel', cancelDrag, true);
-      window.addEventListener('blur', cancelDrag, true);
+      // Not capture: see the note on the limit provider drag. A capture `blur`
+      // listener on `window` also catches every element's blur, so the press
+      // moving focus off the last-clicked control killed the drag immediately.
+      window.addEventListener('blur', cancelDrag);
       itemEl.addEventListener('lostpointercapture', cancelDrag, { once: true });
       try { itemEl.setPointerCapture?.(event.pointerId); } catch (_) {}
     }
@@ -1105,7 +1108,7 @@
       window.removeEventListener('pointermove', moveDrag, true);
       window.removeEventListener('pointerup', endDrag, true);
       window.removeEventListener('pointercancel', cancelDrag, true);
-      window.removeEventListener('blur', cancelDrag, true);
+      window.removeEventListener('blur', cancelDrag);
       itemEl.removeEventListener('lostpointercapture', cancelDrag);
       try {
         if (itemEl.hasPointerCapture?.(pointerId)) itemEl.releasePointerCapture(pointerId);

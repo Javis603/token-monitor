@@ -153,6 +153,17 @@ test('the drag captures the pointer and releases it before the reorder', () => {
   assert.match(body, /removeEventListener\('lostpointercapture', onLimitProviderDragAbort\)/);
 });
 
+// `blur` does not bubble, so a capture listener on `window` is the standard way
+// to observe every element's blur — which is exactly wrong here. The press moves
+// focus off whatever was clicked last, and that blur cancelled the drag before
+// it began: the first drag after opening settings or collapsing the section
+// always failed, then every later one worked because focus sat on the body.
+test('only the window own blur aborts the drag', () => {
+  const app = readRendererFile('app.js');
+  assert.match(app, /window\[method\]\('blur', onLimitProviderDragAbort\);/);
+  assert.doesNotMatch(app, /'blur', onLimitProviderDragAbort, true/);
+});
+
 test('the drag suppresses the click that would otherwise toggle the checkbox', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function suppressNextLimitProviderClick\(\)/);

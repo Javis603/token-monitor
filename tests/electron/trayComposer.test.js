@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const trayLayoutApi = require('../../src/shared/trayLayout');
@@ -328,4 +330,17 @@ test('a custom surface keeps the editor affordances instead of a preview', () =>
   assert.equal(root.classList.contains('is-editing'), true);
   assert.equal(strip.children.at(-1).className, 'tray-composer-add');
   assert.equal(strip.children[0].children[0].textContent, 'Add your first item');
+});
+
+// A capture listener on `window` sees every element's blur, not just the
+// window's. The press moves focus off whatever was clicked last, so the chip
+// drag died on its own first pointerdown whenever a control still held focus.
+test('only the window own blur cancels the chip drag', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'trayComposer.js'),
+    'utf8'
+  );
+  assert.match(source, /window\.addEventListener\('blur', cancelDrag\);/);
+  assert.match(source, /window\.removeEventListener\('blur', cancelDrag\);/);
+  assert.doesNotMatch(source, /'blur', cancelDrag, true/);
 });

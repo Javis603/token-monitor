@@ -6396,8 +6396,13 @@ function setLimitProviderDragListeners(active) {
   window[method]('pointermove', onLimitProviderPointerMove, true);
   window[method]('pointerup', onLimitProviderPointerUp, true);
   window[method]('pointercancel', onLimitProviderDragAbort, true);
-  window[method]('blur', onLimitProviderDragAbort, true);
   window[method]('keydown', onLimitProviderDragKeydown, true);
+  // Deliberately not capture. `blur` does not bubble, so a capture listener on
+  // `window` is the standard way to observe *every* element's blur — including
+  // the one the press itself causes when focus leaves whatever the user last
+  // clicked. That cancelled the drag before it could start. Without capture only
+  // the window's own blur arrives, which is the case worth aborting on.
+  window[method]('blur', onLimitProviderDragAbort);
 }
 
 // Order matters: freeze the accordion, collapse, and only then measure. With
