@@ -149,13 +149,59 @@ test('Claude Web source takes precedence and carries stable account metadata', a
   assert.equal(first.requests.length, 4);
   assert.equal(first.requests[3].url.endsWith('/prepaid/credits'), true);
   assert.equal(first.requests[0].options.headers.cookie, 'sessionKey=sk-ant-first-cookie');
+  // This collector runs on undici, so it carries the browser agent. Pinned
+  // verbatim: Cloudflare challenges every non-browser user-agent on this host, so
+  // swapping in the honest `token-monitor/<version>` agent would 403 the whole
+  // provider on the headless agent.
   assert.deepEqual(first.requests[0].options.headers, {
     accept: 'application/json',
+    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
     cookie: 'sessionKey=sk-ant-first-cookie'
   });
+  // Cloudflare challenges per request, so every hop needs the agent, not just the
+  // first one that happens to be asserted above.
+  assert.equal(
+    first.requests.every(({ options }) => /Chrome\/[\d.]+ Safari/.test(options.headers['user-agent'] || '')),
+    true,
+    'every Claude Web request should carry the browser user-agent'
+  );
   assert.equal(first.requests[0].url.endsWith('/api/organizations'), true);
   assert.equal(first.requests[1].url.endsWith('/api/organizations/organization-web/usage'), true);
   assert.equal(first.requests[2].url.endsWith('/api/account'), true);
+});
+
+test('Claude Web leaves the user-agent to Chromium when the widget supplies the transport', async () => {
+  const requests = [];
+  await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-widget' }, {
+    now: () => Date.parse('2026-07-25T00:00:00Z'),
+    stat: async () => {
+      throw new Error('OAuth credentials must not be read when Web is configured');
+    },
+    fetch: async () => {
+      throw new Error('the widget transport must be used when one is supplied');
+    },
+    claudeWebFetch: async (url, options) => {
+      requests.push({ url, options });
+      if (url.endsWith('/api/organizations')) {
+        return { ok: true, json: async () => [{ uuid: 'organization-web', name: 'Example Workspace' }] };
+      }
+      if (url.endsWith('/prepaid/credits')) {
+        return { ok: true, json: async () => ({ amount: 0, currency: 'USD' }) };
+      }
+      if (url.endsWith('/api/account')) {
+        return { ok: true, json: async () => ({ email_address: 'owner@example.com' }) };
+      }
+      return { ok: true, json: async () => ({ five_hour: { utilization: 10 } }) };
+    }
+  });
+
+  // Electron's net.request already sends a browser agent that tracks the bundled
+  // Chromium; setting one here would pin the widget to a stale version instead.
+  assert.ok(requests.length > 0);
+  for (const { url, options } of requests) {
+    assert.equal(options.headers['user-agent'], undefined, `${url} should carry no user-agent`);
+  }
+  assert.equal(requests[0].options.headers.cookie, 'sessionKey=sk-ant-widget');
 });
 
 test('Claude Web follows a renewed sessionKey across sequential requests and reports it for persistence', async () => {

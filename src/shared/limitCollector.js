@@ -80,6 +80,15 @@ const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
 const CODEX_RPC_TIMEOUT_MS = 20_000;
 const TOKEN_MONITOR_USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
+// claude.ai sits behind Cloudflare, which answers any non-browser user-agent with
+// `403 cf-mitigated: challenge` before the request reaches the API. An honest
+// `token-monitor/<version>` agent is challenged just as hard as sending none at
+// all, so this has to read as a browser. Applied only on the undici path: the
+// widget routes this provider through Electron's `net.request`, whose Chromium
+// agent already passes and, unlike this constant, tracks the bundled Chromium
+// version instead of going stale. Matches the agent the other web-session
+// providers already send.
+const CLAUDE_WEB_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 
 function nowIso(nowMs) {
   return new Date(nowMs).toISOString();
@@ -649,10 +658,13 @@ async function fetchJson(url, headers, deps = {}, options = {}) {
 }
 
 function fetchClaudeWebJson(url, headers, deps = {}, options = {}) {
-  const webDeps = typeof deps.claudeWebFetch === 'function'
-    ? { ...deps, fetch: deps.claudeWebFetch }
-    : deps;
-  return fetchJson(url, headers, webDeps, {
+  const viaChromium = typeof deps.claudeWebFetch === 'function';
+  const webDeps = viaChromium ? { ...deps, fetch: deps.claudeWebFetch } : deps;
+  // Chromium sends its own browser agent, and setting one here would override it
+  // with a version that no longer matches the runtime. undici sends none at all,
+  // which Cloudflare challenges, so that path has to supply one.
+  const webHeaders = viaChromium ? headers : { ...headers, 'user-agent': CLAUDE_WEB_USER_AGENT };
+  return fetchJson(url, webHeaders, webDeps, {
     forbiddenIsUnauthorized: true,
     onResponse: options.onResponse
   });
