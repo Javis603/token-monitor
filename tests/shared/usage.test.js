@@ -3,7 +3,14 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { aggregateDevices, extractUsageFromTokscale, mergeDeviceRecord } = require('../../src/shared/usage');
+const {
+  aggregateDevices,
+  extractUsageBundleFromTokscale,
+  extractUsageFromTokscale,
+  mergeDeviceRecord,
+  mergePeriods,
+  UNATTRIBUTED_USAGE_CLIENT
+} = require('../../src/shared/usage');
 
 function recordWithLimits(extra = {}) {
   return {
@@ -802,6 +809,33 @@ test('extractUsageFromTokscale keeps model usage grouped by client', () => {
   assert.equal(period.clientModels.hermes['claude-3-5-sonnet'], 100);
   assert.equal(period.clientModelCosts.hermes['claude-3-5-sonnet'], 1.25);
   assert.equal(period.clientModels.codex['gpt-5'], 50);
+});
+
+test('extractUsageBundleFromTokscale partitions every aggregate field exactly by client', () => {
+  const bundle = extractUsageBundleFromTokscale({
+    entries: [
+      { client: 'Claude', sessionId: 'c1', model: 'shared', totalTokens: 10, cacheRead: 4, cacheWrite: 2, output: 3, costUsd: 0.1 },
+      { client: 'Codex', sessionId: 'x1', model: 'shared', totalTokens: 20, cacheRead: 8, cacheWrite: 1, output: 5, costUsd: 0.2 }
+    ]
+  });
+
+  assert.equal(bundle.byClient.claude.totalTokens, 10);
+  assert.equal(bundle.byClient.claude.modelCacheReads.shared, 4);
+  assert.equal(bundle.byClient.codex.totalTokens, 20);
+  assert.equal(bundle.byClient.codex.modelCacheWrites.shared, 1);
+  assert.deepEqual(
+    mergePeriods(bundle.byClient.claude, bundle.byClient.codex),
+    bundle.period
+  );
+});
+
+test('extractUsageBundleFromTokscale isolates rows without a client for safe fallback', () => {
+  const bundle = extractUsageBundleFromTokscale({
+    entries: [{ model: 'unknown', totalTokens: 7, costUsd: 0.07 }]
+  });
+
+  assert.equal(bundle.byClient[UNATTRIBUTED_USAGE_CLIENT].totalTokens, 7);
+  assert.equal(bundle.period.totalTokens, 7);
 });
 
 test('extractUsageFromTokscale keeps session usage grouped by client and model', () => {

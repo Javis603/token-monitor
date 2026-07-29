@@ -416,10 +416,13 @@ function collectorWatchEnabled() {
   return normalizeCollectionMode(settings?.collectionMode) !== 'interval';
 }
 
-// Smart mode watches with native events and never collects on the event itself;
-// the event only marks activity, and the interval decides whether to scan.
+// macOS has a native recursive file-event backend, so live mode does not need
+// chokidar's 2-second directory polling there. Keep polling on the other
+// platforms for compatibility; smart mode uses native events everywhere and
+// never collects on the event itself.
 function collectorWatchUsePolling() {
-  return normalizeCollectionMode(settings?.collectionMode) === 'live';
+  return process.platform !== 'darwin'
+    && normalizeCollectionMode(settings?.collectionMode) === 'live';
 }
 
 function collectorWatchTriggersCollection() {

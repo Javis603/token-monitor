@@ -11,7 +11,14 @@ const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { customPricingPath } = require('./tokscaleConfig');
-const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
+const {
+  applyPeriodDelta,
+  emptyPeriod,
+  extractUsageBundleFromTokscale,
+  extractUsageFromTokscale,
+  mergePeriods,
+  UNATTRIBUTED_USAGE_CLIENT
+} = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
 const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
@@ -634,18 +641,28 @@ async function collectUsageOnce(options) {
   // separately below and merged back in.
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
+  const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
+  const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
+  const targetRequested = targetClients.length > 0;
+  const targetTokscaleClients = targetClients.filter((client) => client !== 'proma').join(',');
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
+  let todayPartitions = null;
   const anchor = options.todayOnlyAnchor;
-  const anchorUsed = Boolean(anchor && anchor.dateKey === localTodayKey(collectedAt));
+  const anchorUsed = Boolean(
+    anchor
+    && anchor.dateKey === localTodayKey(collectedAt)
+    && canTargetTodayPartitions(anchor, targetClients)
+  );
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
   if (normalizedClients) {
-    await maybeSyncCursor(tokscaleClients, options.logger, { force: options.forceCursorSync === true });
-    await maybeSyncAntigravity(tokscaleClients, options.logger, options.homeDir || os.homedir());
-    if (includesProma) {
+    const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
+    await maybeSyncCursor(syncClients, options.logger, { force: options.forceCursorSync === true });
+    await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir());
+    if (includesProma && (!targetRequested || targetClients.includes('proma'))) {
       try {
         promaRows = collectPromaRows();
         promaPricing = await resolvePromaPricing(promaRows, {
@@ -667,21 +684,40 @@ async function collectUsageOnce(options) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
       // windows exactly via applyPeriodDelta — one spawn instead of three.
-      if (tokscaleClients) {
-        const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
-        today = extractUsageFromTokscale(todayJson);
+      const scanClients = targetRequested ? targetTokscaleClients : tokscaleClients;
+      let freshPartitions = Object.create(null);
+      let useTargetedPartitions = targetRequested;
+      if (scanClients) {
+        const todayJson = await runTokscaleFn({ clients: scanClients, flags: ['--today'], commandTimeoutMs });
+        const bundle = extractUsageBundleFromTokscale(todayJson);
+        freshPartitions = bundle.byClient;
+        const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
+        if (targetRequested && periodHasUsage(unattributed)) {
+          // A row without a client cannot be replaced safely inside one client
+          // partition. Fall back to one all-client today scan for correctness.
+          const fullTodayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
+          freshPartitions = extractUsageBundleFromTokscale(fullTodayJson).byClient;
+          useTargetedPartitions = false;
+        } else if (targetRequested) {
+          // Empty tokscale output uses the unattributed fallback shape. Keep the
+          // anchor's real unattributed partition while clearing the target.
+          delete freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
+        }
       }
-      // The persisted anchor contains every Windows-side client, including
-      // locally parsed Proma. Include its fresh today usage before deriving
-      // broader windows so base + (fresh today - anchor today) stays exact.
-      if (promaPeriods) today = mergePeriods(today, promaPeriods.today);
+      if (promaPeriods) freshPartitions.proma = promaPeriods.today;
+      todayPartitions = useTargetedPartitions
+        ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
+        : completeTodayPartitions(freshPartitions, normalizedClients);
+      today = mergeTodayPartitions(todayPartitions);
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
     } else if (tokscaleClients) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
-      today = extractUsageFromTokscale(todayJson);
+      const todayBundle = extractUsageBundleFromTokscale(todayJson);
+      today = todayBundle.period;
+      todayPartitions = todayBundle.byClient;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
       const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
@@ -711,7 +747,12 @@ async function collectUsageOnce(options) {
       today = mergePeriods(today, promaPeriods.today);
       month = mergePeriods(month, promaPeriods.month);
       allTime = mergePeriods(allTime, promaPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), proma: promaPeriods.today };
     }
+    todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
+    // Partition metadata is internal but must remain as complete as the public
+    // period: a later targeted tick re-merges these sessions into `today`.
+    propagateTodayProjects(today, Object.values(todayPartitions));
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -801,7 +842,7 @@ async function collectUsageOnce(options) {
   }
 
   if (typeof options.onAnchorComputed === 'function') {
-    options.onAnchorComputed({ windowsPeriods, wslBundle, wslStatus });
+    options.onAnchorComputed({ windowsPeriods, todayPartitions, wslBundle, wslStatus });
   }
 
   const summary = {
@@ -986,19 +1027,40 @@ function antigravityCliDataDir() {
   return path.join(geminiHome, 'antigravity-cli', 'conversations');
 }
 
-function watchPathsForClients(clientsCsv) {
-  const candidates = [];
+function watchClientRootsForClients(clientsCsv) {
+  const rootsByClient = {};
   for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv))) {
     if (SELF_SYNCED_CLIENTS.has(client)) continue;
-    candidates.push(...dirs);
+    const existing = [...new Set(dirs.filter(dirExists))];
+    if (existing.length > 0) rootsByClient[client] = existing;
   }
   // antigravity is self-synced (its IDE cache is written by our sync and must stay
   // watch-excluded), but its CLI data dir is safe to watch (no self-trigger loop)
   // and gives the seconds-level refresh the sync path can't. tokscaleClientFilter
   // pulls the antigravity-cli rows in on the tick.
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
-  if (enabled.has('antigravity')) candidates.push(antigravityCliDataDir());
-  return [...new Set(candidates.filter(dirExists))];
+  const antigravityCliDir = antigravityCliDataDir();
+  if (enabled.has('antigravity') && dirExists(antigravityCliDir)) {
+    rootsByClient.antigravity = [antigravityCliDir];
+  }
+  return rootsByClient;
+}
+
+function watchPathsForClients(clientsCsv) {
+  return [...new Set(Object.values(watchClientRootsForClients(clientsCsv)).flat())];
+}
+
+function clientsForWatchPath(filePath, rootsByClient) {
+  if (!filePath) return [];
+  const resolved = path.resolve(filePath);
+  const matched = [];
+  for (const [client, roots] of Object.entries(rootsByClient || {})) {
+    if (roots.some((root) => {
+      const resolvedRoot = path.resolve(root);
+      return resolved === resolvedRoot || resolved.startsWith(resolvedRoot + path.sep);
+    })) matched.push(client);
+  }
+  return matched;
 }
 
 // Inside a Hermes home dir tokscale only reads the SQLite db; the rest is the
@@ -1101,6 +1163,41 @@ function wslPeriodsForPreview(wslAnchor, anchorDateKey, todayKey) {
   };
 }
 
+function completeTodayPartitions(partitions, clientsCsv) {
+  const completed = { ...(partitions || {}) };
+  for (const client of normalizeClientsCsv(clientsCsv).split(',').filter(Boolean)) {
+    if (!Object.prototype.hasOwnProperty.call(completed, client)) completed[client] = emptyPeriod();
+  }
+  return completed;
+}
+
+function replaceTodayPartitions(current, fresh, targetClients) {
+  const next = { ...(current || {}) };
+  for (const client of targetClients || []) next[client] = emptyPeriod();
+  for (const [client, period] of Object.entries(fresh || {})) next[client] = period;
+  return next;
+}
+
+function mergeTodayPartitions(partitions) {
+  return mergePeriods(...Object.values(partitions || {}));
+}
+
+function periodHasUsage(period) {
+  if (!period) return false;
+  return Number(period.totalTokens || 0) > 0
+    || Number(period.costUsd || 0) > 0
+    || Object.keys(period.sessions || {}).length > 0;
+}
+
+function canTargetTodayPartitions(anchor, targetClients) {
+  if (!targetClients?.length) return true;
+  return Boolean(
+    anchor?.todayPartitions
+    && !periodHasUsage(anchor.todayPartitions[UNATTRIBUTED_USAGE_CLIENT])
+    && targetClients.every((client) => Object.prototype.hasOwnProperty.call(anchor.todayPartitions, client))
+  );
+}
+
 function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
@@ -1116,7 +1213,7 @@ function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
     intervalMs, historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled, watchDebounceMs,
-    watchUsePolling = true, watchTriggersCollection = true, intervalRequiresActivity = false,
+    watchUsePolling = process.platform !== 'darwin', watchTriggersCollection = true, intervalRequiresActivity = false,
     onUpdate, onPreview, onError, logger
   } = options;
   const deviceOsInfo = options.osInfo === undefined
@@ -1141,6 +1238,9 @@ function startCollector(options) {
   let debounceTimer = null;
   let intervalTimer = null;
   let stopped = false;
+  const scheduledWatchClients = new Set();
+  let scheduledWatchNeedsFullScan = false;
+  const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => SELF_SYNCED_CLIENTS.has(client));
   let activityRevision = 0;
   let collectedActivityRevision = 0;
   let initialCollectionComplete = false;
@@ -1158,7 +1258,16 @@ function startCollector(options) {
       if (saved && saved.dateKey === localTodayKey()) {
         const fp = configFingerprint(clients, allTimeSince, options.projectsEnabled);
         if (saved.configFingerprint === fp) {
-          anchor = { dateKey: saved.dateKey, today: saved.today, month: saved.month, allTime: saved.allTime };
+          anchor = {
+            dateKey: saved.dateKey,
+            today: saved.today,
+            month: saved.month,
+            allTime: saved.allTime,
+            // Per-client partitions are deliberately rebuilt by the first
+            // anchored all-client tick after restart. Persisted partitions
+            // could be stale for clients that changed while the app was down.
+            todayPartitions: null
+          };
           // Don't restore a persisted WSL snapshot when WSL scanning is now off —
           // the configFingerprint intentionally ignores the toggle (host periods
           // stay valid), so without this gate a warm-scan preview would briefly
@@ -1189,6 +1298,8 @@ function startCollector(options) {
     const includeHistory = shouldIncludeHistory(Date.now(), lastHistoryAt, historyIntervalMs, Boolean(tickOptions.forceHistory), historyEnabled);
     if (includeHistory) lastHistoryAt = Date.now();
     const todayKey = localTodayKey();
+    const requestedTargetClients = [...new Set(normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean))];
+    const targetAnchorReady = canTargetTodayPartitions(anchor, requestedTargetClients);
     const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
     const refreshWsl = Boolean(tickOptions.refreshWsl);
     try {
@@ -1204,6 +1315,7 @@ function startCollector(options) {
         osInfo: deviceOsInfo,
         includeHistory,
         forceCursorSync: Boolean(tickOptions.forceCursorSync),
+        targetClients: anchored && targetAnchorReady ? requestedTargetClients : [],
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
@@ -1257,7 +1369,13 @@ function startCollector(options) {
       });
       if (stopped) return;
       if (!anchored && captured) {
-        anchor = { dateKey: todayKey, today: captured.windowsPeriods.today, month: captured.windowsPeriods.month, allTime: captured.windowsPeriods.allTime };
+        anchor = {
+          dateKey: todayKey,
+          today: captured.windowsPeriods.today,
+          month: captured.windowsPeriods.month,
+          allTime: captured.windowsPeriods.allTime,
+          todayPartitions: captured.todayPartitions
+        };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
         lastFullScanAt = Date.now();
@@ -1276,11 +1394,14 @@ function startCollector(options) {
             }));
           } catch (_) {}
         }
-      } else if (anchored && refreshWsl && captured) {
-        // Interval anchored ticks refresh WSL independently; update the
-        // frozen snapshot so subsequent watch ticks see the fresh data.
-        wslAnchor = captured.wslBundle;
-        wslStatusAnchor = captured.wslStatus || null;
+      } else if (anchored && captured) {
+        // Keep the rolling per-client today partitions fresh for targeted
+        // watch ticks. WSL stays independently frozen between interval ticks.
+        if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
+        if (refreshWsl) {
+          wslAnchor = captured.wslBundle;
+          wslStatusAnchor = captured.wslStatus || null;
+        }
       }
       await onUpdate?.(summary, reason);
       if (!anchored) setupWatchers();
@@ -1291,6 +1412,7 @@ function startCollector(options) {
       return true;
     } catch (error) {
       if (stopped) return;
+      if (intervalRequiresActivity) scheduledWatchNeedsFullScan = true;
       if (onError) onError(error, reason); else log(`collector tick failed (${reason}): ${error.message}`);
       return false;
     }
@@ -1334,15 +1456,32 @@ function startCollector(options) {
     }
   }
 
-  function scheduleTick(reason) {
+  function recordWatchClients(eventClients) {
+    if (Array.isArray(eventClients)) {
+      if (eventClients.length === 0) scheduledWatchNeedsFullScan = true;
+      else for (const client of eventClients) scheduledWatchClients.add(client);
+    }
+  }
+
+  function takeWatchClients(additionalClients = []) {
+    const targetClients = scheduledWatchNeedsFullScan
+      ? []
+      : [...new Set([...scheduledWatchClients, ...additionalClients])];
+    scheduledWatchClients.clear();
+    scheduledWatchNeedsFullScan = false;
+    return targetClients;
+  }
+
+  function scheduleTick(reason, eventClients) {
     if (stopped) return;
+    recordWatchClients(eventClients);
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       // Re-arm instead of queueing onto the in-flight tick: the coalesce path
       // would re-run immediately on completion, stacking scans back-to-back.
       if (tickInFlight) { scheduleTick(reason); return; }
-      runTick(reason, { todayOnly: true });
+      runTick(reason, { todayOnly: true, targetClients: takeWatchClients() });
     }, watchDebounceMs);
   }
 
@@ -1355,7 +1494,8 @@ function startCollector(options) {
 
   function setupWatchers() {
     if (!watchEnabled) return;
-    const dirs = watchPathsForClients(clients);
+    const rootsByClient = watchClientRootsForClients(clients);
+    const dirs = [...new Set(Object.values(rootsByClient).flat())];
     const directoryKey = dirs.join('\0');
     if (directoryKey === watchedDirectoryKey) return;
     closeWatchers();
@@ -1382,7 +1522,13 @@ function startCollector(options) {
             ? activityRevision
             : Math.max(pendingActivityRevision, activityRevision);
         }
-        if (watchTriggersCollection) scheduleTick(`watch:${event}:${path.basename(filePath || '')}`);
+        const eventClients = clientsForWatchPath(filePath, rootsByClient);
+        if (watchTriggersCollection) {
+          scheduleTick(
+            `watch:${event}:${path.basename(filePath || '')}`,
+            eventClients
+          );
+        } else recordWatchClients(eventClients);
       });
       watcher.on('error', (error) => log(`chokidar error: ${error.message}`));
       watchers.push(watcher);
@@ -1415,8 +1561,9 @@ function startCollector(options) {
     // lastFullScanAt === 0 means no valid timestamp exists (cold start,
     // unparseable, or future timestamp) — force a full scan immediately.
     const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
+    const targetClients = intervalRequiresActivity ? takeWatchClients(selfSyncedClients) : [];
     runTick('interval', {
-      ...(anchorToday ? { todayOnly: true, refreshWsl: true } : {}),
+      ...(anchorToday ? { todayOnly: true, refreshWsl: true, targetClients } : {}),
       activityRevision: activityRevisionAtStart
     }).finally(() => {
       if (stopped) return;

@@ -544,6 +544,45 @@ test('cursor sync runs at most once per throttle window across ticks', async () 
   }
 });
 
+test('a targeted tick does not sync an unrelated self-synced client', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = recordingSpawn([]);
+  const cursorAuth = require('../../src/shared/cursorAuth');
+  const originalReadActiveAccount = cursorAuth.readActiveAccount;
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  let syncCalls = 0;
+  cursorAuth.readActiveAccount = () => ({ accessToken: 'token' });
+  cursorAuth.runCursorSync = async () => { syncCalls += 1; };
+  try {
+    const { collectUsageOnce, localTodayKey } = freshCollector();
+    const claude = emptyPeriod();
+    const cursor = emptyPeriod();
+    await collectUsageOnce({
+      clients: 'claude,cursor',
+      targetClients: ['claude'],
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      todayOnlyAnchor: {
+        dateKey: localTodayKey(),
+        today: emptyPeriod(),
+        month: emptyPeriod(),
+        allTime: emptyPeriod(),
+        todayPartitions: { claude, cursor }
+      }
+    });
+    assert.equal(syncCalls, 0);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    cursorAuth.readActiveAccount = originalReadActiveAccount;
+    cursorAuth.runCursorSync = originalRunCursorSync;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('collectUsageOnce runs the three tokscale scans serially, not concurrently', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
@@ -683,6 +722,152 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
   }
 });
 
+test('live watch events scan only changed clients and preserve the other client partitions', async () => {
+  const tmp = withTmpHome([
+    path.join('.claude', 'projects'),
+    path.join('.codex', 'sessions')
+  ]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  let codexDeleted = false;
+  let codexUnattributed = false;
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const selected = String(args[args.indexOf('--client') + 1] || '').split(',').filter(Boolean);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setImmediate(() => {
+      const entries = codexUnattributed && selected.length === 1 && selected[0] === 'codex'
+        ? [{ model: 'unknown', totalTokens: 99 }]
+        : selected.filter((client) => !(codexDeleted && client === 'codex')).map((client) => {
+            const tokens = client === 'codex' && selected.length === 1 ? 30 : (client === 'codex' ? 20 : 10);
+            return {
+              client,
+              sessionId: `${client}-session`,
+              model: `${client}-model`,
+              totalTokens: tokens,
+              input: tokens,
+              cacheRead: tokens,
+              output: tokens,
+              cost: tokens / 100
+            };
+          });
+      child.stdout.emit('data', Buffer.from(JSON.stringify({
+        entries
+      })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,codex',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(calls.length, 3, 'startup still performs one serial full scan');
+    assert.ok(watchHandler, 'watcher handler captured');
+
+    watchHandler('change', path.join(tmp, '.codex', 'sessions', 'active.jsonl'));
+    await waitForCondition(() => updates.length === 2);
+
+    const targeted = calls[3];
+    assert.equal(targeted[targeted.indexOf('--client') + 1], 'codex');
+    assert.ok(targeted.includes('--today'));
+    assert.equal(updates[1].summary.today.totalTokens, 40);
+    assert.equal(updates[1].summary.today.clients.claude, 10);
+    assert.equal(updates[1].summary.today.clients.codex, 30);
+    assert.equal(updates[1].summary.today.models['claude-model'], 10);
+    assert.equal(updates[1].summary.today.models['codex-model'], 30);
+    assert.equal(updates[1].summary.today.cacheReadTokens, 40);
+    assert.equal(updates[1].summary.month.totalTokens, 40);
+    assert.equal(updates[1].summary.allTime.totalTokens, 40);
+
+    // Multiple clients changing inside one debounce window become one targeted
+    // scan containing the union, not two subprocesses or an all-client fallback.
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'a.jsonl'));
+    watchHandler('change', path.join(tmp, '.codex', 'sessions', 'b.jsonl'));
+    await waitForCondition(() => updates.length === 3);
+    const union = calls[4];
+    assert.equal(union[union.indexOf('--client') + 1], 'claude,codex');
+    assert.equal(calls.length, 5);
+
+    watchHandler('change', path.join(tmp, 'unmapped', 'unknown.jsonl'));
+    await waitForCondition(() => updates.length === 4);
+    const fallback = calls[5];
+    assert.equal(fallback[fallback.indexOf('--client') + 1], 'claude,codex');
+
+    codexUnattributed = true;
+    watchHandler('change', path.join(tmp, '.codex', 'sessions', 'unattributed.jsonl'));
+    await waitForCondition(() => updates.length === 5);
+    assert.equal(calls[6][calls[6].indexOf('--client') + 1], 'codex');
+    assert.equal(calls[7][calls[7].indexOf('--client') + 1], 'claude,codex');
+    assert.equal(updates[4].summary.today.totalTokens, 30);
+
+    // A targeted scan that returns no rows replaces that client's partition
+    // with empty usage, so deletes do not leave stale totals behind.
+    codexUnattributed = false;
+    codexDeleted = true;
+    watchHandler('unlink', path.join(tmp, '.codex', 'sessions', 'active.jsonl'));
+    await waitForCondition(() => updates.length === 6);
+    const deletion = calls[8];
+    assert.equal(deletion[deletion.indexOf('--client') + 1], 'codex');
+    assert.equal(updates[5].summary.today.totalTokens, 10);
+    assert.equal(updates[5].summary.today.clients.claude, 10);
+    assert.equal(updates[5].summary.today.clients.codex, undefined);
+    assert.equal(updates[5].summary.month.totalTokens, 10);
+    assert.equal(updates[5].summary.allTime.totalTokens, 10);
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('smart collection uses native watching and skips idle intervals after startup', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
@@ -744,8 +929,11 @@ test('smart collection uses native watching and skips idle intervals after start
   }
 });
 
-test('smart collection coalesces watch events into one interval scan', async () => {
-  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+test('smart collection coalesces watch events into one targeted interval scan', async () => {
+  const tmp = withTmpHome([
+    path.join('.claude', 'projects'),
+    path.join('.codex', 'sessions')
+  ]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   os.homedir = () => tmp;
@@ -769,7 +957,7 @@ test('smart collection coalesces watch events into one interval scan', async () 
     const { startCollector } = freshCollector();
     const updates = [];
     handle = startCollector({
-      clients: 'claude',
+      clients: 'claude,codex,cursor',
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
@@ -785,14 +973,15 @@ test('smart collection coalesces watch events into one interval scan', async () 
     });
 
     await waitForCondition(() => updates.length === 1);
-    watchHandler('change', '/fake/one.jsonl');
-    watchHandler('change', '/fake/two.jsonl');
-    watchHandler('change', '/fake/three.jsonl');
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'one.jsonl'));
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'two.jsonl'));
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'three.jsonl'));
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(calls.length, 3, 'watch events never scan immediately in smart mode');
 
     await waitForCondition(() => updates.length === 2);
     assert.equal(calls.length, 4, 'one today-only scan acknowledges the event batch');
+    assert.equal(calls[3][calls[3].indexOf('--client') + 1], 'claude,cursor');
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(calls.length, 4, 'the acknowledged batch does not repeat');
   } finally {
@@ -881,7 +1070,10 @@ test('smart collection keeps events received during a scan pending', async () =>
 });
 
 test('smart collection retries a failed activity scan on the next interval', async () => {
-  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const tmp = withTmpHome([
+    path.join('.claude', 'projects'),
+    path.join('.codex', 'sessions')
+  ]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   os.homedir = () => tmp;
@@ -920,7 +1112,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
     const updates = [];
     const errors = [];
     handle = startCollector({
-      clients: 'claude',
+      clients: 'claude,codex,cursor',
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
@@ -938,10 +1130,16 @@ test('smart collection retries a failed activity scan on the next interval', asy
 
     await waitForCondition(() => updates.length === 1);
     failNext = true;
-    watchHandler('change', '/fake/session.jsonl');
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'session.jsonl'));
     await waitForCondition(() => errors.length === 1);
     await waitForCondition(() => updates.length === 2);
     assert.equal(calls.length, 5, 'failed and successful activity attempts each spawn once');
+    assert.equal(calls[3][calls[3].indexOf('--client') + 1], 'claude,cursor');
+    assert.equal(
+      calls[4][calls[4].indexOf('--client') + 1],
+      'claude,codex,cursor',
+      'a failed targeted scan retries all clients instead of acknowledging partial data'
+    );
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;

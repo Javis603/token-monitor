@@ -553,62 +553,94 @@ function normalizePeriod(input, options = {}) {
   return period;
 }
 
-function extractUsageFromTokscale(json) {
+const UNATTRIBUTED_USAGE_CLIENT = '__unattributed';
+
+function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
+  const client = detectedClient;
+  const tokens = tokenValue(row);
+  const cost = costValue(row);
+  const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
+  const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
+  const output = Math.max(0, Math.round(firstNumber(row, OUTPUT_TOKEN_KEYS)));
+  let model = detectModel(row);
+  if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
+  period.totalTokens += Math.max(0, Math.round(tokens));
+  period.costUsd += cost;
+  period.cacheReadTokens += cacheRead;
+  period.cacheWriteTokens += cacheWrite;
+  period.outputTokens += output;
+  if (client && tokens > 0) {
+    period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
+    if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
+    if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
+    if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+  }
+  if (client && cost > 0) period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
+  if (model && tokens > 0) {
+    period.models[model] = (period.models[model] || 0) + Math.round(tokens);
+    if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
+    if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
+    if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
+  }
+  if (model && cost > 0) period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
+  if (client && model && tokens > 0) {
+    if (!period.clientModels[client]) period.clientModels[client] = {};
+    period.clientModels[client][model] = (period.clientModels[client][model] || 0) + Math.round(tokens);
+  }
+  if (client && model && cost > 0) {
+    if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
+    period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
+  }
+  const session = sessionFromRow(row);
+  if (session) addSession(period, session);
+}
+
+function fallbackUsagePeriod(json) {
+  return {
+    totalTokens: Math.max(0, Math.round(tokenValue(json))),
+    costUsd: costValue(json),
+    clients: {},
+    clientCosts: {},
+    models: {},
+    modelCosts: {},
+    clientModels: {},
+    clientModelCosts: {},
+    sessions: {}
+  };
+}
+
+// Build the public aggregate and exact internal per-client partitions in one
+// pass. The partitions stay collector-internal; they let a watch tick replace
+// only the client whose files changed without reconstructing model/cache/project
+// attribution from the already-aggregated public period.
+function extractUsageBundleFromTokscale(json) {
   const rows = [];
   collectUsageRows(json, rows);
   if (rows.length === 0 && json && typeof json === 'object') {
+    const period = fallbackUsagePeriod(json);
     return {
-      totalTokens: Math.max(0, Math.round(tokenValue(json))),
-      costUsd: costValue(json),
-      clients: {},
-      clientCosts: {},
-      models: {},
-      modelCosts: {},
-      clientModels: {},
-      clientModelCosts: {},
-      sessions: {}
+      period,
+      byClient: { [UNATTRIBUTED_USAGE_CLIENT]: period }
     };
   }
   const period = emptyPeriod();
+  const byClient = Object.create(null);
   for (const row of rows) {
     const client = detectClient(row);
-    const tokens = tokenValue(row);
-    const cost = costValue(row);
-    const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
-    const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
-    const output = Math.max(0, Math.round(firstNumber(row, OUTPUT_TOKEN_KEYS)));
-    let model = detectModel(row);
-    if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
-    period.totalTokens += Math.max(0, Math.round(tokens));
-    period.costUsd += cost;
-    period.cacheReadTokens += cacheRead;
-    period.cacheWriteTokens += cacheWrite;
-    period.outputTokens += output;
-    if (client && tokens > 0) {
-      period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
-      if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
-      if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
-      if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
-    }
-    if (client && cost > 0) period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
-    if (model && tokens > 0) {
-      period.models[model] = (period.models[model] || 0) + Math.round(tokens);
-      if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
-      if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
-      if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
-    }
-    if (model && cost > 0) period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
-    if (client && model && tokens > 0) {
-      if (!period.clientModels[client]) period.clientModels[client] = {};
-      period.clientModels[client][model] = (period.clientModels[client][model] || 0) + Math.round(tokens);
-    }
-    if (client && model && cost > 0) {
-      if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
-      period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
-    }
-    const session = sessionFromRow(row);
-    if (session) addSession(period, session);
+    const partitionKey = client || UNATTRIBUTED_USAGE_CLIENT;
+    if (!byClient[partitionKey]) byClient[partitionKey] = emptyPeriod();
+    addUsageRowToPeriod(period, row, client);
+    addUsageRowToPeriod(byClient[partitionKey], row, client);
   }
+  return { period, byClient };
+}
+
+function extractUsageFromTokscale(json) {
+  const rows = [];
+  collectUsageRows(json, rows);
+  if (rows.length === 0 && json && typeof json === 'object') return fallbackUsagePeriod(json);
+  const period = emptyPeriod();
+  for (const row of rows) addUsageRowToPeriod(period, row);
   return period;
 }
 
@@ -1062,4 +1094,22 @@ function deltaValue(base, fresh, anchor, key) {
   return base ?? fresh;
 }
 
-module.exports = { PERIODS, addPeriodInto, aggregateDevices, aggregateHistory, applyPeriodDelta, applyProjectRollups, canonicalProjectKey, carryDeviceHistory, emptyPeriod, extractUsageFromTokscale, mergeDeviceRecord, mergePeriods, normalizeDeviceRecord, normalizePeriod, projectRollupFromSessions };
+module.exports = {
+  PERIODS,
+  UNATTRIBUTED_USAGE_CLIENT,
+  addPeriodInto,
+  aggregateDevices,
+  aggregateHistory,
+  applyPeriodDelta,
+  applyProjectRollups,
+  canonicalProjectKey,
+  carryDeviceHistory,
+  emptyPeriod,
+  extractUsageBundleFromTokscale,
+  extractUsageFromTokscale,
+  mergeDeviceRecord,
+  mergePeriods,
+  normalizeDeviceRecord,
+  normalizePeriod,
+  projectRollupFromSessions
+};

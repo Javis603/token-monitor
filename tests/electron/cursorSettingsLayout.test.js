@@ -1153,6 +1153,7 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
 
 test('main settings normalize collection cadence and restart only the device runtime when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const collector = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'collector.js'), 'utf8');
   assert.match(main, /function normalizeCollectionMode/);
   assert.match(main, /function normalizeCollectionIntervalMs/);
   assert.match(main, /COLLECTION_MODE_VALUES = new Set\(\[[^\]]*'smart'/);
@@ -1172,8 +1173,10 @@ test('main settings normalize collection cadence and restart only the device run
   assert.match(usageConfig, /watchTriggersCollection: collectorWatchTriggersCollection\(\)/);
   assert.match(usageConfig, /intervalRequiresActivity: collectorIntervalRequiresActivity\(\)/);
 
-  // Smart mode keeps watching (native events) but never scans on the event itself.
-  assert.match(main, /function collectorWatchUsePolling[\s\S]*?=== 'live'/);
+  // macOS live mode uses native events; other platforms retain polling.
+  // Smart mode uses native events everywhere and never scans on the event itself.
+  assert.match(main, /function collectorWatchUsePolling[\s\S]*?process\.platform !== 'darwin'[\s\S]*?=== 'live'/);
+  assert.match(collector, /watchUsePolling = process\.platform !== 'darwin'/);
   assert.match(main, /function collectorIntervalRequiresActivity[\s\S]*?=== 'smart'/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
