@@ -21,8 +21,12 @@ function freshCollector() {
   return require(collectorPath);
 }
 
+// realpath the base: a real os.homedir() is already canonical, but os.tmpdir()
+// is an 8.3 short path on the Windows CI runner. Without this the fixture home
+// differs from the canonical root the collector watches, so the synthetic event
+// paths below would stop mapping back to their client on Windows only.
 function withTmpHome(prepare) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-home-'));
+  const tmp = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'token-monitor-home-'));
   for (const dir of prepare) fs.mkdirSync(path.join(tmp, dir), { recursive: true });
   return tmp;
 }

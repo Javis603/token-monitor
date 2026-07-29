@@ -1076,11 +1076,15 @@ const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
 
 function watchIgnoreMatcher(clientsCsv) {
   const candidates = clientWatchCandidates(clientsCsv);
-  const hermesRoots = (candidates.hermes || []).map((dir) => path.resolve(dir));
+  // canonicalWatchPath must be applied here too: chokidar reports events under
+  // whatever root it was handed, so a matcher built on the uncanonicalised path
+  // would stop matching on Windows and silently un-prune the Hermes runtime
+  // (issue #38) while the watch itself still worked.
+  const hermesRoots = (candidates.hermes || []).map((dir) => path.resolve(canonicalWatchPath(dir)));
   const hermesRootSet = new Set(hermesRoots);
   const copilotRoots = (candidates.copilot || [])
     .filter((dir) => path.basename(dir) === 'workspaceStorage')
-    .map((dir) => path.resolve(dir));
+    .map((dir) => path.resolve(canonicalWatchPath(dir)));
   if (hermesRoots.length === 0 && copilotRoots.length === 0) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
@@ -1248,6 +1252,21 @@ function resolveWatchUsePolling(preferred, env = process.env) {
 // everywhere, suppressing this fallback is the only thing that direction of the
 // override still does.
 const WATCH_DESCRIPTOR_ERROR_CODES = new Set(['ENOSPC', 'EMFILE', 'ENFILE']);
+
+// Windows only: libuv asserts that the filename ReadDirectoryChangesW hands
+// back starts with the directory string it was given, and calls abort() when it
+// does not (src/win/fs-event.c). An 8.3 short path such as C:\Users\RUNNER~1\…
+// is reported back in its long form and trips exactly that assert, taking the
+// whole process down. That is a native abort, so handleWatchError can never see
+// it and the polling fallback cannot save us — the only guard is to hand
+// chokidar the canonical long path in the first place. Junctions reach the same
+// assert by the same route. Identity off Windows, so watch roots elsewhere stay
+// byte-identical to the paths tokscale reads.
+function canonicalWatchPath(dir) {
+  if (process.platform !== 'win32') return dir;
+  try { return fs.realpathSync.native(dir); }
+  catch (_) { return dir; }
+}
 
 function watcherOptions(usePolling, ignored) {
   return {
@@ -1574,7 +1593,13 @@ function startCollector(options) {
 
   function setupWatchers() {
     if (!watchEnabled) return;
-    const rootsByClient = watchClientRootsForClients(clients);
+    // Canonicalise before anything derives from these roots, so the paths handed
+    // to chokidar and the paths clientsForWatchPath matches against are the same
+    // strings. Resolving only one of the two would silently break attribution.
+    const rootsByClient = Object.fromEntries(
+      Object.entries(watchClientRootsForClients(clients))
+        .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
+    );
     const dirs = [...new Set(Object.values(rootsByClient).flat())];
     const directoryKey = dirs.join('\0');
     if (directoryKey === watchedDirectoryKey) return;

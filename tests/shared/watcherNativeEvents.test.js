@@ -28,8 +28,13 @@ const { watcherOptions } = require('../../src/shared/collector');
 // emitted, so the floor is already half a second before any scheduling noise.
 const EVENT_TIMEOUT_MS = 20 * 1000;
 
+// os.tmpdir() is an 8.3 short path on the Windows CI runner
+// (C:\Users\RUNNER~1\...), and handing one to fs.watch aborts the process
+// inside libuv rather than raising anything catchable. Production never watches
+// tmp, and canonicalWatchPath() guards the roots it does watch, so canonicalise
+// here for the same reason: to exercise native events, not that libuv bug.
 function withTmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'tm-watch-'));
+  return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-watch-'));
 }
 
 async function watchAndCollect(dir, act) {
