@@ -1,5 +1,6 @@
 import { mkdir, rm, writeFile, copyFile, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { build as bundle } from "esbuild";
 
 const siteRoot = new URL("./", import.meta.url);
 const outputRoot = new URL("../_site/", import.meta.url);
@@ -13,6 +14,7 @@ const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "
 const assets = [
   ["assets/app.png", "assets/app.png"], // full app icon used by the Discord mockup
   ["assets/icon.png", "assets/icon.png"], // nav brand mark (glass sigma)
+  ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
   ...iconNames.map((name) => [`assets/icons/${name}.svg`, `assets/icons/${name}.svg`]),
 ];
 
@@ -22,10 +24,11 @@ async function concat(files) {
   return parts.join("\n");
 }
 function rewriteHtml(html) {
-  // collapse the 4 dev CSS links into one, and the 3 dev scripts into one
+  // Collapse the 4 dev CSS links into one, then add the bundled React islands
+  // beside the existing concatenated i18n/main script.
   return html
     .replace(/\s*<link rel="stylesheet" href="styles\/tokens\.css(?:\?[^"]*)?">[\s\S]*?<link rel="stylesheet" href="styles\/sections\.css(?:\?[^"]*)?">/, '\n    <link rel="stylesheet" href="styles.css">')
-    .replace(/\s*<script src="scripts\/i18n\.js(?:\?[^"]*)?" defer><\/script>[\s\S]*?<script src="scripts\/main\.js(?:\?[^"]*)?" defer><\/script>/, '\n    <script src="app.js" defer></script>')
+    .replace(/\s*<script src="scripts\/i18n\.js(?:\?[^"]*)?" defer><\/script>[\s\S]*?<script src="scripts\/main\.js(?:\?[^"]*)?" defer><\/script>/, '\n    <script src="app.js" defer></script>\n    <script src="islands.js" defer></script>')
     .replace(/url\(\.\.\/assets\//g, "url(assets/");
 }
 
@@ -35,6 +38,17 @@ await mkdir(new URL("assets/icons/", outputRoot), { recursive: true });
 
 await writeFile(new URL("styles.css", outputRoot), await concat(cssFiles));
 await writeFile(new URL("app.js", outputRoot), await concat(jsFiles));
+await bundle({
+  entryPoints: [fileURLToPath(new URL("scripts/islands.jsx", siteRoot))],
+  outfile: fileURLToPath(new URL("islands.js", outputRoot)),
+  bundle: true,
+  format: "iife",
+  platform: "browser",
+  target: ["es2020"],
+  jsx: "automatic",
+  minify: true,
+  legalComments: "inline"
+});
 
 const html = await readFile(new URL("index.html", siteRoot), "utf8");
 await writeFile(new URL("index.html", outputRoot), rewriteHtml(html));

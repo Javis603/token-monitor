@@ -145,6 +145,46 @@ function setupHeroTilt() {
   }, 1500);
 }
 
+/* Hovering the supported-tools strip should preserve its sense of motion.
+   Ease the Web Animations playback rate down instead of snapping to a stop,
+   then let it return to full speed more gradually on pointerleave. */
+function setupToolMarquee() {
+  var marquee = document.querySelector(".tool-marquee");
+  var track = marquee && marquee.querySelector(".tool-track");
+  if (!marquee || !track || reducedMotion()) return;
+  if (!(window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches)) return;
+  if (typeof track.getAnimations !== "function") {
+    marquee.classList.add("marquee-css-fallback");
+    return;
+  }
+
+  var frame = 0;
+  var rate = 1;
+  function easeRate(target, duration) {
+    cancelAnimationFrame(frame);
+    var animations = track.getAnimations();
+    var animation = animations.length ? animations[0] : null;
+    if (!animation) {
+      marquee.classList.add("marquee-css-fallback");
+      return;
+    }
+    var from = rate;
+    var started = performance.now();
+    function step(now) {
+      var progress = Math.min(1, (now - started) / duration);
+      var eased = 1 - Math.pow(1 - progress, 4);
+      rate = from + (target - from) * eased;
+      if (typeof animation.updatePlaybackRate === "function") animation.updatePlaybackRate(rate);
+      else animation.playbackRate = rate;
+      if (progress < 1) frame = requestAnimationFrame(step);
+    }
+    frame = requestAnimationFrame(step);
+  }
+
+  marquee.addEventListener("pointerenter", function () { easeRate(0.22, 450); });
+  marquee.addEventListener("pointerleave", function () { easeRate(1, 700); });
+}
+
 /* Scroll-driven product story. Desktop keeps the app preview pinned while the
    reader moves through each feature; the nearest story beat owns the stage.
    Mobile and reduced-motion layouts move each real scene inline so no content
@@ -967,6 +1007,7 @@ document.addEventListener("DOMContentLoaded", function () {
   setupObservers();
   setupHeroHome();
   setupHeroTilt();
+  setupToolMarquee();
   setupFeatureStory();
   setupDashboard();
   setupDiscordClock();

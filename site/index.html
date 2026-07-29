@@ -62,10 +62,11 @@
 
     <main id="main">
       <section class="hero section shell" id="top">
+        <div class="hero-rays" data-react-island="side-rays" aria-hidden="true"></div>
         <div class="hero-copy reveal">
-          <p class="eyebrow" data-i18n="hero.eyebrow">Local-first AI coding telemetry</p>
-          <h1 data-i18n="hero.title">AI Tools usage at a glance</h1>
-          <p class="lede" data-i18n="hero.lede">Live tokens, cost, limits, sessions, and history across 28+ AI coding tools. Local first, with optional self-hosted sync.</p>
+          <img class="hero-brand-icon" src="assets/app.png" alt="">
+          <h1 data-i18n="hero.title">Token Monitor</h1>
+          <p class="lede" data-i18n="hero.lede">See usage, cost, and limits across every AI coding tool at a glance.</p>
           <div class="hero-actions hero-download-actions" aria-label="Primary actions" data-i18n-attr="aria-label:hero.actions">
             <a class="btn btn-primary smart-download" data-smart-download href="https://github.com/Javis603/token-monitor/releases/latest" aria-label="Download the latest Token Monitor release" data-i18n-attr="aria-label:cta.download.aria.generic">
               <img class="smart-download-icon" data-smart-icon src="assets/icons/os-apple.svg" alt="">
@@ -84,74 +85,9 @@
             </a>
           </div>
         </div>
-        <div class="hero-visual reveal">
-          <div class="product-stack product-stack--home" data-home-demo role="group" aria-label="Interactive preview of the Token Monitor Home dashboard" data-i18n-attr="aria-label:hero.preview">
-            <div class="app-widget app-widget-main home-app-widget">
-              <div class="tm-inner home-app-inner">
-                <div class="tm-titlebar">
-                  <div class="tm-title tm-title-icon" aria-label="Token Monitor"><span aria-hidden="true">Σ</span><span class="tm-live"></span></div>
-                  <div class="tm-tabs home-period-tabs" role="tablist" aria-label="Usage period" data-i18n-attr="aria-label:hero.periods">
-                    <button class="active" type="button" role="tab" aria-selected="true" data-home-period="day">DAY</button>
-                    <button type="button" role="tab" aria-selected="false" tabindex="-1" data-home-period="month">MONTH</button>
-                    <button type="button" role="tab" aria-selected="false" tabindex="-1" data-home-period="total">TOTAL</button>
-                  </div>
-                </div>
-
-                <div class="tm-label">TOTAL TOKENS</div>
-                <div class="tm-total" data-countup="119447218" data-home-total>119,447,218</div>
-                <div class="tm-cost" data-home-cost>$99.60</div>
-
-                <div class="home-overview">
-                  <section class="home-module home-limits" aria-label="Limits">
-                    <div class="home-module-head"><strong data-i18n="home.limits">LIMITS</strong><span class="home-module-action" aria-hidden="true">◔</span></div>
-                    <div class="home-limit-row">
-                      <div class="home-provider"><span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span><strong>Codex · Work</strong></div>
-                      <div class="home-window home-window-wide"><span>Weekly</span><strong>83% left</strong><small>Reset 4d 22h</small></div>
-                    </div>
-                    <div class="home-limit-row">
-                      <div class="home-provider"><span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span><strong>Codex · Personal</strong></div>
-                      <div class="home-window home-window-wide"><span>Weekly</span><strong>67% left</strong><small>Reset 5d 3h</small></div>
-                    </div>
-                    <div class="home-limit-row">
-                      <div class="home-provider"><span class="tm-icon"><img src="assets/icons/claude.svg" alt=""></span><strong>Claude</strong></div>
-                      <div class="home-window"><span>Session</span><strong>62% left</strong><small>Reset 3h 36m</small></div>
-                      <div class="home-window"><span>Weekly</span><strong>37% left</strong><small>Reset 3d 6h</small></div>
-                    </div>
-                  </section>
-
-                  <section class="home-module home-models" aria-label="Models">
-                    <div class="home-module-head"><strong data-i18n="home.models">MODELS</strong><span class="home-module-action" aria-hidden="true">⌘</span></div>
-                    <div class="home-model-row"><span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span><span>gpt-5.6-sol</span><strong>58.8M</strong><small>49%</small></div>
-                    <div class="home-model-row"><span class="tm-icon"><img src="assets/icons/claude.svg" alt=""></span><span>claude-opus-5</span><strong>58.7M</strong><small>49%</small></div>
-                    <div class="home-model-row"><span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span><span>codex-auto-review</span><strong>1.8M</strong><small>1%</small></div>
-                    <div class="home-model-row"><span class="tm-icon"><img src="assets/icons/claude.svg" alt=""></span><span>claude-sonnet-5</span><strong>81.5K</strong><small>0%</small></div>
-                    <div class="home-model-row"><span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span><span>gpt-5.6-luna</span><strong>16.8K</strong><small>0%</small></div>
-                  </section>
-
-                  <section class="home-module home-activity" aria-label="Activity">
-                    <div class="home-module-head"><strong data-i18n="home.activity">ACTIVITY</strong><span data-i18n="home.activeDays">120 active days ↗</span></div>
-                    <div class="home-activity-scroll" aria-hidden="true">
-                      <div class="home-heatmap" data-home-heatmap></div>
-                      <div class="home-months"><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span></div>
-                    </div>
-                    <div class="home-trend-head"><strong data-i18n="home.trend">TREND</strong><span data-i18n="home.peak">Peak 430.2M</span></div>
-                    <div class="home-trend" aria-hidden="true">
-                      <svg viewBox="0 0 320 70" preserveAspectRatio="xMidYMid meet">
-                        <defs><linearGradient id="heroTrendFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#70bff5" stop-opacity=".24"/><stop offset="1" stop-color="#70bff5" stop-opacity="0"/></linearGradient></defs>
-                        <path class="trend-fill" d="M0 62 C8 60 12 67 18 62 S22 30 28 54 S38 48 46 43 S55 48 64 44 S73 38 84 43 S93 47 99 35 S109 60 119 44 S126 58 134 45 S141 59 149 43 S157 56 165 46 S174 54 184 43 S194 49 204 34 S217 21 226 35 S239 26 249 23 S259 17 267 35 S276 11 284 41 S293 22 302 29 S310 15 316 9 S318 42 320 45 L320 70 L0 70Z"/>
-                        <path class="trend-line" d="M0 62 C8 60 12 67 18 62 S22 30 28 54 S38 48 46 43 S55 48 64 44 S73 38 84 43 S93 47 99 35 S109 60 119 44 S126 58 134 45 S141 59 149 43 S157 56 165 46 S174 54 184 43 S194 49 204 34 S217 21 226 35 S239 26 249 23 S259 17 267 35 S276 11 284 41 S293 22 302 29 S310 15 316 9 S318 42 320 45"/>
-                      </svg>
-                      <div class="home-trend-dates"><span>6/14</span><span>7/6</span><span>7/28</span></div>
-                    </div>
-                  </section>
-                </div>
-
-                <div class="tm-footer home-footer">
-                  <span class="is-active" data-i18n="home.footer">⌂ Home</span>
-                  <span aria-label="Settings">⚙</span>
-                </div>
-              </div>
-            </div>
+        <div class="hero-product reveal">
+          <div class="hero-product-window">
+            <div class="hero-dashboard-island" data-react-island="hero-dashboard"></div>
           </div>
         </div>
         <div class="hero-tools reveal" aria-labelledby="tools-title">
