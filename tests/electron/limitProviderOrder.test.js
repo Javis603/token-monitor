@@ -73,7 +73,8 @@ test('account groups derive their order from the default limits provider order',
   const body = app.slice(start, end);
 
   assert.match(body, /for \(const provider of LIMIT_PROVIDERS\)/);
-  assert.match(body, /provider\.id === 'opencode'\s*\? 'opencodeCookieGroup'\s*: `\$\{provider\.id\}AccountGroup`/);
+  assert.match(body, /const groupId = LIMIT_PROVIDER_ACCOUNT_GROUP_IDS\[provider\.id\]/);
+  assert.match(body, /if \(!groupId\) continue/);
   assert.match(body, /if \(group\?\.parentElement === container\) container\.append\(group\)/);
   assert.ok(app.indexOf('orderAccountProviderGroups();') < app.indexOf('initSettingsAnimationWrappers();'));
 });

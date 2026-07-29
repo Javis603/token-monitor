@@ -521,17 +521,12 @@
           </div>
         </div>
 
-        <div class="settings-group settings-collapsible-group settings-accounts-group">
-          <button class="settings-section-toggle" type="button" data-settings-section="accounts" aria-expanded="false" aria-controls="accountsSettingsDetails">
-            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-accounts" aria-hidden="true"></span><span data-i18n="settings.sections.accounts">Accounts</span></span>
-            <span class="settings-section-meta"><span id="accountsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
-          </button>
-          <div id="accountsSettingsDetails" class="settings-section-details hidden">
+        <div id="accountsSettingsDetails" class="hidden" aria-hidden="true">
             <div id="claudeAccountGroup" class="settings-group cursor-account-group">
               <button id="claudeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="claudeSettingsDetails">
                 <span data-i18n="settings.claude.title">Claude Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="claudeAccountStatus" class="cursor-status-pill" data-i18n="settings.claude.statusNotSet">Not configured</span>
+                  <span id="claudeAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -596,7 +591,7 @@
               <button id="cursorSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="cursorSettingsDetails">
                 <span data-i18n="settings.cursor.title">Cursor Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="cursorAccountStatus" class="cursor-status-pill" data-i18n="settings.common.checking">Checking...</span>
+                  <span id="cursorAccountStatus" class="cursor-status-pill">Checking...</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -625,7 +620,7 @@
               <button id="opencodeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="opencodeSettingsDetails">
                 <span data-i18n="settings.opencode.title">OpenCode Accounts</span>
                 <span class="cursor-settings-summary">
-                  <span id="opencodeCookieStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="opencodeCookieStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -671,7 +666,7 @@
               <button id="openrouterSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="openrouterSettingsDetails">
                 <span data-i18n="settings.openrouter.title">OpenRouter Accounts</span>
                 <span class="cursor-settings-summary">
-                  <span id="openrouterStatus" class="cursor-status-pill" data-i18n="settings.openrouter.statusNotSet">Not configured</span>
+                  <span id="openrouterStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -708,7 +703,7 @@
               <button id="deepseekSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="deepseekSettingsDetails">
                 <span data-i18n="settings.deepseek.title">DeepSeek Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="deepseekApiKeyStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="deepseekApiKeyStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -732,7 +727,7 @@
               <button id="minimaxSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="minimaxSettingsDetails">
                 <span data-i18n="settings.minimax.title">Minimax Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="minimaxApiKeyStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="minimaxApiKeyStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -756,7 +751,7 @@
               <button id="zaiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiSettingsDetails">
                 <span data-i18n="settings.zai.title">Z.ai Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="zaiAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="zaiAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -787,7 +782,7 @@
               <button id="zaiteamSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiteamSettingsDetails">
                 <span data-i18n="settings.zaiteam.title">Z.ai Team Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="zaiteamAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="zaiteamAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -829,7 +824,7 @@
               <button id="volcengineSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="volcengineSettingsDetails">
                 <span data-i18n="settings.volcengine.title">Volcengine Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="volcengineAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="volcengineAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -864,7 +859,7 @@
               <button id="qoderSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="qoderSettingsDetails">
                 <span data-i18n="settings.qoder.title">Qoder Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="qoderAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="qoderAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -900,7 +895,7 @@
               <button id="ollamaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="ollamaSettingsDetails">
                 <span data-i18n="settings.ollama.title">Ollama Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="ollamaAccountStatus" class="cursor-status-pill" data-i18n="settings.ollama.statusNotSet">Not configured</span>
+                  <span id="ollamaAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -929,7 +924,7 @@
               <button id="kimiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="kimiSettingsDetails">
                 <span data-i18n="settings.kimi.title">Kimi Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="kimiAccountStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="kimiAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -972,7 +967,7 @@
               <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
                 <span data-i18n="settings.mimo.title">MiMo Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="mimoAccountStatus" class="cursor-status-pill" data-i18n="settings.mimo.notConfigured">Not configured</span>
+                  <span id="mimoAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -1011,7 +1006,7 @@
               <button id="copilotSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="copilotSettingsDetails">
                 <span data-i18n="settings.copilot.title">GitHub Copilot Account</span>
                 <span class="cursor-settings-summary">
-                  <span id="copilotApiTokenStatus" class="cursor-status-pill" data-i18n="settings.opencode.statusNotSet">Not configured</span>
+                  <span id="copilotApiTokenStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -1047,7 +1042,7 @@
               <button id="thirdpartySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="thirdpartySettingsDetails">
                 <span data-i18n="settings.thirdparty.title">Third-party API Accounts</span>
                 <span class="cursor-settings-summary">
-                  <span id="thirdpartyStatus" class="cursor-status-pill" data-i18n="settings.thirdparty.statusNotSet">Not configured</span>
+                  <span id="thirdpartyStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                 </span>
               </button>
@@ -1155,7 +1150,6 @@
                 <div id="thirdpartyErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
-          </div>
         </div>
 
         <div class="settings-group settings-collapsible-group settings-sync-group">

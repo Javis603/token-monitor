@@ -33,7 +33,6 @@ const settingsIconAssets = {
   appearance: 'appearance.svg',
   tools: 'collection.svg',
   limits: 'limits.svg',
-  accounts: 'accounts.svg',
   sync: 'sync.svg'
 };
 
@@ -118,8 +117,9 @@ test('settings page uses collapsible icon sections with summaries', () => {
   assert.match(html, /class="settings-section-icon settings-section-icon-window"/);
   assert.match(html, /class="settings-section-icon settings-section-icon-tools"/);
   assert.match(html, /class="settings-section-icon settings-section-icon-limits"/);
-  assert.match(html, /class="settings-section-icon settings-section-icon-accounts"/);
   assert.match(html, /class="settings-section-icon settings-section-icon-sync"/);
+  assert.doesNotMatch(html, /data-settings-section="accounts"/);
+  assert.match(html, /id="accountsSettingsDetails" class="hidden" aria-hidden="true"/);
   assert.match(html, /id="generalSettingsSummary"/);
   assert.match(html, /id="mainSettingsSummary"/);
   assert.match(html, /id="windowSettingsSummary"/);
@@ -141,6 +141,7 @@ test('settings page uses collapsible icon sections with summaries', () => {
   assert.match(app, /renderSettingsSummaries/);
   assert.match(app, /settingsSectionSummary/);
   assert.match(app, /for \(const other of SETTINGS_SECTION_IDS\)/);
+  assert.doesNotMatch(app, /'limits', 'accounts', 'sync'/);
   assert.doesNotMatch(app, /viewsSettingsSummary/);
 
   const css = readRendererFile('styles.css');
@@ -299,14 +300,13 @@ test('checkbox labels keep semantics without making the whole row a hit target',
   assert.match(css, /\.settings-panel \.client-checkboxes label\.client-checkbox input\[type="checkbox"\]\s*\{[^}]*cursor:\s*pointer/);
 });
 
-// The whole row is the drag surface now, so the label must not also be a hit
-// target: every press that starts a drag would otherwise toggle the provider on
-// release. Only the checkbox toggles, which is what every other settings row
-// already does.
-test('AI Tool Limits provider rows toggle only from the checkbox', () => {
+// The provider row opens its details, while the checkbox remains the only hit
+// target that enables or disables the provider.
+test('AI Tool Limits provider checkbox keeps an isolated hit target', () => {
   const css = readRendererFile('styles.css');
   assert.doesNotMatch(css, /\.settings-panel \.limit-provider-list label\.client-checkbox\s*\{[^}]*pointer-events:\s*auto/);
   assert.match(css, /\.settings-panel \.checkbox-label,\s*\.settings-panel label\.client-checkbox\s*\{[^}]*pointer-events:\s*none/);
+  assert.match(css, /\.settings-panel label\.client-checkbox > input\[type="checkbox"\]\s*\{[^}]*pointer-events:\s*auto/);
 });
 
 test('theme code feedback clears when the displayed code changes', () => {

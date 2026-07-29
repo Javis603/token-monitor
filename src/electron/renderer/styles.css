@@ -1749,16 +1749,12 @@ span.settings-note.settings-item-desc {
 .settings-panel .limit-provider-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   margin: 0 -2px;
-  padding: 1px 2px;
+  padding: 1px 0;
   border-radius: 6px;
-  /* No grab cursor on hover: the row is not a dedicated drag object the way a
-     handle or a canvas is — it also holds a checkbox and a disclosure, and
-     19 rows worth of cursor changes while merely reading is noise. The section
-     note carries the affordance instead. Only the active drag gets a cursor. */
   touch-action: pan-y;
   transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
   transition:
@@ -1770,12 +1766,49 @@ span.settings-note.settings-item-desc {
 .settings-panel .limit-provider-row label.client-checkbox {
   min-width: 0;
 }
-/* The disclosure and the drag handle share one cell, so a provider without
-   options keeps its handle in line with every other row. */
-.limit-provider-actions {
+.limit-provider-main {
   display: flex;
   align-items: center;
-  gap: 2px;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+.limit-provider-main:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.62);
+  outline-offset: 2px;
+}
+.limit-provider-row.is-disabled .limit-provider-main {
+  color: var(--muted);
+}
+.limit-provider-row.is-disabled .limit-provider-tag {
+  border-color: rgba(var(--line-rgb), 0.13);
+  color: var(--muted);
+}
+.limit-provider-actions {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 58%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.limit-provider-actions > .cursor-status-pill {
+  flex: 0 1 auto;
+}
+.limit-provider-row.expanded > .limit-provider-main .cursor-disclosure-icon {
+  transform: rotate(180deg);
 }
 /* Provider options hang under their own row, spanning the full width beneath
    both the label and the actions. The row's spacing is a column gap only: a row
@@ -1789,6 +1822,7 @@ span.settings-note.settings-item-desc {
 .settings-panel .limit-provider-row > .accordion-animated-container {
   grid-column: 1 / -1;
   margin-top: 4px;
+  cursor: default;
 }
 /* The dragged row must track the pointer with zero latency, so it opts out of
    the transform transition its neighbours use to slide out of the way. */
@@ -1809,21 +1843,38 @@ span.settings-note.settings-item-desc {
    geometry rather than a mid-animation height. */
 .limit-provider-list.is-reordering .accordion-animated-container { transition: none; }
 .settings-panel .limit-provider-settings-list {
-  margin-left: 22px;
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
 }
 .settings-panel .limit-provider-toggle {
   align-items: flex-start;
 }
 .limit-provider-copy {
   display: grid;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 3px;
   white-space: normal;
+}
+.limit-provider-name-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
 .limit-provider-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.limit-provider-status-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2px rgba(var(--success-rgb), 0.1);
 }
 .limit-provider-tags {
   display: flex;
@@ -1881,6 +1932,30 @@ span.settings-note.settings-item-desc {
 }
 .limit-provider-tag-muted {
   color: var(--muted);
+}
+.limit-provider-options-inner {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+.limit-provider-account-group {
+  margin-left: 0;
+}
+.limit-provider-account-group > .settings-group-header {
+  display: none;
+}
+.limit-provider-connection-detail {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 4px 0 2px;
+}
+.limit-provider-connection-title {
+  color: var(--text);
+  font-size: 10px;
+}
+.limit-provider-connection-detail > .settings-note {
+  margin: 0;
 }
 .preference-order-handle {
   display: inline-flex;

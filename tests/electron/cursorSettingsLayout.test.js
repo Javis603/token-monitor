@@ -794,15 +794,10 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.match(allowlist, /parsed\.hostname === 'claude\.ai' && parsed\.pathname\.startsWith\('\/settings'\)/);
 });
 
-test('DeepSeek account linked state requires a validated API key', () => {
+test('DeepSeek account pill keeps its validated API key state after moving into Limits', () => {
   const app = readRendererFile('app.js');
-  const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
-  assert.match(summaryBody, /const deepseekLinked = deepseekAccountLinked\(\);/);
-  assert.doesNotMatch(
-    summaryBody,
-    /const deepseekLinked = Boolean\(state\.settings\?\.deepseekApiKeyConfigured\);/,
-    'the account summary should not count an unverified stored API key as linked'
-  );
+  assert.match(app, /deepseek: 'deepseekAccountGroup'/);
+  assert.match(app, /deepseek: 'deepseekApiKeyStatus'/);
 
   const linkedBody = functionBody(app, 'deepseekAccountLinked', 'deepseekProviderStatus');
   assert.match(linkedBody, /Boolean\(state\.settings\?\.deepseekApiKeyConfigured\)/);

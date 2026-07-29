@@ -20,15 +20,19 @@ function cssRule(source, selector) {
 test('limit provider expansion goes through one shared helper', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function setLimitProviderSettingsExpanded\(providerId\) \{/);
-  // The disclosure no longer hand-rolls the three class/aria mutations.
-  assert.match(app, /disclosure\.addEventListener\('click', \(\) => \{\s*setLimitProviderSettingsExpanded\(/);
+  // Account rows notify their original live toggle; automatic/provider-only
+  // panels use the same outer helper directly.
+  assert.match(app, /const toggleOptions = \(\) => \{[\s\S]*?accountToggle\.click\(\);[\s\S]*?setLimitProviderSettingsExpanded\(/);
+  assert.match(app, /main\.addEventListener\('click', toggleOptions\)/);
+  assert.match(app, /function syncLimitProviderAccountExpansion\(providerId, expanded\)/);
 });
 
 test('the limit provider row carries the drag transform contract', () => {
   const css = readRendererFile('styles.css');
   const row = cssRule(css, '.settings-panel .limit-provider-row');
   assert.match(row, /position: relative;/);
-  // Hover keeps the default cursor; only the active drag changes it.
+  // The base row never advertises a grab interaction; expandable rows get a
+  // separate pointer affordance and only an active drag uses grabbing.
   assert.doesNotMatch(row, /cursor: grab;/);
   assert.match(row, /touch-action: pan-y;/);
   assert.match(row, /transform: translateY\(calc\(var\(--drag-y, 0px\) \+ var\(--drag-shift, 0px\)\)\);/);
@@ -128,7 +132,7 @@ test('the drop mirrors the new order locally before anything can repaint', () =>
 // the checkbox and the disclosure worked at all.
 test('a press on the row own controls never arms a drag', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /const LIMIT_PROVIDER_DRAG_EXCLUDED = 'button, input, select, textarea, a, \.accordion-animated-container';/);
+  assert.match(app, /const LIMIT_PROVIDER_DRAG_EXCLUDED = 'button:not\(\.limit-provider-main\), input, select, textarea, a, \.accordion-animated-container';/);
   const start = app.indexOf('function startLimitProviderRowDrag(');
   const body = app.slice(start, app.indexOf('function setLimitProviderDragListeners(', start));
   const guard = body.indexOf('LIMIT_PROVIDER_DRAG_EXCLUDED');
@@ -141,16 +145,62 @@ test('a press on the row own controls never arms a drag', () => {
   assert.match(body, /rowEl\.contains\(excluded\)/);
 });
 
-test('the drag captures the pointer and releases it before the reorder', () => {
+test('the provider main row is one accessible disclosure beside the checkbox', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /rowEl\.setPointerCapture\?\.\(event\.pointerId\)/);
-  assert.match(app, /rowEl\.addEventListener\('lostpointercapture', onLimitProviderDragAbort\)/);
+  const css = readRendererFile('styles.css');
+  const start = app.indexOf('function renderLimitProviderCheckboxes(');
+  const end = app.indexOf('function limitProviderAccountGroup(', start);
+  assert.ok(start !== -1 && end > start);
+  const body = app.slice(start, end);
+
+  assert.match(body, /main = document\.createElement\('button'\)/);
+  assert.match(body, /main\.className = 'limit-provider-main'/);
+  assert.match(body, /main\.setAttribute\('aria-expanded', String\(expanded\)\)/);
+  assert.match(body, /main\.setAttribute\('aria-controls', optionsContainer\.id\)/);
+  assert.match(body, /const toggleOptions = \(\) => \{/);
+  assert.match(body, /main\.addEventListener\('click', toggleOptions\)/);
+  assert.doesNotMatch(body, /limit-provider-disclosure|row\.addEventListener\('click'/);
+  assert.match(css, /\.limit-provider-main\s*\{[^}]*cursor:\s*pointer/);
+  assert.match(css, /\.settings-panel \.limit-provider-row > \.accordion-animated-container\s*\{[^}]*cursor:\s*default/);
+});
+
+test('pointer capture starts only after the row crosses the drag threshold', () => {
+  const app = readRendererFile('app.js');
+  const armStart = app.indexOf('function startLimitProviderRowDrag(');
+  const armBody = app.slice(armStart, app.indexOf('function setLimitProviderDragListeners(', armStart));
+  assert.doesNotMatch(armBody, /setPointerCapture|lostpointercapture/);
+
+  const moveStart = app.indexOf('function onLimitProviderPointerMove(');
+  const moveBody = app.slice(moveStart, app.indexOf('function onLimitProviderPointerUp(', moveStart));
+  const threshold = moveBody.indexOf('LIMIT_PROVIDER_DRAG_THRESHOLD');
+  const capture = moveBody.indexOf('setPointerCapture');
+  const begin = moveBody.indexOf('beginLimitProviderDrag()');
+  assert.ok(threshold !== -1 && capture > threshold, 'capture should wait until the drag threshold is crossed');
+  assert.ok(begin > capture, 'capture should be active before the drag starts moving rows');
+  assert.match(moveBody, /addEventListener\('lostpointercapture', onLimitProviderDragAbort\)/);
+});
+
+test('the drag releases pointer capture before the reorder', () => {
+  const app = readRendererFile('app.js');
   const start = app.indexOf('function finishLimitProviderDrag(');
   const body = app.slice(start, app.indexOf('function suppressNextLimitProviderClick(', start));
   const release = body.indexOf('releasePointerCapture');
   const reorder = body.indexOf("applyPreferenceOrder('provider'");
   assert.ok(release !== -1 && reorder > release, 'capture is released before the node moves');
   assert.match(body, /removeEventListener\('lostpointercapture', onLimitProviderDragAbort\)/);
+});
+
+test('the drop preserves settings scroll across the DOM reorder and deferred repaint', () => {
+  const app = readRendererFile('app.js');
+  const start = app.indexOf('function finishLimitProviderDrag(');
+  const body = app.slice(start, app.indexOf('function suppressNextLimitProviderClick(', start));
+  const preserve = body.indexOf('preserveSettingsPanelScroll(() => {');
+  const reorder = body.indexOf("applyPreferenceOrder('provider'");
+  const pendingRender = body.indexOf('if (renderPending) renderLimitProviderCheckboxes();');
+
+  assert.ok(preserve !== -1, 'drop should snapshot the scroll position before landing');
+  assert.ok(reorder > preserve, 'the DOM reorder should happen inside the scroll-preserved transaction');
+  assert.ok(pendingRender > reorder, 'a deferred repaint should be covered by the same transaction');
 });
 
 // `blur` does not bubble, so a capture listener on `window` is the standard way
@@ -164,7 +214,7 @@ test('only the window own blur aborts the drag', () => {
   assert.doesNotMatch(app, /'blur', onLimitProviderDragAbort, true/);
 });
 
-test('the drag suppresses the click that would otherwise toggle the checkbox', () => {
+test('the drag suppresses the click that would otherwise toggle provider details', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function suppressNextLimitProviderClick\(\)/);
   assert.match(app, /window\.addEventListener\('click', swallow, true\);/);
