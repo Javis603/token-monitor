@@ -5,15 +5,16 @@ var languageStorageKey = "token-monitor-site-language";
 var translations = {
   en: {
     "meta.title": "Token Monitor: AI Tools usage at a glance",
-    "meta.description": "Token Monitor is a local-first desktop widget for real-time token, cost, limit, and session monitoring across AI Tools.",
+    "meta.description": "Token Monitor is a local-first desktop app for live tokens, cost, limits, sessions, and history across 28+ AI coding tools.",
     "meta.ogTitle": "Token Monitor",
-    "meta.ogDescription": "Local-first token, cost, limit, and session monitoring for AI Tools.",
+    "meta.ogDescription": "Live tokens, cost, limits, sessions, and history across 28+ AI coding tools.",
     "nav.skip": "Skip to content",
     "nav.primary": "Primary",
     "nav.home": "Token Monitor home",
     "nav.language": "Language",
-    "nav.theme": "Toggle light or dark theme",
     "nav.github": "GitHub",
+    "nav.star": "Star",
+    "nav.githubStar": "Star Token Monitor on GitHub",
     "nav.sections": "Section navigation",
     "nav.features": "Features",
     "nav.privacy": "Privacy",
@@ -21,19 +22,52 @@ var translations = {
 
     "hero.eyebrow": "Local-first AI coding telemetry",
     "hero.title": "AI Tools usage at a glance",
-    "hero.lede": "A local-first desktop widget for real-time token, cost, limit, session, and trend monitoring across AI Tools.",
+    "hero.lede": "Live tokens, cost, limits, sessions, and history across 28+ AI coding tools. Local first, with optional self-hosted sync.",
     "hero.actions": "Primary actions",
-    "hero.platforms": "Supported platforms",
+    "hero.platforms": "Other platform downloads",
+    "hero.alsoAvailable": "Also for",
+    "hero.preview": "Interactive preview of the Token Monitor Home dashboard",
+    "hero.periods": "Usage period",
     "cta.download": "Download latest release",
+    "cta.download.generic": "Download latest release",
+    "cta.download.mac": "Download for macOS",
+    "cta.download.windows": "Download for Windows",
+    "cta.download.linux": "Download for Linux",
+    "cta.download.meta.generic": "macOS, Windows, and Linux",
+    "cta.download.meta.mac": "Choose Apple Silicon or Intel",
+    "cta.download.meta.macArm": "Apple Silicon · .dmg",
+    "cta.download.meta.macIntel": "Intel · .dmg",
+    "cta.download.meta.windows": "Windows 10 and 11 · Setup .exe",
+    "cta.download.meta.linux": "Portable x64 AppImage",
+    "cta.download.aria.generic": "Download the latest Token Monitor release",
+    "cta.download.aria.mac": "Download Token Monitor for macOS",
+    "cta.download.aria.windows": "Download Token Monitor for Windows",
+    "cta.download.aria.linux": "Download Token Monitor for Linux",
     "cta.github": "View on GitHub",
 
-    "tools.eyebrow": "Tracks every tool in your loop",
+    "tools.eyebrow": "28+ tools and providers",
+    "home.limits": "LIMITS",
+    "home.models": "MODELS",
+    "home.activity": "ACTIVITY",
+    "home.activeDays": "120 active days ↗",
+    "home.trend": "TREND",
+    "home.peak": "Peak 430.2M",
+    "home.footer": "⌂ Home",
 
-    "feature.title": "Tokens, limits, trends, and session detail in one view.",
+    "feature.title": "Shape the whole AI coding workflow around what you need to see.",
+    "feature.menubar.title": "A menu bar arranged your way",
+    "feature.menubar.body": "Drag together tool icons, single or double quota bars, reset times, percentages, tokens, cost, spacers, separators, and custom text, then see the live result before saving.",
+    "feature.menubar.previewKicker": "MENU BAR COMPOSER",
+    "feature.menubar.previewTitle": "Build the signal you want to see.",
+    "feature.menubar.previewSaved": "Live preview",
+    "feature.menubar.previewOrder": "Display order",
+    "feature.menubar.previewHint": "Drag to reorder · Select to edit",
+    "feature.menubar.previewAdd": "Add to display",
+    "feature.menubar.previewSync": "Updates with every refresh",
     "feature.live.title": "Live token tracking & cost",
-    "feature.live.body": "Watch every supported AI coding tool — Claude Code, Codex, Cursor, Kimi, Qwen, Grok, Copilot, and the rest — update within seconds of each turn, with cost and cache-hit rates alongside every count, themed light or dark to match your setup.",
+    "feature.live.body": "Watch every supported AI coding tool, including Claude Code, Codex, Cursor, Kimi, Qwen, Grok, Copilot, and the rest, update within seconds of each turn. Cost and cache-hit rates sit alongside every count.",
     "feature.limits.title": "AI Tool Limits before you hit the wall",
-    "feature.limits.body": "See session, weekly, billing, credits, and balance windows across every supported provider — Claude Code, Codex, Cursor, Grok, Copilot, Kiro, and more — so a limit never surprises you mid-task.",
+    "feature.limits.body": "See session, weekly, billing, credits, and balance windows across every supported provider, including Claude Code, Codex, Cursor, Grok, Copilot, Kiro, and more, before a limit interrupts your work.",
     "feature.session.title": "Per-session detail on demand",
     "feature.session.body": "Open a Claude Code, Codex, or OpenCode session to see tokens per prompt and per reply, read on-demand from local transcripts or databases. Never synced.",
     "feature.trends.title": "A year of trends, inside the widget",
@@ -49,8 +83,12 @@ var translations = {
     "mock.session.two": "Inspect reply details...",
 
     "surfaces.title": "The same usage, on every surface you already use.",
-    "surfaces.menubar.title": "Menu bar & tray",
-    "surfaces.menubar.body": "Live cost, tokens, or your closest limit % right next to the clock on macOS and Windows.",
+    "menubar.file": "File",
+    "menubar.edit": "Edit",
+    "menubar.view": "View",
+    "menubar.window": "Window",
+    "surfaces.menubar.title": "Custom menu bar & tray",
+    "surfaces.menubar.body": "Build a live display from tool icons, quota bars, reset times, cost, tokens, and text, with an instant preview.",
     "surfaces.bubble.title": "Floating Bubble",
     "surfaces.bubble.body": "Collapse the widget into a draggable mini-window with click or hover preview.",
     "surfaces.discord.playing": "Playing",
@@ -91,11 +129,14 @@ var translations = {
     "final.title": "Download the packaged app and keep every coding tool visible.",
     "final.readme": "Read the setup guide",
     "final.downloads": "Release download options",
+    "final.recommended": "Best for this device",
     "final.mac.title": "macOS .dmg",
-    "final.mac.body": "Apple Silicon, M1 and later",
+    "final.mac.body": "Apple Silicon and Intel, signed and notarized",
     "final.win.title": "Windows Setup .exe",
     "final.win.body": "Installer build, recommended",
-    "final.source": "Intel Mac, Linux, and source installs are covered in the README for advanced setups.",
+    "final.linux.title": "Linux AppImage",
+    "final.linux.body": "Portable x64 build",
+    "final.source": "Portable Windows builds and source installs are covered in the README.",
 
     "footer.api": "API docs",
     "footer.worker": "Worker docs",
@@ -104,15 +145,16 @@ var translations = {
 
   "zh-TW": {
     "meta.title": "Token Monitor：AI Tools 用量一眼看清",
-    "meta.description": "Token Monitor 是為 AI Tools 打造的本地優先桌面 widget，可即時監控 token、成本與限額，查看 session 明細，並透過自架 hub 同步多台裝置。",
+    "meta.description": "Token Monitor 是本地優先的桌面 App，可即時查看 28+ 種 AI coding 工具的 token、成本、限額、session 與歷史。",
     "meta.ogTitle": "Token Monitor",
-    "meta.ogDescription": "為 AI Tools 打造的本地優先 token、成本、限額與 session 監控。",
+    "meta.ogDescription": "即時查看 28+ 種 AI coding 工具的 token、成本、限額、session 與歷史。",
     "nav.skip": "跳到內容",
     "nav.primary": "主要導覽",
     "nav.home": "Token Monitor 首頁",
     "nav.language": "語言",
-    "nav.theme": "切換淺色或深色主題",
     "nav.github": "GitHub",
+    "nav.star": "Star",
+    "nav.githubStar": "在 GitHub 上為 Token Monitor 加星",
     "nav.sections": "區塊導覽",
     "nav.features": "功能",
     "nav.privacy": "隱私",
@@ -120,19 +162,52 @@ var translations = {
 
     "hero.eyebrow": "本地優先的 AI coding telemetry",
     "hero.title": "AI Tools 用量一眼看清",
-    "hero.lede": "為 AI Tools 打造的桌面 widget，即時監控 token、成本、限額、session 與歷史趨勢。",
+    "hero.lede": "即時查看 28+ 種 AI coding 工具的 token、成本、限額、session 與歷史。本地優先，也能選擇自架同步。",
     "hero.actions": "主要操作",
-    "hero.platforms": "支援平台",
+    "hero.platforms": "其他平台下載",
+    "hero.alsoAvailable": "其他版本",
+    "hero.preview": "Token Monitor Home dashboard 互動預覽",
+    "hero.periods": "用量期間",
     "cta.download": "下載最新版本",
+    "cta.download.generic": "下載最新版本",
+    "cta.download.mac": "下載 macOS 版",
+    "cta.download.windows": "下載 Windows 版",
+    "cta.download.linux": "下載 Linux 版",
+    "cta.download.meta.generic": "macOS、Windows 與 Linux",
+    "cta.download.meta.mac": "選擇 Apple Silicon 或 Intel",
+    "cta.download.meta.macArm": "Apple Silicon · .dmg",
+    "cta.download.meta.macIntel": "Intel · .dmg",
+    "cta.download.meta.windows": "Windows 10 / 11 · 安裝程式",
+    "cta.download.meta.linux": "可攜式 x64 AppImage",
+    "cta.download.aria.generic": "下載最新版 Token Monitor",
+    "cta.download.aria.mac": "下載 macOS 版 Token Monitor",
+    "cta.download.aria.windows": "下載 Windows 版 Token Monitor",
+    "cta.download.aria.linux": "下載 Linux 版 Token Monitor",
     "cta.github": "查看 GitHub",
 
-    "tools.eyebrow": "涵蓋你工作流裡的每個工具",
+    "tools.eyebrow": "28+ 種工具與供應商",
+    "home.limits": "額度",
+    "home.models": "模型",
+    "home.activity": "活動",
+    "home.activeDays": "活躍 120 天 ↗",
+    "home.trend": "趨勢",
+    "home.peak": "峰值 430.2M",
+    "home.footer": "⌂ 主頁",
 
-    "feature.title": "Token、限制、趨勢與 session 明細，集中在一個畫面。",
+    "feature.title": "把整套 AI coding 工作流，排成你真正想看的樣子。",
+    "feature.menubar.title": "Menu bar，照你的工作方式排",
+    "feature.menubar.body": "拖曳組合工具圖示、單層或雙層限額條、重設時間、百分比、tokens、成本、留白、分隔符與自訂文字；儲存前就能看到即時結果。",
+    "feature.menubar.previewKicker": "MENU BAR 編排器",
+    "feature.menubar.previewTitle": "只留下你真正想看的訊號。",
+    "feature.menubar.previewSaved": "即時預覽",
+    "feature.menubar.previewOrder": "顯示順序",
+    "feature.menubar.previewHint": "拖曳排序 · 點選編輯",
+    "feature.menubar.previewAdd": "加入顯示",
+    "feature.menubar.previewSync": "每次刷新同步更新",
     "feature.live.title": "即時 token 追蹤與成本",
-    "feature.live.body": "所有支援的 AI 編碼工具 — Claude Code、Codex、Cursor、Kimi、Qwen、Grok、Copilot 等等 — 每輪對話後數秒內更新，每個數字旁都有成本與 cache 命中率，並可切換淺色或深色主題。",
+    "feature.live.body": "所有支援的 AI coding 工具，包括 Claude Code、Codex、Cursor、Kimi、Qwen、Grok、Copilot 等，都會在每輪對話後數秒內更新。每個數字旁都有成本與 cache 命中率。",
     "feature.limits.title": "在撞牆前看見 AI Tool Limits",
-    "feature.limits.body": "跨所有支援的供應商 — Claude Code、Codex、Cursor、Grok、Copilot、Kiro 等等 — 看見 session、每週、帳單、credits 與餘額視窗，限制不再在工作中途突襲你。",
+    "feature.limits.body": "跨所有支援的供應商查看 session、每週、帳單、credits 與餘額視窗，包括 Claude Code、Codex、Cursor、Grok、Copilot、Kiro 等，在限制打斷工作前先看到它。",
     "feature.session.title": "需要時才看 session 明細",
     "feature.session.body": "打開 Claude Code、Codex 或 OpenCode session，看每個 prompt 與 reply 的 token；從本機 transcript 或資料庫即時讀取，永不同步。",
     "feature.trends.title": "一年的趨勢，就在 widget 裡",
@@ -148,8 +223,12 @@ var translations = {
     "mock.session.two": "查看 reply 明細...",
 
     "surfaces.title": "同一份用量，出現在你本來就在用的每個介面。",
-    "surfaces.menubar.title": "menu bar 與工作列",
-    "surfaces.menubar.body": "macOS 與 Windows 時鐘旁就有即時成本、tokens 或最接近的限制 %。",
+    "menubar.file": "檔案",
+    "menubar.edit": "編輯",
+    "menubar.view": "顯示",
+    "menubar.window": "視窗",
+    "surfaces.menubar.title": "自訂 menu bar 與工作列",
+    "surfaces.menubar.body": "用工具圖示、限額進度、重設時間、成本、tokens 與文字組出自己的即時顯示，並立即預覽。",
     "surfaces.bubble.title": "Floating Bubble",
     "surfaces.bubble.body": "把 widget 收成可拖曳的迷你視窗，支援點擊或 hover 預覽。",
     "surfaces.discord.playing": "正在遊玩",
@@ -190,11 +269,14 @@ var translations = {
     "final.title": "下載打包好的 App，讓每個 coding 工具的用量都看得見。",
     "final.readme": "閱讀設定指南",
     "final.downloads": "Release 下載選項",
+    "final.recommended": "最適合這部裝置",
     "final.mac.title": "macOS .dmg",
-    "final.mac.body": "Apple Silicon，M1 或更新機型",
+    "final.mac.body": "Apple Silicon 與 Intel，已簽署並 notarize",
     "final.win.title": "Windows Setup .exe",
     "final.win.body": "建議使用安裝版",
-    "final.source": "Intel Mac、Linux 與原始碼啟動方式請看 README，適合進階設定。",
+    "final.linux.title": "Linux AppImage",
+    "final.linux.body": "可攜式 x64 版本",
+    "final.source": "Windows 可攜版與原始碼安裝方式請看 README。",
 
     "footer.api": "API 文件",
     "footer.worker": "Worker 文件",
@@ -203,15 +285,16 @@ var translations = {
 
   "zh-CN": {
     "meta.title": "Token Monitor：AI Tools 用量一眼看清",
-    "meta.description": "Token Monitor 是为 AI Tools 打造的本地优先桌面组件，可实时监控 token、成本与限额，查看 session 明细，并通过自托管 hub 同步多台设备。",
+    "meta.description": "Token Monitor 是本地优先的桌面 App，可实时查看 28+ 种 AI coding 工具的 token、成本、限额、session 与历史。",
     "meta.ogTitle": "Token Monitor",
-    "meta.ogDescription": "为 AI Tools 打造的本地优先 token、成本、限额与 session 监控。",
+    "meta.ogDescription": "实时查看 28+ 种 AI coding 工具的 token、成本、限额、session 与历史。",
     "nav.skip": "跳到内容",
     "nav.primary": "主要导航",
     "nav.home": "Token Monitor 首页",
     "nav.language": "语言",
-    "nav.theme": "切换浅色或深色主题",
     "nav.github": "GitHub",
+    "nav.star": "Star",
+    "nav.githubStar": "在 GitHub 上为 Token Monitor 加星",
     "nav.sections": "区块导航",
     "nav.features": "功能",
     "nav.privacy": "隐私",
@@ -219,19 +302,52 @@ var translations = {
 
     "hero.eyebrow": "本地优先的 AI coding telemetry",
     "hero.title": "AI Tools 用量一眼看清",
-    "hero.lede": "为 AI Tools 打造的桌面组件，实时监控 token、成本、限额、session 与历史趋势。",
+    "hero.lede": "实时查看 28+ 种 AI coding 工具的 token、成本、限额、session 与历史。本地优先，也能选择自托管同步。",
     "hero.actions": "主要操作",
-    "hero.platforms": "支持平台",
+    "hero.platforms": "其他平台下载",
+    "hero.alsoAvailable": "其他版本",
+    "hero.preview": "Token Monitor Home dashboard 交互预览",
+    "hero.periods": "用量期间",
     "cta.download": "下载最新版本",
+    "cta.download.generic": "下载最新版本",
+    "cta.download.mac": "下载 macOS 版",
+    "cta.download.windows": "下载 Windows 版",
+    "cta.download.linux": "下载 Linux 版",
+    "cta.download.meta.generic": "macOS、Windows 与 Linux",
+    "cta.download.meta.mac": "选择 Apple Silicon 或 Intel",
+    "cta.download.meta.macArm": "Apple Silicon · .dmg",
+    "cta.download.meta.macIntel": "Intel · .dmg",
+    "cta.download.meta.windows": "Windows 10 / 11 · 安装程序",
+    "cta.download.meta.linux": "便携式 x64 AppImage",
+    "cta.download.aria.generic": "下载最新版 Token Monitor",
+    "cta.download.aria.mac": "下载 macOS 版 Token Monitor",
+    "cta.download.aria.windows": "下载 Windows 版 Token Monitor",
+    "cta.download.aria.linux": "下载 Linux 版 Token Monitor",
     "cta.github": "查看 GitHub",
 
-    "tools.eyebrow": "覆盖你工作流里的每个工具",
+    "tools.eyebrow": "28+ 种工具与提供商",
+    "home.limits": "额度",
+    "home.models": "模型",
+    "home.activity": "活动",
+    "home.activeDays": "活跃 120 天 ↗",
+    "home.trend": "趋势",
+    "home.peak": "峰值 430.2M",
+    "home.footer": "⌂ 首页",
 
-    "feature.title": "Token、限制、趋势与 session 明细，集中在一个界面。",
+    "feature.title": "把整套 AI coding 工作流，排成你真正想看的样子。",
+    "feature.menubar.title": "Menu bar，按你的工作方式排",
+    "feature.menubar.body": "拖拽组合工具图标、单层或双层限额条、重置时间、百分比、tokens、成本、留白、分隔符与自定义文字；保存前就能看到实时结果。",
+    "feature.menubar.previewKicker": "MENU BAR 编排器",
+    "feature.menubar.previewTitle": "只留下你真正想看的信号。",
+    "feature.menubar.previewSaved": "实时预览",
+    "feature.menubar.previewOrder": "显示顺序",
+    "feature.menubar.previewHint": "拖拽排序 · 点击编辑",
+    "feature.menubar.previewAdd": "加入显示",
+    "feature.menubar.previewSync": "每次刷新同步更新",
     "feature.live.title": "实时 token 追踪与成本",
-    "feature.live.body": "所有受支持的 AI 编码工具 — Claude Code、Codex、Cursor、Kimi、Qwen、Grok、Copilot 等等 — 每轮对话后数秒内更新，每个数字旁都有成本与 cache 命中率，并可切换浅色或深色主题。",
+    "feature.live.body": "所有受支持的 AI coding 工具，包括 Claude Code、Codex、Cursor、Kimi、Qwen、Grok、Copilot 等，都会在每轮对话后数秒内更新。每个数字旁都有成本与 cache 命中率。",
     "feature.limits.title": "在撞墙前看见 AI Tool Limits",
-    "feature.limits.body": "跨所有受支持的提供商 — Claude Code、Codex、Cursor、Grok、Copilot、Kiro 等等 — 看见 session、每周、账单、credits 与余额窗口，限制不再在工作中途突袭你。",
+    "feature.limits.body": "跨所有受支持的提供商查看 session、每周、账单、credits 与余额窗口，包括 Claude Code、Codex、Cursor、Grok、Copilot、Kiro 等，在限制打断工作前先看到它。",
     "feature.session.title": "需要时才看 session 明细",
     "feature.session.body": "打开 Claude Code、Codex 或 OpenCode session，看每个 prompt 与 reply 的 token；从本机 transcript 或数据库实时读取，永不同步。",
     "feature.trends.title": "一年的趋势，就在 widget 里",
@@ -247,8 +363,12 @@ var translations = {
     "mock.session.two": "查看 reply 明细...",
 
     "surfaces.title": "同一份用量，出现在你本来就在用的每个界面。",
-    "surfaces.menubar.title": "menu bar 与任务栏",
-    "surfaces.menubar.body": "macOS 与 Windows 时钟旁就有实时成本、tokens 或最接近的限制 %。",
+    "menubar.file": "文件",
+    "menubar.edit": "编辑",
+    "menubar.view": "显示",
+    "menubar.window": "窗口",
+    "surfaces.menubar.title": "自定义 menu bar 与任务栏",
+    "surfaces.menubar.body": "用工具图标、限额进度、重置时间、成本、tokens 与文字组成自己的实时显示，并立即预览。",
     "surfaces.bubble.title": "Floating Bubble",
     "surfaces.bubble.body": "把 widget 收成可拖拽的迷你窗口，支持点击或 hover 预览。",
     "surfaces.discord.playing": "正在玩",
@@ -289,11 +409,14 @@ var translations = {
     "final.title": "下载打包好的 App，让每个 coding 工具的用量都看得见。",
     "final.readme": "阅读设置指南",
     "final.downloads": "Release 下载选项",
+    "final.recommended": "最适合这台设备",
     "final.mac.title": "macOS .dmg",
-    "final.mac.body": "Apple Silicon，M1 或更新机型",
+    "final.mac.body": "Apple Silicon 与 Intel，已签名并 notarize",
     "final.win.title": "Windows Setup .exe",
     "final.win.body": "建议使用安装版",
-    "final.source": "Intel Mac、Linux 与源码启动方式请看 README，适合进阶设置。",
+    "final.linux.title": "Linux AppImage",
+    "final.linux.body": "便携式 x64 版本",
+    "final.source": "Windows 便携版与源码安装方式请看 README。",
 
     "footer.api": "API 文档",
     "footer.worker": "Worker 文档",
@@ -313,8 +436,22 @@ function normalizeLanguage(value) {
 }
 function readStoredLanguage() { try { return normalizeLanguage(window.localStorage.getItem(languageStorageKey)); } catch (e) { return ""; } }
 function storeLanguage(language) { try { window.localStorage.setItem(languageStorageKey, language); } catch (e) {} }
-function languageFromHash() { return normalizeLanguage(window.location.hash.slice(1)); }
-function preferredLanguage() { return languageFromHash() || readStoredLanguage() || normalizeLanguage(window.navigator.language) || "en"; }
+function languageFromUrl() {
+  var queryLanguage = "";
+  try { queryLanguage = normalizeLanguage(new URLSearchParams(window.location.search).get("lang")); } catch (e) {}
+  if (queryLanguage) return queryLanguage;
+  return normalizeLanguage(window.location.hash.slice(1)); /* legacy #zh-TW links */
+}
+function preferredLanguage() { return languageFromUrl() || readStoredLanguage() || normalizeLanguage(window.navigator.language) || "en"; }
+
+function reflectLanguageInUrl(language) {
+  try {
+    var url = new URL(window.location.href);
+    url.searchParams.set("lang", language);
+    if (normalizeLanguage(url.hash.slice(1))) url.hash = "";
+    window.history.replaceState(null, "", url.pathname + "?" + url.searchParams.toString() + url.hash);
+  } catch (e) {}
+}
 
 function translateElement(element, messages) {
   var key = element.getAttribute("data-i18n");
@@ -337,15 +474,13 @@ function applyLanguage(language) {
   for (var i = 0; i < nodes.length; i++) translateElement(nodes[i], messages);
   var langBtns = document.querySelectorAll("[data-lang]");
   for (var j = 0; j < langBtns.length; j++) langBtns[j].setAttribute("aria-checked", String(langBtns[j].getAttribute("data-lang") === active));
-  var cur = document.querySelector("[data-lang-current]");
-  if (cur) cur.textContent = active === "zh-TW" ? "繁" : active === "zh-CN" ? "简" : "EN";
   storeLanguage(active);
-  if (window.location.hash !== "#" + active) window.history.replaceState(null, "", "#" + active);
+  reflectLanguageInUrl(active);
 }
 function setupLanguageButtons() {
   var btns = document.querySelectorAll("[data-lang]");
   for (var i = 0; i < btns.length; i++) {
     (function (b) { b.addEventListener("click", function () { applyLanguage(b.getAttribute("data-lang")); }); })(btns[i]);
   }
-  window.addEventListener("hashchange", function () { applyLanguage(preferredLanguage()); });
+  window.addEventListener("popstate", function () { applyLanguage(preferredLanguage()); });
 }

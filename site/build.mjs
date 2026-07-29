@@ -5,11 +5,11 @@ const siteRoot = new URL("./", import.meta.url);
 const outputRoot = new URL("../_site/", import.meta.url);
 
 const cssFiles = ["styles/tokens.css", "styles/base.css", "styles/components.css", "styles/sections.css"];
-const jsFiles = ["scripts/i18n.js", "scripts/theme.js", "scripts/main.js"];
+const jsFiles = ["scripts/i18n.js", "scripts/main.js"];
 // Icons are the site's own brand-colored copies under site/assets/icons/ (the app's
 // assets/icons/ stay mask-only currentColor and must not be mutated to serve the web).
 // tray-claude / tray-codex are the real tray glyphs, masked to monochrome in the surfaces section.
-const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "os-apple", "os-windows", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "moonshot", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilocode", "kiro", "mimo-code"];
+const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "openrouter", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "moonshot", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilocode", "kiro", "mimo-code"];
 const assets = [
   ["assets/app.png", "assets/app.png"], // full app icon used by the Discord mockup
   ["assets/icon.png", "assets/icon.png"], // nav brand mark (glass sigma)
@@ -25,7 +25,7 @@ function rewriteHtml(html) {
   // collapse the 4 dev CSS links into one, and the 3 dev scripts into one
   return html
     .replace(/\s*<link rel="stylesheet" href="styles\/tokens\.css(?:\?[^"]*)?">[\s\S]*?<link rel="stylesheet" href="styles\/sections\.css(?:\?[^"]*)?">/, '\n    <link rel="stylesheet" href="styles.css">')
-    .replace(/\s*<script src="scripts\/i18n\.js(?:\?[^"]*)?" defer><\/script>[\s\S]*?<script src="scripts\/main\.js" defer><\/script>/, '\n    <script src="app.js" defer></script>')
+    .replace(/\s*<script src="scripts\/i18n\.js(?:\?[^"]*)?" defer><\/script>[\s\S]*?<script src="scripts\/main\.js(?:\?[^"]*)?" defer><\/script>/, '\n    <script src="app.js" defer></script>')
     .replace(/url\(\.\.\/assets\//g, "url(assets/");
 }
 
