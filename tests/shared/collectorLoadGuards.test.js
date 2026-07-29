@@ -1249,6 +1249,154 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
   }
 });
 
+// The two tests below deliberately build their home WITHOUT realpath, unlike
+// withTmpHome(). On the Windows CI runner os.tmpdir() is an 8.3 short path
+// (C:\Users\RUNNER~1\...), which is exactly the input canonicalWatchPath()
+// exists to neutralise — handing one to fs.watch aborts the process inside
+// libuv, uncatchably. A canonicalised fixture would test around that guard
+// instead of testing it.
+function withRawTmpHome(prepare) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-rawhome-'));
+  for (const dir of prepare) fs.mkdirSync(path.join(tmp, dir), { recursive: true });
+  return tmp;
+}
+
+test('watch roots reach chokidar canonicalised on Windows and untouched elsewhere', async () => {
+  const tmp = withRawTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchedDirs = null;
+  chokidar.watch = (dirs) => {
+    watchedDirs = dirs;
+    return { on: () => {}, close: () => {} };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 1000,
+      watchEnabled: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: () => {}
+    });
+
+    await waitForCondition(() => Array.isArray(watchedDirs) && watchedDirs.length > 0);
+    const raw = path.join(tmp, '.claude', 'projects');
+    if (process.platform === 'win32') {
+      // Every root must already be its own canonical form. This is what keeps
+      // libuv's fs-event assert from firing, and it is not satisfied by a short
+      // path.
+      for (const dir of watchedDirs) assert.equal(dir, fs.realpathSync.native(dir));
+      assert.ok(watchedDirs.includes(fs.realpathSync.native(raw)));
+    } else {
+      // Off Windows this must be identity: resolving here would make the watch
+      // roots disagree with the paths tokscale is pointed at.
+      assert.deepEqual(watchedDirs, [raw]);
+    }
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('the ignore matcher agrees with the roots chokidar was actually handed', async () => {
+  // The dangerous half of the invariant: chokidar reports events under the root
+  // it was handed, so canonicalising the roots without canonicalising the
+  // matcher would leave it comparing against a path no event ever carries. The
+  // watch would keep working while the Hermes runtime silently stopped being
+  // pruned (issue #38, 150k+ files).
+  //
+  // Both halves are read back off the same chokidar.watch call rather than
+  // recomputed here, which is what makes this hold on every platform: it asserts
+  // that the two agree, not which form they agree on.
+  const tmp = withRawTmpHome([]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalHermesHome = process.env.HERMES_HOME;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  const hermesHome = path.join(tmp, '.hermes');
+  fs.mkdirSync(hermesHome, { recursive: true });
+  process.env.HERMES_HOME = hermesHome;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchedDirs = null;
+  let ignored = null;
+  chokidar.watch = (dirs, options) => {
+    watchedDirs = dirs;
+    ignored = options?.ignored;
+    return { on: () => {}, close: () => {} };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'hermes',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 1000,
+      watchEnabled: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: () => {}
+    });
+
+    await waitForCondition(() => Array.isArray(watchedDirs) && watchedDirs.length > 0);
+    assert.equal(typeof ignored, 'function', 'a Hermes watch must carry the prune matcher');
+    const watchedHome = watchedDirs[0];
+    assert.equal(
+      ignored(path.join(watchedHome, 'node_modules', 'anything.js')),
+      true,
+      'runtime files under the watched Hermes root must be pruned'
+    );
+    assert.equal(ignored(watchedHome), false, 'the root itself stays watched');
+    assert.equal(ignored(path.join(watchedHome, 'state.db-wal')), false, 'db sidecars stay watched');
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    if (originalHermesHome === undefined) delete process.env.HERMES_HOME;
+    else process.env.HERMES_HOME = originalHermesHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
