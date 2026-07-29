@@ -20,8 +20,7 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 | **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), the floating bubble, and the global show/hide shortcut. |
 | **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, and system glass opacity / blur. |
 | **Collection** | Tracked tools (and hide / pin / drag-reorder for the main list), collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
-| **AI Tool Limits** | Which providers to probe for session / weekly / billing / credit windows, and how often to refresh. |
-| **Accounts** | Credentials for providers that need them (DeepSeek, GLM, Volcengine, Qoder, Ollama, Kimi, …) and multiple accounts per provider — including switching which tracked Codex account is the active local one. |
+| **AI Tool Limits** | Which providers to enable, their credentials and sign-in options, multiple accounts per provider (including switching the active local Codex account), session / weekly / billing / credit windows, and how often to refresh. |
 | **Multi-device Sync** | **Local only** (no hub), **Connect to a hub** (paste another machine's Hub URL + secret), or **Host hub on this device** (run a hub locally; the panel lists reachable LAN / Tailscale / ZeroTier addresses). |
 
 The `⇧` button in the title bar cycles the window behavior.

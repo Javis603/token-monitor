@@ -188,6 +188,15 @@ test('localized README settings lists keep provider credentials inside AI Tool L
   }
 });
 
+test('configuration reference keeps provider accounts inside AI Tool Limits', () => {
+  const configuration = read('docs/configuration.md');
+  assert.match(
+    configuration,
+    /\| \*\*AI Tool Limits\*\* \|[^|]*(?:credentials|sign-in options|multiple accounts)[^|]*\|/
+  );
+  assert.doesNotMatch(configuration, /\| \*\*Accounts\*\* \|/);
+});
+
 test('localized README WSL claims disclose the SQLite agent boundary', () => {
   const files = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
 

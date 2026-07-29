@@ -7,7 +7,6 @@ Sources:
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database
-  - settings/accounts.svg: users-round
   - settings/sync.svg: cloud-sync
   - settings/appearance.svg: palette
   - views/home.svg: house
