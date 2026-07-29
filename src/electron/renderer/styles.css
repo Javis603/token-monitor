@@ -1837,6 +1837,12 @@ span.settings-note.settings-item-desc {
     opacity 120ms ease;
   will-change: transform;
 }
+.settings-panel .limit-provider-list.is-landing .limit-provider-row {
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
 .limit-provider-list.drag-active .limit-provider-row:not(.dragging) { opacity: 0.78; }
 /* Collapsing must land instantly so the drag snapshot measures settled
    geometry rather than a mid-animation height. */

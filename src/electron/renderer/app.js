@@ -6528,9 +6528,15 @@ function onLimitProviderDragKeydown(event) {
   finishLimitProviderDrag(false);
 }
 
-// Applying the final order to the DOM *before* clearing the transforms is what
-// keeps the drop from flashing: the rows are already where the transforms were
-// pretending they were, so removing the transforms changes nothing on screen.
+function releaseLimitProviderLandingStyleAfterPaint(list) {
+  requestAnimationFrame(() => {
+    setTimeout(() => list?.classList.remove('is-landing'), 0);
+  });
+}
+
+// The final DOM positions and the drag transforms both encode the same move.
+// Keep transform transitions disabled through the first landed paint so rows
+// do not briefly apply both offsets and animate back from a double displacement.
 function finishLimitProviderDrag(commit) {
   const drag = limitProviderDrag;
   if (!drag) return;
@@ -6551,10 +6557,9 @@ function finishLimitProviderDrag(commit) {
     } catch (_) {}
     const list = els.limitProviderCheckboxes;
     if (drag.started) {
-      // Moving the nodes discards any transition running on them, so the lifted
-      // look and the offsets all clear in the frame the row lands in — no settle
-      // animation to suppress here.
-      if (commit && drag.changed && drag.order?.length) applyPreferenceOrder('provider', drag.order);
+      const landing = Boolean(commit && drag.changed && drag.order?.length);
+      if (landing) list?.classList.add('is-landing');
+      if (landing) applyPreferenceOrder('provider', drag.order);
       for (const { el } of drag.rows) {
         el.style.removeProperty('--drag-y');
         el.style.removeProperty('--drag-shift');
@@ -6564,6 +6569,7 @@ function finishLimitProviderDrag(commit) {
       list?.classList.remove('is-reordering');
       if (drag.expandedBefore) setLimitProviderSettingsExpanded(drag.expandedBefore);
       suppressNextLimitProviderClick();
+      if (landing) releaseLimitProviderLandingStyleAfterPaint(list);
     }
     const renderPending = drag.renderPending;
     limitProviderDrag = null;

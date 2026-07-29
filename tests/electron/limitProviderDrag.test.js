@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -201,6 +202,50 @@ test('the drop preserves settings scroll across the DOM reorder and deferred rep
   assert.ok(preserve !== -1, 'drop should snapshot the scroll position before landing');
   assert.ok(reorder > preserve, 'the DOM reorder should happen inside the scroll-preserved transaction');
   assert.ok(pendingRender > reorder, 'a deferred repaint should be covered by the same transaction');
+});
+
+test('a committed drop suppresses transform settling through the first landed paint', () => {
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+  const helperStart = app.indexOf('function releaseLimitProviderLandingStyleAfterPaint(');
+  const finishStart = app.indexOf('function finishLimitProviderDrag(', helperStart);
+  const helper = app.slice(helperStart, finishStart);
+  const finishBody = app.slice(finishStart, app.indexOf('function suppressNextLimitProviderClick(', finishStart));
+  const landingRule = cssRule(css, '.settings-panel .limit-provider-list.is-landing .limit-provider-row');
+  const frames = [];
+  const timers = [];
+  const removed = [];
+  const list = {
+    classList: {
+      remove(value) { removed.push(value); }
+    }
+  };
+
+  vm.runInNewContext(
+    `${helper}\nreleaseLimitProviderLandingStyleAfterPaint(list);`,
+    {
+      list,
+      requestAnimationFrame: (callback) => frames.push(callback),
+      setTimeout: (callback) => timers.push(callback)
+    }
+  );
+
+  assert.deepEqual(removed, []);
+  assert.equal(frames.length, 1);
+  frames[0]();
+  assert.deepEqual(removed, []);
+  assert.equal(timers.length, 1);
+  timers[0]();
+  assert.deepEqual(removed, ['is-landing']);
+
+  const suppress = finishBody.indexOf("list?.classList.add('is-landing')");
+  const reorder = finishBody.indexOf("applyPreferenceOrder('provider'");
+  const clearShift = finishBody.indexOf("el.style.removeProperty('--drag-shift')");
+  const release = finishBody.indexOf('releaseLimitProviderLandingStyleAfterPaint(list)');
+  assert.ok(suppress !== -1 && reorder > suppress, 'transition suppression should precede the DOM reorder');
+  assert.ok(clearShift > reorder, 'drag offsets should clear only after the final order is in the DOM');
+  assert.ok(release > clearShift, 'transition suppression should survive until the landing is complete');
+  assert.doesNotMatch(landingRule, /transform/);
 });
 
 // `blur` does not bubble, so a capture listener on `window` is the standard way
