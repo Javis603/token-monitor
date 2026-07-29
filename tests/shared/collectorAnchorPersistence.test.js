@@ -59,6 +59,26 @@ test('configFingerprint handles undefined and empty clients', () => {
   assert.match(c, /\|undefined\|projects:on$/, 'undefined allTimeSince produces string "undefined"');
 });
 
+test('configFingerprint invalidates anchors when effective custom pricing changes', () => {
+  const base = configFingerprint('micode', '2024-01-01');
+  const first = configFingerprint('micode', '2024-01-01', true, [
+    { modelId: 'MIMO-V2.5-PRO', inputPerM: 0.4, outputPerM: 0.8 },
+    { modelId: 'other', inputPerM: 1, outputPerM: 2 }
+  ]);
+  const reordered = configFingerprint('micode', '2024-01-01', true, [
+    { modelId: 'other', inputPerM: 1, outputPerM: 2 },
+    { modelId: 'mimo-v2.5-pro', inputPerM: 0.4, outputPerM: 0.8 }
+  ]);
+  const changed = configFingerprint('micode', '2024-01-01', true, [
+    { modelId: 'mimo-v2.5-pro', inputPerM: 0.5, outputPerM: 0.8 },
+    { modelId: 'other', inputPerM: 1, outputPerM: 2 }
+  ]);
+
+  assert.notEqual(first, base);
+  assert.equal(first, reordered, 'order and model-id case should not invalidate an equivalent anchor');
+  assert.notEqual(first, changed, 'a price change must invalidate the old-cost anchor');
+});
+
 test('anchored tick with valid anchor runs todayOnly scan and derives month/allTime', async () => {
   const dateKey = localTodayKey();
 

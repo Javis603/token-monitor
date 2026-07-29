@@ -412,13 +412,13 @@ function addSession(period, session) {
   mergeSession(period.sessions[key], session);
 }
 
-function sessionFromRow(row) {
+function sessionFromRow(row, resolvedCost = costValue(row)) {
   const client = detectClient(row);
   const id = detectSessionId(row);
   if (!client || !id) return null;
   const session = emptySession(client, id);
   session.totalTokens = Math.max(0, Math.round(tokenValue(row)));
-  session.costUsd = costValue(row);
+  session.costUsd = resolvedCost;
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
@@ -556,7 +556,20 @@ function normalizePeriod(input, options = {}) {
   return period;
 }
 
-function extractUsageFromTokscale(json) {
+function resolvedRowCost(row, context, costResolver) {
+  const originalCost = costValue(row);
+  if (typeof costResolver !== 'function') return originalCost;
+  try {
+    const resolved = costResolver({ ...context, row, originalCost });
+    return typeof resolved === 'number' && Number.isFinite(resolved) && resolved >= 0
+      ? resolved
+      : originalCost;
+  } catch (_) {
+    return originalCost;
+  }
+}
+
+function extractUsageFromTokscale(json, options = {}) {
   const rows = [];
   collectUsageRows(json, rows);
   if (rows.length === 0 && json && typeof json === 'object') {
@@ -576,12 +589,22 @@ function extractUsageFromTokscale(json) {
   for (const row of rows) {
     const client = detectClient(row);
     const tokens = tokenValue(row);
-    const cost = costValue(row);
-    const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
-    const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
-    const output = Math.max(0, Math.round(firstNumber(row, OUTPUT_TOKEN_KEYS)));
+    const components = sessionTokenComponents(row);
+    const cacheRead = components.cacheReadTokens;
+    const cacheWrite = components.cacheWriteTokens;
+    const output = components.outputTokens;
     let model = detectModel(row);
     if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
+    const cost = resolvedRowCost(row, {
+      client,
+      model,
+      provider: normalizeProviderName(row.provider),
+      input: components.inputTokens,
+      output: components.outputTokens,
+      cacheRead: components.cacheReadTokens,
+      cacheWrite: components.cacheWriteTokens,
+      reasoning: components.reasoningTokens
+    }, options.costResolver);
     period.totalTokens += Math.max(0, Math.round(tokens));
     period.costUsd += cost;
     period.cacheReadTokens += cacheRead;
@@ -609,7 +632,7 @@ function extractUsageFromTokscale(json) {
       if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
       period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
     }
-    const session = sessionFromRow(row);
+    const session = sessionFromRow(row, cost);
     if (session) addSession(period, session);
   }
   return period;

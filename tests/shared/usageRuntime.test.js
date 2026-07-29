@@ -151,3 +151,43 @@ test('refreshClient rejects unsupported targeted usage clients', async () => {
     runtime.stop();
   }
 });
+
+test('manual refresh reads live custom pricing without rebuilding the usage runtime', async () => {
+  let pricing = [{ modelId: 'mimo-v2.5-pro', inputPerM: 1, outputPerM: 2 }];
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'micode',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'pricing-runtime',
+    intervalMs: 60000,
+    watchEnabled: false,
+    historyEnabled: false,
+    projectsEnabled: false,
+    wslScanEnabled: false,
+    anchorPersistenceEnabled: false,
+    customModelPricing: () => pricing,
+    runTokscale: async () => ({
+      entries: [{
+        client: 'micode',
+        model: 'mimo-v2.5-pro',
+        input: 1000,
+        output: 500,
+        cost: 99
+      }]
+    }),
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitFor(() => updates.length >= 1);
+    assert.equal(updates.at(-1).summary.allTime.costUsd, (1000 * 1 + 500 * 2) / 1_000_000);
+
+    pricing = [{ modelId: 'mimo-v2.5-pro', inputPerM: 3, outputPerM: 4 }];
+    await runtime.tick('manual');
+    assert.equal(updates.at(-1).reason, 'manual');
+    assert.equal(updates.at(-1).summary.allTime.costUsd, (1000 * 3 + 500 * 4) / 1_000_000);
+  } finally {
+    runtime.stop();
+  }
+});

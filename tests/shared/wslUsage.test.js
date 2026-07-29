@@ -262,6 +262,32 @@ test('collectWslUsage sums two homes per period', async () => {
   assert.deepEqual(bundle.today.clients, { claude: 15 });
 });
 
+test('collectWslUsage applies the injected row cost resolver to every period', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: () => ['alice'],
+    existsSync: (p) => p === `${home}\\.local\\share\\mimocode\\mimocode.db`
+  };
+  const runTokscale = async () => ({
+    entries: [{ client: 'micode', sessionId: 's1', model: 'mimo-v2.5-pro', input: 10, cost: 99 }]
+  });
+  const { bundle } = await collectWslUsage({
+    clients: 'micode',
+    allTimeSince: '2025-01-01',
+    commandTimeoutMs: 1000,
+    runTokscale,
+    costResolver: () => 0.125
+  }, deps);
+
+  for (const period of [bundle.today, bundle.month, bundle.allTime]) {
+    assert.equal(period.costUsd, 0.125);
+    assert.equal(period.modelCosts['mimo-v2.5-pro'], 0.125);
+    assert.equal(period.sessions['micode:s1'].costUsd, 0.125);
+  }
+});
+
 test('collectWslUsage decorates each home before merging periods', async () => {
   const homes = ['\\\\wsl$\\Ubuntu\\home\\alice'];
   const decorated = [];

@@ -8,6 +8,7 @@ const path = require('node:path');
 
 const {
   normalizeCustomPricingSetting,
+  createCustomPricingCostResolver,
   buildTokscaleModels,
   mergeManaged,
   applyCustomPricing
@@ -44,6 +45,30 @@ test('normalize dedupes by modelId, last wins; empty string is "unset" not 0', (
 test('normalize accepts explicit 0 cache-read (free) but omits unset fields', () => {
   const out = normalizeCustomPricingSetting([{ modelId: 'm', outputPerM: 0.8, cacheReadPerM: 0 }]);
   assert.deepEqual(out, [{ modelId: 'm', inputPerM: undefined, outputPerM: 0.8, cacheReadPerM: 0 }]);
+});
+
+test('App-side resolver overrides a model case-insensitively with tokscale pricing buckets', () => {
+  const resolveCost = createCustomPricingCostResolver([{
+    modelId: 'MiMo-V2.5-Pro',
+    inputPerM: 0.4,
+    outputPerM: 0.8,
+    cacheReadPerM: 0.003
+  }]);
+
+  assert.equal(resolveCost({
+    model: 'mimo-v2.5-pro',
+    input: 1000,
+    output: 500,
+    cacheRead: 100,
+    cacheWrite: 10,
+    reasoning: 50
+  }), (1000 * 0.4 + (500 + 50) * 0.8 + 100 * 0.003) / 1_000_000);
+  assert.equal(resolveCost({ model: 'other', input: 1000 }), undefined);
+});
+
+test('App-side resolver is absent when the setting has no valid overrides', () => {
+  assert.equal(createCustomPricingCostResolver([]), null);
+  assert.equal(createCustomPricingCostResolver([{ modelId: 'm', inputPerM: 0, outputPerM: 0 }]), null);
 });
 
 test('buildTokscaleModels emits per-million keys, omitting undefined fields', () => {

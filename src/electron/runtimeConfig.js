@@ -77,6 +77,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
     wslScanEnabled: settings.wslScanEnabled !== false,
+    customModelPricing: context.getCustomModelPricing || settings.customModelPricing || [],
     onError: context.onError,
     logger: context.logger
   };

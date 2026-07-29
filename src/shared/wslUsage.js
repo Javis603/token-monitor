@@ -192,6 +192,7 @@ function probeWslState(deps = {}) {
 
 async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
+  const extractUsage = (json) => extractUsageFromTokscale(json, { costResolver: options.costResolver });
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
   const existsSync = deps.existsSync || fs.existsSync;
@@ -228,9 +229,9 @@ async function collectWslUsage(options = {}, deps = {}) {
           promaOptions.pricingByModel = options.promaPricingByModel;
         }
         const proma = buildProma(promaOptions);
-        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(proma.today));
-        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(proma.month));
-        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
+        bundle.today = mergePeriods(bundle.today, extractUsage(proma.today));
+        bundle.month = mergePeriods(bundle.month, extractUsage(proma.month));
+        bundle.allTime = mergePeriods(bundle.allTime, extractUsage(proma.allTime));
       } catch (error) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
       }
@@ -245,9 +246,9 @@ async function collectWslUsage(options = {}, deps = {}) {
       const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs });
       const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs });
       const periods = {
-        today: extractUsageFromTokscale(todayJson),
-        month: extractUsageFromTokscale(monthJson),
-        allTime: extractUsageFromTokscale(allTimeJson)
+        today: extractUsage(todayJson),
+        month: extractUsage(monthJson),
+        allTime: extractUsage(allTimeJson)
       };
       if (typeof decoratePeriods === 'function') decoratePeriods(periods, home);
       bundle.today = mergePeriods(bundle.today, periods.today);

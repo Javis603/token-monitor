@@ -11,6 +11,7 @@ const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { customPricingPath } = require('./tokscaleConfig');
+const { createCustomPricingCostResolver, normalizeCustomPricingSetting } = require('./tokscaleCustomPricing');
 const { applyPeriodDelta, emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
@@ -618,6 +619,8 @@ async function collectUsageOnce(options) {
     : normalizeOsInfo(options.osInfo);
   const normalizedClients = normalizeClientsCsv(clients);
   const projectsEnabled = options.projectsEnabled !== false;
+  const costResolver = createCustomPricingCostResolver(options.customModelPricing);
+  const extractUsage = (json) => extractUsageFromTokscale(json, { costResolver });
   const localSessionMetadataDeps = {
     ...(options.sessionMetadataDeps || {}),
     metadataCache: new Map(),
@@ -655,9 +658,9 @@ async function collectUsageOnce(options) {
         });
         const promaJson = buildPromaPeriods({ now: collectedAt, allTimeSince, rows: promaRows, pricingByModel: promaPricing });
         promaPeriods = {
-          today: extractUsageFromTokscale(promaJson.today),
-          month: extractUsageFromTokscale(promaJson.month),
-          allTime: extractUsageFromTokscale(promaJson.allTime)
+          today: extractUsage(promaJson.today),
+          month: extractUsage(promaJson.month),
+          allTime: extractUsage(promaJson.allTime)
         };
       } catch (err) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
@@ -669,7 +672,7 @@ async function collectUsageOnce(options) {
       // windows exactly via applyPeriodDelta — one spawn instead of three.
       if (tokscaleClients) {
         const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
-        today = extractUsageFromTokscale(todayJson);
+        today = extractUsage(todayJson);
       }
       // The persisted anchor contains every Windows-side client, including
       // locally parsed Proma. Include its fresh today usage before deriving
@@ -681,15 +684,15 @@ async function collectUsageOnce(options) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
-      today = extractUsageFromTokscale(todayJson);
+      today = extractUsage(todayJson);
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
       const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
-      month = extractUsageFromTokscale(monthJson);
+      month = extractUsage(monthJson);
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
-      allTime = extractUsageFromTokscale(allTimeJson);
+      allTime = extractUsage(allTimeJson);
     }
     // Always decorate: session timestamps drive the recency sort regardless of the
     // Projects opt-out (issue #182). decorateLocalPeriods gates only project identity
@@ -742,6 +745,7 @@ async function collectUsageOnce(options) {
           commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
           pricingRevision: options.pricingRevision
         }),
+        costResolver,
         logger: options.logger,
         decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
@@ -762,6 +766,7 @@ async function collectUsageOnce(options) {
           commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
           pricingRevision: options.pricingRevision
         }),
+        costResolver,
         logger: options.logger,
         decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
@@ -1101,10 +1106,35 @@ function wslPeriodsForPreview(wslAnchor, anchorDateKey, todayKey) {
   };
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
+function resolveCustomModelPricing(value, logger) {
+  try {
+    return typeof value === 'function' ? value() : value;
+  } catch (error) {
+    if (typeof logger === 'function') logger(`custom pricing read failed: ${error.message}`);
+    return [];
+  }
+}
+
+function customPricingFingerprint(value) {
+  const byModel = new Map();
+  for (const entry of normalizeCustomPricingSetting(value)) {
+    const modelId = entry.modelId.toLowerCase();
+    byModel.set(modelId, {
+      modelId,
+      inputPerM: entry.inputPerM,
+      outputPerM: entry.outputPerM,
+      cacheReadPerM: entry.cacheReadPerM
+    });
+  }
+  return [...byModel.values()].sort((left, right) => left.modelId.localeCompare(right.modelId));
+}
+
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, customModelPricing = []) {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}`;
+  const base = `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}`;
+  const pricing = customPricingFingerprint(customModelPricing);
+  return pricing.length > 0 ? `${base}|pricing:${JSON.stringify(pricing)}` : base;
 }
 
 // Force a full scan at least this often even when the anchor is otherwise
@@ -1156,7 +1186,8 @@ function startCollector(options) {
     try {
       const saved = readJson(anchorPath, null);
       if (saved && saved.dateKey === localTodayKey()) {
-        const fp = configFingerprint(clients, allTimeSince, options.projectsEnabled);
+        const currentPricing = resolveCustomModelPricing(options.customModelPricing, log);
+        const fp = configFingerprint(clients, allTimeSince, options.projectsEnabled, currentPricing);
         if (saved.configFingerprint === fp) {
           anchor = { dateKey: saved.dateKey, today: saved.today, month: saved.month, allTime: saved.allTime };
           // Don't restore a persisted WSL snapshot when WSL scanning is now off —
@@ -1191,10 +1222,12 @@ function startCollector(options) {
     const todayKey = localTodayKey();
     const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
     const refreshWsl = Boolean(tickOptions.refreshWsl);
+    const customModelPricing = resolveCustomModelPricing(options.customModelPricing, log);
     try {
       let captured = null;
       const summary = await collectUsageOnce({
         ...options,
+        customModelPricing,
         clients,
         allTimeSince,
         commandTimeoutMs,
@@ -1271,7 +1304,7 @@ function startCollector(options) {
               allTime: anchor.allTime,
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, customModelPricing),
               fullScanAt: new Date().toISOString()
             }));
           } catch (_) {}

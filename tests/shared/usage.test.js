@@ -804,6 +804,42 @@ test('extractUsageFromTokscale keeps model usage grouped by client', () => {
   assert.equal(period.clientModels.codex['gpt-5'], 50);
 });
 
+test('extractUsageFromTokscale uses one resolved row cost for period and session rollups', () => {
+  const row = {
+    client: 'MiCode',
+    sessionId: 'session-1',
+    model: 'mimo-v2.5-pro',
+    provider: 'mimo',
+    input: 10,
+    output: 5,
+    cost: 99
+  };
+  const seen = [];
+  const period = extractUsageFromTokscale([row], {
+    costResolver: (context) => {
+      seen.push(context);
+      return 0.25;
+    }
+  });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].model, 'mimo-v2.5-pro');
+  assert.equal(seen[0].provider, 'mimo');
+  assert.equal(seen[0].originalCost, 99);
+  assert.equal(period.costUsd, 0.25);
+  assert.equal(period.clientCosts.micode, 0.25);
+  assert.equal(period.modelCosts['mimo-v2.5-pro'], 0.25);
+  assert.equal(period.sessions['micode:session-1'].costUsd, 0.25);
+  assert.equal(period.sessions['micode:session-1'].modelCosts['mimo-v2.5-pro'], 0.25);
+});
+
+test('extractUsageFromTokscale retains reported cost when a resolver declines or fails', () => {
+  const row = { client: 'Codex', model: 'gpt-5', input: 10, cost: 0.75 };
+  assert.equal(extractUsageFromTokscale([row], { costResolver: () => undefined }).costUsd, 0.75);
+  assert.equal(extractUsageFromTokscale([row], { costResolver: () => { throw new Error('bad resolver'); } }).costUsd, 0.75);
+  assert.equal(extractUsageFromTokscale([row], { costResolver: () => Number.NaN }).costUsd, 0.75);
+});
+
 test('extractUsageFromTokscale keeps session usage grouped by client and model', () => {
   const period = extractUsageFromTokscale({
     groupBy: 'client,session,model',
