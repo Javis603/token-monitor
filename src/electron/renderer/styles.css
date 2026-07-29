@@ -1805,7 +1805,6 @@ span.settings-note.settings-item-desc {
 }
 .limit-provider-actions > .cursor-status-pill {
   flex: 0 1 auto;
-  min-width: min(100%, 10em);
 }
 .limit-provider-row.expanded > .limit-provider-main .cursor-disclosure-icon {
   transform: rotate(180deg);

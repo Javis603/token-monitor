@@ -1264,23 +1264,27 @@ test('provider rerenders preserve live account nodes and focused controls', () =
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'limitProviderAccountGroup');
   const focusedInput = { id: 'deepseekApiKeyInput', isConnected: true };
   const oldParent = { isConnected: true };
+  const disclosureIcon = { id: 'disclosureIcon' };
   const connectedParent = {
     isConnected: true,
+    children: [disclosureIcon],
     moveBefore(node, before) {
       assert.equal(this.isConnected, true);
       assert.equal(node.isConnected, true);
-      assert.equal(before, null);
+      assert.equal(before, disclosureIcon);
+      this.children.splice(this.children.indexOf(before), 0, node);
       node.parentElement = this;
     }
   };
   focusedInput.parentElement = oldParent;
 
   vm.runInNewContext(
-    `${moveLiveNode}\nmoveLimitProviderLiveNode(connectedParent, focusedInput);`,
-    { connectedParent, focusedInput }
+    `${moveLiveNode}\nmoveLimitProviderLiveNode(connectedParent, focusedInput, disclosureIcon);`,
+    { connectedParent, disclosureIcon, focusedInput }
   );
 
   assert.equal(focusedInput.parentElement, connectedParent);
+  assert.deepEqual(connectedParent.children, [focusedInput, disclosureIcon]);
   assert.doesNotMatch(renderSettings, /replaceChildren|restoreLimitProviderAccountGroups/);
   assert.ok(
     renderSettings.indexOf('els.limitProviderCheckboxes.appendChild(row);')
@@ -1373,7 +1377,7 @@ test('successful providers use a green dot while preserving source and account l
   assert.match(renderSettings, /dot\.className = 'limit-provider-status-dot'/);
   assert.match(renderSettings, /if \(\(detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(renderSettings, /tag\.className = `limit-provider-tag limit-provider-tag-\$\{tagInfo\.kind\}`/);
-  assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus\)/);
+  assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
   assert.match(css, /\.limit-provider-status-dot\s*\{[\s\S]*?background: var\(--success\)/);
 });
 
@@ -1384,8 +1388,9 @@ test('account and automatic provider panels reuse the original account summary g
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'limitProviderAccountGroup');
 
   assert.match(renderSettings, /main\.className = 'limit-provider-main'/);
-  assert.match(renderSettings, /icon\.className = 'cursor-disclosure-icon'/);
-  assert.match(renderSettings, /actions\.append\(icon\)/);
+  assert.match(renderSettings, /disclosureIcon\.className = 'cursor-disclosure-icon'/);
+  assert.match(renderSettings, /actions\.append\(disclosureIcon\)/);
+  assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
   assert.match(renderSettings, /mode\.className = 'cursor-status-pill limit-provider-mode-pill'/);
   assert.match(renderSettings, /mode\.textContent = t\('settings\.limits\.connection\.autoDetect'\)/);
   assert.match(renderSettings, /connectionDetailKey && tagInfo\.label === 'Auto'/);
@@ -1404,7 +1409,7 @@ test('account and automatic provider panels reuse the original account summary g
   assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 5);
   assert.match(css, /\.limit-provider-main\s*\{[\s\S]*?display: flex;[\s\S]*?justify-content: space-between/);
   assert.match(css, /\.limit-provider-actions\s*\{[\s\S]*?flex: 0 1 auto;[\s\S]*?max-width: 58%;[\s\S]*?gap: 4px/);
-  assert.match(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*min-width: min\(100%, 10em\)/);
+  assert.doesNotMatch(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*min-width:/);
   assert.match(css, /\.limit-provider-row\.expanded > \.limit-provider-main \.cursor-disclosure-icon/);
 });
 

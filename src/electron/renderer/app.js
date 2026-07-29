@@ -7374,9 +7374,9 @@ function connectLimitProviderCheckboxName(checkbox, nameNode, providerId) {
   checkbox.setAttribute('aria-labelledby', nameId);
 }
 
-function moveLimitProviderLiveNode(parent, node) {
+function moveLimitProviderLiveNode(parent, node, before = null) {
   if (!parent || !node || node.parentElement === parent) return;
-  parent.moveBefore(node, null);
+  parent.moveBefore(node, before);
 }
 
 function renderLimitProviderCheckboxes() {
@@ -7466,6 +7466,7 @@ function renderLimitProviderCheckboxes() {
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
+    let disclosureIcon = null;
     if (hasOptions) {
       const expanded = state.limitProviderSettingsExpanded === id;
       row.classList.toggle('expanded', expanded);
@@ -7476,10 +7477,10 @@ function renderLimitProviderCheckboxes() {
       main.title = t('settings.limits.providerOptions', { provider: settingsLabel || label });
       main.setAttribute('aria-label', main.title);
       main.setAttribute('aria-expanded', String(expanded));
-      const icon = document.createElement('span');
-      icon.className = 'cursor-disclosure-icon';
-      icon.setAttribute('aria-hidden', 'true');
-      actions.append(icon);
+      disclosureIcon = document.createElement('span');
+      disclosureIcon.className = 'cursor-disclosure-icon';
+      disclosureIcon.setAttribute('aria-hidden', 'true');
+      actions.append(disclosureIcon);
       optionsContainer = document.createElement('div');
       optionsContainer.id = `limitProviderOptions-${id}`;
       optionsContainer.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
@@ -7515,7 +7516,7 @@ function renderLimitProviderCheckboxes() {
     els.limitProviderCheckboxes.appendChild(row);
     // `moveBefore()` preserves focus and edit state while reparenting. Its
     // destination must already be connected, so the row is mounted first.
-    moveLimitProviderLiveNode(actions, accountStatus);
+    moveLimitProviderLiveNode(actions, accountStatus, disclosureIcon);
     moveLimitProviderLiveNode(optionsInner, accountGroup);
   }
   for (const row of previousRows) row.remove();
