@@ -1216,12 +1216,49 @@ const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
 // support asks would have no stable answer. Resolved here rather than in each
 // entry point so the widget and the headless agent cannot drift apart.
 // Tri-state on purpose: unset must fall through to the caller's value, which
-// is why parseBoolean's fallback semantics don't fit.
-function resolveWatchUsePolling(preferred, env = process.env, platform = process.platform) {
+// is why parseBoolean's fallback semantics don't fit. The default is native on
+// every platform — chokidar 4 has no per-platform backend left to differ on,
+// and the failure cases it cannot cover are handled by the watch-descriptor
+// fallback below rather than by pre-emptively polling everywhere.
+//
+// Returns undefined when unset, which is what keeps that tri-state readable to
+// callers that need to tell "no opinion" from an explicit "never poll".
+function watchPollingEnvOverride(env = process.env) {
   const raw = String(env.TOKEN_MONITOR_WATCH_POLLING ?? '').trim().toLowerCase();
-  if (raw) return !['0', 'false', 'no', 'off'].includes(raw);
+  if (!raw) return undefined;
+  return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
+function resolveWatchUsePolling(preferred, env = process.env) {
+  const override = watchPollingEnvOverride(env);
+  if (override !== undefined) return override;
   if (typeof preferred === 'boolean') return preferred;
-  return platform !== 'darwin';
+  return false;
+}
+
+// Kernel watch descriptors are a per-user budget shared with every other
+// watcher on the machine (inotify on Linux, file descriptors on macOS/BSD), and
+// editors are the usual heavy consumer — a busy Linux desktop can hand us
+// ENOSPC on startup through no fault of ours. chokidar reports that
+// asynchronously on the watcher, so without this the watch would just stop
+// delivering events and live mode would silently decay to hourly
+// reconciliation. Polling needs no descriptors at all, which makes it the
+// correct degraded mode rather than merely a slower one. An explicit
+// TOKEN_MONITOR_WATCH_POLLING=0 opts out: with native events now the default
+// everywhere, suppressing this fallback is the only thing that direction of the
+// override still does.
+const WATCH_DESCRIPTOR_ERROR_CODES = new Set(['ENOSPC', 'EMFILE', 'ENFILE']);
+
+function watcherOptions(usePolling, ignored) {
+  return {
+    ignoreInitial: true,
+    persistent: true,
+    ...(usePolling
+      ? { usePolling: true, interval: 2000, binaryInterval: 5000 }
+      : { usePolling: false }),
+    ...(ignored ? { ignored } : {}),
+    awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 200 }
+  };
 }
 
 function startCollector(options) {
@@ -1232,6 +1269,7 @@ function startCollector(options) {
     onUpdate, onPreview, onError, logger
   } = options;
   const watchUsePolling = resolveWatchUsePolling(options.watchUsePolling);
+  const watchNativeForced = watchPollingEnvOverride() === false;
   const deviceOsInfo = options.osInfo === undefined
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
@@ -1262,6 +1300,11 @@ function startCollector(options) {
   let initialCollectionComplete = false;
   const watchers = [];
   let watchedDirectoryKey = null;
+  // Sticky: once the kernel has refused us watch descriptors, every later
+  // rebuild (a client gaining or losing a data directory) stays on polling for
+  // the rest of the process. Retrying native events on each rebuild would just
+  // rediscover the same exhausted budget.
+  let watchDescriptorFallback = false;
 
   // On-disk anchor: persist full-scan snapshots so the collector can reuse
   // month/allTime across restarts. On the first interval tick the anchor is
@@ -1514,6 +1557,21 @@ function startCollector(options) {
     watchers.length = 0;
   }
 
+  function handleWatchError(error) {
+    log(`chokidar error: ${error.message}`);
+    if (stopped || watchUsePolling || watchNativeForced || watchDescriptorFallback) return;
+    if (!WATCH_DESCRIPTOR_ERROR_CODES.has(error?.code)) return;
+    watchDescriptorFallback = true;
+    log(`Native file events unavailable (${error.code}); falling back to 2s polling.`);
+    // Rebuilding from inside chokidar's own error emit would close the watcher
+    // mid-dispatch, so hand it to the next tick of the loop instead.
+    setImmediate(() => {
+      if (stopped) return;
+      watchedDirectoryKey = null;
+      setupWatchers();
+    });
+  }
+
   function setupWatchers() {
     if (!watchEnabled) return;
     const rootsByClient = watchClientRootsForClients(clients);
@@ -1526,17 +1584,10 @@ function startCollector(options) {
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
     }
+    const usePolling = watchUsePolling || watchDescriptorFallback;
     try {
       const ignored = watchIgnoreMatcher(clients);
-      const watcher = chokidar.watch(dirs, {
-        ignoreInitial: true,
-        persistent: true,
-        ...(watchUsePolling
-          ? { usePolling: true, interval: 2000, binaryInterval: 5000 }
-          : { usePolling: false }),
-        ...(ignored ? { ignored } : {}),
-        awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 200 }
-      });
+      const watcher = chokidar.watch(dirs, watcherOptions(usePolling, ignored));
       watcher.on('all', (event, filePath) => {
         activityRevision += 1;
         if (tickPending) {
@@ -1552,10 +1603,10 @@ function startCollector(options) {
           );
         } else recordWatchClients(eventClients);
       });
-      watcher.on('error', (error) => log(`chokidar error: ${error.message}`));
+      watcher.on('error', handleWatchError);
       watchers.push(watcher);
       watchedDirectoryKey = directoryKey;
-      for (const dir of dirs) log(`Watching ${dir} (${watchUsePolling ? 'polling 2s' : 'native events'})`);
+      for (const dir of dirs) log(`Watching ${dir} (${usePolling ? 'polling 2s' : 'native events'})`);
     } catch (error) {
       watchedDirectoryKey = null;
       log(`Cannot watch ${dirs.join(', ')}: ${error.message}`);
@@ -1658,6 +1709,7 @@ module.exports = {
   tokscaleCommand,
   tokscaleClientFilter,
   TOKSCALE_CLIENT_ALIASES,
+  watcherOptions,
   watchIgnoreMatcher,
   watchPathsForClients
 };

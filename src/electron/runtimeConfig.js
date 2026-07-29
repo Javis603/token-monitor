@@ -72,7 +72,10 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
     watchEnabled: context.watchEnabled,
-    watchUsePolling: context.watchUsePolling !== false,
+    // Deliberately passed through as a tri-state rather than coerced: undefined
+    // means "no opinion", which lets resolveWatchUsePolling() apply the shared
+    // default and the TOKEN_MONITOR_WATCH_POLLING override.
+    watchUsePolling: context.watchUsePolling,
     watchTriggersCollection: context.watchTriggersCollection !== false,
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
     watchDebounceMs: Number(context.watchDebounceMs || 1500),

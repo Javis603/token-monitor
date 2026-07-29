@@ -1169,18 +1169,19 @@ test('main settings normalize collection cadence and restart only the device run
   const usageConfig = functionBody(main, 'electronUsageConfig', 'electronLimitsConfig');
   assert.match(usageConfig, /intervalMs: collectorIntervalMs\(\)/);
   assert.match(usageConfig, /watchEnabled: collectorWatchEnabled\(\)/);
-  assert.match(usageConfig, /watchUsePolling: collectorWatchUsePolling\(\)/);
   assert.match(usageConfig, /watchTriggersCollection: collectorWatchTriggersCollection\(\)/);
   assert.match(usageConfig, /intervalRequiresActivity: collectorIntervalRequiresActivity\(\)/);
 
-  // macOS live mode uses native events; other platforms retain polling.
-  // Smart mode uses native events everywhere and never scans on the event itself.
-  assert.match(main, /function collectorWatchUsePolling[\s\S]*?process\.platform !== 'darwin'[\s\S]*?=== 'live'/);
-  // The platform default lives in resolveWatchUsePolling so the widget and the
-  // headless agent cannot drift, and so TOKEN_MONITOR_WATCH_POLLING overrides
-  // both. Behaviour is covered in tests/shared/collectorLoadGuards.test.js.
+  // Every mode watches with native events on every platform, so the widget must
+  // state no preference at all: the moment it passes one it can drift from the
+  // headless agent, which passes none. The shared resolver owns the default and
+  // the TOKEN_MONITOR_WATCH_POLLING override, and degrades to polling itself
+  // when the kernel refuses watch descriptors. Behaviour is covered in
+  // tests/shared/collectorLoadGuards.test.js.
+  assert.doesNotMatch(usageConfig, /^\s*watchUsePolling:/m);
+  assert.doesNotMatch(main, /function collectorWatchUsePolling/);
   assert.match(collector, /const watchUsePolling = resolveWatchUsePolling\(options\.watchUsePolling\)/);
-  assert.match(collector, /function resolveWatchUsePolling[\s\S]*?TOKEN_MONITOR_WATCH_POLLING[\s\S]*?platform !== 'darwin'/);
+  assert.match(collector, /function resolveWatchUsePolling[\s\S]*?TOKEN_MONITOR_WATCH_POLLING/);
   assert.match(main, /function collectorIntervalRequiresActivity[\s\S]*?=== 'smart'/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));

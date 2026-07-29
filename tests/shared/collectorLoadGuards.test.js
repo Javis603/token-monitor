@@ -1152,21 +1152,222 @@ test('smart collection retries a failed activity scan on the next interval', asy
   }
 });
 
-test('TOKEN_MONITOR_WATCH_POLLING overrides the per-platform watch default', () => {
+test('TOKEN_MONITOR_WATCH_POLLING overrides the native watch default', () => {
   const { resolveWatchUsePolling } = freshCollector();
 
-  // Default: native events on macOS, polling elsewhere.
-  assert.equal(resolveWatchUsePolling(undefined, {}, 'darwin'), false);
-  assert.equal(resolveWatchUsePolling(undefined, {}, 'win32'), true);
-  // A caller that states a preference wins over the platform default.
-  assert.equal(resolveWatchUsePolling(true, {}, 'darwin'), true);
+  // Default is native events, and it is deliberately not platform-dependent:
+  // chokidar 4 has one backend for every platform.
+  assert.equal(resolveWatchUsePolling(undefined, {}), false);
+  // A caller that states a preference wins over the default.
+  assert.equal(resolveWatchUsePolling(true, {}), true);
   // The escape hatch beats both, in both directions — its whole purpose is
   // rescuing a filesystem whose native events never arrive.
-  assert.equal(resolveWatchUsePolling(false, { TOKEN_MONITOR_WATCH_POLLING: '1' }, 'darwin'), true);
-  assert.equal(resolveWatchUsePolling(true, { TOKEN_MONITOR_WATCH_POLLING: '0' }, 'win32'), false);
+  assert.equal(resolveWatchUsePolling(false, { TOKEN_MONITOR_WATCH_POLLING: '1' }), true);
+  assert.equal(resolveWatchUsePolling(true, { TOKEN_MONITOR_WATCH_POLLING: '0' }), false);
   // Unset must stay tri-state: an empty value is not "false".
-  assert.equal(resolveWatchUsePolling(false, { TOKEN_MONITOR_WATCH_POLLING: '' }, 'darwin'), false);
-  assert.equal(resolveWatchUsePolling(true, { TOKEN_MONITOR_WATCH_POLLING: '' }, 'darwin'), true);
+  assert.equal(resolveWatchUsePolling(false, { TOKEN_MONITOR_WATCH_POLLING: '' }), false);
+  assert.equal(resolveWatchUsePolling(true, { TOKEN_MONITOR_WATCH_POLLING: '' }), true);
+});
+
+test('watch-descriptor exhaustion degrades to polling and stays there', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  const watchOptions = [];
+  const errorHandlers = [];
+  let closed = 0;
+  chokidar.watch = (_dirs, options) => {
+    watchOptions.push(options);
+    return {
+      on: (event, handler) => { if (event === 'error') errorHandlers.push(handler); },
+      close: () => { closed += 1; }
+    };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  const logs = [];
+  try {
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 1000,
+      watchEnabled: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      logger: (line) => logs.push(line),
+      onUpdate: () => {}
+    });
+
+    await waitForCondition(() => errorHandlers.length === 1);
+    assert.equal(watchOptions[0].usePolling, false, 'starts on native events');
+
+    // inotify exhaustion is reported asynchronously on the watcher; without the
+    // fallback the watch simply stops delivering events.
+    const enospc = new Error('ENOSPC: System limit for number of file watchers reached');
+    enospc.code = 'ENOSPC';
+    errorHandlers[0](enospc);
+
+    await waitForCondition(() => watchOptions.length === 2);
+    assert.equal(watchOptions[1].usePolling, true, 'rebuilds the watcher with polling');
+    assert.equal(watchOptions[1].interval, 2000);
+    assert.equal(closed, 1, 'the exhausted native watcher is closed');
+    assert.ok(logs.some((line) => line.includes('ENOSPC')));
+
+    // A later rebuild (a client gaining a data directory) must not retry native
+    // events — the budget that failed is machine-wide, not ours to reclaim.
+    fs.mkdirSync(path.join(tmp, '.claude', 'transcripts'), { recursive: true });
+    await handle.tick('manual');
+    await waitForCondition(() => watchOptions.length === 3);
+    assert.equal(watchOptions[2].usePolling, true, 'the fallback is sticky');
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalPolling = process.env.TOKEN_MONITOR_WATCH_POLLING;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  process.env.TOKEN_MONITOR_WATCH_POLLING = '0';
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  const watchOptions = [];
+  const errorHandlers = [];
+  chokidar.watch = (_dirs, options) => {
+    watchOptions.push(options);
+    return {
+      on: (event, handler) => { if (event === 'error') errorHandlers.push(handler); },
+      close: () => {}
+    };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 1000,
+      watchEnabled: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: () => {}
+    });
+
+    await waitForCondition(() => errorHandlers.length === 1);
+    const enospc = new Error('ENOSPC: System limit for number of file watchers reached');
+    enospc.code = 'ENOSPC';
+    errorHandlers[0](enospc);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(watchOptions.length, 1, 'an explicit "never poll" must survive descriptor exhaustion');
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    if (originalPolling === undefined) delete process.env.TOKEN_MONITOR_WATCH_POLLING;
+    else process.env.TOKEN_MONITOR_WATCH_POLLING = originalPolling;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a non-descriptor watch error is logged without degrading to polling', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  const watchOptions = [];
+  const errorHandlers = [];
+  chokidar.watch = (_dirs, options) => {
+    watchOptions.push(options);
+    return {
+      on: (event, handler) => { if (event === 'error') errorHandlers.push(handler); },
+      close: () => {}
+    };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  const logs = [];
+  try {
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 1000,
+      watchEnabled: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      logger: (line) => logs.push(line),
+      onUpdate: () => {}
+    });
+
+    await waitForCondition(() => errorHandlers.length === 1);
+    const transient = new Error('EACCES: permission denied');
+    transient.code = 'EACCES';
+    errorHandlers[0](transient);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(watchOptions.length, 1, 'a permission error must not cost every user native events');
+    assert.ok(logs.some((line) => line.includes('EACCES')));
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('live collection retries all clients after a failed targeted watch scan', async () => {

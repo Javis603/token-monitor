@@ -416,23 +416,6 @@ function collectorWatchEnabled() {
   return normalizeCollectionMode(settings?.collectionMode) !== 'interval';
 }
 
-// Live mode no longer needs chokidar's 2-second directory polling on macOS.
-// chokidar 4 dropped the bundled fsevents backend, so macOS now watches through
-// the same per-directory fs.watch path as every other platform (chokidar still
-// walks the tree itself — there is no OS-level recursive watch involved). The
-// earlier attempt that observed missed events ran on chokidar 3's fsevents
-// backend; that evidence does not transfer to chokidar 4.
-//
-// Staged rollout: macOS first because #260 reported the battery cost there.
-// Windows/Linux keep polling for now and are tracked in #284 — that is a
-// deliberate hold, not a platform capability difference. TOKEN_MONITOR_WATCH_POLLING
-// overrides either way (see resolveWatchUsePolling in src/shared/collector.js).
-// Smart mode uses native events everywhere and never collects on the event itself.
-function collectorWatchUsePolling() {
-  return process.platform !== 'darwin'
-    && normalizeCollectionMode(settings?.collectionMode) === 'live';
-}
-
 function collectorWatchTriggersCollection() {
   return normalizeCollectionMode(settings?.collectionMode) === 'live';
 }
@@ -454,7 +437,15 @@ function electronUsageConfig(errorPrefix) {
     intervalMs: collectorIntervalMs(),
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
-    watchUsePolling: collectorWatchUsePolling(),
+    // No watchUsePolling on purpose. The widget states no preference so the
+    // shared default in resolveWatchUsePolling() governs and the widget cannot
+    // drift from the headless agent, which has never passed one. That default
+    // is native events on every platform: chokidar 4 dropped the bundled
+    // fsevents backend, so every platform now watches through the same
+    // per-directory fs.watch path, and the earlier attempt that observed missed
+    // events ran on the chokidar 3 backend that no longer exists. Where the
+    // kernel cannot supply watch descriptors the collector degrades to polling
+    // by itself; TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
