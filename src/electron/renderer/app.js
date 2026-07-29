@@ -7379,6 +7379,12 @@ function renderToolPreferences() {
   }
 }
 
+function connectLimitProviderCheckboxName(checkbox, nameNode, providerId) {
+  const nameId = `limitProviderName-${providerId}`;
+  nameNode.id = nameId;
+  checkbox.setAttribute('aria-labelledby', nameId);
+}
+
 function renderLimitProviderCheckboxes() {
   if (!els.limitProviderCheckboxes) return;
   // A stats update mid-drag would replace the rows under the pointer and kill
@@ -7419,6 +7425,7 @@ function renderLimitProviderCheckboxes() {
     const text = document.createElement('span');
     text.className = 'limit-provider-name';
     text.textContent = settingsLabel || label;
+    connectLimitProviderCheckboxName(cb, text, id);
     nameLine.append(text);
     const tags = document.createElement('span');
     tags.className = 'limit-provider-tags';

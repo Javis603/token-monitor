@@ -1373,6 +1373,29 @@ test('disabled providers use checkbox state instead of a redundant status tag', 
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-tag\s*\{[^}]*color: var\(--muted\)/);
 });
 
+test('provider checkboxes are named by their visible provider name', () => {
+  const app = readRendererFile('app.js');
+  const connectName = functionBody(app, 'connectLimitProviderCheckboxName', 'renderLimitProviderCheckboxes');
+  const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'limitProviderAccountGroup');
+  const checkbox = {
+    attributes: {},
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    }
+  };
+  const nameNode = { id: '', textContent: 'Codex' };
+
+  vm.runInNewContext(
+    `${connectName}\nconnectLimitProviderCheckboxName(checkbox, nameNode, 'codex');`,
+    { checkbox, nameNode }
+  );
+
+  assert.equal(nameNode.id, 'limitProviderName-codex');
+  assert.equal(checkbox.attributes['aria-labelledby'], nameNode.id);
+  assert.equal(nameNode.textContent, 'Codex');
+  assert.match(renderSettings, /connectLimitProviderCheckboxName\(cb, text, id\)/);
+});
+
 test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
   const app = readRendererFile('app.js');
   const remoteOk = { provider: 'minimax', status: 'ok', sourceDeviceId: 'office-pc' };
