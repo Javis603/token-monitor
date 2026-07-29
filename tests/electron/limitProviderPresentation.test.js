@@ -1076,15 +1076,20 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
   const refreshStats = functionBody(app, 'refreshStats', 'publishViewState');
   const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+  const statsRender = app.slice(
+    app.indexOf('function renderStatsUpdate()'),
+    app.indexOf('const statsRenderScheduler =')
+  );
   const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
   const syncSettings = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
 
   assert.doesNotMatch(renderSettings, /state\.stats \? missingLimitProviderStatus\(\) : 'unavailable'/);
-  assert.match(refreshStats, /renderLimitProviderCheckboxes\(\);/);
+  assert.match(refreshStats, /statsRenderScheduler\.request\(\);/);
   assert.match(refreshStats, /applyCodexActiveAccountFromStats\(\);/);
   assert.doesNotMatch(refreshStats, /state\.codexActiveAccount = codexActiveAccountFromStats\(\);/);
   assert.match(statsPush, /applyCodexActiveAccountFromStats\(\);/);
-  assert.match(statsPush, /renderLimitProviderCheckboxes\(\);/);
+  assert.match(statsPush, /statsRenderScheduler\.request\(\);/);
+  assert.match(statsRender, /renderLimitProviderCheckboxes\(\);/);
   // Account cards read state.stats, so every path that refreshes stats must
   // re-render them. Grok is automatic and belongs only to the generic provider
   // list, so it must not retain a separate account-card renderer.
@@ -1092,13 +1097,11 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   // the two cards are re-rendered there and
   // onSettingsPush itself does not duplicate the calls.
   for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.match(refreshStats, new RegExp(`${fn}\\(\\);`), `${fn} missing from refreshStats`);
-    assert.match(statsPush, new RegExp(`${fn}\\(\\);`), `${fn} missing from onStatsPush`);
+    assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
   for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'kimi', 'ollama']) {
-    assert.match(refreshStats, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from refreshStats`);
-    assert.match(statsPush, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from onStatsPush`);
+    assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
   for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {

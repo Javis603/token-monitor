@@ -6,6 +6,7 @@ const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
+const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
@@ -5029,23 +5030,7 @@ async function refreshStats(options = {}) {
     }
     applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
-    render();
-    renderLimitProviderCheckboxes();
-    renderToolPreferences();
-    renderWslPanel();
-    updateOpenRouterProfilesStatus();
-    updateThirdPartyProfilesStatus();
-    renderDeepseekStatus();
-    renderMinimaxStatus();
-    renderExternalProviderStatus('claude');
-    renderExternalProviderStatus('zai');
-    renderExternalProviderStatus('zaiteam');
-    renderExternalProviderStatus('volcengine');
-    renderExternalProviderStatus('qoder');
-    renderExternalProviderStatus('kimi');
-    renderExternalProviderStatus('ollama');
-    renderMimoStatus();
-    renderCopilotStatus();
+    statsRenderScheduler.request();
     maybeUpdateBarsIcon();
     if (feedback) settleRefreshButtonState('refreshed');
   } catch (error) {
@@ -8555,6 +8540,31 @@ window.tokenMonitor.onTokscalePush?.((payload) => {
   renderTokscaleStatus();
 });
 
+function renderStatsUpdate() {
+  render();
+  renderLimitProviderCheckboxes();
+  renderToolPreferences();
+  renderWslPanel();
+  updateOpenRouterProfilesStatus();
+  updateThirdPartyProfilesStatus();
+  renderDeepseekStatus();
+  renderMinimaxStatus();
+  renderExternalProviderStatus('claude');
+  renderExternalProviderStatus('zai');
+  renderExternalProviderStatus('zaiteam');
+  renderExternalProviderStatus('volcengine');
+  renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('kimi');
+  renderExternalProviderStatus('ollama');
+  renderCopilotStatus();
+}
+
+const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler({
+  isHidden: () => document.hidden,
+  render: renderStatsUpdate
+});
+document.addEventListener('visibilitychange', () => statsRenderScheduler.flush());
+
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
   if (payload.event === 'status') {
@@ -8583,22 +8593,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   setStatus(statusTextFor(state.mode, state.streamConnected));
   renderSyncClientStatus();
   if (payload.data?.stats) {
-    render();
-    renderLimitProviderCheckboxes();
-    renderToolPreferences();
-    renderWslPanel();
-    updateOpenRouterProfilesStatus();
-    updateThirdPartyProfilesStatus();
-    renderDeepseekStatus();
-    renderMinimaxStatus();
-    renderExternalProviderStatus('claude');
-    renderExternalProviderStatus('zai');
-    renderExternalProviderStatus('zaiteam');
-    renderExternalProviderStatus('volcengine');
-    renderExternalProviderStatus('qoder');
-    renderExternalProviderStatus('kimi');
-    renderExternalProviderStatus('ollama');
-    renderCopilotStatus();
+    statsRenderScheduler.request();
     maybeUpdateBarsIcon();
   }
   restartTimer();

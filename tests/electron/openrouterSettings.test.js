@@ -49,9 +49,14 @@ test('OpenRouter account statuses settle when refreshed stats arrive', () => {
     app.indexOf('window.tokenMonitor.onStatsPush?.'),
     app.indexOf('function pickWorstProvider(')
   );
+  const statsRender = app.slice(
+    app.indexOf('function renderStatsUpdate()'),
+    app.indexOf('const statsRenderScheduler =')
+  );
 
-  assert.match(refreshStats, /updateOpenRouterProfilesStatus\(\)/);
-  assert.match(statsPush, /updateOpenRouterProfilesStatus\(\)/);
+  assert.match(refreshStats, /statsRenderScheduler\.request\(\)/);
+  assert.match(statsPush, /statsRenderScheduler\.request\(\)/);
+  assert.match(statsRender, /updateOpenRouterProfilesStatus\(\)/);
 });
 
 test('OpenRouter credentials stay in the main process and renderer receives configured state only', () => {

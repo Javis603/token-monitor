@@ -186,8 +186,22 @@ test('third-party profile rows keep metadata on line two and rename on line one'
 
 test('third-party status settles after refresh and pushed stats', () => {
   const app = read('src/electron/renderer/app.js');
-  const matches = app.match(/updateThirdPartyProfilesStatus\(\)/g) || [];
-  assert.ok(matches.length >= 3);
+  const refreshStats = app.slice(
+    app.indexOf('async function refreshStats(options = {})'),
+    app.indexOf('async function refreshStatusViewManually()')
+  );
+  const statsRender = app.slice(
+    app.indexOf('function renderStatsUpdate()'),
+    app.indexOf('const statsRenderScheduler =')
+  );
+  const statsPush = app.slice(
+    app.indexOf('window.tokenMonitor.onStatsPush?.((payload) => {'),
+    app.indexOf('window.tokenMonitor.onSnapshotPush?.((payload) => {')
+  );
+
+  assert.match(refreshStats, /statsRenderScheduler\.request\(\);/);
+  assert.match(statsRender, /updateThirdPartyProfilesStatus\(\);/);
+  assert.match(statsPush, /statsRenderScheduler\.request\(\);/);
   assert.match(app, /function updateThirdPartyProfilesStatus/);
   assert.match(app, /function thirdPartyProfileStatusText/);
   assert.match(app, /settings\.thirdparty\.unlimited/);
