@@ -198,7 +198,6 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   Subscription: 'settings.limits.capability.subscription',
   'Token Plan': 'settings.limits.capability.tokenPlan',
   'Coding Plan': 'settings.limits.capability.codingPlan',
-  'Membership/Coding Plan': 'settings.limits.capability.membershipCodingPlan',
   Relay: 'settings.limits.capability.relay',
   'API key': 'settings.limits.capability.apiKey',
   'AK/SK': 'settings.limits.capability.akSk',
@@ -7588,6 +7587,7 @@ const LIMIT_PROVIDER_SETTINGS = {
     key: 'claudePrepaidBalanceEnabled',
     titleKey: 'settings.limits.prepaidBalance',
     descKey: 'settings.limits.prepaidBalanceDesc',
+    requiresConfiguredKey: 'claudeWebCookieConfigured',
     defaultValue: true
   }]
 };
@@ -7610,7 +7610,10 @@ function limitProviderSettingsList(providerId, settings) {
     copy.append(title);
     const input = document.createElement('input');
     input.type = 'checkbox';
-    input.checked = state.settings?.[setting.key] !== false;
+    const available = !setting.requiresConfiguredKey || Boolean(state.settings?.[setting.requiresConfiguredKey]);
+    input.checked = available && state.settings?.[setting.key] !== false;
+    input.disabled = !available;
+    item.classList.toggle('is-disabled', !available);
     input.addEventListener('change', async () => {
       await saveSettings({ [setting.key]: input.checked });
       // Switching this off hides the row immediately; the request it also stops

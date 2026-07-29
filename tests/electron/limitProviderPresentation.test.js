@@ -1463,9 +1463,65 @@ test('empty OpenCode profiles render a localized summary before returning', () =
 test('expanded provider options use the full row width without nested indentation', () => {
   const css = readRendererFile('styles.css');
 
-  assert.match(css, /\.settings-panel \.limit-provider-settings-list\s*\{[^}]*margin-left: 0;[^}]*padding-left: 0;[^}]*border-left: 0;/);
+  assert.match(css, /\.settings-panel \.limit-provider-settings-list\s*\{[^}]*margin: 0;[^}]*padding-left: 0;[^}]*border-left: 0;/);
   assert.match(css, /\.limit-provider-account-group\s*\{[^}]*margin-left: 0;/);
+  assert.match(css, /\.limit-provider-account-group > \.cursor-settings-details\s*\{[^}]*margin-top: 0;/);
   assert.match(css, /\.limit-provider-connection-detail\s*\{[^}]*padding: 4px 0 2px;/);
+});
+
+test('Claude prepaid balance stays off and disabled until Web login is configured', () => {
+  const app = readRendererFile('app.js');
+  const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
+  const settings = [{
+    key: 'claudePrepaidBalanceEnabled',
+    titleKey: 'settings.limits.prepaidBalance',
+    descKey: 'settings.limits.prepaidBalanceDesc',
+    requiresConfiguredKey: 'claudeWebCookieConfigured'
+  }];
+
+  class FakeElement {
+    constructor(tagName) {
+      this.tagName = tagName;
+      this.children = [];
+      this.className = '';
+      this.classList = {
+        toggle: (name, enabled) => {
+          if (enabled) this.className = `${this.className} ${name}`.trim();
+        }
+      };
+    }
+    append(...children) { this.children.push(...children); }
+    addEventListener() {}
+  }
+
+  const context = {
+    document: { createElement: (tagName) => new FakeElement(tagName) },
+    state: {
+      settings: {
+        claudePrepaidBalanceEnabled: true,
+        claudeWebCookieConfigured: false
+      }
+    },
+    t: (key) => key
+  };
+  const loggedOutContext = { ...context, settings };
+  vm.runInNewContext(
+    `${renderList}\nresult = limitProviderSettingsList('claude', settings);`,
+    loggedOutContext
+  );
+  const loggedOutInput = loggedOutContext.result?.children?.[0]?.children?.[1];
+  assert.equal(loggedOutInput?.checked, false);
+  assert.equal(loggedOutInput?.disabled, true);
+
+  context.state.settings.claudeWebCookieConfigured = true;
+  const loggedInContext = { ...context, settings };
+  vm.runInNewContext(
+    `${renderList}\nresult = limitProviderSettingsList('claude', settings);`,
+    loggedInContext
+  );
+  const loggedInInput = loggedInContext.result?.children?.[0]?.children?.[1];
+  assert.equal(loggedInInput?.checked, true);
+  assert.equal(loggedInInput?.disabled, false);
 });
 
 test('successful providers use a green dot while preserving source and account labels', () => {
@@ -1744,7 +1800,7 @@ test('Z.ai, Volcengine, Qoder, and Ollama source labels and setup statuses', () 
 });
 
 test('Kimi capability tags and source label', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('kimi'), ['Membership/Coding Plan', 'Web/API']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('kimi'), ['Coding Plan', 'Web/API']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimi', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimi', source: 'web' }), 'Web');
   assert.deepEqual(

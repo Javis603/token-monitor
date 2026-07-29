@@ -1848,7 +1848,7 @@ span.settings-note.settings-item-desc {
    geometry rather than a mid-animation height. */
 .limit-provider-list.is-reordering .accordion-animated-container { transition: none; }
 .settings-panel .limit-provider-settings-list {
-  margin-left: 0;
+  margin: 0;
   padding-left: 0;
   border-left: 0;
 }
@@ -1948,6 +1948,9 @@ span.settings-note.settings-item-desc {
 }
 .limit-provider-account-group > .settings-group-header {
   display: none;
+}
+.limit-provider-account-group > .cursor-settings-details {
+  margin-top: 0;
 }
 .limit-provider-connection-detail {
   display: grid;

@@ -125,7 +125,7 @@ test('AI limit capability labels stay compact in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.limits.device.localAlso'), '本機也有');
   assert.equal(translate('zh-TW', 'settings.limits.capability.web'), 'Web');
   assert.equal(translate('zh-TW', 'settings.limits.capability.webApi'), 'Web/API');
-  assert.equal(translate('zh-TW', 'settings.limits.capability.membershipCodingPlan'), '會員/Coding Plan');
+  assert.equal(translate('zh-TW', 'settings.limits.capability.codingPlan'), 'Coding Plan');
   assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 kimi-auth，複製它的 Value。');
   assert.equal(translate('zh-TW', 'settings.kimi.apiFallback'), '選用：Kimi Code API 備援');
   assert.equal(translate('zh-CN', 'settings.limits.capability.appMustBeOpen'), '需打开 App 或 CLI');
@@ -133,6 +133,23 @@ test('AI limit capability labels stay compact in Chinese', () => {
   assert.equal(translate('zh-CN', 'settings.limits.capability.manualLogin'), '手动登录');
   assert.equal(translate('zh-CN', 'settings.limits.device.from', { device: 'work-mac' }), '来自 work-mac');
   assert.equal(translate('zh-CN', 'settings.limits.status.noSyncedData'), '暂无同步数据');
+});
+
+test('Claude prepaid balance copy points to its merged provider panel', () => {
+  assert.equal(
+    translate('en', 'settings.limits.prepaidBalanceDesc'),
+    'Shows your claude.ai credit balance and expiry dates. Sign in to Claude Web here; the balance appears when the account has credits.'
+  );
+  assert.equal(
+    translate('zh-TW', 'settings.limits.prepaidBalanceDesc'),
+    '顯示 claude.ai 的信用餘額與到期日。請在此登入 Claude Web；帳號有餘額時才會顯示。'
+  );
+  assert.equal(
+    translate('zh-CN', 'settings.limits.prepaidBalanceDesc'),
+    '显示 claude.ai 的信用余额与到期日。请在此登录 Claude Web；账号有余额时才会显示。'
+  );
+  assert.doesNotMatch(translate('ko', 'settings.limits.prepaidBalanceDesc'), /Claude 계정/);
+  assert.doesNotMatch(translate('ja', 'settings.limits.prepaidBalanceDesc'), /Claudeアカウント/);
 });
 
 test('applyTranslations updates text, title, aria-label, placeholders, and document lang', () => {
