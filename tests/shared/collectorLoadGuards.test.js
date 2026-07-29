@@ -1249,24 +1249,39 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
   }
 });
 
-// The two tests below deliberately build their home WITHOUT realpath, unlike
-// withTmpHome(). On the Windows CI runner os.tmpdir() is an 8.3 short path
-// (C:\Users\RUNNER~1\...), which is exactly the input canonicalWatchPath()
-// exists to neutralise — handing one to fs.watch aborts the process inside
-// libuv, uncatchably. A canonicalised fixture would test around that guard
-// instead of testing it.
-function withRawTmpHome(prepare) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-rawhome-'));
-  for (const dir of prepare) fs.mkdirSync(path.join(tmp, dir), { recursive: true });
-  return tmp;
+// The two tests below need a home that is definitely NOT its own canonical
+// path, because that is the only input under which canonicalWatchPath() does
+// anything observable. Simply skipping realpath would not do it: that only
+// works while os.tmpdir() happens to be non-canonical, which is true today
+// (macOS /var -> /private/var, an 8.3 short path on the Windows runner) but is
+// a property of the runner image rather than of this test. A fixture that can
+// stop being able to fail when an image changes is exactly what this file
+// refuses to rely on elsewhere.
+//
+// So build the real home under a canonicalised base and hand back an alias to
+// it. Junction rather than symlink on Windows: junctions need neither elevation
+// nor developer mode, and a junction is one of the two things
+// canonicalWatchPath() exists to resolve.
+function withAliasedTmpHome(prepare) {
+  const base = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'token-monitor-alias-'));
+  const real = path.join(base, 'real-home');
+  const alias = path.join(base, 'alias-home');
+  fs.mkdirSync(real, { recursive: true });
+  for (const dir of prepare) fs.mkdirSync(path.join(real, dir), { recursive: true });
+  fs.symlinkSync(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  // Guard the fixture itself: if the alias ever stopped being non-canonical the
+  // tests below would silently lose their teeth, which is the failure mode this
+  // whole approach exists to avoid.
+  assert.notEqual(alias, fs.realpathSync.native(alias));
+  return { base, alias, real };
 }
 
 test('watch roots reach chokidar canonicalised on Windows and untouched elsewhere', async () => {
-  const tmp = withRawTmpHome([path.join('.claude', 'projects')]);
+  const { base, alias, real } = withAliasedTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  os.homedir = () => tmp;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  os.homedir = () => alias;
+  process.env.TOKEN_MONITOR_SHARED_DIR = alias;
 
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
@@ -1298,17 +1313,15 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
     });
 
     await waitForCondition(() => Array.isArray(watchedDirs) && watchedDirs.length > 0);
-    const raw = path.join(tmp, '.claude', 'projects');
     if (process.platform === 'win32') {
-      // Every root must already be its own canonical form. This is what keeps
-      // libuv's fs-event assert from firing, and it is not satisfied by a short
-      // path.
-      for (const dir of watchedDirs) assert.equal(dir, fs.realpathSync.native(dir));
-      assert.ok(watchedDirs.includes(fs.realpathSync.native(raw)));
+      // The junction must have been resolved away. Handing libuv a path it will
+      // report events under in a different form is what fires the fs-event
+      // assert, and that abort is not something the watcher can recover from.
+      assert.deepEqual(watchedDirs, [path.join(real, '.claude', 'projects')]);
     } else {
       // Off Windows this must be identity: resolving here would make the watch
       // roots disagree with the paths tokscale is pointed at.
-      assert.deepEqual(watchedDirs, [raw]);
+      assert.deepEqual(watchedDirs, [path.join(alias, '.claude', 'projects')]);
     }
   } finally {
     if (handle) handle.stop();
@@ -1318,7 +1331,7 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });
 
@@ -1332,13 +1345,13 @@ test('the ignore matcher agrees with the roots chokidar was actually handed', as
   // Both halves are read back off the same chokidar.watch call rather than
   // recomputed here, which is what makes this hold on every platform: it asserts
   // that the two agree, not which form they agree on.
-  const tmp = withRawTmpHome([]);
+  const { base, alias } = withAliasedTmpHome([]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   const originalHermesHome = process.env.HERMES_HOME;
-  os.homedir = () => tmp;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-  const hermesHome = path.join(tmp, '.hermes');
+  os.homedir = () => alias;
+  process.env.TOKEN_MONITOR_SHARED_DIR = alias;
+  const hermesHome = path.join(alias, '.hermes');
   fs.mkdirSync(hermesHome, { recursive: true });
   process.env.HERMES_HOME = hermesHome;
 
@@ -1393,7 +1406,7 @@ test('the ignore matcher agrees with the roots chokidar was actually handed', as
     if (originalHermesHome === undefined) delete process.env.HERMES_HOME;
     else process.env.HERMES_HOME = originalHermesHome;
     delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });
 

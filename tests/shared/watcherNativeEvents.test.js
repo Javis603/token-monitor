@@ -26,7 +26,12 @@ const { watcherOptions } = require('../../src/shared/collector');
 
 // awaitWriteFinish holds an event for stabilityThreshold (500 ms) before it is
 // emitted, so the floor is already half a second before any scheduling noise.
-const EVENT_TIMEOUT_MS = 20 * 1000;
+// The bound is generous on purpose, and was raised after a single timeout seen
+// while the whole suite ran in parallel on a loaded machine: this asserts that
+// events arrive at all, so the only thing a tighter bound buys is a faster
+// failure on a starved runner, at the cost of failing for a reason that has
+// nothing to do with the watcher.
+const EVENT_TIMEOUT_MS = 45 * 1000;
 
 // os.tmpdir() is an 8.3 short path on the Windows CI runner
 // (C:\Users\RUNNER~1\...), and handing one to fs.watch aborts the process
