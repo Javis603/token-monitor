@@ -161,7 +161,8 @@ function functionBody(source, name, nextName) {
   assert.notEqual(start, -1, `${name} function should exist`);
   const end = source.indexOf(`function ${nextName}(`, start);
   assert.notEqual(end, -1, `${nextName} function should follow ${name}`);
-  return source.slice(start, end);
+  const endLineStart = source.lastIndexOf('\n', end) + 1;
+  return source.slice(start, endLineStart);
 }
 
 function runLocalProviderStatus(source, state, providerName) {
@@ -1297,6 +1298,49 @@ test('provider rerenders preserve live account nodes and focused controls', () =
   assert.match(renderSettings, /accountGroup\.classList\.add\('limit-provider-account-group'\)/);
   assert.match(renderSettings, /document\.getElementById\(focusedId\)\?\.focus\(\{ preventScroll: true \}\)/);
   assert.doesNotMatch(app, /function restoreLimitProviderAccountGroups/);
+});
+
+test('background provider rerenders preserve settings scroll without a focused control', () => {
+  const app = readRendererFile('app.js');
+  const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'renderLimitProviderCheckboxesNow');
+  const preserveScroll = functionBody(app, 'preserveSettingsPanelScroll', 'saveSettings');
+  const panel = {
+    scrollTop: 684,
+    scrollLeft: 9,
+    classList: { contains: () => false }
+  };
+  const frames = [];
+  const els = {
+    limitProviderCheckboxes: {},
+    settingsPanel: panel
+  };
+  const renderLimitProviderCheckboxesNow = () => {
+    // Removing the visible anchor rows can make Chromium clamp both axes while
+    // the replacement list is being committed.
+    panel.scrollTop = 112;
+    panel.scrollLeft = 0;
+  };
+
+  vm.runInNewContext(
+    `${preserveScroll}\n${renderSettings}\nrenderLimitProviderCheckboxes();`,
+    {
+      els,
+      limitProviderDrag: null,
+      renderLimitProviderCheckboxesNow,
+      requestAnimationFrame: (callback) => frames.push(callback)
+    }
+  );
+
+  assert.equal(panel.scrollTop, 684);
+  assert.equal(panel.scrollLeft, 9);
+  assert.equal(frames.length, 1);
+
+  // A post-layout anchor adjustment must be corrected as well.
+  panel.scrollTop = 112;
+  panel.scrollLeft = 0;
+  frames[0]();
+  assert.equal(panel.scrollTop, 684);
+  assert.equal(panel.scrollLeft, 9);
 });
 
 test('dynamic account summaries are never reset by the static translation pass', () => {

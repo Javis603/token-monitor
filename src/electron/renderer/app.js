@@ -7387,6 +7387,10 @@ function renderLimitProviderCheckboxes() {
     limitProviderDrag.renderPending = true;
     return;
   }
+  return preserveSettingsPanelScroll(renderLimitProviderCheckboxesNow);
+}
+
+function renderLimitProviderCheckboxesNow() {
   const previousRows = Array.from(els.limitProviderCheckboxes.children);
   const focusedId = document.activeElement?.id || '';
   const enabled = enabledLimitProviderSet();
