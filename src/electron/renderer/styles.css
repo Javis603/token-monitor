@@ -990,7 +990,6 @@ span.settings-note.settings-item-desc {
 .settings-section-icon-window { --settings-section-icon-url: url("icons/settings/window.svg"); }
 .settings-section-icon-tools { --settings-section-icon-url: url("icons/settings/collection.svg"); }
 .settings-section-icon-limits { --settings-section-icon-url: url("icons/settings/limits.svg"); }
-.settings-section-icon-accounts { --settings-section-icon-url: url("icons/settings/accounts.svg"); }
 .settings-section-icon-sync { --settings-section-icon-url: url("icons/settings/sync.svg"); }
 .settings-section-icon-appearance { --settings-section-icon-url: url("icons/settings/appearance.svg"); }
 .cursor-settings-toggle {
@@ -1806,6 +1805,7 @@ span.settings-note.settings-item-desc {
 }
 .limit-provider-actions > .cursor-status-pill {
   flex: 0 1 auto;
+  min-width: min(100%, 10em);
 }
 .limit-provider-row.expanded > .limit-provider-main .cursor-disclosure-icon {
   transform: rotate(180deg);

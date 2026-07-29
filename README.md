@@ -245,7 +245,7 @@ This archive only covers days Token Monitor has already observed; data deleted b
 
 There are two places to configure Token Monitor; day-to-day use only needs the first:
 
-- **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates), Main (Home modules and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, shortcut), Appearance (theme and vendor colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, data export), AI Tool Limits, Accounts (per-provider credentials), and Multi-device Sync. The `⇧` button in the title bar cycles the window behavior.
+- **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates), Main (Home modules and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, shortcut), Appearance (theme and vendor colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, data export), AI Tool Limits (provider selection, limits, and credentials), and Multi-device Sync. The `⇧` button in the title bar cycles the window behavior.
 - **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default.
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.

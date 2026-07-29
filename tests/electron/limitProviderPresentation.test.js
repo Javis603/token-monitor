@@ -1258,20 +1258,41 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
   assert.doesNotMatch(html, /data-settings-section="accounts"/);
 });
 
-test('provider rerenders re-park live account nodes before replacing rows', () => {
+test('provider rerenders preserve live account nodes and focused controls', () => {
   const app = readRendererFile('app.js');
+  const moveLiveNode = functionBody(app, 'moveLimitProviderLiveNode', 'renderLimitProviderCheckboxes');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'limitProviderAccountGroup');
-  const restore = functionBody(app, 'restoreLimitProviderAccountGroups', 'limitProviderConnectionDetail');
+  const focusedInput = { id: 'deepseekApiKeyInput', isConnected: true };
+  const oldParent = { isConnected: true };
+  const connectedParent = {
+    isConnected: true,
+    moveBefore(node, before) {
+      assert.equal(this.isConnected, true);
+      assert.equal(node.isConnected, true);
+      assert.equal(before, null);
+      node.parentElement = this;
+    }
+  };
+  focusedInput.parentElement = oldParent;
 
-  assert.ok(
-    renderSettings.indexOf('restoreLimitProviderAccountGroups();')
-      < renderSettings.indexOf('els.limitProviderCheckboxes.replaceChildren();')
+  vm.runInNewContext(
+    `${moveLiveNode}\nmoveLimitProviderLiveNode(connectedParent, focusedInput);`,
+    { connectedParent, focusedInput }
   );
-  assert.match(restore, /statusHost\.prepend\(status\)/);
-  assert.match(restore, /pool\.append\(group\)/);
-  assert.match(renderSettings, /if \(accountStatus\) actions\.append\(accountStatus\)/);
+
+  assert.equal(focusedInput.parentElement, connectedParent);
+  assert.doesNotMatch(renderSettings, /replaceChildren|restoreLimitProviderAccountGroups/);
+  assert.ok(
+    renderSettings.indexOf('els.limitProviderCheckboxes.appendChild(row);')
+      < renderSettings.indexOf('moveLimitProviderLiveNode(optionsInner, accountGroup);')
+  );
+  assert.ok(
+    renderSettings.indexOf('moveLimitProviderLiveNode(optionsInner, accountGroup);')
+      < renderSettings.indexOf('for (const row of previousRows) row.remove();')
+  );
   assert.match(renderSettings, /accountGroup\.classList\.add\('limit-provider-account-group'\)/);
-  assert.match(renderSettings, /inner\.append\(accountGroup\)/);
+  assert.match(renderSettings, /document\.getElementById\(focusedId\)\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.doesNotMatch(app, /function restoreLimitProviderAccountGroups/);
 });
 
 test('dynamic account summaries are never reset by the static translation pass', () => {
@@ -1311,6 +1332,30 @@ test('provider toggles converge through the limits push without a forced refresh
   assert.doesNotMatch(body, /refreshStats\(/);
 });
 
+test('empty OpenCode profiles render a localized summary before returning', () => {
+  const app = readRendererFile('app.js');
+  const renderProfiles = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
+  const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'openrouterProfileStatusText');
+  const totalEl = { textContent: 'Not configured' };
+  const context = {
+    document: {
+      getElementById(id) {
+        return id === 'opencodeCookieStatus' ? totalEl : null;
+      }
+    },
+    state: { opencodeProfileCount: 0 },
+    t: (key, params) => params ? `${key}:${params.linked}/${params.total}` : `localized:${key}`
+  };
+
+  vm.runInNewContext(`${renderSummary}\nrenderOpenCodeProfilesStatusSummary({});`, context);
+
+  assert.equal(totalEl.textContent, 'localized:settings.opencode.statusNotSet');
+  assert.match(
+    renderProfiles,
+    /state\.opencodeProfileCount = 0;\s*renderOpenCodeProfilesStatusSummary\(\{\}\);\s*renderSettingsSummaries\(\);\s*return;/
+  );
+});
+
 test('expanded provider options use the full row width without nested indentation', () => {
   const css = readRendererFile('styles.css');
 
@@ -1328,7 +1373,7 @@ test('successful providers use a green dot while preserving source and account l
   assert.match(renderSettings, /dot\.className = 'limit-provider-status-dot'/);
   assert.match(renderSettings, /if \(\(detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(renderSettings, /tag\.className = `limit-provider-tag limit-provider-tag-\$\{tagInfo\.kind\}`/);
-  assert.match(renderSettings, /if \(accountStatus\) actions\.append\(accountStatus\)/);
+  assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus\)/);
   assert.match(css, /\.limit-provider-status-dot\s*\{[\s\S]*?background: var\(--success\)/);
 });
 
@@ -1359,6 +1404,7 @@ test('account and automatic provider panels reuse the original account summary g
   assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 5);
   assert.match(css, /\.limit-provider-main\s*\{[\s\S]*?display: flex;[\s\S]*?justify-content: space-between/);
   assert.match(css, /\.limit-provider-actions\s*\{[\s\S]*?flex: 0 1 auto;[\s\S]*?max-width: 58%;[\s\S]*?gap: 4px/);
+  assert.match(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*min-width: min\(100%, 10em\)/);
   assert.match(css, /\.limit-provider-row\.expanded > \.limit-provider-main \.cursor-disclosure-icon/);
 });
 

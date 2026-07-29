@@ -66,19 +66,6 @@ test('renderer provider order matches the collector default for new settings', (
   assert.deepEqual(ids, parseLimitProviders());
 });
 
-test('account groups derive their order from the default limits provider order', () => {
-  const app = read('src/electron/renderer/app.js');
-  const start = app.indexOf('function orderAccountProviderGroups()');
-  const end = app.indexOf('function refreshIntervalLabel', start);
-  const body = app.slice(start, end);
-
-  assert.match(body, /for \(const provider of LIMIT_PROVIDERS\)/);
-  assert.match(body, /const groupId = LIMIT_PROVIDER_ACCOUNT_GROUP_IDS\[provider\.id\]/);
-  assert.match(body, /if \(!groupId\) continue/);
-  assert.match(body, /if \(group\?\.parentElement === container\) container\.append\(group\)/);
-  assert.ok(app.indexOf('orderAccountProviderGroups();') < app.indexOf('initSettingsAnimationWrappers();'));
-});
-
 test('normalizeLimitProviderOrder drops invalid entries and appends missing providers', () => {
   assert.deepEqual(
     normalizeLimitProviderOrder('codex,unknown,codex,claude', providers),

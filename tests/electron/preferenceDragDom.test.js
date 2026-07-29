@@ -143,11 +143,16 @@ test('settings page uses collapsible icon sections with summaries', () => {
   assert.match(app, /for \(const other of SETTINGS_SECTION_IDS\)/);
   assert.doesNotMatch(app, /'limits', 'accounts', 'sync'/);
   assert.doesNotMatch(app, /viewsSettingsSummary/);
+  assert.doesNotMatch(app, /orderAccountProviderGroups/);
 
   const css = readRendererFile('styles.css');
+  const i18n = readRendererFile('i18n.js');
   assert.match(css, /\.settings-section-toggle/);
   assert.match(css, /\.settings-section-icon/);
   assert.match(css, /\.settings-section-summary/);
+  assert.doesNotMatch(css, /\.settings-section-icon-accounts/);
+  assert.doesNotMatch(i18n, /settings\.(?:sections|summary)\.accounts/);
+  assert.equal(fs.existsSync(path.join(rendererDir, 'icons', 'settings', 'accounts.svg')), false);
   assert.match(cssRule(css, '.settings-section-icon'), /mask:\s*var\(--settings-section-icon-url\)/);
   for (const [section, asset] of Object.entries(settingsIconAssets)) {
     assert.match(cssRule(css, `.settings-section-icon-${section}`), new RegExp(`icons/settings/${asset}`));

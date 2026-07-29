@@ -575,17 +575,6 @@ function setupSettingsSections() {
   els.settingsPanel?.addEventListener('keydown', cancelSettingsScrollAnchorOnKeydown);
 }
 
-function orderAccountProviderGroups() {
-  const container = document.getElementById('accountsSettingsDetails');
-  if (!container) return;
-  for (const provider of LIMIT_PROVIDERS) {
-    const groupId = LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[provider.id];
-    if (!groupId) continue;
-    const group = document.getElementById(groupId);
-    if (group?.parentElement === container) container.append(group);
-  }
-}
-
 function refreshIntervalLabel(value) {
   const ms = Number(value) || 300000;
   const minutes = Math.max(1, Math.round(ms / 60000));
@@ -7385,6 +7374,11 @@ function connectLimitProviderCheckboxName(checkbox, nameNode, providerId) {
   checkbox.setAttribute('aria-labelledby', nameId);
 }
 
+function moveLimitProviderLiveNode(parent, node) {
+  if (!parent || !node || node.parentElement === parent) return;
+  parent.moveBefore(node, null);
+}
+
 function renderLimitProviderCheckboxes() {
   if (!els.limitProviderCheckboxes) return;
   // A stats update mid-drag would replace the rows under the pointer and kill
@@ -7393,11 +7387,11 @@ function renderLimitProviderCheckboxes() {
     limitProviderDrag.renderPending = true;
     return;
   }
-  restoreLimitProviderAccountGroups();
+  const previousRows = Array.from(els.limitProviderCheckboxes.children);
+  const focusedId = document.activeElement?.id || '';
   const enabled = enabledLimitProviderSet();
   const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
-  els.limitProviderCheckboxes.replaceChildren();
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
@@ -7410,6 +7404,7 @@ function renderLimitProviderCheckboxes() {
     wrap.className = 'client-checkbox limit-provider-toggle';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
+    cb.id = `limitProviderEnabled-${id}`;
     cb.dataset.provider = id;
     cb.checked = isEnabled;
     cb.addEventListener('change', onLimitProviderToggle);
@@ -7460,7 +7455,6 @@ function renderLimitProviderCheckboxes() {
     const actions = document.createElement('span');
     actions.className = 'limit-provider-actions';
     const accountStatus = limitProviderAccountStatus(id);
-    if (accountStatus) actions.append(accountStatus);
     if (connectionDetailKey) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
@@ -7470,12 +7464,14 @@ function renderLimitProviderCheckboxes() {
     const settings = LIMIT_PROVIDER_SETTINGS[id];
     const hasOptions = Boolean(accountGroup || settings || connectionDetailKey);
     let optionsContainer = null;
+    let optionsInner = null;
     let main = null;
     if (hasOptions) {
       const expanded = state.limitProviderSettingsExpanded === id;
       row.classList.toggle('expanded', expanded);
       main = document.createElement('button');
       main.type = 'button';
+      main.id = `limitProviderDisclosure-${id}`;
       main.className = 'limit-provider-main';
       main.title = t('settings.limits.providerOptions', { provider: settingsLabel || label });
       main.setAttribute('aria-label', main.title);
@@ -7488,15 +7484,14 @@ function renderLimitProviderCheckboxes() {
       optionsContainer.id = `limitProviderOptions-${id}`;
       optionsContainer.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
       main.setAttribute('aria-controls', optionsContainer.id);
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner limit-provider-options-inner';
+      optionsInner = document.createElement('div');
+      optionsInner.className = 'accordion-animation-inner limit-provider-options-inner';
       if (accountGroup) {
         accountGroup.classList.add('limit-provider-account-group');
-        inner.append(accountGroup);
       }
-      if (connectionDetailKey) inner.append(limitProviderConnectionDetail(connectionDetailKey));
-      if (settings) inner.append(limitProviderSettingsList(id, settings));
-      optionsContainer.append(inner);
+      if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
+      if (settings) optionsInner.append(limitProviderSettingsList(id, settings));
+      optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
         const accountToggle = accountGroup?.querySelector(':scope > .settings-group-header');
@@ -7518,6 +7513,14 @@ function renderLimitProviderCheckboxes() {
     // list is dragged.
     if (optionsContainer) row.append(optionsContainer);
     els.limitProviderCheckboxes.appendChild(row);
+    // `moveBefore()` preserves focus and edit state while reparenting. Its
+    // destination must already be connected, so the row is mounted first.
+    moveLimitProviderLiveNode(actions, accountStatus);
+    moveLimitProviderLiveNode(optionsInner, accountGroup);
+  }
+  for (const row of previousRows) row.remove();
+  if (focusedId && document.activeElement === document.body) {
+    document.getElementById(focusedId)?.focus({ preventScroll: true });
   }
 }
 
@@ -7529,20 +7532,6 @@ function limitProviderAccountGroup(providerId) {
 function limitProviderAccountStatus(providerId) {
   const statusId = LIMIT_PROVIDER_ACCOUNT_STATUS_IDS[providerId];
   return statusId ? document.getElementById(statusId) : null;
-}
-
-function restoreLimitProviderAccountGroups() {
-  const pool = document.getElementById('accountsSettingsDetails');
-  if (!pool) return;
-  for (const providerId of Object.keys(LIMIT_PROVIDER_ACCOUNT_GROUP_IDS)) {
-    const group = limitProviderAccountGroup(providerId);
-    if (!group) continue;
-    const status = limitProviderAccountStatus(providerId);
-    const statusHost = group.querySelector(':scope > .settings-group-header .cursor-settings-summary');
-    if (status && statusHost && status.parentElement !== statusHost) statusHost.prepend(status);
-    group.classList.remove('limit-provider-account-group');
-    pool.append(group);
-  }
 }
 
 function limitProviderConnectionDetail(bodyKey) {
@@ -10565,6 +10554,7 @@ function renderOpenCodeProfiles() {
     if (entries.length === 0 && !hasEnvVar) {
       listEl.innerHTML = '<div class="opencode-empty">' + t('settings.opencode.emptyList') + '</div>';
       state.opencodeProfileCount = 0;
+      renderOpenCodeProfilesStatusSummary({});
       renderSettingsSummaries();
       return;
     }
@@ -10700,7 +10690,10 @@ async function updateOpenCodeProfilesStatus() {
     }
   }
 
-  // Update summary pill
+  renderOpenCodeProfilesStatusSummary(profiles);
+}
+
+function renderOpenCodeProfilesStatusSummary(profiles) {
   const totalEl = document.getElementById('opencodeCookieStatus');
   if (totalEl) {
     const linkedCount = Object.values(profiles).filter(s => s.linked).length;
@@ -12464,7 +12457,6 @@ function initSettingsAnimationWrappers() {
   });
 }
 
-orderAccountProviderGroups();
 initSettingsAnimationWrappers();
 setupSettingsSections();
 setupCursorAccountUI();

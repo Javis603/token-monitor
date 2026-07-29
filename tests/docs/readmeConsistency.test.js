@@ -174,6 +174,20 @@ test('localized READMEs link to the configuration reference', () => {
   for (const file of localizedReadmes) assert.match(read(file), /docs\/configuration\.md/, file);
 });
 
+test('localized README settings lists keep provider credentials inside AI Tool Limits', () => {
+  const mergedSectionCopy = {
+    'README.md': 'AI Tool Limits (provider selection, limits, and credentials)',
+    'README.zh-TW.md': 'AI 工具額度（供應商選擇、額度與憑證）',
+    'README.zh-CN.md': 'AI 工具额度（提供方选择、额度与凭据）',
+    'README.ja.md': 'AI ツール制限（プロバイダー選択、制限、認証情報）',
+    'README.ko.md': 'AI 도구 한도(공급자 선택, 한도, 자격 증명)'
+  };
+
+  for (const [file, copy] of Object.entries(mergedSectionCopy)) {
+    assert.match(read(file), new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), file);
+  }
+});
+
 test('localized README WSL claims disclose the SQLite agent boundary', () => {
   const files = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
 
