@@ -1302,6 +1302,9 @@ test('provider rerenders preserve live account nodes and focused controls', () =
 
 test('background provider rerenders preserve settings scroll without a focused control', () => {
   const app = readRendererFile('app.js');
+  const interactionStart = app.indexOf('const SETTINGS_SCROLL_ANCHOR_MS');
+  const interactionEnd = app.indexOf('function shouldAnchorSettingsScroll', interactionStart);
+  const scrollInteraction = app.slice(interactionStart, interactionEnd);
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'renderLimitProviderCheckboxesNow');
   const preserveScroll = functionBody(app, 'preserveSettingsPanelScroll', 'saveSettings');
   const panel = {
@@ -1322,8 +1325,9 @@ test('background provider rerenders preserve settings scroll without a focused c
   };
 
   vm.runInNewContext(
-    `${preserveScroll}\n${renderSettings}\nrenderLimitProviderCheckboxes();`,
+    `${scrollInteraction}\n${preserveScroll}\n${renderSettings}\nrenderLimitProviderCheckboxes();`,
     {
+      cancelAnimationFrame: () => {},
       els,
       limitProviderDrag: null,
       renderLimitProviderCheckboxesNow,
@@ -1341,6 +1345,58 @@ test('background provider rerenders preserve settings scroll without a focused c
   frames[0]();
   assert.equal(panel.scrollTop, 684);
   assert.equal(panel.scrollLeft, 9);
+});
+
+test('user scrolling wins over a pending provider scroll restore', () => {
+  const app = readRendererFile('app.js');
+  const interactionStart = app.indexOf('const SETTINGS_SCROLL_ANCHOR_MS');
+  const interactionEnd = app.indexOf('function shouldAnchorSettingsScroll', interactionStart);
+  const scrollInteraction = app.slice(interactionStart, interactionEnd);
+  const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'renderLimitProviderCheckboxesNow');
+  const preserveScroll = functionBody(app, 'preserveSettingsPanelScroll', 'saveSettings');
+  const setupSections = functionBody(app, 'setupSettingsSections', 'refreshIntervalLabel');
+  const listeners = new Map();
+  const panel = {
+    scrollTop: 200,
+    scrollLeft: 0,
+    classList: { contains: () => false },
+    addEventListener(type, listener) {
+      const entries = listeners.get(type) || [];
+      entries.push(listener);
+      listeners.set(type, entries);
+    },
+    dispatch(type, event = {}) {
+      for (const listener of listeners.get(type) || []) listener(event);
+    }
+  };
+  const frames = [];
+  const els = {
+    limitProviderCheckboxes: {},
+    settingsPanel: panel
+  };
+  const renderLimitProviderCheckboxesNow = () => {};
+
+  vm.runInNewContext(
+    `${scrollInteraction}
+${setupSections}
+${preserveScroll}
+${renderSettings}
+setupSettingsSections();
+renderLimitProviderCheckboxes();`,
+    {
+      cancelAnimationFrame: () => {},
+      document: { querySelectorAll: () => [] },
+      els,
+      limitProviderDrag: null,
+      renderLimitProviderCheckboxesNow,
+      requestAnimationFrame: (callback) => frames.push(callback)
+    }
+  );
+
+  panel.dispatch('wheel');
+  panel.scrollTop = 240;
+  frames[0]();
+  assert.equal(panel.scrollTop, 240);
 });
 
 test('dynamic account summaries are never reset by the static translation pass', () => {

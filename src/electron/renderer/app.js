@@ -522,6 +522,7 @@ function setSettingsSectionExpanded(section, expanded) {
 const SETTINGS_SCROLL_ANCHOR_MS = 360;
 const SETTINGS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab']);
 let settingsScrollAnchorFrame = null;
+let settingsScrollInteractionRevision = 0;
 
 function cancelSettingsScrollAnchor() {
   if (settingsScrollAnchorFrame === null) return;
@@ -529,8 +530,13 @@ function cancelSettingsScrollAnchor() {
   settingsScrollAnchorFrame = null;
 }
 
+function cancelSettingsScrollAnchorOnInteraction() {
+  settingsScrollInteractionRevision += 1;
+  cancelSettingsScrollAnchor();
+}
+
 function cancelSettingsScrollAnchorOnKeydown(event) {
-  if (SETTINGS_SCROLL_KEYS.has(event.key)) cancelSettingsScrollAnchor();
+  if (SETTINGS_SCROLL_KEYS.has(event.key)) cancelSettingsScrollAnchorOnInteraction();
 }
 
 function shouldAnchorSettingsScroll(section, expanding) {
@@ -570,8 +576,8 @@ function setupSettingsSections() {
     });
     setSettingsSectionExpanded(section, state.settingsSections[section]);
   }
-  els.settingsPanel?.addEventListener('pointerdown', cancelSettingsScrollAnchor, { passive: true });
-  els.settingsPanel?.addEventListener('wheel', cancelSettingsScrollAnchor, { passive: true });
+  els.settingsPanel?.addEventListener('pointerdown', cancelSettingsScrollAnchorOnInteraction, { passive: true });
+  els.settingsPanel?.addEventListener('wheel', cancelSettingsScrollAnchorOnInteraction, { passive: true });
   els.settingsPanel?.addEventListener('keydown', cancelSettingsScrollAnchorOnKeydown);
 }
 
@@ -7913,13 +7919,18 @@ function preserveSettingsPanelScroll(callback) {
   if (!panel || panel.classList.contains('hidden')) return callback();
   const scrollTop = panel.scrollTop;
   const scrollLeft = panel.scrollLeft;
+  const interactionRevision = settingsScrollInteractionRevision;
   const restore = () => {
     panel.scrollTop = scrollTop;
     panel.scrollLeft = scrollLeft;
   };
   const result = callback();
   restore();
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restore);
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => {
+      if (settingsScrollInteractionRevision === interactionRevision) restore();
+    });
+  }
   return result;
 }
 
