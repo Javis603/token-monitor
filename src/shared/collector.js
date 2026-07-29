@@ -1209,13 +1209,29 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
 // and picks up any changes that the delta-derivation might miss.
 const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
 
+// Escape hatch for filesystems that never deliver native events — network
+// mounts, some FUSE drivers, container bind mounts. chokidar has its own
+// CHOKIDAR_USEPOLLING override, but that is chokidar's surface, not ours: it
+// is undocumented for our users and can change with a dependency bump, so
+// support asks would have no stable answer. Resolved here rather than in each
+// entry point so the widget and the headless agent cannot drift apart.
+// Tri-state on purpose: unset must fall through to the caller's value, which
+// is why parseBoolean's fallback semantics don't fit.
+function resolveWatchUsePolling(preferred, env = process.env, platform = process.platform) {
+  const raw = String(env.TOKEN_MONITOR_WATCH_POLLING ?? '').trim().toLowerCase();
+  if (raw) return !['0', 'false', 'no', 'off'].includes(raw);
+  if (typeof preferred === 'boolean') return preferred;
+  return platform !== 'darwin';
+}
+
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
     intervalMs, historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled, watchDebounceMs,
-    watchUsePolling = process.platform !== 'darwin', watchTriggersCollection = true, intervalRequiresActivity = false,
+    watchTriggersCollection = true, intervalRequiresActivity = false,
     onUpdate, onPreview, onError, logger
   } = options;
+  const watchUsePolling = resolveWatchUsePolling(options.watchUsePolling);
   const deviceOsInfo = options.osInfo === undefined
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
@@ -1412,7 +1428,13 @@ function startCollector(options) {
       return true;
     } catch (error) {
       if (stopped) return;
-      if (intervalRequiresActivity) scheduledWatchNeedsFullScan = true;
+      // takeWatchClients() already drained the pending set, so the clients this
+      // tick was meant to cover are gone. Force the next tick to scan all of
+      // them in every mode: in live mode the next watch event would otherwise
+      // target only its own client and leave the failed one serving the stale
+      // anchor partition until the 5–30 minute interval reconciles it, which
+      // breaks the seconds-level freshness live mode promises.
+      scheduledWatchNeedsFullScan = true;
       if (onError) onError(error, reason); else log(`collector tick failed (${reason}): ${error.message}`);
       return false;
     }
@@ -1608,6 +1630,7 @@ module.exports = {
   collectHistoryOnce,
   collectUsageOnce,
   clientDataDirPresence,
+  clientWatchCandidates,
   computePeriodWindows,
   configFingerprint,
   deriveClientStatus,
@@ -1629,9 +1652,12 @@ module.exports = {
   resolvePlatformBinary,
   resolvePromaPricing,
   resetPromaPricingCache,
+  resolveWatchUsePolling,
   shouldIncludeHistory,
   startCollector,
   tokscaleCommand,
+  tokscaleClientFilter,
+  TOKSCALE_CLIENT_ALIASES,
   watchIgnoreMatcher,
   watchPathsForClients
 };

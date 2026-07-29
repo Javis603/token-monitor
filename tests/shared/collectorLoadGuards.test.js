@@ -1152,6 +1152,118 @@ test('smart collection retries a failed activity scan on the next interval', asy
   }
 });
 
+test('TOKEN_MONITOR_WATCH_POLLING overrides the per-platform watch default', () => {
+  const { resolveWatchUsePolling } = freshCollector();
+
+  // Default: native events on macOS, polling elsewhere.
+  assert.equal(resolveWatchUsePolling(undefined, {}, 'darwin'), false);
+  assert.equal(resolveWatchUsePolling(undefined, {}, 'win32'), true);
+  // A caller that states a preference wins over the platform default.
+  assert.equal(resolveWatchUsePolling(true, {}, 'darwin'), true);
+  // The escape hatch beats both, in both directions — its whole purpose is
+  // rescuing a filesystem whose native events never arrive.
+  assert.equal(resolveWatchUsePolling(false, { TOKEN_MONITOR_WATCH_POLLING: '1' }, 'darwin'), true);
+  assert.equal(resolveWatchUsePolling(true, { TOKEN_MONITOR_WATCH_POLLING: '0' }, 'win32'), false);
+  // Unset must stay tri-state: an empty value is not "false".
+  assert.equal(resolveWatchUsePolling(false, { TOKEN_MONITOR_WATCH_POLLING: '' }, 'darwin'), false);
+  assert.equal(resolveWatchUsePolling(true, { TOKEN_MONITOR_WATCH_POLLING: '' }, 'darwin'), true);
+});
+
+test('live collection retries all clients after a failed targeted watch scan', async () => {
+  const tmp = withTmpHome([
+    path.join('.claude', 'projects'),
+    path.join('.codex', 'sessions')
+  ]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => ({
+    on: (event, handler) => { if (event === 'all') watchHandler = handler; },
+    close: () => {}
+  });
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  let failNext = false;
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setImmediate(() => {
+      if (!failNext) child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', failNext ? 1 : 0);
+      failNext = false;
+    });
+    return child;
+  };
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    const errors = [];
+    handle = startCollector({
+      clients: 'claude,codex',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      // Long enough that the interval reconciliation cannot be what recovers
+      // the failed client: only the next watch event may do it.
+      intervalMs: 60000,
+      watchEnabled: true,
+      watchDebounceMs: 10,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      intervalRequiresActivity: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (_summary, reason) => updates.push(reason),
+      onError: (error) => errors.push(error.message)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    const afterStartup = calls.length;
+
+    failNext = true;
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'session.jsonl'));
+    await waitForCondition(() => errors.length === 1);
+
+    // An unrelated client changes next. Without an unconditional full-scan
+    // flag this tick targets only codex, leaving claude on the stale anchor
+    // partition until the 5–30 minute interval — the live-mode gap.
+    watchHandler('change', path.join(tmp, '.codex', 'sessions', 'rollout.jsonl'));
+    await waitForCondition(() => calls.length === afterStartup + 2);
+
+    const failed = calls[afterStartup];
+    const recovery = calls[afterStartup + 1];
+    assert.equal(failed[failed.indexOf('--client') + 1], 'claude');
+    assert.equal(
+      recovery[recovery.indexOf('--client') + 1],
+      'claude,codex',
+      'a failed live targeted scan retries every client on the next watch event'
+    );
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('idle smart collection still performs the hourly full reconciliation', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;

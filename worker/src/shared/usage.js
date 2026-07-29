@@ -1112,6 +1112,7 @@ module.exports = {
   extractUsageFromTokscale,
   mergeDeviceRecord,
   mergePeriods,
+  normalizeClientName,
   normalizeDeviceRecord,
   normalizePeriod,
   projectRollupFromSessions

@@ -1176,7 +1176,11 @@ test('main settings normalize collection cadence and restart only the device run
   // macOS live mode uses native events; other platforms retain polling.
   // Smart mode uses native events everywhere and never scans on the event itself.
   assert.match(main, /function collectorWatchUsePolling[\s\S]*?process\.platform !== 'darwin'[\s\S]*?=== 'live'/);
-  assert.match(collector, /watchUsePolling = process\.platform !== 'darwin'/);
+  // The platform default lives in resolveWatchUsePolling so the widget and the
+  // headless agent cannot drift, and so TOKEN_MONITOR_WATCH_POLLING overrides
+  // both. Behaviour is covered in tests/shared/collectorLoadGuards.test.js.
+  assert.match(collector, /const watchUsePolling = resolveWatchUsePolling\(options\.watchUsePolling\)/);
+  assert.match(collector, /function resolveWatchUsePolling[\s\S]*?TOKEN_MONITOR_WATCH_POLLING[\s\S]*?platform !== 'darwin'/);
   assert.match(main, /function collectorIntervalRequiresActivity[\s\S]*?=== 'smart'/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
