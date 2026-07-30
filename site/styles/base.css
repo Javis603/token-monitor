@@ -12,10 +12,7 @@ body {
   overflow-x: hidden;
   overflow-x: clip;
   color: var(--text);
-  background:
-    radial-gradient(circle at 15% 0%, rgba(255,95,86,0.08), transparent 28rem),
-    var(--bg-glow),
-    var(--bg);
+  background: var(--bg-glow), var(--bg);
   background-attachment: fixed;
   font-family: var(--sans);
   line-height: 1.55;

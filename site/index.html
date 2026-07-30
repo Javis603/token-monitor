@@ -11,10 +11,10 @@
     <meta property="og:image" content="assets/icon.png">
     <meta name="theme-color" content="#14171c">
     <link rel="icon" href="assets/icon.png">
-    <link rel="stylesheet" href="styles/tokens.css?v=20260728-smart">
-    <link rel="stylesheet" href="styles/base.css?v=20260728-smart">
-    <link rel="stylesheet" href="styles/components.css?v=20260728-smart">
-    <link rel="stylesheet" href="styles/sections.css?v=20260728-smart">
+    <link rel="stylesheet" href="styles/tokens.css?v=20260730-story28">
+    <link rel="stylesheet" href="styles/base.css?v=20260730-story28">
+    <link rel="stylesheet" href="styles/components.css?v=20260730-story28">
+    <link rel="stylesheet" href="styles/sections.css?v=20260730-story28">
   </head>
   <body>
     <a class="skip-link" href="#main" data-i18n="nav.skip">Skip to content</a>
@@ -25,11 +25,6 @@
           <img class="brand-mark" src="assets/icon.png" alt="" width="36" height="36">
           <span>Token Monitor</span>
         </a>
-        <div class="nav-menu" aria-label="Section navigation" data-i18n-attr="aria-label:nav.sections">
-          <a href="#features" data-i18n="nav.features">Features</a>
-          <a href="#privacy" data-i18n="nav.privacy">Privacy</a>
-          <a href="#download" data-i18n="nav.download">Download</a>
-        </div>
         <div class="nav-actions">
           <details class="lang-menu" data-lang-menu>
             <summary class="nav-icon-btn lang-btn" aria-label="Language" aria-haspopup="menu" aria-expanded="false" data-i18n-attr="aria-label:nav.language">
@@ -102,7 +97,7 @@
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/cursor.svg" alt=""></span><span>Cursor</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/antigravity.svg" alt=""></span><span>Antigravity</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/cline.svg" alt=""></span><span>Cline</span></span>
-              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/moonshot.svg" alt=""></span><span>Kimi</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/kimi.svg" alt=""></span><span>Kimi</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/qwen.svg" alt=""></span><span>Qwen</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/xai.svg" alt=""></span><span>Grok</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/copilot.svg" alt=""></span><span>Copilot</span></span>
@@ -126,7 +121,7 @@
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/cursor.svg" alt=""></span><span>Cursor</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/antigravity.svg" alt=""></span><span>Antigravity</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/cline.svg" alt=""></span><span>Cline</span></span>
-              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/moonshot.svg" alt=""></span><span>Kimi</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/kimi.svg" alt=""></span><span>Kimi</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/qwen.svg" alt=""></span><span>Qwen</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/xai.svg" alt=""></span><span>Grok</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/copilot.svg" alt=""></span><span>Copilot</span></span>
@@ -148,167 +143,145 @@
       </section>
 
       <section class="features section shell" id="features" aria-labelledby="features-title">
-        <div class="section-head reveal">
-          <h2 id="features-title" data-i18n="feature.title">Tokens, limits, trends, and session detail in one view.</h2>
-        </div>
-
-        <!-- On desktop, each story beat takes over the sticky product stage as it
-             crosses the reading line. On mobile and reduced motion, every beat keeps
-             its own inline product scene so the story remains complete without pinning. -->
         <div class="tour reveal" data-tour>
-          <div class="tour-nav" aria-label="Features" data-i18n-attr="aria-label:nav.features">
-            <span class="tour-progress-rail" aria-hidden="true"><i data-tour-progress></i></span>
-            <article class="tour-item is-active" data-feature-step tabindex="0" aria-current="step">
-              <span class="tour-index" aria-hidden="true">01</span>
-              <div class="tour-copy">
-                <strong data-i18n="feature.menubar.title">A menu bar arranged your way</strong>
-                <p data-i18n="feature.menubar.body">Drag together tool icons, quota bars, reset times, percentages, tokens, cost, spacers, separators, and custom text, then see the live result before saving.</p>
+          <div class="tour-viewport">
+            <div class="tour-story">
+              <div class="section-head">
+                <span class="section-kicker" data-i18n="feature.eyebrow">One widget, nine views</span>
+                <h2 id="features-title" data-i18n="feature.title">Every signal is here. Open only the view you need.</h2>
+                <p data-i18n="feature.lede">Walk through four of the nine real Token Monitor views, or choose a view directly.</p>
               </div>
-              <div class="tour-inline-stage" data-tour-inline></div>
-            </article>
-            <article class="tour-item" data-feature-step tabindex="0">
-              <span class="tour-index" aria-hidden="true">02</span>
-              <div class="tour-copy">
-                <strong data-i18n="feature.live.title">Live token tracking &amp; cost</strong>
-                <p data-i18n="feature.live.body">Watch every supported AI coding tool update within seconds of each turn, with cost and cache-hit rates alongside every count.</p>
-              </div>
-              <div class="tour-inline-stage" data-tour-inline></div>
-            </article>
-            <article class="tour-item" data-feature-step tabindex="0">
-              <span class="tour-index" aria-hidden="true">03</span>
-              <div class="tour-copy">
-                <strong data-i18n="feature.limits.title">AI Tool Limits before you hit the wall</strong>
-                <p data-i18n="feature.limits.body">See Claude Code, Codex, Cursor, Antigravity, OpenCode, and DeepSeek session, weekly, billing, credits, and balance windows, so a limit never surprises you mid-task.</p>
-              </div>
-              <div class="tour-inline-stage" data-tour-inline></div>
-            </article>
-            <article class="tour-item" data-feature-step tabindex="0">
-              <span class="tour-index" aria-hidden="true">04</span>
-              <div class="tour-copy">
-                <strong data-i18n="feature.trends.title">Usage trends across every device</strong>
-                <p data-i18n="feature.trends.body">Turn on opt-in history to open a dedicated dashboard: a GitHub-style activity heatmap with streaks, plus stacked per-tool and per-model usage over time in bar and K-line views, rolled up across all your machines.</p>
-              </div>
-              <div class="tour-inline-stage" data-tour-inline></div>
-            </article>
-            <article class="tour-item" data-feature-step tabindex="0">
-              <span class="tour-index" aria-hidden="true">05</span>
-              <div class="tour-copy">
-                <strong data-i18n="feature.session.title">Per-session detail on demand</strong>
-                <p data-i18n="feature.session.body">Open a Claude Code, Codex, or OpenCode session to see tokens per prompt and per reply, read on-demand from local transcripts or databases. Never synced.</p>
-              </div>
-              <div class="tour-inline-stage" data-tour-inline></div>
-            </article>
-            <article class="tour-item" data-feature-step tabindex="0">
-              <span class="tour-index" aria-hidden="true">06</span>
-              <div class="tour-copy">
-                <strong data-i18n="feature.status.title">Provider status, right in the widget</strong>
-                <p data-i18n="feature.status.body">Watch Claude, OpenAI, Cursor, and DeepSeek service status without leaving the widget. Each card leads with the active incident title and the count of affected components, and re-checks on your chosen interval.</p>
-              </div>
-              <div class="tour-inline-stage" data-tour-inline></div>
-            </article>
-          </div>
-
-          <div class="tour-stage">
-            <div class="tour-screen app-frame is-active tour-menubar-screen" data-tour-screen aria-hidden="false">
-              <div class="menubar-story">
-                <div class="menubar-story-head">
-                  <div>
-                    <span class="menubar-story-kicker" data-i18n="feature.menubar.previewKicker">MENU BAR COMPOSER</span>
-                    <strong data-i18n="feature.menubar.previewTitle">Build the signal you want to see.</strong>
-                  </div>
-                  <span class="menubar-saved" data-i18n="feature.menubar.previewSaved">Live preview</span>
-                </div>
-                <div class="menubar-preview-canvas">
-                  <div class="menubar-preview-strip">
-                    <span class="menubar-preview-item"><span class="tray-mark" style="--m:url(../assets/icon.png)"></span></span>
-                    <span class="menubar-preview-item"><img src="assets/icons/tray-claude.svg" alt=""><span class="menubar-double-bar"><i style="--w:62%"></i><i style="--w:37%"></i></span></span>
-                    <span class="menubar-dot">·</span>
-                    <span class="menubar-preview-item"><img src="assets/icons/tray-codex.svg" alt=""><strong>83%</strong></span>
-                    <span class="menubar-preview-item menubar-metric">119.4M</span>
-                    <span class="menubar-spacer"></span>
-                    <span class="menubar-preview-item menubar-metric">$99.60</span>
-                  </div>
-                </div>
-                <div class="menubar-composer-head"><strong data-i18n="feature.menubar.previewOrder">Display order</strong><span data-i18n="feature.menubar.previewHint">Drag to reorder · Select to edit</span></div>
-                <div class="menubar-composer-list" aria-hidden="true">
-                  <span class="composer-tile"><i>⋮⋮</i><img src="assets/icon.png" alt=""><b>App icon</b></span>
-                  <span class="composer-tile is-selected"><i>⋮⋮</i><img src="assets/icons/tray-claude.svg" alt=""><b>Double quota bar</b></span>
-                  <span class="composer-tile"><i>⋮⋮</i><em>·</em><b>Separator</b></span>
-                  <span class="composer-tile"><i>⋮⋮</i><img src="assets/icons/tray-codex.svg" alt=""><b>Percentage</b></span>
-                  <span class="composer-tile"><i>⋮⋮</i><em>Σ</em><b>Tokens</b></span>
-                  <span class="composer-tile"><i>⋮⋮</i><em>↔</em><b>Spacer</b></span>
-                  <span class="composer-tile"><i>⋮⋮</i><em>$</em><b>Cost</b></span>
-                </div>
-                <div class="menubar-composer-foot">
-                  <button type="button" tabindex="-1"><span>＋</span><span data-i18n="feature.menubar.previewAdd">Add to display</span></button>
-                  <span><i></i><span data-i18n="feature.menubar.previewSync">Updates with every refresh</span></span>
-                </div>
-              </div>
-            </div>
-            <div class="tour-screen app-frame" id="tour-live" data-tour-screen aria-hidden="true">
-              <div class="tm-inner">
-                <div class="tm-titlebar">
-                  <div class="tm-title tm-title-icon" aria-label="Token Monitor"><span aria-hidden="true">Σ</span><span class="tm-live"></span></div>
-                  <div class="tm-tabs"><span>DAY</span><span class="active">MONTH</span><span>TOTAL</span></div>
-                </div>
-                <div class="tm-label">TOTAL TOKENS</div>
-                <div class="tm-total" data-countup="2111540267">2,111,540,267</div>
-                <div class="tm-cost">$1794.65</div>
-                <div class="tm-breakdown">
-                  <div class="tm-row">
-                    <div class="tm-row-head">
-                      <span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span>
-                      <span class="tm-row-name">gpt-5.5</span>
-                      <span class="tm-row-value">843,641,656<span>$771.91</span></span>
-                    </div>
-                    <div class="tm-bar"><span style="--w:100%;--bar:#49a3b0"></span></div>
-                  </div>
-                  <div class="tm-row">
-                    <div class="tm-row-head">
-                      <span class="tm-icon"><img src="assets/icons/claude.svg" alt=""></span>
-                      <span class="tm-row-name">claude-opus-4-8</span>
-                      <span class="tm-row-value">612,318,440<span>$548.20</span></span>
-                    </div>
-                    <div class="tm-bar"><span style="--w:73%;--bar:#cc7c5e"></span></div>
-                    <!-- the app's click-to-expand cache accordion, opened a beat after
-                         this screen activates so the reveal replays every tour cycle -->
-                    <div class="tm-acc" aria-hidden="true">
-                      <div class="tm-acc-inner">
-                        <div class="tm-acc-content">
-                          <div class="tm-acc-row"><span class="lbl">Input (Cache Hit) <i>91%</i></span><span class="val">544,283,123</span></div>
-                          <div class="tm-acc-row"><span class="lbl">Input (Cache Miss) <i>9%</i></span><span class="val">53,830,199</span></div>
-                          <div class="tm-acc-row"><span class="lbl">Output</span><span class="val">14,205,118</span></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="tm-row">
-                    <div class="tm-row-head">
-                      <span class="tm-icon"><img src="assets/icons/gemini.svg" alt=""></span>
-                      <span class="tm-row-name">gemini-3.5-pro</span>
-                      <span class="tm-row-value">421,905,330<span>$298.64</span></span>
-                    </div>
-                    <div class="tm-bar"><span style="--w:50%;--bar:#4285f4"></span></div>
-                  </div>
-                </div>
-                <div class="tm-footer">
-                  <span>Model</span>
-                  <span>⚙</span>
-                </div>
+              <div class="tour-nav" role="tablist" aria-orientation="vertical" aria-label="Product views" data-i18n-attr="aria-label:feature.views">
+                <span class="tour-progress-rail" aria-hidden="true"><i data-tour-progress></i></span>
+                <button class="tour-item is-active" id="tour-tab-live" type="button" role="tab" aria-selected="true" aria-controls="tour-live" data-feature-step>
+                  <span class="tour-index" aria-hidden="true">01</span>
+                  <span class="tour-copy">
+                    <strong data-i18n="feature.live.title">Drill into every tool and model</strong>
+                    <span data-i18n="feature.live.body">Move from the total to each tool, model, cost, and cache split without losing context.</span>
+                  </span>
+                  <span class="tour-arrow" aria-hidden="true">↗</span>
+                </button>
+                <button class="tour-item" id="tour-tab-limits" type="button" role="tab" aria-selected="false" aria-controls="tour-limits" data-feature-step tabindex="-1">
+                  <span class="tour-index" aria-hidden="true">02</span>
+                  <span class="tour-copy">
+                    <strong data-i18n="feature.limits.title">AI Tool Limits before you hit the wall</strong>
+                    <span data-i18n="feature.limits.body">See every quota window before a limit surprises you mid-task.</span>
+                  </span>
+                  <span class="tour-arrow" aria-hidden="true">↗</span>
+                </button>
+                <button class="tour-item" id="tour-tab-session" type="button" role="tab" aria-selected="false" aria-controls="tour-session" data-feature-step tabindex="-1">
+                  <span class="tour-index" aria-hidden="true">03</span>
+                  <span class="tour-copy">
+                    <strong data-i18n="feature.session.title">Per-session detail on demand</strong>
+                    <span data-i18n="feature.session.body">Open a session to inspect every prompt and reply from local data.</span>
+                  </span>
+                  <span class="tour-arrow" aria-hidden="true">↗</span>
+                </button>
+                <button class="tour-item" id="tour-tab-status" type="button" role="tab" aria-selected="false" aria-controls="tour-status" data-feature-step tabindex="-1">
+                  <span class="tour-index" aria-hidden="true">04</span>
+                  <span class="tour-copy">
+                    <strong data-i18n="feature.status.title">Provider status, right in the widget</strong>
+                    <span data-i18n="feature.status.body">See active incidents across the providers you depend on.</span>
+                  </span>
+                  <span class="tour-arrow" aria-hidden="true">↗</span>
+                </button>
               </div>
             </div>
 
-            <div class="tour-screen app-frame" id="tour-limits" data-tour-screen aria-hidden="true">
+            <div class="tour-stage" data-tour-stage>
+              <div class="tour-stage-glow" aria-hidden="true"></div>
+              <div class="tour-screen app-frame is-active" id="tour-live" role="tabpanel" aria-labelledby="tour-tab-live" data-tour-screen aria-hidden="false">
               <div class="tm-inner">
                 <div class="tm-titlebar">
                   <div class="tm-title tm-title-icon" aria-label="Token Monitor"><span aria-hidden="true">Σ</span><span class="tm-live"></span></div>
                   <div class="tm-tabs"><span class="active">DAY</span><span>MONTH</span><span>TOTAL</span></div>
                 </div>
                 <div class="tm-label">TOTAL TOKENS</div>
-                <div class="tm-total" data-countup="147852309">147,852,309</div>
-                <div class="tm-cost">$122.29</div>
+                <div class="tm-total">165,164,772</div>
+                <div class="tm-cost">$136.08</div>
+                <div class="tm-breakdown">
+                  <div class="tm-row tm-device-row">
+                    <div class="tm-row-head">
+                      <span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span>
+                      <span class="tm-row-name">gpt-5.6-sol</span>
+                      <span class="tm-row-value">55,820,110<span>$46.01</span></span>
+                    </div>
+                    <div class="tm-bar"><span style="--w:100%;--bar:#49a3b0"></span></div>
+                  </div>
+                  <div class="tm-row">
+                    <div class="tm-row-head">
+                      <span class="tm-icon"><img src="assets/icons/claude.svg" alt=""></span>
+                      <span class="tm-row-name">claude-fable-5</span>
+                      <span class="tm-row-value">38,906,795<span>$32.07</span></span>
+                    </div>
+                    <div class="tm-bar"><span style="--w:69%;--bar:#cc7c5e"></span></div>
+                    <!-- the app's click-to-expand cache accordion, opened a beat after
+                         this screen activates so the reveal replays every tour cycle -->
+                    <div class="tm-acc" aria-hidden="true">
+                      <div class="tm-acc-inner">
+                        <div class="tm-acc-content">
+                          <div class="tm-acc-row"><span class="lbl"><span data-i18n="mock.cacheHit">Input (Cache Hit)</span> <i>86%</i></span><span class="val">31,899,572</span></div>
+                          <div class="tm-acc-row"><span class="lbl"><span data-i18n="mock.cacheMiss">Input (Cache Miss)</span> <i>14%</i></span><span class="val">4,912,124</span></div>
+                          <div class="tm-acc-row"><span class="lbl" data-i18n="mock.output">Output</span><span class="val">2,095,099</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="tm-row">
+                    <div class="tm-row-head">
+                      <span class="tm-icon"><img src="assets/icons/kimi.svg" alt=""></span>
+                      <span class="tm-row-name">kimi-k3</span>
+                      <span class="tm-row-value">26,399,329<span>$21.75</span></span>
+                    </div>
+                    <div class="tm-bar"><span style="--w:43%;--bar:#4285f4"></span></div>
+                  </div>
+                  <div class="tm-row">
+                    <div class="tm-row-head">
+                      <span class="tm-icon"><img src="assets/icons/zai.svg" alt=""></span>
+                      <span class="tm-row-name">glm-5.2</span>
+                      <span class="tm-row-value">18,975,927<span>$15.62</span></span>
+                    </div>
+                    <div class="tm-bar"><span style="--w:31%;--bar:#8ea7bd"></span></div>
+                  </div>
+                  <div class="tm-row">
+                    <div class="tm-row-head">
+                      <span class="tm-icon"><img src="assets/icons/claude.svg" alt=""></span>
+                      <span class="tm-row-name">claude-sonnet-5</span>
+                      <span class="tm-row-value">14,062,457<span>$11.58</span></span>
+                    </div>
+                    <div class="tm-bar"><span style="--w:25%;--bar:#cc7c5e"></span></div>
+                  </div>
+                  <div class="tm-row">
+                    <div class="tm-row-head">
+                      <span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span>
+                      <span class="tm-row-name">codex-auto-review</span>
+                      <span class="tm-row-value">11,000,154<span>$9.05</span></span>
+                    </div>
+                    <div class="tm-bar"><span style="--w:20%;--bar:#49a3b0"></span></div>
+                  </div>
+                </div>
+                <div class="tm-footer tm-app-footer">
+                  <div class="tm-view-control" data-widget-view-switcher data-current-view="model">
+                    <button class="tm-view-current" type="button"><span class="app-view-icon view-icon-model" aria-hidden="true"></span><span>Model</span></button>
+                    <button class="tm-view-disclosure" type="button" aria-label="Choose view" aria-expanded="false"><span aria-hidden="true"></span></button>
+                    <div class="tm-view-menu" role="menu" aria-hidden="true"></div>
+                  </div>
+                  <button class="tm-settings-button" type="button" aria-label="Settings"><span class="tm-settings-glyph" aria-hidden="true"></span></button>
+                </div>
+              </div>
+              </div>
+
+            <div class="tour-screen app-frame" id="tour-limits" role="tabpanel" aria-labelledby="tour-tab-limits" data-tour-screen aria-hidden="true">
+              <div class="tm-inner">
+                <div class="tm-titlebar">
+                  <div class="tm-title tm-title-icon" aria-label="Token Monitor"><span aria-hidden="true">Σ</span><span class="tm-live"></span></div>
+                  <div class="tm-tabs"><span class="active">DAY</span><span>MONTH</span><span>TOTAL</span></div>
+                </div>
+                <div class="tm-label">TOTAL TOKENS</div>
+                <div class="tm-total">165,164,772</div>
+                <div class="tm-cost">$136.08</div>
                 <div class="tm-limits">
-                  <div class="tm-limit">
+                  <div class="tm-limit tm-limit-claude">
                     <div class="tm-limit-head">
                       <span class="tm-limit-name"><span class="tm-icon"><img src="assets/icons/claude.svg" alt=""></span>Claude</span>
                       <span class="tm-plan">Pro</span>
@@ -326,97 +299,73 @@
                         <div class="tm-reset">Reset 5d 18h</div>
                       </div>
                     </div>
+                    <div class="tm-balance"><span class="lbl">Usage credits</span><span class="val">$16.43 / $20.00</span></div>
+                    <div class="tm-bar"><span style="--w:21%;--bar:#df8b6d"></span></div>
+                    <div class="tm-balance"><span class="lbl">Balance</span><span class="val">$99.36</span></div>
                   </div>
-                  <div class="tm-limit">
+                  <div class="tm-limit tm-limit-accounts">
                     <div class="tm-limit-head">
                       <span class="tm-limit-name"><span class="tm-icon"><img src="assets/icons/codex.svg" alt=""></span>Codex</span>
-                      <span class="tm-plan">Plus</span>
+                      <span class="tm-plan">2 accounts</span>
                     </div>
-                    <div class="tm-updated">Updated 2m ago</div>
-                    <div class="tm-windows">
-                      <div>
-                        <div class="tm-window-top"><span class="lbl">Session</span><span class="pct">82% left</span></div>
-                        <div class="tm-bar"><span style="--w:82%;--bar:#58bfca"></span></div>
-                        <div class="tm-reset">Reset 4h 47m</div>
+                    <div class="tm-account">
+                      <div class="tm-account-head">
+                        <button class="tm-account-email" type="button">
+                          <span>dev@example.com</span>
+                          <span class="tm-account-switch">Switch account</span>
+                        </button>
+                        <span class="tm-plan">Plus</span>
                       </div>
-                      <div>
-                        <div class="tm-window-top"><span class="lbl">Weekly</span><span class="pct">46% left</span></div>
-                        <div class="tm-bar"><span style="--w:46%;--bar:#58bfca"></span></div>
-                        <div class="tm-reset">Reset 4d 11h</div>
+                      <div class="tm-updated">Updated 2m ago</div>
+                      <div class="tm-window-top"><span class="lbl">Weekly</span><span class="pct">2% left</span></div>
+                      <div class="tm-bar"><span style="--w:2%;--bar:#58bfca"></span></div>
+                      <div class="tm-reset">Reset 6d</div>
+                    </div>
+                    <div class="tm-account is-current">
+                      <div class="tm-account-head">
+                        <button class="tm-account-email" type="button">
+                          <span>work@example.com <i aria-label="Current account">✓</i></span>
+                          <span class="tm-account-switch">Local</span>
+                        </button>
+                        <span class="tm-plan">Plus</span>
                       </div>
+                      <div class="tm-updated">Updated 2m ago</div>
+                      <div class="tm-window-top"><span class="lbl">Weekly</span><span class="pct">55% left</span></div>
+                      <div class="tm-bar"><span style="--w:55%;--bar:#58bfca"></span></div>
+                      <div class="tm-reset tm-account-reset"><span>Reset 6d</span><span>1 reset · 13d 13h</span></div>
                     </div>
                   </div>
-                  <div class="tm-limit">
+                  <div class="tm-limit tm-limit-third-party">
                     <div class="tm-limit-head">
-                      <span class="tm-limit-name"><span class="tm-icon"><img src="assets/icons/cursor.svg" alt=""></span>Cursor</span>
-                      <span class="tm-plan">Pro</span>
+                      <span class="tm-limit-name"><span class="tm-icon"><img src="assets/icons/newapi.svg" alt=""></span>Third-party APIs</span>
+                      <span class="tm-plan">Account</span>
                     </div>
                     <div class="tm-updated">Updated 3m ago</div>
-                    <div class="tm-windows single">
-                      <div>
-                        <div class="tm-window-top"><span class="lbl">Billing</span><span class="pct">71% left</span></div>
-                        <div class="tm-bar"><span style="--w:71%;--bar:#aab3c0"></span></div>
-                        <div class="tm-reset">Renews 12d</div>
-                      </div>
-                    </div>
+                    <div class="tm-balance"><span class="lbl">Balance</span><span class="val">$84.20</span></div>
+                    <div class="tm-bar"><span style="--w:62%;--bar:#f2385a"></span></div>
+                    <div class="tm-balance"><span class="lbl">Spend</span><span class="val">All time $1,246.75</span></div>
                   </div>
                 </div>
-                <div class="tm-footer">
-                  <span>Limits</span>
-                  <span>⚙</span>
+                <div class="tm-footer tm-app-footer">
+                  <div class="tm-view-control" data-widget-view-switcher data-current-view="limits">
+                    <button class="tm-view-current" type="button"><span class="app-view-icon view-icon-limits" aria-hidden="true"></span><span>Limits</span></button>
+                    <button class="tm-view-disclosure" type="button" aria-label="Choose view" aria-expanded="false"><span aria-hidden="true"></span></button>
+                    <div class="tm-view-menu" role="menu" aria-hidden="true"></div>
+                  </div>
+                  <button class="tm-settings-button" type="button" aria-label="Settings"><span class="tm-settings-glyph" aria-hidden="true"></span></button>
                 </div>
               </div>
             </div>
 
-            <div class="tour-screen app-frame" id="tour-trends" data-tour-screen aria-hidden="true">
-              <div class="tm-inner">
-                <div class="tm-titlebar">
-                  <div class="tm-title tm-title-icon" aria-label="Token Monitor"><span aria-hidden="true">Σ</span><span class="tm-live"></span></div>
-                  <div class="tm-tabs"><span>DAY</span><span>MONTH</span><span class="active">TOTAL</span></div>
-                </div>
-                <div class="tm-label">TOTAL TOKENS</div>
-                <div class="tm-total" data-countup="2217877661">2,217,877,661</div>
-                <div class="tm-cost">$1899.60</div>
-                <div class="tm-trends-cap"><span>This year</span><span class="tm-trends-hint">↗</span></div>
-                <div class="tm-spark">
-                  <svg viewBox="0 0 300 120" preserveAspectRatio="none" aria-hidden="true">
-                    <rect x="4" y="98" width="17" height="22" rx="2"></rect>
-                    <rect x="29" y="86" width="17" height="34" rx="2"></rect>
-                    <rect x="54" y="92" width="17" height="28" rx="2"></rect>
-                    <rect x="79" y="72" width="17" height="48" rx="2"></rect>
-                    <rect x="104" y="78" width="17" height="42" rx="2"></rect>
-                    <rect x="129" y="58" width="17" height="62" rx="2"></rect>
-                    <rect x="154" y="65" width="17" height="55" rx="2"></rect>
-                    <rect x="179" y="46" width="17" height="74" rx="2"></rect>
-                    <rect x="204" y="52" width="17" height="68" rx="2"></rect>
-                    <rect x="229" y="32" width="17" height="88" rx="2"></rect>
-                    <rect x="254" y="24" width="17" height="96" rx="2"></rect>
-                    <rect x="279" y="6" width="17" height="114" rx="2"></rect>
-                  </svg>
-                </div>
-                <div class="tm-axis"><span>Jan</span><span>Dec</span></div>
-                <div class="tm-trend-stats">
-                  <div class="tm-trend-stat"><span class="v">71</span><span class="k">Active days</span></div>
-                  <div class="tm-trend-stat"><span class="v">46</span><span class="k">Current streak</span></div>
-                  <div class="tm-trend-stat"><span class="v">58</span><span class="k">Longest streak</span></div>
-                  <div class="tm-trend-stat"><span class="v">228.6M</span><span class="k">Peak day</span></div>
-                </div>
-                <div class="tm-footer">
-                  <span>Trends</span>
-                  <span>⚙</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="tour-screen app-frame" id="tour-session" data-tour-screen aria-hidden="true">
+            <div class="tour-screen app-frame" id="tour-session" role="tabpanel" aria-labelledby="tour-tab-session" data-tour-screen aria-hidden="true">
               <div class="tm-inner">
                 <div class="tm-titlebar">
                   <div class="tm-title tm-title-icon" aria-label="Token Monitor"><span aria-hidden="true">Σ</span><span class="tm-live"></span></div>
                   <div class="tm-tabs"><span class="active">DAY</span><span>MONTH</span><span>TOTAL</span></div>
                 </div>
                 <div class="tm-label">TOTAL TOKENS</div>
-                <div class="tm-total" data-countup="147852309">147,852,309</div>
-                <div class="tm-cost">$122.29</div>
+                <div class="tm-total">165,164,772</div>
+                <div class="tm-cost">$136.08</div>
                 <div class="tm-crumb">
                   <span class="tm-back">‹ Sessions</span>
                   <span class="tm-pill" data-i18n="mock.newest">↕ Newest</span>
@@ -426,7 +375,7 @@
                     <span class="tm-caret" aria-hidden="true"></span>
                     <div class="tm-sess-body">
                       <div class="tm-sess-head">
-                        <span class="tm-sess-title"><span class="you" data-i18n="mock.you">你</span><span class="sep">›</span><span data-i18n="mock.session.two">整理 session 明細間距...</span></span>
+                        <span class="tm-sess-title"><span class="you">YOU</span><span class="sep">›</span><span>Polish dashboard details...</span></span>
                         <span class="tm-sess-val">8,314,064</span>
                       </div>
                       <div class="tm-sess-meta"><span>18:13 · 32 turns · 3 tools</span><span class="tm-sess-cost">$25.12</span></div>
@@ -448,7 +397,7 @@
                     <span class="tm-caret tm-caret-closed" aria-hidden="true"></span>
                     <div class="tm-sess-body">
                       <div class="tm-sess-head">
-                        <span class="tm-sess-title"><span class="you" data-i18n="mock.you">YOU</span><span class="sep">›</span><span data-i18n="mock.session.one">Compare model spend...</span></span>
+                        <span class="tm-sess-title"><span class="you">YOU</span><span class="sep">›</span><span>Compare model spend...</span></span>
                         <span class="tm-sess-val">3,907,118</span>
                       </div>
                       <div class="tm-sess-meta"><span>16:42 · 18 turns · 2 tools</span><span class="tm-sess-cost">$11.84</span></div>
@@ -456,22 +405,26 @@
                     </div>
                   </div>
                 </div>
-                <div class="tm-footer">
-                  <span>Sessions</span>
-                  <span>⚙</span>
+                <div class="tm-footer tm-app-footer">
+                  <div class="tm-view-control" data-widget-view-switcher data-current-view="session">
+                    <button class="tm-view-current" type="button"><span class="app-view-icon view-icon-session" aria-hidden="true"></span><span>Sessions</span></button>
+                    <button class="tm-view-disclosure" type="button" aria-label="Choose view" aria-expanded="false"><span aria-hidden="true"></span></button>
+                    <div class="tm-view-menu" role="menu" aria-hidden="true"></div>
+                  </div>
+                  <button class="tm-settings-button" type="button" aria-label="Settings"><span class="tm-settings-glyph" aria-hidden="true"></span></button>
                 </div>
               </div>
             </div>
 
-            <div class="tour-screen app-frame" id="tour-status" data-tour-screen aria-hidden="true">
+            <div class="tour-screen app-frame" id="tour-status" role="tabpanel" aria-labelledby="tour-tab-status" data-tour-screen aria-hidden="true">
               <div class="tm-inner">
                 <div class="tm-titlebar">
                   <div class="tm-title tm-title-icon" aria-label="Token Monitor"><span aria-hidden="true">Σ</span><span class="tm-live"></span></div>
-                  <div class="tm-tabs"><span>DAY</span><span>MONTH</span><span class="active">TOTAL</span></div>
+                  <div class="tm-tabs"><span class="active">DAY</span><span>MONTH</span><span>TOTAL</span></div>
                 </div>
                 <div class="tm-label">TOTAL TOKENS</div>
-                <div class="tm-total" data-countup="2217877661">2,217,877,661</div>
-                <div class="tm-cost">$1899.60</div>
+                <div class="tm-total">165,164,772</div>
+                <div class="tm-cost">$136.08</div>
                 <div class="tm-statuslist">
                   <div class="tm-status">
                     <div class="tm-status-head">
@@ -498,11 +451,16 @@
                     <div class="tm-status-meta">Affected 1 · Incidents 1 · 46s ago</div>
                   </div>
                 </div>
-                <div class="tm-footer">
-                  <span>Status</span>
-                  <span>⚙</span>
+                <div class="tm-footer tm-app-footer">
+                  <div class="tm-view-control" data-widget-view-switcher data-current-view="status">
+                    <button class="tm-view-current" type="button"><span class="app-view-icon view-icon-status" aria-hidden="true"></span><span>Status</span></button>
+                    <button class="tm-view-disclosure" type="button" aria-label="Choose view" aria-expanded="false"><span aria-hidden="true"></span></button>
+                    <div class="tm-view-menu" role="menu" aria-hidden="true"></div>
+                  </div>
+                  <button class="tm-settings-button" type="button" aria-label="Settings"><span class="tm-settings-glyph" aria-hidden="true"></span></button>
                 </div>
               </div>
+            </div>
             </div>
           </div>
         </div>
@@ -520,43 +478,43 @@
              seeded sample series and wires the tabs and chart toggles. -->
         <div class="dash-frame reveal" data-dash>
           <div class="dash-bar">
-            <span class="dash-name">Usage Dashboard</span>
+            <span class="dash-name" data-i18n="dash.windowTitle">Usage Dashboard</span>
             <span class="dash-win" aria-hidden="true"><i>◐</i><i>↻</i><i>−</i><i>×</i></span>
           </div>
-          <div class="dash-tabs" role="tablist" aria-label="Dashboard tabs">
-            <button class="dash-tab is-active" type="button" role="tab" id="dash-tab-overview" aria-controls="dash-overview" aria-selected="true">Overview</button>
-            <button class="dash-tab" type="button" role="tab" id="dash-tab-trends" aria-controls="dash-trends" aria-selected="false" tabindex="-1">Trends</button>
+          <div class="dash-tabs" role="tablist" aria-label="Dashboard tabs" data-i18n-attr="aria-label:dash.tabs.aria">
+            <button class="dash-tab is-active" type="button" role="tab" id="dash-tab-overview" aria-controls="dash-overview" aria-selected="true" data-i18n="dash.tab.overview">Overview</button>
+            <button class="dash-tab" type="button" role="tab" id="dash-tab-trends" aria-controls="dash-trends" aria-selected="false" tabindex="-1" data-i18n="dash.tab.trends">Trends</button>
           </div>
           <div class="dash-stage">
             <div class="dash-pane is-active" id="dash-overview" role="tabpanel" aria-labelledby="dash-tab-overview">
               <div class="dash-cards">
-                <div class="dash-card"><span class="dash-card-v">2.22B</span><span class="dash-card-k">Total tokens</span></div>
-                <div class="dash-card"><span class="dash-card-v">$1,899.60</span><span class="dash-card-k">Total cost</span></div>
-                <div class="dash-card"><span class="dash-card-v">238</span><span class="dash-card-k">Active days</span></div>
-                <div class="dash-card"><span class="dash-card-v">46</span><span class="dash-card-k">Current streak</span></div>
-                <div class="dash-card"><span class="dash-card-v">58</span><span class="dash-card-k">Longest streak</span></div>
-                <div class="dash-card"><span class="dash-card-v">228.6M</span><span class="dash-card-k">Peak day</span></div>
-                <div class="dash-card"><span class="dash-card-v">gpt-5.5</span><span class="dash-card-k">Top model</span></div>
-                <div class="dash-card"><span class="dash-card-v">12,408</span><span class="dash-card-k">Messages</span></div>
+                <div class="dash-card"><span class="dash-card-v">38.42B</span><span class="dash-card-k" data-i18n="dash.stat.totalTokens">Total tokens</span></div>
+                <div class="dash-card"><span class="dash-card-v">$31.86K</span><span class="dash-card-k" data-i18n="dash.stat.totalCost">Total cost</span></div>
+                <div class="dash-card"><span class="dash-card-v">312</span><span class="dash-card-k" data-i18n="dash.stat.activeDays">Active days</span></div>
+                <div class="dash-card"><span class="dash-card-v">97</span><span class="dash-card-k" data-i18n="dash.stat.currentStreak">Current streak</span></div>
+                <div class="dash-card"><span class="dash-card-v">3,101h</span><span class="dash-card-k" data-i18n="dash.stat.activeTime">Active time</span></div>
+                <div class="dash-card"><span class="dash-card-v">430.2M</span><span class="dash-card-k" data-i18n="dash.stat.peakDay">Peak day</span></div>
+                <div class="dash-card"><span class="dash-card-v">gpt-5.6-sol</span><span class="dash-card-k" data-i18n="dash.stat.topModel">Top model</span></div>
+                <div class="dash-card"><span class="dash-card-v">283.0K</span><span class="dash-card-k" data-i18n="dash.stat.messages">Messages</span></div>
               </div>
               <div class="dash-heat-block">
-                <div class="dash-cap">Token Activity</div>
+                <div class="dash-cap" data-i18n="dash.activity">Token Activity</div>
                 <div class="dash-heat" data-dash-heatmap aria-hidden="true"></div>
               </div>
               <div class="dash-breakdown">
                 <div class="dash-bd-col">
-                  <div class="dash-bd-title">By tool</div>
-                  <div class="dash-bd-row"><span class="dash-bd-name">Codex</span><span class="dash-bd-track"><i style="--w:100%;--bar:#58bfca"></i></span><span class="dash-bd-val">1.51B</span><span class="dash-bd-pct">68.1%</span></div>
-                  <div class="dash-bd-row"><span class="dash-bd-name">Claude Code</span><span class="dash-bd-track"><i style="--w:41%;--bar:#df8b6d"></i></span><span class="dash-bd-val">615.4M</span><span class="dash-bd-pct">27.7%</span></div>
-                  <div class="dash-bd-row"><span class="dash-bd-name">Hermes</span><span class="dash-bd-track"><i style="--w:7%;--bar:#f1d15f"></i></span><span class="dash-bd-val">92.9M</span><span class="dash-bd-pct">4.2%</span></div>
-                  <div class="dash-bd-row"><span class="dash-bd-name">Cursor</span><span class="dash-bd-track"><i style="--w:1%;--bar:#aab3c0"></i></span><span class="dash-bd-val">70.0K</span><span class="dash-bd-pct">0.0%</span></div>
+                  <div class="dash-bd-title" data-i18n="dash.byTool">By tool</div>
+                  <div class="dash-bd-row"><span class="dash-bd-name">Codex</span><span class="dash-bd-track"><i style="--w:100%;--bar:#58bfca"></i></span><span class="dash-bd-val">24.96B</span><span class="dash-bd-pct">65.0%</span></div>
+                  <div class="dash-bd-row"><span class="dash-bd-name">Claude Code</span><span class="dash-bd-track"><i style="--w:39%;--bar:#df8b6d"></i></span><span class="dash-bd-val">9.84B</span><span class="dash-bd-pct">25.6%</span></div>
+                  <div class="dash-bd-row"><span class="dash-bd-name">Hermes</span><span class="dash-bd-track"><i style="--w:11%;--bar:#f1d15f"></i></span><span class="dash-bd-val">2.74B</span><span class="dash-bd-pct">7.1%</span></div>
+                  <div class="dash-bd-row"><span class="dash-bd-name">Cursor</span><span class="dash-bd-track"><i style="--w:4%;--bar:#aab3c0"></i></span><span class="dash-bd-val">880.0M</span><span class="dash-bd-pct">2.3%</span></div>
                 </div>
                 <div class="dash-bd-col">
-                  <div class="dash-bd-title">By model</div>
-                  <div class="dash-bd-row"><span class="dash-bd-name">gpt-5.5</span><span class="dash-bd-track"><i style="--w:100%;--bar:#49a3b0"></i></span><span class="dash-bd-val">891.2M</span><span class="dash-bd-pct">40.2%</span></div>
-                  <div class="dash-bd-row"><span class="dash-bd-name">claude-opus-4-8</span><span class="dash-bd-track"><i style="--w:72%;--bar:#cc7c5e"></i></span><span class="dash-bd-val">642.6M</span><span class="dash-bd-pct">29.0%</span></div>
-                  <div class="dash-bd-row"><span class="dash-bd-name">gemini-3.5-pro</span><span class="dash-bd-track"><i style="--w:51%;--bar:#4285f4"></i></span><span class="dash-bd-val">458.1M</span><span class="dash-bd-pct">20.7%</span></div>
-                  <div class="dash-bd-row"><span class="dash-bd-name">claude-sonnet-4-6</span><span class="dash-bd-track"><i style="--w:25%;--bar:#cc7c5e"></i></span><span class="dash-bd-val">226.0M</span><span class="dash-bd-pct">10.2%</span></div>
+                  <div class="dash-bd-title" data-i18n="dash.byModel">By model</div>
+                  <div class="dash-bd-row"><span class="dash-bd-name">gpt-5.6-sol</span><span class="dash-bd-track"><i style="--w:100%;--bar:#49a3b0"></i></span><span class="dash-bd-val">15.80B</span><span class="dash-bd-pct">41.1%</span></div>
+                  <div class="dash-bd-row"><span class="dash-bd-name">claude-fable-5</span><span class="dash-bd-track"><i style="--w:69%;--bar:#cc7c5e"></i></span><span class="dash-bd-val">10.92B</span><span class="dash-bd-pct">28.4%</span></div>
+                  <div class="dash-bd-row"><span class="dash-bd-name">kimi-k3</span><span class="dash-bd-track"><i style="--w:43%;--bar:#4285f4"></i></span><span class="dash-bd-val">6.84B</span><span class="dash-bd-pct">17.8%</span></div>
+                  <div class="dash-bd-row"><span class="dash-bd-name">glm-5.2</span><span class="dash-bd-track"><i style="--w:31%;--bar:#8ea7bd"></i></span><span class="dash-bd-val">4.86B</span><span class="dash-bd-pct">12.7%</span></div>
                 </div>
               </div>
             </div>
@@ -572,7 +530,7 @@
                   <button type="button" data-mode="kline">K-line</button>
                 </div>
                 <div class="dash-ranges" aria-hidden="true">
-                  <span>7 days</span><span>30 days</span><span class="is-active">90 days</span><span>1 year</span><span>All</span>
+                  <span>7 days</span><span class="is-active">30 days</span><span>90 days</span><span>1 year</span><span>All</span>
                 </div>
               </div>
               <div class="dash-chart" data-dash-chart aria-hidden="true"></div>
@@ -605,6 +563,19 @@
                     <span class="mb-item"><span class="tray-mark mb-mark" style="--m:url(../assets/icons/tray-claude.svg)"></span><strong>52%</strong></span>
                     <span class="mb-item mb-reset"><strong>4h 47m</strong></span>
                     <time class="mac-clock" data-menubar-clock></time>
+                  </span>
+                </span>
+                <span class="mac-layout-preview">
+                  <span class="mac-layout-meta">
+                    <strong>Menu bar layout</strong>
+                    <span>Drag to arrange</span>
+                  </span>
+                  <span class="mac-layout-strip">
+                    <span class="mac-layout-handle" aria-hidden="true">⠿</span>
+                    <span class="mb-item"><span class="tray-mark mb-mark" style="--m:url(../assets/icons/tray-codex.svg)"></span><strong>147.9M</strong></span>
+                    <span class="mac-layout-separator"></span>
+                    <span class="mb-item"><span class="tray-mark mb-mark" style="--m:url(../assets/icons/tray-claude.svg)"></span><strong>52%</strong></span>
+                    <span class="mb-item"><strong>4h 47m</strong></span>
                   </span>
                 </span>
               </span>
@@ -690,38 +661,44 @@
                   <div class="tm-tabs"><span>DAY</span><span>MONTH</span><span class="active">TOTAL</span></div>
                 </div>
                 <div class="tm-label">TOTAL TOKENS</div>
-                <div class="tm-total" data-countup="2217877661">2,217,877,661</div>
-                <div class="tm-cost">$1899.60</div>
+                <div class="tm-total" data-countup="38420000000">38,420,000,000</div>
+                <div class="tm-cost">$31,864.70</div>
                 <div class="tm-breakdown">
                   <div class="tm-row">
                     <div class="tm-row-head">
                       <span class="tm-icon"><img src="assets/icons/os-apple.svg" alt=""></span>
-                      <span class="tm-row-name">mac-studio</span>
-                      <span class="tm-row-value">1,182,433,907<span>$1012.84</span></span>
+                      <span class="tm-row-name">mac-studio <em class="tm-you">YOU</em></span>
+                      <span class="tm-row-value">20,477,860,000<span>$16,983.89</span></span>
                     </div>
                     <div class="tm-bar"><span style="--w:100%;--bar:#73bdf5"></span></div>
                   </div>
-                  <div class="tm-row">
+                  <div class="tm-row tm-device-row">
                     <div class="tm-row-head">
                       <span class="tm-icon"><img src="assets/icons/os-apple.svg" alt=""></span>
                       <span class="tm-row-name">macbook-air</span>
-                      <span class="tm-row-value">562,118,330<span>$480.62</span></span>
+                      <span class="tm-row-value">9,720,260,000<span>$8,061.77</span></span>
                     </div>
                     <div class="tm-bar"><span style="--w:48%;--bar:#73bdf5"></span></div>
                   </div>
-                  <div class="tm-row">
+                  <div class="tm-row tm-device-row is-expanded">
                     <div class="tm-row-head">
                       <span class="tm-icon"><img src="assets/icons/os-windows.svg" alt=""></span>
-                      <span class="tm-row-name">win-desktop</span>
-                      <span class="tm-row-value">393,325,424<span>$337.77</span></span>
+                      <span class="tm-row-name">windows-workstation</span>
+                      <span class="tm-row-value">6,800,340,000<span>$5,640.05</span></span>
                     </div>
                     <div class="tm-bar"><span style="--w:33%;--bar:#73bdf5"></span></div>
+                    <div class="tm-device-detail">
+                      <div class="tm-device-client-row"><span><img src="assets/icons/codex.svg" alt="">Codex <em>100%</em></span><strong>6.80B</strong></div>
+                      <div class="tm-device-model-row"><span>gpt-5.6-sol</span><strong>6.31B</strong></div>
+                      <div class="tm-device-model-row"><span>codex-auto-review</span><strong>490.3M</strong></div>
+                      <small data-i18n="mock.deviceMeta">Windows 11 · Agent v0.37.0 · Synced 3m ago</small>
+                    </div>
                   </div>
-                  <div class="tm-row is-stale">
+                  <div class="tm-row tm-device-row is-stale">
                     <div class="tm-row-head">
                       <span class="tm-icon"><img src="assets/icons/os-windows.svg" alt=""></span>
-                      <span class="tm-row-name">old-thinkpad</span>
-                      <span class="tm-row-value">80,000,000<span>$68.37</span></span>
+                      <span class="tm-row-name">travel-laptop</span>
+                      <span class="tm-row-value">1,421,540,000<span>$1,178.99</span></span>
                     </div>
                     <div class="tm-bar"><span style="--w:7%;--bar:#8c97a7"></span></div>
                   </div>
@@ -747,8 +724,10 @@
       <section class="privacy section shell" id="privacy" aria-labelledby="privacy-title">
         <div class="privacy-grid">
           <div class="privacy-intro reveal">
-            <h2 id="privacy-title" data-i18n="privacy.title">Your code and conversations are not the product.</h2>
-            <p data-i18n="privacy.body">Token Monitor syncs only the fields needed to show totals, costs, tool and model breakdowns, and normalized account limit status.</p>
+            <div class="privacy-head">
+              <h2 id="privacy-title" data-i18n="privacy.title">Your code and conversations are not the product.</h2>
+              <p data-i18n="privacy.body">Token Monitor syncs only the fields needed to show totals, costs, tool and model breakdowns, and normalized account limit status.</p>
+            </div>
             <h3 data-i18n="privacy.never">Never syncs</h3>
             <ul class="never">
               <li data-i18n="privacy.never.1">Raw prompts or source files</li>
@@ -771,17 +750,35 @@
   <span class="pk">"agentVersion"</span>: <span class="ps">"0.36.0"</span>,
   <span class="pk">"updatedAt"</span>: <span class="ps">"2026-07-28T10:14:20.193Z"</span>,
   <span class="pk">"today"</span>: {
-    <span class="pk">"totalTokens"</span>: <span class="pn">147852309</span>,
-    <span class="pk">"costUsd"</span>: <span class="pn">122.29</span>,
-    <span class="pk">"clients"</span>: { <span class="pk">"codex"</span>: <span class="pn">98123456</span>, <span class="pk">"claude"</span>: <span class="pn">49728853</span> },
-    <span class="pk">"models"</span>: { <span class="pk">"gpt-5.5"</span>: <span class="pn">98123456</span>, <span class="pk">"claude-opus-4-8"</span>: <span class="pn">49728853</span> }
+    <span class="pk">"totalTokens"</span>: <span class="pn">165164772</span>,
+    <span class="pk">"costUsd"</span>: <span class="pn">136.08</span>,
+    <span class="pk">"clients"</span>: {
+      <span class="pk">"codex"</span>: <span class="pn">98123456</span>,
+      <span class="pk">"claude"</span>: <span class="pn">49728853</span>,
+      <span class="pk">"kimi"</span>: <span class="pn">10000000</span>,
+      <span class="pk">"zai"</span>: <span class="pn">7312463</span>
+    },
+    <span class="pk">"models"</span>: {
+      <span class="pk">"gpt-5.6-sol"</span>: <span class="pn">67882721</span>,
+      <span class="pk">"claude-fable-5"</span>: <span class="pn">46906795</span>,
+      <span class="pk">"kimi-k3"</span>: <span class="pn">29399329</span>,
+      <span class="pk">"glm-5.2"</span>: <span class="pn">20975927</span>
+    }
   },
   <span class="pk">"month"</span>: { <span class="pc">… totals, clients, models …</span> },
   <span class="pk">"allTime"</span>: { <span class="pc">… totals, clients, models …</span> },
   <span class="pk">"limits"</span>: {
     <span class="pk">"providers"</span>: [
-      { <span class="pk">"provider"</span>: <span class="ps">"claude"</span>, <span class="pk">"accountKey"</span>: <span class="ps">"sha256:9f2c…"</span>, <span class="pk">"status"</span>: <span class="ps">"ok"</span>,
-        <span class="pk">"windows"</span>: [ { <span class="pk">"kind"</span>: <span class="ps">"weekly"</span>, <span class="pk">"usedPercent"</span>: <span class="pn">61.4</span>, <span class="pk">"resetsAt"</span>: <span class="ps">"2026-06-15T00:00:00Z"</span> } ] }
+      {
+        <span class="pk">"provider"</span>: <span class="ps">"claude"</span>,
+        <span class="pk">"accountKey"</span>: <span class="ps">"sha256:9f2c…"</span>,
+        <span class="pk">"status"</span>: <span class="ps">"ok"</span>,
+        <span class="pk">"windows"</span>: [{
+          <span class="pk">"kind"</span>: <span class="ps">"weekly"</span>,
+          <span class="pk">"usedPercent"</span>: <span class="pn">61.4</span>,
+          <span class="pk">"resetsAt"</span>: <span class="ps">"2026-06-15T00:00:00Z"</span>
+        }]
+      }
     ]
   }
 }</code></pre>
@@ -830,7 +827,6 @@
             <span class="download-arrow" aria-hidden="true">↓</span>
           </a>
         </div>
-        <p class="source-note" data-i18n="final.source">Portable Windows builds and source installs are covered in the README.</p>
       </section>
     </main>
 
@@ -849,7 +845,7 @@
       </div>
     </footer>
 
-    <script src="scripts/i18n.js?v=20260728-smart" defer></script>
-    <script src="scripts/main.js?v=20260728-smart" defer></script>
+    <script src="scripts/i18n.js?v=20260730-story28" defer></script>
+    <script src="scripts/main.js?v=20260730-story28" defer></script>
   </body>
 </html>

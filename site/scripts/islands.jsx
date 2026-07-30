@@ -196,10 +196,26 @@ function SideRays({
 }
 
 var HERO_PERIODS = {
-  day: { total: "165,164,772", cost: "$136.08" },
-  month: { total: "1,482,907,441", cost: "$1,214.62" },
-  total: { total: "2,217,877,661", cost: "$1,899.60" }
+  day: { total: 165164772, cost: 136.08 },
+  month: { total: 8611540267, cost: 7177.64 },
+  total: { total: 38420000000, cost: 31864.70 }
 };
+
+var HERO_PERIOD_IDS = Object.keys(HERO_PERIODS);
+var HERO_LIVE_INTERVAL_MS = 10000;
+var HERO_LIVE_STEP = 220000;
+var HERO_COST_PER_TOKEN = HERO_PERIODS.day.cost / HERO_PERIODS.day.total;
+var WIDGET_VIEWS = [
+  { id: "home", label: "Home" },
+  { id: "limits", label: "Limits" },
+  { id: "tool", label: "Tools" },
+  { id: "model", label: "Models" },
+  { id: "device", label: "Devices" },
+  { id: "session", label: "Sessions" },
+  { id: "project", label: "Projects" },
+  { id: "trends", label: "Trends" },
+  { id: "status", label: "Status" }
+];
 
 var HERO_LIMITS = [
   {
@@ -221,10 +237,15 @@ var HERO_LIMITS = [
 ];
 
 var HERO_MODELS = [
-  { id: "codex", name: "gpt-5.4", value: "88.2M", share: "53%" },
-  { id: "claude", name: "claude-sonnet-4.5", value: "44.6M", share: "27%" },
-  { id: "codex", name: "gpt-5.3-codex", value: "24.8M", share: "15%" },
-  { id: "gemini", name: "gemini-2.5-pro", value: "7.6M", share: "5%" }
+  { id: "codex", name: "gpt-5.6-sol", value: 67900000, share: 0.41, shareLabel: "41%" },
+  { id: "claude", name: "claude-fable-5", value: 46900000, share: 0.28, shareLabel: "28%" },
+  { id: "kimi", name: "kimi-k3", value: 29400000, share: 0.18, shareLabel: "18%" },
+  { id: "zai", name: "glm-5.2", value: 21000000, share: 0.13, shareLabel: "13%" }
+];
+
+var HERO_DEVICES = [
+  { id: "mac", name: "mac-studio", icon: "assets/icons/os-apple.svg", value: 165100000, share: 0.998, you: true },
+  { id: "windows", name: "windows-workstation", icon: "assets/icons/os-windows.svg", value: 16700, share: 0.002 }
 ];
 
 function heroHeatLevel(index) {
@@ -241,9 +262,178 @@ var HERO_HEAT_LEVELS = Array.from({ length: 224 }, function heatCell(_, index) {
   return heroHeatLevel(index);
 });
 
+function prefersReducedMotion() {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function easeOutQuart(value) {
+  return 1 - Math.pow(1 - value, 4);
+}
+
+function formatHeroCompact(value) {
+  var absolute = Math.abs(value);
+  if (absolute >= 1000000000) return `${(value / 1000000000).toFixed(1)}B`;
+  if (absolute >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+  if (absolute >= 1000) return `${(value / 1000).toFixed(1)}K`;
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function AnimatedNumber({ value, currency = false, format }) {
+  var valueRef = useRef(value);
+  var frameRef = useRef(0);
+  var [displayValue, setDisplayValue] = useState(value);
+
+  useEffect(function animateValue() {
+    var from = valueRef.current;
+    var to = value;
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    if (prefersReducedMotion() || from === to) {
+      valueRef.current = to;
+      setDisplayValue(to);
+      return undefined;
+    }
+
+    var startedAt = performance.now();
+    var duration = currency ? 620 : 1000;
+    function frame(now) {
+      var progress = Math.min(1, (now - startedAt) / duration);
+      var next = from + (to - from) * easeOutQuart(progress);
+      valueRef.current = next;
+      setDisplayValue(next);
+      if (progress < 1) frameRef.current = requestAnimationFrame(frame);
+      else frameRef.current = 0;
+    }
+    frameRef.current = requestAnimationFrame(frame);
+    return function cleanup() {
+      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      frameRef.current = 0;
+    };
+  }, [currency, value]);
+
+  if (currency) {
+    return `$${Number(displayValue).toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
+  }
+  if (format) return format(displayValue);
+  return Math.round(displayValue).toLocaleString("en-US");
+}
+
+function ViewIcon({ id, className = "" }) {
+  return <span className={`app-view-icon view-icon-${id} ${className}`.trim()} aria-hidden="true"></span>;
+}
+
+function HeroViewSwitcher() {
+  var [open, setOpen] = useState(false);
+  var rootRef = useRef(null);
+  var closeTimerRef = useRef(0);
+
+  function cancelClose() {
+    if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = 0;
+  }
+  function openMenu() {
+    cancelClose();
+    setOpen(true);
+  }
+  function closeMenu() {
+    cancelClose();
+    setOpen(false);
+  }
+  function scheduleClose() {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(function closeAfterPointerLeaves() {
+      if (!rootRef.current || !rootRef.current.matches(":focus-within")) closeMenu();
+    }, 160);
+  }
+
+  useEffect(function bindDismissal() {
+    function onPointerDown(event) {
+      if (open && rootRef.current && !rootRef.current.contains(event.target)) closeMenu();
+    }
+    function onKeyDown(event) {
+      if (event.key === "Escape" && open) closeMenu();
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return function cleanup() {
+      cancelClose();
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div
+      className={`hero-dashboard-view-control ${open ? "is-open" : ""}`}
+      ref={rootRef}
+      onPointerEnter={cancelClose}
+      onPointerLeave={scheduleClose}
+      onFocus={cancelClose}
+      onBlur={function closeAfterBlur(event) {
+        if (!event.currentTarget.contains(event.relatedTarget)) closeMenu();
+      }}
+    >
+      <button type="button" aria-label="Home view">
+        <ViewIcon id="home" />
+        <span>Home</span>
+      </button>
+      <button
+        type="button"
+        aria-label="Choose view"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onPointerEnter={openMenu}
+        onFocus={openMenu}
+        onClick={openMenu}
+      >
+        <span className="hero-dashboard-chevron" aria-hidden="true"></span>
+      </button>
+      <div className="hero-dashboard-view-menu" role="menu" aria-hidden={!open}>
+        {WIDGET_VIEWS.map(function renderView(view) {
+          var active = view.id === "home";
+          return (
+            <button
+              className={active ? "is-current" : ""}
+              key={view.id}
+              type="button"
+              role="menuitem"
+              onClick={closeMenu}
+            >
+              <ViewIcon id={view.id} />
+              <span>{view.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function HeroDashboard() {
   var [period, setPeriod] = useState("day");
+  var [liveTick, setLiveTick] = useState(0);
   var periodData = HERO_PERIODS[period];
+  var periodIndex = HERO_PERIOD_IDS.indexOf(period);
+  var liveTotal = periodData.total + liveTick * HERO_LIVE_STEP;
+  var liveCost = periodData.cost + liveTick * HERO_LIVE_STEP * HERO_COST_PER_TOKEN;
+
+  useEffect(function startLiveTicker() {
+    if (prefersReducedMotion()) return undefined;
+    var timer = window.setInterval(function advanceLiveSample() {
+      setLiveTick(function incrementLiveTick(value) { return value + 1; });
+    }, HERO_LIVE_INTERVAL_MS);
+    return function cleanupLiveTicker() {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  function selectPeriod(id) {
+    if (HERO_PERIODS[id]) setPeriod(id);
+  }
 
   return (
     <div className="hero-dashboard" aria-label="Interactive Token Monitor Home dashboard">
@@ -252,8 +442,21 @@ function HeroDashboard() {
           <span aria-hidden="true">Σ</span>
           <i aria-hidden="true"></i>
         </div>
-        <div className="hero-dashboard-tabs" role="tablist" aria-label="Usage period">
-          {Object.keys(HERO_PERIODS).map(function renderPeriod(id) {
+        <div
+          className="hero-dashboard-tabs"
+          role="tablist"
+          aria-label="Usage period"
+          style={{ "--period-index": periodIndex }}
+          onKeyDown={function movePeriod(event) {
+            var direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+            if (!direction) return;
+            event.preventDefault();
+            var next = (periodIndex + direction + HERO_PERIOD_IDS.length) % HERO_PERIOD_IDS.length;
+            selectPeriod(HERO_PERIOD_IDS[next]);
+          }}
+        >
+          <i className="hero-dashboard-tab-indicator" aria-hidden="true"></i>
+          {HERO_PERIOD_IDS.map(function renderPeriod(id) {
             var active = period === id;
             return (
               <button
@@ -263,7 +466,7 @@ function HeroDashboard() {
                 role="tab"
                 aria-selected={active}
                 tabIndex={active ? 0 : -1}
-                onClick={function selectPeriod() { setPeriod(id); }}
+                onClick={function selectPeriodButton() { selectPeriod(id); }}
               >
                 {id.toUpperCase()}
               </button>
@@ -274,8 +477,8 @@ function HeroDashboard() {
 
       <section className="hero-dashboard-total" aria-live="polite">
         <span>TOTAL TOKENS</span>
-        <strong>{periodData.total}</strong>
-        <small>{periodData.cost}</small>
+        <strong><AnimatedNumber value={liveTotal} /></strong>
+        <small><AnimatedNumber value={liveCost} currency /></small>
       </section>
 
       <div className="hero-dashboard-rule"></div>
@@ -283,7 +486,7 @@ function HeroDashboard() {
       <section className="hero-dashboard-module hero-dashboard-limits" aria-labelledby="hero-limits-title">
         <div className="hero-dashboard-module-head">
           <strong id="hero-limits-title">LIMITS</strong>
-          <span aria-hidden="true">◴</span>
+          <ViewIcon id="limits" />
         </div>
         {HERO_LIMITS.map(function renderLimit(row) {
           return (
@@ -313,18 +516,20 @@ function HeroDashboard() {
       <section className="hero-dashboard-module" aria-labelledby="hero-devices-title">
         <div className="hero-dashboard-module-head">
           <strong id="hero-devices-title">DEVICES</strong>
-          <span aria-hidden="true">▱</span>
+          <ViewIcon id="device" />
         </div>
-        <div className="hero-dashboard-device-row">
-          <img src="assets/icons/os-apple.svg" alt="" />
-          <span>macbook-m5 <em>YOU</em></span>
-          <strong>165.1M</strong>
-        </div>
-        <div className="hero-dashboard-device-row">
-          <img src="assets/icons/os-windows.svg" alt="" />
-          <span>9950x3d</span>
-          <strong>16.7K</strong>
-        </div>
+        {HERO_DEVICES.map(function renderDevice(device) {
+          return (
+            <div className="hero-dashboard-device-row" key={device.id}>
+              <img src={device.icon} alt="" />
+              <span className={device.you ? "hero-dashboard-device-label" : ""}>
+                <span>{device.name}</span>
+                {device.you ? <em>YOU</em> : null}
+              </span>
+              <strong><AnimatedNumber value={device.value + liveTick * HERO_LIVE_STEP * device.share} format={formatHeroCompact} /></strong>
+            </div>
+          );
+        })}
       </section>
 
       <div className="hero-dashboard-rule"></div>
@@ -332,15 +537,15 @@ function HeroDashboard() {
       <section className="hero-dashboard-module hero-dashboard-models" aria-labelledby="hero-models-title">
         <div className="hero-dashboard-module-head">
           <strong id="hero-models-title">MODELS</strong>
-          <span aria-hidden="true">⌘</span>
+          <ViewIcon id="model" />
         </div>
         {HERO_MODELS.map(function renderModel(model, index) {
           return (
             <div className="hero-dashboard-model-row" key={`${model.name}-${index}`}>
               <img src={`assets/icons/${model.id}.svg`} alt="" />
               <span>{model.name}</span>
-              <strong>{model.value}</strong>
-              <em>{model.share}</em>
+              <strong><AnimatedNumber value={model.value + liveTick * HERO_LIVE_STEP * model.share} format={formatHeroCompact} /></strong>
+              <em>{model.shareLabel}</em>
             </div>
           );
         })}
@@ -351,7 +556,7 @@ function HeroDashboard() {
       <section className="hero-dashboard-module hero-dashboard-activity" aria-labelledby="hero-activity-title">
         <div className="hero-dashboard-module-head">
           <strong id="hero-activity-title">ACTIVITY</strong>
-          <span>106 active days ↗</span>
+          <span className="hero-dashboard-activity-summary">121 active days <ViewIcon id="trends" /></span>
         </div>
         <div className="hero-dashboard-activity-scroll">
           <div className="hero-dashboard-activity-canvas">
@@ -367,7 +572,7 @@ function HeroDashboard() {
         </div>
         <div className="hero-dashboard-trend-head">
           <strong>TREND</strong>
-          <span>Peak 278.4M</span>
+          <span>Peak 430.2M</span>
         </div>
         <div className="hero-dashboard-trend" aria-hidden="true">
           <svg viewBox="0 0 360 74" preserveAspectRatio="none">
@@ -393,16 +598,7 @@ function HeroDashboard() {
       </section>
 
       <footer className="hero-dashboard-footer">
-        <div className="hero-dashboard-view-control">
-          <button type="button" aria-label="Home view">
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M2.5 7.1 8 2.5l5.5 4.6v6.1a.8.8 0 0 1-.8.8H3.3a.8.8 0 0 1-.8-.8V7.1Z" />
-              <path d="M6.1 14V9.4h3.8V14" />
-            </svg>
-            <span>Home</span>
-          </button>
-          <button type="button" aria-label="Choose view"><span aria-hidden="true"></span></button>
-        </div>
+        <HeroViewSwitcher />
         <button className="hero-dashboard-settings" type="button" aria-label="Settings">
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M6.7 2.1h2.6l.4 1.4c.4.2.8.4 1.1.7l1.4-.4 1.3 2.2-1 1c0 .4 0 .9-.1 1.3l1 1-1.3 2.2-1.4-.4c-.3.3-.7.5-1.1.7l-.4 1.4H6.7l-.4-1.4c-.4-.2-.8-.4-1.1-.7l-1.4.4-1.3-2.2 1-1c-.1-.4-.1-.9 0-1.3l-1-1 1.3-2.2 1.4.4c.3-.3.7-.5 1.1-.7l.4-1.4Z" />

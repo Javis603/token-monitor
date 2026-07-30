@@ -17,7 +17,7 @@
   width: var(--navw);
   min-height: 60px;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto minmax(250px, 1fr);
+  grid-template-columns: minmax(180px, 1fr) auto;
   align-items: center;
   gap: 1rem;
   padding: 0.48rem 0.58rem 0.48rem 0.62rem;
@@ -605,7 +605,7 @@
   margin-top: 23px;
 }
 
-.tm-footer span {
+.tm-footer > span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -618,7 +618,7 @@
   font-weight: 800;
 }
 
-.tm-footer span:last-child {
+.tm-footer > span:last-child {
   width: 44px;
   padding: 0;
   color: var(--widget-text);
@@ -781,8 +781,165 @@
 .app-frame .tm-bar { height: 6px; margin-top: 11px; }
 /* every view keeps the real footer: current view pill + settings gear */
 .app-frame .tm-footer { margin-top: 19px; }
-.app-frame .tm-footer span { min-height: 36px; padding: 0 12px; border-radius: 11px; font-size: 13px; }
-.app-frame .tm-footer span:last-child { width: 36px; padding: 0; }
+.app-frame .tm-footer > span { min-height: 36px; padding: 0 12px; border-radius: 11px; font-size: 13px; }
+.app-frame .tm-footer > span:last-child { width: 36px; padding: 0; }
+
+/* Exact copies of the desktop widget's view glyphs, recolored through masks in
+   the same way the renderer does. Keeping one primitive here prevents the Home
+   panel, the feature views, and the view menu from drifting apart. */
+.app-view-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  background: currentColor;
+  -webkit-mask: var(--view-icon) center / contain no-repeat;
+  mask: var(--view-icon) center / contain no-repeat;
+}
+.view-icon-home { --view-icon: url("../assets/icons/views/home.svg"); }
+.view-icon-limits { --view-icon: url("../assets/icons/views/limits.svg"); }
+.view-icon-tool { --view-icon: url("../assets/icons/views/tool.svg"); }
+.view-icon-model { --view-icon: url("../assets/icons/views/model.svg"); }
+.view-icon-device { --view-icon: url("../assets/icons/views/device.svg"); }
+.view-icon-session { --view-icon: url("../assets/icons/views/session.svg"); }
+.view-icon-project { --view-icon: url("../assets/icons/views/project.svg"); }
+.view-icon-trends { --view-icon: url("../assets/icons/views/trends.svg"); }
+.view-icon-status { --view-icon: url("../assets/icons/views/status.svg"); }
+
+.tm-app-footer {
+  position: relative;
+  overflow: visible;
+}
+.tm-view-control {
+  position: relative;
+  display: flex;
+  height: 30px;
+  color: #b8c0ce;
+}
+.tm-app-footer button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  margin: 0;
+  border: 0;
+  background: rgba(4, 8, 13, .16);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(228, 238, 248, .12);
+}
+.tm-app-footer .tm-view-current {
+  gap: 6px;
+  min-width: 82px;
+  padding: 0 9px;
+  border-radius: 7px 0 0 7px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+.tm-view-disclosure {
+  width: 24px;
+  margin-left: -1px !important;
+  border-radius: 0 7px 7px 0;
+}
+.tm-view-disclosure > span {
+  width: 7px;
+  height: 7px;
+  margin-top: -3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 180ms cubic-bezier(.16, 1, .3, 1), margin 180ms cubic-bezier(.16, 1, .3, 1);
+}
+.tm-view-control.is-open .tm-view-disclosure > span {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+.tm-settings-button {
+  width: 34px;
+  border-radius: 7px;
+  color: #e9f3ff !important;
+}
+.tm-settings-glyph::before {
+  content: "⚙";
+  font-size: 15px;
+  line-height: 1;
+}
+.tm-app-footer button:hover,
+.tm-app-footer button:focus-visible,
+.tm-view-control.is-open > button {
+  background: rgba(128, 183, 255, .13);
+  color: #fff;
+}
+.tm-app-footer button:focus-visible {
+  outline: 2px solid rgba(125, 190, 255, .7);
+  outline-offset: 1px;
+}
+.tm-view-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 8;
+  display: grid;
+  width: 118px;
+  padding: 4px;
+  border: 1px solid rgba(228, 238, 248, .13);
+  border-radius: 9px;
+  background: rgba(20, 23, 29, .88);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .06);
+  backdrop-filter: blur(28px) saturate(1.18);
+  -webkit-backdrop-filter: blur(28px) saturate(1.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(6px) scale(.985);
+  transform-origin: bottom left;
+  filter: blur(2px);
+  transition:
+    opacity 130ms ease,
+    transform 130ms ease,
+    filter 130ms ease,
+    visibility 0s linear 130ms;
+}
+.tm-view-control.is-open .tm-view-menu {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  filter: none;
+  transition:
+    opacity 190ms cubic-bezier(.16, 1, .3, 1),
+    transform 190ms cubic-bezier(.16, 1, .3, 1),
+    filter 190ms cubic-bezier(.16, 1, .3, 1),
+    visibility 0s;
+}
+.tm-view-menu button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 7px;
+  width: 100%;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: #aeb8c6;
+  font-size: 11px;
+  text-align: left;
+}
+.tm-view-menu button > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-view-menu button:hover,
+.tm-view-menu button:focus-visible,
+.tm-view-menu button.is-current {
+  background: rgba(128, 183, 255, .11);
+  color: #f4f8ff;
+}
 /* the view body sits below the always-visible total panel, like the app */
 .app-frame .tm-limits,
 .app-frame .tm-statuslist,
@@ -924,7 +1081,7 @@
 .tool-chip img[src$="meta.svg"],
 .tool-chip img[src$="mimo-code.svg"],
 .tool-chip img[src$="mistral.svg"],
-.tool-chip img[src$="moonshot.svg"],
+.tool-chip img[src$="kimi.svg"],
 .tool-chip img[src$="opencode.svg"],
 .tool-chip img[src$="openrouter.svg"],
 .tool-chip img[src$="pi.svg"],

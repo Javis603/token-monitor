@@ -185,96 +185,193 @@ function setupToolMarquee() {
   marquee.addEventListener("pointerleave", function () { easeRate(1, 700); });
 }
 
-/* Scroll-driven product story. Desktop keeps the app preview pinned while the
-   reader moves through each feature; the nearest story beat owns the stage.
-   Mobile and reduced-motion layouts move each real scene inline so no content
-   depends on sticky positioning or crossfades. */
+/* The feature mockups use the same compact footer switcher as the Electron
+   widget: the disclosure opens on mouse hover or keyboard focus, stays open
+   while crossing into the menu, and closes shortly after the pointer leaves. */
+function setupWidgetViewSwitchers() {
+  var viewOptions = [
+    { id: "home", label: "Home" },
+    { id: "limits", label: "Limits" },
+    { id: "tool", label: "Tools" },
+    { id: "model", label: "Models" },
+    { id: "device", label: "Devices" },
+    { id: "session", label: "Sessions" },
+    { id: "project", label: "Projects" },
+    { id: "trends", label: "Trends" },
+    { id: "status", label: "Status" }
+  ];
+  var tourTargets = {
+    model: "tour-tab-live",
+    limits: "tour-tab-limits",
+    session: "tour-tab-session",
+    status: "tour-tab-status"
+  };
+  var switchers = document.querySelectorAll("[data-widget-view-switcher]");
+
+  for (var i = 0; i < switchers.length; i++) (function wireSwitcher(root) {
+    var current = root.getAttribute("data-current-view") || "home";
+    var disclosure = root.querySelector(".tm-view-disclosure");
+    var menu = root.querySelector(".tm-view-menu");
+    if (!disclosure || !menu) return;
+    var closeTimer = 0;
+
+    menu.innerHTML = viewOptions.map(function renderViewOption(view) {
+      var active = view.id === current;
+      return '<button class="' + (active ? "is-current" : "") + '" type="button" role="menuitem" data-widget-view="' + view.id + '">'
+        + '<span class="app-view-icon view-icon-' + view.id + '" aria-hidden="true"></span>'
+        + "<span>" + view.label + "</span>"
+        + "</button>";
+    }).join("");
+
+    function cancelClose() {
+      if (closeTimer) window.clearTimeout(closeTimer);
+      closeTimer = 0;
+    }
+    function reflect(open) {
+      root.classList.toggle("is-open", open);
+      disclosure.setAttribute("aria-expanded", open ? "true" : "false");
+      menu.setAttribute("aria-hidden", open ? "false" : "true");
+    }
+    function openMenu() {
+      cancelClose();
+      reflect(true);
+    }
+    function closeMenu() {
+      cancelClose();
+      reflect(false);
+    }
+    function scheduleClose() {
+      cancelClose();
+      closeTimer = window.setTimeout(function closeAfterExit() {
+        if (!root.matches(":focus-within")) closeMenu();
+      }, 160);
+    }
+
+    disclosure.addEventListener("pointerenter", openMenu);
+    disclosure.addEventListener("focus", openMenu);
+    disclosure.addEventListener("click", openMenu);
+    root.addEventListener("pointerenter", cancelClose);
+    root.addEventListener("pointerleave", scheduleClose);
+    root.addEventListener("focusout", function () {
+      window.setTimeout(function () {
+        if (!root.contains(document.activeElement)) closeMenu();
+      }, 0);
+    });
+    menu.addEventListener("click", function (event) {
+      var button = event.target.closest("[data-widget-view]");
+      if (!button) return;
+      closeMenu();
+      var target = document.getElementById(tourTargets[button.getAttribute("data-widget-view")] || "");
+      if (target) target.click();
+    });
+    root.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        closeMenu();
+        disclosure.focus();
+      }
+    });
+  })(switchers[i]);
+}
+
+/* Pinned product story. The rail follows the document's real scroll progress
+   through the sticky viewport; the active screen changes only when that
+   continuous progress crosses the midpoint between two steps. */
 function setupFeatureStory() {
   var tour = document.querySelector("[data-tour]");
   if (!tour) return;
+  var viewport = tour.querySelector(".tour-viewport");
   var nav = tour.querySelector(".tour-nav");
   var stage = tour.querySelector(".tour-stage");
-  if (!nav || !stage) return;
+  if (!viewport || !nav || !stage) return;
   var steps = Array.prototype.slice.call(nav.querySelectorAll("[data-feature-step]"));
   var screens = Array.prototype.slice.call(tour.querySelectorAll("[data-tour-screen]"));
-  var inlineStages = Array.prototype.slice.call(nav.querySelectorAll("[data-tour-inline]"));
-  if (steps.length < 2 || steps.length !== screens.length || inlineStages.length !== screens.length) return;
+  if (steps.length < 2 || steps.length !== screens.length) return;
+  var rail = tour.querySelector(".tour-progress-rail");
   var progress = tour.querySelector("[data-tour-progress]");
-  var media = window.matchMedia("(min-width: 901px)");
+  var scrollMedia = window.matchMedia("(min-width: 901px)");
+  var scrollFrame = 0;
   var current = 0;
-  var desktopMode = false;
-  var raf = 0;
 
-  function activate(i) {
+  function setProgress(value) {
+    if (!progress) return;
+    progress.style.transform = "scaleY(" + Math.max(0, Math.min(1, value)) + ")";
+  }
+
+  function alignProgressRail() {
+    if (!rail) return;
+    var firstIndex = steps[0].querySelector(".tour-index");
+    var lastIndex = steps[steps.length - 1].querySelector(".tour-index");
+    if (!firstIndex || !lastIndex) return;
+    var navRect = nav.getBoundingClientRect();
+    var firstRect = firstIndex.getBoundingClientRect();
+    var lastRect = lastIndex.getBoundingClientRect();
+    nav.style.setProperty("--tour-rail-top", (firstRect.top + firstRect.height / 2 - navRect.top) + "px");
+    nav.style.setProperty("--tour-rail-bottom", (navRect.bottom - (lastRect.top + lastRect.height / 2)) + "px");
+  }
+
+  function activate(i, moveFocus, selectedProgress) {
     if (i < 0 || i >= steps.length) return;
     current = i;
     for (var j = 0; j < steps.length; j++) {
       var selected = j === i;
       steps[j].classList.toggle("is-active", selected);
-      if (selected) steps[j].setAttribute("aria-current", "step");
-      else steps[j].removeAttribute("aria-current");
+      steps[j].setAttribute("aria-selected", selected ? "true" : "false");
+      steps[j].setAttribute("tabindex", selected ? "0" : "-1");
       screens[j].classList.toggle("is-active", selected);
       screens[j].setAttribute("aria-hidden", selected ? "false" : "true");
     }
-    if (progress) progress.style.transform = "scaleY(" + (steps.length > 1 ? i / (steps.length - 1) : 1) + ")";
-    var counts = screens[i].querySelectorAll("[data-countup]");
-    for (var c = 0; c < counts.length; c++) countUp(counts[c]);
-  }
-
-  function updateFromScroll() {
-    raf = 0;
-    if (!desktopMode) return;
-    var readingLine = window.innerHeight * 0.46;
-    var nearest = current;
-    var distance = Infinity;
-    for (var i = 0; i < steps.length; i++) {
-      var rect = steps[i].getBoundingClientRect();
-      var d = Math.abs(rect.top + rect.height * 0.45 - readingLine);
-      if (d < distance) {
-        distance = d;
-        nearest = i;
-      }
-    }
-    if (nearest !== current) activate(nearest);
-  }
-
-  function scheduleUpdate() {
-    if (!raf) raf = requestAnimationFrame(updateFromScroll);
-  }
-
-  function placeScreens() {
-    desktopMode = media.matches && !reducedMotion();
-    tour.classList.toggle("is-inline-story", !desktopMode);
-    if (desktopMode) {
-      stage.removeAttribute("aria-hidden");
-      for (var i = 0; i < screens.length; i++) stage.appendChild(screens[i]);
-      activate(current);
-      scheduleUpdate();
-      return;
-    }
-    stage.setAttribute("aria-hidden", "true");
-    for (var j = 0; j < screens.length; j++) {
-      screens[j].classList.add("is-active");
-      screens[j].setAttribute("aria-hidden", "false");
-      inlineStages[j].appendChild(screens[j]);
-      steps[j].removeAttribute("aria-current");
-    }
-    if (progress) progress.style.transform = "scaleY(1)";
+    if (typeof selectedProgress === "number") setProgress(selectedProgress);
+    if (moveFocus) steps[i].focus();
   }
 
   for (var i = 0; i < steps.length; i++) (function (index) {
-    steps[index].addEventListener("pointerenter", function () {
-      if (desktopMode) activate(index);
+    steps[index].addEventListener("focus", function () {
+      activate(index, false, index / (steps.length - 1));
     });
-    steps[index].addEventListener("focusin", function () {
-      if (desktopMode) activate(index);
+    steps[index].addEventListener("click", function () {
+      activate(index, false, index / (steps.length - 1));
+    });
+    steps[index].addEventListener("keydown", function (event) {
+      var next = current;
+      if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (current + 1) % steps.length;
+      else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (current - 1 + steps.length) % steps.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = steps.length - 1;
+      else return;
+      event.preventDefault();
+      activate(next, true, next / (steps.length - 1));
     });
   })(i);
-  window.addEventListener("scroll", scheduleUpdate, { passive: true });
-  window.addEventListener("resize", scheduleUpdate, { passive: true });
-  if (typeof media.addEventListener === "function") media.addEventListener("change", placeScreens);
-  else if (typeof media.addListener === "function") media.addListener(placeScreens);
-  placeScreens();
+
+  function updateScrollSelection() {
+    scrollFrame = 0;
+    if (!scrollMedia.matches || reducedMotion()) return;
+    var rect = tour.getBoundingClientRect();
+    var tourTop = window.scrollY + rect.top;
+    var stickyTop = parseFloat(window.getComputedStyle(viewport).top) || 0;
+    var start = tourTop - stickyTop;
+    var end = Math.max(start + 1, tourTop + tour.offsetHeight - window.innerHeight);
+    var amount = Math.max(0, Math.min(1, (window.scrollY - start) / (end - start)));
+    var nearest = Math.min(steps.length - 1, Math.round(amount * (steps.length - 1)));
+    setProgress(amount);
+    if (nearest !== current) activate(nearest);
+  }
+
+  function scheduleScrollSelection() {
+    if (scrollFrame) return;
+    scrollFrame = window.requestAnimationFrame(updateScrollSelection);
+  }
+
+  window.addEventListener("scroll", scheduleScrollSelection, { passive: true });
+  window.addEventListener("resize", function realignStory() {
+    alignProgressRail();
+    scheduleScrollSelection();
+  }, { passive: true });
+  if (typeof scrollMedia.addEventListener === "function") scrollMedia.addEventListener("change", scheduleScrollSelection);
+  else if (typeof scrollMedia.addListener === "function") scrollMedia.addListener(scheduleScrollSelection);
+  alignProgressRail();
+  activate(0, false, 0);
+  scheduleScrollSelection();
 }
 
 /* Usage Dashboard replica: draws the activity heatmap, stacked bars, and
@@ -321,12 +418,17 @@ function setupDashboard() {
       var fit = totalWidth / sum;
       for (var k = 0; k < columns.length; k++) columns[k] *= fit;
     }
+    var fittedTotal = columns.reduce(function (total, width) { return total + width; }, 0);
+    if (columns.length && Math.abs(totalWidth - fittedTotal) > 0.01) {
+      columns[columns.length - 1] = Math.max(0, columns[columns.length - 1] + totalWidth - fittedTotal);
+    }
     return columns.map(function (width) { return Math.round(width * 10) / 10; });
   }
   function balanceStatCards() {
     if (!cardsEl) return;
     var cards = Array.prototype.slice.call(cardsEl.querySelectorAll(".dash-card"));
-    if (cards.length < 2 || cardsEl.clientWidth < 760) {
+    cardsEl.style.setProperty("--stat-count", String(Math.max(1, cards.length)));
+    if (cards.length < 2 || window.matchMedia("(max-width: 900px)").matches) {
       cardsEl.style.removeProperty("grid-template-columns");
       return;
     }
@@ -353,7 +455,7 @@ function setupDashboard() {
   }
 
   var DAYS = 364; /* 52 whole weeks */
-  var DENSE = 300; /* active throughout the year, with a stronger recent run */
+  var DENSE = 364; /* active throughout the year, with a stronger recent run */
   var rand = prng(603);
   var daily = [];
   for (var i = 0; i < DAYS; i++) {
@@ -364,7 +466,7 @@ function setupDashboard() {
       var weekday = i % 7 === 5 ? 0.42 : i % 7 === 6 ? 0.34 : 1;
       v = ramp * weekday * (0.4 + rand() * 0.95);
       if (rand() < 0.4) v *= 1.55; /* spiky, like real agent days */
-      if (fromEnd > 46 && rand() < 0.18) v = 0; /* organic gaps before the current streak */
+      if (fromEnd > 90 && rand() < 0.18) v = 0; /* organic gaps before the 97-day current streak */
     } else if (rand() < 0.32) {
       v = 0.08 + rand() * 0.24; /* established early activity, not an empty year */
     }
@@ -372,43 +474,43 @@ function setupDashboard() {
   }
 
   /* anchor the series to the rest of the site's data universe: the year sums
-     to the 2,217,877,661 all-time total, and one agent-swarm day 11 days ago
-     is forced to exactly the 228.6M "Peak day" card */
-  var TOTAL = 2217877661, PEAK = 228600000;
+     to the 38,420,000,000 all-time total, and one agent-swarm day 11 days ago
+     is forced to exactly the 430.2M "Peak day" card */
+  var TOTAL = 38420000000, PEAK = 430200000;
   var peakIdx = DAYS - 1 - 11;
   daily[peakIdx] = 0;
   var restSum = daily.reduce(function (a, b) { return a + b; }, 0);
   daily[peakIdx] = (PEAK / (TOTAL - PEAK)) * restSum;
   var scale = TOTAL / (restSum + daily[peakIdx]);
 
-  /* shares mirror the Overview breakdown (Codex 68.1% … Cursor ~0%) */
+  /* shares mirror the Overview breakdown (Codex 65.0% … Cursor 2.3%) */
   var SERIES = {
     client: [
-      { name: "Codex", color: "#58bfca", share: 0.6806 },
-      { name: "Claude Code", color: "#df8b6d", share: 0.2775 },
-      { name: "Hermes", color: "#f1d15f", share: 0.0419 },
-      { name: "Cursor", color: "#aab3c0", share: 0.0003 }
+      { name: "Codex", color: "#58bfca", share: 0.65 },
+      { name: "Claude Code", color: "#df8b6d", share: 0.256 },
+      { name: "Hermes", color: "#f1d15f", share: 0.071 },
+      { name: "Cursor", color: "#aab3c0", share: 0.023 }
     ],
     model: [
-      { name: "gpt-5.5", color: "#49a3b0", share: 0.402 },
-      { name: "claude-opus-4-8", color: "#cc7c5e", share: 0.29 },
-      { name: "gemini-3.5-pro", color: "#4285f4", share: 0.207 },
-      { name: "claude-sonnet-4-6", color: "#cc7c5e", share: 0.102 }
+      { name: "gpt-5.6-sol", color: "#49a3b0", share: 0.411 },
+      { name: "claude-fable-5", color: "#cc7c5e", share: 0.284 },
+      { name: "kimi-k3", color: "#4285f4", share: 0.178 },
+      { name: "glm-5.2", color: "#8ea7bd", share: 0.127 }
     ]
   };
 
-  /* charts cover the dense last 90 days */
-  var last90 = daily.slice(-90);
+  /* the dashboard opens on the app's compact 30-day range */
+  var chartDays = daily.slice(-30);
   var splits = { client: [], model: [] };
   ["client", "model"].forEach(function (key) {
     var jit = prng(key === "client" ? 91 : 47);
-    for (var d = 0; d < last90.length; d++) {
+    for (var d = 0; d < chartDays.length; d++) {
       var defs = SERIES[key], parts = [], sum = 0;
       for (var s = 0; s < defs.length; s++) {
         var f = defs[s].share * (0.7 + 0.6 * jit());
         parts.push(f); sum += f;
       }
-      splits[key].push(parts.map(function (f) { return last90[d] * scale * f / sum; }));
+      splits[key].push(parts.map(function (f) { return chartDays[d] * scale * f / sum; }));
     }
   });
 
@@ -420,10 +522,17 @@ function setupDashboard() {
   }
 
   function chartDate(i) {
-    return new Date(Date.now() - (last90.length - 1 - i) * 86400000);
+    return new Date(Date.now() - (chartDays.length - 1 - i) * 86400000);
   }
   function xLabel(i) {
     return chartDate(i).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+  function chartTickIndexes(length) {
+    if (length <= 1) return [0];
+    var last = length - 1;
+    return [0, Math.round(last / 3), Math.round(last * 2 / 3), last].filter(function (value, index, values) {
+      return values.indexOf(value) === index;
+    });
   }
 
   var CW = 760, CH = 280, padL = 46, padR = 6, padT = 10, padB = 24;
@@ -445,16 +554,21 @@ function setupDashboard() {
   function heatmapSvg() {
     var weeks = 52, cell = 12, gap = 3, top = 16;
     var w = weeks * (cell + gap) - gap;
-    var h = top + 7 * (cell + gap) - gap;
+    var gridHeight = 7 * (cell + gap) - gap;
+    var monthY = top + gridHeight + 17;
+    var h = monthY + 4;
     /* quartile thresholds over active days, like GitHub, so the one outlier
        peak day doesn't wash every other cell down a level */
     var active = daily.filter(function (v) { return v > 0; }).sort(function (a, b) { return a - b; });
     function q(p) { return active[Math.min(active.length - 1, Math.floor(active.length * p))]; }
     var q1 = q(0.25), q2 = q(0.5), q3 = q(0.75);
-    var months = ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"];
+    var localeMap = { en: "en-US", "zh-TW": "zh-Hant-HK", "zh-CN": "zh-Hans-CN" };
+    var monthFormatter = new Intl.DateTimeFormat(localeMap[document.documentElement.lang] || "en-US", { month: "short", timeZone: "UTC" });
+    var months = [];
+    for (var month = 0; month < 12; month++) months.push(monthFormatter.format(new Date(Date.UTC(2026, 6 + month, 1))));
     var out = "";
     for (var m = 0; m < months.length; m++) {
-      out += '<text class="heat-month" x="' + Math.round(m * (weeks / 12) * (cell + gap)) + '" y="10">' + months[m] + "</text>";
+      out += '<text class="heat-month" x="' + Math.round(m * (weeks / 12) * (cell + gap)) + '" y="' + monthY + '">' + months[m] + "</text>";
     }
     for (var d = 0; d < daily.length; d++) {
       var wk = Math.floor(d / 7), row = d % 7;
@@ -471,13 +585,13 @@ function setupDashboard() {
     var totals = splits[stack].map(function (p) { return p[0] + p[1] + p[2] + p[3]; });
     var maxV = Math.max.apply(null, totals) * 1.08;
     var innerH = CH - padT - padB, baseY = CH - padB;
-    var slot = (CW - padL - padR) / last90.length;
+    var slot = (CW - padL - padR) / chartDays.length;
     var bw = Math.max(3, slot * 0.62);
     var out = axisSvg(maxV);
-    [0, 30, 60, 89].forEach(function (i) {
+    chartTickIndexes(chartDays.length).forEach(function (i) {
       out += '<text class="axis-label" x="' + (padL + i * slot + slot / 2).toFixed(1) + '" y="' + (CH - 8) + '" text-anchor="middle">' + xLabel(i) + "</text>";
     });
-    for (var d = 0; d < last90.length; d++) {
+    for (var d = 0; d < chartDays.length; d++) {
       var x = (padL + d * slot + (slot - bw) / 2).toFixed(1);
       var y = baseY, segs = "";
       for (var s = 0; s < defs.length; s++) {
@@ -493,7 +607,7 @@ function setupDashboard() {
 
   /* 3-day buckets, like the app: O = first day, C = last day, H/L = busiest/quietest */
   var candles = (function () {
-    var vals = last90.map(function (v) { return v * scale; });
+    var vals = chartDays.map(function (v) { return v * scale; });
     var list = [];
     for (var b = 0; b < vals.length; b += 3) {
       var seg = vals.slice(b, b + 3);
@@ -503,7 +617,7 @@ function setupDashboard() {
         h: Math.max.apply(null, seg),
         l: Math.min.apply(null, seg),
         from: b,
-        to: Math.min(last90.length - 1, b + 2)
+        to: Math.min(chartDays.length - 1, b + 2)
       });
     }
     return list;
@@ -516,8 +630,8 @@ function setupDashboard() {
     var bw = slot * 0.5;
     function yOf(v) { return baseY - innerH * (v / maxV); }
     var out = axisSvg(maxV);
-    [0, 10, 20, 29].forEach(function (ci) {
-      out += '<text class="axis-label" x="' + (padL + ci * slot + slot / 2).toFixed(1) + '" y="' + (CH - 8) + '" text-anchor="middle">' + xLabel(Math.min(last90.length - 1, ci * 3)) + "</text>";
+    chartTickIndexes(candles.length).forEach(function (ci) {
+      out += '<text class="axis-label" x="' + (padL + ci * slot + slot / 2).toFixed(1) + '" y="' + (CH - 8) + '" text-anchor="middle">' + xLabel(candles[ci].from) + "</text>";
     });
     for (var k = 0; k < candles.length; k++) {
       var c = candles[k];
@@ -574,7 +688,7 @@ function setupDashboard() {
   function fmtCost(v) {
     return "$" + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
-  var COST_RATE = 1899.60 / TOTAL;
+  var COST_RATE = 31864.70 / TOTAL;
 
   function showBarTip(i, ev) {
     var defs = SERIES[state.stack], parts = splits[state.stack][i];
@@ -635,7 +749,11 @@ function setupDashboard() {
     hideTip();
   }
 
-  heatEl.innerHTML = heatmapSvg();
+  function renderHeatmap() {
+    heatEl.innerHTML = heatmapSvg();
+  }
+  renderHeatmap();
+  window.addEventListener("token-monitor-languagechange", renderHeatmap);
   renderChart();
 
   function wireSeg(seg, attr, apply) {
@@ -873,9 +991,9 @@ function setupHeroHome() {
   if (!buttons.length || !totalEl || !costEl) return;
 
   var periods = {
-    day: { total: 119447218, cost: "$99.60" },
-    month: { total: 1211540267, cost: "$988.15" },
-    total: { total: 2217877661, cost: "$1,899.60" }
+    day: { total: 165164772, cost: "$136.08" },
+    month: { total: 8611540267, cost: "$7,177.64" },
+    total: { total: 38420000000, cost: "$31,864.70" }
   };
 
   if (heatmapEl && !heatmapEl.children.length) {
@@ -1009,6 +1127,7 @@ document.addEventListener("DOMContentLoaded", function () {
   setupHeroTilt();
   setupToolMarquee();
   setupFeatureStory();
+  setupWidgetViewSwitchers();
   setupDashboard();
   setupDiscordClock();
   setupMenubarClock();
