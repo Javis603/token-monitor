@@ -42,7 +42,7 @@ function withTmpDir() {
   return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-watch-'));
 }
 
-async function watchAndCollect(dir, act) {
+async function watchAndCollect(dir, expectedPath, act) {
   const events = [];
   const watcher = chokidar.watch(dir, watcherOptions(false));
   try {
@@ -53,7 +53,7 @@ async function watchAndCollect(dir, act) {
     const seen = new Promise((resolve) => {
       watcher.on('all', (event, filePath) => {
         events.push({ event, filePath });
-        resolve();
+        if (path.basename(filePath) === path.basename(expectedPath)) resolve();
       });
     });
     await act();
@@ -73,8 +73,9 @@ async function watchAndCollect(dir, act) {
 test('native file events reach a watcher on this platform', async () => {
   const dir = withTmpDir();
   try {
-    const events = await watchAndCollect(dir, async () => {
-      fs.writeFileSync(path.join(dir, 'session.jsonl'), '{"tokens":1}\n');
+    const sessionPath = path.join(dir, 'session.jsonl');
+    const events = await watchAndCollect(dir, sessionPath, async () => {
+      fs.writeFileSync(sessionPath, '{"tokens":1}\n');
     });
     assert.ok(
       events.some((entry) => path.basename(entry.filePath) === 'session.jsonl'),
@@ -94,13 +95,14 @@ test('native file events reach a subdirectory created after the watch started', 
   const dir = withTmpDir();
   try {
     const projectDir = path.join(dir, 'a-new-project');
-    const events = await watchAndCollect(dir, async () => {
+    const sessionPath = path.join(projectDir, 'session.jsonl');
+    const events = await watchAndCollect(dir, sessionPath, async () => {
       fs.mkdirSync(projectDir);
       // Give chokidar a moment to watch the directory it just discovered,
       // otherwise the write races the addDir handler and the assertion would
       // pass on the mkdir event alone.
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      fs.writeFileSync(path.join(projectDir, 'session.jsonl'), '{"tokens":1}\n');
+      fs.writeFileSync(sessionPath, '{"tokens":1}\n');
       await new Promise((resolve) => setTimeout(resolve, 2000));
     });
     assert.ok(
