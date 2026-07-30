@@ -98,8 +98,13 @@ function collectCcswitchRows(options = {}) {
     for (const r of rows) {
       const providerStr = normalizedModelId(r.provider_id);
       const appTypeStr = normalizedModelId(r.app_type);
+      const sessionStr = normalizedModelId(r.session_id);
+
       const isOfficialOrNative = OFFICIAL_OR_NATIVE_PATTERNS.some(
-        (pat) => providerStr.includes(pat) || appTypeStr.includes(pat)
+        (pat) =>
+          providerStr.includes(pat) ||
+          appTypeStr.includes(pat) ||
+          sessionStr.includes(pat)
       );
       if (skipOfficial && isOfficialOrNative) {
         continue;

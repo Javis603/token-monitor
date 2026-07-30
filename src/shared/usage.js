@@ -119,7 +119,7 @@ function normalizeClientName(value) {
   if (raw.includes('hermes')) return 'hermes';
   if (raw.includes('gemini')) return 'gemini';
   if (raw.includes('cursor')) return 'cursor';
-  if (raw.includes('antigravity')) return 'antigravity';
+  if (raw.includes('antigravity') || raw.includes('anti-gravity') || raw.includes('anti_gravity') || raw === 'agy') return 'antigravity';
   if (raw.includes('kimi')) return 'kimi';
   if (raw.includes('qwen')) return 'qwen';
   if (raw.includes('grok')) return 'grok';

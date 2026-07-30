@@ -1847,9 +1847,7 @@ function modelRowsForPeriod(period) {
     cacheWriteTokens: Number(period?.modelCacheWrites?.[model] || 0),
     outputTokens: Number(period?.modelOutputs?.[model] || 0)
   }));
-  if (modelRows.length > 0) return modelRows.sort((a, b) => b.value - a.value);
-  if (Number(period?.totalTokens || 0) === 0) return [];
-  return toolRowsForPeriod(period);
+  return modelRows.sort((a, b) => b.value - a.value);
 }
 
 function sessionRowsForPeriod(period) {
@@ -1861,9 +1859,7 @@ function sessionRowsForPeriod(period) {
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived')
   });
-  if (rows.length > 0) return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-  if (Number(period?.totalTokens || 0) === 0) return [];
-  return modelRowsForPeriod(period);
+  return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
 }
 
 function projectRowsForPeriod(period) {
