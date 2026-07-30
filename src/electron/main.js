@@ -186,6 +186,7 @@ const {
   moveFloatingBubbleBounds
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
+const { offerMacAppInstall } = require('./macosAppInstall');
 const { setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   WINDOWS_BACKDROP_ACCENT,
@@ -4149,9 +4150,10 @@ function rebuildWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
+  if (await offerMacAppInstall({ app, dialog, appName: APP_NAME })) return;
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
