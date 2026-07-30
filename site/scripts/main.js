@@ -499,20 +499,40 @@ function setupDashboard() {
     ]
   };
 
-  /* the dashboard opens on the app's compact 30-day range */
-  var chartDays = daily.slice(-30);
-  var splits = { client: [], model: [] };
-  ["client", "model"].forEach(function (key) {
-    var jit = prng(key === "client" ? 91 : 47);
-    for (var d = 0; d < chartDays.length; d++) {
-      var defs = SERIES[key], parts = [], sum = 0;
-      for (var s = 0; s < defs.length; s++) {
-        var f = defs[s].share * (0.7 + 0.6 * jit());
-        parts.push(f); sum += f;
+  function buildChartData(days) {
+    var chartDays = daily.slice(-days), splits = { client: [], model: [] };
+    ["client", "model"].forEach(function (key) {
+      var jit = prng(key === "client" ? 91 : 47);
+      for (var d = 0; d < chartDays.length; d++) {
+        var defs = SERIES[key], parts = [], sum = 0;
+        for (var s = 0; s < defs.length; s++) {
+          var f = defs[s].share * (0.7 + 0.6 * jit());
+          parts.push(f); sum += f;
+        }
+        splits[key].push(parts.map(function (f) { return chartDays[d] * scale * f / sum; }));
       }
-      splits[key].push(parts.map(function (f) { return chartDays[d] * scale * f / sum; }));
+    });
+    var vals = chartDays.map(function (v) { return v * scale; });
+    var candles = [];
+    for (var b = 0; b < vals.length; b += 3) {
+      var seg = vals.slice(b, b + 3);
+      candles.push({
+        o: seg[0],
+        c: seg[seg.length - 1],
+        h: Math.max.apply(null, seg),
+        l: Math.min.apply(null, seg),
+        from: b,
+        to: Math.min(chartDays.length - 1, b + 2)
+      });
     }
-  });
+    return { days: chartDays, splits: splits, candles: candles };
+  }
+
+  /* Bars and model breakdowns stay compact; K-line switches to the app's 90-day view. */
+  var chartData = buildChartData(30);
+  var chartDays = chartData.days;
+  var splits = chartData.splits;
+  var candles = chartData.candles;
 
   function fmtCompact(v) {
     if (v >= 1e9) return (v / 1e9).toFixed(2) + "B";
@@ -605,24 +625,6 @@ function setupDashboard() {
     return svgWrap(out, CW, CH);
   }
 
-  /* 3-day buckets, like the app: O = first day, C = last day, H/L = busiest/quietest */
-  var candles = (function () {
-    var vals = chartDays.map(function (v) { return v * scale; });
-    var list = [];
-    for (var b = 0; b < vals.length; b += 3) {
-      var seg = vals.slice(b, b + 3);
-      list.push({
-        o: seg[0],
-        c: seg[seg.length - 1],
-        h: Math.max.apply(null, seg),
-        l: Math.min.apply(null, seg),
-        from: b,
-        to: Math.min(chartDays.length - 1, b + 2)
-      });
-    }
-    return list;
-  })();
-
   function klineSvg() {
     var maxV = Math.max.apply(null, candles.map(function (c) { return c.h; })) * 1.08;
     var innerH = CH - padT - padB, baseY = CH - padB;
@@ -664,6 +666,20 @@ function setupDashboard() {
   var state = { mode: "bars", stack: "client" };
   var stackSeg = frame.querySelector("[data-dash-stack]");
   var modeSeg = frame.querySelector("[data-dash-mode]");
+  var rangeSeg = frame.querySelector(".dash-ranges");
+
+  function setChartRange(days) {
+    chartData = buildChartData(days);
+    chartDays = chartData.days;
+    splits = chartData.splits;
+    candles = chartData.candles;
+    if (rangeSeg) {
+      var ranges = rangeSeg.querySelectorAll("[data-range]");
+      for (var r = 0; r < ranges.length; r++) {
+        ranges[r].classList.toggle("is-active", ranges[r].getAttribute("data-range") === String(days));
+      }
+    }
+  }
 
   /* cursor tooltip, mirroring the app's dashboard.js: bars show the per-series
      split of the hovered day, candles show OHLC for the 3-day bucket, heat
@@ -769,7 +785,11 @@ function setupDashboard() {
     })(btns[b2]);
   }
   wireSeg(stackSeg, "data-stack", function (v) { state.stack = v; renderChart(); });
-  wireSeg(modeSeg, "data-mode", function (v) { state.mode = v; renderChart(); });
+  wireSeg(modeSeg, "data-mode", function (v) {
+    state.mode = v;
+    setChartRange(v === "kline" ? 90 : 30);
+    renderChart();
+  });
 
   /* Overview / Trends tabs crossfade like the feature tour */
   var tabs = frame.querySelectorAll(".dash-tab");

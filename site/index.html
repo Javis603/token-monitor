@@ -522,15 +522,15 @@
             <div class="dash-pane" id="dash-trends" role="tabpanel" aria-labelledby="dash-tab-trends" aria-hidden="true">
               <div class="dash-controls">
                 <div class="dash-seg" data-dash-stack>
-                  <button class="is-active" type="button" data-stack="client">By tool</button>
-                  <button type="button" data-stack="model">By model</button>
+                  <button class="is-active" type="button" data-stack="client" data-i18n="dash.byTool">By tool</button>
+                  <button type="button" data-stack="model" data-i18n="dash.byModel">By model</button>
                 </div>
                 <div class="dash-seg" data-dash-mode>
-                  <button class="is-active" type="button" data-mode="bars">Bars</button>
-                  <button type="button" data-mode="kline">K-line</button>
+                  <button class="is-active" type="button" data-mode="bars" data-i18n="dash.chart.bars">Bars</button>
+                  <button type="button" data-mode="kline" data-i18n="dash.chart.kline">K-line</button>
                 </div>
                 <div class="dash-ranges" aria-hidden="true">
-                  <span>7 days</span><span class="is-active">30 days</span><span>90 days</span><span>1 year</span><span>All</span>
+                  <span data-range="7" data-i18n="dash.range.7d">7 days</span><span class="is-active" data-range="30" data-i18n="dash.range.30d">30 days</span><span data-range="90" data-i18n="dash.range.90d">90 days</span><span data-range="365" data-i18n="dash.range.1y">1 year</span><span data-range="all" data-i18n="dash.range.all">All</span>
                 </div>
               </div>
               <div class="dash-chart" data-dash-chart aria-hidden="true"></div>
