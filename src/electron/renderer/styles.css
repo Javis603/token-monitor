@@ -4531,8 +4531,101 @@ html.is-windows .limit-live-badge {
 .trends-stats { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .trends-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(var(--overlay-rgb), 0.04); }
 .trends-stat-v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.trends-stat-k { font-size: 10px; opacity: 0.55; }
 .trends-empty { flex: 1; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 12px; }
+
+/* Trends Model Breakdown Section */
+.trends-breakdown-section {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(var(--overlay-rgb), 0.03);
+  border: 1px solid rgba(var(--overlay-rgb), 0.06);
+}
+.trends-breakdown-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+.trends-breakdown-title {
+  font-weight: 600;
+  opacity: 0.9;
+}
+.trends-breakdown-sub {
+  font-size: 10px;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+.trends-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.trends-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  gap: 8px;
+}
+.trends-model-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.trends-model-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.trends-model-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  opacity: 0.85;
+}
+.trends-model-bar-wrap {
+  flex: 1;
+  max-width: 90px;
+  height: 4px;
+  background: rgba(var(--overlay-rgb), 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.trends-model-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.25s ease;
+}
+.trends-model-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.trends-model-pct {
+  font-size: 10px;
+  opacity: 0.5;
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.trends-model-empty {
+  font-size: 11px;
+  opacity: 0.5;
+  padding: 4px 0;
+  text-align: center;
+}
 
 /* Row Accordion for Cache Stats */
 .row.has-accordion { cursor: pointer; }

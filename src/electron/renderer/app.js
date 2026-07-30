@@ -3802,10 +3802,12 @@ function buildHourlySeries(stats) {
 
   for (let i = 23; i >= 0; i--) {
     const time = new Date(currentHourStart.getTime() - i * 60 * 60 * 1000);
-    const hourStr = time.getHours().toString().padStart(2, '0') + ':00';
+    const hourNum = time.getHours();
+    const hourStr = `${hourNum}hr`;
+    const dateStr = `${time.getMonth() + 1}月${time.getDate()}日 ${hourNum}hr`;
     buckets.push({
       label: hourStr,
-      date: time.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }),
+      date: dateStr,
       tokens: 0,
       cacheRead: 0,
       cost: 0,
@@ -3813,6 +3815,7 @@ function buildHourlySeries(stats) {
       outputTokens: 0,
       reasoningTokens: 0,
       messageCount: 0,
+      models: {},
       _startMs: time.getTime(),
       _endMs: time.getTime() + 60 * 60 * 1000
     });
@@ -3838,13 +3841,17 @@ function buildHourlySeries(stats) {
     for (let i = 0; i < 24; i++) {
       const b = buckets[i];
       if (ts >= b._startMs && ts < b._endMs) {
-        b.tokens += Number(s.totalTokens || 0);
+        const tokens = Number(s.totalTokens || 0);
+        b.tokens += tokens;
         b.cacheRead += Number(s.cacheReadTokens || 0);
         b.cost += Number(s.costUsd || 0);
         b.inputTokens += Number(s.inputTokens || 0);
         b.outputTokens += Number(s.outputTokens || 0);
         b.reasoningTokens += Number(s.reasoningTokens || 0);
         b.messageCount += Number(s.messageCount || 0);
+        if (s.model && tokens > 0) {
+          b.models[s.model] = (b.models[s.model] || 0) + tokens;
+        }
         break;
       }
     }
@@ -3854,36 +3861,34 @@ function buildHourlySeries(stats) {
 }
 
 function buildHourlyPeriod(stats) {
+  const todayPeriod = stats?.periods?.today || {};
   const period = {
-    totalTokens: 0,
-    costUsd: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    outputTokens: 0,
-    clients: {},
-    clientCosts: {},
-    clientCacheReads: {},
-    clientCacheWrites: {},
-    clientOutputs: {},
-    models: {},
-    modelCosts: {},
-    modelCacheReads: {},
-    modelCacheWrites: {},
-    modelOutputs: {},
-    clientModels: {},
-    clientModelCosts: {},
-    projects: Object.create(null),
-    sessions: {}
+    totalTokens: Number(todayPeriod.totalTokens || 0),
+    costUsd: Number(todayPeriod.costUsd || 0),
+    cacheReadTokens: Number(todayPeriod.cacheReadTokens || 0),
+    cacheWriteTokens: Number(todayPeriod.cacheWriteTokens || 0),
+    outputTokens: Number(todayPeriod.outputTokens || 0),
+    clients: { ...(todayPeriod.clients || {}) },
+    clientCosts: { ...(todayPeriod.clientCosts || {}) },
+    clientCacheReads: { ...(todayPeriod.clientCacheReads || {}) },
+    clientCacheWrites: { ...(todayPeriod.clientCacheWrites || {}) },
+    clientOutputs: { ...(todayPeriod.clientOutputs || {}) },
+    models: { ...(todayPeriod.models || {}) },
+    modelCosts: { ...(todayPeriod.modelCosts || {}) },
+    modelCacheReads: { ...(todayPeriod.modelCacheReads || {}) },
+    modelCacheWrites: { ...(todayPeriod.modelCacheWrites || {}) },
+    modelOutputs: { ...(todayPeriod.modelOutputs || {}) },
+    clientModels: { ...(todayPeriod.clientModels || {}) },
+    clientModelCosts: { ...(todayPeriod.clientModelCosts || {}) },
+    projects: todayPeriod.projects || Object.create(null),
+    sessions: { ...(todayPeriod.sessions || {}) }
   };
-
-  if (!stats) return period;
 
   const nowMs = Date.now();
   const oneDayMs = 24 * 60 * 60 * 1000;
 
-  const addSessionsFromObj = (sessObj) => {
-    if (!sessObj || typeof sessObj !== 'object') return;
-    for (const [key, s] of Object.entries(sessObj)) {
+  if (stats?.periods?.month?.sessions) {
+    for (const [key, s] of Object.entries(stats.periods.month.sessions)) {
       const tsStr = s.lastUsedAt || s.startedAt;
       if (!tsStr) continue;
       const ts = Date.parse(tsStr);
@@ -3891,54 +3896,15 @@ function buildHourlyPeriod(stats) {
       const age = nowMs - ts;
       if (age >= 0 && age <= oneDayMs) {
         period.sessions[key] = s;
-        const client = s.client;
-        const model = s.model;
-        const tokens = Number(s.totalTokens || 0);
-        const cost = Number(s.costUsd || 0);
-        const cacheRead = Number(s.cacheReadTokens || 0);
-        const cacheWrite = Number(s.cacheWriteTokens || 0);
-        const output = Number(s.outputTokens || 0);
-
-        period.totalTokens += tokens;
-        period.costUsd += cost;
-        period.cacheReadTokens += cacheRead;
-        period.cacheWriteTokens += cacheWrite;
-        period.outputTokens += output;
-
-        if (client && tokens > 0) {
-          period.clients[client] = (period.clients[client] || 0) + tokens;
-          if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
-          if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
-          if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+        if (s.client && Number(s.totalTokens || 0) > 0) {
+          period.clients[s.client] = Math.max(period.clients[s.client] || 0, Number(s.totalTokens));
         }
-        if (client && cost > 0) {
-          period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
-        }
-
-        if (model && tokens > 0) {
-          period.models[model] = (period.models[model] || 0) + tokens;
-          if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
-          if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
-          if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
-        }
-        if (model && cost > 0) {
-          period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
-        }
-
-        if (client && model && tokens > 0) {
-          if (!period.clientModels[client]) period.clientModels[client] = {};
-          period.clientModels[client][model] = (period.clientModels[client][model] || 0) + tokens;
-        }
-        if (client && model && cost > 0) {
-          if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
-          period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
+        if (s.model && Number(s.totalTokens || 0) > 0) {
+          period.models[s.model] = Math.max(period.models[s.model] || 0, Number(s.totalTokens));
         }
       }
     }
-  };
-
-  addSessionsFromObj(stats?.periods?.today?.sessions);
-  addSessionsFromObj(stats?.periods?.month?.sessions);
+  }
 
   return period;
 }
@@ -4052,12 +4018,29 @@ function renderTrends() {
   `;
 
   const sparkCenterStyle = !isVertical ? 'margin: 0 auto; display: flex; justify-content: center;' : '';
+  const breakdownTitle = isZh ? '模型用量占比' : 'Model Proportion';
+  const breakdownSub = state.period === 'hours'
+    ? (isZh ? '前 24 小时' : 'Last 24 hours')
+    : (isZh ? '全时间段' : 'All Range');
+
+  const modelBreakdownHtml = `
+    <div class="trends-breakdown-section">
+      <div class="trends-breakdown-head">
+        <span class="trends-breakdown-title">${breakdownTitle}</span>
+        <span class="trends-breakdown-sub" id="trendsBreakdownSub">${breakdownSub}</span>
+      </div>
+      <div class="trends-model-list" id="trendsModelBreakdownList"></div>
+    </div>
+  `;
 
   els.trendsPanel.innerHTML =
     `<div class="trends-cap"><span>${rangeLabel}</span>${legendHtml}<span class="trends-open-hint" title="${t('trends.open')}">↗</span></div>`
     + `<div class="trends-spark web-trend-spark" style="${sparkCenterStyle} width: 100%; height: 100%;" role="button" tabindex="0" title="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
-    + `<div class="trends-stats">${statsHtml}</div>`;
+    + `<div class="trends-stats">${statsHtml}</div>`
+    + modelBreakdownHtml;
+
+  updateTrendsModelBreakdown(null);
 
   const labelKey = 'date';
   const finalPoints = dataPoints;
@@ -4126,6 +4109,8 @@ function renderTrends() {
       const d = dataPoints[nearestIndex];
       if (!point || !d) return;
 
+      updateTrendsModelBreakdown(d);
+
       if (isVertical) {
         selectedBarLayer.innerHTML = `
           <line x1="${padding.left}" y1="${point.y.toFixed(2)}" x2="${(chartW - padding.right).toFixed(2)}" y2="${point.y.toFixed(2)}" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="3 3" />
@@ -4151,9 +4136,6 @@ function renderTrends() {
       const labelInput = isZh ? '输入 Token' : 'Input Tokens';
       const labelCached = isZh ? '缓存命中' : 'Cached Input';
       const labelOutput = isZh ? '输出 Token' : 'Output Tokens';
-      const labelReasoning = isZh ? '推理 Token' : 'Reasoning Tokens';
-      const labelTurns = isZh ? '轮数' : 'Turns';
-      const labelCost = isZh ? '消费' : 'Cost';
 
       tooltipEl.innerHTML = `
         <div class="trend-tooltip-title">${escapeXml(d.date || d.label || '')}</div>
@@ -4161,9 +4143,6 @@ function renderTrends() {
         <div class="trend-tooltip-row"><span>${labelInput}</span><span class="trend-tooltip-val">${charts.formatToken(d.inputTokens)}</span></div>
         <div class="trend-tooltip-row"><span>${labelCached}</span><span class="trend-tooltip-val">${charts.formatToken(d.cacheRead)}</span></div>
         <div class="trend-tooltip-row"><span>${labelOutput}</span><span class="trend-tooltip-val">${charts.formatToken(d.outputTokens)}</span></div>
-        ${d.reasoningTokens ? `<div class="trend-tooltip-row"><span>${labelReasoning}</span><span class="trend-tooltip-val">${charts.formatToken(d.reasoningTokens)}</span></div>` : ''}
-        <div class="trend-tooltip-row"><span>${labelTurns}</span><span class="trend-tooltip-val">${d.messageCount}</span></div>
-        <div class="trend-tooltip-row"><span>${labelCost}</span><span class="trend-tooltip-val">$${d.cost.toFixed(4)}</span></div>
       `;
 
       const tooltipRect = tooltipEl.getBoundingClientRect();
@@ -4184,8 +4163,66 @@ function renderTrends() {
       selectedBarLayer.innerHTML = '';
       const tooltipEl = document.getElementById('trendTooltip');
       if (tooltipEl) tooltipEl.classList.add('hidden');
+      updateTrendsModelBreakdown(null);
     });
   }
+}
+
+function updateTrendsModelBreakdown(targetPoint = null) {
+  const container = document.getElementById('trendsModelBreakdownList');
+  const subTitleEl = document.getElementById('trendsBreakdownSub');
+  if (!container) return;
+
+  const isZh = currentLanguage() === 'zh';
+  let modelsObj = {};
+  let label = targetPoint
+    ? (targetPoint.date || targetPoint.label || '')
+    : (state.period === 'hours' ? (isZh ? '前 24 小时' : 'Last 24 hours') : (isZh ? '全时间段' : 'All Range'));
+
+  if (targetPoint) {
+    if (targetPoint.models && Object.keys(targetPoint.models).length > 0) {
+      modelsObj = targetPoint.models;
+    } else if (targetPoint.tokens > 0) {
+      modelsObj = { [targetPoint.model || 'Unknown']: targetPoint.tokens };
+    }
+  } else {
+    const period = resolveActivePeriod(state.stats, state.period);
+    modelsObj = period?.models || {};
+  }
+
+  if (subTitleEl) subTitleEl.textContent = label;
+
+  const entries = Object.entries(modelsObj)
+    .map(([model, tokens]) => ({ model, tokens: Number(tokens || 0) }))
+    .filter((e) => e.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens);
+
+  const totalTokens = entries.reduce((acc, e) => acc + e.tokens, 0);
+
+  if (entries.length === 0 || totalTokens === 0) {
+    container.innerHTML = `<div class="trends-model-empty">${isZh ? '无模型消耗数据' : 'No model data'}</div>`;
+    return;
+  }
+
+  const html = entries.map((e) => {
+    const pct = ((e.tokens / totalTokens) * 100).toFixed(1);
+    const color = modelColor(e.model);
+    return `
+      <div class="trends-model-row">
+        <div class="trends-model-info">
+          <span class="trends-model-dot" style="background:${color}"></span>
+          <span class="trends-model-name" title="${escapeXml(e.model)}">${escapeXml(e.model)}</span>
+        </div>
+        <div class="trends-model-bar-wrap">
+          <div class="trends-model-bar-fill" style="width:${pct}%; background:${color}"></div>
+        </div>
+        <span class="trends-model-val">${window.TokenMonitorUsageCharts.formatToken(e.tokens)}</span>
+        <span class="trends-model-pct">${pct}%</span>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = html;
 }
 
 function viewLabelById(id) {
