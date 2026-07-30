@@ -4109,8 +4109,6 @@ function renderTrends() {
       const d = dataPoints[nearestIndex];
       if (!point || !d) return;
 
-      updateTrendsModelBreakdown(d);
-
       if (isVertical) {
         selectedBarLayer.innerHTML = `
           <line x1="${padding.left}" y1="${point.y.toFixed(2)}" x2="${(chartW - padding.right).toFixed(2)}" y2="${point.y.toFixed(2)}" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="3 3" />
@@ -4137,12 +4135,49 @@ function renderTrends() {
       const labelCached = isZh ? '缓存命中' : 'Cached Input';
       const labelOutput = isZh ? '输出 Token' : 'Output Tokens';
 
+      let modelBreakdownHtml = '';
+      let modelsMap = d.models || {};
+      if ((!modelsMap || Object.keys(modelsMap).length === 0) && d.tokens > 0) {
+        modelsMap = { [d.model || 'Unknown']: d.tokens };
+      }
+
+      const modelEntries = Object.entries(modelsMap)
+        .map(([m, tok]) => ({ model: m, tokens: Number(tok || 0) }))
+        .filter((e) => e.tokens > 0)
+        .sort((a, b) => b.tokens - a.tokens);
+
+      const dTotal = d.tokens || modelEntries.reduce((acc, e) => acc + e.tokens, 0);
+
+      if (modelEntries.length > 0 && dTotal > 0) {
+        const subhead = isZh ? '模型分布' : 'Model Distribution';
+        const rowsHtml = modelEntries.map((e) => {
+          const pct = ((e.tokens / dTotal) * 100).toFixed(1);
+          const color = modelColor(e.model);
+          return `
+            <div class="trend-tooltip-model-row">
+              <div class="trend-tooltip-model-info">
+                <span class="trend-tooltip-model-dot" style="background:${color}"></span>
+                <span class="trend-tooltip-model-name" title="${escapeXml(e.model)}">${escapeXml(e.model)}</span>
+              </div>
+              <span class="trend-tooltip-model-val">${charts.formatToken(e.tokens)} (${pct}%)</span>
+            </div>
+          `;
+        }).join('');
+
+        modelBreakdownHtml = `
+          <div class="trend-tooltip-divider"></div>
+          <div class="trend-tooltip-subhead">${subhead}</div>
+          <div class="trend-tooltip-models">${rowsHtml}</div>
+        `;
+      }
+
       tooltipEl.innerHTML = `
         <div class="trend-tooltip-title">${escapeXml(d.date || d.label || '')}</div>
         <div class="trend-tooltip-row"><span>${labelTotal}</span><span class="trend-tooltip-val">${charts.formatToken(d.tokens)}</span></div>
         <div class="trend-tooltip-row"><span>${labelInput}</span><span class="trend-tooltip-val">${charts.formatToken(d.inputTokens)}</span></div>
         <div class="trend-tooltip-row"><span>${labelCached}</span><span class="trend-tooltip-val">${charts.formatToken(d.cacheRead)}</span></div>
         <div class="trend-tooltip-row"><span>${labelOutput}</span><span class="trend-tooltip-val">${charts.formatToken(d.outputTokens)}</span></div>
+        ${modelBreakdownHtml}
       `;
 
       const tooltipRect = tooltipEl.getBoundingClientRect();
@@ -4163,7 +4198,6 @@ function renderTrends() {
       selectedBarLayer.innerHTML = '';
       const tooltipEl = document.getElementById('trendTooltip');
       if (tooltipEl) tooltipEl.classList.add('hidden');
-      updateTrendsModelBreakdown(null);
     });
   }
 }

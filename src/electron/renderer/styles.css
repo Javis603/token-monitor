@@ -5805,6 +5805,55 @@ html.is-windows .limit-live-badge {
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
+.trend-tooltip-divider {
+  margin: 6px 0 4px;
+  border-top: 1px dashed rgba(var(--overlay-rgb), 0.12);
+}
+.trend-tooltip-subhead {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.6;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.trend-tooltip-models {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.trend-tooltip-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10px;
+}
+.trend-tooltip-model-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.trend-tooltip-model-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.trend-tooltip-model-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+.trend-tooltip-model-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  opacity: 0.9;
+  white-space: nowrap;
+}
 .web-trend-spark svg {
   display: block;
 }
