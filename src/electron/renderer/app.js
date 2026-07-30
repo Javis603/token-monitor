@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', ccswitch: 'CCSwitch' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
@@ -9,7 +9,7 @@ const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'ccswitch',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama', 'thirdparty'
 ]);
 
@@ -65,7 +65,8 @@ const KNOWN_CLIENTS = [
   { id: 'kiro', label: 'Kiro' },
   { id: 'codebuddy', label: 'CodeBuddy' },
   { id: 'workbuddy', label: 'WorkBuddy' },
-  { id: 'proma', label: 'Proma' }
+  { id: 'proma', label: 'Proma' },
+  { id: 'ccswitch', label: 'CCSwitch' }
 ];
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
@@ -239,7 +240,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'limits', labelKey: 'views.limits' },
   { id: 'trends', labelKey: 'views.trends' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'allTime']);
+const viewPeriodValues = new Set(['hours', 'today', 'month', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -767,6 +768,7 @@ function formatDuration(ms) {
   if (minutes > 0) return `${minutes}m`;
   return '<1m';
 }
+// eslint-disable-next-line no-unused-vars
 function formatActiveDuration(ms) {
   const totalMinutes = Math.max(0, Math.round(Number(ms || 0) / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -775,6 +777,7 @@ function formatActiveDuration(ms) {
   if (minutes > 0) return `${minutes}m`;
   return '0m';
 }
+
 function formatUpdatedAge(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return 'Update unknown';
@@ -1794,12 +1797,13 @@ function stableColor(value, colors) {
 function deviceRowsForPeriod() {
   const localId = state.settings?.deviceId || '';
   return (state.stats?.devices || []).map((device) => {
-    const breakdown = deviceBreakdownApi.deviceBreakdownForPeriod(device, state.period, {
+    const effectivePeriodKey = state.period === 'hours' ? 'today' : state.period;
+    const breakdown = deviceBreakdownApi.deviceBreakdownForPeriod(device, effectivePeriodKey, {
       clientLabels,
       clientColors,
       fallbackColor: clientColors.default
     });
-    const period = device.periods?.[state.period] || {};
+    const period = device.periods?.[effectivePeriodKey] || {};
     const runtime = deviceRuntimeLabel(device.agentRuntime);
     const version = device.agentVersion ? `${runtime ? `${runtime} ` : ''}v${device.agentVersion}` : runtime;
     const metaParts = [deviceBreakdownApi.devicePlatformLabel(device.platform, device.osName, device.osVersion), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
@@ -3793,50 +3797,399 @@ function turnNode(turn) {
 
 let contentReadySignaled = false;
 
+const escapeXml = (str) => String(str).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+
+function buildHourlySeries(stats) {
+  const now = new Date();
+  const buckets = [];
+  const currentHourStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0, 0);
+
+  for (let i = 23; i >= 0; i--) {
+    const time = new Date(currentHourStart.getTime() - i * 60 * 60 * 1000);
+    const hourStr = time.getHours().toString().padStart(2, '0') + ':00';
+    buckets.push({
+      label: hourStr,
+      date: time.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }),
+      tokens: 0,
+      cacheRead: 0,
+      cost: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      messageCount: 0,
+      _startMs: time.getTime(),
+      _endMs: time.getTime() + 60 * 60 * 1000
+    });
+  }
+
+  const sessions = new Map();
+
+  const addSessions = (sessObj) => {
+    if (!sessObj || typeof sessObj !== 'object') return;
+    for (const [key, s] of Object.entries(sessObj)) {
+      sessions.set(key, s);
+    }
+  };
+  addSessions(stats?.periods?.today?.sessions);
+  addSessions(stats?.periods?.month?.sessions);
+
+  for (const s of sessions.values()) {
+    const tsStr = s.lastUsedAt || s.startedAt;
+    if (!tsStr) continue;
+    const ts = Date.parse(tsStr);
+    if (isNaN(ts)) continue;
+    
+    for (let i = 0; i < 24; i++) {
+      const b = buckets[i];
+      if (ts >= b._startMs && ts < b._endMs) {
+        b.tokens += Number(s.totalTokens || 0);
+        b.cacheRead += Number(s.cacheReadTokens || 0);
+        b.cost += Number(s.costUsd || 0);
+        b.inputTokens += Number(s.inputTokens || 0);
+        b.outputTokens += Number(s.outputTokens || 0);
+        b.reasoningTokens += Number(s.reasoningTokens || 0);
+        b.messageCount += Number(s.messageCount || 0);
+        break;
+      }
+    }
+  }
+
+  return buckets;
+}
+
+function buildHourlyPeriod(stats) {
+  const period = {
+    totalTokens: 0,
+    costUsd: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    clients: {},
+    clientCosts: {},
+    clientCacheReads: {},
+    clientCacheWrites: {},
+    clientOutputs: {},
+    models: {},
+    modelCosts: {},
+    modelCacheReads: {},
+    modelCacheWrites: {},
+    modelOutputs: {},
+    clientModels: {},
+    clientModelCosts: {},
+    projects: Object.create(null),
+    sessions: {}
+  };
+
+  if (!stats) return period;
+
+  const nowMs = Date.now();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+
+  const addSessionsFromObj = (sessObj) => {
+    if (!sessObj || typeof sessObj !== 'object') return;
+    for (const [key, s] of Object.entries(sessObj)) {
+      const tsStr = s.lastUsedAt || s.startedAt;
+      if (!tsStr) continue;
+      const ts = Date.parse(tsStr);
+      if (isNaN(ts)) continue;
+      const age = nowMs - ts;
+      if (age >= 0 && age <= oneDayMs) {
+        period.sessions[key] = s;
+        const client = s.client;
+        const model = s.model;
+        const tokens = Number(s.totalTokens || 0);
+        const cost = Number(s.costUsd || 0);
+        const cacheRead = Number(s.cacheReadTokens || 0);
+        const cacheWrite = Number(s.cacheWriteTokens || 0);
+        const output = Number(s.outputTokens || 0);
+
+        period.totalTokens += tokens;
+        period.costUsd += cost;
+        period.cacheReadTokens += cacheRead;
+        period.cacheWriteTokens += cacheWrite;
+        period.outputTokens += output;
+
+        if (client && tokens > 0) {
+          period.clients[client] = (period.clients[client] || 0) + tokens;
+          if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
+          if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
+          if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+        }
+        if (client && cost > 0) {
+          period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
+        }
+
+        if (model && tokens > 0) {
+          period.models[model] = (period.models[model] || 0) + tokens;
+          if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
+          if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
+          if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
+        }
+        if (model && cost > 0) {
+          period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
+        }
+
+        if (client && model && tokens > 0) {
+          if (!period.clientModels[client]) period.clientModels[client] = {};
+          period.clientModels[client][model] = (period.clientModels[client][model] || 0) + tokens;
+        }
+        if (client && model && cost > 0) {
+          if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
+          period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
+        }
+      }
+    }
+  };
+
+  addSessionsFromObj(stats?.periods?.today?.sessions);
+  addSessionsFromObj(stats?.periods?.month?.sessions);
+
+  return period;
+}
+
+function resolveActivePeriod(stats, periodKey) {
+  if (!stats) return { totalTokens: 0, costUsd: 0, clients: {} };
+  if (periodKey === 'hours') {
+    return buildHourlyPeriod(stats);
+  }
+  return stats.periods?.[periodKey] || { totalTokens: 0, costUsd: 0, clients: {} };
+}
+
 function renderTrends() {
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
-  const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
-  const { points, metric, labelKey } = charts.selectPreviewSeries(preview, state.period);
-  const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
 
-  if (finalPoints.length === 0) {
+  if (!state.trendResizeObserver && els.trendsPanel) {
+    state.trendResizeObserver = new ResizeObserver(() => {
+      if (state.breakdown === 'trends') {
+        renderTrends();
+      }
+    });
+    state.trendResizeObserver.observe(els.trendsPanel);
+  }
+
+  let dataPoints = [];
+  const isZh = currentLanguage() === 'zh';
+
+  if (state.period === 'hours') {
+    dataPoints = buildHourlySeries(state.stats);
+  } else {
+    const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
+    const { points, labelKey } = charts.selectPreviewSeries(preview, state.period);
+    const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
+
+    if (finalPoints.length === 0) {
+      els.trendsPanel.innerHTML = `<div class="trends-empty">${t('trends.empty')}</div>`;
+      return;
+    }
+
+    dataPoints = finalPoints.map((p) => ({
+      label: trendShortLabel(p[labelKey], labelKey),
+      date: p[labelKey],
+      tokens: Number(p.tokens || p.totalTokens || 0),
+      cacheRead: Number(p.cacheReadTokens || p.cacheRead || 0),
+      cost: Number(p.cost || 0),
+      inputTokens: Number(p.inputTokens || (p.tokens - (p.outputTokens || 0))),
+      outputTokens: Number(p.outputTokens || 0),
+      reasoningTokens: Number(p.reasoningTokens || 0),
+      messageCount: Number(p.messages || p.messageCount || 0)
+    }));
+  }
+
+  if (dataPoints.length === 0) {
     els.trendsPanel.innerHTML = `<div class="trends-empty">${t('trends.empty')}</div>`;
     return;
   }
 
-  const model = charts.sparklinePreview(finalPoints, { width: 300, height: 120, gap: 0.3, metric });
-  const titles = finalPoints.map((p) => `${trendShortLabel(p[labelKey], labelKey)} · ${formatCompact(p[metric])}`);
-  const svg = charts.sparklineSvg(model, { titles });
+  const container = els.trendsPanel.querySelector('.trends-spark');
+  let chartW = 580;
+  let chartH = 260;
+  if (container) {
+    const rect = container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      chartW = Math.floor(rect.width);
+      chartH = Math.floor(rect.height);
+    }
+  }
 
-  const summary = preview.summary || {};
-  const rangeLabel = state.period === 'allTime' ? t('trends.range.year')
+  const isVertical = chartH > chartW;
+  const svg = charts.trendWebChartSvg(dataPoints, { width: chartW, height: chartH });
+
+  const totalTokensSum = dataPoints.reduce((acc, d) => acc + d.tokens, 0);
+  const totalCacheSum = dataPoints.reduce((acc, d) => acc + d.cacheRead, 0);
+  const totalInputSum = dataPoints.reduce((acc, d) => acc + d.inputTokens, 0);
+  const totalTurnsSum = dataPoints.reduce((acc, d) => acc + d.messageCount, 0);
+  const peakVal = dataPoints.length > 0 ? Math.max(...dataPoints.map(d => d.tokens)) : 0;
+  
+  const cacheHitRateVal = totalInputSum > 0 ? Math.round((totalCacheSum / totalInputSum) * 100) : 0;
+
+  const rangeLabel = state.period === 'hours' ? (isZh ? '前 24 小时' : 'Last 24 hours')
+    : state.period === 'allTime' ? t('trends.range.year')
     : state.period === 'month' ? t('trends.range.month') : t('trends.range.week');
-  const first = trendShortLabel(finalPoints[0][labelKey], labelKey);
-  const last = trendShortLabel(finalPoints[finalPoints.length - 1][labelKey], labelKey);
+  
+  const first = dataPoints[0]?.label || '';
+  const last = dataPoints[dataPoints.length - 1]?.label || '';
+
+  const labelTurns = isZh ? '对话轮数' : 'Turns';
+  const labelTotalTokens = isZh ? '总 Token 数' : 'Total Tokens';
+  const labelCacheHitRate = isZh ? '缓存命中率' : 'Cache Hit Rate';
+  const labelPeak = state.period === 'hours'
+    ? (isZh ? '峰值单小时' : 'Peak Hour')
+    : (isZh ? '峰值单日' : 'Peak Day');
+
   const stats = [
-    [t('trends.activeDays'), formatNumber(summary.activeDays)],
-    [t('trends.currentStreak'), formatNumber(summary.currentStreak)],
-    [t('trends.activeTime'), formatActiveDuration(summary.activeTimeMs)],
-    [t('trends.peakDay'), formatCompact(summary.peakDayTokens)]
+    [labelTurns, formatNumber(totalTurnsSum)],
+    [labelTotalTokens, charts.formatToken(totalTokensSum)],
+    [labelCacheHitRate, `${cacheHitRateVal}%`],
+    [labelPeak, charts.formatToken(peakVal)]
   ];
   const statsHtml = stats
     .map(([k, v]) => `<div class="trends-stat"><span class="trends-stat-v">${v}</span><span class="trends-stat-k">${k}</span></div>`)
     .join('');
 
+  const legendHtml = `
+    <div class="trends-legend">
+      <span class="legend-item"><i class="legend-dot legend-total"></i>Total ${charts.formatToken(totalTokensSum)}</span>
+      <span class="legend-item"><i class="legend-dot legend-cache"></i>Cached ${charts.formatToken(totalCacheSum)}</span>
+    </div>
+  `;
+
+  const sparkCenterStyle = !isVertical ? 'margin: 0 auto; display: flex; justify-content: center;' : '';
+
   els.trendsPanel.innerHTML =
-    `<div class="trends-cap"><span>${rangeLabel}</span><span class="trends-open-hint" title="${t('trends.open')}">↗</span></div>`
-    + `<div class="trends-spark" role="button" tabindex="0" title="${t('trends.open')}">${svg}</div>`
+    `<div class="trends-cap"><span>${rangeLabel}</span>${legendHtml}<span class="trends-open-hint" title="${t('trends.open')}">↗</span></div>`
+    + `<div class="trends-spark web-trend-spark" style="${sparkCenterStyle} width: 100%; height: 100%;" role="button" tabindex="0" title="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
     + `<div class="trends-stats">${statsHtml}</div>`;
-  const bars = Array.from(els.trendsPanel.querySelectorAll('.spark-bar'));
+
+  const labelKey = 'date';
+  const finalPoints = dataPoints;
+  const bars = Array.from(els.trendsPanel.querySelectorAll('.token-cache-bar'));
   bars.forEach((bar, index) => {
     bar.dataset.motionKey = String(finalPoints[index]?.[labelKey] || index);
   });
   const fromZero = state.animateChartsOnRender;
   animateTrendBarsFrom(previousBars, { fromZero });
   if (fromZero) state.animateChartsOnRender = false;
+
+  const svgEl = els.trendsPanel.querySelector('svg');
+  const hoverZone = svgEl?.querySelector('.trend-hover-zone');
+  const selectedBarLayer = svgEl?.querySelector('.hover-point-layer');
+
+  if (hoverZone && selectedBarLayer) {
+    const padding = isVertical
+      ? { top: 24, right: 16, bottom: 20, left: 54 }
+      : { top: 20, right: 16, bottom: 32, left: 54 };
+    const plotWidth = chartW - padding.left - padding.right;
+    const plotHeight = chartH - padding.top - padding.bottom;
+    const zeroLineY = padding.top + plotHeight;
+    const step = isVertical ? (plotHeight / dataPoints.length) : (plotWidth / dataPoints.length);
+
+    const maxValue = Math.max(
+      ...dataPoints.map((d) => Math.max(d.tokens, d.cacheRead)),
+      1
+    );
+    const axisMax = charts.niceCeiling(maxValue);
+    const points = dataPoints.map((d, index) => {
+      if (isVertical) {
+        const y = padding.top + (index + 0.5) * step;
+        const x = padding.left + (d.tokens / axisMax) * plotWidth;
+        return { x: Math.max(padding.left, Math.min(chartW - padding.right, x)), y };
+      } else {
+        const x = padding.left + (index + 0.5) * step;
+        const y = zeroLineY - (d.tokens / axisMax) * plotHeight;
+        return { x, y: Math.max(padding.top, Math.min(zeroLineY, y)) };
+      }
+    });
+
+    const getSvgCoords = (e) => {
+      const box = svgEl.getBoundingClientRect();
+      const scaleX = chartW / box.width;
+      const scaleY = chartH / box.height;
+      return {
+        x: (e.clientX - box.left) * scaleX,
+        y: (e.clientY - box.top) * scaleY
+      };
+    };
+
+    hoverZone.addEventListener('mousemove', (e) => {
+      const coords = getSvgCoords(e);
+      let nearestIndex = 0;
+      let minDist = Infinity;
+
+      for (let i = 0; i < points.length; i++) {
+        const dist = isVertical ? Math.abs(points[i].y - coords.y) : Math.abs(points[i].x - coords.x);
+        if (dist < minDist) {
+          minDist = dist;
+          nearestIndex = i;
+        }
+      }
+
+      const point = points[nearestIndex];
+      const d = dataPoints[nearestIndex];
+      if (!point || !d) return;
+
+      if (isVertical) {
+        selectedBarLayer.innerHTML = `
+          <line x1="${padding.left}" y1="${point.y.toFixed(2)}" x2="${(chartW - padding.right).toFixed(2)}" y2="${point.y.toFixed(2)}" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="3 3" />
+          <circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2" />
+        `;
+      } else {
+        selectedBarLayer.innerHTML = `
+          <line x1="${point.x.toFixed(2)}" y1="${padding.top}" x2="${point.x.toFixed(2)}" y2="${zeroLineY.toFixed(2)}" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="3 3" />
+          <circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2" />
+        `;
+      }
+
+      let tooltipEl = document.getElementById('trendTooltip');
+      if (!tooltipEl) {
+        tooltipEl = document.createElement('div');
+        tooltipEl.id = 'trendTooltip';
+        tooltipEl.className = 'trend-tooltip';
+        document.body.appendChild(tooltipEl);
+      }
+      tooltipEl.classList.remove('hidden');
+
+      const labelTotal = isZh ? '总 Token' : 'Total Tokens';
+      const labelInput = isZh ? '输入 Token' : 'Input Tokens';
+      const labelCached = isZh ? '缓存命中' : 'Cached Input';
+      const labelOutput = isZh ? '输出 Token' : 'Output Tokens';
+      const labelReasoning = isZh ? '推理 Token' : 'Reasoning Tokens';
+      const labelTurns = isZh ? '轮数' : 'Turns';
+      const labelCost = isZh ? '消费' : 'Cost';
+
+      tooltipEl.innerHTML = `
+        <div class="trend-tooltip-title">${escapeXml(d.date || d.label || '')}</div>
+        <div class="trend-tooltip-row"><span>${labelTotal}</span><span class="trend-tooltip-val">${charts.formatToken(d.tokens)}</span></div>
+        <div class="trend-tooltip-row"><span>${labelInput}</span><span class="trend-tooltip-val">${charts.formatToken(d.inputTokens)}</span></div>
+        <div class="trend-tooltip-row"><span>${labelCached}</span><span class="trend-tooltip-val">${charts.formatToken(d.cacheRead)}</span></div>
+        <div class="trend-tooltip-row"><span>${labelOutput}</span><span class="trend-tooltip-val">${charts.formatToken(d.outputTokens)}</span></div>
+        ${d.reasoningTokens ? `<div class="trend-tooltip-row"><span>${labelReasoning}</span><span class="trend-tooltip-val">${charts.formatToken(d.reasoningTokens)}</span></div>` : ''}
+        <div class="trend-tooltip-row"><span>${labelTurns}</span><span class="trend-tooltip-val">${d.messageCount}</span></div>
+        <div class="trend-tooltip-row"><span>${labelCost}</span><span class="trend-tooltip-val">$${d.cost.toFixed(4)}</span></div>
+      `;
+
+      const tooltipRect = tooltipEl.getBoundingClientRect();
+      let left = e.clientX + 16;
+      let top = e.clientY + 16;
+
+      if (left + tooltipRect.width > window.innerWidth) {
+        left = e.clientX - tooltipRect.width - 16;
+      }
+      if (top + tooltipRect.height > window.innerHeight) {
+        top = e.clientY - tooltipRect.height - 16;
+      }
+      tooltipEl.style.left = `${left}px`;
+      tooltipEl.style.top = `${top}px`;
+    });
+
+    hoverZone.addEventListener('mouseleave', () => {
+      selectedBarLayer.innerHTML = '';
+      const tooltipEl = document.getElementById('trendTooltip');
+      if (tooltipEl) tooltipEl.classList.add('hidden');
+    });
+  }
 }
 
 function viewLabelById(id) {
@@ -4755,7 +5108,7 @@ function renderHome() {
   hideHomeActivityTooltip();
   state.homeActivityResizeObserver?.disconnect();
   state.homeActivityResizeObserver = null;
-  const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
+  const period = resolveActivePeriod(state.stats, state.period);
   const moduleIds = homeModuleIds();
   if (moduleIds.includes('trends')) void loadHomeHistory();
   if (moduleIds.length === 0) {
@@ -4795,7 +5148,7 @@ function render() {
   renderViewSwitcher();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
-  const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
+  const period = resolveActivePeriod(state.stats, state.period);
   const nextTotal = Number(period.totalTokens || 0);
   const totalChanged = nextTotal !== state.currentTotal;
   if (state.suppressInitialNumberAnimation) {
@@ -8054,7 +8407,7 @@ els.breakdown.addEventListener('click', (event) => {
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = match[2];
-  const period = state.stats?.periods?.[state.period];
+  const period = resolveActivePeriod(state.stats, state.period);
   const session = period?.sessions?.[`${client}:${sessionId}`];
   openSessionDetail({
     client,

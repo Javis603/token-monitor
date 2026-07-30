@@ -29,7 +29,7 @@ const { createClaudeWebFetch } = require('./claudeWebFetch');
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
+const { lookupModelPricing, normalizeHistoryIntervalMs, readLatestSqliteSnapshot } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
@@ -2693,8 +2693,10 @@ function startLocalCollector() {
   stopLocalCollector();
   mode = 'local';
   sendStatus(false, { reason: 'collecting' });
+  const cachedSnapshot = readLatestSqliteSnapshot(settings.deviceId);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
+    initialUsage: cachedSnapshot || undefined,
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,

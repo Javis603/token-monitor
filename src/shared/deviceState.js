@@ -63,12 +63,16 @@ function createDeviceState(options = {}) {
   const epoch = options.epoch ?? 0;
   const envelope = normalizedEnvelope(options.envelope);
   const onRecord = typeof options.onRecord === 'function' ? options.onRecord : null;
-  let usagePart = null;
+  let usagePart = hasOwn(options, 'initialUsage') ? cloneValue(options.initialUsage) : null;
   let limitsPart = hasOwn(options, 'initialLimits') ? cloneValue(options.initialLimits) : undefined;
   let currentRecord = null;
-  let hasCompleteUsageBaseline = false;
+  let hasCompleteUsageBaseline = Boolean(usagePart && hasOwn(usagePart, 'month') && hasOwn(usagePart, 'allTime'));
   let revision = 0;
   let stopped = false;
+
+  if (usagePart) {
+    publish('usage', 'cache');
+  }
 
   function accepts(meta) {
     if (stopped) return false;

@@ -17,6 +17,9 @@ function createDeviceRuntime(options = {}, deps = {}) {
   const deviceState = makeDeviceState({
     epoch,
     envelope: options.envelope,
+    ...(Object.prototype.hasOwnProperty.call(options, 'initialUsage')
+      ? { initialUsage: options.initialUsage }
+      : {}),
     ...(Object.prototype.hasOwnProperty.call(options, 'initialLimits')
       ? { initialLimits: options.initialLimits }
       : {}),

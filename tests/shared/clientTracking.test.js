@@ -74,7 +74,7 @@ test('tracked client defaults, renderer, and README share one display order', ()
 });
 
 test('default tracked clients are accepted by bundled tokscale', () => {
-  const locallyParsedClients = new Set(['proma']);
+  const locallyParsedClients = new Set(['proma', 'ccswitch']);
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;

@@ -27,6 +27,8 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildCcswitchHistoryGraph, buildCcswitchPeriods, collectCcswitchRows } = require('./ccswitchUsage');
+const { readLatestSnapshot: readLatestSqliteSnapshot, writeSnapshot: writeSqliteSnapshot } = require('./sqliteCache');
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 const {
@@ -582,6 +584,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
+  if (options.ccswitchGraph) {
+    rawGraphs.push(options.ccswitchGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.ccswitchGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -636,15 +642,16 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // tokscale doesn't know about Proma yet — filter it out of the subprocess
-  // calls so --client doesn't reject an unknown value. Proma is parsed
+  // tokscale doesn't know about Proma or CCSwitch yet — filter them out of the subprocess
+  // calls so --client doesn't reject an unknown value. They are parsed
   // separately below and merged back in.
-  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',') : normalizedClients;
+  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma' && c !== 'ccswitch').join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
-  const targetTokscaleClients = targetClients.filter((client) => client !== 'proma').join(',');
+  const targetTokscaleClients = targetClients.filter((client) => client !== 'proma' && client !== 'ccswitch').join(',');
+  const includesCcswitch = normalizedClients.split(',').includes('ccswitch');
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
@@ -658,6 +665,8 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
+  let ccswitchPeriods = null;
+  let ccswitchRows = null;
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
     await maybeSyncCursor(syncClients, options.logger, { force: options.forceCursorSync === true });
@@ -678,6 +687,19 @@ async function collectUsageOnce(options) {
         };
       } catch (err) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
+      }
+    }
+    if (includesCcswitch) {
+      try {
+        ccswitchRows = collectCcswitchRows();
+        const ccswitchJson = buildCcswitchPeriods({ now: collectedAt, allTimeSince, rows: ccswitchRows });
+        ccswitchPeriods = {
+          today: extractUsageFromTokscale(ccswitchJson.today),
+          month: extractUsageFromTokscale(ccswitchJson.month),
+          allTime: extractUsageFromTokscale(ccswitchJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`ccswitch parse failed: ${err.message}`);
       }
     }
     if (anchorUsed) {
@@ -705,6 +727,7 @@ async function collectUsageOnce(options) {
         }
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
+      if (ccswitchPeriods) freshPartitions.ccswitch = ccswitchPeriods.today;
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
@@ -748,6 +771,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, promaPeriods.month);
       allTime = mergePeriods(allTime, promaPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), proma: promaPeriods.today };
+    }
+    if (ccswitchPeriods && !anchorUsed) {
+      today = mergePeriods(today, ccswitchPeriods.today);
+      month = mergePeriods(month, ccswitchPeriods.month);
+      allTime = mergePeriods(allTime, ccswitchPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), ccswitch: ccswitchPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -869,6 +898,7 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+      ccswitchGraph: includesCcswitch ? buildCcswitchHistoryGraph({ rows: ccswitchRows || collectCcswitchRows() }) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -880,6 +910,11 @@ async function collectUsageOnce(options) {
       logger: options.logger
     });
     if (history) summary.history = history;
+  }
+  if (options.sqliteCacheWriteEnabled !== false) {
+    try {
+      writeSqliteSnapshot(deviceId, summary, options.sqliteCacheOptions);
+    } catch (_) {}
   }
   return summary;
 }
@@ -972,6 +1007,8 @@ function clientWatchCandidates(clientsCsv) {
   add('workbuddy', path.join(home, '.workbuddy', 'projects'));
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', path.join(home, '.proma', 'agent-sessions'));
+  // CCSwitch — request logs database at ~/.cc-switch / ~/.ccswitch
+  add('ccswitch', path.join(home, '.cc-switch'), path.join(home, '.ccswitch'), path.join(home, 'AppData', 'Roaming', 'ccswitch', 'logs'));
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
@@ -1725,6 +1762,8 @@ module.exports = {
   normalizePromaPricing,
   pruneAttemptedResetBoundaries,
   readDownloadedPointer,
+  readLatestSqliteSnapshot,
+  writeSqliteSnapshot,
   resolvePlatformBinary,
   resolvePromaPricing,
   resetPromaPricingCache,

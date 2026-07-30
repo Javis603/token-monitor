@@ -348,7 +348,7 @@
     claude: '#cc7c5e', codex: '#49a3b0', hermes: '#d4af37', gemini: '#4285f4',
     antigravity: '#4285f4', cline: '#323B43', kimi: '#16191e', grok: '#000000', copilot: '#000000', deepseek: '#4d6bfe', cursor: '#000000', opencode: '#000000', openrouter: '#6566F1',
     openclaw: '#ff4d4d', xai: '#000000', meta: '#1d65c1', mistral: '#fa520f', qwen: '#615ced',
-    pi: '#000', zed: '#4173e7', kilocode: '#F8F676', micode: '#000000', zcode: '#000000', kiro: '#9046FF', codebuddy: '#6C4DFF', workbuddy: '#0DC8A5', proma: '#000000',
+    pi: '#000', zed: '#4173e7', kilocode: '#F8F676', micode: '#000000', zcode: '#000000', kiro: '#9046FF', codebuddy: '#6C4DFF', workbuddy: '#0DC8A5', proma: '#000000', ccswitch: '#16a34a',
     moonshot: '#16191e', zai: '#000000', zaiteam: '#000000', cohere: '#39594d', xiaomi: '#ff6700', minimax: '#f23f5d', doubao: '#1E37FC', volcengine: '#006EFF', qoder: '#2ADB5C', ollama: '#888888', thirdparty: '#DD2E57',
     default: '#6ab4f0'
   };
@@ -579,9 +579,285 @@
     return rounded;
   }
 
+  function smoothPointsToPathVertical(points, minX, zeroLineX) {
+    if (!points.length) return '';
+    const safePoints = points.map((point) => ({
+      x: clamp(Number(point.x), minX, zeroLineX),
+      y: Number(point.y)
+    }));
+    if (safePoints.length < 3) {
+      return safePoints
+        .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+        .join(' ');
+    }
+
+    const slopes = safePoints.slice(0, -1).map((point, index) => {
+      const next = safePoints[index + 1];
+      return (next.x - point.x) / Math.max(next.y - point.y, 1);
+    });
+
+    const tangents = safePoints.map((_, index) => {
+      if (index === 0) return slopes[0];
+      if (index === safePoints.length - 1) return slopes.at(-1);
+      const before = slopes[index - 1];
+      const after = slopes[index];
+      if (before === 0 || after === 0 || Math.sign(before) !== Math.sign(after)) return 0;
+      return (before + after) / 2;
+    });
+
+    slopes.forEach((slope, index) => {
+      if (slope === 0) {
+        tangents[index] = 0;
+        tangents[index + 1] = 0;
+        return;
+      }
+      const a = tangents[index] / slope;
+      const b = tangents[index + 1] / slope;
+      const magnitude = Math.hypot(a, b);
+      if (magnitude > 3) {
+        const scale = 3 / magnitude;
+        tangents[index] = scale * a * slope;
+        tangents[index + 1] = scale * b * slope;
+      }
+    });
+
+    return safePoints
+      .map((point, index) => {
+        if (index === 0) return `M${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+        const previous = safePoints[index - 1];
+        const heightVal = point.y - previous.y;
+        const cp1y = previous.y + heightVal / 3;
+        const cp1x = clamp(previous.x + (tangents[index - 1] * heightVal) / 3, minX, zeroLineX);
+        const cp2y = point.y - heightVal / 3;
+        const cp2x = clamp(point.x - (tangents[index] * heightVal) / 3, minX, zeroLineX);
+        return `C${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+      })
+      .join(' ');
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function niceCeiling(value) {
+    if (!Number.isFinite(value) || value <= 0) return 10;
+    const exponent = 10 ** Math.floor(Math.log10(value));
+    const fraction = value / exponent;
+    const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+    return niceFraction * exponent;
+  }
+
+  function formatToken(value) {
+    const number = Number(value || 0);
+    const absolute = Math.abs(number);
+    if (absolute >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(2)}B`;
+    if (absolute >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M`;
+    if (absolute >= 1_000) return `${(number / 1_000).toFixed(1)}k`;
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(number);
+  }
+
+  function pointsToPath(points) {
+    return points
+      .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+      .join(' ');
+  }
+
+  function smoothPointsToPath(points, minY, zeroLineY) {
+    if (!points.length) return '';
+    const safePoints = points.map((point) => ({
+      x: Number(point.x),
+      y: clamp(Number(point.y), minY, zeroLineY)
+    }));
+    if (safePoints.length < 3) return pointsToPath(safePoints);
+
+    const slopes = safePoints.slice(0, -1).map((point, index) => {
+      const next = safePoints[index + 1];
+      return (next.y - point.y) / Math.max(next.x - point.x, 1);
+    });
+
+    const tangents = safePoints.map((_, index) => {
+      if (index === 0) return slopes[0];
+      if (index === safePoints.length - 1) return slopes.at(-1);
+      const before = slopes[index - 1];
+      const after = slopes[index];
+      if (before === 0 || after === 0 || Math.sign(before) !== Math.sign(after)) return 0;
+      return (before + after) / 2;
+    });
+
+    slopes.forEach((slope, index) => {
+      if (slope === 0) {
+        tangents[index] = 0;
+        tangents[index + 1] = 0;
+        return;
+      }
+      const a = tangents[index] / slope;
+      const b = tangents[index + 1] / slope;
+      const magnitude = Math.hypot(a, b);
+      if (magnitude > 3) {
+        const scale = 3 / magnitude;
+        tangents[index] = scale * a * slope;
+        tangents[index + 1] = scale * b * slope;
+      }
+    });
+
+    return safePoints
+      .map((point, index) => {
+        if (index === 0) return `M${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+        const previous = safePoints[index - 1];
+        const width = point.x - previous.x;
+        const cp1x = previous.x + width / 3;
+        const cp1y = clamp(previous.y + (tangents[index - 1] * width) / 3, minY, zeroLineY);
+        const cp2x = point.x - width / 3;
+        const cp2y = clamp(point.y - (tangents[index] * width) / 3, minY, zeroLineY);
+        return `C${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+      })
+      .join(' ');
+  }
+
+  function trendWebChartSvg(dataPoints, options = {}) {
+    const width = options.width || 400;
+    const height = options.height || 400;
+    const isVertical = height > width;
+
+    const padding = options.padding || (isVertical
+      ? { top: 24, right: 16, bottom: 20, left: 54 }
+      : { top: 20, right: 16, bottom: 32, left: 54 }
+    );
+    const plotWidth = width - padding.left - padding.right;
+    const plotHeight = height - padding.top - padding.bottom;
+    const data = Array.isArray(dataPoints) ? dataPoints : [];
+    if (!data.length) return `<div class="chart-empty">No trend data</div>`;
+
+    const maxValue = Math.max(
+      ...data.map((d) => Math.max(n(d.tokens || d.totalTokens || 0), n(d.cacheRead || d.cachedTokens || d.cacheReadTokens || 0))),
+      1
+    );
+    const axisMax = niceCeiling(maxValue);
+
+    if (isVertical) {
+      const step = plotHeight / Math.max(1, data.length);
+      const barWidth = Math.min(12, Math.max(2, step * 0.5));
+
+      const points = data.map((d, index) => {
+        const y = padding.top + (index + 0.5) * step;
+        const x = padding.left + (n(d.tokens || d.totalTokens || 0) / axisMax) * plotWidth;
+        return { x: clamp(x, padding.left, width - padding.right), y, raw: d };
+      });
+
+      const ticks = Array.from({ length: 5 }, (_, index) => {
+        const ratio = index / 4;
+        const x = padding.left + ratio * plotWidth;
+        return `
+          <line class="grid-line" x1="${svgRound(x)}" y1="${padding.top}" x2="${svgRound(x)}" y2="${height - padding.bottom}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="3 3" />
+          <text class="axis-text" x="${svgRound(x)}" y="${padding.top - 6}" fill="var(--muted)" font-size="10" text-anchor="middle">${escapeXml(formatToken(axisMax * ratio))}</text>
+        `;
+      }).join('');
+
+      const bars = data
+        .map((d, index) => {
+          const cacheVal = n(d.cacheRead || d.cachedTokens || d.cacheReadTokens || 0);
+          const barLength = (cacheVal / axisMax) * plotWidth;
+          const y = points[index].y - barWidth / 2;
+          return `<rect class="token-cache-bar" data-index="${index}" x="${padding.left.toFixed(2)}" y="${y.toFixed(2)}" width="${Math.max(0, barLength).toFixed(2)}" height="${barWidth.toFixed(2)}" rx="2" fill="rgba(24, 121, 78, 0.45)" stroke="rgba(24, 121, 78, 0.65)" stroke-width="1"><title>Cache Hit: ${formatToken(cacheVal)}</title></rect>`;
+        })
+        .join('');
+
+      const labelInterval = Math.max(1, Math.ceil(data.length / 10));
+      const labels = data
+        .map((d, index) => {
+          if (index !== 0 && index !== data.length - 1 && index % labelInterval !== 0) return '';
+          const labelText = String(d.label || d.date || d.hour || '');
+          return `<text class="axis-text" x="${padding.left - 8}" y="${(points[index].y + 4).toFixed(2)}" fill="var(--muted)" font-size="10" text-anchor="end">${escapeXml(labelText)}</text>`;
+        })
+        .join('');
+
+      const path = smoothPointsToPathVertical(points, padding.left, width - padding.right);
+      const areaPath = path ? `${path} L ${padding.left} ${(height - padding.bottom).toFixed(2)} L ${padding.left} ${padding.top.toFixed(2)} Z` : '';
+
+      return `
+        <svg class="trend-web-svg vertical-layout" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="trendLineAreaGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="var(--accent, #4285f4)" stop-opacity="0.28" />
+              <stop offset="100%" stop-color="var(--accent, #4285f4)" stop-opacity="0.0" />
+            </linearGradient>
+          </defs>
+          ${ticks}
+          ${bars}
+          ${areaPath ? `<path d="${areaPath}" fill="url(#trendLineAreaGrad)" />` : ''}
+          <path class="trend-line-path" d="${path}" fill="none" stroke="var(--accent, #4285f4)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+          <g class="hover-point-layer"></g>
+          ${labels}
+          <rect class="trend-hover-zone" x="${padding.left}" y="${padding.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" />
+        </svg>
+      `;
+
+    } else {
+      const step = plotWidth / Math.max(1, data.length);
+      const barWidth = Math.min(12, Math.max(2, step * 0.5));
+      const zeroLineY = padding.top + plotHeight;
+
+      const points = data.map((d, index) => {
+        const x = padding.left + (index + 0.5) * step;
+        const y = zeroLineY - (n(d.tokens || d.totalTokens || 0) / axisMax) * plotHeight;
+        return { x, y: clamp(y, padding.top, zeroLineY), raw: d };
+      });
+
+      const ticks = Array.from({ length: 5 }, (_, index) => {
+        const ratio = index / 4;
+        const y = zeroLineY - ratio * plotHeight;
+        return `
+          <line class="grid-line" x1="${padding.left}" y1="${svgRound(y)}" x2="${width - padding.right}" y2="${svgRound(y)}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="3 3" />
+          <text class="axis-text" x="${padding.left - 8}" y="${svgRound(y + 4)}" fill="var(--muted)" font-size="10" text-anchor="end">${escapeXml(formatToken(axisMax * ratio))}</text>
+        `;
+      }).join('');
+
+      const bars = data
+        .map((d, index) => {
+          const cacheVal = n(d.cacheRead || d.cachedTokens || d.cacheReadTokens || 0);
+          const heightValue = (cacheVal / axisMax) * plotHeight;
+          const x = points[index].x - barWidth / 2;
+          const y = zeroLineY - heightValue;
+          return `<rect class="token-cache-bar" data-index="${index}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${Math.max(0, heightValue).toFixed(2)}" rx="2" fill="rgba(24, 121, 78, 0.45)" stroke="rgba(24, 121, 78, 0.65)" stroke-width="1"><title>Cache Hit: ${formatToken(cacheVal)}</title></rect>`;
+        })
+        .join('');
+
+      const labelInterval = Math.max(1, Math.ceil(data.length / 7));
+      const labels = data
+        .map((d, index) => {
+          if (index !== 0 && index !== data.length - 1 && index % labelInterval !== 0) return '';
+          const anchor = index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle';
+          const labelText = String(d.label || d.date || d.hour || '');
+          return `<text class="axis-text" x="${points[index].x.toFixed(2)}" y="${height - 8}" fill="var(--muted)" font-size="10" text-anchor="${anchor}">${escapeXml(labelText)}</text>`;
+        })
+        .join('');
+
+      const path = smoothPointsToPath(points, padding.top, zeroLineY);
+      const areaPath = path ? `${path} L ${(width - padding.right).toFixed(2)} ${zeroLineY} L ${padding.left} ${zeroLineY} Z` : '';
+
+      return `
+        <svg class="trend-web-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="trendLineAreaGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--accent, #4285f4)" stop-opacity="0.28" />
+              <stop offset="100%" stop-color="var(--accent, #4285f4)" stop-opacity="0.0" />
+            </linearGradient>
+          </defs>
+          ${ticks}
+          ${bars}
+          ${areaPath ? `<path d="${areaPath}" fill="url(#trendLineAreaGrad)" />` : ''}
+          <path class="trend-line-path" d="${path}" fill="none" stroke="var(--accent, #4285f4)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+          <g class="hover-point-layer"></g>
+          ${labels}
+          <rect class="trend-hover-zone" x="${padding.left}" y="${padding.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" />
+        </svg>
+      `;
+    }
+  }
+
   return {
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
-    areaLineChart, areaLineSvg,
+    areaLineChart, areaLineSvg, smoothPointsToPath, niceCeiling, formatToken, trendWebChartSvg, smoothPointsToPathVertical,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths

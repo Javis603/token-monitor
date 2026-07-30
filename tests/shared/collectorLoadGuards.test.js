@@ -339,7 +339,7 @@ test('watchPathsForClients watches the Hermes home dir so new state.db sidecars 
 });
 
 test('watchIgnoreMatcher prunes the Hermes runtime but keeps the state.db family and the watch root', () => {
-  const tmp = withTmpHome([path.join('.hermes', 'hermes-agent', 'node_modules')]);
+  const tmp = withTmpHome([path.join('.hermes', 'state.db'), path.join('.hermes', 'hermes-agent', 'node_modules')]);
   const originalHomedir = os.homedir;
   const previousHermesHome = process.env.HERMES_HOME;
   os.homedir = () => tmp;

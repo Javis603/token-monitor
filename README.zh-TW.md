@@ -26,7 +26,7 @@
 
 ## 什麼是 Token Monitor？
 
-一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot 等 28+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
+一款桌面小工具，可即時顯示 Claude Code、Codex、Cursor、GitHub Copilot 等 29+ 種 AI 編程工具的即時 Token 用量與 AI 工具額度，支援多裝置即時同步、歷史趨勢分析，並可按工具、裝置、模型、Session 或專案拆分檢視。
 
 ## 支援的工具
 
@@ -55,6 +55,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 與 IDE / VS Code 擴充套件日誌 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/ccswitch.png" width="28" alt="CCSwitch" /> | CCSwitch | `%APPDATA%\ccswitch\cc-switch.db` / `~/.ccswitch/cc-switch.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API 金鑰（透過 DeepSeek API 查詢餘額） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 金鑰（查詢用量／金鑰上限；獲授權存取 credits 時顯示餘額，官方文件指定 Management 金鑰） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API 金鑰（透過 Minimax API 查詢 Token Plan 額度） | — | ✅ | — |
@@ -95,7 +96,7 @@ Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 
 
 ### 用量追蹤
 
-- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 21+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
+- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 22+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
 - **單一 session 明細**：點進 Claude Code、Codex 或 OpenCode 的 session，可看每則提問的 Token 消耗，並展開查看每次回覆的 Token 拆分與用到的工具（開啟時才即時讀取本機 transcript 或資料庫，絕不同步）
 - **快取命中統計**：點擊任何工具或模型，展開查看輸入 Token（快取命中與未命中）、輸出 Token 的詳細分類及命中率百分比
 - **成本與幣別**：Token 數量旁附帶成本；可用 USD、TWD、HKD 或 CNY 顯示，匯率每日自動更新，也可在設定中手動覆寫
