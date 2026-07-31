@@ -60,16 +60,6 @@
                 <span id="startupNote" class="settings-note settings-item-desc" data-i18n="settings.startup.available">Available in packaged builds. On Linux, run the AppImage build to enable.</span>
               </label>
             </div>
-            <div class="settings-subgroup">
-              <div class="settings-group-header"><span data-i18n="settings.integrations.title">Integrations</span></div>
-              <label class="checkbox-label settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.integrations.discord">Discord Rich Presence</span>
-                </span>
-                <input id="discordRpcInput" type="checkbox" aria-describedby="discordRpcDescription" />
-                <span id="discordRpcDescription" class="settings-item-desc" data-i18n="settings.integrations.discordDescription">Show today's tokens, cost, and most-used AI tool in your Discord activity.</span>
-              </label>
-            </div>
             <div class="settings-subgroup maintenance-section app-update-settings">
               <div class="settings-group-header maintenance-header"><span data-i18n="settings.appUpdate.title">App Updates</span><span data-i18n="settings.appUpdate.source">GitHub releases</span></div>
               <label id="automaticAppUpdatesRow" class="checkbox-label settings-item">
@@ -100,6 +90,16 @@
                 </div>
               </div>
               <div id="appUpdateMessage" class="tokscale-message"></div>
+            </div>
+            <div class="settings-subgroup">
+              <div class="settings-group-header"><span data-i18n="settings.integrations.title">Integrations</span></div>
+              <label class="checkbox-label settings-item">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.integrations.discord">Discord Rich Presence</span>
+                </span>
+                <input id="discordRpcInput" type="checkbox" aria-describedby="discordRpcDescription" />
+                <span id="discordRpcDescription" class="settings-item-desc" data-i18n="settings.integrations.discordDescription">Show today's tokens, cost, and most-used AI tool in your Discord activity.</span>
+              </label>
             </div>
             <div id="advancedSettingsGroup" class="settings-subgroup advanced-settings">
               <button id="advancedSettingsToggle" class="settings-group-header advanced-settings-toggle" type="button" aria-expanded="false" aria-controls="advancedSettingsDetails">
@@ -140,6 +140,7 @@
               <p class="settings-note" data-i18n="settings.about.description">Open-source AI tool token usage monitor, licensed under MIT.</p>
               <div class="about-settings-links">
                 <button id="openRepositoryButton" type="button" class="inline-link" data-i18n="settings.about.repository">GitHub</button>
+                <button id="openWebsiteButton" type="button" class="inline-link" data-i18n="settings.about.website">Website</button>
                 <button id="reportIssueButton" type="button" class="inline-link" data-i18n="settings.about.reportIssue">Report an issue</button>
               </div>
             </div>
@@ -292,6 +293,7 @@
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
+              <label id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</span></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>

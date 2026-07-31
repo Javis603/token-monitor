@@ -1953,11 +1953,16 @@ test('smart collection acknowledges the latest activity revision after tick coal
     await manualTick;
     await waitForCondition(() => updates.length === 3);
     assert.deepEqual(updates, ['interval', 'manual', 'coalesced']);
-    assert.equal(calls.length, 9, 'startup, manual, and coalesced ticks are full scans');
+    // 3 + 3 + 1: the replay honours what the ticks folded into it actually
+    // asked for. Only the anchored interval tick was pending here, so it stays
+    // the `--today` scan it would have been on its own. A pending manual tick,
+    // or an interval tick due for its hourly reconciliation, omits todayOnly
+    // and drags the replay back to a full scan.
+    assert.equal(calls.length, 7, 'the coalesced replay is the warm scan the pending interval tick requested');
 
     await new Promise((resolve) => setTimeout(resolve, 120));
     assert.equal(updates.length, 3, 'coalesced scan acknowledges activity and prevents a redundant interval');
-    assert.equal(calls.length, 9, 'no redundant scan runs on the next interval');
+    assert.equal(calls.length, 7, 'no redundant scan runs on the next interval');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;

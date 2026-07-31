@@ -27,8 +27,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install site dependencies
+        run: npm ci --prefix site
       - name: Build static site
-        run: node site/build.mjs
+        run: npm run build --prefix site
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:

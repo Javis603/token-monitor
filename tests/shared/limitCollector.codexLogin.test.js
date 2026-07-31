@@ -15,6 +15,10 @@ function fakeChild() {
   return child;
 }
 
+function isTaskkill(command) {
+  return /taskkill(\.exe)?$/i.test(String(command));
+}
+
 // A no-op timer so the success/failure paths never arm a real timeout.
 const noopTimers = { setTimeout: () => 0, clearTimeout: () => {} };
 
@@ -181,9 +185,9 @@ test('runCodexLogin tree-kills the login process with taskkill on Windows timeou
     {
       platform: 'win32',
       codexCommand: 'codex.cmd',
-      env: {},
+      env: { SystemRoot: 'D:\\Windows' },
       spawn: (command, args) => {
-        if (command === 'taskkill') { killCalls.push(args); return fakeChild(); }
+        if (isTaskkill(command)) { killCalls.push({ command, args }); return fakeChild(); }
         return child;
       },
       setTimeout: (cb) => { timeoutCb = cb; return 9; },
@@ -196,7 +200,41 @@ test('runCodexLogin tree-kills the login process with taskkill on Windows timeou
 
   assert.equal(result.outcome, 'timedOut');
   assert.equal(killCalls.length, 1);
-  assert.deepEqual(killCalls[0], ['/pid', '4321', '/t', '/f']);
+  // Absolute path, so a user PATH that lost System32 can't make this ENOENT.
+  assert.equal(killCalls[0].command, 'D:\\Windows\\System32\\taskkill.exe');
+  assert.deepEqual(killCalls[0].args, ['/pid', '4321', '/t', '/f']);
+});
+
+test('runCodexLogin survives a taskkill spawn that fails with ENOENT', async () => {
+  let timeoutCb = null;
+  let killer = null;
+  const child = fakeChild();
+  child.pid = 4321;
+  const promise = runCodexLogin(
+    { homePath: 'C:/managed/home', timeoutMs: 50 },
+    {
+      platform: 'win32',
+      codexCommand: 'codex.cmd',
+      env: {},
+      spawn: (command) => {
+        if (isTaskkill(command)) { killer = fakeChild(); return killer; }
+        return child;
+      },
+      setTimeout: (cb) => { timeoutCb = cb; return 9; },
+      clearTimeout: () => {}
+    }
+  );
+
+  timeoutCb();
+  const result = await promise;
+
+  assert.equal(result.outcome, 'timedOut');
+  assert.equal(child.killed, true);
+  // Node reports a missing taskkill.exe asynchronously as an 'error' event on the
+  // spawned child, so the caller's try/catch never sees it. With no listener the
+  // EventEmitter rethrows and takes the Electron main process down (issue #288).
+  const enoent = Object.assign(new Error('spawn taskkill ENOENT'), { code: 'ENOENT' });
+  assert.doesNotThrow(() => killer.emit('error', enoent));
 });
 
 test('runCodexLogin reports launchFailed when spawning throws', async () => {

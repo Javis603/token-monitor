@@ -180,6 +180,7 @@ test('Home activity heatmap contains horizontal overscroll and prevents native p
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   const setupBody = functionBody(app, 'setupHomeActivityScroller', 'renderHomeTrendsModule');
+  assert.match(cssRule(css, '.home-activity-scroll'), /cursor:\s*default/);
   assert.match(cssRule(css, '.home-activity-scroll'), /overscroll-behavior-x:\s*contain/);
   assert.match(setupBody, /pointerdown[\s\S]*event\.preventDefault\(\)/);
   assert.match(setupBody, /pointermove[\s\S]*event\.preventDefault\(\)/);

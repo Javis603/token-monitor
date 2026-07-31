@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
@@ -34,21 +35,62 @@ test('compact token formatter promotes values that round across unit boundaries'
   assert.equal(formatCompact(999_950_000), '1B');
 });
 
+test('localized compact token formatter uses ten-thousand units without a thousand unit', () => {
+  const formatCompact = rendererFunction('formatCompact', 'updateTotalCompact');
+  assert.equal(formatCompact(9_999, 'localized', 'zh-TW'), '9999');
+  assert.equal(formatCompact(15_000, 'localized', 'zh-TW'), '1.5萬');
+  assert.equal(formatCompact(295_116_445, 'localized', 'zh-TW'), '2.95億');
+  assert.equal(formatCompact(295_116_445, 'localized', 'zh-CN'), '2.95亿');
+  assert.equal(formatCompact(295_116_445, 'localized', 'ja'), '2.95億');
+  assert.equal(formatCompact(295_116_445, 'localized', 'ko'), '2.95억');
+});
+
+test('localized compact token formatter promotes rounded values to the next unit', () => {
+  const formatCompact = rendererFunction('formatCompact', 'updateTotalCompact');
+  assert.equal(formatCompact(99_999_500, 'localized', 'zh-TW'), '1億');
+});
+
+test('localized compact token units are available only for East Asian UI locales', () => {
+  const supportsLocalizedCompactTokenUnits = rendererFunction(
+    'supportsLocalizedCompactTokenUnits',
+    'effectiveCompactTokenUnits'
+  );
+  assert.equal(supportsLocalizedCompactTokenUnits('en'), false);
+  assert.equal(supportsLocalizedCompactTokenUnits('en-US'), false);
+  assert.equal(supportsLocalizedCompactTokenUnits('zh-TW'), true);
+  assert.equal(supportsLocalizedCompactTokenUnits('zh-CN'), true);
+  assert.equal(supportsLocalizedCompactTokenUnits('ja'), true);
+  assert.equal(supportsLocalizedCompactTokenUnits('ko'), true);
+});
+
 test('compact total is an opt-in appearance preference', () => {
   assert.match(html, /id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"/);
   assert.match(html, /id="showCompactTotalTokensInput" type="checkbox"/);
   assert.match(html, /data-i18n="settings\.appearance\.compactTotalTokens"/);
+  assert.match(html, /id="compactTokenUnitsRow" class="settings-item hidden"/);
+  assert.match(html, /id="compactTokenUnitsInput"/);
   assert.match(css, /\.total-number-row\s*\{[^}]*display:\s*flex/s);
   assert.match(css, /\.total-compact\s*\{[^}]*white-space:\s*nowrap/s);
   assert.match(css, /\.total-compact\s*\{[^}]*font-weight:\s*500/s);
   assert.match(main, /showCompactTotalTokens:\s*false/);
+  assert.match(main, /compactTokenUnits:\s*'western'/);
   assert.match(main, /showCompactTotalTokens:\s*parseBoolean\(patch\.showCompactTotalTokens \?\? settings\.showCompactTotalTokens, false\)/);
+  assert.match(main, /compactTokenUnits:\s*normalizeCompactTokenUnits\(patch\.compactTokenUnits \?\? settings\.compactTokenUnits\)/);
   assert.match(app, /showCompactTotalTokensInput: document\.getElementById\('showCompactTotalTokensInput'\)/);
+  assert.match(app, /compactTokenUnitsInput: document\.getElementById\('compactTokenUnitsInput'\)/);
   assert.match(app, /showCompactTotalTokens: false/);
+  assert.match(app, /compactTokenUnits: 'western'/);
   assert.match(app, /showCompactTotalTokens: Boolean\(els\.showCompactTotalTokensInput\.checked\)/);
+  assert.match(app, /compactTokenUnits: els\.compactTokenUnitsInput\?\.value === 'localized' \? 'localized' : 'western'/);
   assert.match(app, /els\.showCompactTotalTokensInput\.checked = state\.settings\.showCompactTotalTokens === true/);
+  assert.match(app, /els\.compactTokenUnitsInput\.value = state\.settings\.compactTokenUnits === 'localized' \? 'localized' : 'western'/);
+  assert.match(app, /state\.settings\.showCompactTotalTokens !== true \|\| !supportsLocalizedCompactTokenUnits\(currentLocale\(\)\)/);
   assert.match(app, /els\.showCompactTotalTokensInput\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
+  assert.match(app, /els\.compactTokenUnitsInput\?\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
   assert.match(app, /state\.settings\?\.showCompactTotalTokens !== true[\s\S]*?hideTotalCompact\(\)/);
+  assert.match(app, /const threshold = unitSystem === 'localized' \? 1e4 : 1e3/);
+  assert.match(app, /formatCompact\(num, unitSystem, currentLocale\(\)\)/);
+  assert.match(app, /els\.languageInput\?\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
 });
 
 test('compact total stays visible through the count-up, with the font pre-locked', () => {
@@ -56,13 +98,47 @@ test('compact total stays visible through the count-up, with the font pre-locked
   // does not vanish, clip, or resize mid-animation in either direction.
   assert.match(app, /const animationFrom = numberAnimHandle \? numberAnimValue : state\.currentTotal;/);
   assert.match(app, /const widest = formatNumber\(nextTotal\)\.length >= formatNumber\(animationFrom\)\.length \? nextTotal : animationFrom;/);
-  assert.match(app, /els\.totalTokens\.textContent = formatNumber\(widest\);\s*updateTotalCompact\(nextTotal\);\s*animateNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000, fitTotalNumber\);/s);
+  assert.match(app, /els\.totalTokens\.textContent = formatNumber\(widest\);\s*updateTotalCompact\(nextTotal\);\s*animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000\);/s);
   // animateNumber must not reset the font, or the pre-locked size would be lost.
   const animateBody = app.slice(app.indexOf('function animateNumber('), app.indexOf('function rowWidth('));
   assert.doesNotMatch(animateBody, /style\.fontSize/);
   // Tabular figures keep the number's width constant as it counts, so the chip
   // beside it does not jitter.
   assert.match(css, /\.total-number\s*\{[^}]*font-variant-numeric:\s*tabular-nums/s);
+});
+
+test('unit changes made during the count-up are applied when the animation settles', () => {
+  const start = app.indexOf('function easeOutQuart(');
+  const end = app.indexOf('const rowNumberAnimations', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const frames = [];
+  const compactRenders = [];
+  let unitSystem = 'western';
+  const context = {
+    cancelAnimationFrame() {},
+    requestAnimationFrame(callback) {
+      frames.push(callback);
+      return frames.length;
+    },
+    performance: { now: () => 0 },
+    prefersReducedMotion: () => false,
+    formatNumber: (value) => String(Math.round(value)),
+    updateTotalCompact(value) {
+      compactRenders.push(`${value}:${unitSystem}`);
+    }
+  };
+  vm.runInNewContext(
+    `${app.slice(start, end)}\nthis.animateTotalNumberForTest = animateTotalNumber;`,
+    context
+  );
+
+  context.animateTotalNumberForTest({ textContent: '' }, 0, 100_000, 1000);
+  unitSystem = 'localized';
+  assert.deepEqual(compactRenders, []);
+  frames.shift()(1000);
+  assert.deepEqual(compactRenders, ['100000:localized']);
 });
 
 test('total number font scale shrinks to fit instead of clipping', () => {

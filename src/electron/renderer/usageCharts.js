@@ -365,7 +365,7 @@
     if (/llama|meta/.test(name)) return 'meta';
     if (/mistral|mixtral|codestral/.test(name)) return 'mistral';
     if (/qwen|qwq|qvq/.test(name)) return 'qwen';
-    if (/kimi|moonshot/.test(name)) return 'moonshot';
+    if (/kimi|moonshot/.test(name)) return 'kimi';
     if (/chatglm|\bglm-|\bzai\b|z\.ai|zhipu/.test(name)) return 'zai';
     if (/cohere|command-r/.test(name)) return 'cohere';
     if (/mimo|xiaomi/.test(name)) return 'xiaomi';

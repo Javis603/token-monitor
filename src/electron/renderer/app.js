@@ -271,6 +271,7 @@ const SERVICE_STATUS_PLACEHOLDERS = [
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
 const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';
 const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/choose`;
+const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'sync'];
@@ -297,7 +298,7 @@ let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, compactTokenUnits: 'western', settingsInTitlebar: false };
 let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
@@ -353,6 +354,7 @@ Object.assign(els, {
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
   aboutVersion: document.getElementById('aboutVersion'),
   openRepositoryButton: document.getElementById('openRepositoryButton'),
+  openWebsiteButton: document.getElementById('openWebsiteButton'),
   reportIssueButton: document.getElementById('reportIssueButton'),
   appUpdatePill: document.getElementById('appUpdatePill'),
   appUpdatePillAction: document.getElementById('appUpdatePillAction'),
@@ -382,6 +384,8 @@ Object.assign(els, {
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
+  compactTokenUnitsRow: document.getElementById('compactTokenUnitsRow'),
+  compactTokenUnitsInput: document.getElementById('compactTokenUnitsInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
   resetClientDisplayOrderButton: document.getElementById('resetClientDisplayOrderButton'),
   showAllClientsButton: document.getElementById('showAllClientsButton'),
@@ -470,6 +474,17 @@ function currentLanguage() {
 
 function currentLocale() {
   return i18n.resolveLocale(currentLanguage(), preferredLanguages());
+}
+
+function supportsLocalizedCompactTokenUnits(locale) {
+  return /^(zh|ja|ko)(?:-|$)/i.test(String(locale || ''));
+}
+
+function effectiveCompactTokenUnits() {
+  return supportsLocalizedCompactTokenUnits(currentLocale())
+    && state.settings?.compactTokenUnits === 'localized'
+    ? 'localized'
+    : 'western';
 }
 
 function t(key, params) {
@@ -647,32 +662,60 @@ function renderSettingsSummaries() {
 }
 
 function formatNumber(value) { return Math.round(Number(value || 0)).toLocaleString('en-US'); }
-function formatCompact(value) {
+function formatCompact(value, unitSystem = 'western', locale = 'en') {
   const num = Math.round(Number(value || 0));
   const abs = Math.abs(num);
-  const units = [
-    { divisor: 1e3, suffix: 'K' },
-    { divisor: 1e6, suffix: 'M' },
-    { divisor: 1e9, suffix: 'B' }
-  ];
-  let unitIndex = abs >= 1e9 ? 2 : abs >= 1e6 ? 1 : abs >= 1e3 ? 0 : -1;
+  const localized = unitSystem === 'localized';
+  const language = String(locale || '').toLowerCase();
+  const localizedSuffixes = language.startsWith('ko')
+    ? ['만', '억']
+    : language.startsWith('zh-cn')
+      ? ['万', '亿']
+      : language.startsWith('ja')
+        ? ['万', '億']
+        : ['萬', '億'];
+  const units = localized
+    ? [
+        { divisor: 1e4, suffix: localizedSuffixes[0] },
+        { divisor: 1e8, suffix: localizedSuffixes[1] }
+      ]
+    : [
+        { divisor: 1e3, suffix: 'K' },
+        { divisor: 1e6, suffix: 'M' },
+        { divisor: 1e9, suffix: 'B' }
+      ];
+  let unitIndex = -1;
+  for (let index = units.length - 1; index >= 0; index -= 1) {
+    if (abs >= units[index].divisor) {
+      unitIndex = index;
+      break;
+    }
+  }
   if (unitIndex < 0) return String(num);
 
   let unit = units[unitIndex];
-  let display = (num / unit.divisor).toFixed(1);
-  if (Math.abs(Number(display)) >= 1000 && unitIndex < units.length - 1) {
+  const formatted = () => {
+    const scaled = num / unit.divisor;
+    const digits = localized && Math.abs(scaled) < 10 ? 2 : 1;
+    return scaled.toFixed(digits);
+  };
+  let display = formatted();
+  const promotionBoundary = localized ? 10000 : 1000;
+  if (Math.abs(Number(display)) >= promotionBoundary && unitIndex < units.length - 1) {
     unit = units[unitIndex + 1];
-    display = (num / unit.divisor).toFixed(1);
+    display = formatted();
   }
-  return `${display.replace(/\.0$/, '')}${unit.suffix}`;
+  return `${display.replace(/\.?0+$/, '')}${unit.suffix}`;
 }
 function updateTotalCompact(value) {
   if (!els.totalTokensCompact) return;
   const num = Math.round(Number(value || 0));
-  if (state.settings?.showCompactTotalTokens !== true || Math.abs(num) < 1000) {
+  const unitSystem = effectiveCompactTokenUnits();
+  const threshold = unitSystem === 'localized' ? 1e4 : 1e3;
+  if (state.settings?.showCompactTotalTokens !== true || Math.abs(num) < threshold) {
     hideTotalCompact();
   } else {
-    els.totalTokensCompact.textContent = `≈ ${formatCompact(num)}`;
+    els.totalTokensCompact.textContent = `≈ ${formatCompact(num, unitSystem, currentLocale())}`;
     els.totalTokensCompact.classList.remove('hidden');
   }
   fitTotalNumber();
@@ -1203,6 +1246,10 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
     }
   }
   numberAnimHandle = requestAnimationFrame(frame);
+}
+
+function animateTotalNumber(el, from, to, duration) {
+  animateNumber(el, from, to, duration, () => updateTotalCompact(to));
 }
 
 const rowNumberAnimations = new Map();
@@ -2096,7 +2143,12 @@ function codexResetCreditExpiryDetailLabel(date) {
 
 // Shared by Codex reset credits and Claude prepaid grants.
 function expiryDateLabel(date) {
-  return new Intl.DateTimeFormat(currentLocale(), { month: 'numeric', day: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat(currentLocale(), {
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(date);
 }
 
 function limitDetailTooltipShouldHoldRender() {
@@ -2157,9 +2209,10 @@ function codexResetCreditsNode(resetCredits) {
       timeline.append(time);
     });
     expiryGroup.append(timeline);
-    if (expirationDates.length > 1) {
+    if (expirationDates.length > 0) {
       // A date paired with a bare duration doesn't read as `<name>: <value>`, so
-      // the spoken label is supplied rather than derived from the cells.
+      // the spoken label is supplied rather than derived from the cells. Keep
+      // this detail available for a single reset as well as multiple resets.
       const infoNode = limitDetailInfoNode(
         expirationDates.map((date) => [expiryDateLabel(date), codexResetCreditExpiryLabel(date)]),
         '',
@@ -4776,16 +4829,18 @@ function renderHomeLimitModule() {
       line.append(label, value);
       metric.append(line);
       const resetAt = formatReset(window.resetsAt);
-      const resetText = document.createElement('span');
-      resetText.className = 'home-limit-reset';
       const resetLabel = window.resetsAt
-        ? resetAt || '\u00a0'
+        ? resetAt || ''
         : window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
-        : '\u00a0';
-      const periodLabel = limitProviderPresentationApi.limitProviderCompactWindowPeriodLabel(row.providerId, window, row.windows);
-      resetText.textContent = periodLabel && resetLabel !== '\u00a0' ? `${periodLabel} · ${resetLabel}` : resetLabel;
-      metric.append(resetText);
+        : '';
+      if (resetLabel) {
+        const resetText = document.createElement('span');
+        resetText.className = 'home-limit-reset';
+        const periodLabel = limitProviderPresentationApi.limitProviderCompactWindowPeriodLabel(row.providerId, window, row.windows);
+        resetText.textContent = periodLabel ? `${periodLabel} · ${resetLabel}` : resetLabel;
+        metric.append(resetText);
+      }
       windows.append(metric);
     }
     item.append(account, windows);
@@ -4911,6 +4966,8 @@ function dailyWithHeatIntensity(daily) {
   return window.TokenMonitorUsageCharts.computeHeatmapIntensities(daily);
 }
 
+const homeActivityProgrammaticScrollers = new WeakSet();
+
 function applyHomeActivityScroll(scroller) {
   const target = homeOverviewApi.homeActivityScrollTarget({
     scrollWidth: scroller.scrollWidth,
@@ -4918,7 +4975,10 @@ function applyHomeActivityScroll(scroller) {
     followEnd: state.homeActivityFollowEnd,
     savedLeft: state.homeActivityScrollLeft
   });
-  if (Math.abs(scroller.scrollLeft - target) > 0.5) scroller.scrollLeft = target;
+  if (Math.abs(scroller.scrollLeft - target) > 0.5) {
+    homeActivityProgrammaticScrollers.add(scroller);
+    scroller.scrollLeft = target;
+  }
   scroller.classList.toggle('is-scrolled', target > 2);
 }
 
@@ -5070,10 +5130,16 @@ function setupHomeActivityHover(scroller) {
     scheduleSpotlight();
   };
 
-  const hide = () => {
-    tooltip.dataset.visible = 'false';
-    tooltip.setAttribute('aria-hidden', 'true');
-    tooltip.style.transform = 'translate(-9999px, -9999px)';
+  const hide = ({ clearHover = true, concealTooltip = true } = {}) => {
+    if (clearHover) {
+      state.homeActivityHoverPoint = null;
+      state.homeActivityHoverDate = '';
+    }
+    if (concealTooltip) {
+      tooltip.dataset.visible = 'false';
+      tooltip.setAttribute('aria-hidden', 'true');
+      tooltip.style.transform = 'translate(-9999px, -9999px)';
+    }
     if (spotlightFrame) cancelAnimationFrame(spotlightFrame);
     spotlightFrame = 0;
     spotlightVisible = false;
@@ -5086,23 +5152,25 @@ function setupHomeActivityHover(scroller) {
     activeCell = null;
   };
 
-  scroller.addEventListener('pointermove', (event) => {
+  const showAtPoint = (clientX, clientY, target) => {
     if (!svg || scroller.classList.contains('is-dragging')) {
       hide();
       return;
     }
     const rect = svg.getBoundingClientRect();
     const view = svg.viewBox.baseVal;
-    const x = view.x + (event.clientX - rect.left) * view.width / Math.max(1, rect.width);
-    const y = view.y + (event.clientY - rect.top) * view.height / Math.max(1, rect.height);
+    const x = view.x + (clientX - rect.left) * view.width / Math.max(1, rect.width);
+    const y = view.y + (clientY - rect.top) * view.height / Math.max(1, rect.height);
     moveSpotlight(x, y);
 
-    const target = event.target instanceof Element ? event.target.closest('.heat[data-d]') : null;
-    const cell = target && canvas.contains(target) ? target : null;
+    const targetCell = target instanceof Element ? target.closest('.heat[data-d]') : null;
+    const cell = targetCell && canvas.contains(targetCell) ? targetCell : null;
     if (!cell) {
       hide();
       return;
     }
+    state.homeActivityHoverPoint = { x: clientX, y: clientY };
+    state.homeActivityHoverDate = cell.dataset.d || '';
     if (activeCell !== cell) {
       activeCell?.removeAttribute('data-active');
       activeCell = cell;
@@ -5114,23 +5182,73 @@ function setupHomeActivityHover(scroller) {
     tooltip.dataset.visible = 'true';
     tooltip.setAttribute('aria-hidden', 'false');
     moveHomeActivityTooltip(tooltip, cell);
+  };
+
+  scroller.addEventListener('pointermove', (event) => {
+    showAtPoint(event.clientX, event.clientY, event.target);
   });
-  scroller.addEventListener('pointerleave', hide);
-  scroller.addEventListener('scroll', hide);
+  scroller.addEventListener('pointerleave', () => hide());
+  scroller.addEventListener('scroll', () => {
+    // Restoring the saved/right-edge position emits a delayed scroll event. It is not
+    // user intent and must not clear the hover that renderHome just reconnected.
+    if (homeActivityProgrammaticScrollers.delete(scroller)) {
+      state.homeActivityHoverRestore?.();
+      return;
+    }
+    hide();
+  });
   // The tooltip lives on document.body and is only dismissed by handlers on this
-  // scroller, which renderHome() throws away on every rebuild. Expose the latest
-  // hide() so renderHome/render can clear it — DOM removal fires no pointerleave.
-  state.homeActivityHoverTeardown = hide;
+  // scroller, which renderHome() throws away on every rebuild. Preserve the visible
+  // tooltip plus its semantic cell identity across that replacement, so live stats
+  // refreshes do not fade or jump it before the new cell is ready.
+  state.homeActivityHoverTeardown = ({ preserveHover = false } = {}) => hide({
+    clearHover: !preserveHover,
+    concealTooltip: !preserveHover
+  });
+  state.homeActivityHoverRestore = () => {
+    const point = state.homeActivityHoverPoint;
+    const date = state.homeActivityHoverDate;
+    if (!point || !date) return;
+    const cell = Array.from(canvas?.querySelectorAll('.heat[data-d]') || [])
+      .find((candidate) => candidate.dataset.d === date);
+    if (!cell) {
+      hide();
+      return;
+    }
+    const rect = cell.getBoundingClientRect();
+    const hitSlop = 2;
+    const stillHovered = point.x >= rect.left - hitSlop
+      && point.x <= rect.right + hitSlop
+      && point.y >= rect.top - hitSlop
+      && point.y <= rect.bottom + hitSlop;
+    if (!stillHovered) {
+      hide();
+      return;
+    }
+    showAtPoint(point.x, point.y, cell);
+  };
 }
 
 // Dismiss the body-level activity tooltip + spotlight from outside the scroller's own
-// pointer handlers (Home rerender, or switching away from Home while a cell is hovered).
-// Clearing the ref after teardown drops the last hold on the old hide() closure, so a
-// discarded scroller + its SVG can be collected when the trends module goes away and no
-// fresh setupHomeActivityHover reassigns it. setup always re-registers before any hover.
-function hideHomeActivityTooltip() {
-  state.homeActivityHoverTeardown?.();
+// pointer handlers. A Home rerender may preserve the active hover for the replacement
+// scroller; leaving Home clears it. Dropping both closures lets the old SVG be collected.
+function hideHomeActivityTooltip({ preserveHover = false } = {}) {
+  const teardown = state.homeActivityHoverTeardown;
+  teardown?.({ preserveHover });
   state.homeActivityHoverTeardown = null;
+  state.homeActivityHoverRestore = null;
+  if (!preserveHover) {
+    state.homeActivityHoverPoint = null;
+    state.homeActivityHoverDate = '';
+    if (!teardown) {
+      const tooltip = document.querySelector('.home-activity-tooltip');
+      if (tooltip) {
+        tooltip.dataset.visible = 'false';
+        tooltip.setAttribute('aria-hidden', 'true');
+        tooltip.style.transform = 'translate(-9999px, -9999px)';
+      }
+    }
+  }
 }
 
 function renderHomeTrendsModule() {
@@ -5193,6 +5311,11 @@ function renderHomeTrendsModule() {
   const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
   const activityScroll = document.createElement('div');
   activityScroll.className = 'home-activity-scroll';
+  if (state.homeActivityHoverPoint && state.homeActivityHoverDate) {
+    // This replacement is being inserted directly under a stationary pointer. Keep
+    // the already-visible spotlight from replaying its hover fade on the new SVG.
+    activityScroll.classList.add('is-restoring-hover');
+  }
   activityScroll.tabIndex = 0;
   activityScroll.setAttribute('role', 'region');
   activityScroll.setAttribute('aria-label', t('home.activityScroll'));
@@ -5232,7 +5355,13 @@ function renderHomeTrendsModule() {
     dates.append(label);
   }
   body.append(activityScroll, trendHead, plot, dates);
-  setupHomeActivityScroller(activityScroll, () => animateHomeHistoryVisuals(activityScroll, activityCanvas, chart));
+  setupHomeActivityScroller(activityScroll, () => {
+    // The scroller is now laid out and has its saved/right-edge position. Reconnect
+    // an active hover only after that geometry is stable; otherwise the replacement
+    // briefly resolves against the oldest (left) edge and then drops the tooltip.
+    state.homeActivityHoverRestore?.();
+    animateHomeHistoryVisuals(activityScroll, activityCanvas, chart);
+  });
   setupHomeActivityHover(activityScroll);
   return module;
 }
@@ -5240,9 +5369,9 @@ function renderHomeTrendsModule() {
 function renderHome() {
   if (!els.homePanel) return;
   // The previous scroller (and its ResizeObserver) is about to be replaced; drop the
-  // observer so at most one is live and it is gone if the trends module disappears,
-  // and hide any open activity tooltip before its owning scroller is discarded.
-  hideHomeActivityTooltip();
+  // observer so at most one is live. Keep the active tooltip visible while the
+  // replacement heatmap reconnects it to the same date cell.
+  hideHomeActivityTooltip({ preserveHover: true });
   state.homeActivityResizeObserver?.disconnect();
   state.homeActivityResizeObserver = null;
   const period = resolveActivePeriod(state.stats, state.period);
@@ -5264,6 +5393,7 @@ function renderHome() {
     action.addEventListener('click', openHomeSettings);
     empty.append(title, body, action);
     els.homePanel.replaceChildren(empty);
+    hideHomeActivityTooltip();
     return;
   }
   const nodes = moduleIds.map((id) => {
@@ -5274,8 +5404,17 @@ function renderHome() {
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
-  // setupHomeActivityScroller wires a ResizeObserver that applies the scroll position
-  // post-layout, so no requestAnimationFrame guess is needed here.
+  // setupHomeActivityScroller first runs while its module is detached, where
+  // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
+  // attached, before the browser paints or hover restoration measures the new cell.
+  const activityScroller = els.homePanel.querySelector('.home-activity-scroll');
+  if (activityScroller) applyHomeActivityScroll(activityScroller);
+  if (state.homeActivityHoverRestore) state.homeActivityHoverRestore();
+  else hideHomeActivityTooltip();
+  if (activityScroller?.classList.contains('is-restoring-hover')) {
+    requestAnimationFrame(() => activityScroller.classList.remove('is-restoring-hover'));
+  }
+  // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
 }
 
 function render() {
@@ -5303,7 +5442,7 @@ function render() {
     const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
     els.totalTokens.textContent = formatNumber(widest);
     updateTotalCompact(nextTotal);
-    animateNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000, fitTotalNumber);
+    animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000);
     pulseLiveDot();
   } else if (!headlineNumberIsAnimatingTo(nextTotal)) {
     cancelNumberAnimation();
@@ -6279,6 +6418,7 @@ function appearancePatchFromControls() {
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
     showCompactTotalTokens: Boolean(els.showCompactTotalTokensInput.checked),
+    compactTokenUnits: els.compactTokenUnitsInput?.value === 'localized' ? 'localized' : 'western',
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
     glassBlur: Number(els.blurInput.value === '' ? defaultAppearance.glassBlur : els.blurInput.value),
@@ -6520,6 +6660,13 @@ function syncSettingsForm() {
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
+  if (els.compactTokenUnitsInput) {
+    els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
+  }
+  els.compactTokenUnitsRow?.classList.toggle(
+    'hidden',
+    state.settings.showCompactTotalTokens !== true || !supportsLocalizedCompactTokenUnits(currentLocale())
+  );
   els.swapSettingsRefreshInput.checked = state.settings.settingsInTitlebar === true;
   els.discordRpcInput.checked = Boolean(state.settings.discordRpcEnabled);
   syncWindowBehaviorControls();
@@ -8600,6 +8747,7 @@ els.hubModeOptions.addEventListener('change', async (event) => {
 
 els.languageInput?.addEventListener('change', async () => {
   await saveSettings({ language: els.languageInput.value });
+  if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
 });
 
 els.currencyInput?.addEventListener('change', async () => {
@@ -8800,6 +8948,14 @@ els.toolIconsInput.addEventListener('change', async () => {
 });
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
+  els.compactTokenUnitsRow?.classList.toggle(
+    'hidden',
+    !els.showCompactTotalTokensInput.checked || !supportsLocalizedCompactTokenUnits(currentLocale())
+  );
+  await saveAppearanceFromControls();
+  if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
+});
+els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
   if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
 });
@@ -8871,13 +9027,15 @@ els.downloadTokscaleButton?.addEventListener('click', downloadTokscaleFromNpm);
 els.resetTokscaleButton?.addEventListener('click', resetTokscaleToBundled);
 els.openTokscaleLinkButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://github.com/junhoyeo/tokscale'));
 els.openRepositoryButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL));
+els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WEBSITE_URL));
 els.reportIssueButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_ISSUES_URL));
 els.refreshButton.addEventListener('click', () => {
   if (state.breakdown === 'status') refreshStatusViewManually().catch(() => {});
-  // Only this button asks for a history rescan: `{ force: true }` is used all over the
-  // settings/account flows, and folding history into it would re-run the expensive
-  // `tokscale graph` on every one of them.
-  else refreshStats({ force: true, forceHistory: true, feedback: true });
+  // Only this button asks for a history rescan and a self-sync: `{ force: true }` is
+  // used all over the settings/account flows, and folding those into it would re-run
+  // the expensive `tokscale graph`, plus the Cursor and Antigravity sync subprocesses,
+  // on every one of them.
+  else refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
 });
 els.minButton.addEventListener('click', () => window.tokenMonitor.minimize());
 els.closeButton.addEventListener('click', () => window.tokenMonitor.close());

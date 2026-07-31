@@ -284,6 +284,7 @@ function defaultSettings() {
     showToolIcons: true,
     titleIconOnly: true,
     showCompactTotalTokens: false,
+    compactTokenUnits: 'western',
     heatmapMetric: 'cost',
     homeActiveDaysWindow: 'all',
     themeColors: {},
@@ -384,6 +385,10 @@ function normalizeCollectionMode(value, fallback = 'live') {
   const next = String(value || '').trim();
   if (COLLECTION_MODE_VALUES.has(next)) return next;
   return COLLECTION_MODE_VALUES.has(fallback) ? fallback : 'live';
+}
+
+function normalizeCompactTokenUnits(value) {
+  return value === 'localized' ? 'localized' : 'western';
 }
 
 function normalizeHeatmapMetric(value, fallback = 'cost') {
@@ -1937,6 +1942,7 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     if (saved.serviceProviderDisplayOrder !== undefined) {
       merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
     }
@@ -3436,14 +3442,16 @@ async function writeExportTo(dir, periods, options = {}) {
 
 async function fetchStats(options = {}) {
   const force = Boolean(options?.force);
-  // forceHistory stays independent of `force` on purpose: tool settings, account
-  // sign-ins and limits actions all refresh with { force: true }, so folding the
-  // history rescan into it would spawn the expensive `tokscale graph` on each one.
-  // Only the manual refresh button opts in.
+  // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
+  // settings, account sign-ins and limits actions all refresh with { force: true },
+  // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
+  // and Antigravity sync subprocesses — on every one of them. Only the manual
+  // refresh button opts in.
   const canRefreshRuntime = mode === 'local' || !isExternalAgentActive();
   if (force && deviceRuntimeHandle && canRefreshRuntime) {
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       forceHistory: Boolean(options?.forceHistory),
+      forceSelfSync: Boolean(options?.forceSelfSync),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
     });
   }
@@ -3812,6 +3820,10 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
   if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/token-monitor')) return true;
+  if (
+    (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
+    && (parsed.pathname === '/token-monitor' || parsed.pathname.startsWith('/token-monitor/'))
+  ) return true;
   if (parsed.hostname === 'claude.ai' && parsed.pathname.startsWith('/settings')) return true;
   if ((parsed.hostname === 'cursor.com' || parsed.hostname === 'www.cursor.com') && parsed.pathname.startsWith('/settings')) return true;
   if (parsed.hostname === 'opencode.ai' || parsed.hostname === 'www.opencode.ai') return true;
@@ -4267,6 +4279,7 @@ app.whenReady().then(() => {
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
+      compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),

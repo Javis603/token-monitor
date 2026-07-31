@@ -53,6 +53,10 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   }
   assert.doesNotMatch(rule(css, '.home-activity-scroll'), /padding-block/);
   assert.match(rule(css, '.home-activity-canvas .heat-bright-layer'), /pointer-events:\s*none/);
+  assert.match(
+    css,
+    /\.home-activity-scroll\.is-restoring-hover \.heat,\s*\.home-activity-scroll\.is-restoring-hover \.heat-bright-layer\s*\{[^}]*transition:\s*none/
+  );
   assert.match(rule(css, '.home-activity-tooltip'), /position:\s*fixed/);
   assert.match(rule(css, '.home-activity-canvas .heat-month'), /fill:\s*rgba\(var\(--line-rgb\), 0\.5\)/);
 });
@@ -78,20 +82,47 @@ test('Home activity uses a custom spotlight hover instead of native SVG titles',
   assert.match(rendererSource, /computeHeatmapIntensities\(daily\)/);
 });
 
-test('Home activity tooltip is dismissed on Home rerender and when the view leaves Home', () => {
+test('Home activity tooltip survives Home rerenders and is dismissed when the view leaves Home', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   // The body-level tooltip only has scroller-local pointer handlers; DOM removal fires
   // no pointerleave, so the hover setup must expose a teardown other code can invoke.
-  assert.match(rendererSource, /state\.homeActivityHoverTeardown\s*=\s*hide/);
+  assert.match(rendererSource, /state\.homeActivityHoverPoint\s*=\s*\{\s*x:\s*clientX,\s*y:\s*clientY\s*\}/);
+  assert.match(rendererSource, /state\.homeActivityHoverDate\s*=\s*cell\.dataset\.d/);
+  assert.match(rendererSource, /state\.homeActivityHoverTeardown\s*=\s*\(\{\s*preserveHover/);
+  assert.match(rendererSource, /state\.homeActivityHoverRestore\s*=\s*\(\)\s*=>/);
+  assert.match(rendererSource, /candidate\.dataset\.d\s*===\s*date/);
+  assert.match(rendererSource, /stillHovered[\s\S]*?showAtPoint\(point\.x,\s*point\.y,\s*cell\)/);
   // Clearing the ref after teardown lets a discarded scroller closure be collected.
-  const hideFn = rendererSource.match(/function hideHomeActivityTooltip\(\) \{([\s\S]*?)\n\}/);
+  const hideFn = rendererSource.match(/function hideHomeActivityTooltip\(\{ preserveHover = false \} = \{\}\) \{([\s\S]*?)\n\}/);
   assert.ok(hideFn, 'hideHomeActivityTooltip exists');
   assert.match(hideFn[1], /state\.homeActivityHoverTeardown\s*=\s*null/);
-  // renderHome replaces the scroller that owns those handlers — it must hide the tooltip
-  // before rebuilding, or a cell hovered across a stats refresh leaves a stale tooltip.
+  assert.match(hideFn[1], /state\.homeActivityHoverRestore\s*=\s*null/);
+  // renderHome replaces the scroller on live stats refreshes. Preserve the pointer point,
+  // restore the attached scroller position before measuring the new cell, and repeat the
+  // hover restoration after ResizeObserver confirms that layout has settled.
   const renderHome = rendererSource.match(/function renderHome\(\) \{([\s\S]*?)\n\}\n\nfunction render\(\)/);
   assert.ok(renderHome, 'renderHome exists');
-  assert.match(renderHome[1], /hideHomeActivityTooltip\(\)/);
+  assert.match(renderHome[1], /hideHomeActivityTooltip\(\{\s*preserveHover:\s*true\s*\}\)/);
+  assert.match(
+    renderHome[1],
+    /replaceChildren\(\.\.\.nodes\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
+  );
+  const trendsModule = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
+  assert.ok(trendsModule, 'renderHomeTrendsModule exists');
+  assert.match(
+    trendsModule[1],
+    /setupHomeActivityScroller\(activityScroll,\s*\(\)\s*=>\s*\{[\s\S]*?homeActivityHoverRestore\?\.\(\)[\s\S]*?animateHomeHistoryVisuals/
+  );
+  assert.match(trendsModule[1], /homeActivityHoverPoint[\s\S]*?homeActivityHoverDate[\s\S]*?classList\.add\('is-restoring-hover'\)/);
+  assert.match(
+    renderHome[1],
+    /homeActivityHoverRestore\(\)[\s\S]*?requestAnimationFrame\(\(\)\s*=>\s*activityScroller\.classList\.remove\('is-restoring-hover'\)\)/
+  );
+  assert.match(rendererSource, /homeActivityProgrammaticScrollers\.add\(scroller\)[\s\S]*?scroller\.scrollLeft\s*=\s*target/);
+  assert.match(
+    rendererSource,
+    /addEventListener\('scroll',\s*\(\)\s*=>\s*\{[\s\S]*?homeActivityProgrammaticScrollers\.delete\(scroller\)[\s\S]*?homeActivityHoverRestore\?\.\(\)[\s\S]*?hide\(\)/
+  );
   // Leaving Home for another view must also dismiss it (the panel is only CSS-hidden).
   const render = rendererSource.match(/function render\(\) \{([\s\S]*?)\n\}\n\nfunction setStatus/);
   assert.ok(render, 'render exists');

@@ -4,26 +4,25 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Smart collection:** Choose **Smart (10 minutes)** under **Settings → Collection** to collect after detected Agent activity while keeping an hourly reconciliation; **Live watch** remains the default. (#160)
-- **Claude credits:** Claude now shows **Usage credits** spend from OAuth and Web sources, plus an optional **Prepaid balance** with per-grant expiry details for Claude Web accounts under **Settings → AI Tool Limits → Claude**. (#269)
-- **DeepSeek spend history:** The balance tooltip now breaks tracked spend into **Today**, **Week**, **Month**, and **All time**, with Week covering the latest seven local calendar days. (#278)
+- **Compact token units:** With **Show compact token total** on, choose **International (K/M/B)** or **East Asian (萬/億)** under **Settings → Appearance**.
+- **Website:** **Settings → About Token Monitor** now opens the redesigned Token Monitor site, with platform-aware downloads and product previews. (#283)
 
 ### Improved
-- **AI Tool Limits settings:** Provider credentials, sign-in controls, account lists, enablement, status, and capability tags now live together in expandable provider rows under **Settings → AI Tool Limits**; the separate **Accounts** section has been removed without changing saved account behavior. (#281)
-- **Provider reordering:** Drag anywhere on a provider row to reorder **AI Tool Limits**; rows follow the pointer and only settle after drop, with expanded rows collapsing during the drag. (#279)
+- **Battery and CPU:** **Live watch** collection now reacts to native filesystem events on macOS, Windows, and Linux instead of re-checking watched folders every two seconds, and a change refreshes only the tool whose data moved. Updates stay in the usual 3–5 second range; if the OS runs out of watch descriptors, collection falls back to polling on its own. (#282, #285)
+- **Hidden window:** Usage re-renders are coalesced while the widget is hidden, and the latest state is drawn once it becomes visible again. Tray icon updates are never delayed. (#282)
 
 ### Fixed
-- **Claude Web limits:** Subscription plan labels now resolve from the matching organization, and the headless agent can refresh through Claude's browser-gated endpoint instead of reporting a valid session as expired. (#271, #272)
-- **Settings refresh:** Changing a provider credential or account setting now clears the old provider status before checking the new source. (#268)
+- **Home activity heatmap:** Hovering a day keeps its tooltip through live refreshes instead of losing it every few seconds.
+- **Kimi icons:** Kimi now uses its own logo in tool lists, **AI Tool Limits**, the tray, and chart colors instead of the Moonshot mark.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.37.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-0.37.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.37.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-0.37.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.37.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-Setup-0.37.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.37.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-0.37.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.37.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-0.37.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.38.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.38.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.38.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-Setup-0.38.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.38.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.38.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -61,26 +60,25 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **智能采集：** 可在 **设置 → 采集** 中选择 **智能采集（10 分钟）**，仅在检测到 Agent 活动后采集，并每小时校准一次；**实时追踪** 仍是默认选项。（#160）
-- **Claude credits：** Claude 现在会显示 OAuth 与 Web 来源的 **Usage credits** 消费；Claude Web 账号还可在 **设置 → AI 工具额度 → Claude** 中显示 **预付余额** 与各笔余额的到期信息。（#269）
-- **DeepSeek 消费记录：** 余额提示现在会显示 **Today**、**Week**、**Month** 和 **All time** 的已追踪消费，其中 Week 按最近 7 个本地自然日计算。（#278）
+- **Token 简写单位：** 开启 **显示简写总 Token** 后，可在 **设置 → 外观** 中选择 **国际（K/M/B）** 或 **中文（万/亿）**。
+- **网站：** **设置 → 关于 Token Monitor** 现在可以打开重新设计的 Token Monitor 网站，提供按平台推荐的下载与产品预览。（#283）
 
 ### 改进
-- **AI 工具额度设置：** 供应商凭据、登录控件、账号列表、启用状态、检测状态与能力标签现在集中在 **设置 → AI 工具额度** 的可展开供应商行中；原来的 **账号** 分区已移除，已有账号行为不受影响。（#281）
-- **供应商排序：** 现在可拖动供应商整行来调整 **AI 工具额度** 的顺序；拖动时当前行会跟随指针，展开内容会暂时收起，放下后才更新顺序。（#279）
+- **电量与 CPU：** **实时追踪** 现在在 macOS、Windows 和 Linux 上都改用系统原生的文件事件，不再每两秒重新检查一次被监视的目录；数据有变化时只重新扫描对应的那个工具。更新仍保持在 3–5 秒；如果系统的监视句柄用尽，采集会自动回退到轮询。（#282、#285）
+- **窗口隐藏时：** 窗口隐藏期间会合并用量重绘，重新显示时只绘制最新状态；托盘图标更新不会延迟。（#282）
 
 ### 修复
-- **Claude Web 额度：** 现在会从对应的组织解析正确订阅方案；headless agent 也能通过 Claude 需要浏览器标识的端点刷新，不再把有效会话误报为 Cookie 过期。（#271、#272）
-- **设置刷新：** 更改供应商凭据或账号设置后，会先清除旧状态再检测新来源，不再短暂显示过期结果。（#268）
+- **主页 Token 活动：** 悬停某一天时，提示不会再被几秒一次的实时刷新弄丢。
+- **Kimi 图标：** 工具列表、**AI 工具额度**、托盘与图表配色中的 Kimi 现在使用自己的品牌标识，不再沿用 Moonshot 标识。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.37.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-0.37.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.37.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-0.37.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.37.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-Setup-0.37.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.37.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-0.37.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.37.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.37.0/Token-Monitor-0.37.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.38.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.38.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.38.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-Setup-0.38.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.38.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.38.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>

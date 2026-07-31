@@ -2610,7 +2610,7 @@ html.is-windows .settings-panel select option {
 .home-limit-account {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: 4px;
 }
 .home-limit-account-head {
   display: grid;
@@ -2622,7 +2622,7 @@ html.is-windows .settings-panel select option {
 .home-limit-windows {
   display: grid;
   min-width: 0;
-  margin-left: 16px;
+  margin-left: 18px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
@@ -2757,7 +2757,7 @@ html.is-windows .settings-panel select option {
   margin-top: 1px;
   overflow-x: auto;
   overflow-y: hidden;
-  cursor: grab;
+  cursor: default;
   scrollbar-width: none;
   overscroll-behavior-x: contain;
   touch-action: pan-x pan-y;
@@ -2802,6 +2802,10 @@ html.is-windows .settings-panel select option {
   opacity: 0;
   pointer-events: none;
   transition: opacity 180ms ease;
+}
+.home-activity-scroll.is-restoring-hover .heat,
+.home-activity-scroll.is-restoring-hover .heat-bright-layer {
+  transition: none;
 }
 .home-activity-scroll:hover .heat-bright-layer,
 .home-activity-scroll:focus-within .heat-bright-layer {
@@ -2960,7 +2964,7 @@ html.is-windows .settings-panel select option {
 .row-icon-cursor     { -webkit-mask-image: url(../../../assets/icons/cursor.svg);        mask-image: url(../../../assets/icons/cursor.svg); }
 .row-icon-antigravity { -webkit-mask-image: url(../../../assets/icons/antigravity.svg);   mask-image: url(../../../assets/icons/antigravity.svg); }
 .row-icon-cline      { -webkit-mask-image: url(../../../assets/icons/cline.svg);         mask-image: url(../../../assets/icons/cline.svg); }
-.row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/moonshot.svg);      mask-image: url(../../../assets/icons/moonshot.svg); }
+.row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }
 .row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
 .row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
 .row-icon-pi         { -webkit-mask-image: url(../../../assets/icons/pi.svg);            mask-image: url(../../../assets/icons/pi.svg); }
@@ -3075,8 +3079,8 @@ html.is-windows .settings-panel select option {
   mask-image: url(../../../assets/icons/ollama.svg);
 }
 .limit-icon-kimi {
-  -webkit-mask-image: url(../../../assets/icons/moonshot.svg);
-  mask-image: url(../../../assets/icons/moonshot.svg);
+  -webkit-mask-image: url(../../../assets/icons/kimi.svg);
+  mask-image: url(../../../assets/icons/kimi.svg);
 }
 .limit-icon-mimo {
   -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
