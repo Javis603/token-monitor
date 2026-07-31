@@ -847,7 +847,8 @@ function setupGitHubStars() {
   } catch (e) {}
 
   window.fetch("https://api.github.com/repos/Javis603/token-monitor", {
-    headers: { Accept: "application/vnd.github+json" }
+    headers: { Accept: "application/vnd.github+json" },
+    credentials: "omit"
   }).then(function (response) {
     if (!response.ok) throw new Error("GitHub returned " + response.status);
     return response.json();
