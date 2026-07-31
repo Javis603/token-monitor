@@ -235,11 +235,15 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 /* Swap text → Σ at the exact width where the title would start to truncate, */
 /* driven by JS overflow detection (see renderer/app.js). */
 .shell.title-collapsed .app-title-text, .shell.title-icon-only .app-title-text { display: none; }
-.shell.title-collapsed .app-title-mark, .shell.title-icon-only .app-title-mark { display: inline; }
+.shell.title-collapsed .app-title-mark, .shell.title-icon-only .app-title-mark {
+  display: inline;
+  position: relative;
+}
 .app-title-mark,
 .live-dot { -webkit-app-region: no-drag; }
 .live-dot {
   display: inline-block;
+  position: relative;
   width: 4px;
   height: 4px;
   margin-left: 5px;
@@ -253,6 +257,14 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   background: var(--accent);
   box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.55);
 }
+.app-title-mark::before,
+.live-dot::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  -webkit-app-region: no-drag;
+}
+.app-title-mark::before { inset: -6px -7px; }
 .token-rate-reveal {
   display: inline-block;
   max-width: 0;

@@ -64,5 +64,6 @@ test('token rate is a hover-only reveal beside the compact Σ title mark', () =>
   assert.match(css, /\.shell\.title-icon-only \.app-title-mark:hover ~ \.token-rate-reveal\.has-value/);
   assert.match(css, /\.shell\.title-collapsed \.live-dot:hover ~ \.token-rate-reveal\.has-value/);
   assert.match(css, /\.app-title-mark,\s*\.live-dot\s*\{\s*-webkit-app-region:\s*no-drag/);
+  assert.match(css, /\.app-title-mark::before,\s*\.live-dot::before\s*\{[^}]*inset:\s*-6px/);
   assert.match(css, /\.token-rate-reveal\s*\{[^}]*max-width:\s*0/);
 });
