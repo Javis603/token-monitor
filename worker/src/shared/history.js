@@ -58,9 +58,9 @@ function parseGraphResult(raw) {
       const t = sumTokens(c.tokens);
       const cst = num(c.cost);
       const msg = num(c.messages);
-      const cr = num(c.tokens?.cacheRead);
-      const inp = num(c.tokens?.input);
-      const out = num(c.tokens?.output);
+      const cr = num(c.cacheRead ?? c.cache_read ?? c.cacheReadTokens ?? c.tokens?.cacheRead ?? c.tokens?.cache_read ?? c.tokens?.cacheReadTokens);
+      const inp = num(c.inputTokens ?? c.input_tokens ?? c.input ?? c.tokens?.input ?? c.tokens?.inputTokens);
+      const out = num(c.outputTokens ?? c.output_tokens ?? c.output ?? c.tokens?.output ?? c.tokens?.outputTokens);
       tokens += t;
       cost += cst;
       messages += msg;
@@ -81,9 +81,11 @@ function parseGraphResult(raw) {
       perClient,
       perModel
     };
-    if (cacheRead > 0) entry.cacheRead = cacheRead;
-    if (inputTokens > 0) entry.inputTokens = inputTokens;
-    if (outputTokens > 0) entry.outputTokens = outputTokens;
+    if (cacheRead > 0) {
+      entry.cacheRead = cacheRead;
+      if (inputTokens > 0) entry.inputTokens = inputTokens;
+      if (outputTokens > 0) entry.outputTokens = outputTokens;
+    }
     contributions.push(entry);
   }
   const timeMetrics = normalizeTimeMetrics(raw?.timeMetrics ?? raw?.time_metrics);

@@ -3935,10 +3935,13 @@ function buildHourlySeries(stats) {
 }
 
 function buildHourlyPeriod(stats) {
+  const series = buildHourlySeries(stats);
+  const totalTokens = series.reduce((sum, h) => sum + (h.tokens || 0), 0);
+  const costUsd = series.reduce((sum, h) => sum + (h.cost || 0), 0);
   const todayPeriod = stats?.periods?.today || {};
   const period = {
-    totalTokens: Number(todayPeriod.totalTokens || 0),
-    costUsd: Number(todayPeriod.costUsd || 0),
+    totalTokens,
+    costUsd,
     cacheReadTokens: Number(todayPeriod.cacheReadTokens || 0),
     cacheWriteTokens: Number(todayPeriod.cacheWriteTokens || 0),
     outputTokens: Number(todayPeriod.outputTokens || 0),
@@ -4097,14 +4100,26 @@ function renderTrends() {
   const totalTurnsSum = dataPoints.reduce((acc, d) => acc + d.messageCount, 0);
 
   if (totalCacheSum === 0) {
-    const activePeriod = resolveActivePeriod(state.stats, state.period);
-    if (activePeriod && activePeriod.clients) {
-      for (const c of Object.values(activePeriod.clients)) {
-        if (!c) continue;
-        const cr = Number(c.cacheRead || c.cacheReadTokens || c.tokens?.cacheRead || 0);
-        const inp = Number(c.inputTokens || c.tokens?.input || 0);
-        totalCacheSum += cr;
-        totalInputSum += inp;
+    const pKey = state.period === 'hours' || state.period === 'day' || state.period === 'today' ? 'today' : state.period === 'month' ? 'month' : 'allTime';
+    const periodObj = state.stats?.periods?.[pKey];
+    if (periodObj) {
+      let cr = Number(periodObj.cacheReadTokens || periodObj.cacheRead || 0);
+      let inp = Number(periodObj.inputTokens || 0);
+      if (periodObj.clients && typeof periodObj.clients === 'object') {
+        for (const [cKey, clientVal] of Object.entries(periodObj.clients)) {
+          if (!clientVal) continue;
+          if (typeof clientVal === 'object') {
+            cr += Number(clientVal.cacheRead || clientVal.cacheReadTokens || 0);
+            inp += Number(clientVal.inputTokens || 0);
+          } else {
+            cr += Number(periodObj.clientCacheReads?.[cKey] || 0);
+          }
+        }
+      }
+      if (cr > 0) {
+        totalCacheSum = cr;
+        if (inp > 0) totalInputSum = Math.max(totalInputSum, inp, cr);
+        else if (totalTokensSum > 0) totalInputSum = Math.max(totalTokensSum, cr);
       }
     }
   }
@@ -4120,9 +4135,9 @@ function renderTrends() {
     : state.period === 'month' ? 'Last 30 Days'
     : 'In Total';
 
-  const labelTotalTokens = 'Total Tokens';
+  const labelTotalTokens = 'Total';
   const labelCacheHit = 'Cache Hit';
-  const labelAvgTokens = 'Average Tokens';
+  const labelAvgTokens = 'Average';
   const labelTurns = 'Turns';
 
   const pointCount = dataPoints.length || 1;
