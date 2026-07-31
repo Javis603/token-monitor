@@ -306,6 +306,7 @@ const els = {
   shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
+  periodBadge: document.getElementById('periodBadge'),
   viewBackRow: document.getElementById('viewBackRow'),
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
@@ -3821,36 +3822,56 @@ function buildHourlySeries(stats) {
     });
   }
 
+  const windowStartMs = buckets[0]._startMs;
+  const windowEndMs = buckets[23]._endMs;
   const sessions = new Map();
 
   const addSessions = (sessObj) => {
     if (!sessObj || typeof sessObj !== 'object') return;
     for (const [key, s] of Object.entries(sessObj)) {
+      if (!s) continue;
+      const clientName = String(s.client || s.provider || '').toLowerCase();
+      const appType = String(s.appType || '').toLowerCase();
+      if (clientName === 'ccswitch' && (appType.match(/codex|claude|opencode|cursor|antigravity|official/i) || key.match(/codex|claude|opencode|cursor|antigravity|official/i))) {
+        continue;
+      }
       sessions.set(key, s);
     }
   };
   addSessions(stats?.periods?.today?.sessions);
-  addSessions(stats?.periods?.month?.sessions);
 
   for (const s of sessions.values()) {
     const tsStr = s.lastUsedAt || s.startedAt;
     if (!tsStr) continue;
     const ts = Date.parse(tsStr);
-    if (isNaN(ts)) continue;
+    if (isNaN(ts) || ts < windowStartMs || ts >= windowEndMs) continue;
     
     for (let i = 0; i < 24; i++) {
       const b = buckets[i];
       if (ts >= b._startMs && ts < b._endMs) {
         const tokens = Number(s.totalTokens || 0);
+        const rawCache = Number(s.cacheReadTokens || s.cacheRead || 0);
+        const rawInput = Number(s.inputTokens || 0);
+        const totalInput = rawInput < rawCache ? (rawInput + rawCache) : rawInput;
         b.tokens += tokens;
-        b.cacheRead += Number(s.cacheReadTokens || 0);
-        b.cost += Number(s.costUsd || 0);
-        b.inputTokens += Number(s.inputTokens || 0);
+        b.cacheRead += rawCache;
+        b.cost += Number(s.costUsd || s.cost || 0);
+        b.inputTokens += totalInput;
         b.outputTokens += Number(s.outputTokens || 0);
         b.reasoningTokens += Number(s.reasoningTokens || 0);
         b.messageCount += Number(s.messageCount || 0);
-        if (s.model && tokens > 0) {
-          b.models[s.model] = (b.models[s.model] || 0) + tokens;
+        if (s.models && typeof s.models === 'object' && Object.keys(s.models).length > 0) {
+          for (const [mName, mTokens] of Object.entries(s.models)) {
+            const mt = Number(mTokens || 0);
+            if (mt > 0) {
+              b.models[mName] = (b.models[mName] || 0) + mt;
+            }
+          }
+        } else {
+          const modelName = s.model || s.modelId || s.model_id || s.request_model || s.client;
+          if (modelName && tokens > 0) {
+            b.models[modelName] = (b.models[modelName] || 0) + tokens;
+          }
         }
         break;
       }
@@ -3946,17 +3967,53 @@ function renderTrends() {
       return;
     }
 
-    dataPoints = finalPoints.map((p) => ({
-      label: trendShortLabel(p[labelKey], labelKey),
-      date: p[labelKey],
-      tokens: Number(p.tokens || p.totalTokens || 0),
-      cacheRead: Number(p.cacheReadTokens || p.cacheRead || 0),
-      cost: Number(p.cost || 0),
-      inputTokens: Number(p.inputTokens || (p.tokens - (p.outputTokens || 0))),
-      outputTokens: Number(p.outputTokens || 0),
-      reasoningTokens: Number(p.reasoningTokens || 0),
-      messageCount: Number(p.messages || p.messageCount || 0)
-    }));
+    dataPoints = finalPoints.map((p) => {
+      let cacheRead = Number(p.cacheReadTokens || p.cacheRead || 0);
+      let inputTokens = Number(p.inputTokens || 0);
+      let outputTokens = Number(p.outputTokens || 0);
+      let messageCount = Number(p.messages || p.messageCount || 0);
+
+      if (p.perClient && typeof p.perClient === 'object') {
+        for (const c of Object.values(p.perClient)) {
+          if (!c) continue;
+          if (!cacheRead && c.cacheRead) cacheRead += Number(c.cacheRead);
+          if (!inputTokens && c.inputTokens) inputTokens += Number(c.inputTokens);
+          if (!outputTokens && c.outputTokens) outputTokens += Number(c.outputTokens);
+          if (!messageCount && c.messages) messageCount += Number(c.messages);
+        }
+      }
+
+      const totalTokens = Number(p.tokens || p.totalTokens || 0);
+      let totalInputTokens = inputTokens;
+      if (cacheRead > 0 && inputTokens < cacheRead) {
+        totalInputTokens = inputTokens + cacheRead;
+      }
+      if (!totalInputTokens && totalTokens > 0) {
+        totalInputTokens = Math.max(0, totalTokens - outputTokens);
+      }
+
+      let models = p.models;
+      if (!models && p.perModel && typeof p.perModel === 'object') {
+        models = {};
+        for (const [mName, v] of Object.entries(p.perModel)) {
+          const t = typeof v === 'number' ? v : Number(v?.tokens || 0);
+          if (t > 0) models[mName] = t;
+        }
+      }
+
+      return {
+        label: trendShortLabel(p[labelKey], labelKey),
+        date: p[labelKey],
+        tokens: totalTokens,
+        models: models && Object.keys(models).length > 0 ? models : undefined,
+        cacheRead,
+        cost: Number(p.cost || 0),
+        inputTokens: totalInputTokens,
+        outputTokens,
+        reasoningTokens: Number(p.reasoningTokens || 0),
+        messageCount
+      };
+    });
   }
 
   if (dataPoints.length === 0) {
@@ -4138,7 +4195,8 @@ function renderTrends() {
       let modelBreakdownHtml = '';
       let modelsMap = d.models || {};
       if ((!modelsMap || Object.keys(modelsMap).length === 0) && d.tokens > 0) {
-        modelsMap = { [d.model || 'Unknown']: d.tokens };
+        const fallbackName = d.model || d.client || (isZh ? '其他模型' : 'Other Models');
+        modelsMap = { [fallbackName]: d.tokens };
       }
 
       const modelEntries = Object.entries(modelsMap)
@@ -4148,9 +4206,20 @@ function renderTrends() {
 
       const dTotal = d.tokens || modelEntries.reduce((acc, e) => acc + e.tokens, 0);
 
-      if (modelEntries.length > 0 && dTotal > 0) {
+      let displayEntries = modelEntries;
+      if (modelEntries.length > 5) {
+        const top5 = modelEntries.slice(0, 5);
+        const otherTokens = modelEntries.slice(5).reduce((acc, e) => acc + e.tokens, 0);
+        if (otherTokens > 0) {
+          const otherLabel = isZh ? '其他模型' : 'Other Models';
+          top5.push({ model: otherLabel, tokens: otherTokens });
+        }
+        displayEntries = top5;
+      }
+
+      if (displayEntries.length > 0 && dTotal > 0) {
         const subhead = isZh ? '模型分布' : 'Model Distribution';
-        const rowsHtml = modelEntries.map((e) => {
+        const rowsHtml = displayEntries.map((e) => {
           const pct = ((e.tokens / dTotal) * 100).toFixed(1);
           const color = modelColor(e.model);
           return `
@@ -4238,7 +4307,8 @@ function updateTrendsModelBreakdown(targetPoint = null) {
     return;
   }
 
-  const html = entries.map((e) => {
+  const topEntries = entries.slice(0, 8);
+  const html = topEntries.map((e) => {
     const pct = ((e.tokens / totalTokens) * 100).toFixed(1);
     const color = modelColor(e.model);
     return `
@@ -5243,6 +5313,15 @@ function render() {
   }
   state.currentTotal = nextTotal;
   els.cost.textContent = formatCost(period.costUsd || 0);
+  if (els.periodBadge) {
+    const pKey = state.period;
+    const badgeText = pKey === 'hours' ? 'in Last 24 Hours'
+      : pKey === 'today' ? 'in Today'
+      : pKey === 'day' ? 'in Last 30 Days'
+      : pKey === 'month' ? 'in Last 12 Months'
+      : 'in Total';
+    els.periodBadge.textContent = badgeText;
+  }
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');

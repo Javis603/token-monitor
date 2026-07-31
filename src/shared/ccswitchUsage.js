@@ -93,7 +93,10 @@ function collectCcswitchRows(options = {}) {
     const sourceId = sourceNamespace(dbPath);
     const collected = [];
     const skipOfficial = options.includeOfficial !== true;
-    const OFFICIAL_OR_NATIVE_PATTERNS = ['official', 'codex', 'claude', 'copilot', 'openai', 'anthropic', 'github', 'chatgpt'];
+    const OFFICIAL_OR_NATIVE_PATTERNS = [
+      'official', 'codex', '_codex_', 'claude', 'copilot', 'openai', 'anthropic',
+      'github', 'chatgpt', 'opencode', '_opencode_', 'cursor', 'antigravity', 'agy'
+    ];
 
     for (const r of rows) {
       const providerStr = normalizedModelId(r.provider_id);

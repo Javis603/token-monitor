@@ -2307,7 +2307,27 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
 }
 .total-compact.hidden { display: none; }
-.cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
+.total-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  width: 100%;
+}
+.total-footer-row .cost {
+  margin-top: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.period-badge {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.65;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  margin-left: 8px;
+}
 .view-back-row {
   position: relative;
   z-index: 1;
@@ -4564,8 +4584,23 @@ html.is-windows .limit-live-badge {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 160px;
+  max-height: 240px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--overlay-rgb), 0.2) transparent;
+}
+.trends-model-list::-webkit-scrollbar {
+  width: 3px;
+}
+.trends-model-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.trends-model-list::-webkit-scrollbar-thumb {
+  background: rgba(var(--overlay-rgb), 0.2);
+  border-radius: 3px;
+}
+.trends-model-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--overlay-rgb), 0.4);
 }
 .trends-model-row {
   display: flex;

@@ -32,7 +32,7 @@ const els = {
   heatmapMetricBtns: Array.from(document.querySelectorAll('[data-control="heatmapMetric"] .seg-btn'))
 };
 
-const RANGES = ['7', '30', '90', '365', 'all'];
+const RANGES = ['24h', '7', '30', '90', '365', 'all'];
 const state = {
   tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
   locale: 'en', currency: 'USD', history: null, chartModel: null,
@@ -329,7 +329,7 @@ function renderLegend(model) {
 function renderTrends() {
   const previousKind = state.chartKind;
   const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
-  const daily = charts.clampDaily(state.history?.daily || [], state.range === 'all' ? 0 : Number(state.range));
+  const daily = charts.clampDaily(state.history?.daily || [], state.range === '24h' ? 1 : (state.range === 'all' ? 0 : Number(state.range)));
   if (daily.length === 0) { els.chart.innerHTML = ''; els.legend.innerHTML = ''; state.chartModel = null; return; }
   const pad = { padTop: 10, padRight: 14, padBottom: 24, padLeft: 52 };
   
@@ -366,7 +366,7 @@ function renderBreakdown() {
   const elsBreakdown = document.getElementById('dashBreakdown');
   if (!elsBreakdown) return;
   const previousBars = captureGeometry(elsBreakdown, '.dash-bd-bar-fill[data-motion-key]');
-  const daily = state.history?.daily || [];
+  const daily = charts.clampDaily(state.history?.daily || [], state.range === '24h' ? 1 : (state.range === 'all' ? 0 : Number(state.range)));
   if (daily.length === 0) { elsBreakdown.innerHTML = ''; return; }
   
   const clientTotals = {};

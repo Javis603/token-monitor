@@ -122,7 +122,7 @@ function normalizeClientName(value) {
   if (raw.includes('hermes')) return 'hermes';
   if (raw.includes('gemini')) return 'gemini';
   if (raw.includes('cursor')) return 'cursor';
-  if (raw.includes('antigravity')) return 'antigravity';
+  if (raw.includes('antigravity') || raw.includes('anti-gravity') || raw.includes('anti_gravity') || raw === 'agy') return 'antigravity';
   if (raw.includes('kimi')) return 'kimi';
   if (raw.includes('qwen')) return 'qwen';
   if (raw.includes('grok')) return 'grok';
@@ -136,6 +136,7 @@ function normalizeClientName(value) {
   if (raw.includes('codebuddy')) return 'codebuddy';
   if (raw.includes('workbuddy')) return 'workbuddy';
   if (raw.includes('proma')) return 'proma';
+  if (raw.includes('ccswitch') || raw.includes('cc-switch')) return 'ccswitch';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;

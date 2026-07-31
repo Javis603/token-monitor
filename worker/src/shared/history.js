@@ -47,6 +47,9 @@ function parseGraphResult(raw) {
     let tokens = 0;
     let cost = 0;
     let messages = 0;
+    let cacheRead = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
     const clientRows = Array.isArray(row.clients) ? row.clients : [];
     for (const c of clientRows) {
       if (!c || typeof c !== 'object') continue;
@@ -55,15 +58,21 @@ function parseGraphResult(raw) {
       const t = sumTokens(c.tokens);
       const cst = num(c.cost);
       const msg = num(c.messages);
+      const cr = num(c.tokens?.cacheRead);
+      const inp = num(c.tokens?.input);
+      const out = num(c.tokens?.output);
       tokens += t;
       cost += cst;
       messages += msg;
+      cacheRead += cr;
+      inputTokens += inp;
+      outputTokens += out;
       const pc = perClient[client] || (perClient[client] = { tokens: 0, cost: 0, messages: 0 });
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
       const pm = perModel[model] || (perModel[model] = { tokens: 0, cost: 0 });
       pm.tokens += t; pm.cost += cst;
     }
-    contributions.push({
+    const entry = {
       date,
       tokens,
       cost,
@@ -71,7 +80,11 @@ function parseGraphResult(raw) {
       activeTimeMs: num(row.activeTimeMs ?? row.active_time_ms),
       perClient,
       perModel
-    });
+    };
+    if (cacheRead > 0) entry.cacheRead = cacheRead;
+    if (inputTokens > 0) entry.inputTokens = inputTokens;
+    if (outputTokens > 0) entry.outputTokens = outputTokens;
+    contributions.push(entry);
   }
   const timeMetrics = normalizeTimeMetrics(raw?.timeMetrics ?? raw?.time_metrics);
   return timeMetrics ? { contributions, timeMetrics } : { contributions };
@@ -157,8 +170,10 @@ function monthlyRollup(days) {
   for (const d of (Array.isArray(days) ? days : [])) {
     const month = String(d.date).slice(0, 7);
     if (month.length !== 7) continue;
-    const m = byMonth.get(month) || { month, tokens: 0, cost: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
-    m.tokens += num(d.tokens); m.cost += num(d.cost); m.activeTimeMs += num(d.activeTimeMs);
+    const m = byMonth.get(month) || { month, tokens: 0, cost: 0, messages: 0, cacheRead: 0, inputTokens: 0, outputTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+    m.tokens += num(d.tokens); m.cost += num(d.cost); m.messages += num(d.messages);
+    m.cacheRead += num(d.cacheRead); m.inputTokens += num(d.inputTokens); m.outputTokens += num(d.outputTokens);
+    m.activeTimeMs += num(d.activeTimeMs);
     addPerClient(m.perClient, d.perClient);
     addPerModel(m.perModel, d.perModel);
     byMonth.set(month, m);
@@ -233,8 +248,10 @@ function mergeDailyMaps(histories) {
   for (const h of histories) {
     for (const d of (h && Array.isArray(h.daily) ? h.daily : [])) {
       const cur = byDate.get(d.date)
-        || { date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
-      cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
+        || { date: d.date, tokens: 0, cost: 0, messages: 0, cacheRead: 0, inputTokens: 0, outputTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+      cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages);
+      cur.cacheRead += num(d.cacheRead); cur.inputTokens += num(d.inputTokens); cur.outputTokens += num(d.outputTokens);
+      cur.activeTimeMs += num(d.activeTimeMs);
       addPerClient(cur.perClient, d.perClient);
       addPerModel(cur.perModel, d.perModel);
       byDate.set(d.date, cur);
@@ -247,8 +264,10 @@ function mergeMonthlyMaps(histories) {
   const byMonth = new Map();
   for (const h of histories) {
     for (const m of (h && Array.isArray(h.monthly) ? h.monthly : [])) {
-      const cur = byMonth.get(m.month) || { month: m.month, tokens: 0, cost: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
-      cur.tokens += num(m.tokens); cur.cost += num(m.cost); cur.activeTimeMs += num(m.activeTimeMs);
+      const cur = byMonth.get(m.month) || { month: m.month, tokens: 0, cost: 0, messages: 0, cacheRead: 0, inputTokens: 0, outputTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+      cur.tokens += num(m.tokens); cur.cost += num(m.cost); cur.messages += num(m.messages);
+      cur.cacheRead += num(m.cacheRead); cur.inputTokens += num(m.inputTokens); cur.outputTokens += num(m.outputTokens);
+      cur.activeTimeMs += num(m.activeTimeMs);
       addPerClient(cur.perClient, m.perClient);
       addPerModel(cur.perModel, m.perModel);
       byMonth.set(m.month, cur);
@@ -304,13 +323,47 @@ function coerceHistory(raw) {
   };
 }
 
+function extractModelsMap(source) {
+  if (!source || typeof source !== 'object') return undefined;
+  const pm = source.models || source.perModel;
+  if (!pm || typeof pm !== 'object') return undefined;
+  const models = {};
+  let count = 0;
+  for (const [mName, val] of Object.entries(pm)) {
+    const t = typeof val === 'number' ? num(val) : num(val?.tokens);
+    if (t > 0) {
+      models[mName] = t;
+      count++;
+    }
+  }
+  return count > 0 ? models : undefined;
+}
+
 // Trim a full History to a compact, per-client-free payload for /api/stats.
 function historyPreview(history, options = {}) {
   const dailyDays = Number.isFinite(options.dailyDays) ? options.dailyDays : 30;
   const monthlyMonths = Number.isFinite(options.monthlyMonths) ? options.monthlyMonths : 12;
   const h = coerceHistory(history);
-  const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs) }));
-  const monthly = h.monthly.slice(-monthlyMonths).map((m) => ({ month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs) }));
+  const daily = h.daily.slice(-dailyDays).map((d) => {
+    const item = { date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs) };
+    if (d.messages) item.messages = num(d.messages);
+    if (d.cacheRead) item.cacheRead = num(d.cacheRead);
+    if (d.inputTokens) item.inputTokens = num(d.inputTokens);
+    if (d.outputTokens) item.outputTokens = num(d.outputTokens);
+    const models = extractModelsMap(d);
+    if (models) item.models = models;
+    return item;
+  });
+  const monthly = h.monthly.slice(-monthlyMonths).map((m) => {
+    const item = { month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs) };
+    if (m.messages) item.messages = num(m.messages);
+    if (m.cacheRead) item.cacheRead = num(m.cacheRead);
+    if (m.inputTokens) item.inputTokens = num(m.inputTokens);
+    if (m.outputTokens) item.outputTokens = num(m.outputTokens);
+    const models = extractModelsMap(m);
+    if (models) item.models = models;
+    return item;
+  });
   return { daily, monthly, summary: h.summary };
 }
 
