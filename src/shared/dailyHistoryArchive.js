@@ -23,6 +23,8 @@ function normalizeObservation(value) {
   const tokens = Math.max(0, Math.round(num(value.tokens)));
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
+  const cacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cacheRead ?? value.cache_read ?? value.tokens?.cacheRead)));
+  const inputTokens = Math.max(0, Math.round(num(value.inputTokens ?? value.input_tokens ?? value.input ?? value.tokens?.input)));
   const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
   if (tokens === 0 && cost === 0 && messages === 0) return null;
   return {
@@ -34,6 +36,7 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
+    ...(cacheReadTokens > 0 ? { cacheReadTokens, ...(inputTokens > 0 ? { inputTokens } : {}) } : {}),
     ...(reasoningTokens > 0 ? { reasoningTokens } : {})
   };
 }
@@ -84,6 +87,9 @@ function observationsFromGraphs(graphs) {
         const candidate = normalizeObservation({
           ...raw,
           tokens: sumTokens(raw?.tokens),
+          cacheReadTokens: raw?.cacheRead ?? raw?.cache_read ?? raw?.cacheReadTokens ?? raw?.tokens?.cacheRead,
+          inputTokens: raw?.inputTokens ?? raw?.input_tokens ?? raw?.input ?? raw?.tokens?.input,
+          outputTokens: raw?.outputTokens ?? raw?.output_tokens ?? raw?.output ?? raw?.tokens?.output,
           reasoningTokens: raw?.tokens?.reasoning
         });
         if (!candidate) continue;
@@ -99,6 +105,9 @@ function observationsFromGraphs(graphs) {
           tokens: previous.tokens + candidate.tokens,
           cost: previous.cost + candidate.cost,
           messages: previous.messages + candidate.messages,
+          cacheReadTokens: num(previous.cacheReadTokens) + num(candidate.cacheReadTokens),
+          inputTokens: num(previous.inputTokens) + num(candidate.inputTokens),
+          outputTokens: num(previous.outputTokens) + num(candidate.outputTokens),
           reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens)
         });
       }
@@ -188,9 +197,9 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
           modelId: observation.modelId,
           ...(observation.providerId ? { providerId: observation.providerId } : {}),
           tokens: {
-            input: observation.tokens,
-            output: 0,
-            cacheRead: 0,
+            input: num(observation.inputTokens) || Math.max(0, observation.tokens - num(observation.outputTokens)),
+            output: num(observation.outputTokens),
+            cacheRead: num(observation.cacheReadTokens),
             cacheWrite: 0,
             reasoning: num(observation.reasoningTokens)
           },
