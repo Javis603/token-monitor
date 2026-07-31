@@ -22,6 +22,12 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
+const {
+  normalWindowBounds,
+  persistWindowMaximizedState,
+  restoreWindowMaximized,
+  shouldPersistWindowBounds
+} = require('./windowState');
 
 // Install EPIPE suppression before anything that might log. Without this,
 // a closed parent pipe turns the next log call into an unhandled 'error'
@@ -337,6 +343,7 @@ function defaultSettings() {
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     windowBounds: null,
+    windowMaximized: false,
     zoomFactor: 1,
     showTrayIcon: true,
     trayMode: false,
@@ -1701,6 +1708,7 @@ function expandFloatingBubble(options = {}) {
   sendFloatingBubbleState();
   if (options.focus !== false) {
     mainWindow.show();
+    restoreWindowMaximized(mainWindow, settings);
   }
   return true;
 }
@@ -1734,11 +1742,15 @@ function syncFloatingBubbleAvailability() {
 
 function persistBoundsSoon() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized() || mainWindow.isFullScreen()) return;
+  if (!shouldPersistWindowBounds(mainWindow)) {
+    stopPersistBoundsTimer();
+    return;
+  }
   stopPersistBoundsTimer();
   persistBoundsTimer = setTimeout(() => {
     persistBoundsTimer = null;
     if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (!shouldPersistWindowBounds(mainWindow)) return;
     const next = mainWindow.getBounds();
     const prev = settings.windowBounds || {};
     if (settings?.trayMode) {
@@ -1916,6 +1928,7 @@ function readSettings() {
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
@@ -2836,7 +2849,10 @@ function focusExistingWindow() {
   else {
     applyMacSpaceBehavior(false);
     if (floatingBubbleState.collapsed) expandFloatingBubble();
-    else mainWindow.show();
+    else {
+      mainWindow.show();
+      restoreWindowMaximized(mainWindow, settings);
+    }
   }
 }
 
@@ -3308,6 +3324,7 @@ function exitTrayMode() {
     });
     applyWindowSettings();
     mainWindow.show();
+    restoreWindowMaximized(mainWindow, settings);
   }
   if (!shouldCreateTray(settings)) destroyTray();
   else ensureTray();
@@ -3855,6 +3872,11 @@ function loadWindowFile(target, options = {}) {
     if (revealed) return;
     revealed = true;
     if (settings?.trayMode) return; // stay hidden until tray click
+    if (options.restoreMaximized === true) {
+      restoreWindowMaximized(target, settings, {
+        collapsedFloatingBubble: options.collapsedFloatingBubble === true
+      });
+    }
     revealWindow(target, { inactive: options.inactive === true });
   };
   const waitForContent = options.waitForContent === true;
@@ -3941,6 +3963,18 @@ function createWindow(boundsOverride, options = {}) {
     console.warn('[window] AccentBlurBehind unavailable; falling back to Acrylic');
     try { win.setBackgroundMaterial('acrylic'); } catch (_) {}
   }
+  win.on('maximize', () => {
+    stopPersistBoundsTimer();
+    const bounds = normalWindowBounds(win);
+    if (bounds) persistWindowBounds(bounds);
+    persistWindowMaximizedState(settings, saveSettings, true);
+  });
+  win.on('unmaximize', () => {
+    const bounds = normalWindowBounds(win);
+    if (bounds) persistWindowBounds(bounds);
+    persistWindowMaximizedState(settings, saveSettings, false);
+    persistBoundsSoon();
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -3980,6 +4014,8 @@ function createWindow(boundsOverride, options = {}) {
   loadWindowFile(win, {
     waitForContent: options.waitForContent === true,
     inactive: options.inactive === true,
+    collapsedFloatingBubble,
+    restoreMaximized: !collapsedFloatingBubble,
     query: {
       ...floatingBubbleInitialRendererQuery(floatingBubbleState, {
         collapsedWindow: collapsedFloatingBubble,
@@ -4311,6 +4347,7 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
+      windowMaximized: parseBoolean(patch.windowMaximized ?? settings.windowMaximized, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
       ...normalizeTrayModeSettings({
         showTrayIcon: patch.showTrayIcon ?? settings.showTrayIcon,
