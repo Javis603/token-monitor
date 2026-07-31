@@ -4552,6 +4552,20 @@ html.is-windows .limit-live-badge {
 .trend-line-path { transition: d 0.25s ease; }
 .token-cache-bar { transition: height 0.2s ease, y 0.2s ease; }
 .trends-axis { flex: none; display: flex; justify-content: space-between; padding: 0 4px; font-size: 10px; opacity: 0.45; font-variant-numeric: tabular-nums; }
+.trends-stats-section {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.trends-stats-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: 0.65;
+  padding-left: 2px;
+  letter-spacing: 0.2px;
+}
 .trends-stats { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .trends-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(var(--overlay-rgb), 0.04); }
 .trends-stat-v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }

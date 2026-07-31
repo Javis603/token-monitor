@@ -737,7 +737,6 @@
 
     if (isVertical) {
       const step = plotHeight / Math.max(1, data.length);
-      const barWidth = Math.min(12, Math.max(2, step * 0.5));
 
       const points = data.map((d, index) => {
         const y = padding.top + (index + 0.5) * step;
@@ -754,15 +753,6 @@
         `;
       }).join('');
 
-      const bars = data
-        .map((d, index) => {
-          const cacheVal = n(d.cacheRead || d.cachedTokens || d.cacheReadTokens || 0);
-          const barLength = (cacheVal / axisMax) * plotWidth;
-          const y = points[index].y - barWidth / 2;
-          return `<rect class="token-cache-bar" data-index="${index}" x="${padding.left.toFixed(2)}" y="${y.toFixed(2)}" width="${Math.max(0, barLength).toFixed(2)}" height="${barWidth.toFixed(2)}" rx="2" fill="rgba(24, 121, 78, 0.45)" stroke="rgba(24, 121, 78, 0.65)" stroke-width="1"><title>Cache Hit: ${formatToken(cacheVal)}</title></rect>`;
-        })
-        .join('');
-
       const labelInterval = Math.max(1, Math.ceil(data.length / 10));
       const labels = data
         .map((d, index) => {
@@ -776,7 +766,7 @@
       const areaPath = path ? `${path} L ${padding.left} ${(height - padding.bottom).toFixed(2)} L ${padding.left} ${padding.top.toFixed(2)} Z` : '';
 
       return `
-        <svg class="trend-web-svg vertical-layout" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+        <svg class="trend-web-svg vertical-layout" viewBox="0 0 ${width} ${height}">
           <defs>
             <linearGradient id="trendLineAreaGrad" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stop-color="var(--accent, #4285f4)" stop-opacity="0.28" />
@@ -784,7 +774,6 @@
             </linearGradient>
           </defs>
           ${ticks}
-          ${bars}
           ${areaPath ? `<path d="${areaPath}" fill="url(#trendLineAreaGrad)" />` : ''}
           <path class="trend-line-path" d="${path}" fill="none" stroke="var(--accent, #4285f4)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
           <g class="hover-point-layer"></g>
@@ -795,7 +784,6 @@
 
     } else {
       const step = plotWidth / Math.max(1, data.length);
-      const barWidth = Math.min(12, Math.max(2, step * 0.5));
       const zeroLineY = padding.top + plotHeight;
 
       const points = data.map((d, index) => {
@@ -813,16 +801,6 @@
         `;
       }).join('');
 
-      const bars = data
-        .map((d, index) => {
-          const cacheVal = n(d.cacheRead || d.cachedTokens || d.cacheReadTokens || 0);
-          const heightValue = (cacheVal / axisMax) * plotHeight;
-          const x = points[index].x - barWidth / 2;
-          const y = zeroLineY - heightValue;
-          return `<rect class="token-cache-bar" data-index="${index}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${Math.max(0, heightValue).toFixed(2)}" rx="2" fill="rgba(24, 121, 78, 0.45)" stroke="rgba(24, 121, 78, 0.65)" stroke-width="1"><title>Cache Hit: ${formatToken(cacheVal)}</title></rect>`;
-        })
-        .join('');
-
       const labelInterval = Math.max(1, Math.ceil(data.length / 7));
       const labels = data
         .map((d, index) => {
@@ -837,7 +815,7 @@
       const areaPath = path ? `${path} L ${(width - padding.right).toFixed(2)} ${zeroLineY} L ${padding.left} ${zeroLineY} Z` : '';
 
       return `
-        <svg class="trend-web-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+        <svg class="trend-web-svg" viewBox="0 0 ${width} ${height}">
           <defs>
             <linearGradient id="trendLineAreaGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="var(--accent, #4285f4)" stop-opacity="0.28" />
@@ -845,7 +823,6 @@
             </linearGradient>
           </defs>
           ${ticks}
-          ${bars}
           ${areaPath ? `<path d="${areaPath}" fill="url(#trendLineAreaGrad)" />` : ''}
           <path class="trend-line-path" d="${path}" fill="none" stroke="var(--accent, #4285f4)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
           <g class="hover-point-layer"></g>

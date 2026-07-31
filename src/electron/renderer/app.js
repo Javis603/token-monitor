@@ -4092,29 +4092,26 @@ function renderTrends() {
   const totalCacheSum = dataPoints.reduce((acc, d) => acc + d.cacheRead, 0);
   const totalInputSum = dataPoints.reduce((acc, d) => acc + d.inputTokens, 0);
   const totalTurnsSum = dataPoints.reduce((acc, d) => acc + d.messageCount, 0);
-  const peakVal = dataPoints.length > 0 ? Math.max(...dataPoints.map(d => d.tokens)) : 0;
-  
   const cacheHitRateVal = totalInputSum > 0 ? Math.round((totalCacheSum / totalInputSum) * 100) : 0;
 
-  const rangeLabel = state.period === 'hours' ? (isZh ? '前 24 小时' : 'Last 24 hours')
-    : state.period === 'allTime' ? t('trends.range.year')
-    : state.period === 'month' ? t('trends.range.month') : t('trends.range.week');
-  
-  const first = dataPoints[0]?.label || '';
-  const last = dataPoints[dataPoints.length - 1]?.label || '';
+  const rangeLabel = state.period === 'hours' ? 'Last 24 Hours'
+    : state.period === 'today' || state.period === 'day' ? 'Last 7 Days'
+    : state.period === 'month' ? 'Last 30 Days'
+    : 'In Total';
 
-  const labelTurns = isZh ? '对话轮数' : 'Turns';
-  const labelTotalTokens = isZh ? '总 Token 数' : 'Total Tokens';
-  const labelCacheHitRate = isZh ? '缓存命中率' : 'Cache Hit Rate';
-  const labelPeak = state.period === 'hours'
-    ? (isZh ? '峰值单小时' : 'Peak Hour')
-    : (isZh ? '峰值单日' : 'Peak Day');
+  const labelTotalTokens = 'Total Tokens';
+  const labelCacheHit = 'Cache Hit';
+  const labelAvgTokens = 'Average Tokens';
+  const labelTurns = 'Turns';
+
+  const pointCount = dataPoints.length || 1;
+  const avgTokensVal = Math.round(totalTokensSum / pointCount);
 
   const stats = [
-    [labelTurns, formatNumber(totalTurnsSum)],
     [labelTotalTokens, charts.formatToken(totalTokensSum)],
-    [labelCacheHitRate, `${cacheHitRateVal}%`],
-    [labelPeak, charts.formatToken(peakVal)]
+    [labelCacheHit, `${cacheHitRateVal}%`],
+    [labelAvgTokens, charts.formatToken(avgTokensVal)],
+    [labelTurns, formatNumber(totalTurnsSum)]
   ];
   const statsHtml = stats
     .map(([k, v]) => `<div class="trends-stat"><span class="trends-stat-v">${v}</span><span class="trends-stat-k">${k}</span></div>`)
@@ -4129,9 +4126,7 @@ function renderTrends() {
 
   const sparkCenterStyle = !isVertical ? 'margin: 0 auto; display: flex; justify-content: center;' : '';
   const breakdownTitle = isZh ? '模型用量占比' : 'Model Proportion';
-  const breakdownSub = state.period === 'hours'
-    ? (isZh ? '前 24 小时' : 'Last 24 hours')
-    : (isZh ? '全时间段' : 'All Range');
+  const breakdownSub = rangeLabel;
 
   const modelBreakdownHtml = `
     <div class="trends-breakdown-section">
@@ -4144,10 +4139,9 @@ function renderTrends() {
   `;
 
   els.trendsPanel.innerHTML =
-    `<div class="trends-cap"><span>${rangeLabel}</span>${legendHtml}<span class="trends-open-hint" title="${t('trends.open')}">↗</span></div>`
+    `<div class="trends-cap">${legendHtml}<span class="trends-open-hint" title="${t('trends.open')}">↗</span></div>`
     + `<div class="trends-spark web-trend-spark" style="${sparkCenterStyle} width: 100%; height: 100%;" role="button" tabindex="0" title="${t('trends.open')}">${svg}</div>`
-    + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
-    + `<div class="trends-stats">${statsHtml}</div>`
+    + `<div class="trends-stats-section"><div class="trends-stats-header">${rangeLabel}</div><div class="trends-stats">${statsHtml}</div></div>`
     + modelBreakdownHtml;
 
   updateTrendsModelBreakdown(null);
@@ -4333,7 +4327,7 @@ function updateTrendsModelBreakdown(targetPoint = null) {
   let modelsObj = {};
   let label = targetPoint
     ? (targetPoint.date || targetPoint.label || '')
-    : (state.period === 'hours' ? (isZh ? '前 24 小时' : 'Last 24 hours') : (isZh ? '全时间段' : 'All Range'));
+    : (state.period === 'hours' ? 'Last 24 Hours' : state.period === 'today' || state.period === 'day' ? 'Last 7 Days' : state.period === 'month' ? 'Last 30 Days' : 'In Total');
 
   if (targetPoint) {
     if (targetPoint.models && Object.keys(targetPoint.models).length > 0) {
@@ -4360,7 +4354,7 @@ function updateTrendsModelBreakdown(targetPoint = null) {
     return;
   }
 
-  const topEntries = entries.slice(0, 8);
+  const topEntries = entries.slice(0, 5);
   const html = topEntries.map((e) => {
     const pct = ((e.tokens / totalTokens) * 100).toFixed(1);
     const color = modelColor(e.model);
@@ -5710,7 +5704,11 @@ function setPeriod(period) {
     return false;
   }
   state.period = next;
+  state.animateChartsOnRender = true;
   publishViewState();
+  requestAnimationFrame(() => {
+    render();
+  });
   return true;
 }
 
