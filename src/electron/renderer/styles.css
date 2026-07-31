@@ -4566,9 +4566,10 @@ html.is-windows .limit-live-badge {
   padding-left: 2px;
   letter-spacing: 0.2px;
 }
-.trends-stats { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.trends-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(var(--overlay-rgb), 0.04); }
-.trends-stat-v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.trends-stats { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.trends-stat { display: flex; flex-direction: column; gap: 1px; padding: 5px 8px; border-radius: 6px; background: rgba(var(--overlay-rgb), 0.04); }
+.trends-stat-v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.trends-stat-k { font-size: 11px; font-weight: 400; opacity: 0.65; letter-spacing: 0.1px; }
 .trends-empty { flex: 1; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 12px; }
 
 /* Trends Model Breakdown Section */
@@ -4602,7 +4603,7 @@ html.is-windows .limit-live-badge {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 240px;
+  max-height: 135px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(var(--overlay-rgb), 0.2) transparent;

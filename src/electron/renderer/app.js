@@ -4029,10 +4029,10 @@ function renderTrends() {
       if (p.perClient && typeof p.perClient === 'object') {
         for (const c of Object.values(p.perClient)) {
           if (!c) continue;
-          if (!cacheRead && c.cacheRead) cacheRead += Number(c.cacheRead);
-          if (!inputTokens && c.inputTokens) inputTokens += Number(c.inputTokens);
-          if (!outputTokens && c.outputTokens) outputTokens += Number(c.outputTokens);
-          if (!messageCount && c.messages) messageCount += Number(c.messages);
+          cacheRead += Number(c.cacheRead || c.cacheReadTokens || 0);
+          inputTokens += Number(c.inputTokens || 0);
+          outputTokens += Number(c.outputTokens || 0);
+          messageCount += Number(c.messages || c.messageCount || 0);
         }
       }
 
@@ -4043,6 +4043,9 @@ function renderTrends() {
       }
       if (!totalInputTokens && totalTokens > 0) {
         totalInputTokens = Math.max(0, totalTokens - outputTokens);
+      }
+      if (totalInputTokens < cacheRead) {
+        totalInputTokens = cacheRead;
       }
 
       let models = p.models;
@@ -4089,9 +4092,27 @@ function renderTrends() {
   const svg = charts.trendWebChartSvg(dataPoints, { width: chartW, height: chartH });
 
   const totalTokensSum = dataPoints.reduce((acc, d) => acc + d.tokens, 0);
-  const totalCacheSum = dataPoints.reduce((acc, d) => acc + d.cacheRead, 0);
-  const totalInputSum = dataPoints.reduce((acc, d) => acc + d.inputTokens, 0);
+  let totalCacheSum = dataPoints.reduce((acc, d) => acc + d.cacheRead, 0);
+  let totalInputSum = dataPoints.reduce((acc, d) => acc + d.inputTokens, 0);
   const totalTurnsSum = dataPoints.reduce((acc, d) => acc + d.messageCount, 0);
+
+  if (totalCacheSum === 0) {
+    const activePeriod = resolveActivePeriod(state.stats, state.period);
+    if (activePeriod && activePeriod.clients) {
+      for (const c of Object.values(activePeriod.clients)) {
+        if (!c) continue;
+        const cr = Number(c.cacheRead || c.cacheReadTokens || c.tokens?.cacheRead || 0);
+        const inp = Number(c.inputTokens || c.tokens?.input || 0);
+        totalCacheSum += cr;
+        totalInputSum += inp;
+      }
+    }
+  }
+
+  if (totalCacheSum > 0 && totalInputSum < totalCacheSum) {
+    totalInputSum = totalCacheSum;
+  }
+
   const cacheHitRateVal = totalInputSum > 0 ? Math.round((totalCacheSum / totalInputSum) * 100) : 0;
 
   const rangeLabel = state.period === 'hours' ? 'Last 24 Hours'
