@@ -7,6 +7,7 @@ const {
   isWindowMaximized,
   normalWindowBounds,
   persistWindowState,
+  rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
   shouldPersistWindowBounds,
@@ -97,6 +98,30 @@ test('persists changed bounds and maximization state in one save', () => {
   assert.equal(persistWindowState(settings, saveSettings, bounds, true), false);
   assert.equal(saves, 1);
   assert.equal(persistWindowState(settings, saveSettings, bounds, false), true);
+  assert.equal(settings.windowMaximized, false);
+  assert.equal(saves, 2);
+});
+
+test('keeps normal bounds across a maximized rebuild and unmaximize', () => {
+  const normalBounds = { x: 40, y: 50, width: 360, height: 700 };
+  const screenBounds = { x: 0, y: 0, width: 1920, height: 1080 };
+  const oldWindow = fakeWindow({ maximized: true, bounds: screenBounds, normalBounds });
+  const rebuiltBounds = rebuildWindowBounds(oldWindow);
+  assert.deepEqual(rebuiltBounds, normalBounds);
+
+  const rebuiltState = { bounds: rebuiltBounds, normalBounds: rebuiltBounds };
+  const rebuiltWindow = fakeWindow(rebuiltState);
+  const settings = { windowBounds: screenBounds, windowMaximized: true };
+  let saves = 0;
+  const saveSettings = () => { saves += 1; };
+
+  assert.equal(restoreWindowMaximized(rebuiltWindow, settings), true);
+  persistWindowState(settings, saveSettings, normalWindowBounds(rebuiltWindow), true);
+  assert.deepEqual(settings.windowBounds, normalBounds);
+
+  rebuiltState.maximized = false;
+  persistWindowState(settings, saveSettings, normalWindowBounds(rebuiltWindow), false);
+  assert.deepEqual(settings.windowBounds, normalBounds);
   assert.equal(settings.windowMaximized, false);
   assert.equal(saves, 2);
 });

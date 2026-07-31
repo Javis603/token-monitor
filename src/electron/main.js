@@ -25,6 +25,7 @@ const { createClaudeWebFetch } = require('./claudeWebFetch');
 const {
   normalWindowBounds,
   persistWindowState,
+  rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
   shouldPersistWindowBounds
@@ -4173,9 +4174,7 @@ function normalizeManualCookie(input) {
 
 function rebuildWindow() {
   if (!mainWindow) return;
-  const bounds = floatingBubbleState.collapsed && floatingBubbleState.expandedBounds
-    ? floatingBubbleState.expandedBounds
-    : mainWindow.getBounds();
+  const bounds = rebuildWindowBounds(mainWindow, floatingBubbleState);
   const wasFocused = mainWindow.isFocused();
   const old = mainWindow;
   floatingBubbleState.collapsed = false;

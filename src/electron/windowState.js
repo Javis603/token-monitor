@@ -74,10 +74,19 @@ function persistWindowState(settings, saveSettings, bounds, maximized) {
   return true;
 }
 
+function rebuildWindowBounds(window, state = {}) {
+  if (state.collapsed === true && state.expandedBounds) return state.expandedBounds;
+  const bounds = normalWindowBounds(window);
+  if (bounds) return bounds;
+  if (window && typeof window.getBounds === 'function') return window.getBounds();
+  return null;
+}
+
 module.exports = {
   isWindowMaximized,
   normalWindowBounds,
   persistWindowState,
+  rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
   shouldPersistWindowBounds,
