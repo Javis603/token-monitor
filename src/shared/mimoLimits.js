@@ -81,11 +81,19 @@ function unwrapApiBody(value) {
   return value.data && typeof value.data === 'object' ? value.data : value;
 }
 
+// MiMo reports `percent` as a 0-1 ratio, so it overshoots 1 once the request
+// that exhausts the plan pushes used past limit. Inferring the scale from the
+// value ("<= 1 must be a ratio, above that must already be a percentage") reads
+// that 1.005 as 1% used and paints a spent plan as 99% left (#292), so treat
+// the field as the ratio it is — and prefer used/limit, which carry no scale
+// ambiguity at all, whenever the item reports both.
 function normalizePercent(value, used, limit) {
+  if (used !== null && limit !== null && limit > 0) {
+    return Math.max(0, Math.min(100, (used / limit) * 100));
+  }
   const explicit = numberFrom(value);
-  if (explicit !== null) return Math.max(0, Math.min(100, explicit <= 1 ? explicit * 100 : explicit));
-  if (used !== null && limit !== null && limit > 0) return Math.max(0, Math.min(100, (used / limit) * 100));
-  return null;
+  if (explicit === null) return null;
+  return Math.max(0, Math.min(100, explicit * 100));
 }
 
 function parseMimoBalance(body) {
