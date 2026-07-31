@@ -25,6 +25,7 @@ function normalizeObservation(value) {
   const messages = Math.max(0, Math.round(num(value.messages)));
   const cacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cacheRead ?? value.cache_read ?? value.tokens?.cacheRead)));
   const inputTokens = Math.max(0, Math.round(num(value.inputTokens ?? value.input_tokens ?? value.input ?? value.tokens?.input)));
+  const outputTokens = Math.max(0, Math.round(num(value.outputTokens ?? value.output_tokens ?? value.output ?? value.tokens?.output)));
   const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
   if (tokens === 0 && cost === 0 && messages === 0) return null;
   return {
@@ -36,7 +37,9 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
-    ...(cacheReadTokens > 0 ? { cacheReadTokens, ...(inputTokens > 0 ? { inputTokens } : {}) } : {}),
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+    ...(inputTokens > 0 && inputTokens !== tokens ? { inputTokens } : {}),
+    ...(outputTokens > 0 ? { outputTokens } : {}),
     ...(reasoningTokens > 0 ? { reasoningTokens } : {})
   };
 }

@@ -4272,8 +4272,11 @@ function renderTrends() {
 
       const labelTotal = isZh ? '总 Token' : 'Total Tokens';
       const labelInput = isZh ? '输入 Token' : 'Input Tokens';
-      const labelCached = isZh ? '缓存命中' : 'Cached Input';
+      const labelCached = isZh ? '缓存命中率' : 'Cache Rate';
       const labelOutput = isZh ? '输出 Token' : 'Output Tokens';
+
+      const cachePct = d.inputTokens > 0 ? ((d.cacheRead / d.inputTokens) * 100).toFixed(1) : '0';
+      const cachedValText = `${cachePct}% (${charts.formatToken(d.cacheRead)})`;
 
       let modelBreakdownHtml = '';
       let modelsMap = d.models || {};
@@ -4327,7 +4330,7 @@ function renderTrends() {
         <div class="trend-tooltip-title">${escapeXml(d.date || d.label || '')}</div>
         <div class="trend-tooltip-row"><span>${labelTotal}</span><span class="trend-tooltip-val">${charts.formatToken(d.tokens)}</span></div>
         <div class="trend-tooltip-row"><span>${labelInput}</span><span class="trend-tooltip-val">${charts.formatToken(d.inputTokens)}</span></div>
-        <div class="trend-tooltip-row"><span>${labelCached}</span><span class="trend-tooltip-val">${charts.formatToken(d.cacheRead)}</span></div>
+        <div class="trend-tooltip-row"><span>${labelCached}</span><span class="trend-tooltip-val">${cachedValText}</span></div>
         <div class="trend-tooltip-row"><span>${labelOutput}</span><span class="trend-tooltip-val">${charts.formatToken(d.outputTokens)}</span></div>
         ${modelBreakdownHtml}
       `;
