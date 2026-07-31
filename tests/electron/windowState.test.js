@@ -6,8 +6,9 @@ const test = require('node:test');
 const {
   isWindowMaximized,
   normalWindowBounds,
-  persistWindowMaximizedState,
+  persistWindowState,
   restoreWindowMaximized,
+  restoreWindowMaximizedForReveal,
   shouldPersistWindowBounds,
   shouldRestoreWindowMaximized
 } = require('../../src/electron/windowState');
@@ -20,8 +21,10 @@ function fakeWindow(state = {}) {
     getNormalBounds: () => normalBounds,
     isDestroyed: () => state.destroyed === true,
     isFullScreen: () => state.fullScreen === true,
+    isFocused: () => state.focused === true,
     isMaximized: () => state.maximized === true,
     isMinimized: () => state.minimized === true,
+    focus: () => { state.focused = true; },
     maximize: () => { state.maximized = true; }
   };
 }
@@ -65,17 +68,35 @@ test('restores maximization outside tray and collapsed modes', () => {
   assert.equal(restoreWindowMaximized(fakeWindow(), { windowMaximized: true }, { collapsedFloatingBubble: true }), false);
 });
 
-test('persists a changed maximization state once', () => {
-  const settings = { windowMaximized: false };
+test('restores maximization and focuses a normal cold-start window', () => {
+  const state = {};
+  const window = fakeWindow(state);
+  assert.equal(restoreWindowMaximizedForReveal(window, { windowMaximized: true }, { restoreMaximized: true }), true);
+  assert.equal(state.maximized, true);
+  assert.equal(state.focused, true);
+});
+
+test('does not focus an inactive maximized replacement window', () => {
+  const state = {};
+  const window = fakeWindow(state);
+  assert.equal(restoreWindowMaximizedForReveal(window, { windowMaximized: true }, { restoreMaximized: true, inactive: true }), true);
+  assert.equal(state.maximized, true);
+  assert.equal(state.focused, undefined);
+});
+
+test('persists changed bounds and maximization state in one save', () => {
+  const bounds = { x: 40, y: 50, width: 360, height: 700 };
+  const settings = { windowBounds: null, windowMaximized: false };
   let saves = 0;
   const saveSettings = () => { saves += 1; };
 
-  assert.equal(persistWindowMaximizedState(settings, saveSettings, true), true);
+  assert.equal(persistWindowState(settings, saveSettings, bounds, true), true);
+  assert.deepEqual(settings.windowBounds, bounds);
   assert.equal(settings.windowMaximized, true);
   assert.equal(saves, 1);
-  assert.equal(persistWindowMaximizedState(settings, saveSettings, true), false);
+  assert.equal(persistWindowState(settings, saveSettings, bounds, true), false);
   assert.equal(saves, 1);
-  assert.equal(persistWindowMaximizedState(settings, saveSettings, false), true);
+  assert.equal(persistWindowState(settings, saveSettings, bounds, false), true);
   assert.equal(settings.windowMaximized, false);
   assert.equal(saves, 2);
 });

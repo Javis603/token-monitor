@@ -42,10 +42,34 @@ function restoreWindowMaximized(window, settings = {}, options = {}) {
   return true;
 }
 
-function persistWindowMaximizedState(settings, saveSettings, maximized) {
-  const next = maximized === true;
-  if (settings.windowMaximized === next) return false;
-  settings.windowMaximized = next;
+function restoreWindowMaximizedForReveal(window, settings = {}, options = {}) {
+  const restored = options.restoreMaximized === true && restoreWindowMaximized(window, settings, options);
+  if (!restored) return false;
+  if (
+    options.inactive !== true &&
+    typeof window.isFocused === 'function' &&
+    !window.isFocused() &&
+    typeof window.focus === 'function'
+  ) {
+    window.focus();
+  }
+  return true;
+}
+
+function sameWindowBounds(first, second) {
+  return first?.x === second?.x &&
+    first?.y === second?.y &&
+    first?.width === second?.width &&
+    first?.height === second?.height;
+}
+
+function persistWindowState(settings, saveSettings, bounds, maximized) {
+  const nextMaximized = maximized === true;
+  const boundsChanged = Boolean(bounds) && !sameWindowBounds(settings.windowBounds, bounds);
+  const maximizedChanged = settings.windowMaximized !== nextMaximized;
+  if (!boundsChanged && !maximizedChanged) return false;
+  if (boundsChanged) settings.windowBounds = bounds;
+  if (maximizedChanged) settings.windowMaximized = nextMaximized;
   saveSettings();
   return true;
 }
@@ -53,8 +77,9 @@ function persistWindowMaximizedState(settings, saveSettings, maximized) {
 module.exports = {
   isWindowMaximized,
   normalWindowBounds,
-  persistWindowMaximizedState,
+  persistWindowState,
   restoreWindowMaximized,
+  restoreWindowMaximizedForReveal,
   shouldPersistWindowBounds,
   shouldRestoreWindowMaximized
 };

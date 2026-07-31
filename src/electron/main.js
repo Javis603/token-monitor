@@ -24,8 +24,9 @@ const motionPreferenceApi = require('./motionPreference');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
 const {
   normalWindowBounds,
-  persistWindowMaximizedState,
+  persistWindowState,
   restoreWindowMaximized,
+  restoreWindowMaximizedForReveal,
   shouldPersistWindowBounds
 } = require('./windowState');
 
@@ -3872,11 +3873,11 @@ function loadWindowFile(target, options = {}) {
     if (revealed) return;
     revealed = true;
     if (settings?.trayMode) return; // stay hidden until tray click
-    if (options.restoreMaximized === true) {
-      restoreWindowMaximized(target, settings, {
-        collapsedFloatingBubble: options.collapsedFloatingBubble === true
-      });
-    }
+    if (restoreWindowMaximizedForReveal(target, settings, {
+      restoreMaximized: options.restoreMaximized === true,
+      inactive: options.inactive === true,
+      collapsedFloatingBubble: options.collapsedFloatingBubble === true
+    })) return;
     revealWindow(target, { inactive: options.inactive === true });
   };
   const waitForContent = options.waitForContent === true;
@@ -3965,14 +3966,10 @@ function createWindow(boundsOverride, options = {}) {
   }
   win.on('maximize', () => {
     stopPersistBoundsTimer();
-    const bounds = normalWindowBounds(win);
-    if (bounds) persistWindowBounds(bounds);
-    persistWindowMaximizedState(settings, saveSettings, true);
+    persistWindowState(settings, saveSettings, normalWindowBounds(win), true);
   });
   win.on('unmaximize', () => {
-    const bounds = normalWindowBounds(win);
-    if (bounds) persistWindowBounds(bounds);
-    persistWindowMaximizedState(settings, saveSettings, false);
+    persistWindowState(settings, saveSettings, normalWindowBounds(win), false);
     persistBoundsSoon();
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -4266,6 +4263,7 @@ app.whenReady().then(() => {
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
+    delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
     delete normalizedPatch.openrouterProfiles;
@@ -4347,7 +4345,7 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
-      windowMaximized: parseBoolean(patch.windowMaximized ?? settings.windowMaximized, false),
+      windowMaximized: parseBoolean(settings.windowMaximized, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
       ...normalizeTrayModeSettings({
         showTrayIcon: patch.showTrayIcon ?? settings.showTrayIcon,
