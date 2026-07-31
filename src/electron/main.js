@@ -392,9 +392,10 @@ function normalizeCompactTokenUnits(value) {
   return value === 'localized' ? 'localized' : 'western';
 }
 
-// Which throughput reading the title-mark reveal shows. 'speed' is output tokens per second
-// of model-busy time; 'burn' is every token per minute of the same window. Both derive from
-// the one (timedTokens, timedDurationMs) pair on the period — this only picks the framing.
+// Which throughput reading the title-mark reveal shows. 'speed' is estimated output tokens
+// per second of model-busy time; 'burn' is every token per minute of the same window. Both
+// derive from the timed totals the collector already puts on the period — this only picks
+// the framing, and neither costs an extra scan.
 function normalizeTokenRateMode(value) {
   return value === 'burn' ? 'burn' : 'speed';
 }

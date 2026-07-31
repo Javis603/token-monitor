@@ -728,32 +728,26 @@ function positiveNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
-// Share of the period's tokens that came from messages carrying a duration. tokscale only
-// times some messages, so `timedDurationMs` is the denominator for that subset only. Clamped
-// because the two totals count reasoning differently: tokscale folds it into timedTokens
-// while totalTokens deliberately leaves it out (it is already inside output — see
-// TOKEN_COMPONENT_KEYS), so a reasoning-heavy period reports over 100% raw coverage.
-function tokenRateCoverage(period) {
-  const timed = positiveNumber(period?.timedTokens);
-  const total = positiveNumber(period?.totalTokens);
-  if (!timed || !total) return 0;
-  return Math.min(1, timed / total);
-}
-// Output tokens per second of model-busy time — the same unit every inference benchmark
-// reports, so the number is sanity-checkable against a known model's streaming speed.
+// Estimated output tokens per second of model-busy time — roughly the unit an inference
+// benchmark reports, so the number is sanity-checkable against a known model's streaming
+// speed. An estimate, not a measurement: tokscale times a message as a whole rather than
+// its decode phase, and does not break output out per timed message, so the collector
+// apportions each row's output by that row's coverage (see timedOutputTokens in usage.js).
 //
 // Output rather than total tokens because cache reads dominate the total (typically >90%)
 // and were never generated, which would inflate the rate by two orders of magnitude and
-// read as a bug. Scaled by coverage because the numerator counts every output token in the
-// period while the denominator only covers timed messages; without it the ratio runs 1/coverage high.
+// read as a bug.
 //
-// Both inputs ride the same tokscale scan as the headline total, so this never divides a
-// live numerator by a stale denominator — the reason it does not read History activeTimeMs.
+// Numerator and denominator now describe the same set of messages, so this stays correct
+// when periods are summed across clients and devices — an all-output numerator over a
+// timed-only denominator would read high by 1/coverage on any device running a client that
+// reports no durations. Both ride the same tokscale scan as the headline total, so it never
+// divides a live numerator by a stale denominator — the reason it dropped History activeTimeMs.
 function tokenRatePerSecond(period) {
   const durationMs = positiveNumber(period?.timedDurationMs);
-  const output = positiveNumber(period?.outputTokens);
-  if (!durationMs || !output) return 0;
-  return output * tokenRateCoverage(period) * 1000 / durationMs;
+  const timedOutput = positiveNumber(period?.timedOutputTokens);
+  if (!durationMs || !timedOutput) return 0;
+  return timedOutput * 1000 / durationMs;
 }
 // Every token per minute of the same model-busy window — the burn framing rather than the
 // speed one. This needs no coverage correction: timedTokens is exactly what the timed
@@ -781,6 +775,14 @@ function renderTokenRate() {
 }
 // The title mark is the only pixel of the reveal that can take a click: a drag region does
 // not deliver mouse events, so this control and its hover target are the same no-drag island.
+//
+// Deliberately pointer-only, and the mark stays a non-focusable aria-hidden span. A focusable
+// control here is worse than no keyboard path: the window assigns focus to a control when it
+// is shown, and Chromium then derives :focus-visible from that activation rather than from
+// any click, so the reveal reopens with a focus ring on a window the user just summoned with
+// the pointer nowhere near the title. The renderer cannot even clean that up, because it
+// receives no blur, focus or visibilitychange event across a real hide and show. This is a
+// hover-only enhancement layered on a pointer affordance, not a keyboard path that regressed.
 function toggleTokenRateMode() {
   const next = state.settings?.tokenRateMode === 'burn' ? 'speed' : 'burn';
   // Repaint before the settings round trip. saveSettings re-syncs the entire settings form,

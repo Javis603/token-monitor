@@ -32,9 +32,10 @@ const CACHE_READ_TOKEN_KEYS = ['cacheRead', 'cacheReadTokens', 'cache_read_token
 const CACHE_WRITE_TOKEN_KEYS = ['cacheWrite', 'cacheWriteTokens', 'cache_write_tokens', 'cacheCreationInputTokens', 'totalCacheWrite'];
 const REASONING_TOKEN_KEYS = ['reasoning', 'reasoningTokens', 'reasoning_tokens'];
 // Read off tokscale's per-entry `performance` block. `msPer1KTokens` is deliberately ignored:
-// it is a pre-divided ratio, and only the raw pair survives summing across rows and devices.
+// it is a pre-divided ratio, and only raw sums survive being added across rows and devices.
 const TIMED_DURATION_KEYS = ['totalDurationMs', 'total_duration_ms', 'timedDurationMs', 'timed_duration_ms'];
 const TIMED_TOKEN_KEYS = ['timedTokens', 'timed_tokens'];
+const TIMED_COVERAGE_KEYS = ['tokenCoverage', 'token_coverage'];
 const STARTED_AT_KEYS = ['startedAt', 'started_at', 'createdAt', 'created_at'];
 const LAST_USED_AT_KEYS = ['lastUsedAt', 'last_used_at', 'updatedAt', 'updated_at', 'lastActivityAt', 'last_activity_at', 'timestamp'];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
@@ -103,11 +104,18 @@ function emptyPeriod() {
     outputTokens: 0,
     // tokscale's per-entry `performance` block, summed. `timedDurationMs` is the sum of
     // per-message durations (NOT a wall-clock span — concurrent sessions count twice), and
-    // `timedTokens` covers only the messages that carried a duration. Both are additive over
-    // append-only messages, which is what makes them exact under applyPeriodDelta. Keep them
-    // as the raw pair: a rate is a ratio and ratios cannot be summed across devices or
-    // periods, so every consumer divides at the point of display.
+    // `timedTokens` covers only the messages that carried a duration. `timedOutputTokens`
+    // estimates how much of `outputTokens` those timed messages produced, by scaling each
+    // row's output by that row's own coverage — tokscale does not break output out per timed
+    // message. It has to be accumulated per row: coverage varies from 1 to exactly 0 between
+    // clients (several emit no durations at all), so a coverage rebuilt from period totals
+    // would smear a per-client gate across every client and skew any rate derived from it.
+    //
+    // All three are additive over append-only messages, which is what makes them exact under
+    // applyPeriodDelta. Keep them as raw sums: a rate is a ratio and ratios cannot be summed
+    // across devices or periods, so every consumer divides at the point of display.
     timedTokens: 0,
+    timedOutputTokens: 0,
     timedDurationMs: 0,
     clients: {},
     clientCosts: {},
@@ -494,6 +502,7 @@ function normalizePeriod(input, options = {}) {
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
+  period.timedOutputTokens = Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0)));
   period.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
   if (input.clients && typeof input.clients === 'object') {
     for (const [client, value] of Object.entries(input.clients)) {
@@ -572,6 +581,20 @@ function normalizePeriod(input, options = {}) {
 
 const UNATTRIBUTED_USAGE_CLIENT = '__unattributed';
 
+// Share of one row's tokens that came from messages carrying a duration. Prefer tokscale's
+// own `tokenCoverage`: its denominator is tokscale's token total, which counts reasoning,
+// so it never exceeds 1 — whereas a ratio rebuilt against our reasoning-free `totalTokens`
+// runs slightly over 1 on reasoning-heavy rows and would need clamping. The fallback exists
+// only for a tokscale build that reports durations without the coverage field.
+function timedCoverage(performance, row) {
+  const reported = firstNumber(performance, TIMED_COVERAGE_KEYS);
+  if (reported > 0) return Math.min(1, reported);
+  const timed = firstNumber(performance, TIMED_TOKEN_KEYS);
+  if (timed <= 0) return 0;
+  const total = tokenValue(row);
+  return total > 0 ? Math.min(1, timed / total) : 0;
+}
+
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const client = detectedClient;
   const tokens = tokenValue(row);
@@ -582,6 +605,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
   const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
+  const timedOutputTokens = Math.round(output * timedCoverage(performance, row));
   let model = detectModel(row);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));
@@ -590,6 +614,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
   period.timedTokens += timedTokens;
+  period.timedOutputTokens += timedOutputTokens;
   period.timedDurationMs += timedDurationMs;
   if (client && tokens > 0) {
     period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
@@ -928,6 +953,7 @@ function addPeriodInto(target, source) {
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
   target.timedTokens += source.timedTokens;
+  target.timedOutputTokens += source.timedOutputTokens;
   target.timedDurationMs += source.timedDurationMs;
   for (const [client, tokens] of Object.entries(source.clients)) {
     target.clients[client] = (target.clients[client] || 0) + tokens;
