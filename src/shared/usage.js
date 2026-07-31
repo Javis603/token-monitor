@@ -28,6 +28,10 @@ const OUTPUT_TOKEN_KEYS = ['output', 'outputTokens', 'output_tokens', 'completio
 const CACHE_READ_TOKEN_KEYS = ['cacheRead', 'cacheReadTokens', 'cache_read_tokens', 'cachedTokens', 'cached_tokens', 'cacheReadInputTokens', 'totalCacheRead'];
 const CACHE_WRITE_TOKEN_KEYS = ['cacheWrite', 'cacheWriteTokens', 'cache_write_tokens', 'cacheCreationInputTokens', 'totalCacheWrite'];
 const REASONING_TOKEN_KEYS = ['reasoning', 'reasoningTokens', 'reasoning_tokens'];
+// Read off tokscale's per-entry `performance` block. `msPer1KTokens` is deliberately ignored:
+// it is a pre-divided ratio, and only the raw pair survives summing across rows and devices.
+const TIMED_DURATION_KEYS = ['totalDurationMs', 'total_duration_ms', 'timedDurationMs', 'timed_duration_ms'];
+const TIMED_TOKEN_KEYS = ['timedTokens', 'timed_tokens'];
 const STARTED_AT_KEYS = ['startedAt', 'started_at', 'createdAt', 'created_at'];
 const LAST_USED_AT_KEYS = ['lastUsedAt', 'last_used_at', 'updatedAt', 'updated_at', 'lastActivityAt', 'last_activity_at', 'timestamp'];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
@@ -94,6 +98,14 @@ function emptyPeriod() {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     outputTokens: 0,
+    // tokscale's per-entry `performance` block, summed. `timedDurationMs` is the sum of
+    // per-message durations (NOT a wall-clock span — concurrent sessions count twice), and
+    // `timedTokens` covers only the messages that carried a duration. Both are additive over
+    // append-only messages, which is what makes them exact under applyPeriodDelta. Keep them
+    // as the raw pair: a rate is a ratio and ratios cannot be summed across devices or
+    // periods, so every consumer divides at the point of display.
+    timedTokens: 0,
+    timedDurationMs: 0,
     clients: {},
     clientCosts: {},
     clientCacheReads: {},
@@ -478,6 +490,8 @@ function normalizePeriod(input, options = {}) {
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
+  period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
+  period.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
   if (input.clients && typeof input.clients === 'object') {
     for (const [client, value] of Object.entries(input.clients)) {
       const key = normalizeClientName(client);
@@ -562,6 +576,9 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
   const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
   const output = Math.max(0, Math.round(firstNumber(row, OUTPUT_TOKEN_KEYS)));
+  const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
+  const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
+  const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
   let model = detectModel(row);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));
@@ -569,6 +586,8 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
+  period.timedTokens += timedTokens;
+  period.timedDurationMs += timedDurationMs;
   if (client && tokens > 0) {
     period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
     if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
@@ -905,6 +924,8 @@ function addPeriodInto(target, source) {
   target.cacheReadTokens += source.cacheReadTokens;
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
+  target.timedTokens += source.timedTokens;
+  target.timedDurationMs += source.timedDurationMs;
   for (const [client, tokens] of Object.entries(source.clients)) {
     target.clients[client] = (target.clients[client] || 0) + tokens;
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];

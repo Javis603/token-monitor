@@ -306,6 +306,7 @@ const els = {
   shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
+  appTitleMark: document.querySelector('.app-title-mark'),
   viewBackRow: document.getElementById('viewBackRow'),
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
@@ -723,55 +724,70 @@ function hideTotalCompact() {
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
 }
-function tokenRateActiveTimeMs(history, period, todayKey) {
-  const toMs = (value) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-  };
-  const daily = Array.isArray(history?.daily) ? history.daily : [];
-  const monthly = Array.isArray(history?.monthly) ? history.monthly : [];
-  const dayKey = String(todayKey || '').slice(0, 10);
-  if (period === 'today') {
-    return daily.reduce((sum, day) => String(day?.date || '').slice(0, 10) === dayKey
-      ? sum + toMs(day?.activeTimeMs)
-      : sum, 0);
-  }
-  if (period === 'month') {
-    const monthKey = dayKey.slice(0, 7);
-    const monthlyActiveTime = monthly.reduce((sum, month) => String(month?.month || '').slice(0, 7) === monthKey
-      ? sum + toMs(month?.activeTimeMs)
-      : sum, 0);
-    if (monthlyActiveTime > 0) return monthlyActiveTime;
-    return daily.reduce((sum, day) => String(day?.date || '').slice(0, 7) === monthKey
-      ? sum + toMs(day?.activeTimeMs)
-      : sum, 0);
-  }
-  const summaryActiveTime = toMs(history?.summary?.activeTimeMs);
-  if (summaryActiveTime > 0) return summaryActiveTime;
-  return monthly.reduce((sum, month) => sum + toMs(month?.activeTimeMs), 0);
+function positiveNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
-function tokenRatePerMinute(totalTokens, history, period, todayKey) {
-  const tokens = Number(totalTokens);
-  const activeTimeMs = tokenRateActiveTimeMs(history, period, todayKey);
-  if (!Number.isFinite(tokens) || tokens <= 0 || activeTimeMs <= 0) return 0;
-  return tokens * 60000 / activeTimeMs;
+// Share of the period's tokens that came from messages carrying a duration. tokscale only
+// times some messages, so `timedDurationMs` is the denominator for that subset only. Clamped
+// because the two totals count reasoning differently: tokscale folds it into timedTokens
+// while totalTokens deliberately leaves it out (it is already inside output — see
+// TOKEN_COMPONENT_KEYS), so a reasoning-heavy period reports over 100% raw coverage.
+function tokenRateCoverage(period) {
+  const timed = positiveNumber(period?.timedTokens);
+  const total = positiveNumber(period?.totalTokens);
+  if (!timed || !total) return 0;
+  return Math.min(1, timed / total);
+}
+// Output tokens per second of model-busy time — the same unit every inference benchmark
+// reports, so the number is sanity-checkable against a known model's streaming speed.
+//
+// Output rather than total tokens because cache reads dominate the total (typically >90%)
+// and were never generated, which would inflate the rate by two orders of magnitude and
+// read as a bug. Scaled by coverage because the numerator counts every output token in the
+// period while the denominator only covers timed messages; without it the ratio runs 1/coverage high.
+//
+// Both inputs ride the same tokscale scan as the headline total, so this never divides a
+// live numerator by a stale denominator — the reason it does not read History activeTimeMs.
+function tokenRatePerSecond(period) {
+  const durationMs = positiveNumber(period?.timedDurationMs);
+  const output = positiveNumber(period?.outputTokens);
+  if (!durationMs || !output) return 0;
+  return output * tokenRateCoverage(period) * 1000 / durationMs;
+}
+// Every token per minute of the same model-busy window — the burn framing rather than the
+// speed one. This needs no coverage correction: timedTokens is exactly what the timed
+// messages carried, so numerator and denominator describe the identical set of messages.
+function tokenBurnPerMinute(period) {
+  const durationMs = positiveNumber(period?.timedDurationMs);
+  const timed = positiveNumber(period?.timedTokens);
+  if (!durationMs || !timed) return 0;
+  return timed * 60000 / durationMs;
 }
 function renderTokenRate() {
   if (!els.tokenRateReveal) return;
-  const todayKey = window.TokenMonitorUsageCharts?.localDayKey?.() || '';
   const period = state.stats?.periods?.[state.period];
-  const history = homeOverviewApi.pickHomeHistory(state.homeHistory, state.stats?.historyPreview);
-  const rate = tokenRatePerMinute(
-    period?.totalTokens,
-    history,
-    state.period,
-    todayKey
-  );
-  const text = rate > 0
-    ? `≈ ${formatCompact(rate, effectiveCompactTokenUnits(), currentLocale())}/min`
+  const burn = state.settings?.tokenRateMode === 'burn';
+  const rate = burn ? tokenBurnPerMinute(period) : tokenRatePerSecond(period);
+  // formatCompact rounds, so a sub-0.5 rate would render as a bare "0". Treat that as no
+  // data and stay hidden rather than claim a zero pace.
+  const text = Math.round(rate) > 0
+    ? t(burn ? 'home.tokenRateBurn' : 'home.tokenRate', {
+      value: formatCompact(rate, effectiveCompactTokenUnits(), currentLocale())
+    })
     : '';
   els.tokenRateReveal.textContent = text;
   els.tokenRateReveal.classList.toggle('has-value', Boolean(text));
+}
+// The title mark is the only pixel of the reveal that can take a click: a drag region does
+// not deliver mouse events, so this control and its hover target are the same no-drag island.
+function toggleTokenRateMode() {
+  const next = state.settings?.tokenRateMode === 'burn' ? 'speed' : 'burn';
+  // Repaint before the settings round trip. saveSettings re-syncs the entire settings form,
+  // which is orders of magnitude heavier than this label and would make the switch lag.
+  if (state.settings) state.settings.tokenRateMode = next;
+  renderTokenRate();
+  saveSettings({ tokenRateMode: next }).catch(() => {});
 }
 // Scale the exact total to fit the width it is actually given instead of clipping
 // it to an ellipsis. The compact chip (when shown) is flex:0 0 auto and claims its
@@ -8296,6 +8312,11 @@ els.hubModeOptions.addEventListener('change', async (event) => {
   await refreshHubInfo();
   await refreshStats();
 });
+
+// Both, not just the mark: either one reveals the reading on hover, so a click that only
+// worked on one of them would leave the other looking broken.
+els.appTitleMark?.addEventListener('click', toggleTokenRateMode);
+els.liveDot?.addEventListener('click', toggleTokenRateMode);
 
 els.languageInput?.addEventListener('change', async () => {
   await saveSettings({ language: els.languageInput.value });

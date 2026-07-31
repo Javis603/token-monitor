@@ -285,6 +285,7 @@ function defaultSettings() {
     titleIconOnly: true,
     showCompactTotalTokens: false,
     compactTokenUnits: 'western',
+    tokenRateMode: 'speed',
     heatmapMetric: 'cost',
     homeActiveDaysWindow: 'all',
     themeColors: {},
@@ -389,6 +390,13 @@ function normalizeCollectionMode(value, fallback = 'live') {
 
 function normalizeCompactTokenUnits(value) {
   return value === 'localized' ? 'localized' : 'western';
+}
+
+// Which throughput reading the title-mark reveal shows. 'speed' is output tokens per second
+// of model-busy time; 'burn' is every token per minute of the same window. Both derive from
+// the one (timedTokens, timedDurationMs) pair on the period — this only picks the framing.
+function normalizeTokenRateMode(value) {
+  return value === 'burn' ? 'burn' : 'speed';
 }
 
 function normalizeHeatmapMetric(value, fallback = 'cost') {
@@ -1943,6 +1951,7 @@ function readSettings() {
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
+    merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
     if (saved.serviceProviderDisplayOrder !== undefined) {
       merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
     }
@@ -4278,6 +4287,7 @@ app.whenReady().then(() => {
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
+      tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),

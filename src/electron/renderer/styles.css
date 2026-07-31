@@ -239,8 +239,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   display: inline;
   position: relative;
 }
-.app-title-mark,
-.live-dot { -webkit-app-region: no-drag; }
 .live-dot {
   display: inline-block;
   position: relative;
@@ -257,18 +255,40 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   background: var(--accent);
   box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.55);
 }
-.app-title-mark::before,
-.live-dot::before {
+/* The reveal only exists in the two collapsed title states, so its no-drag island and the
+   enlarged hover targets are scoped to them. Unscoped, the live dot — which is shown in
+   every state — would punch a permanent ~16px no-drag hole into the frameless window's
+   drag region right beside the title, for users who can never see the reveal. */
+.shell.title-collapsed .app-title-mark,
+.shell.title-collapsed .live-dot,
+.shell.title-icon-only .app-title-mark,
+.shell.title-icon-only .live-dot { -webkit-app-region: no-drag; }
+/* Both toggle the reveal between the speed and burn readings, so both get a pointer: the
+   hover target and the click target must be the same surface, and an area of the titlebar
+   that refuses to drag reads as broken unless it visibly announces itself as a control. */
+.shell.title-collapsed .app-title-mark,
+.shell.title-collapsed .live-dot,
+.shell.title-icon-only .app-title-mark,
+.shell.title-icon-only .live-dot { cursor: pointer; }
+.shell.title-collapsed .app-title-mark::before,
+.shell.title-collapsed .live-dot::before,
+.shell.title-icon-only .app-title-mark::before,
+.shell.title-icon-only .live-dot::before {
   content: '';
   position: absolute;
   inset: -6px;
   -webkit-app-region: no-drag;
 }
-.app-title-mark::before { inset: -6px -7px; }
+.shell.title-collapsed .app-title-mark::before,
+.shell.title-icon-only .app-title-mark::before { inset: -6px -7px; }
 .token-rate-reveal {
   display: inline-block;
   max-width: 0;
-  margin-left: 0;
+  /* Constant, not animated: at rest the element is zero-wide and this leaves a 6px gap after
+     the live dot, which is the last thing in the collapsed title and therefore invisible.
+     Animating the margin as well would put a second layout property in the transition for no
+     visual gain. */
+  margin-left: 6px;
   overflow: hidden;
   color: var(--muted);
   font-size: 10px;
@@ -277,15 +297,18 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   opacity: 0;
   pointer-events: none;
   white-space: nowrap;
-  transition: max-width 180ms ease, margin-left 180ms ease, color 180ms ease, opacity 180ms ease;
+  transition: max-width 180ms ease, color 180ms ease, opacity 180ms ease;
   vertical-align: baseline;
 }
 .shell.title-icon-only .app-title-mark:hover ~ .token-rate-reveal.has-value,
 .shell.title-icon-only .live-dot:hover ~ .token-rate-reveal.has-value,
 .shell.title-collapsed .app-title-mark:hover ~ .token-rate-reveal.has-value,
 .shell.title-collapsed .live-dot:hover ~ .token-rate-reveal.has-value {
-  max-width: 84px;
-  margin-left: 6px;
+  /* ch rather than a px constant so the cap follows the font size. Sized off the widest
+     measured reading rather than a typical one: the burn framing peaks at a 5-significant-
+     digit compact value ("≈ 999.9K tok/min"), which renders at 96px here — 16ch cleared it
+     by a third of a pixel, which is luck, not headroom. */
+  max-width: 18ch;
   color: var(--text);
   opacity: 0.82;
 }

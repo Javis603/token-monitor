@@ -60,6 +60,8 @@ Example payload:
     "cacheReadTokens": 1100,
     "cacheWriteTokens": 0,
     "outputTokens": 34,
+    "timedTokens": 1230,
+    "timedDurationMs": 4200,
     "clients": {
       "codex": 1234
     },
@@ -186,6 +188,8 @@ The hub normalizes records before storing them. The Node hub accepts JSON ingest
 `projects` is a bounded rollup keyed by a canonicalized workspace-folder label. Each entry carries the deterministic display `label`, token/cost totals, and a per-client token breakdown. Agents upload `allTime.projects` because synchronized payloads intentionally omit the unbounded `allTime.sessions`; `today.projects` and `month.projects` are normally omitted on upload and rebuilt by the hub from their synchronized sessions. If adding the all-time rollup would exceed the safe ingest budget, the agent drops only that rollup, sets `allTimeProjectsOmitted: true`, and keeps core totals and session data uploadable. If monthly or daily session detail would still exceed the budget, the agent keeps the newest rows that fit, sends the complete project rollup for that period, and sets `sessionDetailsOmitted` to the number of omitted rows per affected period. If that project rollup cannot fit even after all session rows are removed, the agent omits it too and sets `periodProjectsOmitted`; token/cost and client/model totals remain complete while the affected project breakdown is marked incomplete. A normal later upload clears these diagnostics; limits-only updates preserve them. `projectsEnabled: false` tells the hub that project metadata collection is disabled for this device; sync payloads then remove project rollups plus session `projectId` / `projectLabel` fields.
 
 Authenticated stats expose `projectsIncomplete: true` when a device omitted its rollup, disabled project tracking while contributing usage, or could not preserve exact all-time attribution after its tracked-client list changed. Affected device entries expose `allTimeProjectsOmitted`, `allTimeProjectsIncomplete`, or `projectsEnabled: false` as the reason. The public Worker stats endpoint removes the entire `projects` map, including both display labels and canonical keys.
+
+`timedTokens` and `timedDurationMs` are optional throughput inputs, summed from tokscale's per-entry `performance` block. `timedDurationMs` is the sum of per-message durations, not a wall-clock span — concurrent sessions contribute their durations separately — and `timedTokens` counts only the messages that carried a duration, so `timedTokens / totalTokens` is the sample coverage for that period. They are reported as a raw pair rather than a pre-divided rate because a ratio cannot be summed: consumers add each field across devices and periods and divide only at the point of display. Both are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses. Payloads without these fields are accepted and normalize to `0`, which consumers must read as "no throughput data" rather than "zero throughput".
 
 `trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
 
