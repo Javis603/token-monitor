@@ -236,6 +236,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 /* driven by JS overflow detection (see renderer/app.js). */
 .shell.title-collapsed .app-title-text, .shell.title-icon-only .app-title-text { display: none; }
 .shell.title-collapsed .app-title-mark, .shell.title-icon-only .app-title-mark { display: inline; }
+.app-title-mark,
+.live-dot { -webkit-app-region: no-drag; }
 .live-dot {
   display: inline-block;
   width: 4px;
@@ -250,6 +252,33 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .live-dot.live {
   background: var(--accent);
   box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.55);
+}
+.token-rate-reveal {
+  display: inline-block;
+  max-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: max-width 180ms ease, margin-left 180ms ease, color 180ms ease, opacity 180ms ease;
+  vertical-align: baseline;
+}
+.shell.title-icon-only .app-title-mark:hover ~ .token-rate-reveal.has-value,
+.shell.title-icon-only .live-dot:hover ~ .token-rate-reveal.has-value,
+.shell.title-collapsed .app-title-mark:hover ~ .token-rate-reveal.has-value,
+.shell.title-collapsed .live-dot:hover ~ .token-rate-reveal.has-value {
+  max-width: 84px;
+  margin-left: 6px;
+  color: var(--text);
+  opacity: 0.82;
+}
+@media (prefers-reduced-motion: reduce) {
+  .token-rate-reveal { transition: none; }
 }
 /* One-shot flare on data update — flares, then settles back to the resting
    .live glow. No `infinite`, so the GPU compositor can idle between updates. */

@@ -303,7 +303,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
   viewBackRow: document.getElementById('viewBackRow'),
@@ -722,6 +722,56 @@ function hideTotalCompact() {
   if (!els.totalTokensCompact) return;
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
+}
+function tokenRateActiveTimeMs(history, period, todayKey) {
+  const toMs = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
+  const daily = Array.isArray(history?.daily) ? history.daily : [];
+  const monthly = Array.isArray(history?.monthly) ? history.monthly : [];
+  const dayKey = String(todayKey || '').slice(0, 10);
+  if (period === 'today') {
+    return daily.reduce((sum, day) => String(day?.date || '').slice(0, 10) === dayKey
+      ? sum + toMs(day?.activeTimeMs)
+      : sum, 0);
+  }
+  if (period === 'month') {
+    const monthKey = dayKey.slice(0, 7);
+    const monthlyActiveTime = monthly.reduce((sum, month) => String(month?.month || '').slice(0, 7) === monthKey
+      ? sum + toMs(month?.activeTimeMs)
+      : sum, 0);
+    if (monthlyActiveTime > 0) return monthlyActiveTime;
+    return daily.reduce((sum, day) => String(day?.date || '').slice(0, 7) === monthKey
+      ? sum + toMs(day?.activeTimeMs)
+      : sum, 0);
+  }
+  const summaryActiveTime = toMs(history?.summary?.activeTimeMs);
+  if (summaryActiveTime > 0) return summaryActiveTime;
+  return monthly.reduce((sum, month) => sum + toMs(month?.activeTimeMs), 0);
+}
+function tokenRatePerMinute(totalTokens, history, period, todayKey) {
+  const tokens = Number(totalTokens);
+  const activeTimeMs = tokenRateActiveTimeMs(history, period, todayKey);
+  if (!Number.isFinite(tokens) || tokens <= 0 || activeTimeMs <= 0) return 0;
+  return tokens * 60000 / activeTimeMs;
+}
+function renderTokenRate() {
+  if (!els.tokenRateReveal) return;
+  const todayKey = window.TokenMonitorUsageCharts?.localDayKey?.() || '';
+  const period = state.stats?.periods?.[state.period];
+  const history = homeOverviewApi.pickHomeHistory(state.homeHistory, state.stats?.historyPreview);
+  const rate = tokenRatePerMinute(
+    period?.totalTokens,
+    history,
+    state.period,
+    todayKey
+  );
+  const text = rate > 0
+    ? `≈ ${formatCompact(rate, effectiveCompactTokenUnits(), currentLocale())}/min`
+    : '';
+  els.tokenRateReveal.textContent = text;
+  els.tokenRateReveal.classList.toggle('has-value', Boolean(text));
 }
 // Scale the exact total to fit the width it is actually given instead of clipping
 // it to an ellipsis. The compact chip (when shown) is flex:0 0 auto and claims its
@@ -4962,6 +5012,7 @@ function render() {
   }
   state.currentTotal = nextTotal;
   els.cost.textContent = formatCost(period.costUsd || 0);
+  renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
@@ -8249,6 +8300,7 @@ els.hubModeOptions.addEventListener('change', async (event) => {
 els.languageInput?.addEventListener('change', async () => {
   await saveSettings({ language: els.languageInput.value });
   if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
+  renderTokenRate();
 });
 
 els.currencyInput?.addEventListener('change', async () => {
@@ -8455,10 +8507,12 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
   );
   await saveAppearanceFromControls();
   if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
+  renderTokenRate();
 });
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
   if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
+  renderTokenRate();
 });
 window.addEventListener('resize', () => { if (!numberAnimHandle) fitTotalNumber(); });
 els.swapSettingsRefreshInput.addEventListener('change', () => {
