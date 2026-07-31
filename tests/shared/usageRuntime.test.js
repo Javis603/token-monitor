@@ -85,12 +85,66 @@ test('forced Cursor sync bypasses the throttle and resets the ordinary cadence',
   };
 
   try {
-    await collectUsageOnce({ ...options, forceCursorSync: true });
+    await collectUsageOnce({ ...options, forceSelfSync: true });
     await collectUsageOnce(options);
     assert.equal(syncCalls, 1);
   } finally {
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
+  }
+});
+
+test('a scoped force syncs only the client it names', async () => {
+  const originalReadActiveAccount = cursorAuth.readActiveAccount;
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  let cursorSyncs = 0;
+  let antigravitySyncs = 0;
+  cursorAuth.readActiveAccount = () => ({ accountId: 'cursor-test' });
+  cursorAuth.runCursorSync = async () => { cursorSyncs += 1; };
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-self-sync-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  const options = {
+    clients: 'cursor,antigravity',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-only',
+    historyEnabled: false,
+    homeDir: home,
+    runTokscale: async () => emptyTokscaleResult(),
+    runAntigravitySync: async () => { antigravitySyncs += 1; }
+  };
+
+  try {
+    // lastSyncAt lives at module scope, so arm both throttles here rather than
+    // inheriting whatever earlier tests left behind. After this, the only thing
+    // that can produce another sync is an explicit force.
+    await collectUsageOnce({ ...options, forceSelfSync: true });
+    const [primedCursor, primedAntigravity] = [cursorSyncs, antigravitySyncs];
+
+    // A Cursor sign-in must not drag an unrelated `tokscale antigravity sync`
+    // along with it, and vice versa.
+    await collectUsageOnce({ ...options, forceSelfSync: ['cursor'] });
+    assert.equal(cursorSyncs, primedCursor + 1);
+    assert.equal(antigravitySyncs, primedAntigravity);
+
+    await collectUsageOnce({ ...options, forceSelfSync: ['antigravity'] });
+    assert.equal(cursorSyncs, primedCursor + 1);
+    assert.equal(antigravitySyncs, primedAntigravity + 1);
+
+    // `true` is the manual-refresh case: every self-synced client at once.
+    await collectUsageOnce({ ...options, forceSelfSync: true });
+    assert.equal(cursorSyncs, primedCursor + 2);
+    assert.equal(antigravitySyncs, primedAntigravity + 2);
+
+    // And an unforced tick still respects the throttle both syncs just reset.
+    await collectUsageOnce(options);
+    assert.equal(cursorSyncs, primedCursor + 2);
+    assert.equal(antigravitySyncs, primedAntigravity + 2);
+  } finally {
+    cursorAuth.readActiveAccount = originalReadActiveAccount;
+    cursorAuth.runCursorSync = originalRunCursorSync;
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -130,6 +184,56 @@ test('refreshClient cursor runs one targeted today scan without rebuilding the r
     runtime.stop();
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
+  }
+});
+
+test('a coalesced manual refresh stays a full scan', async () => {
+  // The coalesced replay used to derive todayOnly from the force-sync flag,
+  // which was invisible while only refreshClient set that flag. Now that the
+  // refresh button sets it too, the derivation would silently downgrade a
+  // manual "rescan everything" into a one-partition warm scan.
+  const flags = [];
+  const updates = [];
+  let gate = null;
+
+  const runtime = startCollector({
+    clients: 'codex',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-runtime',
+    intervalMs: 60000,
+    watchEnabled: false,
+    historyEnabled: false,
+    runTokscale: async ({ flags: scanFlags }) => {
+      flags.push(scanFlags);
+      if (gate) await gate.promise;
+      return emptyTokscaleResult();
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitFor(() => updates.length >= 1);
+    const callsAfterStartup = flags.length;
+    assert.equal(callsAfterStartup, 3, 'startup should be a full today/month/allTime scan');
+
+    // Hold the first manual tick inside tokscale so the second one has to
+    // coalesce onto it instead of running on its own.
+    let release;
+    gate = { promise: new Promise((resolve) => { release = resolve; }) };
+    const first = runtime.tick('manual', { forceSelfSync: true });
+    await waitFor(() => flags.length > callsAfterStartup);
+    const second = runtime.tick('manual', { forceSelfSync: true });
+    gate = null;
+    release();
+    await Promise.all([first, second]);
+
+    // 3 for the tick that was in flight, 3 for the coalesced replay. A replay
+    // that had inherited todayOnly would have added a single ['--today'].
+    assert.equal(flags.length, callsAfterStartup + 6);
+    assert.deepEqual(flags.at(-1), flags[2]);
+  } finally {
+    runtime.stop();
   }
 });
 

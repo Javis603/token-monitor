@@ -3440,14 +3440,16 @@ async function writeExportTo(dir, periods, options = {}) {
 
 async function fetchStats(options = {}) {
   const force = Boolean(options?.force);
-  // forceHistory stays independent of `force` on purpose: tool settings, account
-  // sign-ins and limits actions all refresh with { force: true }, so folding the
-  // history rescan into it would spawn the expensive `tokscale graph` on each one.
-  // Only the manual refresh button opts in.
+  // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
+  // settings, account sign-ins and limits actions all refresh with { force: true },
+  // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
+  // and Antigravity sync subprocesses — on every one of them. Only the manual
+  // refresh button opts in.
   const canRefreshRuntime = mode === 'local' || !isExternalAgentActive();
   if (force && deviceRuntimeHandle && canRefreshRuntime) {
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       forceHistory: Boolean(options?.forceHistory),
+      forceSelfSync: Boolean(options?.forceSelfSync),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
     });
   }

@@ -8532,10 +8532,11 @@ els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openE
 els.reportIssueButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_ISSUES_URL));
 els.refreshButton.addEventListener('click', () => {
   if (state.breakdown === 'status') refreshStatusViewManually().catch(() => {});
-  // Only this button asks for a history rescan: `{ force: true }` is used all over the
-  // settings/account flows, and folding history into it would re-run the expensive
-  // `tokscale graph` on every one of them.
-  else refreshStats({ force: true, forceHistory: true, feedback: true });
+  // Only this button asks for a history rescan and a self-sync: `{ force: true }` is
+  // used all over the settings/account flows, and folding those into it would re-run
+  // the expensive `tokscale graph`, plus the Cursor and Antigravity sync subprocesses,
+  // on every one of them.
+  else refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
 });
 els.minButton.addEventListener('click', () => window.tokenMonitor.minimize());
 els.closeButton.addEventListener('click', () => window.tokenMonitor.close());
