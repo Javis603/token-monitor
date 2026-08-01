@@ -68,6 +68,39 @@ function waitForEvent(watcher, predicate) {
   });
 }
 
+function waitForWatchRegistration(watcher, expectedPath) {
+  assert.strictEqual(
+    typeof watcher._addPathCloser,
+    'function',
+    'chokidar no longer exposes its native watch-registration hook'
+  );
+  return new Promise((resolve, reject) => {
+    const originalAddPathCloser = watcher._addPathCloser;
+    const expected = path.resolve(expectedPath);
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`native watcher registration did not complete within ${EVENT_TIMEOUT_MS}ms on ${process.platform}`));
+    }, EVENT_TIMEOUT_MS);
+    timer.unref();
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    function cleanup() {
+      clearTimeout(timer);
+      watcher._addPathCloser = originalAddPathCloser;
+      watcher.off('error', onError);
+    }
+    watcher._addPathCloser = function addPathCloser(watchedPath, closer) {
+      originalAddPathCloser.call(this, watchedPath, closer);
+      if (path.resolve(watchedPath) !== expected) return;
+      cleanup();
+      resolve();
+    };
+    watcher.once('error', onError);
+  });
+}
+
 async function watchAndCollect(dir, act) {
   const events = [];
   const watcher = chokidar.watch(dir, watcherOptions(false));
@@ -77,7 +110,7 @@ async function watchAndCollect(dir, act) {
       watcher.once('error', reject);
     });
     watcher.on('all', (event, filePath) => events.push({ event, filePath }));
-    await act((predicate) => waitForEvent(watcher, predicate));
+    await act((predicate) => waitForEvent(watcher, predicate), watcher);
   } finally {
     await watcher.close();
   }
@@ -112,11 +145,20 @@ test('native file events reach a subdirectory created after the watch started', 
   const dir = withTmpDir();
   try {
     const projectDir = path.join(dir, 'a-new-project');
-    const events = await watchAndCollect(dir, async (waitFor) => {
+    const events = await watchAndCollect(dir, async (waitFor, watcher) => {
+      // FSEvents watches the root recursively, so there is no per-directory
+      // native handle to await. The node fs backends do install one for the
+      // newly discovered directory, and addDir is emitted before that handle
+      // exists; use chokidar's registration hook as the deterministic barrier
+      // on those platforms.
+      const registration = watcher.options.useFsEvents
+        ? Promise.resolve()
+        : waitForWatchRegistration(watcher, projectDir);
       fs.mkdirSync(projectDir);
       await waitFor((event, filePath) => (
         event === 'addDir' && path.resolve(filePath) === path.resolve(projectDir)
       ));
+      await registration;
       const fileEvent = waitFor((event, filePath) => (
         path.resolve(filePath) === path.resolve(path.join(projectDir, 'session.jsonl'))
         && (event === 'add' || event === 'change')
