@@ -6,7 +6,6 @@ const test = require('node:test');
 const {
   isTeamPrefixedAppGroup,
   profileIsRequired,
-  readProvisioningProfile,
   validateProvisioningProfile,
   validateProvisioningProfiles
 } = require('../../scripts/macos-provisioning');
@@ -18,10 +17,28 @@ const APP_GROUP = 'group.com.example.tokenmonitor';
 
 function fixtureProfiles() {
   return {
-    app: readProvisioningProfile(appPath, { plainPlist: true }),
-    widget: readProvisioningProfile(widgetPath, { plainPlist: true })
+    app: {
+      applicationIdentifier: 'ABCDE12345.com.example.tokenmonitor',
+      teamIdentifier: 'ABCDE12345',
+      applicationGroups: [APP_GROUP],
+      expirationDate: new Date('2030-01-01T00:00:00Z'),
+      getTaskAllow: false
+    },
+    widget: {
+      applicationIdentifier: 'ABCDE12345.com.example.tokenmonitor.widget',
+      teamIdentifier: 'ABCDE12345',
+      applicationGroups: [APP_GROUP],
+      expirationDate: new Date('2030-01-01T00:00:00Z'),
+      getTaskAllow: false
+    }
   };
 }
+
+test('reads fixture provisioning profiles on macOS', { skip: process.platform !== 'darwin' }, () => {
+  const { readProvisioningProfile } = require('../../scripts/macos-provisioning');
+  assert.equal(readProvisioningProfile(appPath, { plainPlist: true }).teamIdentifier, 'ABCDE12345');
+  assert.equal(readProvisioningProfile(widgetPath, { plainPlist: true }).applicationIdentifier, 'ABCDE12345.com.example.tokenmonitor.widget');
+});
 
 test('validates fixture app and Widget profiles for the production App Group', () => {
   const result = validateProvisioningProfiles({

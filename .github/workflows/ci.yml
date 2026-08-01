@@ -67,6 +67,7 @@ jobs:
           TOKEN_MONITOR_APP_GROUP: group.com.example.tokenmonitor
           TOKEN_MONITOR_WIDGET_BUNDLE_ID: com.example.tokenmonitor.widget
           TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING: '1'
+          CSC_FOR_PULL_REQUEST: 'true'
         run: |
           npm run pack:mac:widget
           npm run verify:mac:widget-app
