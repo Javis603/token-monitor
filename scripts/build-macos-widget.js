@@ -3,7 +3,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { normalizeWidgetURLScheme } = require('./macos-widget-config');
+const {
+  normalizeMacDistributionChannel,
+  normalizeWidgetURLScheme,
+  validateAppGroup
+} = require('./macos-widget-config');
 const {
   profileIsRequired,
   profilePath,
@@ -95,8 +99,17 @@ function assertWidgetArchitecture(extension, helperBinary, architecture) {
   }
 }
 
-function validateDistributionIdentifiers({ appGroup, bundleId, appId = DEFAULT_APP_ID, distributionBuild }) {
-  if (!distributionBuild) return;
+function validateDistributionIdentifiers({
+  appGroup,
+  bundleId,
+  appId = DEFAULT_APP_ID,
+  distributionBuild,
+  developmentTeam = process.env.DEVELOPMENT_TEAM
+}) {
+  if (!distributionBuild) {
+    validateAppGroup(appGroup, { developmentTeam });
+    return;
+  }
   if (!process.env.TOKEN_MONITOR_APP_GROUP || /^group\.com\.example\./i.test(appGroup)) {
     throw new Error('TOKEN_MONITOR_APP_GROUP must be explicitly configured for a distribution build');
   }
@@ -106,6 +119,7 @@ function validateDistributionIdentifiers({ appGroup, bundleId, appId = DEFAULT_A
   if (!bundleId.startsWith(`${appId}.`)) {
     throw new Error(`TOKEN_MONITOR_WIDGET_BUNDLE_ID must be in the ${appId}. namespace`);
   }
+  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: true });
 }
 
 function xmlEscape(value) {
@@ -174,8 +188,12 @@ function main() {
   const versions = widgetVersions();
   const appId = DEFAULT_APP_ID;
   const distributionBuild = process.env.TOKEN_MONITOR_WIDGET_DISTRIBUTION === '1';
-  validateDistributionIdentifiers({ appGroup, bundleId, appId, distributionBuild });
   const localDevelopmentSigning = process.env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING === '1';
+  const developmentTeam = String(process.env.DEVELOPMENT_TEAM || '').trim();
+  validateDistributionIdentifiers({ appGroup, bundleId, appId, distributionBuild, developmentTeam });
+  const distributionChannel = distributionBuild
+    ? normalizeMacDistributionChannel(process.env.TOKEN_MONITOR_MAC_DISTRIBUTION_CHANNEL)
+    : null;
   const appProfilePath = profilePath(process.env, 'TOKEN_MONITOR_APP_PROVISIONING_PROFILE');
   const widgetProfilePath = profilePath(process.env, 'TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE');
   if (profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup })) {
@@ -184,17 +202,14 @@ function main() {
       widgetProfilePath,
       appBundleId: appId,
       widgetBundleId: bundleId,
-      appGroup
+      appGroup,
+      developmentTeam,
+      distributionChannel
     });
   }
   if (localDevelopmentSigning && !distributionBuild) {
     console.log('[mac-widget] Local ad-hoc preview does not validate production App Group authorization.');
   }
-  const developmentTeam = String(process.env.DEVELOPMENT_TEAM || '').trim();
-  if (developmentTeam && !/^[A-Z0-9]+$/.test(developmentTeam)) {
-    throw new Error('DEVELOPMENT_TEAM contains unsupported characters');
-  }
-
   fs.rmSync(OUTPUT, { recursive: true, force: true });
   fs.mkdirSync(OUTPUT, { recursive: true });
   const xcconfigPath = path.join(OUTPUT, 'local-widget-build.xcconfig');

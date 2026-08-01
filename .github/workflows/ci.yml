@@ -41,8 +41,27 @@ jobs:
             || { echo "::error::worker/src/shared is stale — run 'npm run sync:worker' and commit."; exit 1; }
       - run: npm run lint
       - run: npm test
+
+  mac-widget:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Run macOS Widget Node tests
+        run: >-
+          node --test
+          tests/shared/macWidgetSnapshot.test.js
+          tests/electron/macWidgetBridge.test.js
+          tests/electron/macWidgetDeepLink.test.js
+          tests/electron/macWidgetReloader.test.js
+          tests/electron/macWidgetSigning.test.js
+          tests/electron/macosProvisioning.test.js
+          tests/electron/macWidgetIntegration.test.js
       - name: Run native macOS Widget tests
-        if: runner.os == 'macOS'
         run: >-
           xcodebuild
           -project native/macos/TokenMonitorWidget.xcodeproj
@@ -50,17 +69,17 @@ jobs:
           -destination 'platform=macOS'
           test
           CODE_SIGNING_ALLOWED=NO
-      - name: Build unsigned native macOS Widget extension
-        if: runner.os == 'macOS'
+      - name: Build and verify arm64 Widget extension
+        env:
+          TOKEN_MONITOR_WIDGET_ARCH: arm64
         run: |
-          TOKEN_MONITOR_WIDGET_ARCH=arm64 npm run build:mac-widget
+          npm run build:mac-widget
           test -d build/macos-widget/TokenMonitorWidget.appex
           test -x build/macos-widget/TokenMonitorWidgetReloader
           test "$(lipo -archs build/macos-widget/TokenMonitorWidget.appex/Contents/MacOS/TokenMonitorWidget)" = "arm64"
           test "$(lipo -archs build/macos-widget/TokenMonitorWidgetReloader)" = "arm64"
           test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' build/macos-widget/TokenMonitorWidget.entitlements)" = "group.com.example.tokenmonitor"
       - name: Package and verify a complete local Widget app
-        if: runner.os == 'macOS'
         env:
           TOKEN_MONITOR_WIDGET_ENABLED: '1'
           TOKEN_MONITOR_WIDGET_ARCH: arm64
@@ -71,9 +90,15 @@ jobs:
         run: |
           npm run pack:mac:widget
           npm run verify:mac:widget-app
-          TOKEN_MONITOR_WIDGET_ARCH=x64 npm run build:mac-widget
+      - name: Build and verify x64 Widget extension
+        env:
+          TOKEN_MONITOR_WIDGET_ARCH: x64
+        run: |
+          npm run build:mac-widget
           test -d build/macos-widget/TokenMonitorWidget.appex
           test -x build/macos-widget/TokenMonitorWidgetReloader
           test "$(lipo -archs build/macos-widget/TokenMonitorWidget.appex/Contents/MacOS/TokenMonitorWidget)" = "x86_64"
           test "$(lipo -archs build/macos-widget/TokenMonitorWidgetReloader)" = "x86_64"
           test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' build/macos-widget/TokenMonitorWidget.entitlements)" = "group.com.example.tokenmonitor"
+      - name: Check Widget CI diff
+        run: git diff --check

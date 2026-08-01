@@ -4,10 +4,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-
-function isTeamPrefixedAppGroup(appGroup) {
-  return /^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/.test(String(appGroup || '').trim());
-}
+const {
+  classifyAppGroup,
+  isTeamPrefixedAppGroup,
+  normalizeMacDistributionChannel,
+  validateAppGroup
+} = require('../src/shared/macWidgetConfig');
 
 function profilePath(env, name) {
   const value = String(env?.[name] || '').trim();
@@ -15,7 +17,11 @@ function profilePath(env, name) {
 }
 
 function profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup }) {
-  return Boolean(distributionBuild && !localDevelopmentSigning && String(appGroup || '').startsWith('group.'));
+  return Boolean(
+    distributionBuild
+    && !localDevelopmentSigning
+    && classifyAppGroup(appGroup) === 'group-profile'
+  );
 }
 
 function parseProvisioningProfileDocument(document) {
@@ -44,7 +50,7 @@ function parseProvisioningProfileDocument(document) {
     expirationDate: document?.ExpirationDate ? new Date(document.ExpirationDate) : null,
     getTaskAllow,
     provisionsAllDevices: document?.ProvisionsAllDevices === true,
-    hasProvisionedDevices: Array.isArray(document?.ProvisionedDevices) && document.ProvisionedDevices.length > 0
+    hasProvisionedDevices: Object.hasOwn(document || {}, 'ProvisionedDevices')
   };
 }
 
@@ -109,11 +115,23 @@ function readProvisioningProfile(filePath, options = {}) {
   }
 }
 
-function validateProvisioningProfile(profile, { role, bundleId, appGroup, now = new Date() }) {
+function validateProvisioningProfile(profile, {
+  role,
+  bundleId,
+  appGroup,
+  now = new Date(),
+  developmentTeam,
+  distributionChannel
+}) {
   const label = role === 'extension' ? 'Widget extension' : 'main app';
   if (!profile || typeof profile !== 'object') throw new Error(`${label} provisioning profile could not be decoded`);
+  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: true });
+  normalizeMacDistributionChannel(distributionChannel);
   if (!/^[A-Z0-9]{10}$/.test(profile.teamIdentifier)) {
     throw new Error(`${label} provisioning profile has no valid Team ID`);
+  }
+  if (developmentTeam && profile.teamIdentifier !== developmentTeam) {
+    throw new Error(`${label} provisioning profile Team ID does not match DEVELOPMENT_TEAM`);
   }
   const expectedApplicationIdentifier = `${profile.teamIdentifier}.${bundleId}`;
   if (profile.applicationIdentifier !== expectedApplicationIdentifier) {
@@ -128,6 +146,12 @@ function validateProvisioningProfile(profile, { role, bundleId, appGroup, now = 
   if (profile.getTaskAllow) {
     throw new Error(`${label} provisioning profile is a development profile; distribution requires a non-development profile`);
   }
+  if (profile.provisionsAllDevices !== true) {
+    throw new Error(`${label} provisioning profile is not a Developer ID distribution profile: ProvisionsAllDevices is false`);
+  }
+  if (profile.hasProvisionedDevices) {
+    throw new Error(`${label} provisioning profile is not a Developer ID distribution profile: ProvisionedDevices is present`);
+  }
   return profile;
 }
 
@@ -138,16 +162,24 @@ function validateProvisioningProfiles({
   widgetBundleId,
   appGroup,
   now,
-  profileReader
+  profileReader,
+  developmentTeam,
+  distributionChannel
 }) {
+  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: true });
+  normalizeMacDistributionChannel(distributionChannel);
   if (!appProfilePath || !widgetProfilePath) {
     throw new Error('Production Widget distribution with a group.* App Group requires TOKEN_MONITOR_APP_PROVISIONING_PROFILE and TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE');
   }
   const readerOptions = profileReader ? { profileReader } : {};
   const appProfile = readProvisioningProfile(appProfilePath, readerOptions);
   const widgetProfile = readProvisioningProfile(widgetProfilePath, readerOptions);
-  validateProvisioningProfile(appProfile, { role: 'app', bundleId: appBundleId, appGroup, now });
-  validateProvisioningProfile(widgetProfile, { role: 'extension', bundleId: widgetBundleId, appGroup, now });
+  validateProvisioningProfile(appProfile, {
+    role: 'app', bundleId: appBundleId, appGroup, now, developmentTeam, distributionChannel
+  });
+  validateProvisioningProfile(widgetProfile, {
+    role: 'extension', bundleId: widgetBundleId, appGroup, now, developmentTeam, distributionChannel
+  });
   if (appProfile.teamIdentifier !== widgetProfile.teamIdentifier) {
     throw new Error('Main app and Widget extension provisioning profiles use different Team IDs');
   }
@@ -162,6 +194,7 @@ async function copyProvisioningProfiles({ appProfilePath, widgetProfilePath, app
 }
 
 module.exports = {
+  classifyAppGroup,
   copyProvisioningProfiles,
   isTeamPrefixedAppGroup,
   parseProvisioningProfileDocument,

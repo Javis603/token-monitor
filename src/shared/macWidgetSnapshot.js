@@ -42,6 +42,45 @@ function normalizedIso(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function sourceTimestamp(value) {
+  const timestamp = Date.parse(String(value || ''));
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function validSourceDevice(device) {
+  return Boolean(
+    device
+    && typeof device === 'object'
+    && (
+      String(device.deviceId || device.id || '').trim()
+      || (device.periods && typeof device.periods === 'object')
+      || sourceTimestamp(device.receivedAt) !== null
+      || sourceTimestamp(device.updatedAt) !== null
+    )
+  );
+}
+
+function resolveWidgetSourceFreshness(stats, _now = new Date()) {
+  const devices = Array.isArray(stats?.devices) ? stats.devices.filter(validSourceDevice) : [];
+  if (devices.length > 0) {
+    const deviceTimes = devices.map((device) => (
+      sourceTimestamp(device.receivedAt) ?? sourceTimestamp(device.updatedAt)
+    )).filter((value) => value !== null);
+    const newest = deviceTimes.length > 0 ? Math.max(...deviceTimes) : null;
+    return {
+      sourceUpdatedAt: newest === null
+        ? normalizedIso(stats?.updatedAt || stats?.generatedAt)
+        : new Date(newest).toISOString(),
+      sourceStale: devices.every((device) => device.stale === true)
+    };
+  }
+
+  return {
+    sourceUpdatedAt: normalizedIso(stats?.updatedAt || stats?.generatedAt),
+    sourceStale: Boolean(stats?.stale)
+  };
+}
+
 function normalizedStatus(value) {
   const status = String(value || '').trim();
   return KNOWN_LIMIT_STATUSES.has(status) ? status : 'error';
@@ -136,7 +175,7 @@ function buildProviderBalance(provider) {
 function buildQuota(limits) {
   const providers = Array.isArray(limits?.providers) ? limits.providers : [];
   const candidates = [];
-  for (const provider of providers) {
+  for (const [inputIndex, provider] of providers.entries()) {
     if (!provider || typeof provider !== 'object') continue;
     const providerId = String(provider.provider || '').trim().toLowerCase();
     if (!KNOWN_LIMIT_PROVIDERS.has(providerId)) continue;
@@ -145,6 +184,8 @@ function buildQuota(limits) {
       : [];
     const balance = buildProviderBalance(provider);
     const accountKey = String(provider.accountKey || '').trim();
+    const source = String(provider.source || '').trim().toLowerCase();
+    const sourceDetail = String(provider.sourceDetail || '').trim().toLowerCase();
     const stableRecord = {
       provider: providerId,
       status: normalizedStatus(provider.status),
@@ -153,7 +194,10 @@ function buildQuota(limits) {
     };
     candidates.push({
       accountKey,
-      identitySortKey: accountKey ? `key:${accountKey}` : `record:${stableJson(stableRecord)}`,
+      identitySortKey: accountKey
+        ? `key:${accountKey}`
+        : `anonymous:${source}|${sourceDetail}`,
+      inputIndex,
       record: {
       provider: providerId,
       status: stableRecord.status,
@@ -166,10 +210,15 @@ function buildQuota(limits) {
   candidates.sort((left, right) => (
     left.record.provider.localeCompare(right.record.provider)
     || left.identitySortKey.localeCompare(right.identitySortKey)
-    || JSON.stringify(left.record).localeCompare(JSON.stringify(right.record))
+    || left.inputIndex - right.inputIndex
   ));
   const providerCounts = new Map();
+  const providerTotals = new Map();
+  for (const candidate of candidates) {
+    providerTotals.set(candidate.record.provider, (providerTotals.get(candidate.record.provider) || 0) + 1);
+  }
   const providerOrdinals = new Map();
+  const anonymousOrdinals = new Map();
   const identityCounts = new Map();
   const output = candidates.map((candidate) => {
     const providerId = candidate.record.provider;
@@ -180,9 +229,19 @@ function buildQuota(limits) {
     const identityOrdinal = (identityCounts.get(identityKey) || 0) + 1;
     identityCounts.set(identityKey, identityOrdinal);
     const suffix = identityOrdinal > 1 ? `-${identityOrdinal}` : '';
+    let instanceId;
+    if (candidate.accountKey) {
+      instanceId = `${providerId}-${stableHash(`${identityKey}${suffix}`)}`;
+    } else {
+      const anonymousOrdinal = (anonymousOrdinals.get(providerId) || 0) + 1;
+      anonymousOrdinals.set(providerId, anonymousOrdinal);
+      instanceId = providerTotals.get(providerId) === 1
+        ? `${providerId}-single`
+        : `${providerId}-anonymous-${anonymousOrdinal}`;
+    }
     return {
       ...candidate.record,
-      instanceId: `${providerId}-${stableHash(`${identityKey}${suffix}`)}`,
+      instanceId,
       _providerOrdinal: providerOrdinal
     };
   }).map((provider) => ({
@@ -304,7 +363,7 @@ function buildTrend(history) {
   };
 }
 
-function buildPeriodSnapshot(stats, period, generatedAt, history) {
+function buildPeriodSnapshot(stats, period, generatedAt, history, sourceUpdatedAt) {
   const current = periodStats(stats, period);
   const tools = buildTools(current);
   const models = buildModels(current);
@@ -315,7 +374,7 @@ function buildPeriodSnapshot(stats, period, generatedAt, history) {
     totalTokens: Math.round(nonNegativeNumber(current.totalTokens)),
     costUsd: nonNegativeNumber(current.costUsd),
     primaryTool: tools[0]?.id || null,
-    updatedAt: normalizedIso(stats?.updatedAt) || generatedAt
+    updatedAt: sourceUpdatedAt || normalizedIso(stats?.updatedAt) || generatedAt
   };
   return { overview, models, activity, trend };
 }
@@ -336,14 +395,14 @@ function buildPresentation(source = {}, period = 'today') {
   };
 }
 
-function buildStatus({ generatedAt, stats, quota, periods, now }) {
-  const sourceUpdatedAt = normalizedIso(stats?.updatedAt || stats?.generatedAt);
+function buildStatus({ generatedAt, quota, periods, now, sourceFreshness }) {
+  const sourceUpdatedAt = sourceFreshness.sourceUpdatedAt;
   const sourceTime = sourceUpdatedAt ? Date.parse(sourceUpdatedAt) : now.getTime();
   const dataAgeSeconds = Math.max(0, Math.round((now.getTime() - sourceTime) / 1000));
   const statuses = quota.map((provider) => provider.status);
   return {
-    isStale: Boolean(stats?.stale) || dataAgeSeconds > 20 * 60,
-    sourceStale: Boolean(stats?.stale),
+    isStale: sourceFreshness.sourceStale || dataAgeSeconds > 20 * 60,
+    sourceStale: sourceFreshness.sourceStale,
     dataAgeSeconds,
     providerConfigured: statuses.some((status) => !['notConfigured', 'disabled'].includes(status)),
     providerNeedsLogin: statuses.some((status) => status === 'unauthorized'),
@@ -361,13 +420,14 @@ function buildMacWidgetSnapshot(stats, options = {}) {
   const now = options.now === undefined ? new Date() : new Date(options.now);
   const safeNow = Number.isNaN(now.getTime()) ? new Date() : now;
   const generatedAt = safeNow.toISOString();
+  const sourceFreshness = resolveWidgetSourceFreshness(stats, safeNow);
   const presentation = buildPresentation(options.presentation, options.presentation?.defaultPeriod);
   const quota = buildQuota(stats?.limits);
   const history = options.history;
   const periods = {
-    day: buildPeriodSnapshot(stats, 'today', generatedAt, history),
-    month: buildPeriodSnapshot(stats, 'month', generatedAt, history),
-    total: buildPeriodSnapshot(stats, 'allTime', generatedAt, history)
+    day: buildPeriodSnapshot(stats, 'today', generatedAt, history, sourceFreshness.sourceUpdatedAt),
+    month: buildPeriodSnapshot(stats, 'month', generatedAt, history, sourceFreshness.sourceUpdatedAt),
+    total: buildPeriodSnapshot(stats, 'allTime', generatedAt, history, sourceFreshness.sourceUpdatedAt)
   };
   const defaultPeriod = normalizedPeriod(presentation.defaultPeriod);
   const defaultKey = defaultPeriod === 'month' ? 'month' : defaultPeriod === 'allTime' ? 'total' : 'day';
@@ -382,7 +442,7 @@ function buildMacWidgetSnapshot(stats, options = {}) {
     activity: selected.activity,
     trend: selected.trend,
     presentation,
-    status: buildStatus({ generatedAt, stats, quota, periods, now: safeNow })
+    status: buildStatus({ generatedAt, quota, periods, now: safeNow, sourceFreshness })
   };
 }
 
@@ -474,6 +534,7 @@ module.exports = {
   MAC_WIDGET_SCHEMA_VERSION,
   MAC_WIDGET_FRESHNESS_HEARTBEAT_MS,
   buildMacWidgetSnapshot,
+  resolveWidgetSourceFreshness,
   isLikelySensitivePathOrUrl,
   macWidgetSnapshotFingerprint,
   macWidgetSnapshotFingerprintFromSerialized,

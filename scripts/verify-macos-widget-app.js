@@ -5,6 +5,10 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const packageJson = require('../package.json');
 const {
+  normalizeMacDistributionChannel,
+  validateAppGroup
+} = require('../src/shared/macWidgetConfig');
+const {
   readProvisioningProfile,
   profileIsRequired,
   validateProvisioningProfile
@@ -91,6 +95,8 @@ function verifyMacWidgetApp({
   widgetBundleId,
   distributionBuild = false,
   localDevelopmentSigning = false,
+  developmentTeam,
+  distributionChannel,
   skipCodesign = false,
   execFileSyncImpl = execFileSync,
   spawnSyncImpl = spawnSync,
@@ -98,6 +104,12 @@ function verifyMacWidgetApp({
 }) {
   const resolvedApp = path.resolve(String(appPath || '').trim());
   if (!resolvedApp.endsWith('.app')) fail('input must be a complete .app bundle');
+  try {
+    validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: distributionBuild });
+    if (distributionBuild) normalizeMacDistributionChannel(distributionChannel);
+  } catch (error) {
+    fail(error.message);
+  }
   const paths = verifyWidgetAppStructure(resolvedApp);
   const appInfo = readPlist(path.join(paths.contents, 'Info.plist'), execFileSyncImpl);
   const extensionInfo = readPlist(path.join(paths.extension, 'Contents', 'Info.plist'), execFileSyncImpl);
@@ -157,8 +169,12 @@ function verifyMacWidgetApp({
     const readerOptions = profileReader ? { profileReader } : {};
     const appProfile = readProvisioningProfile(appProfilePath, readerOptions);
     const widgetProfile = readProvisioningProfile(widgetProfilePath, readerOptions);
-    validateProvisioningProfile(appProfile, { role: 'app', bundleId: appId, appGroup });
-    validateProvisioningProfile(widgetProfile, { role: 'extension', bundleId: widgetBundleId, appGroup });
+    validateProvisioningProfile(appProfile, {
+      role: 'app', bundleId: appId, appGroup, developmentTeam, distributionChannel
+    });
+    validateProvisioningProfile(widgetProfile, {
+      role: 'extension', bundleId: widgetBundleId, appGroup, developmentTeam, distributionChannel
+    });
     if (appProfile.teamIdentifier !== widgetProfile.teamIdentifier) {
       fail('embedded provisioning profiles use different Team IDs');
     }
@@ -188,7 +204,9 @@ if (require.main === module) {
     appGroup: process.env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor',
     widgetBundleId: process.env.TOKEN_MONITOR_WIDGET_BUNDLE_ID || 'com.javis.tokenmonitor.widget',
     distributionBuild: process.env.TOKEN_MONITOR_WIDGET_DISTRIBUTION === '1',
-    localDevelopmentSigning: process.env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING === '1'
+    localDevelopmentSigning: process.env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING === '1',
+    developmentTeam: process.env.DEVELOPMENT_TEAM,
+    distributionChannel: process.env.TOKEN_MONITOR_MAC_DISTRIBUTION_CHANNEL
   });
   console.log(`[mac-widget] verified ${appPath}`);
 }

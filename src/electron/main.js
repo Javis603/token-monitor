@@ -2659,6 +2659,7 @@ function macWidgetConfiguration() {
   }
   const snapshotPath = resolveMacWidgetSnapshotPath({
     appGroup,
+    developmentTeam: process.env.DEVELOPMENT_TEAM,
     home: app.getPath('home'),
     snapshotFileName
   });

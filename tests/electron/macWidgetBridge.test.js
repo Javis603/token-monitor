@@ -10,6 +10,7 @@ const {
   updateMacWidgetSnapshot,
   writeMacWidgetSnapshot
 } = require('../../src/electron/macWidgetBridge');
+const { aggregateDevices } = require('../../src/shared/usage');
 
 async function withTempDirectory(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-widget-'));
@@ -120,6 +121,7 @@ test('resolves only safe macOS App Group snapshot paths', () => {
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'ABCDEFGHIJ.dev.example.widgettest',
+    developmentTeam: 'ABCDEFGHIJ',
     home: '/Users/example'
   }), path.join(
     '/Users/example',
@@ -344,6 +346,39 @@ test('rewrites when a real source refresh restores stale data to fresh', async (
       snapshotOptions: { ...options.snapshotOptions, now: '2026-07-16T10:01:00Z' }
     });
     assert.equal(clockOnly.changed, false);
+  });
+});
+
+test('rewrites when a Hub device refresh restores stale data to fresh without business changes', async () => {
+  await withTempDirectory(async (directory) => {
+    const snapshotPath = path.join(directory, 'snapshot.json');
+    const nowMs = Date.parse('2026-07-16T10:00:00Z');
+    const device = (receivedAt) => ({
+      deviceId: 'remote',
+      updatedAt: receivedAt,
+      receivedAt,
+      periods: {
+        today: { totalTokens: 42, costUsd: 0.5 },
+        month: { totalTokens: 42, costUsd: 0.5 },
+        allTime: { totalTokens: 42, costUsd: 0.5 }
+      }
+    });
+    const options = {
+      platform: 'darwin',
+      snapshotPath,
+      snapshotOptions: {
+        now: new Date(nowMs).toISOString(),
+        history: { daily: [], monthly: [], summary: {} }
+      }
+    };
+
+    const staleStats = aggregateDevices([device('2026-07-16T09:00:00Z')], 20 * 60 * 1000, nowMs);
+    const freshStats = aggregateDevices([device('2026-07-16T09:55:00Z')], 20 * 60 * 1000, nowMs);
+    assert.equal((await updateMacWidgetSnapshot(staleStats, options)).changed, true);
+    assert.equal((await updateMacWidgetSnapshot(freshStats, options)).changed, true);
+    const snapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8'));
+    assert.equal(snapshot.status.isStale, false);
+    assert.equal(snapshot.status.sourceUpdatedAt, '2026-07-16T09:55:00.000Z');
   });
 });
 

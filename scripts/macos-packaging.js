@@ -2,7 +2,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { DEFAULT_WIDGET_URL_SCHEME, normalizeWidgetURLScheme } = require('./macos-widget-config');
+const {
+  DEFAULT_WIDGET_URL_SCHEME,
+  normalizeMacDistributionChannel,
+  normalizeWidgetURLScheme,
+  validateAppGroup
+} = require('./macos-widget-config');
 const { profileIsRequired } = require('./macos-provisioning');
 
 function widgetEnabled(env = process.env) {
@@ -39,8 +44,12 @@ function assertWidgetArtifacts(root, options = {}) {
     ['Widget reloader entitlements', paths.reloaderEntitlements]
   ];
   const appGroup = String(env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor').trim();
+  const distributionBuild = String(env.TOKEN_MONITOR_WIDGET_DISTRIBUTION || '').trim() === '1';
+  const developmentTeam = String(env.DEVELOPMENT_TEAM || '').trim();
+  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: distributionBuild });
+  if (distributionBuild) normalizeMacDistributionChannel(env.TOKEN_MONITOR_MAC_DISTRIBUTION_CHANNEL);
   if (profileIsRequired({
-    distributionBuild: String(env.TOKEN_MONITOR_WIDGET_DISTRIBUTION || '').trim() === '1',
+    distributionBuild,
     localDevelopmentSigning: String(env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING || '').trim() === '1',
     appGroup
   })) {

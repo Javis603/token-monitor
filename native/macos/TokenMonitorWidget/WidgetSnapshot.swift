@@ -231,13 +231,13 @@ struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
         windows = (try? container.decodeIfPresent([WidgetLimitWindow].self, forKey: .windows)) ?? []
         let decodedInstanceId = container.string(.instanceId)
         instanceId = decodedInstanceId.isEmpty
-            ? widgetQuotaFallbackID(provider: provider, status: status, balance: balance, windows: windows)
+            ? widgetQuotaFallbackID(provider: provider)
             : decodedInstanceId
         displayName = container.optionalString(.displayName)
     }
 
     init(provider: String, status: String, updatedAt: Date?, windows: [WidgetLimitWindow], balance: WidgetQuotaBalance? = nil, instanceId: String? = nil, displayName: String? = nil) {
-        self.instanceId = instanceId ?? widgetQuotaFallbackID(provider: provider, status: status, balance: balance, windows: windows)
+        self.instanceId = instanceId ?? widgetQuotaFallbackID(provider: provider)
         self.displayName = displayName
         self.provider = provider
         self.status = status
@@ -430,17 +430,8 @@ private func stableWidgetHash(_ value: String) -> String {
     return String(repeating: "0", count: max(0, 12 - value.count)) + value
 }
 
-private func widgetQuotaFallbackID(
-    provider: String,
-    status: String,
-    balance: WidgetQuotaBalance?,
-    windows: [WidgetLimitWindow]
-) -> String {
-    let balanceKey = balance.map { "\($0.amount)|\($0.currency)" } ?? ""
-    let windowKey = windows.map {
-        "\($0.kind)|\($0.metric ?? "")|\($0.showMeter ? "1" : "0")|\($0.remaining.map { String($0) } ?? "")|\($0.currency ?? "")"
-    }.joined(separator: ";")
-    return "provider-\(stableWidgetHash("\(provider)|\(status)|\(balanceKey)|\(windowKey)"))"
+private func widgetQuotaFallbackID(provider: String) -> String {
+    "\(provider)-single"
 }
 
 private func normalizeQuotaProviders(_ providers: [WidgetQuotaProvider]) -> [WidgetQuotaProvider] {

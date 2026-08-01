@@ -7,8 +7,10 @@ const {
   buildMacWidgetSnapshot,
   isLikelySensitivePathOrUrl,
   macWidgetSnapshotFingerprint,
+  resolveWidgetSourceFreshness,
   serializeMacWidgetSnapshot
 } = require('../../src/shared/macWidgetSnapshot');
+const { aggregateDevices } = require('../../src/shared/usage');
 
 const NOW = '2026-07-17T08:30:00.000Z';
 
@@ -58,6 +60,19 @@ function sampleStats() {
         { date: '2026-07-17', tokens: 50, cost: 0.05 }
       ],
       summary: { activeDays: 3, favoriteModel: 'private-model' }
+    }
+  };
+}
+
+function aggregateDevice(deviceId, sourceTime, totalTokens = 42) {
+  return {
+    deviceId,
+    updatedAt: sourceTime,
+    receivedAt: sourceTime,
+    periods: {
+      today: { totalTokens, costUsd: 0.5 },
+      month: { totalTokens, costUsd: 0.5 },
+      allTime: { totalTokens, costUsd: 0.5 }
     }
   };
 }
@@ -166,6 +181,44 @@ test('keeps multi-account provider identities stable without exporting account d
   for (const privateValue of ['workspace-a', 'workspace-b', 'a@example.com', 'b@example.com', 'auth.json', 'secret-a', 'private-a']) {
     assert.doesNotMatch(JSON.stringify(first), new RegExp(privateValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+});
+
+test('keeps anonymous Provider IDs stable when quota status and values change', () => {
+  const stats = {
+    limits: { providers: [{
+      provider: 'openrouter',
+      source: 'api',
+      sourceDetail: 'credits',
+      status: 'ok',
+      balance: { amount: 12.5, currency: 'USD' },
+      windows: [{ kind: 'billing', remaining: 12.5 }],
+      updatedAt: '2026-07-17T08:25:00.000Z'
+    }] }
+  };
+  const first = buildSnapshot(stats, { now: NOW });
+  stats.limits.providers[0].status = 'unavailable';
+  stats.limits.providers[0].balance.amount = 3.25;
+  stats.limits.providers[0].windows[0].remaining = 3.25;
+  stats.limits.providers[0].updatedAt = '2026-07-17T09:25:00.000Z';
+  const second = buildSnapshot(stats, { now: NOW });
+
+  assert.equal(first.quota[0].instanceId, 'openrouter-single');
+  assert.equal(second.quota[0].instanceId, first.quota[0].instanceId);
+  assert.doesNotMatch(JSON.stringify(first), /credits/);
+});
+
+test('gives duplicate anonymous Provider rows unique IDs using stable input order', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      { provider: 'thirdparty', source: 'api', sourceDetail: 'adapter-a', status: 'ok', windows: [] },
+      { provider: 'thirdparty', source: 'api', sourceDetail: 'adapter-a', status: 'ok', windows: [] }
+    ] }
+  }, { now: NOW });
+
+  assert.deepEqual(snapshot.quota.map((provider) => provider.instanceId), [
+    'thirdparty-anonymous-1', 'thirdparty-anonymous-2'
+  ]);
+  assert.equal(new Set(snapshot.quota.map((provider) => provider.instanceId)).size, 2);
 });
 
 test('merges model display-name collisions before calculating shares', () => {
@@ -290,6 +343,39 @@ test('returns a complete empty schema and stale status for missing or old data',
   const stale = buildSnapshot({ updatedAt: '2026-07-17T07:00:00Z' }, { now: NOW });
   assert.equal(stale.status.isStale, true);
   assert.equal(stale.status.dataAgeSeconds, 5400);
+});
+
+test('derives Widget freshness from real Hub device sources instead of aggregate updatedAt', () => {
+  const now = Date.parse('2026-07-17T10:00:00.000Z');
+  const oldStats = aggregateDevices([
+    aggregateDevice('old', '2026-07-17T09:00:00.000Z')
+  ], 20 * 60 * 1000, now);
+  const mixedStats = aggregateDevices([
+    aggregateDevice('old', '2026-07-17T09:00:00.000Z'),
+    aggregateDevice('new', '2026-07-17T09:55:00.000Z')
+  ], 20 * 60 * 1000, now);
+  const allStaleStats = aggregateDevices([
+    aggregateDevice('old-a', '2026-07-17T09:00:00.000Z'),
+    aggregateDevice('old-b', '2026-07-17T09:10:00.000Z')
+  ], 20 * 60 * 1000, now);
+
+  assert.equal(oldStats.devices[0].stale, true);
+  assert.equal(resolveWidgetSourceFreshness(oldStats, new Date(now)).sourceUpdatedAt, '2026-07-17T09:00:00.000Z');
+  const oldSnapshot = buildSnapshot(oldStats, { now: '2026-07-17T10:00:00.000Z' });
+  assert.equal(oldSnapshot.status.sourceStale, true);
+  assert.equal(oldSnapshot.status.isStale, true);
+  assert.equal(oldSnapshot.status.sourceUpdatedAt, '2026-07-17T09:00:00.000Z');
+  assert.equal(oldSnapshot.overview.updatedAt, '2026-07-17T09:00:00.000Z');
+
+  const mixedSnapshot = buildSnapshot(mixedStats, { now: '2026-07-17T10:00:00.000Z' });
+  assert.equal(mixedSnapshot.status.sourceStale, false);
+  assert.equal(mixedSnapshot.status.isStale, false);
+  assert.equal(mixedSnapshot.status.sourceUpdatedAt, '2026-07-17T09:55:00.000Z');
+  assert.equal(mixedSnapshot.overview.updatedAt, '2026-07-17T09:55:00.000Z');
+
+  const allStaleSnapshot = buildSnapshot(allStaleStats, { now: '2026-07-17T10:00:00.000Z' });
+  assert.equal(allStaleSnapshot.status.sourceStale, true);
+  assert.equal(allStaleSnapshot.status.isStale, true);
 });
 
 test('normalizes invalid values, statuses, names, and percentages', () => {

@@ -9,6 +9,7 @@ const {
   macWidgetSnapshotFingerprintFromSerialized,
   macWidgetSnapshotNeedsWrite
 } = require('../shared/macWidgetSnapshot');
+const { validateAppGroup } = require('../shared/macWidgetConfig');
 
 function resolveMacWidgetSnapshotPath(options = {}) {
   const platform = options.platform || process.platform;
@@ -16,7 +17,12 @@ function resolveMacWidgetSnapshotPath(options = {}) {
   const appGroup = String(options.appGroup || '').trim();
   const home = String(options.home || '').trim();
   const snapshotFileName = String(options.snapshotFileName || 'snapshot.json').trim();
-  if (!/^(?:group|[A-Z0-9]{10})(?:\.[A-Za-z0-9-]+)+$/.test(appGroup) || !home) return null;
+  if (!home) return null;
+  try {
+    validateAppGroup(appGroup, { developmentTeam: options.developmentTeam });
+  } catch (_) {
+    return null;
+  }
   if (!snapshotFileName || path.basename(snapshotFileName) !== snapshotFileName) return null;
   return path.join(home, 'Library', 'Group Containers', appGroup, snapshotFileName);
 }

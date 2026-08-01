@@ -8,8 +8,8 @@
   <array><string>ABCDE12345</string></array>
   <key>ExpirationDate</key>
   <date>2099-01-01T00:00:00Z</date>
-  <key>ProvisionedDevices</key>
-  <array><string>fixture-device</string></array>
+  <key>ProvisionsAllDevices</key>
+  <true/>
   <key>Entitlements</key>
   <dict>
     <key>application-identifier</key>

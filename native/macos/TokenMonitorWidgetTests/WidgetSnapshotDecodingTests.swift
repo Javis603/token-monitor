@@ -62,6 +62,18 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(first.quota.map(\.provider), ["codex", "codex", "openrouter"])
     }
 
+    func testLegacyQuotaFallbackIDsIgnoreVolatileQuotaFields() throws {
+        let first = try decode("""
+        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"openrouter","status":"ok","balance":{"amount":12.5,"currency":"USD"},"windows":[{"kind":"billing","remaining":12.5}]}],"status":{"noData":true}}
+        """)
+        let second = try decode("""
+        {"schemaVersion":5,"generatedAt":"2026-07-17T10:00:00.000Z","quota":[{"provider":"openrouter","status":"unavailable","balance":{"amount":3.25,"currency":"USD"},"windows":[{"kind":"billing","remaining":3.25}]}],"status":{"noData":true}}
+        """)
+
+        XCTAssertEqual(first.quota.map(\.id), ["openrouter-single"])
+        XCTAssertEqual(first.quota.map(\.id), second.quota.map(\.id))
+    }
+
     func testLegacyLimitsUseLossyDecodingForMalformedRows() throws {
         let snapshot = try decode("""
         {"schemaVersion":1,"generatedAt":"2026-07-17T09:00:00Z","today":{"totalTokens":12,"costUsd":0.1},"limits":[{"status":"ok"},{"provider":"codex","status":"ok","windows":[]}]}
