@@ -124,6 +124,7 @@ const {
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
 const { historyPreview, historyRevision } = require('../shared/history');
+const { resolveCompleteHistory } = require('./historySource');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const { resolveMacWidgetSnapshotPath, updateMacWidgetSnapshot } = require('./macWidgetBridge');
@@ -2233,6 +2234,9 @@ let tray = null;
 let latestStats = null;
 let pendingMacWidgetStats = null;
 let macWidgetWriteInFlight = false;
+let cachedMacWidgetHistory = null;
+let cachedMacWidgetHistoryKey = '';
+let macWidgetHistoryRequest = null;
 let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
@@ -2639,6 +2643,59 @@ function macWidgetConfiguration() {
   return cachedMacWidgetConfiguration;
 }
 
+function historyResolverOptions() {
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  return {
+    aggregateHistory,
+    embeddedHub,
+    historyEnabled: settings?.historyEnabled !== false,
+    hubMode: settings?.hubMode,
+    hubUrl,
+    localDevice,
+    mode,
+    secret
+  };
+}
+
+function getCompleteHistory() {
+  return resolveCompleteHistory(historyResolverOptions());
+}
+
+async function getMacWidgetHistory(stats) {
+  const revision = String(stats?.historyRevision || '').trim();
+  const config = historyResolverOptions();
+  const key = [
+    config.mode,
+    config.hubMode,
+    config.historyEnabled,
+    config.hubUrl || '',
+    revision
+  ].join('|');
+  if (revision && cachedMacWidgetHistoryKey === key && cachedMacWidgetHistory) {
+    return cachedMacWidgetHistory;
+  }
+  if (macWidgetHistoryRequest?.key === key) return macWidgetHistoryRequest.promise;
+
+  const promise = getCompleteHistory()
+    .then((history) => {
+      if (revision) {
+        cachedMacWidgetHistory = history;
+        cachedMacWidgetHistoryKey = key;
+      }
+      return history;
+    })
+    .catch((error) => {
+      console.warn(`[mac-widget] complete history unavailable: ${error?.message || error}`);
+      return { daily: [], monthly: [], summary: {} };
+    });
+  macWidgetHistoryRequest = { key, promise };
+  try {
+    return await promise;
+  } finally {
+    if (macWidgetHistoryRequest?.promise === promise) macWidgetHistoryRequest = null;
+  }
+}
+
 function scheduleMacWidgetSnapshot(stats) {
   if (process.platform !== 'darwin' || !stats) return;
   pendingMacWidgetStats = stats;
@@ -2651,6 +2708,7 @@ function scheduleMacWidgetSnapshot(stats) {
         pendingMacWidgetStats = null;
         const config = macWidgetConfiguration();
         if (!config) break;
+        const history = await getMacWidgetHistory(nextStats);
         const result = await updateMacWidgetSnapshot(nextStats, {
           snapshotPath: config.snapshotPath,
           snapshotOptions: {
@@ -2662,7 +2720,8 @@ function scheduleMacWidgetSnapshot(stats) {
               showCost: true,
               locale: settings?.language,
               theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
-            }
+            },
+            history
           },
           logger: (message) => console.warn(message)
         });
@@ -4212,35 +4271,7 @@ function createDashboardWindow() {
 }
 
 async function getDashboardHistory() {
-  if (settings?.historyEnabled === false) return aggregateHistory([]);
-  if (mode === 'local') {
-    // The local collector keeps localDevice.history current (watch + interval
-    // ticks, with carry-forward), so read it directly — exactly as the hub
-    // branch reads /api/history. Forcing a full collection tick here made the
-    // fetch take seconds; on a quick close/reopen the response outlived the
-    // renderer and was dropped, stranding the dashboard on its empty state.
-    return aggregateHistory(localDevice ? [localDevice] : []);
-  }
-  if (settings.hubMode === 'host' && embeddedHub) {
-    // Host mode reads its own hub store in-process, so the dashboard history
-    // doesn't depend on a loopback fetch the local firewall/proxy might block.
-    return embeddedHub.hub.getHistory();
-  }
-  const { url: hubUrl, secret } = effectiveHubConfig();
-  if (!hubUrl) return aggregateHistory([]);
-  const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const response = await fetch(url, {
-      headers: secret ? { authorization: `Bearer ${secret}` } : {},
-      signal: controller.signal
-    });
-    if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-    return response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
+  return getCompleteHistory();
 }
 
 let cursorStatusCache = { value: null, at: 0 };

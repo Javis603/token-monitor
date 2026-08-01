@@ -1,14 +1,11 @@
 'use strict';
 
 const { KNOWN_CLIENTS } = require('./clientTracking');
+const { LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
 
 const MAC_WIDGET_SCHEMA_VERSION = 5;
 const KNOWN_TOOLS = new Set(KNOWN_CLIENTS.split(',').filter(Boolean));
-const KNOWN_LIMIT_PROVIDERS = new Set([
-  'claude', 'codex', 'cursor', 'antigravity', 'opencode', 'deepseek', 'minimax',
-  'mimo', 'grok', 'copilot', 'kiro', 'zai', 'volcengine', 'qoder', 'zaiteam',
-  'kimi', 'ollama'
-]);
+const KNOWN_LIMIT_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
 const KNOWN_LIMIT_STATUSES = new Set([
   'ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited',
   'sourceRateLimited', 'unavailable', 'error'
@@ -90,14 +87,22 @@ function buildLimitWindow(window) {
   const remainingPercent = normalizedPercent(
     window.remainingPercent ?? (usedPercent === null ? null : 100 - usedPercent)
   );
+  const metricValue = String(window.metric || '').trim().toLowerCase();
+  const metric = VALID_LIMIT_WINDOW_METRICS.has(metricValue) ? metricValue : null;
+  const remaining = optionalFiniteNumber(window.remaining);
+  const currency = String(window.currency || '').trim().toUpperCase().slice(0, 8) || null;
   return {
     kind,
+    metric,
+    showMeter: window.showMeter !== false,
     usedPercent,
     remainingPercent,
     resetsAt: normalizedIso(window.resetsAt),
     windowMinutes: window.windowMinutes === null || window.windowMinutes === undefined
       ? null
-      : nonNegativeNumber(window.windowMinutes)
+      : nonNegativeNumber(window.windowMinutes),
+    ...(remaining === null ? {} : { remaining }),
+    ...(currency ? { currency } : {})
   };
 }
 
@@ -203,12 +208,12 @@ function buildTrend(history) {
   };
 }
 
-function buildPeriodSnapshot(stats, period, generatedAt) {
+function buildPeriodSnapshot(stats, period, generatedAt, history) {
   const current = periodStats(stats, period);
   const tools = buildTools(current);
   const models = buildModels(current);
-  const activity = buildActivity(stats?.historyPreview, period);
-  const trend = buildTrend(stats?.historyPreview);
+  const activity = buildActivity(history, period);
+  const trend = buildTrend(history);
   const overview = {
     currentPeriod: period,
     totalTokens: Math.round(nonNegativeNumber(current.totalTokens)),
@@ -261,10 +266,11 @@ function buildMacWidgetSnapshot(stats, options = {}) {
   const generatedAt = safeNow.toISOString();
   const presentation = buildPresentation(options.presentation, options.presentation?.defaultPeriod);
   const quota = buildQuota(stats?.limits);
+  const history = options.history;
   const periods = {
-    day: buildPeriodSnapshot(stats, 'today', generatedAt),
-    month: buildPeriodSnapshot(stats, 'month', generatedAt),
-    total: buildPeriodSnapshot(stats, 'allTime', generatedAt)
+    day: buildPeriodSnapshot(stats, 'today', generatedAt, history),
+    month: buildPeriodSnapshot(stats, 'month', generatedAt, history),
+    total: buildPeriodSnapshot(stats, 'allTime', generatedAt, history)
   };
   const defaultPeriod = normalizedPeriod(presentation.defaultPeriod);
   const defaultKey = defaultPeriod === 'month' ? 'month' : defaultPeriod === 'allTime' ? 'total' : 'day';
@@ -283,6 +289,50 @@ function buildMacWidgetSnapshot(stats, options = {}) {
   };
 }
 
+const SNAPSHOT_VOLATILE_KEYS = new Set([
+  'generatedAt',
+  'snapshotGeneratedAt',
+  'dataAgeSeconds',
+  'updatedAt',
+  'isStale'
+]);
+
+function stableComparisonValue(value) {
+  if (Array.isArray(value)) return value.map(stableComparisonValue);
+  if (!value || typeof value !== 'object') return value;
+  const output = {};
+  for (const key of Object.keys(value).sort()) {
+    if (SNAPSHOT_VOLATILE_KEYS.has(key)) continue;
+    if (value[key] === undefined) continue;
+    output[key] = stableComparisonValue(value[key]);
+  }
+  return output;
+}
+
+function stableJson(value) {
+  return JSON.stringify(stableComparisonValue(value));
+}
+
+function macWidgetSnapshotFingerprint(snapshot) {
+  const source = stableJson(snapshot);
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function macWidgetSnapshotFingerprintFromSerialized(serialized) {
+  try {
+    return macWidgetSnapshotFingerprint(JSON.parse(String(serialized)));
+  } catch (_) {
+    return null;
+  }
+}
+
 function serializeMacWidgetSnapshot(stats, options = {}) {
   return `${JSON.stringify(buildMacWidgetSnapshot(stats, options))}\n`;
 }
@@ -290,6 +340,8 @@ function serializeMacWidgetSnapshot(stats, options = {}) {
 module.exports = {
   MAC_WIDGET_SCHEMA_VERSION,
   buildMacWidgetSnapshot,
+  macWidgetSnapshotFingerprint,
+  macWidgetSnapshotFingerprintFromSerialized,
   safeDisplayName,
   serializeMacWidgetSnapshot
 };

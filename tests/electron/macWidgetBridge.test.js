@@ -170,3 +170,118 @@ test('serializes aggregate stats before writing the snapshot', async () => {
     assert.deepEqual(snapshot.models, []);
   });
 });
+
+test('compares stable snapshot content instead of rewriting for clock-only changes', async () => {
+  await withTempDirectory(async (directory) => {
+    const snapshotPath = path.join(directory, 'snapshot.json');
+    const stats = {
+      updatedAt: '2026-07-16T09:00:00Z',
+      periods: { today: { totalTokens: 42, costUsd: 0.5 } },
+      limits: { providers: [{ provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 80 }] }] }
+    };
+    const options = {
+      platform: 'darwin',
+      snapshotPath,
+      snapshotOptions: {
+        history: { daily: [], monthly: [], summary: {} },
+        presentation: { defaultPeriod: 'today' }
+      }
+    };
+
+    const first = await updateMacWidgetSnapshot(stats, {
+      ...options,
+      snapshotOptions: { ...options.snapshotOptions, now: '2026-07-16T09:00:00Z' }
+    });
+    const second = await updateMacWidgetSnapshot(stats, {
+      ...options,
+      snapshotOptions: { ...options.snapshotOptions, now: '2026-07-17T09:00:00Z' }
+    });
+    assert.equal(first.changed, true);
+    assert.equal(second.changed, false);
+    assert.equal(JSON.parse(await fs.readFile(snapshotPath, 'utf8')).generatedAt, '2026-07-16T09:00:00.000Z');
+
+    const tokenChanged = structuredClone(stats);
+    tokenChanged.periods.today.totalTokens = 43;
+    assert.equal((await updateMacWidgetSnapshot(tokenChanged, options)).changed, true);
+
+    const limitsChanged = structuredClone(tokenChanged);
+    limitsChanged.limits.providers[0].windows[0].remainingPercent = 79;
+    assert.equal((await updateMacWidgetSnapshot(limitsChanged, options)).changed, true);
+
+    assert.equal((await updateMacWidgetSnapshot(limitsChanged, {
+      ...options,
+      snapshotOptions: { ...options.snapshotOptions, presentation: { defaultPeriod: 'month' } }
+    })).changed, true);
+  });
+});
+
+test('rewrites when a real source refresh restores stale data to fresh', async () => {
+  await withTempDirectory(async (directory) => {
+    const snapshotPath = path.join(directory, 'snapshot.json');
+    const stats = {
+      updatedAt: '2026-07-16T09:39:00Z',
+      periods: { today: { totalTokens: 42, costUsd: 0.5 } },
+      limits: { providers: [{ provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 80 }] }] }
+    };
+    const options = {
+      platform: 'darwin',
+      snapshotPath,
+      snapshotOptions: {
+        now: '2026-07-16T10:00:00Z',
+        history: { daily: [], monthly: [], summary: {} }
+      }
+    };
+
+    const stale = await updateMacWidgetSnapshot(stats, options);
+    assert.equal(stale.changed, true);
+    assert.equal(JSON.parse(await fs.readFile(snapshotPath, 'utf8')).status.isStale, true);
+
+    const refreshedStats = { ...stats, updatedAt: '2026-07-16T09:50:00Z' };
+    const refreshed = await updateMacWidgetSnapshot(refreshedStats, options);
+    assert.equal(refreshed.changed, true);
+    const freshSnapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8'));
+    assert.equal(freshSnapshot.status.isStale, false);
+    assert.equal(freshSnapshot.status.sourceUpdatedAt, '2026-07-16T09:50:00.000Z');
+
+    const clockOnly = await updateMacWidgetSnapshot(refreshedStats, {
+      ...options,
+      snapshotOptions: { ...options.snapshotOptions, now: '2026-07-16T10:01:00Z' }
+    });
+    assert.equal(clockOnly.changed, false);
+  });
+});
+
+test('compares an existing snapshot from before startup by stable content', async () => {
+  await withTempDirectory(async (directory) => {
+    const snapshotPath = path.join(directory, 'snapshot.json');
+    const stats = {
+      updatedAt: '2026-07-16T09:00:00Z',
+      periods: { today: { totalTokens: 42, costUsd: 0.5 } }
+    };
+    const first = await updateMacWidgetSnapshot(stats, {
+      platform: 'darwin',
+      snapshotPath,
+      snapshotOptions: {
+        now: '2026-07-16T09:00:00Z',
+        history: { daily: [], monthly: [], summary: {} }
+      }
+    });
+    assert.equal(first.changed, true);
+
+    const oldSnapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8'));
+    oldSnapshot.generatedAt = '2026-07-15T09:00:00.000Z';
+    oldSnapshot.status.snapshotGeneratedAt = oldSnapshot.generatedAt;
+    await fs.writeFile(snapshotPath, `${JSON.stringify(oldSnapshot)}\n`, 'utf8');
+
+    const second = await updateMacWidgetSnapshot(stats, {
+      platform: 'darwin',
+      snapshotPath,
+      snapshotOptions: {
+        now: '2026-07-17T09:00:00Z',
+        history: { daily: [], monthly: [], summary: {} }
+      }
+    });
+    assert.equal(second.changed, false);
+    assert.equal(JSON.parse(await fs.readFile(snapshotPath, 'utf8')).generatedAt, '2026-07-15T09:00:00.000Z');
+  });
+});

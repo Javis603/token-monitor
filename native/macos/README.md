@@ -21,7 +21,7 @@ npm run build:mac-widget
 xcodebuild -project native/macos/TokenMonitorWidget.xcodeproj -scheme TokenMonitorWidget -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO
 ```
 
-`npm run dist:mac` runs the Widget build first and embeds `TokenMonitorWidget.appex` under `Contents/PlugIns`. The release signer must sign the extension with `TokenMonitorWidget.entitlements` before signing the containing Electron app.
+`npm run build:mac-widget` stages an unsigned local Widget preview. Ordinary `npm run pack`, `npm run dist:mac`, and the Release workflow do not include Widget artifacts. Use `npm run pack:mac:widget` for a local ad-hoc-signed preview, or the explicit `dist:mac:widget` entry points with production identifiers and signing credentials. The release signer must sign the extension with `TokenMonitorWidget.entitlements` before signing the containing Electron app.
 
 WidgetKit schedules timeline refreshes; the 15-minute policy is a request, not a real-time guarantee. The extension keeps displaying the last valid snapshot while the main app is closed and shows explicit missing/stale states.
 

@@ -254,7 +254,7 @@
 				TOKEN_MONITOR_PACKAGE_VERSION = 0.0.0;
 				TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP = 1970-01-01T00:00:00Z;
 				TOKEN_MONITOR_WIDGET_URL_SCHEME = "token-monitor";
-				TOKEN_MONITOR_WIDGET_BUNDLE_ID = com.javis.tokenmonitor.widget;
+				TOKEN_MONITOR_WIDGET_BUNDLE_ID = com.example.tokenmonitor.widget;
 				TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;
 				TOKEN_MONITOR_WIDGET_KIND = com.tokenmonitor.dashboard;
 			};
@@ -288,7 +288,7 @@
 				TOKEN_MONITOR_PACKAGE_VERSION = 0.0.0;
 				TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP = 1970-01-01T00:00:00Z;
 				TOKEN_MONITOR_WIDGET_URL_SCHEME = "token-monitor";
-				TOKEN_MONITOR_WIDGET_BUNDLE_ID = com.javis.tokenmonitor.widget;
+				TOKEN_MONITOR_WIDGET_BUNDLE_ID = com.example.tokenmonitor.widget;
 				TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;
 				TOKEN_MONITOR_WIDGET_KIND = com.tokenmonitor.dashboard;
 			};
@@ -301,7 +301,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.widget.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.tokenmonitor.widget.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
@@ -315,7 +315,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.widget.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.tokenmonitor.widget.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;

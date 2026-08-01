@@ -33,19 +33,23 @@ test('main registers dashboard handlers and a sender-scoped close', () => {
 
 test('dashboard readiness waits for data and recovers only from actual failures', () => {
   const main = read('src', 'electron', 'main.js');
+  const historySource = read('src', 'electron', 'historySource.js');
   assert.doesNotMatch(main, /dashboardShowFallback|armDashboardShowFallback/);
   assert.match(main, /webContents\.on\('did-fail-load'/);
   assert.match(main, /errorCode === -3/);
   assert.match(main, /webContents\.on\('render-process-gone'/);
   assert.match(main, /win\.on\('unresponsive'/);
   assert.match(main, /function discardFailedDashboardWindow\(win, reason\)[\s\S]*?win\.destroy\(\)/);
-  assert.match(main, /const controller = new AbortController\(\);[\s\S]*?signal: controller\.signal[\s\S]*?clearTimeout\(timeout\)/);
+  assert.match(historySource, /const controller = new AbortController\(\);[\s\S]*?signal: controller\.signal[\s\S]*?clearTimeout\(timeout\)/);
 });
 
-test('getDashboardHistory mirrors the local/sync split of fetchStats', () => {
+test('Dashboard and Widget share the complete local/host/client history resolver', () => {
   const main = read('src', 'electron', 'main.js');
-  assert.match(main, /aggregateHistory\(localDevice \? \[localDevice\] : \[\]\)/);
-  assert.match(main, /\/api\/history/);
+  const historySource = read('src', 'electron', 'historySource.js');
+  assert.match(main, /return resolveCompleteHistory\(historyResolverOptions\(\)\)/);
+  assert.match(historySource, /mode === 'local'/);
+  assert.match(historySource, /hubMode === 'host' && embeddedHub/);
+  assert.match(historySource, /\/api\/history/);
 });
 
 test('getDashboardHistory reads local history directly without a blocking collection tick', () => {
@@ -62,7 +66,7 @@ test('dashboard history is gated by the historyEnabled setting', () => {
   const main = read('src', 'electron', 'main.js');
   assert.match(main, /historyEnabled:\s*true/);
   assert.match(main, /historyEnabled:\s*parseBoolean\(patch\.historyEnabled[\s\S]*?,\s*false\)/);
-  assert.match(main, /if \(settings\?\.historyEnabled === false\) return aggregateHistory\(\[\]\)/);
+  assert.match(read('src', 'electron', 'historySource.js'), /historyEnabled === false/);
   assert.equal(usageConfigFromSettings({ historyEnabled: true }).historyEnabled, true);
   assert.equal(usageConfigFromSettings({ historyEnabled: false }).historyEnabled, false);
   assert.match(main, /usageConfigFromSettings\(settings, \{/);

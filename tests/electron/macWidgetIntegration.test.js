@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -37,8 +38,13 @@ const {
   DEFAULT_APP_GROUP,
   DEFAULT_WIDGET_BUNDLE_ID,
   packageVersion,
+  resolveWidgetArchitecture,
   validateDistributionIdentifiers
 } = require('../../scripts/build-macos-widget');
+const {
+  createBuilderConfig,
+  widgetArtifactPaths
+} = require('../../scripts/macos-packaging');
 
 test('publishes final stats to the macOS Widget from the single sendPush outlet', () => {
   const start = mainSource.indexOf('function sendPush(payload)');
@@ -49,24 +55,55 @@ test('publishes final stats to the macOS Widget from the single sendPush outlet'
   assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(latestStats\)/g) || []).length, 1);
 });
 
-test('registers the Widget deep link and embeds the appex in macOS packages', () => {
-  const mac = packageJson.build.mac;
+test('keeps Widget packaging opt-in and injects artifacts only after a successful build', () => {
+  const normal = createBuilderConfig({
+    baseConfig: packageJson.build,
+    env: { TOKEN_MONITOR_WIDGET_ENABLED: '0' },
+    root
+  }).mac;
+  assert.equal(normal.entitlements, undefined);
+  assert.equal(normal.sign, undefined);
+  assert.equal(normal.extraFiles, undefined);
+  assert.equal(normal.extraResources, undefined);
+  assert.equal(normal.extendInfo.CFBundleURLTypes, undefined);
+  assert.equal(packageJson.scripts.predistMac, undefined);
+  assert.equal(packageJson.scripts['predist:mac'], undefined);
+
+  const missingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-widget-missing-'));
+  assert.throws(() => createBuilderConfig({
+    baseConfig: packageJson.build,
+    env: { TOKEN_MONITOR_WIDGET_ENABLED: '1' },
+    root: missingRoot
+  }), /missing before electron-builder/);
+  fs.rmSync(missingRoot, { recursive: true, force: true });
+
+  const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-widget-artifacts-'));
+  const paths = widgetArtifactPaths(artifactRoot);
+  fs.mkdirSync(path.dirname(paths.extensionExecutable), { recursive: true });
+  for (const filePath of [paths.entitlements, paths.extensionExecutable, paths.config, paths.reloader, paths.extensionEntitlements]) {
+    fs.writeFileSync(filePath, 'test');
+  }
+  const widget = createBuilderConfig({
+    baseConfig: packageJson.build,
+    env: { TOKEN_MONITOR_WIDGET_ENABLED: '1' },
+    root: artifactRoot
+  }).mac;
+  fs.rmSync(artifactRoot, { recursive: true, force: true });
+
+  const mac = widget;
   assert.deepEqual(mac.extendInfo.CFBundleURLTypes[0].CFBundleURLSchemes, ['token-monitor']);
   assert.equal(mac.extraFiles[0].to, 'PlugIns/TokenMonitorWidget.appex');
   assert.equal(mac.extraResources[0].to, 'token-monitor-widget.json');
   assert.equal(mac.extraResources[1].to, 'TokenMonitorWidgetReloader');
   assert.equal(mac.sign, 'scripts/sign-macos-with-widget.js');
-  assert.match(packageJson.scripts['predist:mac'], /build:mac-widget/);
+  assert.match(packageJson.scripts['pack'], /electron-builder --config scripts\/electron-builder\.config\.js/);
 });
 
 test('supports an isolated local Widget URL scheme without changing the release default', () => {
   assert.match(mainSource, /parseMacWidgetDeepLink\(url, urlScheme\)/);
   assert.match(widgetSource, /static let urlScheme = Bundle\.main\.object/);
   assert.match(widgetInfo, /<key>TokenMonitorURLScheme<\/key>/);
-  assert.deepEqual(
-    packageJson.build.mac.extendInfo.CFBundleURLTypes[0].CFBundleURLSchemes,
-    ['token-monitor']
-  );
+  assert.match(packageJson.scripts['pack:mac:widget'], /TOKEN_MONITOR_WIDGET_ENABLED=1/);
 });
 
 test('uses AppIntent configuration and page-specific deep links', () => {
@@ -146,6 +183,19 @@ test('distribution Widget builds reject implicit example identifiers', () => {
     bundleId: 'org.example-project.tokenmonitor.widget',
     distributionBuild: false
   }));
+});
+
+test('maps the Electron target architecture to both Widget build products', () => {
+  assert.deepEqual(resolveWidgetArchitecture('arm64'), {
+    name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64'
+  });
+  assert.deepEqual(resolveWidgetArchitecture('x64'), {
+    name: 'x64', xcodeArch: 'x86_64', swiftArch: 'x86_64'
+  });
+  assert.throws(() => resolveWidgetArchitecture('universal'), /TOKEN_MONITOR_WIDGET_ARCH/);
+  assert.match(widgetBuildSource, /ARCHS=\$\{architecture\.xcodeArch\}/);
+  assert.match(widgetBuildSource, /\$\{architecture\.swiftArch\}-apple-macos14\.0/);
+  assert.match(widgetBuildSource, /assertWidgetArchitecture\(stagedExtension, helperBinary, architecture\)/);
 });
 
 test('Widget user-facing strings are localized in five languages', () => {

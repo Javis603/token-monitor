@@ -239,11 +239,37 @@ struct WidgetQuotaBalance: Decodable, Equatable {
 
 struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
     let kind: String
+    let metric: String?
+    let showMeter: Bool
     let usedPercent: Double?
     let remainingPercent: Double?
     let resetsAt: Date?
     let windowMinutes: Double?
+    let remaining: Double?
+    let currency: String?
     var id: String { kind }
+
+    init(
+        kind: String,
+        usedPercent: Double?,
+        remainingPercent: Double?,
+        resetsAt: Date?,
+        windowMinutes: Double?,
+        metric: String? = nil,
+        showMeter: Bool = true,
+        remaining: Double? = nil,
+        currency: String? = nil
+    ) {
+        self.kind = kind
+        self.metric = metric
+        self.showMeter = showMeter
+        self.usedPercent = usedPercent
+        self.remainingPercent = remainingPercent
+        self.resetsAt = resetsAt
+        self.windowMinutes = windowMinutes
+        self.remaining = remaining
+        self.currency = currency
+    }
 }
 
 struct WidgetModel: Decodable, Equatable, Identifiable {
@@ -330,14 +356,19 @@ extension WidgetOverview {
 }
 
 extension WidgetLimitWindow {
-    private enum CodingKeys: String, CodingKey { case kind, usedPercent, remainingPercent, resetsAt, windowMinutes }
+    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, usedPercent, remainingPercent, resetsAt, windowMinutes, remaining, currency }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = c.string(.kind)
+        let rawMetric = c.string(.metric).lowercased()
+        metric = ["credits", "spend"].contains(rawMetric) ? rawMetric : nil
+        showMeter = c.bool(.showMeter, default: true)
         usedPercent = try? c.decodeIfPresent(Double.self, forKey: .usedPercent)
         remainingPercent = try? c.decodeIfPresent(Double.self, forKey: .remainingPercent)
         resetsAt = try? c.decodeIfPresent(Date.self, forKey: .resetsAt)
         windowMinutes = try? c.decodeIfPresent(Double.self, forKey: .windowMinutes)
+        remaining = try? c.decodeIfPresent(Double.self, forKey: .remaining)
+        currency = try? c.decodeIfPresent(String.self, forKey: .currency)
     }
 }
 

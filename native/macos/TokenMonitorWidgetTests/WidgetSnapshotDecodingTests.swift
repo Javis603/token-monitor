@@ -21,6 +21,31 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertNil(snapshot.quota[2].balance)
     }
 
+    func testDecodesSharedProviderAndWindowSchema() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"openrouter","status":"ok","windows":[{"kind":"billing","metric":"credits","remaining":12.5,"currency":"USD","showMeter":false}]},{"provider":"thirdparty","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]}],"status":{"noData":false}}
+        """)
+
+        XCTAssertEqual(snapshot.quota.map(\.provider), ["openrouter", "thirdparty"])
+        let credits = try XCTUnwrap(snapshot.quota[0].windows.first)
+        XCTAssertEqual(credits.metric, "credits")
+        XCTAssertEqual(credits.remaining, 12.5)
+        XCTAssertEqual(credits.currency, "USD")
+        XCTAssertFalse(credits.showMeter)
+        XCTAssertEqual(WidgetFormat.quotaValue(snapshot.quota[0]), "$12.50 left")
+        XCTAssertNil(snapshot.quota[1].windows.first?.metric)
+    }
+
+    func testLegacyWindowSchemaDefaultsMetricAndMeterSafely() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":57}]}],"status":{"noData":false}}
+        """)
+
+        let window = try XCTUnwrap(snapshot.quota.first?.windows.first)
+        XCTAssertNil(window.metric)
+        XCTAssertTrue(window.showMeter)
+    }
+
     func testSchemaV4ActivityDayDefaultsTokenTotalToZero() throws {
         let snapshot = try decode("""
         {"schemaVersion":4,"generatedAt":"2026-07-17T09:00:00.000Z","activity":{"days":[{"date":"2026-07-16","intensity":4}]},"status":{"noData":false}}

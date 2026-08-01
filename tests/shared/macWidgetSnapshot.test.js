@@ -5,6 +5,7 @@ const test = require('node:test');
 const {
   MAC_WIDGET_SCHEMA_VERSION,
   buildMacWidgetSnapshot,
+  macWidgetSnapshotFingerprint,
   serializeMacWidgetSnapshot
 } = require('../../src/shared/macWidgetSnapshot');
 
@@ -17,6 +18,13 @@ function dailyHistory(count, start = '2026-01-01') {
     tokens: index + 1,
     cost: (index + 1) / 100
   }));
+}
+
+function buildSnapshot(stats, options = {}) {
+  return buildMacWidgetSnapshot(stats, {
+    history: stats.history || { daily: [], monthly: [], summary: {} },
+    ...options
+  });
 }
 
 function sampleStats() {
@@ -42,7 +50,7 @@ function sampleStats() {
         windows: [{ kind: 'weekly', usedPercent: 35, resetsAt: '2026-07-20T00:00:00Z' }]
       }, { provider: 'claude', status: 'notConfigured', windows: [] }]
     },
-    historyPreview: {
+    history: {
       daily: [
         { date: '2026-07-15', tokens: 100, cost: 0.1, perClient: { secret: 1 } },
         { date: '2026-07-16', tokens: 200, cost: 0.2 },
@@ -54,7 +62,7 @@ function sampleStats() {
 }
 
 test('builds schema v5 overview, quota, models, activity, trend and presentation', () => {
-  const snapshot = buildMacWidgetSnapshot(sampleStats(), {
+  const snapshot = buildSnapshot(sampleStats(), {
     now: NOW,
     presentation: {
       defaultPeriod: 'today', currencyCode: 'CNY', currencyRate: 7.1,
@@ -72,7 +80,8 @@ test('builds schema v5 overview, quota, models, activity, trend and presentation
   assert.equal(snapshot.periods.month.overview.totalTokens, 9_000_000);
   assert.equal(snapshot.periods.total.overview.totalTokens, 20_000_000);
   assert.deepEqual(snapshot.quota[0].windows[0], {
-    kind: 'weekly', usedPercent: 35, remainingPercent: 65,
+    kind: 'weekly', metric: null, showMeter: true,
+    usedPercent: 35, remainingPercent: 65,
     resetsAt: '2026-07-20T00:00:00.000Z', windowMinutes: null
   });
   assert.deepEqual(snapshot.models.map((model) => [model.displayName, model.totalTokens, model.sharePercent]), [
@@ -92,7 +101,7 @@ test('builds schema v5 overview, quota, models, activity, trend and presentation
 });
 
 test('allowlists MiMo and DeepSeek balances and ranks numeric quota ahead of status-only rows', () => {
-  const snapshot = buildMacWidgetSnapshot({
+  const snapshot = buildSnapshot({
     limits: { providers: [
       { provider: 'claude', status: 'ok', windows: [] },
       { provider: 'mimo', status: 'ok', balance: { amount: 3.62, currency: 'CNY' }, windows: [] },
@@ -110,8 +119,27 @@ test('allowlists MiMo and DeepSeek balances and ranks numeric quota ahead of sta
   assert.equal(snapshot.quota[0].windows[0].remainingPercent, 2);
 });
 
+test('shares the complete provider allowlist and preserves credit window display semantics', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      { provider: 'openrouter', status: 'ok', windows: [{ kind: 'billing', metric: 'credits', remaining: 12.5, currency: 'USD', showMeter: false }] },
+      { provider: 'thirdparty', status: 'ok', windows: [{ kind: 'weekly', metric: 'unsupported', remainingPercent: 80 }] }
+    ] }
+  }, { now: NOW });
+  const byProvider = new Map(snapshot.quota.map((provider) => [provider.provider, provider]));
+
+  assert.deepEqual(snapshot.quota.map((provider) => provider.provider), ['openrouter', 'thirdparty']);
+  assert.deepEqual(byProvider.get('openrouter').windows[0], {
+    kind: 'billing', metric: 'credits', showMeter: false,
+    usedPercent: null, remainingPercent: null, resetsAt: null, windowMinutes: null,
+    remaining: 12.5, currency: 'USD'
+  });
+  assert.equal(byProvider.get('thirdparty').windows[0].metric, null);
+  assert.equal(byProvider.get('thirdparty').windows[0].showMeter, true);
+});
+
 test('preserves a zero balance and omits missing, non-finite, or unsupported balances', () => {
-  const snapshot = buildMacWidgetSnapshot({
+  const snapshot = buildSnapshot({
     limits: { providers: [
       { provider: 'deepseek', status: 'ok', balance: { amount: '0', currency: ' cny ' } },
       { provider: 'mimo', status: 'ok', balance: { amount: Infinity, currency: 'CNY' } },
@@ -129,7 +157,7 @@ test('preserves a zero balance and omits missing, non-finite, or unsupported bal
 });
 
 test('chooses the configured period without duplicating aggregation logic', () => {
-  const snapshot = buildMacWidgetSnapshot(sampleStats(), {
+  const snapshot = buildSnapshot(sampleStats(), {
     now: NOW,
     presentation: { defaultPeriod: 'month' }
   });
@@ -143,7 +171,7 @@ test('keeps day, month and total model data independent', () => {
   const stats = sampleStats();
   stats.periods.month.models = { 'month-model': 7_000_000 };
   stats.periods.allTime.models = { 'total-model': 18_000_000 };
-  const snapshot = buildMacWidgetSnapshot(stats, { now: NOW });
+  const snapshot = buildSnapshot(stats, { now: NOW });
 
   assert.deepEqual(snapshot.periods.day.models.map((model) => model.displayName), ['gpt-5.6', 'MiMo V2 Pro']);
   assert.deepEqual(snapshot.periods.month.models.map((model) => model.displayName), ['month-model']);
@@ -165,7 +193,7 @@ test('keeps up to ten provider and model rows for adaptive widget capacity', () 
     Array.from({ length: 12 }, (_, index) => [`model-${String(index + 1).padStart(2, '0')}`, 12 - index])
   );
 
-  const snapshot = buildMacWidgetSnapshot(stats, { now: NOW });
+  const snapshot = buildSnapshot(stats, { now: NOW });
   assert.equal(snapshot.quota.length, 10);
   assert.equal(snapshot.models.length, 10);
 });
@@ -173,7 +201,7 @@ test('keeps up to ten provider and model rows for adaptive widget capacity', () 
 test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and leaves trend at 28', () => {
   for (const count of [28, 90, 180]) {
     const daily = dailyHistory(count);
-    const snapshot = buildMacWidgetSnapshot({ historyPreview: { daily } }, { now: NOW });
+    const snapshot = buildSnapshot({ history: { daily } }, { now: NOW });
     assert.equal(snapshot.activity.days.length, count);
     assert.equal(snapshot.activity.days[0].date, daily[0].date);
     assert.equal(snapshot.activity.days.at(-1).date, daily.at(-1).date);
@@ -181,7 +209,7 @@ test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and leaves tr
   }
 
   const daily = dailyHistory(190, '2025-12-01');
-  const snapshot = buildMacWidgetSnapshot({ historyPreview: { daily } }, { now: NOW });
+  const snapshot = buildSnapshot({ history: { daily } }, { now: NOW });
   assert.equal(snapshot.activity.days.length, 182);
   assert.equal(snapshot.activity.days[0].date, daily[8].date);
   assert.equal(snapshot.activity.days.at(-1).date, daily.at(-1).date);
@@ -189,7 +217,7 @@ test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and leaves tr
 });
 
 test('accepts only real UTC calendar dates and lets the last duplicate date win', () => {
-  const snapshot = buildMacWidgetSnapshot({ historyPreview: { daily: [
+  const snapshot = buildSnapshot({ history: { daily: [
     { date: '2026-03-01', tokens: 10, cost: 1 },
     { date: '2026-02-29', tokens: 99, cost: 9.9 },
     { date: '2026-04-31', tokens: 99, cost: 9.9 },
@@ -208,7 +236,7 @@ test('accepts only real UTC calendar dates and lets the last duplicate date win'
 });
 
 test('returns a complete empty schema and stale status for missing or old data', () => {
-  const empty = buildMacWidgetSnapshot({}, { now: NOW });
+  const empty = buildSnapshot({}, { now: NOW });
   assert.equal(empty.schemaVersion, 5);
   assert.equal(empty.overview.totalTokens, 0);
   assert.equal(empty.periods.day.overview.totalTokens, 0);
@@ -218,13 +246,13 @@ test('returns a complete empty schema and stale status for missing or old data',
   assert.deepEqual(empty.models, []);
   assert.equal(empty.status.noData, true);
 
-  const stale = buildMacWidgetSnapshot({ updatedAt: '2026-07-17T07:00:00Z' }, { now: NOW });
+  const stale = buildSnapshot({ updatedAt: '2026-07-17T07:00:00Z' }, { now: NOW });
   assert.equal(stale.status.isStale, true);
   assert.equal(stale.status.dataAgeSeconds, 5400);
 });
 
 test('normalizes invalid values, statuses, names, and percentages', () => {
-  const snapshot = buildMacWidgetSnapshot({
+  const snapshot = buildSnapshot({
     periods: { today: {
       totalTokens: Infinity,
       costUsd: -1,
@@ -239,12 +267,13 @@ test('normalizes invalid values, statuses, names, and percentages', () => {
   assert.deepEqual(snapshot.models.map((model) => model.displayName), ['safe-model']);
   assert.equal(snapshot.quota[0].status, 'error');
   assert.deepEqual(snapshot.quota[0].windows[0], {
-    kind: 'session', usedPercent: 100, remainingPercent: 0, resetsAt: null, windowMinutes: 0
+    kind: 'session', metric: null, showMeter: true,
+    usedPercent: 100, remainingPercent: 0, resetsAt: null, windowMinutes: 0
   });
 });
 
 test('normalizes negative or invalid activity totals to zero', () => {
-  const snapshot = buildMacWidgetSnapshot({ historyPreview: { daily: [
+  const snapshot = buildSnapshot({ history: { daily: [
     { date: '2026-07-15', tokens: -10 },
     { date: '2026-07-16', tokens: 'invalid' },
     { date: '2026-07-17', tokens: 37_400_000 }
@@ -254,7 +283,7 @@ test('normalizes negative or invalid activity totals to zero', () => {
 });
 
 test('keeps missing percentages absent instead of coercing them to zero or one hundred', () => {
-  const snapshot = buildMacWidgetSnapshot({
+  const snapshot = buildSnapshot({
     limits: { providers: [{
       provider: 'codex',
       status: 'ok',
@@ -282,7 +311,7 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
     conversation: sensitive[4], credentialPath: sensitive[5]
   });
   stats.periods.today.sessions = { secret: { prompt: sensitive[3] } };
-  stats.historyPreview.daily[0].prompt = sensitive[3];
+  stats.history.daily[0].prompt = sensitive[3];
   stats.limits.providers[0].token = sensitive[0];
   stats.limits.providers[0].cookie = sensitive[1];
   stats.limits.providers.push({
@@ -300,7 +329,7 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
     }
   });
 
-  const serialized = serializeMacWidgetSnapshot(stats, { now: NOW });
+  const serialized = serializeMacWidgetSnapshot(stats, { now: NOW, history: stats.history });
   for (const value of sensitive) assert.equal(serialized.includes(value), false);
   assert.equal(serialized.endsWith('\n'), true);
   const parsed = JSON.parse(serialized);
@@ -312,7 +341,7 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
 });
 
 test('provider status summarizes configuration and login requirements without identity', () => {
-  const snapshot = buildMacWidgetSnapshot({
+  const snapshot = buildSnapshot({
     limits: { providers: [
       { provider: 'codex', status: 'unauthorized', accountKey: 'private-key' },
       { provider: 'claude', status: 'notConfigured' }
@@ -321,4 +350,31 @@ test('provider status summarizes configuration and login requirements without id
   assert.equal(snapshot.status.providerConfigured, true);
   assert.equal(snapshot.status.providerNeedsLogin, true);
   assert.equal(JSON.stringify(snapshot).includes('private-key'), false);
+});
+
+test('fingerprints business content while ignoring snapshot clock fields', () => {
+  const stats = sampleStats();
+  const first = buildSnapshot(stats, { now: '2026-07-17T08:30:00Z' });
+  const later = buildSnapshot(stats, { now: '2026-07-17T09:30:00Z' });
+  assert.equal(macWidgetSnapshotFingerprint(first), macWidgetSnapshotFingerprint(later));
+
+  const tokenChange = structuredClone(stats);
+  tokenChange.periods.today.totalTokens += 1;
+  assert.notEqual(
+    macWidgetSnapshotFingerprint(first),
+    macWidgetSnapshotFingerprint(buildSnapshot(tokenChange, { now: NOW }))
+  );
+
+  const limitsChange = structuredClone(stats);
+  limitsChange.limits.providers[0].windows[0].usedPercent = 36;
+  assert.notEqual(
+    macWidgetSnapshotFingerprint(first),
+    macWidgetSnapshotFingerprint(buildSnapshot(limitsChange, { now: NOW }))
+  );
+
+  const presentationChange = buildSnapshot(stats, {
+    now: NOW,
+    presentation: { defaultPeriod: 'month' }
+  });
+  assert.notEqual(macWidgetSnapshotFingerprint(first), macWidgetSnapshotFingerprint(presentationChange));
 });

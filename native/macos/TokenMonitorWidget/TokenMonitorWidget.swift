@@ -577,7 +577,7 @@ struct TokenMonitorWidgetView: View {
     private func sortedQuotaProviders(_ snapshot: WidgetSnapshot) -> [WidgetQuotaProvider] {
         snapshot.quota.sorted { a, b in
             func priority(_ p: WidgetQuotaProvider) -> Int {
-                if p.balance != nil || p.windows.first?.remainingPercent != nil { return 0 }
+                if p.balance != nil || p.windows.first?.remaining != nil || p.windows.first?.remainingPercent != nil { return 0 }
                 if p.status == "unauthorized" || p.status == "sessionExpired" { return 1 }
                 if p.status == "notConfigured" { return 3 }
                 return 2
@@ -675,7 +675,9 @@ struct TokenMonitorWidgetView: View {
         showsBars: Bool,
         showsReset: Bool
     ) -> some View {
-        let remaining = provider.windows.first?.remainingPercent
+        let remaining = provider.windows.first?.showMeter == false || provider.windows.first?.metric == "credits"
+            ? nil
+            : provider.windows.first?.remainingPercent
         let providerFontSize: CGFloat = density == .regular && layout == .small ? 13 : density == .summary ? 10 : 11
 
         return VStack(alignment: .leading, spacing: 2) {

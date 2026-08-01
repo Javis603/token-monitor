@@ -9,11 +9,15 @@ const PROJECT = path.join(ROOT, 'native', 'macos', 'TokenMonitorWidget.xcodeproj
 const OUTPUT = path.join(ROOT, 'build', 'macos-widget');
 const DERIVED_DATA = path.join(OUTPUT, 'DerivedData');
 const DEFAULT_APP_GROUP = 'group.com.example.tokenmonitor';
-const DEFAULT_WIDGET_BUNDLE_ID = 'com.javis.tokenmonitor.widget';
+const DEFAULT_WIDGET_BUNDLE_ID = 'com.example.tokenmonitor.widget';
 const DEFAULT_URL_SCHEME = 'token-monitor';
 const DEFAULT_WIDGET_KIND = 'com.tokenmonitor.dashboard';
 const WIDGET_UI_VERSION = 19;
 const WIDGET_SCHEMA_VERSION = 5;
+const WIDGET_ARCHITECTURES = Object.freeze({
+  arm64: Object.freeze({ name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64' }),
+  x64: Object.freeze({ name: 'x64', xcodeArch: 'x86_64', swiftArch: 'x86_64' })
+});
 
 function packageVersion() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -41,6 +45,36 @@ function gitRevision() {
 
 function buildTimestamp(now = new Date()) {
   return now.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function resolveWidgetArchitecture(value = process.env.TOKEN_MONITOR_WIDGET_ARCH || process.arch) {
+  const raw = String(value || '').trim().toLowerCase();
+  const architecture = WIDGET_ARCHITECTURES[raw];
+  if (!architecture) {
+    throw new Error(`TOKEN_MONITOR_WIDGET_ARCH must be one of: ${Object.keys(WIDGET_ARCHITECTURES).join(', ')} (received ${raw || 'empty'})`);
+  }
+  return architecture;
+}
+
+function lipoArchitectures(filePath) {
+  const result = spawnSync('lipo', ['-archs', filePath], {
+    cwd: ROOT,
+    encoding: 'utf8'
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`lipo -archs failed for ${filePath}: ${result.error?.message || result.stderr || result.status}`);
+  }
+  return String(result.stdout || '').trim().split(/\s+/).filter(Boolean).sort();
+}
+
+function assertWidgetArchitecture(extension, helperBinary, architecture) {
+  const expected = [architecture.xcodeArch].sort();
+  for (const filePath of [path.join(extension, 'Contents', 'MacOS', 'TokenMonitorWidget'), helperBinary]) {
+    const actual = lipoArchitectures(filePath);
+    if (actual.length !== expected.length || actual.some((value, index) => value !== expected[index])) {
+      throw new Error(`Widget architecture mismatch for ${filePath}: expected ${expected.join(',')}, got ${actual.join(',') || 'none'}`);
+    }
+  }
 }
 
 function validateDistributionIdentifiers({ appGroup, bundleId, distributionBuild }) {
@@ -104,6 +138,7 @@ function main() {
   const bundleId = configuredIdentifier('TOKEN_MONITOR_WIDGET_BUNDLE_ID', DEFAULT_WIDGET_BUNDLE_ID);
   const urlScheme = configuredIdentifier('TOKEN_MONITOR_WIDGET_URL_SCHEME', DEFAULT_URL_SCHEME);
   const widgetKind = configuredIdentifier('TOKEN_MONITOR_WIDGET_KIND', DEFAULT_WIDGET_KIND);
+  const architecture = resolveWidgetArchitecture();
   const revision = String(process.env.TOKEN_MONITOR_WIDGET_GIT_REVISION || gitRevision()).trim();
   const timestamp = String(process.env.TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP || buildTimestamp()).trim();
   const currentProjectVersion = packageVersion();
@@ -125,6 +160,7 @@ function main() {
     xcconfigLine('TOKEN_MONITOR_WIDGET_BUNDLE_ID', bundleId),
     xcconfigLine('TOKEN_MONITOR_WIDGET_URL_SCHEME', urlScheme),
     xcconfigLine('TOKEN_MONITOR_WIDGET_KIND', widgetKind),
+    xcconfigLine('TOKEN_MONITOR_WIDGET_ARCH', architecture.name),
     xcconfigLine('TOKEN_MONITOR_WIDGET_GIT_REVISION', revision),
     xcconfigLine('TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP', timestamp),
     xcconfigLine('DEVELOPMENT_TEAM', developmentTeam)
@@ -138,7 +174,7 @@ function main() {
     '-xcconfig', xcconfigPath,
     'build',
     'CODE_SIGNING_ALLOWED=NO',
-    'ARCHS=arm64',
+    `ARCHS=${architecture.xcodeArch}`,
     'ONLY_ACTIVE_ARCH=YES'
   ];
   const result = spawnSync('xcodebuild', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -157,7 +193,7 @@ function main() {
   fs.cpSync(builtExtension, stagedExtension, { recursive: true });
   const helperResult = spawnSync('swiftc', [
     '-O',
-    '-target', 'arm64-apple-macos14.0',
+    '-target', `${architecture.swiftArch}-apple-macos14.0`,
     '-o', helperBinary,
     helperSource
   ], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -167,6 +203,7 @@ function main() {
     process.stderr.write(sanitizedBuildOutput(helperResult.stderr));
     throw new Error(`swiftc exited with status ${helperResult.status}`);
   }
+  assertWidgetArchitecture(stagedExtension, helperBinary, architecture);
   fs.writeFileSync(path.join(OUTPUT, 'TokenMonitor.entitlements'), entitlementPlist(appGroup));
   fs.writeFileSync(path.join(OUTPUT, 'TokenMonitorWidget.entitlements'), entitlementPlist(appGroup, true));
   fs.writeFileSync(path.join(OUTPUT, 'widget-config.json'), `${JSON.stringify({
@@ -189,6 +226,9 @@ if (require.main === module) main();
 module.exports = {
   DEFAULT_APP_GROUP,
   DEFAULT_WIDGET_BUNDLE_ID,
+  WIDGET_ARCHITECTURES,
+  assertWidgetArchitecture,
   packageVersion,
+  resolveWidgetArchitecture,
   validateDistributionIdentifiers
 };

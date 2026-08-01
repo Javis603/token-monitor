@@ -648,6 +648,8 @@ enum WidgetFormat {
         case "claude": "Claude"
         case "antigravity": "Antigravity"
         case "opencode": "OpenCode"
+        case "openrouter": "OpenRouter"
+        case "thirdparty": "Thirdparty"
         case "deepseek": "DeepSeek"
         case "minimax": "MiniMax"
         case "mimo": "MiMo"
@@ -677,7 +679,23 @@ enum WidgetFormat {
             )
             return WidgetL10n.format("%@ left", "\(symbol)\(amount)")
         }
-        if let remaining = provider.windows.first?.remainingPercent {
+        if let window = provider.windows.first,
+           window.metric == "credits",
+           let remaining = window.remaining,
+           remaining.isFinite {
+            let currency = switch window.currency?.uppercased() {
+            case "CNY": "¥"
+            case "USD": "$"
+            case "TWD": "NT$"
+            case "HKD": "HK$"
+            case .some(let value): "\(value) "
+            case .none: ""
+            }
+            let amount = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), remaining)
+            return WidgetL10n.format("%@ left", "\(currency)\(amount)")
+        }
+        if provider.windows.first?.metric != "credits",
+           let remaining = provider.windows.first?.remainingPercent {
             return WidgetL10n.format("%lld%% left", Int(remaining.rounded()))
         }
         return provider.displayStatus

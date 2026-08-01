@@ -53,7 +53,15 @@ jobs:
       - name: Build unsigned native macOS Widget extension
         if: runner.os == 'macOS'
         run: |
-          npm run build:mac-widget
+          TOKEN_MONITOR_WIDGET_ARCH=arm64 npm run build:mac-widget
           test -d build/macos-widget/TokenMonitorWidget.appex
           test -x build/macos-widget/TokenMonitorWidgetReloader
+          test "$(lipo -archs build/macos-widget/TokenMonitorWidget.appex/Contents/MacOS/TokenMonitorWidget)" = "arm64"
+          test "$(lipo -archs build/macos-widget/TokenMonitorWidgetReloader)" = "arm64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' build/macos-widget/TokenMonitorWidget.entitlements)" = "group.com.example.tokenmonitor"
+          TOKEN_MONITOR_WIDGET_ARCH=x64 npm run build:mac-widget
+          test -d build/macos-widget/TokenMonitorWidget.appex
+          test -x build/macos-widget/TokenMonitorWidgetReloader
+          test "$(lipo -archs build/macos-widget/TokenMonitorWidget.appex/Contents/MacOS/TokenMonitorWidget)" = "x86_64"
+          test "$(lipo -archs build/macos-widget/TokenMonitorWidgetReloader)" = "x86_64"
           test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' build/macos-widget/TokenMonitorWidget.entitlements)" = "group.com.example.tokenmonitor"

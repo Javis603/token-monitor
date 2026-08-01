@@ -3,7 +3,11 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { serializeMacWidgetSnapshot } = require('../shared/macWidgetSnapshot');
+const {
+  buildMacWidgetSnapshot,
+  macWidgetSnapshotFingerprint,
+  macWidgetSnapshotFingerprintFromSerialized
+} = require('../shared/macWidgetSnapshot');
 
 function resolveMacWidgetSnapshotPath(options = {}) {
   const platform = options.platform || process.platform;
@@ -46,14 +50,20 @@ async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
   const tempPath = `${snapshotPath}.${process.pid}.${randomUUID()}.tmp`;
   let handle;
   try {
+    const snapshotText = String(serializedSnapshot);
+    const currentFingerprint = options.fingerprint || macWidgetSnapshotFingerprintFromSerialized(snapshotText);
     let changed = true;
     try {
-      changed = await fsApi.readFile(snapshotPath, 'utf8') !== String(serializedSnapshot);
+      const previousText = await fsApi.readFile(snapshotPath, 'utf8');
+      const previousFingerprint = macWidgetSnapshotFingerprintFromSerialized(previousText);
+      changed = currentFingerprint !== null && previousFingerprint !== null
+        ? currentFingerprint !== previousFingerprint
+        : previousText !== snapshotText;
     } catch (_) {}
     if (!changed) return { ok: true, path: snapshotPath, changed: false };
     await fsApi.mkdir(directory, { recursive: true });
     handle = await fsApi.open(tempPath, 'w', 0o600);
-    await handle.writeFile(String(serializedSnapshot), 'utf8');
+    await handle.writeFile(snapshotText, 'utf8');
     await handle.sync();
     await handle.close();
     handle = null;
@@ -69,14 +79,20 @@ async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
 }
 
 async function updateMacWidgetSnapshot(stats, options = {}) {
+  let snapshot;
   let serialized;
   try {
-    serialized = serializeMacWidgetSnapshot(stats, options.snapshotOptions);
+    const snapshotOptions = options.snapshotOptions || {};
+    snapshot = buildMacWidgetSnapshot(stats, snapshotOptions);
+    serialized = `${JSON.stringify(snapshot)}\n`;
   } catch (error) {
     safeLog(options.logger, `[mac-widget] snapshot serialization failed: ${error?.message || error}`);
     return { ok: false, reason: 'serialization-failed', error };
   }
-  return writeMacWidgetSnapshot(serialized, options);
+  return writeMacWidgetSnapshot(serialized, {
+    ...options,
+    fingerprint: macWidgetSnapshotFingerprint(snapshot)
+  });
 }
 
 module.exports = {
