@@ -108,6 +108,7 @@ const openrouterLimits = require('../shared/openrouterLimits');
 const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
+const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
   applyArchivedClientUsage,
@@ -398,10 +399,6 @@ function normalizeCollectionMode(value, fallback = 'live') {
   const next = String(value || '').trim();
   if (COLLECTION_MODE_VALUES.has(next)) return next;
   return COLLECTION_MODE_VALUES.has(fallback) ? fallback : 'live';
-}
-
-function normalizeCompactTokenUnits(value) {
-  return value === 'localized' ? 'localized' : 'western';
 }
 
 // Which throughput reading the title-mark reveal shows. 'speed' is estimated output tokens
@@ -2682,14 +2679,23 @@ async function refreshExchangeRates({ force = false } = {}) {
   pushSettingsToRenderer();
 }
 
+function compactTokenDisplayOptions() {
+  return {
+    compactTokenUnits: settings?.compactTokenUnits,
+    locale: resolveLocale(settings?.language, [typeof app.getLocale === 'function' ? app.getLocale() : 'en'])
+  };
+}
+
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);
+  const compactOptions = compactTokenDisplayOptions();
   const limitText = formatTrayText(latestStats, mode, currency, {
     limitProviderOrder: settings?.limitProviderOrder,
     limitProviders: settings?.limitProviders,
-    showLimitUsed: settings?.showLimitUsed
+    showLimitUsed: settings?.showLimitUsed,
+    ...compactOptions
   });
   const barsImageMode = isBarsTrayIconMode(mode) && !limitText && providerTrayIcons[mode];
   // A renderer-generated icon is cached in the main process. Only reuse it
@@ -2700,7 +2706,7 @@ function updateTrayDisplay() {
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
-  const tip = formatTrayText(latestStats, 'both', currency);
+  const tip = formatTrayText(latestStats, 'both', currency, compactOptions);
   tray.setToolTip(`Token Monitor - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
@@ -4289,6 +4295,8 @@ app.whenReady().then(() => {
     const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousCurrency = settings.currency;
+    const previousCompactTokenUnits = settings.compactTokenUnits;
+    const previousLanguage = settings.language;
     const previousStartAtLogin = settings.startAtLogin;
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
@@ -4489,7 +4497,9 @@ app.whenReady().then(() => {
       JSON.stringify(settings.trayCustomLayout || {}) !== previousTrayCustomLayout ||
       JSON.stringify(settings.floatingBubbleCustomLayout || {}) !== previousFloatingBubbleCustomLayout ||
       settings.showTrayProviderBadge !== previousShowTrayProviderBadge ||
-      settings.currency !== previousCurrency
+      settings.currency !== previousCurrency ||
+      settings.compactTokenUnits !== previousCompactTokenUnits ||
+      settings.language !== previousLanguage
     ) {
       updateTrayDisplay();
     }

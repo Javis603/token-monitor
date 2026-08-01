@@ -11,6 +11,7 @@ const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+const compactTokens = require('../../src/shared/compactTokens');
 
 function rendererFunction(name, nextName) {
   const start = app.indexOf(`function ${name}(`);
@@ -21,7 +22,7 @@ function rendererFunction(name, nextName) {
 }
 
 test('compact token formatter uses K, M, and B units', () => {
-  const formatCompact = rendererFunction('formatCompact', 'updateTotalCompact');
+  const formatCompact = compactTokens.formatCompactTokens;
   assert.equal(formatCompact(999), '999');
   assert.equal(formatCompact(1_500), '1.5K');
   assert.equal(formatCompact(2_000_000), '2M');
@@ -29,14 +30,14 @@ test('compact token formatter uses K, M, and B units', () => {
 });
 
 test('compact token formatter promotes values that round across unit boundaries', () => {
-  const formatCompact = rendererFunction('formatCompact', 'updateTotalCompact');
+  const formatCompact = compactTokens.formatCompactTokens;
   assert.equal(formatCompact(999_949), '999.9K');
   assert.equal(formatCompact(999_950), '1M');
   assert.equal(formatCompact(999_950_000), '1B');
 });
 
 test('localized compact token formatter uses ten-thousand units without a thousand unit', () => {
-  const formatCompact = rendererFunction('formatCompact', 'updateTotalCompact');
+  const formatCompact = compactTokens.formatCompactTokens;
   assert.equal(formatCompact(9_999, 'localized', 'zh-TW'), '9999');
   assert.equal(formatCompact(15_000, 'localized', 'zh-TW'), '1.5萬');
   assert.equal(formatCompact(295_116_445, 'localized', 'zh-TW'), '2.95億');
@@ -46,15 +47,12 @@ test('localized compact token formatter uses ten-thousand units without a thousa
 });
 
 test('localized compact token formatter promotes rounded values to the next unit', () => {
-  const formatCompact = rendererFunction('formatCompact', 'updateTotalCompact');
+  const formatCompact = compactTokens.formatCompactTokens;
   assert.equal(formatCompact(99_999_500, 'localized', 'zh-TW'), '1億');
 });
 
 test('localized compact token units are available only for East Asian UI locales', () => {
-  const supportsLocalizedCompactTokenUnits = rendererFunction(
-    'supportsLocalizedCompactTokenUnits',
-    'effectiveCompactTokenUnits'
-  );
+  const supportsLocalizedCompactTokenUnits = compactTokens.supportsLocalizedCompactTokenUnits;
   assert.equal(supportsLocalizedCompactTokenUnits('en'), false);
   assert.equal(supportsLocalizedCompactTokenUnits('en-US'), false);
   assert.equal(supportsLocalizedCompactTokenUnits('zh-TW'), true);
@@ -76,6 +74,7 @@ test('compact total is an opt-in appearance preference', () => {
   assert.match(main, /compactTokenUnits:\s*'western'/);
   assert.match(main, /showCompactTotalTokens:\s*parseBoolean\(patch\.showCompactTotalTokens \?\? settings\.showCompactTotalTokens, false\)/);
   assert.match(main, /compactTokenUnits:\s*normalizeCompactTokenUnits\(patch\.compactTokenUnits \?\? settings\.compactTokenUnits\)/);
+  assert.match(main, /require\('\.\.\/shared\/compactTokens'\)/);
   assert.match(app, /showCompactTotalTokensInput: document\.getElementById\('showCompactTotalTokensInput'\)/);
   assert.match(app, /compactTokenUnitsInput: document\.getElementById\('compactTokenUnitsInput'\)/);
   assert.match(app, /showCompactTotalTokens: false/);
@@ -84,12 +83,15 @@ test('compact total is an opt-in appearance preference', () => {
   assert.match(app, /compactTokenUnits: els\.compactTokenUnitsInput\?\.value === 'localized' \? 'localized' : 'western'/);
   assert.match(app, /els\.showCompactTotalTokensInput\.checked = state\.settings\.showCompactTotalTokens === true/);
   assert.match(app, /els\.compactTokenUnitsInput\.value = state\.settings\.compactTokenUnits === 'localized' \? 'localized' : 'western'/);
-  assert.match(app, /state\.settings\.showCompactTotalTokens !== true \|\| !supportsLocalizedCompactTokenUnits\(currentLocale\(\)\)/);
+  assert.match(app, /!supportsLocalizedCompactTokenUnits\(currentLocale\(\)\)/);
+  assert.doesNotMatch(app, /showCompactTotalTokens !== true \|\| !supportsLocalizedCompactTokenUnits/);
+  assert.doesNotMatch(app, /!els\.showCompactTotalTokensInput\.checked \|\| !supportsLocalizedCompactTokenUnits/);
   assert.match(app, /els\.showCompactTotalTokensInput\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
   assert.match(app, /els\.compactTokenUnitsInput\?\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
   assert.match(app, /state\.settings\?\.showCompactTotalTokens !== true[\s\S]*?hideTotalCompact\(\)/);
-  assert.match(app, /const threshold = unitSystem === 'localized' \? 1e4 : 1e3/);
+  assert.match(app, /compactTokenApi\.compactTokenUnitThreshold\(unitSystem, currentLocale\(\)\)/);
   assert.match(app, /formatCompact\(num, unitSystem, currentLocale\(\)\)/);
+  assert.match(app, /compactTokenApi\.formatCompactTokens\(/);
   assert.match(app, /els\.languageInput\?\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
 });
 

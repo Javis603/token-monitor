@@ -740,8 +740,8 @@
     });
   }
 
-  function formatCompactNumber(value) {
-    if (trayTextApi?.formatCompactNumber) return trayTextApi.formatCompactNumber(value);
+  function formatCompactNumber(value, options) {
+    if (trayTextApi?.formatCompactNumber) return trayTextApi.formatCompactNumber(value, options);
     const number = Math.round(Number(value) || 0);
     if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(2)}B`;
     if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
@@ -757,7 +757,7 @@
     if (item.metric === 'tokens' || item.metric === 'cost') {
       const period = stats?.periods?.[item.period] || {};
       const text = item.metric === 'tokens'
-        ? formatCompactNumber(period.totalTokens)
+        ? formatCompactNumber(period.totalTokens, options)
         : currencyApi?.formatCurrencyFromUsd
           ? currencyApi.formatCurrencyFromUsd(period.costUsd, options.currency || 'USD')
           : String(Number(period.costUsd) || 0);
