@@ -42,6 +42,32 @@ function withTmpDir() {
   return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-watch-'));
 }
 
+function waitForEvent(watcher, predicate) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`no native file event within ${EVENT_TIMEOUT_MS}ms on ${process.platform}`));
+    }, EVENT_TIMEOUT_MS);
+    timer.unref();
+    const onAll = (event, filePath) => {
+      if (!predicate(event, filePath)) return;
+      cleanup();
+      resolve({ event, filePath });
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    function cleanup() {
+      clearTimeout(timer);
+      watcher.off('all', onAll);
+      watcher.off('error', onError);
+    }
+    watcher.on('all', onAll);
+    watcher.once('error', onError);
+  });
+}
+
 async function watchAndCollect(dir, act) {
   const events = [];
   const watcher = chokidar.watch(dir, watcherOptions(false));
@@ -50,20 +76,8 @@ async function watchAndCollect(dir, act) {
       watcher.once('ready', resolve);
       watcher.once('error', reject);
     });
-    const seen = new Promise((resolve) => {
-      watcher.on('all', (event, filePath) => {
-        events.push({ event, filePath });
-        resolve();
-      });
-    });
-    await act();
-    await Promise.race([
-      seen,
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error(`no native file event within ${EVENT_TIMEOUT_MS}ms on ${process.platform}`)),
-        EVENT_TIMEOUT_MS
-      ).unref())
-    ]);
+    watcher.on('all', (event, filePath) => events.push({ event, filePath }));
+    await act((predicate) => waitForEvent(watcher, predicate));
   } finally {
     await watcher.close();
   }
@@ -73,8 +87,12 @@ async function watchAndCollect(dir, act) {
 test('native file events reach a watcher on this platform', async () => {
   const dir = withTmpDir();
   try {
-    const events = await watchAndCollect(dir, async () => {
+    const events = await watchAndCollect(dir, async (waitFor) => {
+      const fileEvent = waitFor((event, filePath) => (
+        path.basename(filePath) === 'session.jsonl' && (event === 'add' || event === 'change')
+      ));
       fs.writeFileSync(path.join(dir, 'session.jsonl'), '{"tokens":1}\n');
+      await fileEvent;
     });
     assert.ok(
       events.some((entry) => path.basename(entry.filePath) === 'session.jsonl'),
@@ -94,14 +112,17 @@ test('native file events reach a subdirectory created after the watch started', 
   const dir = withTmpDir();
   try {
     const projectDir = path.join(dir, 'a-new-project');
-    const events = await watchAndCollect(dir, async () => {
+    const events = await watchAndCollect(dir, async (waitFor) => {
       fs.mkdirSync(projectDir);
-      // Give chokidar a moment to watch the directory it just discovered,
-      // otherwise the write races the addDir handler and the assertion would
-      // pass on the mkdir event alone.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await waitFor((event, filePath) => (
+        event === 'addDir' && path.resolve(filePath) === path.resolve(projectDir)
+      ));
+      const fileEvent = waitFor((event, filePath) => (
+        path.resolve(filePath) === path.resolve(path.join(projectDir, 'session.jsonl'))
+        && (event === 'add' || event === 'change')
+      ));
       fs.writeFileSync(path.join(projectDir, 'session.jsonl'), '{"tokens":1}\n');
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await fileEvent;
     });
     assert.ok(
       events.some((entry) => path.basename(entry.filePath) === 'session.jsonl'),
