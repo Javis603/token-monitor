@@ -23,12 +23,16 @@ const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/tray
 const motionPreferenceApi = require('./motionPreference');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
 const {
+  expandedBoundsForCollapse,
   normalWindowBounds,
   persistWindowState,
   rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
-  shouldPersistWindowBounds
+  setWindowMaximizable,
+  shouldPersistWindowBounds,
+  shouldTrackWindowMaximized,
+  suspendWindowMaximized
 } = require('./windowState');
 
 // Install EPIPE suppression before anything that might log. Without this,
@@ -1656,10 +1660,13 @@ function collapseFloatingBubble(plan) {
 }
 
 function maybeCollapseFloatingBubble(bounds) {
+  // The display comes from where the window actually sits, but the bounds the
+  // plan remembers as "expanded" must be the normal ones: collapsing a
+  // maximized window would otherwise persist the whole screen as its size.
   const display = displayForBounds(bounds);
   if (!display) return false;
   const collapsedArea = collapsedAreaForDisplay(display);
-  const plan = floatingBubbleCollapsePlan(bounds, display.workArea, settings, {
+  const plan = floatingBubbleCollapsePlan(expandedBoundsForCollapse(mainWindow, bounds), display.workArea, settings, {
     collapsed: floatingBubbleState.collapsed,
     suppressNextCollapse: floatingBubbleState.suppressNextCollapse,
     collapsedArea,
@@ -3308,6 +3315,11 @@ function enterTrayMode() {
   applyMacActivationPolicy();
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
+    // settings.trayMode is already true here, so this unmaximize is ignored by
+    // the native handler and settings.windowMaximized keeps describing the
+    // window exitTrayMode() will hand back.
+    suspendWindowMaximized(mainWindow);
+    setWindowMaximizable(mainWindow, false);
     applyMacSpaceBehavior(true);
     mainWindow.hide();
   }
@@ -3317,6 +3329,7 @@ function exitTrayMode() {
   applyMacActivationPolicy({ mainWindowVisible: true });
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(false);
+    setWindowMaximizable(mainWindow, true);
     applyMacSpaceBehavior(false);
     const restore = restoredBounds() || DEFAULT_WINDOW;
     mainWindow.setBounds({
@@ -3943,6 +3956,8 @@ function createWindow(boundsOverride, options = {}) {
     icon: APP_ICON_PATH,
     skipTaskbar: collapsedFloatingBubble || Boolean(settings?.trayMode),
     ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
+    // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
+    ...(settings?.trayMode ? { maximizable: false } : {}),
     ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
     ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
@@ -3966,10 +3981,18 @@ function createWindow(boundsOverride, options = {}) {
     try { win.setBackgroundMaterial('acrylic'); } catch (_) {}
   }
   win.on('maximize', () => {
+    if (!shouldTrackWindowMaximized(settings, floatingBubbleState)) {
+      // A tray popover is sized from getBounds() on every open, so a maximized
+      // one would open full-screen. setMaximizable() covers Windows and macOS;
+      // it is a no-op on Linux, which is why this bounce still has to exist.
+      if (settings?.trayMode) suspendWindowMaximized(win);
+      return;
+    }
     stopPersistBoundsTimer();
     persistWindowState(settings, saveSettings, normalWindowBounds(win), true);
   });
   win.on('unmaximize', () => {
+    if (!shouldTrackWindowMaximized(settings, floatingBubbleState)) return;
     persistWindowState(settings, saveSettings, normalWindowBounds(win), false);
     persistBoundsSoon();
   });

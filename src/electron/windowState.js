@@ -29,6 +29,36 @@ function shouldPersistWindowBounds(window) {
   return Boolean(normalWindowBounds(window) && !isWindowMaximized(window));
 }
 
+// Tray popovers are re-anchored and re-sized on every open, and a collapsed
+// floating bubble persists through settings.floatingBubbleBounds — in both
+// modes the native maximize/unmaximize events describe a window that is no
+// longer the normal one, so they must not rewrite the normal window state.
+function shouldTrackWindowMaximized(settings = {}, bubbleState = {}) {
+  return settings.trayMode !== true && bubbleState.collapsed !== true;
+}
+
+// Drops the native maximized state while leaving settings.windowMaximized
+// alone, so the flag still describes the window the user will come back to.
+function suspendWindowMaximized(window) {
+  if (!isWindowMaximized(window) || typeof window.unmaximize !== 'function') return false;
+  window.unmaximize();
+  return true;
+}
+
+function setWindowMaximizable(window, maximizable) {
+  if (!window || (typeof window.isDestroyed === 'function' && window.isDestroyed())) return false;
+  if (typeof window.setMaximizable !== 'function') return false;
+  window.setMaximizable(maximizable === true);
+  return true;
+}
+
+// The bounds a collapse should remember as the expanded window. A maximized
+// window's getBounds() is the whole screen, so remembering it would lose the
+// size the user gets back when they unmaximize.
+function expandedBoundsForCollapse(window, currentBounds) {
+  return normalWindowBounds(window) || currentBounds || null;
+}
+
 function shouldRestoreWindowMaximized(settings = {}, options = {}) {
   if (settings.trayMode === true || options.collapsedFloatingBubble === true) return false;
   return settings.windowMaximized === true;
@@ -83,12 +113,16 @@ function rebuildWindowBounds(window, state = {}) {
 }
 
 module.exports = {
+  expandedBoundsForCollapse,
   isWindowMaximized,
   normalWindowBounds,
   persistWindowState,
   rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
+  setWindowMaximizable,
   shouldPersistWindowBounds,
-  shouldRestoreWindowMaximized
+  shouldRestoreWindowMaximized,
+  shouldTrackWindowMaximized,
+  suspendWindowMaximized
 };
