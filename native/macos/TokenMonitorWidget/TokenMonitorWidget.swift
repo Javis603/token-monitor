@@ -4,7 +4,11 @@ import WidgetKit
 enum TokenMonitorWidgetConfiguration {
     static let kind = Bundle.main.object(forInfoDictionaryKey: "TMWidgetKind") as? String ?? "com.tokenmonitor.dashboard"
     static let appGroup = Bundle.main.object(forInfoDictionaryKey: "TokenMonitorAppGroup") as? String ?? ""
-    static let urlScheme = Bundle.main.object(forInfoDictionaryKey: "TokenMonitorURLScheme") as? String ?? "token-monitor"
+    static let urlScheme: String = {
+        let raw = (Bundle.main.object(forInfoDictionaryKey: "TokenMonitorURLScheme") as? String ?? "token-monitor").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard raw.range(of: "^[A-Za-z][A-Za-z0-9+.-]*$", options: .regularExpression) != nil else { return "token-monitor" }
+        return raw.lowercased()
+    }()
 
     static func url(for page: WidgetPage) -> URL {
         URL(string: "\(urlScheme)://\(page.rawValue)")!
@@ -116,9 +120,7 @@ struct TokenMonitorWidgetView: View {
 
     @ViewBuilder
     private func content(_ snapshot: WidgetSnapshot) -> some View {
-        if snapshot.isEmpty {
-            statusState(title: WidgetL10n.text("No usage yet"), detail: WidgetL10n.text("Open Token Monitor to collect data"))
-        } else if snapshot.isStale(at: entry.date) {
+        if snapshot.isStale(at: entry.date) {
             statusState(
                 title: WidgetL10n.text("Data may be stale"),
                 detail: WidgetL10n.format("Updated %@", snapshot.generatedAt.formatted(.relative(presentation: .named)))
@@ -236,6 +238,13 @@ struct TokenMonitorWidgetView: View {
 
     private func overview(_ snapshot: WidgetSnapshot, context: WidgetContentContext) -> some View {
         let model = WidgetViewModel.make(snapshot: snapshot, page: .overview, layout: context.layout)
+
+        if snapshot.overview.totalTokens == 0
+            && snapshot.overview.costUsd == 0
+            && snapshot.models.isEmpty
+            && snapshot.activity.activeDays == 0 {
+            return AnyView(emptyMessage(WidgetL10n.text("No usage yet")))
+        }
 
         if context.layout == .large {
             return AnyView(largeOverview(snapshot, model: model))
@@ -545,7 +554,7 @@ struct TokenMonitorWidgetView: View {
 
     private func quotaSummary(_ snapshot: WidgetSnapshot) -> String {
         guard let provider = snapshot.quota.first else { return WidgetL10n.text("Not configured") }
-        let label = WidgetFormat.provider(provider.provider)
+        let label = providerDisplayName(provider)
         return "\(label) \(WidgetFormat.quotaValue(provider))"
     }
 
@@ -559,7 +568,7 @@ struct TokenMonitorWidgetView: View {
                     } else {
                         ForEach(Array(sortedQuotaProviders(snapshot).prefix(max(0, limit)))) { provider in
                             LargeOverviewListRow(
-                                label: WidgetFormat.provider(provider.provider),
+                                label: providerDisplayName(provider),
                                 value: WidgetFormat.quotaValue(provider),
                                 style: provider.status == "ok" ? .primary : .secondary
                             )
@@ -682,7 +691,7 @@ struct TokenMonitorWidgetView: View {
 
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                Text(WidgetFormat.provider(provider.provider))
+                Text(providerDisplayName(provider))
                     .font(.system(size: providerFontSize, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -998,9 +1007,12 @@ struct TokenMonitorWidgetView: View {
         context: WidgetContentContext,
         density: WidgetContentDensity
     ) -> some View {
+        if snapshot.trend.points.isEmpty {
+            return AnyView(emptyMessage(WidgetL10n.text("No trend data")))
+        }
         let sparkHeight = sparklineHeight(for: context.layout, density: density)
 
-        return VStack(alignment: .leading, spacing: density == .summary ? 4 : 6) {
+        return AnyView(VStack(alignment: .leading, spacing: density == .summary ? 4 : 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 primary(
                     WidgetFormat.tokens(snapshot.trend.currentTokens, style: snapshot.presentation.numberStyle),
@@ -1019,7 +1031,14 @@ struct TokenMonitorWidgetView: View {
                 secondary(trendDateRange(snapshot.trend))
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading))
+    }
+
+    private func providerDisplayName(_ provider: WidgetQuotaProvider) -> String {
+        if let displayName = provider.displayName, !displayName.isEmpty {
+            return displayName
+        }
+        return WidgetFormat.provider(provider.provider)
     }
 
     private func sparklineHeight(for layout: WidgetLayout, density: WidgetContentDensity) -> CGFloat {

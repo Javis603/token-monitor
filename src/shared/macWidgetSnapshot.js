@@ -3,7 +3,8 @@
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
 
-const MAC_WIDGET_SCHEMA_VERSION = 5;
+const MAC_WIDGET_SCHEMA_VERSION = 6;
+const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
 const KNOWN_TOOLS = new Set(KNOWN_CLIENTS.split(',').filter(Boolean));
 const KNOWN_LIMIT_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
 const KNOWN_LIMIT_STATUSES = new Set([
@@ -47,9 +48,25 @@ function normalizedStatus(value) {
 }
 
 function safeDisplayName(value, fallback = '') {
-  const name = String(value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-  if (!name || name.includes('\0') || /^[A-Za-z]:[\\/]/.test(name) || name.startsWith('/') || name.includes('@')) return fallback;
+  const raw = String(value || '').trim();
+  if (isLikelySensitivePathOrUrl(raw)) return fallback;
+  const name = raw.replace(/\s+/g, ' ').slice(0, 80);
+  if (!name || name.includes('@')) return fallback;
   return name;
+}
+
+function isLikelySensitivePathOrUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 80 || /[\u0000-\u001f\u007f]/.test(raw)) return true;
+  return Boolean(
+    /^\\\\/.test(raw)
+    || raw.startsWith('/')
+    || /^(?:file|https?):\/\//i.test(raw)
+    || /^(?:~|\.{1,2})[\\/]/.test(raw)
+    || /^[A-Za-z]:[\\/]/.test(raw)
+    || /(?:^|[\\/])(?:\.\.?)(?:[\\/]|$)/.test(raw)
+    || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)
+  );
 }
 
 function normalizedPeriod(value) {
@@ -90,7 +107,8 @@ function buildLimitWindow(window) {
   const metricValue = String(window.metric || '').trim().toLowerCase();
   const metric = VALID_LIMIT_WINDOW_METRICS.has(metricValue) ? metricValue : null;
   const remaining = optionalFiniteNumber(window.remaining);
-  const currency = String(window.currency || '').trim().toUpperCase().slice(0, 8) || null;
+  const rawCurrency = String(window.currency || '').trim().toUpperCase();
+  const currency = /^[A-Z]{3,8}$/.test(rawCurrency) ? rawCurrency : null;
   return {
     kind,
     metric,
@@ -117,7 +135,7 @@ function buildProviderBalance(provider) {
 
 function buildQuota(limits) {
   const providers = Array.isArray(limits?.providers) ? limits.providers : [];
-  const output = [];
+  const candidates = [];
   for (const provider of providers) {
     if (!provider || typeof provider !== 'object') continue;
     const providerId = String(provider.provider || '').trim().toLowerCase();
@@ -126,35 +144,113 @@ function buildQuota(limits) {
       ? provider.windows.map(buildLimitWindow).filter(Boolean).slice(0, 2)
       : [];
     const balance = buildProviderBalance(provider);
-    output.push({
+    const accountKey = String(provider.accountKey || '').trim();
+    const stableRecord = {
       provider: providerId,
       status: normalizedStatus(provider.status),
+      balance,
+      windows
+    };
+    candidates.push({
+      accountKey,
+      identitySortKey: accountKey ? `key:${accountKey}` : `record:${stableJson(stableRecord)}`,
+      record: {
+      provider: providerId,
+      status: stableRecord.status,
       updatedAt: normalizedIso(provider.updatedAt),
       ...(balance ? { balance } : {}),
       windows
+      }
     });
   }
+  candidates.sort((left, right) => (
+    left.record.provider.localeCompare(right.record.provider)
+    || left.identitySortKey.localeCompare(right.identitySortKey)
+    || JSON.stringify(left.record).localeCompare(JSON.stringify(right.record))
+  ));
+  const providerCounts = new Map();
+  const providerOrdinals = new Map();
+  const identityCounts = new Map();
+  const output = candidates.map((candidate) => {
+    const providerId = candidate.record.provider;
+    providerCounts.set(providerId, (providerCounts.get(providerId) || 0) + 1);
+    const providerOrdinal = (providerOrdinals.get(providerId) || 0) + 1;
+    providerOrdinals.set(providerId, providerOrdinal);
+    const identityKey = `${providerId}|${candidate.identitySortKey}`;
+    const identityOrdinal = (identityCounts.get(identityKey) || 0) + 1;
+    identityCounts.set(identityKey, identityOrdinal);
+    const suffix = identityOrdinal > 1 ? `-${identityOrdinal}` : '';
+    return {
+      ...candidate.record,
+      instanceId: `${providerId}-${stableHash(`${identityKey}${suffix}`)}`,
+      _providerOrdinal: providerOrdinal
+    };
+  }).map((provider) => ({
+    ...provider,
+    displayName: `${providerLabel(provider.provider)}${providerCounts.get(provider.provider) > 1 ? ` ${provider._providerOrdinal}` : ''}`
+  }));
   return output.sort((left, right) => {
     const leftReady = left.status === 'ok' && (left.balance || left.windows.length) ? 0 : 1;
     const rightReady = right.status === 'ok' && (right.balance || right.windows.length) ? 0 : 1;
-    return leftReady - rightReady || left.provider.localeCompare(right.provider);
-  }).slice(0, 10);
+    return leftReady - rightReady
+      || left.provider.localeCompare(right.provider)
+      || left._providerOrdinal - right._providerOrdinal
+      || left.instanceId.localeCompare(right.instanceId);
+  }).map(({ _providerOrdinal, ...provider }) => provider).slice(0, 10);
+}
+
+const PROVIDER_LABELS = Object.freeze({
+  antigravity: 'Antigravity',
+  claude: 'Claude',
+  codex: 'Codex',
+  copilot: 'Copilot',
+  cursor: 'Cursor',
+  deepseek: 'DeepSeek',
+  grok: 'Grok',
+  kiro: 'Kiro',
+  kimi: 'Kimi',
+  minimax: 'MiniMax',
+  mimo: 'MiMo',
+  ollama: 'Ollama',
+  opencode: 'OpenCode',
+  openrouter: 'OpenRouter',
+  qoder: 'Qoder',
+  thirdparty: 'Third-party',
+  volcengine: 'Volcengine',
+  zai: 'Z.ai',
+  zaiteam: 'Z.ai Team'
+});
+
+function providerLabel(provider) {
+  return PROVIDER_LABELS[provider] || provider;
 }
 
 function buildModels(period) {
   const values = period?.models && typeof period.models === 'object' ? period.models : {};
   const costs = period?.modelCosts && typeof period.modelCosts === 'object' ? period.modelCosts : {};
-  const rows = [];
+  const rowsByName = new Map();
   for (const [rawName, rawTokens] of Object.entries(values)) {
     const displayName = safeDisplayName(rawName);
     const totalTokens = Math.round(nonNegativeNumber(rawTokens));
     if (!displayName || totalTokens <= 0) continue;
-    rows.push({ displayName, totalTokens, costUsd: nonNegativeNumber(costs[rawName]) });
+    const key = displayName.normalize('NFKC').toLocaleLowerCase('en-US');
+    const existing = rowsByName.get(key);
+    if (existing) {
+      existing.totalTokens += totalTokens;
+      existing.costUsd += nonNegativeNumber(costs[rawName]);
+      existing.displayName = existing.displayName.localeCompare(displayName) <= 0 ? existing.displayName : displayName;
+    } else {
+      rowsByName.set(key, { displayName, totalTokens, costUsd: nonNegativeNumber(costs[rawName]), key });
+    }
   }
+  const rows = Array.from(rowsByName.values());
   rows.sort((left, right) => right.totalTokens - left.totalTokens || left.displayName.localeCompare(right.displayName));
   const denominator = rows.reduce((sum, row) => sum + row.totalTokens, 0);
   return rows.slice(0, 10).map((row) => ({
-    ...row,
+    displayName: row.displayName,
+    id: `model-${stableHash(row.key)}`,
+    totalTokens: row.totalTokens,
+    costUsd: row.costUsd,
     sharePercent: denominator > 0 ? Math.max(0, Math.min(100, row.totalTokens / denominator * 100)) : 0
   }));
 }
@@ -247,6 +343,7 @@ function buildStatus({ generatedAt, stats, quota, periods, now }) {
   const statuses = quota.map((provider) => provider.status);
   return {
     isStale: Boolean(stats?.stale) || dataAgeSeconds > 20 * 60,
+    sourceStale: Boolean(stats?.stale),
     dataAgeSeconds,
     providerConfigured: statuses.some((status) => !['notConfigured', 'disabled'].includes(status)),
     providerNeedsLogin: statuses.some((status) => status === 'unauthorized'),
@@ -294,6 +391,7 @@ const SNAPSHOT_VOLATILE_KEYS = new Set([
   'snapshotGeneratedAt',
   'dataAgeSeconds',
   'updatedAt',
+  'sourceUpdatedAt',
   'isStale'
 ]);
 
@@ -333,15 +431,53 @@ function macWidgetSnapshotFingerprintFromSerialized(serialized) {
   }
 }
 
+function stableHash(value) {
+  const source = String(value);
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`.slice(0, 12);
+}
+
+function freshnessSignature(snapshot) {
+  return JSON.stringify({
+    isStale: Boolean(snapshot?.status?.isStale),
+    sourceStale: Boolean(snapshot?.status?.sourceStale)
+  });
+}
+
+function snapshotGeneratedTime(snapshot) {
+  const value = snapshot?.status?.snapshotGeneratedAt || snapshot?.generatedAt;
+  const timestamp = Date.parse(value || '');
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function macWidgetSnapshotNeedsWrite(currentSnapshot, previousSnapshot, options = {}) {
+  if (!previousSnapshot) return true;
+  if (macWidgetSnapshotFingerprint(currentSnapshot) !== macWidgetSnapshotFingerprint(previousSnapshot)) return true;
+  if (freshnessSignature(currentSnapshot) !== freshnessSignature(previousSnapshot)) return true;
+  const now = Date.parse(options.now || '');
+  const previousGeneratedAt = snapshotGeneratedTime(previousSnapshot);
+  if (!Number.isFinite(now) || previousGeneratedAt === null) return false;
+  return now - previousGeneratedAt >= MAC_WIDGET_FRESHNESS_HEARTBEAT_MS;
+}
+
 function serializeMacWidgetSnapshot(stats, options = {}) {
   return `${JSON.stringify(buildMacWidgetSnapshot(stats, options))}\n`;
 }
 
 module.exports = {
   MAC_WIDGET_SCHEMA_VERSION,
+  MAC_WIDGET_FRESHNESS_HEARTBEAT_MS,
   buildMacWidgetSnapshot,
+  isLikelySensitivePathOrUrl,
   macWidgetSnapshotFingerprint,
   macWidgetSnapshotFingerprintFromSerialized,
+  macWidgetSnapshotNeedsWrite,
   safeDisplayName,
   serializeMacWidgetSnapshot
 };

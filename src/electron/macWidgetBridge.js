@@ -6,7 +6,8 @@ const { randomUUID } = require('node:crypto');
 const {
   buildMacWidgetSnapshot,
   macWidgetSnapshotFingerprint,
-  macWidgetSnapshotFingerprintFromSerialized
+  macWidgetSnapshotFingerprintFromSerialized,
+  macWidgetSnapshotNeedsWrite
 } = require('../shared/macWidgetSnapshot');
 
 function resolveMacWidgetSnapshotPath(options = {}) {
@@ -52,12 +53,16 @@ async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
   try {
     const snapshotText = String(serializedSnapshot);
     const currentFingerprint = options.fingerprint || macWidgetSnapshotFingerprintFromSerialized(snapshotText);
+    let currentSnapshot;
+    try { currentSnapshot = JSON.parse(snapshotText); } catch (_) {}
     let changed = true;
     try {
       const previousText = await fsApi.readFile(snapshotPath, 'utf8');
       const previousFingerprint = macWidgetSnapshotFingerprintFromSerialized(previousText);
-      changed = currentFingerprint !== null && previousFingerprint !== null
-        ? currentFingerprint !== previousFingerprint
+      let previousSnapshot;
+      try { previousSnapshot = JSON.parse(String(previousText)); } catch (_) {}
+      changed = currentFingerprint !== null && previousFingerprint !== null && currentSnapshot && previousSnapshot
+        ? macWidgetSnapshotNeedsWrite(currentSnapshot, previousSnapshot, { now: options.freshnessNow })
         : previousText !== snapshotText;
     } catch (_) {}
     if (!changed) return { ok: true, path: snapshotPath, changed: false };
@@ -81,8 +86,8 @@ async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
 async function updateMacWidgetSnapshot(stats, options = {}) {
   let snapshot;
   let serialized;
+  const snapshotOptions = options.snapshotOptions || {};
   try {
-    const snapshotOptions = options.snapshotOptions || {};
     snapshot = buildMacWidgetSnapshot(stats, snapshotOptions);
     serialized = `${JSON.stringify(snapshot)}\n`;
   } catch (error) {
@@ -91,7 +96,8 @@ async function updateMacWidgetSnapshot(stats, options = {}) {
   }
   return writeMacWidgetSnapshot(serialized, {
     ...options,
-    fingerprint: macWidgetSnapshotFingerprint(snapshot)
+    fingerprint: macWidgetSnapshotFingerprint(snapshot),
+    freshnessNow: options.freshnessNow || snapshotOptions.now || snapshot.generatedAt
   });
 }
 

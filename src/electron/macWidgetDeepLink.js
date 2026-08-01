@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
+
 const PAGE_TO_VIEW = Object.freeze({
   overview: 'home',
   quota: 'limits',
@@ -10,8 +12,9 @@ const PAGE_TO_VIEW = Object.freeze({
 
 function parseMacWidgetDeepLink(value, scheme = 'token-monitor') {
   try {
+    const canonicalScheme = normalizeWidgetURLScheme(scheme);
     const url = new URL(String(value || ''));
-    if (url.protocol !== `${scheme}:`) return null;
+    if (url.protocol !== `${canonicalScheme}:`) return null;
     const page = String(url.hostname || '').toLowerCase();
     if (page === 'widget') return { page: 'overview', view: 'home', settings: false };
     if (page === 'widget-settings') return { page: 'overview', view: 'home', settings: true };

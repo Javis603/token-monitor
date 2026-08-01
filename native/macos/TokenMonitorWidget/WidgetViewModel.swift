@@ -590,11 +590,11 @@ struct WidgetViewModel: Equatable {
             let provider = snapshot.quota.first
             return WidgetViewModel(
                 page: page,
-                title: provider.map { WidgetFormat.provider($0.provider) } ?? WidgetL10n.text("Quota"),
+                title: provider.map { $0.displayName ?? WidgetFormat.provider($0.provider) } ?? WidgetL10n.text("Quota"),
                 primaryValue: provider.map(WidgetFormat.quotaValue) ?? WidgetL10n.text("Not configured"),
                 secondaryValue: provider?.windows.first?.resetsAt.map(WidgetFormat.reset) ?? "",
                 rows: snapshot.quota.dropFirst().map {
-                    "\(WidgetFormat.provider($0.provider)) · \(WidgetFormat.quotaValue($0))"
+                    "\($0.displayName ?? WidgetFormat.provider($0.provider)) · \(WidgetFormat.quotaValue($0))"
                 }
             )
         case .models:

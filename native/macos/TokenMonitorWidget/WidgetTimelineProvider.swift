@@ -76,7 +76,7 @@ extension WidgetSnapshot {
     }
 
     static let placeholder = WidgetSnapshot(
-        schemaVersion: 5,
+        schemaVersion: 6,
         generatedAt: Date(),
         overview: WidgetOverview(currentPeriod: "today", totalTokens: 27_800_000, costUsd: 14.86, primaryTool: "codex", updatedAt: Date()),
         quota: [

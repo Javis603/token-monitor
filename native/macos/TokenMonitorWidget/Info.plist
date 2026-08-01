@@ -36,7 +36,7 @@
   <key>TMWidgetKind</key>
   <string>$(TOKEN_MONITOR_WIDGET_KIND)</string>
   <key>TMWidgetSchemaVersion</key>
-  <string>5</string>
+  <string>6</string>
   <key>TMWidgetUIVersion</key>
   <string>19</string>
 </dict>

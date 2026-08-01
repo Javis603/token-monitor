@@ -2,8 +2,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-
-const DEFAULT_WIDGET_URL_SCHEME = 'token-monitor';
+const { DEFAULT_WIDGET_URL_SCHEME, normalizeWidgetURLScheme } = require('./macos-widget-config');
+const { profileIsRequired } = require('./macos-provisioning');
 
 function widgetEnabled(env = process.env) {
   return String(env.TOKEN_MONITOR_WIDGET_ENABLED || '').trim() === '1';
@@ -19,11 +19,15 @@ function widgetArtifactPaths(root) {
     extensionExecutable: path.join(extension, 'Contents', 'MacOS', 'TokenMonitorWidget'),
     config: path.join(output, 'widget-config.json'),
     reloader: path.join(output, 'TokenMonitorWidgetReloader'),
-    extensionEntitlements: path.join(output, 'TokenMonitorWidget.entitlements')
+    extensionEntitlements: path.join(output, 'TokenMonitorWidget.entitlements'),
+    reloaderEntitlements: path.join(output, 'TokenMonitorWidgetReloader.entitlements'),
+    appProvisioningProfile: path.join(output, 'TokenMonitor.provisionprofile'),
+    widgetProvisioningProfile: path.join(output, 'TokenMonitorWidget.provisionprofile')
   };
 }
 
-function assertWidgetArtifacts(root) {
+function assertWidgetArtifacts(root, options = {}) {
+  const env = options.env || process.env;
   const paths = widgetArtifactPaths(root);
   const required = [
     ['entitlements', paths.entitlements],
@@ -31,8 +35,20 @@ function assertWidgetArtifacts(root) {
     ['Widget extension executable', paths.extensionExecutable],
     ['Widget config', paths.config],
     ['Widget reloader', paths.reloader],
-    ['Widget extension entitlements', paths.extensionEntitlements]
+    ['Widget extension entitlements', paths.extensionEntitlements],
+    ['Widget reloader entitlements', paths.reloaderEntitlements]
   ];
+  const appGroup = String(env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor').trim();
+  if (profileIsRequired({
+    distributionBuild: String(env.TOKEN_MONITOR_WIDGET_DISTRIBUTION || '').trim() === '1',
+    localDevelopmentSigning: String(env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING || '').trim() === '1',
+    appGroup
+  })) {
+    required.push(
+      ['main app provisioning profile', paths.appProvisioningProfile],
+      ['Widget provisioning profile', paths.widgetProvisioningProfile]
+    );
+  }
   const missing = required.filter(([, filePath]) => {
     try {
       return !fs.existsSync(filePath) || (filePath === paths.extension && !fs.statSync(filePath).isDirectory());
@@ -56,11 +72,7 @@ function resolveWidgetUrlScheme(env = process.env, root = path.resolve(__dirname
       value = String(config.urlScheme || '').trim();
     } catch (_) {}
   }
-  if (!value) value = DEFAULT_WIDGET_URL_SCHEME;
-  if (!/^[A-Za-z][A-Za-z0-9+.-]*$/.test(value)) {
-    throw new Error('TOKEN_MONITOR_WIDGET_URL_SCHEME contains unsupported characters');
-  }
-  return value;
+  return normalizeWidgetURLScheme(value, DEFAULT_WIDGET_URL_SCHEME);
 }
 
 function widgetMacBuildConfig(baseMac = {}, options = {}) {
@@ -73,7 +85,7 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
   delete baseWithoutWidget.extraResources;
   if (!widgetEnabled(env)) return baseWithoutWidget;
 
-  assertWidgetArtifacts(root);
+  assertWidgetArtifacts(root, { env });
   const urlScheme = resolveWidgetUrlScheme(env, root);
   const localDevelopmentSigning = String(env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING || '').trim() === '1';
   return {
@@ -97,10 +109,15 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
     ],
     extendInfo: {
       ...(baseWithoutWidget.extendInfo || {}),
-      CFBundleURLTypes: [{
-        CFBundleURLName: 'token-monitor-widget',
-        CFBundleURLSchemes: [urlScheme]
-      }]
+      CFBundleURLTypes: [
+        ...(Array.isArray(baseWithoutWidget.extendInfo?.CFBundleURLTypes)
+          ? baseWithoutWidget.extendInfo.CFBundleURLTypes
+          : []),
+        {
+          CFBundleURLName: 'token-monitor-widget',
+          CFBundleURLSchemes: [urlScheme]
+        }
+      ]
     }
   };
 }
@@ -114,7 +131,7 @@ function createBuilderConfig({ baseConfig, env = process.env, root = path.resolv
 }
 
 if (require.main === module && widgetEnabled()) {
-  assertWidgetArtifacts(path.resolve(__dirname, '..'));
+  assertWidgetArtifacts(path.resolve(__dirname, '..'), { env: process.env });
 }
 
 module.exports = {

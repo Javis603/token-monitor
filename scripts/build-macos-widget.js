@@ -3,17 +3,25 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { normalizeWidgetURLScheme } = require('./macos-widget-config');
+const {
+  profileIsRequired,
+  profilePath,
+  validateProvisioningProfiles
+} = require('./macos-provisioning');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROJECT = path.join(ROOT, 'native', 'macos', 'TokenMonitorWidget.xcodeproj');
 const OUTPUT = path.join(ROOT, 'build', 'macos-widget');
 const DERIVED_DATA = path.join(OUTPUT, 'DerivedData');
+const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const DEFAULT_APP_ID = String(PACKAGE_JSON.build?.appId || 'com.example.tokenmonitor').trim();
 const DEFAULT_APP_GROUP = 'group.com.example.tokenmonitor';
-const DEFAULT_WIDGET_BUNDLE_ID = 'com.example.tokenmonitor.widget';
+const DEFAULT_WIDGET_BUNDLE_ID = `${DEFAULT_APP_ID}.widget`;
 const DEFAULT_URL_SCHEME = 'token-monitor';
 const DEFAULT_WIDGET_KIND = 'com.tokenmonitor.dashboard';
 const WIDGET_UI_VERSION = 19;
-const WIDGET_SCHEMA_VERSION = 5;
+const WIDGET_SCHEMA_VERSION = 6;
 const WIDGET_ARCHITECTURES = Object.freeze({
   arm64: Object.freeze({ name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64' }),
   x64: Object.freeze({ name: 'x64', xcodeArch: 'x86_64', swiftArch: 'x86_64' })
@@ -26,6 +34,16 @@ function packageVersion() {
     throw new Error('package.json version is not a valid semantic version');
   }
   return version;
+}
+
+function widgetVersions(version = packageVersion()) {
+  const match = String(version).match(/^(\d+\.\d+\.\d+)(?:[-+][0-9A-Za-z.-]+)?$/);
+  if (!match) throw new Error('package.json version is not a valid semantic version');
+  return {
+    packageVersion: String(version),
+    marketingVersion: match[1],
+    bundleVersion: match[1]
+  };
 }
 
 function configuredIdentifier(name, fallback) {
@@ -77,13 +95,16 @@ function assertWidgetArchitecture(extension, helperBinary, architecture) {
   }
 }
 
-function validateDistributionIdentifiers({ appGroup, bundleId, distributionBuild }) {
+function validateDistributionIdentifiers({ appGroup, bundleId, appId = DEFAULT_APP_ID, distributionBuild }) {
   if (!distributionBuild) return;
   if (!process.env.TOKEN_MONITOR_APP_GROUP || /^group\.com\.example\./i.test(appGroup)) {
     throw new Error('TOKEN_MONITOR_APP_GROUP must be explicitly configured for a distribution build');
   }
   if (!process.env.TOKEN_MONITOR_WIDGET_BUNDLE_ID || /^com\.example\./i.test(bundleId)) {
     throw new Error('TOKEN_MONITOR_WIDGET_BUNDLE_ID must be explicitly configured for a distribution build');
+  }
+  if (!bundleId.startsWith(`${appId}.`)) {
+    throw new Error(`TOKEN_MONITOR_WIDGET_BUNDLE_ID must be in the ${appId}. namespace`);
   }
 }
 
@@ -116,6 +137,15 @@ ${extension ? '  <key>com.apple.security.app-sandbox</key>\n  <true/>\n' : `  <k
 `;
 }
 
+function emptyEntitlementPlist() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict/>
+</plist>
+`;
+}
+
 function xcconfigLine(key, value) {
   return `${key} = ${String(value).replaceAll('\n', '')}`;
 }
@@ -136,14 +166,30 @@ function main() {
 
   const appGroup = configuredIdentifier('TOKEN_MONITOR_APP_GROUP', DEFAULT_APP_GROUP);
   const bundleId = configuredIdentifier('TOKEN_MONITOR_WIDGET_BUNDLE_ID', DEFAULT_WIDGET_BUNDLE_ID);
-  const urlScheme = configuredIdentifier('TOKEN_MONITOR_WIDGET_URL_SCHEME', DEFAULT_URL_SCHEME);
+  const urlScheme = normalizeWidgetURLScheme(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME, DEFAULT_URL_SCHEME);
   const widgetKind = configuredIdentifier('TOKEN_MONITOR_WIDGET_KIND', DEFAULT_WIDGET_KIND);
   const architecture = resolveWidgetArchitecture();
   const revision = String(process.env.TOKEN_MONITOR_WIDGET_GIT_REVISION || gitRevision()).trim();
   const timestamp = String(process.env.TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP || buildTimestamp()).trim();
-  const currentProjectVersion = packageVersion();
+  const versions = widgetVersions();
+  const appId = DEFAULT_APP_ID;
   const distributionBuild = process.env.TOKEN_MONITOR_WIDGET_DISTRIBUTION === '1';
-  validateDistributionIdentifiers({ appGroup, bundleId, distributionBuild });
+  validateDistributionIdentifiers({ appGroup, bundleId, appId, distributionBuild });
+  const localDevelopmentSigning = process.env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING === '1';
+  const appProfilePath = profilePath(process.env, 'TOKEN_MONITOR_APP_PROVISIONING_PROFILE');
+  const widgetProfilePath = profilePath(process.env, 'TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE');
+  if (profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup })) {
+    validateProvisioningProfiles({
+      appProfilePath,
+      widgetProfilePath,
+      appBundleId: appId,
+      widgetBundleId: bundleId,
+      appGroup
+    });
+  }
+  if (localDevelopmentSigning && !distributionBuild) {
+    console.log('[mac-widget] Local ad-hoc preview does not validate production App Group authorization.');
+  }
   const developmentTeam = String(process.env.DEVELOPMENT_TEAM || '').trim();
   if (developmentTeam && !/^[A-Z0-9]+$/.test(developmentTeam)) {
     throw new Error('DEVELOPMENT_TEAM contains unsupported characters');
@@ -153,9 +199,11 @@ function main() {
   fs.mkdirSync(OUTPUT, { recursive: true });
   const xcconfigPath = path.join(OUTPUT, 'local-widget-build.xcconfig');
   fs.writeFileSync(xcconfigPath, `${[
-    xcconfigLine('CURRENT_PROJECT_VERSION', currentProjectVersion),
-    xcconfigLine('MARKETING_VERSION', currentProjectVersion),
-    xcconfigLine('TOKEN_MONITOR_PACKAGE_VERSION', currentProjectVersion),
+    xcconfigLine('CURRENT_PROJECT_VERSION', versions.bundleVersion),
+    xcconfigLine('MARKETING_VERSION', versions.marketingVersion),
+    xcconfigLine('TOKEN_MONITOR_BUNDLE_VERSION', versions.bundleVersion),
+    xcconfigLine('TOKEN_MONITOR_MARKETING_VERSION', versions.marketingVersion),
+    xcconfigLine('TOKEN_MONITOR_PACKAGE_VERSION', versions.packageVersion),
     xcconfigLine('TOKEN_MONITOR_APP_GROUP', appGroup),
     xcconfigLine('TOKEN_MONITOR_WIDGET_BUNDLE_ID', bundleId),
     xcconfigLine('TOKEN_MONITOR_WIDGET_URL_SCHEME', urlScheme),
@@ -204,8 +252,17 @@ function main() {
     throw new Error(`swiftc exited with status ${helperResult.status}`);
   }
   assertWidgetArchitecture(stagedExtension, helperBinary, architecture);
+  if (profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup })) {
+    const stagedAppProfile = path.join(OUTPUT, 'TokenMonitor.provisionprofile');
+    const stagedWidgetProfile = path.join(OUTPUT, 'TokenMonitorWidget.provisionprofile');
+    fs.copyFileSync(appProfilePath, stagedAppProfile);
+    fs.copyFileSync(widgetProfilePath, stagedWidgetProfile);
+    fs.chmodSync(stagedAppProfile, 0o600);
+    fs.chmodSync(stagedWidgetProfile, 0o600);
+  }
   fs.writeFileSync(path.join(OUTPUT, 'TokenMonitor.entitlements'), entitlementPlist(appGroup));
   fs.writeFileSync(path.join(OUTPUT, 'TokenMonitorWidget.entitlements'), entitlementPlist(appGroup, true));
+  fs.writeFileSync(path.join(OUTPUT, 'TokenMonitorWidgetReloader.entitlements'), emptyEntitlementPlist());
   fs.writeFileSync(path.join(OUTPUT, 'widget-config.json'), `${JSON.stringify({
     schemaVersion: 1,
     appGroup,
@@ -215,7 +272,9 @@ function main() {
     widgetSchemaVersion: WIDGET_SCHEMA_VERSION,
     gitRevision: revision,
     buildTimestamp: timestamp,
-    bundleVersion: currentProjectVersion,
+    packageVersion: versions.packageVersion,
+    marketingVersion: versions.marketingVersion,
+    bundleVersion: versions.bundleVersion,
     snapshotFileName: 'snapshot.json'
   }, null, 2)}\n`);
   console.log(`[mac-widget] staged ${path.relative(ROOT, stagedExtension)} and ${path.relative(ROOT, helperBinary)} (${widgetKind}, ${revision}, ${timestamp})`);
@@ -229,6 +288,7 @@ module.exports = {
   WIDGET_ARCHITECTURES,
   assertWidgetArchitecture,
   packageVersion,
+  widgetVersions,
   resolveWidgetArchitecture,
   validateDistributionIdentifiers
 };

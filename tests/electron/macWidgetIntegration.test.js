@@ -38,6 +38,7 @@ const {
   DEFAULT_APP_GROUP,
   DEFAULT_WIDGET_BUNDLE_ID,
   packageVersion,
+  widgetVersions,
   resolveWidgetArchitecture,
   validateDistributionIdentifiers
 } = require('../../scripts/build-macos-widget');
@@ -45,6 +46,7 @@ const {
   createBuilderConfig,
   widgetArtifactPaths
 } = require('../../scripts/macos-packaging');
+const { normalizeWidgetURLScheme } = require('../../src/shared/macWidgetConfig');
 
 test('publishes final stats to the macOS Widget from the single sendPush outlet', () => {
   const start = mainSource.indexOf('function sendPush(payload)');
@@ -80,7 +82,7 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-widget-artifacts-'));
   const paths = widgetArtifactPaths(artifactRoot);
   fs.mkdirSync(path.dirname(paths.extensionExecutable), { recursive: true });
-  for (const filePath of [paths.entitlements, paths.extensionExecutable, paths.config, paths.reloader, paths.extensionEntitlements]) {
+  for (const filePath of [paths.entitlements, paths.extensionExecutable, paths.config, paths.reloader, paths.extensionEntitlements, paths.reloaderEntitlements]) {
     fs.writeFileSync(filePath, 'test');
   }
   const widget = createBuilderConfig({
@@ -97,13 +99,23 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   assert.equal(mac.extraResources[1].to, 'TokenMonitorWidgetReloader');
   assert.equal(mac.sign, 'scripts/sign-macos-with-widget.js');
   assert.match(packageJson.scripts['pack'], /electron-builder --config scripts\/electron-builder\.config\.js/);
+  assert.match(packageJson.scripts['dist:mac:widget'], /TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 node scripts\/macos-packaging\.js/);
+  assert.match(packageJson.scripts['dist:mac:widget'], /TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 electron-builder/);
+  assert.match(packageJson.scripts['dist:mac:widget:x64'], /TOKEN_MONITOR_WIDGET_ARCH=x64/);
 });
 
 test('supports an isolated local Widget URL scheme without changing the release default', () => {
   assert.match(mainSource, /parseMacWidgetDeepLink\(url, urlScheme\)/);
-  assert.match(widgetSource, /static let urlScheme = Bundle\.main\.object/);
+  assert.match(widgetSource, /static let urlScheme: String/);
   assert.match(widgetInfo, /<key>TokenMonitorURLScheme<\/key>/);
   assert.match(packageJson.scripts['pack:mac:widget'], /TOKEN_MONITOR_WIDGET_ENABLED=1/);
+});
+
+test('canonicalizes Widget URL schemes and rejects unsafe values', () => {
+  assert.equal(normalizeWidgetURLScheme('Token-Monitor+Preview'), 'token-monitor+preview');
+  assert.equal(normalizeWidgetURLScheme(''), 'token-monitor');
+  assert.throws(() => normalizeWidgetURLScheme('https://example.test'), /unsupported characters/);
+  assert.throws(() => normalizeWidgetURLScheme('widget scheme'), /unsupported characters/);
 });
 
 test('uses AppIntent configuration and page-specific deep links', () => {
@@ -120,6 +132,35 @@ test('Widget period controls are real App Intent buttons without fake dropdown s
   assert.doesNotMatch(widgetSource, /onTapGesture/);
   assert.doesNotMatch(widgetSource, /chevron\.down/);
   assert.doesNotMatch(widgetSource, /TOKEN_MONITOR_WIDGET_KIND.*v4|v3-temp|dev/);
+});
+
+test('Widget page empty states are scoped to the selected page', () => {
+  const contentStart = widgetSource.indexOf('private func content(_ snapshot: WidgetSnapshot)');
+  const contentEnd = widgetSource.indexOf('\n    private func small', contentStart);
+  const contentSource = widgetSource.slice(contentStart, contentEnd);
+  assert.doesNotMatch(contentSource, /snapshot\.isEmpty/);
+
+  const overviewStart = widgetSource.indexOf('private func overview(');
+  const overviewEnd = widgetSource.indexOf('\n    private func quota(', overviewStart);
+  const overviewSource = widgetSource.slice(overviewStart, overviewEnd);
+  assert.match(overviewSource, /snapshot\.overview\.totalTokens == 0/);
+  assert.match(overviewSource, /snapshot\.models\.isEmpty/);
+  assert.match(overviewSource, /snapshot\.activity\.activeDays == 0/);
+
+  const quotaStart = widgetSource.indexOf('private func quota(');
+  const quotaEnd = widgetSource.indexOf('\n    private func models(', quotaStart);
+  assert.match(widgetSource.slice(quotaStart, quotaEnd), /snapshot\.quota\.count/);
+  const modelsStart = widgetSource.indexOf('private func models(');
+  const modelsEnd = widgetSource.indexOf('\n    private func activity(', modelsStart);
+  assert.match(widgetSource.slice(modelsStart, modelsEnd), /snapshot\.models\.count/);
+  const activityStart = widgetSource.indexOf('private func activity(');
+  const activityEnd = widgetSource.indexOf('\n    private func trend(', activityStart);
+  assert.ok(activityEnd > activityStart);
+  assert.match(widgetSource, /No activity data/);
+  const trendStart = widgetSource.indexOf('private func trend(');
+  const trendEnd = widgetSource.indexOf('\n    private func footer(', trendStart);
+  assert.ok(trendEnd > trendStart);
+  assert.match(widgetSource, /snapshot\.trend\.points\.isEmpty/);
 });
 
 test('Widget page control cycles pages with per-family App Intent state', () => {
@@ -163,13 +204,23 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
   assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 19;/);
-  assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 5;/);
+  assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 6;/);
   assert.equal(packageVersion(), packageJson.version);
-  assert.match(widgetProject, /MARKETING_VERSION = "\$\(TOKEN_MONITOR_PACKAGE_VERSION\)";/);
-  assert.match(widgetProject, /CURRENT_PROJECT_VERSION = "\$\(TOKEN_MONITOR_PACKAGE_VERSION\)";/);
-  assert.match(widgetBuildSource, /xcconfigLine\('MARKETING_VERSION', currentProjectVersion\)/);
-  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>5<\/string>/);
+  assert.match(widgetProject, /MARKETING_VERSION = "\$\(TOKEN_MONITOR_MARKETING_VERSION\)";/);
+  assert.match(widgetProject, /CURRENT_PROJECT_VERSION = "\$\(TOKEN_MONITOR_BUNDLE_VERSION\)";/);
+  assert.match(widgetBuildSource, /xcconfigLine\('MARKETING_VERSION', versions\.marketingVersion\)/);
+  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>6<\/string>/);
   assert.match(widgetInfo, /<key>TMWidgetUIVersion<\/key>\s*<string>19<\/string>/);
+});
+
+test('keeps marketing and bundle versions numeric across release channels', () => {
+  for (const version of ['1.2.3', '1.2.3-beta.4', '1.2.3-rc.1', '1.2.3+build.9']) {
+    assert.deepEqual(widgetVersions(version), {
+      packageVersion: version,
+      marketingVersion: '1.2.3',
+      bundleVersion: '1.2.3'
+    });
+  }
 });
 
 test('distribution Widget builds reject implicit example identifiers', () => {
@@ -241,7 +292,7 @@ test('Widget layout uses system margins and fixed scaffold metrics without chang
   assert.match(widgetSource, /\.frame\(height: metrics\.footerHeight\)/);
   assert.match(widgetSource, /\.frame\(width: metrics\.pageControlWidth, height: WidgetDesignTokens\.pageControlHeight, alignment: \.leading\)/);
   assert.match(widgetSource, /Image\(systemName: "arrow\.up\.right"\)[\s\S]*\.frame\(width: WidgetDesignTokens\.openButtonSize, height: WidgetDesignTokens\.openButtonSize\)/);
-  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>5<\/string>/);
+  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>6<\/string>/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
 });
 

@@ -6,8 +6,37 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { signApp } = require('@electron/osx-sign');
+const { normalizeWidgetURLScheme } = require('./macos-widget-config');
+const { copyProvisioningProfiles, profileIsRequired } = require('./macos-provisioning');
 
 const execFileAsync = promisify(execFile);
+
+function reloaderEntitlementsPath() {
+  return path.resolve(
+    __dirname,
+    '..',
+    'build',
+    'macos-widget',
+    'TokenMonitorWidgetReloader.entitlements'
+  );
+}
+
+function reloaderSigningOptions(options) {
+  const reloaderPath = path.join(options.app, 'Contents', 'Resources', 'TokenMonitorWidgetReloader');
+  const originalOptionsForFile = options.optionsForFile;
+  return {
+    ...options,
+    async optionsForFile(filePath) {
+      const fileOptions = originalOptionsForFile
+        ? await originalOptionsForFile(filePath)
+        : {};
+      if (path.resolve(filePath) === path.resolve(reloaderPath)) {
+        return { ...fileOptions, entitlements: reloaderEntitlementsPath() };
+      }
+      return fileOptions;
+    }
+  };
+}
 
 function extensionSignArgs({ identity, entitlementsPath, keychain, localDevelopmentSigning }) {
   const args = ['--force', '--sign', identity, '--entitlements', entitlementsPath];
@@ -64,9 +93,48 @@ function localMainAppSignArgs({ identity, entitlements, keychain, app }) {
   return args;
 }
 
+function formalMainAppSignArgs({ identity, entitlements, keychain, app }) {
+  const args = ['--force', '--sign', identity, '--entitlements', entitlements, '--options', 'runtime', '--timestamp'];
+  if (keychain) args.push('--keychain', keychain);
+  args.push(app);
+  return args;
+}
+
+function reloaderSignArgs({ identity, entitlements, keychain, app, localDevelopmentSigning }) {
+  const args = ['--force', '--sign', identity, '--entitlements', entitlements];
+  if (identity !== '-' && !localDevelopmentSigning) args.push('--options', 'runtime', '--timestamp');
+  if (keychain) args.push('--keychain', keychain);
+  args.push(path.join(app, 'Contents', 'Resources', 'TokenMonitorWidgetReloader'));
+  return args;
+}
+
+async function signReloaderAndContainer(options, localDevelopmentSigning) {
+  const mainFileOptions = options.optionsForFile
+    ? await options.optionsForFile(options.app)
+    : {};
+  if (!mainFileOptions.entitlements) {
+    throw new Error('macOS main app entitlements are unavailable after Widget signing');
+  }
+  await execFileAsync('codesign', reloaderSignArgs({
+    identity: options.identity,
+    entitlements: reloaderEntitlementsPath(),
+    keychain: options.keychain,
+    app: options.app,
+    localDevelopmentSigning
+  }));
+  await execFileAsync('codesign', (localDevelopmentSigning ? localMainAppSignArgs : formalMainAppSignArgs)({
+    identity: options.identity,
+    entitlements: mainFileOptions.entitlements,
+    keychain: options.keychain,
+    app: options.app
+  }));
+}
+
 async function signAppForMode(options, localDevelopmentSigning) {
+  const signingOptions = reloaderSigningOptions(options);
   if (!localDevelopmentSigning) {
-    await signApp(options);
+    await signApp(signingOptions);
+    await signReloaderAndContainer(signingOptions, false);
     return;
   }
 
@@ -76,19 +144,8 @@ async function signAppForMode(options, localDevelopmentSigning) {
   try {
     await fs.writeFile(wrapperPath, localCodesignWrapperScript(), { mode: 0o700 });
     process.env.PATH = `${wrapperDirectory}${path.delimiter}${originalPath || ''}`;
-    await signApp(options);
-    const mainFileOptions = options.optionsForFile
-      ? await options.optionsForFile(options.app)
-      : {};
-    if (!mainFileOptions.entitlements) {
-      throw new Error('macOS main app entitlements are unavailable for local development signing');
-    }
-    await execFileAsync('codesign', localMainAppSignArgs({
-      identity: options.identity,
-      entitlements: mainFileOptions.entitlements,
-      keychain: options.keychain,
-      app: options.app
-    }));
+    await signApp(signingOptions);
+    await signReloaderAndContainer(signingOptions, true);
   } finally {
     process.env.PATH = originalPath;
     await fs.rm(wrapperDirectory, { recursive: true, force: true });
@@ -98,10 +155,7 @@ async function signAppForMode(options, localDevelopmentSigning) {
 function widgetURLScheme() {
   const value = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || '').trim();
   if (!value) return null;
-  if (!/^[A-Za-z][A-Za-z0-9+.-]*$/.test(value)) {
-    throw new Error('TOKEN_MONITOR_WIDGET_URL_SCHEME contains unsupported characters');
-  }
-  return value;
+  return normalizeWidgetURLScheme(value);
 }
 
 module.exports = async function signMacAppWithWidget(options) {
@@ -121,13 +175,21 @@ module.exports = async function signMacAppWithWidget(options) {
   const identity = String(options.identity || '').trim();
   if (!identity) throw new Error('macOS signing identity is unavailable for Widget extension');
   const localDevelopmentSigning = process.env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING === '1';
-  const urlScheme = widgetURLScheme();
-  if (urlScheme) {
-    await execFileAsync('plutil', [
-      '-replace', 'CFBundleURLTypes.0.CFBundleURLSchemes.0',
-      '-string', urlScheme,
-      path.join(options.app, 'Contents', 'Info.plist')
-    ]);
+  const appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor').trim();
+  const distributionBuild = process.env.TOKEN_MONITOR_WIDGET_DISTRIBUTION === '1';
+  if (profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup })) {
+    const output = path.resolve(__dirname, '..', 'build', 'macos-widget');
+    const appProfilePath = path.join(output, 'TokenMonitor.provisionprofile');
+    const widgetProfilePath = path.join(output, 'TokenMonitorWidget.provisionprofile');
+    if (!fsSyncExists(appProfilePath) || !fsSyncExists(widgetProfilePath)) {
+      throw new Error('Production Widget signing requires staged app and Widget provisioning profiles');
+    }
+    await copyProvisioningProfiles({
+      appProfilePath,
+      widgetProfilePath,
+      appPath: options.app,
+      extensionPath
+    });
   }
   const args = extensionSignArgs({
     identity,
@@ -140,8 +202,18 @@ module.exports = async function signMacAppWithWidget(options) {
   await signAppForMode(appSignOptions(options, localDevelopmentSigning), localDevelopmentSigning);
 };
 
+function fsSyncExists(filePath) {
+  try {
+    return require('node:fs').existsSync(filePath);
+  } catch (_) {
+    return false;
+  }
+}
+
 module.exports.extensionSignArgs = extensionSignArgs;
 module.exports.appSignOptions = appSignOptions;
 module.exports.localCodesignWrapperScript = localCodesignWrapperScript;
 module.exports.localMainAppSignArgs = localMainAppSignArgs;
+module.exports.formalMainAppSignArgs = formalMainAppSignArgs;
+module.exports.reloaderSignArgs = reloaderSignArgs;
 module.exports.widgetURLScheme = widgetURLScheme;

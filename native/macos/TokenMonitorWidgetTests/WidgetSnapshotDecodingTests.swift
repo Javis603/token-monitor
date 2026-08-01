@@ -36,6 +36,101 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertNil(snapshot.quota[1].windows.first?.metric)
     }
 
+    func testSchemaV6KeepsMultiAccountProviderRowsStableAndPrivate() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-a1b2c3d4","displayName":"Codex 1","windows":[{"kind":"weekly","remainingPercent":80}]},{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-e5f6a7b8","displayName":"Codex 2","windows":[{"kind":"weekly","remainingPercent":60}]},{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-c9d0e1f2","displayName":"Codex 3","windows":[{"kind":"weekly","remainingPercent":40}]}],"status":{"noData":true}}
+        """)
+
+        XCTAssertEqual(snapshot.quota.map(\.id), ["codex-a1b2c3d4", "codex-e5f6a7b8", "codex-c9d0e1f2"])
+        XCTAssertEqual(snapshot.quota.map(\.displayName), ["Codex 1", "Codex 2", "Codex 3"])
+        XCTAssertEqual(Set(snapshot.quota.map(\.id)).count, 3)
+        XCTAssertTrue(snapshot.status.noData)
+        XCTAssertFalse(snapshot.quota.isEmpty)
+    }
+
+    func testLegacyQuotaRowsGetDistinctStableFallbackIDsAndBadRowsDoNotBlankSnapshot() throws {
+        let first = try decode("""
+        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]},{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":60}]},"not-a-provider",{"provider":"openrouter","status":"ok","windows":[]}],"status":{"noData":true}}
+        """)
+        let second = try decode("""
+        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]},{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":60}]},"not-a-provider",{"provider":"openrouter","status":"ok","windows":[]}],"status":{"noData":true}}
+        """)
+
+        XCTAssertEqual(first.quota.count, 3)
+        XCTAssertEqual(Set(first.quota.map(\.id)).count, first.quota.count)
+        XCTAssertEqual(first.quota.map(\.id), second.quota.map(\.id))
+        XCTAssertEqual(first.quota.map(\.provider), ["codex", "codex", "openrouter"])
+    }
+
+    func testLegacyLimitsUseLossyDecodingForMalformedRows() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":1,"generatedAt":"2026-07-17T09:00:00Z","today":{"totalTokens":12,"costUsd":0.1},"limits":[{"status":"ok"},{"provider":"codex","status":"ok","windows":[]}]}
+        """)
+
+        XCTAssertEqual(snapshot.quota.map(\.provider), ["codex"])
+        XCTAssertEqual(snapshot.overview.totalTokens, 12)
+    }
+
+    func testMissingSourceStaleDefaultsToFalseAndCreditsNeverUsesPercentageMeter() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"thirdparty","status":"ok","windows":[{"kind":"billing","metric":"credits","remaining":4.25,"currency":"USD","showMeter":false}]}],"status":{"isStale":false,"noData":true}}
+        """)
+
+        XCTAssertFalse(snapshot.status.sourceStale)
+        let window = try XCTUnwrap(snapshot.quota.first?.windows.first)
+        XCTAssertEqual(window.metric, "credits")
+        XCTAssertFalse(window.showMeter)
+        XCTAssertNil(window.remainingPercent)
+    }
+
+    func testMalformedQuotaEntryIsDroppedWithoutDroppingOtherPages() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"totalTokens":12},"models":[{"id":"model-safe","displayName":"safe","totalTokens":12,"sharePercent":100}]}},"quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]},{"windows":42},{"provider":"openrouter","status":"ok","windows":[]}],"status":{"noData":false}}
+        """)
+
+        XCTAssertEqual(snapshot.quota.map(\.provider), ["codex", "openrouter"])
+        XCTAssertEqual(snapshot.models.first?.id, "model-safe")
+        XCTAssertFalse(snapshot.isEmpty)
+    }
+
+    func testPageEmptyStatesRemainIndependentWhenOnlyOnePageHasData() throws {
+        let quotaOnly = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00Z","quota":[{"provider":"openrouter","status":"ok","windows":[{"kind":"billing","metric":"credits","remaining":4.25,"currency":"USD","showMeter":false}]}],"status":{"noData":true}}
+        """)
+        XCTAssertTrue(quotaOnly.isEmpty)
+        XCTAssertFalse(quotaOnly.quota.isEmpty)
+        XCTAssertTrue(quotaOnly.selecting(.day).models.isEmpty)
+        XCTAssertFalse(quotaOnly.selecting(.day).quota.isEmpty)
+
+        let modelsOnly = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":0,"costUsd":0},"models":[{"id":"model-safe","displayName":"safe","totalTokens":12,"sharePercent":100}],"activity":{"days":[]},"trend":{"points":[]}}},"status":{"noData":false}}
+        """)
+        XCTAssertFalse(modelsOnly.selecting(.day).models.isEmpty)
+        XCTAssertTrue(modelsOnly.selecting(.day).activity.days.isEmpty)
+        XCTAssertTrue(modelsOnly.selecting(.day).quota.isEmpty)
+
+        let activityOnly = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":0,"costUsd":0},"models":[],"activity":{"activeDays":1,"days":[{"date":"2026-07-16","intensity":1}]},"trend":{"points":[]}}},"status":{"noData":false}}
+        """)
+        XCTAssertFalse(activityOnly.selecting(.day).activity.days.isEmpty)
+        XCTAssertTrue(activityOnly.selecting(.day).trend.points.isEmpty)
+
+        let trendOnly = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":0,"costUsd":0},"models":[],"activity":{"days":[]},"trend":{"points":[{"date":"2026-07-16","totalTokens":12,"costUsd":0.1}]}}},"status":{"noData":false}}
+        """)
+        XCTAssertFalse(trendOnly.selecting(.day).trend.points.isEmpty)
+        XCTAssertTrue(trendOnly.selecting(.day).models.isEmpty)
+    }
+
+    func testLegacyDuplicateModelRowsReceiveDistinctStableIDs() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00Z","models":[{"displayName":"same","totalTokens":10,"sharePercent":50},{"displayName":"same","totalTokens":10,"sharePercent":50}],"status":{"noData":false}}
+        """)
+        XCTAssertEqual(snapshot.models.count, 2)
+        XCTAssertEqual(Set(snapshot.models.map(\.id)).count, 2)
+        XCTAssertEqual(snapshot.models.map(\.id), [snapshot.models[0].id, "\(snapshot.models[0].id)-2"])
+    }
+
     func testLegacyWindowSchemaDefaultsMetricAndMeterSafely() throws {
         let snapshot = try decode("""
         {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":57}]}],"status":{"noData":false}}

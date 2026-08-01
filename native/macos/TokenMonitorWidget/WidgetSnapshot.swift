@@ -47,7 +47,7 @@ struct WidgetSnapshot: Decodable, Equatable {
                 return (period, value)
             })
             let fallbackOverview = try container.decodeIfPresent(WidgetOverview.self, forKey: .overview) ?? .empty(generatedAt: generatedAt)
-            let fallbackModels = try container.decodeIfPresent([WidgetModel].self, forKey: .models) ?? []
+            let fallbackModels = normalizeWidgetModels(try container.decodeIfPresent([WidgetModel].self, forKey: .models) ?? [])
             let fallbackActivity = try container.decodeIfPresent(WidgetActivity.self, forKey: .activity) ?? .empty
             let fallbackTrend = try container.decodeIfPresent(WidgetTrend.self, forKey: .trend) ?? .empty
             let initialPeriod = periods[.day] ?? WidgetPeriodSnapshot(
@@ -60,15 +60,17 @@ struct WidgetSnapshot: Decodable, Equatable {
             models = initialPeriod.models
             activity = initialPeriod.activity
             trend = initialPeriod.trend
-            quota = try container.decodeIfPresent([WidgetQuotaProvider].self, forKey: .quota) ?? []
+            let decodedQuota = (try? container.decodeIfPresent(WidgetQuotaProviderArray.self, forKey: .quota)) ?? nil
+            quota = normalizeQuotaProviders(decodedQuota?.values ?? [])
             presentation = try container.decodeIfPresent(WidgetPresentation.self, forKey: .presentation) ?? .default
             status = try container.decodeIfPresent(WidgetStatus.self, forKey: .status)
                 ?? WidgetStatus(isStale: false, dataAgeSeconds: 0, providerConfigured: !quota.isEmpty, providerNeedsLogin: false, noData: overview.totalTokens == 0 && models.isEmpty && activity.activeDays == 0)
         } else {
             let today = try container.decodeIfPresent(LegacyToday.self, forKey: .today) ?? .empty
-            let limits = try container.decodeIfPresent([WidgetQuotaProvider].self, forKey: .limits) ?? []
+            let decodedLimits = (try? container.decodeIfPresent(WidgetQuotaProviderArray.self, forKey: .limits)) ?? nil
+            let limits = decodedLimits?.values ?? []
             overview = WidgetOverview(currentPeriod: "today", totalTokens: today.totalTokens, costUsd: today.costUsd, primaryTool: nil, updatedAt: generatedAt)
-            quota = limits
+            quota = normalizeQuotaProviders(limits)
             models = []
             activity = .empty
             trend = .empty
@@ -104,7 +106,7 @@ struct WidgetSnapshot: Decodable, Equatable {
                 trend: .empty,
                 periods: periods,
                 presentation: presentation,
-                status: WidgetStatus(isStale: status.isStale, dataAgeSeconds: status.dataAgeSeconds, providerConfigured: status.providerConfigured, providerNeedsLogin: status.providerNeedsLogin, noData: true)
+                status: WidgetStatus(isStale: status.isStale, sourceStale: status.sourceStale, dataAgeSeconds: status.dataAgeSeconds, providerConfigured: status.providerConfigured, providerNeedsLogin: status.providerNeedsLogin, noData: true)
             )
         }
         return WidgetSnapshot(
@@ -119,6 +121,7 @@ struct WidgetSnapshot: Decodable, Equatable {
             presentation: presentation,
             status: WidgetStatus(
                 isStale: status.isStale,
+                sourceStale: status.sourceStale,
                 dataAgeSeconds: status.dataAgeSeconds,
                 providerConfigured: status.providerConfigured,
                 providerNeedsLogin: status.providerNeedsLogin,
@@ -161,7 +164,7 @@ struct WidgetPeriodSnapshot: Decodable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         overview = try c.decodeIfPresent(WidgetOverview.self, forKey: .overview) ?? .empty(generatedAt: .distantPast)
-        models = try c.decodeIfPresent([WidgetModel].self, forKey: .models) ?? []
+        models = normalizeWidgetModels(try c.decodeIfPresent([WidgetModel].self, forKey: .models) ?? [])
         activity = try c.decodeIfPresent(WidgetActivity.self, forKey: .activity) ?? .empty
         trend = try c.decodeIfPresent(WidgetTrend.self, forKey: .trend) ?? .empty
     }
@@ -193,12 +196,14 @@ private struct LegacyToday: Decodable {
 }
 
 struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
+    let instanceId: String
+    let displayName: String?
     let provider: String
     let status: String
     let updatedAt: Date?
     let balance: WidgetQuotaBalance?
     let windows: [WidgetLimitWindow]
-    var id: String { "\(provider)-\(updatedAt?.timeIntervalSince1970 ?? 0)" }
+    var id: String { instanceId }
 
     var displayStatus: String {
         switch status {
@@ -213,22 +218,36 @@ struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case provider, status, updatedAt, balance, windows }
+    private enum CodingKeys: String, CodingKey { case instanceId, displayName, provider, status, updatedAt, balance, windows }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "unknown"
-        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "unavailable"
-        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
-        balance = try container.decodeIfPresent(WidgetQuotaBalance.self, forKey: .balance)
-        windows = try container.decodeIfPresent([WidgetLimitWindow].self, forKey: .windows) ?? []
+        guard let decodedProvider = container.optionalString(.provider), !decodedProvider.isEmpty else {
+            throw DecodingError.dataCorruptedError(forKey: .provider, in: container, debugDescription: "Widget quota provider is missing an identifier")
+        }
+        provider = decodedProvider
+        status = container.string(.status, default: "unavailable")
+        updatedAt = try? container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        balance = try? container.decodeIfPresent(WidgetQuotaBalance.self, forKey: .balance)
+        windows = (try? container.decodeIfPresent([WidgetLimitWindow].self, forKey: .windows)) ?? []
+        let decodedInstanceId = container.string(.instanceId)
+        instanceId = decodedInstanceId.isEmpty
+            ? widgetQuotaFallbackID(provider: provider, status: status, balance: balance, windows: windows)
+            : decodedInstanceId
+        displayName = container.optionalString(.displayName)
     }
 
-    init(provider: String, status: String, updatedAt: Date?, windows: [WidgetLimitWindow], balance: WidgetQuotaBalance? = nil) {
+    init(provider: String, status: String, updatedAt: Date?, windows: [WidgetLimitWindow], balance: WidgetQuotaBalance? = nil, instanceId: String? = nil, displayName: String? = nil) {
+        self.instanceId = instanceId ?? widgetQuotaFallbackID(provider: provider, status: status, balance: balance, windows: windows)
+        self.displayName = displayName
         self.provider = provider
         self.status = status
         self.updatedAt = updatedAt
         self.balance = balance
         self.windows = windows
+    }
+
+    func withInstanceId(_ value: String) -> WidgetQuotaProvider {
+        WidgetQuotaProvider(provider: provider, status: status, updatedAt: updatedAt, windows: windows, balance: balance, instanceId: value, displayName: displayName)
     }
 }
 
@@ -273,11 +292,24 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
 }
 
 struct WidgetModel: Decodable, Equatable, Identifiable {
+    let modelId: String
     let displayName: String
     let totalTokens: Int
     let costUsd: Double
     let sharePercent: Double
-    var id: String { displayName }
+    var id: String { modelId }
+
+    init(displayName: String, totalTokens: Int, costUsd: Double, sharePercent: Double, id: String? = nil) {
+        self.displayName = displayName
+        self.totalTokens = totalTokens
+        self.costUsd = costUsd
+        self.sharePercent = sharePercent
+        self.modelId = id ?? "model-\(stableWidgetHash("\(displayName)|\(totalTokens)|\(costUsd)|\(sharePercent)"))"
+    }
+
+    func withModelId(_ value: String) -> WidgetModel {
+        WidgetModel(displayName: displayName, totalTokens: totalTokens, costUsd: costUsd, sharePercent: sharePercent, id: value)
+    }
 }
 
 struct WidgetActivityDay: Decodable, Equatable, Identifiable {
@@ -330,14 +362,110 @@ struct WidgetPresentation: Decodable, Equatable {
 
 struct WidgetStatus: Decodable, Equatable {
     let isStale: Bool
+    let sourceStale: Bool
     let dataAgeSeconds: Int
     let providerConfigured: Bool
     let providerNeedsLogin: Bool
     let noData: Bool
+
+    init(isStale: Bool, sourceStale: Bool = false, dataAgeSeconds: Int, providerConfigured: Bool, providerNeedsLogin: Bool, noData: Bool) {
+        self.isStale = isStale
+        self.sourceStale = sourceStale
+        self.dataAgeSeconds = dataAgeSeconds
+        self.providerConfigured = providerConfigured
+        self.providerNeedsLogin = providerNeedsLogin
+        self.noData = noData
+    }
+}
+
+private struct WidgetAnyCodingKey: CodingKey {
+    let stringValue: String
+    init?(stringValue: String) { self.stringValue = stringValue }
+    let intValue: Int? = nil
+    init?(intValue: Int) { return nil }
+}
+
+private struct WidgetDiscardedValue: Decodable {
+    init(from decoder: Decoder) throws {
+        if var container = try? decoder.unkeyedContainer() {
+            while !container.isAtEnd {
+                _ = try container.decode(WidgetDiscardedValue.self)
+            }
+            return
+        }
+        if let container = try? decoder.container(keyedBy: WidgetAnyCodingKey.self) {
+            for key in container.allKeys {
+                _ = try container.decode(WidgetDiscardedValue.self, forKey: key)
+            }
+            return
+        }
+        _ = try decoder.singleValueContainer()
+    }
+}
+
+private struct WidgetQuotaProviderArray: Decodable {
+    let values: [WidgetQuotaProvider]
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var decoded: [WidgetQuotaProvider] = []
+        while !container.isAtEnd {
+            do {
+                decoded.append(try container.decode(WidgetQuotaProvider.self))
+            } catch {
+                _ = try container.decode(WidgetDiscardedValue.self)
+            }
+        }
+        values = decoded
+    }
+}
+
+private func stableWidgetHash(_ value: String) -> String {
+    var hash: UInt64 = 0xcbf29ce484222325
+    for byte in value.utf8 {
+        hash ^= UInt64(byte)
+        hash &*= 0x100000001b3
+    }
+    let value = String(hash, radix: 16)
+    return String(repeating: "0", count: max(0, 12 - value.count)) + value
+}
+
+private func widgetQuotaFallbackID(
+    provider: String,
+    status: String,
+    balance: WidgetQuotaBalance?,
+    windows: [WidgetLimitWindow]
+) -> String {
+    let balanceKey = balance.map { "\($0.amount)|\($0.currency)" } ?? ""
+    let windowKey = windows.map {
+        "\($0.kind)|\($0.metric ?? "")|\($0.showMeter ? "1" : "0")|\($0.remaining.map { String($0) } ?? "")|\($0.currency ?? "")"
+    }.joined(separator: ";")
+    return "provider-\(stableWidgetHash("\(provider)|\(status)|\(balanceKey)|\(windowKey)"))"
+}
+
+private func normalizeQuotaProviders(_ providers: [WidgetQuotaProvider]) -> [WidgetQuotaProvider] {
+    var seen: [String: Int] = [:]
+    return providers.map { provider in
+        let occurrence = (seen[provider.instanceId] ?? 0) + 1
+        seen[provider.instanceId] = occurrence
+        guard occurrence > 1 else { return provider }
+        return provider.withInstanceId("\(provider.instanceId)-\(occurrence)")
+    }
+}
+
+private func normalizeWidgetModels(_ models: [WidgetModel]) -> [WidgetModel] {
+    var seen: [String: Int] = [:]
+    return models.map { model in
+        let occurrence = (seen[model.modelId] ?? 0) + 1
+        seen[model.modelId] = occurrence
+        guard occurrence > 1 else { return model }
+        return model.withModelId("\(model.modelId)-\(occurrence)")
+    }
 }
 
 private extension KeyedDecodingContainer {
     func string(_ key: Key, default fallback: String = "") -> String { (try? decodeIfPresent(String.self, forKey: key)) ?? fallback }
+    func optionalString(_ key: Key) -> String? { try? decodeIfPresent(String.self, forKey: key) }
     func int(_ key: Key, default fallback: Int = 0) -> Int { (try? decodeIfPresent(Int.self, forKey: key)) ?? fallback }
     func double(_ key: Key, default fallback: Double = 0) -> Double { (try? decodeIfPresent(Double.self, forKey: key)) ?? fallback }
     func bool(_ key: Key, default fallback: Bool = false) -> Bool { (try? decodeIfPresent(Bool.self, forKey: key)) ?? fallback }
@@ -373,13 +501,17 @@ extension WidgetLimitWindow {
 }
 
 extension WidgetModel {
-    private enum CodingKeys: String, CodingKey { case displayName, totalTokens, costUsd, sharePercent }
+    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, costUsd, sharePercent }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         displayName = c.string(.displayName)
         totalTokens = c.int(.totalTokens)
         costUsd = c.double(.costUsd)
         sharePercent = c.double(.sharePercent)
+        let decodedID = c.string(.id)
+        modelId = decodedID.isEmpty
+            ? "model-\(stableWidgetHash("\(displayName)|\(totalTokens)|\(costUsd)|\(sharePercent)"))"
+            : decodedID
     }
 }
 
@@ -441,10 +573,11 @@ extension WidgetPresentation {
 }
 
 extension WidgetStatus {
-    private enum CodingKeys: String, CodingKey { case isStale, dataAgeSeconds, providerConfigured, providerNeedsLogin, noData }
+    private enum CodingKeys: String, CodingKey { case isStale, sourceStale, dataAgeSeconds, providerConfigured, providerNeedsLogin, noData }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         isStale = c.bool(.isStale)
+        sourceStale = c.bool(.sourceStale, default: false)
         dataAgeSeconds = c.int(.dataAgeSeconds)
         providerConfigured = c.bool(.providerConfigured)
         providerNeedsLogin = c.bool(.providerNeedsLogin)

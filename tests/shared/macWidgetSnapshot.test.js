@@ -5,6 +5,7 @@ const test = require('node:test');
 const {
   MAC_WIDGET_SCHEMA_VERSION,
   buildMacWidgetSnapshot,
+  isLikelySensitivePathOrUrl,
   macWidgetSnapshotFingerprint,
   serializeMacWidgetSnapshot
 } = require('../../src/shared/macWidgetSnapshot');
@@ -61,7 +62,7 @@ function sampleStats() {
   };
 }
 
-test('builds schema v5 overview, quota, models, activity, trend and presentation', () => {
+test('builds schema v6 overview, quota, models, activity, trend and presentation', () => {
   const snapshot = buildSnapshot(sampleStats(), {
     now: NOW,
     presentation: {
@@ -71,7 +72,7 @@ test('builds schema v5 overview, quota, models, activity, trend and presentation
   });
 
   assert.equal(snapshot.schemaVersion, MAC_WIDGET_SCHEMA_VERSION);
-  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 5);
+  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 6);
   assert.deepEqual(snapshot.overview, {
     currentPeriod: 'today', totalTokens: 1_200_000, costUsd: 1.25,
     primaryTool: 'codex', updatedAt: '2026-07-17T08:25:00.000Z'
@@ -136,6 +137,46 @@ test('shares the complete provider allowlist and preserves credit window display
   });
   assert.equal(byProvider.get('thirdparty').windows[0].metric, null);
   assert.equal(byProvider.get('thirdparty').windows[0].showMeter, true);
+});
+
+test('keeps multi-account provider identities stable without exporting account details', () => {
+  const stats = {
+    limits: { providers: [
+      {
+        provider: 'codex', accountKey: 'workspace-a', accountEmail: 'a@example.com',
+        authPath: '/Users/private/.codex/auth.json', token: 'secret-a', workspaceId: 'private-a',
+        status: 'ok', updatedAt: '2026-07-17T08:25:00.000Z',
+        windows: [{ kind: 'weekly', remainingPercent: 70 }]
+      },
+      {
+        provider: 'codex', accountKey: 'workspace-b', accountEmail: 'b@example.com',
+        authPath: '/Users/private/.codex/auth-b.json', token: 'secret-b', workspaceId: 'private-b',
+        status: 'ok', updatedAt: '2026-07-17T08:25:00.000Z',
+        windows: [{ kind: 'weekly', remainingPercent: 60 }]
+      }
+    ]}
+  };
+  const first = buildSnapshot(stats, { now: NOW });
+  stats.limits.providers[0].windows[0].remainingPercent = 65;
+  const second = buildSnapshot(stats, { now: NOW });
+
+  assert.deepEqual(first.quota.map((provider) => provider.displayName), ['Codex 1', 'Codex 2']);
+  assert.equal(new Set(first.quota.map((provider) => provider.instanceId)).size, 2);
+  assert.deepEqual(first.quota.map((provider) => provider.instanceId), second.quota.map((provider) => provider.instanceId));
+  for (const privateValue of ['workspace-a', 'workspace-b', 'a@example.com', 'b@example.com', 'auth.json', 'secret-a', 'private-a']) {
+    assert.doesNotMatch(JSON.stringify(first), new RegExp(privateValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+});
+
+test('merges model display-name collisions before calculating shares', () => {
+  const snapshot = buildSnapshot({ periods: {
+    today: { models: { 'GPT-5.6': 10, 'gpt-5.6': 20 }, modelCosts: { 'GPT-5.6': 1, 'gpt-5.6': 2 } }
+  } }, { now: NOW });
+  assert.equal(snapshot.models.length, 1);
+  assert.equal(snapshot.models[0].totalTokens, 30);
+  assert.equal(snapshot.models[0].costUsd, 3);
+  assert.equal(snapshot.models[0].sharePercent, 100);
+  assert.match(snapshot.models[0].id, /^model-/);
 });
 
 test('preserves a zero balance and omits missing, non-finite, or unsupported balances', () => {
@@ -237,7 +278,7 @@ test('accepts only real UTC calendar dates and lets the last duplicate date win'
 
 test('returns a complete empty schema and stale status for missing or old data', () => {
   const empty = buildSnapshot({}, { now: NOW });
-  assert.equal(empty.schemaVersion, 5);
+  assert.equal(empty.schemaVersion, 6);
   assert.equal(empty.overview.totalTokens, 0);
   assert.equal(empty.periods.day.overview.totalTokens, 0);
   assert.equal(empty.periods.month.overview.totalTokens, 0);
@@ -270,6 +311,18 @@ test('normalizes invalid values, statuses, names, and percentages', () => {
     kind: 'session', metric: null, showMeter: true,
     usedPercent: 100, remainingPercent: 0, resetsAt: null, windowMinutes: 0
   });
+});
+
+test('rejects path, URL, control-character, email, and overlong Widget labels', () => {
+  for (const value of [
+    '\\\\server\\share', '/Users/private/model', 'file:///private/model',
+    'https://internal.example/model', '~/private/model', '../private/model',
+    './private/model', 'model\u0000name', 'user@example.com', 'x'.repeat(81)
+  ]) {
+    assert.equal(isLikelySensitivePathOrUrl(value), true, value);
+  }
+  assert.equal(isLikelySensitivePathOrUrl('organization/model'), false);
+  assert.equal(isLikelySensitivePathOrUrl('provider/model-name'), false);
 });
 
 test('normalizes negative or invalid activity totals to zero', () => {
@@ -333,7 +386,7 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
   for (const value of sensitive) assert.equal(serialized.includes(value), false);
   assert.equal(serialized.endsWith('\n'), true);
   const parsed = JSON.parse(serialized);
-  assert.equal(parsed.schemaVersion, 5);
+  assert.equal(parsed.schemaVersion, 6);
   assert.deepEqual(parsed.quota.find((provider) => provider.provider === 'mimo').balance, {
     amount: 3.62,
     currency: 'CNY'
