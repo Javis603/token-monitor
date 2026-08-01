@@ -10,6 +10,7 @@ const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'rendere
 const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
+const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 const compactTokens = require('../../src/shared/compactTokens');
 
@@ -75,6 +76,9 @@ test('compact total is an opt-in appearance preference', () => {
   assert.match(main, /showCompactTotalTokens:\s*parseBoolean\(patch\.showCompactTotalTokens \?\? settings\.showCompactTotalTokens, false\)/);
   assert.match(main, /compactTokenUnits:\s*normalizeCompactTokenUnits\(patch\.compactTokenUnits \?\? settings\.compactTokenUnits\)/);
   assert.match(main, /require\('\.\.\/shared\/compactTokens'\)/);
+  assert.match(main, /function compactTokenDisplayOptions\(\)[\s\S]*?locale: trayMenuLocale\(\)/);
+  assert.match(main, /function updateDiscordRpcDisplay\(stats\)[\s\S]*?compactTokenDisplayOptions\(\)/);
+  assert.match(main, /function settingsForRenderer\(\)[\s\S]*?locale: trayMenuLocale\(\)/);
   assert.match(app, /showCompactTotalTokensInput: document\.getElementById\('showCompactTotalTokensInput'\)/);
   assert.match(app, /compactTokenUnitsInput: document\.getElementById\('compactTokenUnitsInput'\)/);
   assert.match(app, /showCompactTotalTokens: false/);
@@ -87,12 +91,24 @@ test('compact total is an opt-in appearance preference', () => {
   assert.doesNotMatch(app, /showCompactTotalTokens !== true \|\| !supportsLocalizedCompactTokenUnits/);
   assert.doesNotMatch(app, /!els\.showCompactTotalTokensInput\.checked \|\| !supportsLocalizedCompactTokenUnits/);
   assert.match(app, /els\.showCompactTotalTokensInput\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
-  assert.match(app, /els\.compactTokenUnitsInput\?\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
+  assert.match(app, /els\.compactTokenUnitsInput\?\.addEventListener\('change',[\s\S]*?saveAppearanceFromControls\(\)/);
   assert.match(app, /state\.settings\?\.showCompactTotalTokens !== true[\s\S]*?hideTotalCompact\(\)/);
   assert.match(app, /compactTokenApi\.compactTokenUnitThreshold\(unitSystem, currentLocale\(\)\)/);
   assert.match(app, /formatCompact\(num, unitSystem, currentLocale\(\)\)/);
   assert.match(app, /compactTokenApi\.formatCompactTokens\(/);
-  assert.match(app, /els\.languageInput\?\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
+  assert.match(app, /function currentLocale\(\)[\s\S]*?i18n\.resolveLocale\(state\.settings\?\.locale \|\| currentLanguage\(\), preferredLanguages\(\)\)/);
+  assert.match(app, /els\.languageInput\?\.addEventListener\('change',[\s\S]*?saveSettings\(\{ language: els\.languageInput\.value \}\)/);
+  const languageHandler = app.slice(
+    app.indexOf("els.languageInput?.addEventListener('change'"),
+    app.indexOf("els.currencyInput?.addEventListener('change'")
+  );
+  const compactUnitsHandler = app.slice(
+    app.indexOf("els.compactTokenUnitsInput?.addEventListener('change'"),
+    app.indexOf("window.addEventListener('resize'")
+  );
+  assert.doesNotMatch(languageHandler, /render\(\)/);
+  assert.doesNotMatch(compactUnitsHandler, /render\(\)/);
+  assert.doesNotMatch(i18n, /settings\.tray\.(?:tokensToday|bothToday|tokensTotal|bothTotal)':[^\n]*(?:1\.2M|1\.36B)/);
 });
 
 test('compact total stays visible through the count-up, with the font pre-locked', () => {

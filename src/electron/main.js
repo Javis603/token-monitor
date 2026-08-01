@@ -2490,7 +2490,7 @@ function startSyncCollector() {
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
-        updateDiscordRpc(displayStats, settings.currency);
+        updateDiscordRpcDisplay(displayStats);
         sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
       }
       await syncUploadScheduler.enqueue(visibleSummary, revision);
@@ -2570,7 +2570,7 @@ function startHostStats() {
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
-    updateDiscordRpc(stats, settings.currency);
+    updateDiscordRpcDisplay(stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
   };
   embeddedHubUnsub = embeddedHub.hub.onStats((stats, reason) => emit(stats, reason || 'hub'));
@@ -2675,15 +2675,19 @@ async function refreshExchangeRates({ force = false } = {}) {
   }
   applyEffectiveRates();
   updateTrayDisplay();
-  if (settings?.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
+  if (settings?.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
   pushSettingsToRenderer();
 }
 
 function compactTokenDisplayOptions() {
   return {
     compactTokenUnits: settings?.compactTokenUnits,
-    locale: resolveLocale(settings?.language, [typeof app.getLocale === 'function' ? app.getLocale() : 'en'])
+    locale: trayMenuLocale()
   };
+}
+
+function updateDiscordRpcDisplay(stats) {
+  updateDiscordRpc(stats, settings?.currency, compactTokenDisplayOptions());
 }
 
 function updateTrayDisplay() {
@@ -2749,7 +2753,7 @@ function startLocalCollector() {
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
-      updateDiscordRpc(localStats, settings.currency);
+      updateDiscordRpcDisplay(localStats);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
     },
@@ -2820,7 +2824,7 @@ async function startStatsStream(options = {}) {
             latestHubStats = parsed.data.stats;
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
-            updateDiscordRpc(displayStats, settings.currency);
+            updateDiscordRpcDisplay(displayStats);
           }
           sendPush(parsed);
         }
@@ -3000,6 +3004,7 @@ function settingsForRenderer() {
   });
   return {
     ...settings,
+    locale: trayMenuLocale(),
     ...redactedCredentials,
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
@@ -4448,10 +4453,14 @@ app.whenReady().then(() => {
     if (patch.zoomFactor !== undefined) applyZoomFactor();
     if (settings.discordRpcEnabled && !previousDiscordRpcEnabled) {
       startDiscordRpc();
-      if (latestStats) updateDiscordRpc(latestStats, settings.currency);
+      if (latestStats) updateDiscordRpcDisplay(latestStats);
     }
     else if (!settings.discordRpcEnabled && previousDiscordRpcEnabled) stopDiscordRpc();
-    else if (settings.discordRpcEnabled && settings.currency !== previousCurrency && latestStats) updateDiscordRpc(latestStats, settings.currency);
+    else if (settings.discordRpcEnabled && (
+      settings.currency !== previousCurrency
+      || settings.compactTokenUnits !== previousCompactTokenUnits
+      || settings.language !== previousLanguage
+    ) && latestStats) updateDiscordRpcDisplay(latestStats);
     applyWindowSettings();
     syncFloatingBubbleAvailability();
     const nextNativeMaterial = nativeBlurEnabled();
@@ -4506,7 +4515,7 @@ app.whenReady().then(() => {
     if (patch.currency !== undefined || patch.currencyRates !== undefined) {
       applyEffectiveRates();               // sync: settingsForRenderer() below sees fresh effective map
       updateTrayDisplay();
-      if (settings.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
+      if (settings.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
       refreshExchangeRates();              // async: fetch if stale, then re-push
     }
     pushSettingsToRenderer();

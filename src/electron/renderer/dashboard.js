@@ -594,7 +594,7 @@ async function refresh() {
 async function boot() {
   let settings = {};
   try { settings = await window.tokenMonitor.getSettings(); } catch (_) {}
-  state.locale = i18n.resolveLocale(settings.language, navigator.languages);
+  state.locale = i18n.resolveLocale(settings.locale || settings.language, navigator.languages);
   state.currency = settings.currency || 'USD';
   state.compactTokenUnits = compactTokenApi.normalizeCompactTokenUnits(settings.compactTokenUnits);
   if (settings.currencyRatesEffective && window.TokenMonitorCurrency?.configureRates) {
@@ -615,7 +615,7 @@ async function boot() {
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   let needsRender = false;
-  const nextLocale = i18n.resolveLocale(next.language, navigator.languages);
+  const nextLocale = i18n.resolveLocale(next.locale || next.language, navigator.languages);
   if (state.locale !== nextLocale) {
     state.locale = nextLocale;
     applyTranslations();

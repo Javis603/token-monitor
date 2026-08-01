@@ -15,6 +15,7 @@ function loadBuildPayload() {
     require(name) {
       if (name === '@xhayper/discord-rpc') return { Client: class {} };
       if (name === '../shared/currency') return require('../../src/shared/currency');
+      if (name === '../shared/compactTokens') return require('../../src/shared/compactTokens');
       return require(name);
     },
     setTimeout,
@@ -58,6 +59,21 @@ test('Discord Rich Presence uses Cline label and uploaded asset key', () => {
   assert.equal(payload.details, 'Cline · 12.3K tokens');
   assert.equal(payload.smallImageKey, 'cline');
   assert.equal(payload.smallImageText, 'Cline');
+});
+
+test('Discord Rich Presence follows localized compact token units', () => {
+  const buildPayload = loadBuildPayload();
+  const payload = buildPayload({
+    periods: {
+      today: {
+        totalTokens: 15_000,
+        costUsd: 0.125,
+        clients: { claude: 15_000 }
+      }
+    }
+  }, 'USD', 'localized', 'zh-TW');
+
+  assert.equal(payload.details, 'Claude · 1.5萬 tokens');
 });
 
 test('Discord Rich Presence uses labels and asset keys for tracked clients', () => {

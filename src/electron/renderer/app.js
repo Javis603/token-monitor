@@ -473,7 +473,7 @@ function currentLanguage() {
 }
 
 function currentLocale() {
-  return i18n.resolveLocale(currentLanguage(), preferredLanguages());
+  return i18n.resolveLocale(state.settings?.locale || currentLanguage(), preferredLanguages());
 }
 
 function supportsLocalizedCompactTokenUnits(locale) {
@@ -8291,9 +8291,6 @@ els.liveDot?.addEventListener('click', toggleTokenRateMode);
 
 els.languageInput?.addEventListener('change', async () => {
   await saveSettings({ language: els.languageInput.value });
-  if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
-  renderTokenRate();
-  render();
 });
 
 els.currencyInput?.addEventListener('change', async () => {
@@ -8504,9 +8501,6 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 });
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
-  if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
-  renderTokenRate();
-  render();
 });
 window.addEventListener('resize', () => { if (!numberAnimHandle) fitTotalNumber(); });
 els.swapSettingsRefreshInput.addEventListener('change', () => {
