@@ -789,7 +789,11 @@ function toggleTokenRateMode() {
   // which is orders of magnitude heavier than this label and would make the switch lag.
   if (state.settings) state.settings.tokenRateMode = next;
   renderTokenRate();
-  saveSettings({ tokenRateMode: next }).catch(() => {});
+  // Repaint again if the write failed: saveSettings re-reads settings from the main process on
+  // rejection, so state has already reverted to the persisted framing while the label is still
+  // showing the one the click asked for. Without this the label stays wrong until some later
+  // tick silently flips it back.
+  saveSettings({ tokenRateMode: next }).catch(() => renderTokenRate());
 }
 // Scale the exact total to fit the width it is actually given instead of clipping
 // it to an ellipsis. The compact chip (when shown) is flex:0 0 auto and claims its

@@ -270,6 +270,14 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .shell.title-collapsed .live-dot,
 .shell.title-icon-only .app-title-mark,
 .shell.title-icon-only .live-dot { cursor: pointer; }
+/* Scoped to the states that can actually show the reveal. Left on the base rule it would take
+   6px of the flex row in the expanded state too, where updateTitleFit() does not account for
+   it — so "Token Monitor" would start clipping ~6px before the collapse to Σ triggers, leaving
+   a truncated title and no hover target. Constant rather than animated within these states:
+   at rest the element is zero-wide and the gap sits after the live dot, the last thing in the
+   collapsed title, so animating it would add a second layout property for no visual gain. */
+.shell.title-collapsed .token-rate-reveal,
+.shell.title-icon-only .token-rate-reveal { margin-left: 6px; }
 .shell.title-collapsed .app-title-mark::before,
 .shell.title-collapsed .live-dot::before,
 .shell.title-icon-only .app-title-mark::before,
@@ -284,11 +292,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .token-rate-reveal {
   display: inline-block;
   max-width: 0;
-  /* Constant, not animated: at rest the element is zero-wide and this leaves a 6px gap after
-     the live dot, which is the last thing in the collapsed title and therefore invisible.
-     Animating the margin as well would put a second layout property in the transition for no
-     visual gain. */
-  margin-left: 6px;
   overflow: hidden;
   color: var(--muted);
   font-size: 10px;
