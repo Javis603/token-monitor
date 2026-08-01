@@ -1,9 +1,42 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const { exchangeRows, formatToolList } = require('../../src/electron/renderer/sessionDetail');
+
+const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+function sessionDetailHarness(getSessionDetail) {
+  const start = rendererSource.indexOf('async function openSessionDetail(');
+  const end = rendererSource.indexOf('\nfunction toggleDetailSort', start);
+  assert.ok(start >= 0 && end > start, 'openSessionDetail should be present');
+  const renders = [];
+  const state = { period: 'today', openSession: null };
+  const context = {
+    state,
+    renderSessionDetail: (args) => renders.push(args),
+    window: { tokenMonitor: { getSessionDetail } }
+  };
+  vm.runInNewContext(
+    `${rendererSource.slice(start, end)}\nglobalThis.testOpenSessionDetail = openSessionDetail;`,
+    context
+  );
+  return { openSessionDetail: context.testOpenSessionDetail, renders, state };
+}
 
 const detail = {
   found: true,
@@ -57,4 +90,32 @@ test('exchangeRows sorts by tokens when sortBy=tokens', () => {
 test('formatToolList dedupes and truncates', () => {
   assert.equal(formatToolList(['Read', 'Read', 'Bash']), 'Read · Bash');
   assert.equal(formatToolList([]), '');
+});
+
+test('openSessionDetail ignores a stale period result that completes last', async () => {
+  const pending = [];
+  const requests = [];
+  const { openSessionDetail, renders, state } = sessionDetailHarness((args) => {
+    const job = deferred();
+    requests.push(args);
+    pending.push(job);
+    return job.promise;
+  });
+  const session = { client: 'claude', sessionId: 'same-session', sessionCost: 0.25, title: 'Session' };
+
+  const todayRequest = openSessionDetail(session);
+  state.period = 'month';
+  const monthRequest = openSessionDetail(session);
+
+  assert.equal(requests[0].period, 'today');
+  assert.equal(requests[1].period, 'month');
+
+  pending[1].resolve({ found: true, marker: 'month' });
+  await monthRequest;
+  pending[0].resolve({ found: true, marker: 'today' });
+  await todayRequest;
+
+  assert.equal(state.openSession.period, 'month');
+  assert.equal(state.openSession.detail.marker, 'month');
+  assert.deepEqual(renders.filter((render) => render.detail).map((render) => render.detail.marker), ['month']);
 });

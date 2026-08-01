@@ -3725,16 +3725,17 @@ function stopServiceStatusTicker() {
 }
 
 async function openSessionDetail({ client, sessionId, sessionCost, title }) {
-  state.openSession = { client, sessionId, sessionCost, title, detail: null };
+  const request = { client, sessionId, sessionCost, title, period: state.period, detail: null };
+  state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
-    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: state.period, sessionCost });
-    if (state.openSession && state.openSession.sessionId === sessionId) {
-      state.openSession.detail = detail;
+    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
+    if (state.openSession === request) {
+      request.detail = detail;
       renderSessionDetail({ detail });
     }
   } catch (_) {
-    if (state.openSession && state.openSession.sessionId === sessionId) renderSessionDetail({ error: true });
+    if (state.openSession === request) renderSessionDetail({ error: true });
   }
 }
 
