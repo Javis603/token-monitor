@@ -135,12 +135,27 @@ test('a partly timed entry contributes its whole output and stays an integer', (
 test('normalizePeriod accepts both spellings and defaults an older payload to zero', () => {
   assert.equal(normalizePeriod({ timedTokens: 900, timedDurationMs: 1000 }).timedDurationMs, 1000);
   assert.equal(normalizePeriod({ timed_tokens: 900, timed_duration_ms: 1000 }).timedTokens, 900);
-  assert.equal(normalizePeriod({ timedOutputTokens: 42 }).timedOutputTokens, 42);
-  assert.equal(normalizePeriod({ timed_output_tokens: 42 }).timedOutputTokens, 42);
+  // outputTokens rides along in any real payload, and the cap below needs it present.
+  assert.equal(normalizePeriod({ outputTokens: 50, timedOutputTokens: 42 }).timedOutputTokens, 42);
+  assert.equal(normalizePeriod({ output_tokens: 50, timed_output_tokens: 42 }).timedOutputTokens, 42);
   const legacy = normalizePeriod({ totalTokens: 5 });
   assert.equal(legacy.timedTokens, 0);
   assert.equal(legacy.timedOutputTokens, 0);
   assert.equal(legacy.timedDurationMs, 0);
+});
+
+test('normalization caps timedOutputTokens at the output it claims to have timed', () => {
+  // The collector cannot break this — output is gated whole or not at all — but the hub and the
+  // Worker normalize whatever an agent posts, and this value divides straight into a headline
+  // tok/s. Without the cap a single malformed record sets the fleet rate arbitrarily high.
+  const capped = normalizePeriod({ outputTokens: 100, timedOutputTokens: 5_000, timedDurationMs: 1_000 });
+  assert.equal(capped.timedOutputTokens, 100);
+  assert.equal(capped.timedOutputTokens * 1000 / capped.timedDurationMs, 100, 'bounded at all-output-was-timed');
+  // A legitimate fully-timed period is untouched, and so is a partly timed one.
+  assert.equal(normalizePeriod({ outputTokens: 100, timedOutputTokens: 100 }).timedOutputTokens, 100);
+  assert.equal(normalizePeriod({ outputTokens: 100, timedOutputTokens: 60 }).timedOutputTokens, 60);
+  // A payload carrying no output at all cannot smuggle throughput in either.
+  assert.equal(normalizePeriod({ timedOutputTokens: 5_000 }).timedOutputTokens, 0);
 });
 
 test('addPeriodInto sums the components so cross-device throughput divides once at the end', () => {
@@ -156,8 +171,8 @@ test('addPeriodInto sums the components so cross-device throughput divides once 
 
 test('mergePeriods carries throughput across per-client today partitions', () => {
   const merged = mergePeriods(
-    period({ timedTokens: 900, timedDurationMs: 1000, timedOutputTokens: 40 }),
-    period({ timedTokens: 100, timedDurationMs: 250, timedOutputTokens: 10 })
+    period({ timedTokens: 900, timedDurationMs: 1000, outputTokens: 40, timedOutputTokens: 40 }),
+    period({ timedTokens: 100, timedDurationMs: 250, outputTokens: 10, timedOutputTokens: 10 })
   );
   assert.equal(merged.timedTokens, 1000);
   assert.equal(merged.timedOutputTokens, 50);
@@ -256,7 +271,7 @@ test('an unattributed fallback period reads as no throughput data, never NaN', (
 test('a targeted watch tick lands on the same throughput as a full rescan', () => {
   // The live path is not a whole-fleet rescan: a watch event maps a changed file to one client
   // and rescans only that client's --today partition, which is then merged back over the other
-  // clients' retained partitions. Per-entry apportionment is what makes that safe — each
+  // clients' retained partitions. The per-entry gate is what makes that safe — each
   // partition already carries its own correctly weighted share, so an untimed client sitting in
   // a stale partition cannot move the rate, and the targeted result has to equal the full one.
   const claude = (output, timedTokens, totalDurationMs) => tokscaleEntry({

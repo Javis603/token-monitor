@@ -198,7 +198,9 @@ tokscale also reports a per-entry `tokenCoverage`, and this deliberately does no
 
 All three are reported as raw sums rather than a pre-divided rate because a ratio cannot be summed: consumers add each field across devices and periods and divide only at the point of display, which makes a fleet-wide rate duration-weighted. Payloads without these fields are accepted and normalize to `0`, which consumers must read as "no throughput data" rather than "zero throughput".
 
-Because the gate is all-or-nothing per entry, `timedOutputTokens ≤ outputTokens` always holds, and the two are equal when every entry in the period reported durations. A partly timed entry — 1230 of 1234 tokens in the example above — still contributes all of its output, since the untimed remainder is cache and input rather than generation.
+Because the gate is all-or-nothing per entry, `timedOutputTokens ≤ outputTokens` is a physical bound: a period cannot have timed more output than it produced. The two are equal when every entry in the period reported durations. A partly timed entry — 1230 of 1234 tokens in the example above — still contributes all of its output, since the untimed remainder is cache and input rather than generation.
+
+The collector satisfies that bound by construction, but the hub and the Worker normalize records posted by any agent, so normalization **enforces** it: a `timedOutputTokens` larger than the record's own `outputTokens` is capped rather than trusted. Ingest is a trust boundary here, and this value divides straight into a headline rate.
 
 All three are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses to carry a `today` rescan into `month` and `allTime`. The one case where `timedOutputTokens` and a full rescan can disagree is a session that spans the boundary and starts or stops reporting durations partway through, since a rescan then re-gates the whole session on its combined state; the next full scan reconciles it. Closing even that needs a per-message timed-output counter from tokscale.
 

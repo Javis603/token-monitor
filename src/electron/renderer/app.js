@@ -731,18 +731,18 @@ function positiveNumber(value) {
 // Estimated output tokens per second of model-busy time — roughly the unit an inference
 // benchmark reports, so the number is sanity-checkable against a known model's streaming
 // speed. An estimate, not a measurement: tokscale times a message as a whole rather than
-// its decode phase, and does not break output out per timed message, so the collector
-// apportions each row's output by that row's coverage (see timedOutputTokens in usage.js).
+// its decode phase, and does not break output out per timed message, so the collector counts
+// an entry's output whenever that entry reported a duration (see timedOutputTokens in usage.js).
 //
 // Output rather than total tokens because cache reads dominate the total (typically >90%)
 // and were never generated, which would inflate the rate by two orders of magnitude and
 // read as a bug.
 //
-// Numerator and denominator now describe the same set of messages, so this stays correct
-// when periods are summed across clients and devices — an all-output numerator over a
-// timed-only denominator would read high by 1/coverage on any device running a client that
-// reports no durations. Both ride the same tokscale scan as the headline total, so it never
-// divides a live numerator by a stale denominator — the reason it dropped History activeTimeMs.
+// Numerator and denominator describe the same entries, so this stays correct when periods are
+// summed across clients and devices — an all-output numerator over a timed-only denominator
+// would read high on any device running a client that reports no durations. Both ride the same
+// tokscale scan as the headline total, so it never divides a live numerator by a stale
+// denominator — the reason it dropped History activeTimeMs.
 function tokenRatePerSecond(period) {
   const durationMs = positiveNumber(period?.timedDurationMs);
   const timedOutput = positiveNumber(period?.timedOutputTokens);

@@ -507,7 +507,14 @@ function normalizePeriod(input, options = {}) {
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
-  period.timedOutputTokens = Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0)));
+  // Capped at outputTokens because the gate makes that a physical bound: output is counted
+  // whole or not at all, so a period cannot have timed more output than it produced. The
+  // collector satisfies this by construction, but the hub and Worker normalize records posted
+  // by any agent, and an inflated value here divides straight into a headline tok/s.
+  period.timedOutputTokens = Math.min(
+    period.outputTokens,
+    Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0)))
+  );
   period.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
   if (input.clients && typeof input.clients === 'object') {
     for (const [client, value] of Object.entries(input.clients)) {

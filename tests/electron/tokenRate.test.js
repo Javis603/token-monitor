@@ -40,7 +40,7 @@ test('token rate is timed output tokens per second of timed model duration', () 
 
 test('token rate divides matched numerator and denominator, never the whole period output', () => {
   // Half the period's output came from a client that reports no durations. The collector
-  // apportions that away per entry, so the renderer must read timedOutputTokens and not
+  // gates that away per entry, so the renderer must read timedOutputTokens and not
   // re-derive anything from outputTokens or totalTokens — doing so would report 40 tok/s for
   // work that actually ran at 20.
   const { tokenRatePerSecond } = tokenRateFunctions();
@@ -64,7 +64,7 @@ test('token rate reads zero when throughput data is missing or unusable', () => 
 test('the burn reading uses the token pair rather than the output one', () => {
   const { tokenBurnPerMinute, tokenRatePerSecond } = tokenRateFunctions();
   // timedTokens already describes exactly the messages that produced timedDurationMs, so burn
-  // divides one matched pair with no apportioning at all: 4500 / 30s = 9000 tok/min.
+  // divides one matched pair straight through: 4500 / 30s = 9000 tok/min.
   const period = { outputTokens: 1200, totalTokens: 9000, timedOutputTokens: 600, timedTokens: 4500, timedDurationMs: 30_000 };
   assert.equal(tokenBurnPerMinute(period), 9000);
   assert.equal(tokenRatePerSecond(period), 20);
