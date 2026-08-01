@@ -197,6 +197,34 @@ test('the production worker entry returns session detail', async () => {
   });
 });
 
+test('terminates and rejects a session detail worker that exceeds its deadline', async () => {
+  let onTimeout;
+  let timeoutDelay;
+  let terminated = false;
+  class HangingWorker {
+    once() { return this; }
+    terminate() {
+      terminated = true;
+      return Promise.resolve(0);
+    }
+  }
+
+  const result = runSessionDetailWorker(
+    { client: 'claude', sessionId: 'blocked-wsl' },
+    {
+      Worker: HangingWorker,
+      timeoutMs: 25,
+      setTimeout: (callback, delay) => { onTimeout = callback; timeoutDelay = delay; return 1; },
+      clearTimeout: () => {}
+    }
+  );
+
+  assert.equal(timeoutDelay, 25);
+  onTimeout();
+  await assert.rejects(result, /Session detail worker timed out after 25ms/);
+  assert.equal(terminated, true);
+});
+
 test('the public session detail resolver uses the worker boundary', async () => {
   let workerArgs;
   class FakeWorker {

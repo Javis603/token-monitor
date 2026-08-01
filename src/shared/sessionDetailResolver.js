@@ -7,6 +7,7 @@ const { readSessionDetail } = require('./sessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
 
 const WSL_JSONL_CLIENTS = new Set(['claude', 'codex']);
+const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   const readDetail = deps.readSessionDetail || readSessionDetail;
@@ -45,16 +46,39 @@ function workerError(payload) {
 function runSessionDetailWorker(args = {}, deps = {}) {
   const WorkerClass = deps.Worker || Worker;
   const workerPath = deps.workerPath || require.resolve('./sessionDetailWorker');
+  const configuredTimeoutMs = Number(deps.timeoutMs ?? SESSION_DETAIL_WORKER_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+    ? Math.trunc(configuredTimeoutMs)
+    : SESSION_DETAIL_WORKER_TIMEOUT_MS;
+  const setTimer = deps.setTimeout || setTimeout;
+  const clearTimer = deps.clearTimeout || clearTimeout;
 
   return new Promise((resolve, reject) => {
     const worker = new WorkerClass(workerPath, { workerData: args });
     let settled = false;
+    let timer = null;
 
     function finish(callback, value) {
       if (settled) return;
       settled = true;
+      if (timer !== null) {
+        clearTimer(timer);
+        timer = null;
+      }
       callback(value);
     }
+
+    function terminateWorker() {
+      try {
+        const termination = worker.terminate();
+        termination?.catch?.(() => {});
+      } catch (_) {}
+    }
+
+    timer = setTimer(() => {
+      finish(reject, new Error(`Session detail worker timed out after ${timeoutMs}ms`));
+      terminateWorker();
+    }, timeoutMs);
 
     worker.once('message', (message) => {
       if (message?.ok) finish(resolve, message.detail);
@@ -73,4 +97,8 @@ function readSessionDetailForPlatform(args = {}, deps = {}) {
   return runSessionDetailWorker(args, deps);
 }
 
-module.exports = { readSessionDetailForPlatform, resolveSessionDetailForPlatform, runSessionDetailWorker };
+module.exports = {
+  readSessionDetailForPlatform,
+  resolveSessionDetailForPlatform,
+  runSessionDetailWorker
+};
