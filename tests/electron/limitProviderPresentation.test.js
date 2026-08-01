@@ -198,6 +198,38 @@ function runProviderSpendNode(source, balance) {
   return JSON.parse(JSON.stringify(context.result));
 }
 
+function runHomeLimitModule(rows, resetLabels = {}) {
+  const app = readRendererFile('app.js');
+  const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
+  function createNode(tagName) {
+    return {
+      tagName,
+      className: '',
+      textContent: '',
+      children: [],
+      classList: { add() {} },
+      style: { setProperty() {} },
+      append(...children) { this.children.push(...children); }
+    };
+  }
+  const body = createNode('body');
+  const context = {
+    document: { createElement: createNode },
+    homeModuleShell: () => ({ module: createNode('section'), body }),
+    homeLimitRows: () => rows,
+    applyHomeListMark() {},
+    iconKindFor: () => 'limits',
+    homeLimitWindowLabel: (window) => window.label,
+    formatHomeLimitWindowValue: () => '',
+    formatReset: (value) => resetLabels[value] || '',
+    limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
+    state: { settings: {} },
+    t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
+  };
+  vm.runInNewContext(`${homeLimits}\nresult = renderHomeLimitModule();`, context);
+  return body;
+}
+
 test('Limits and Home share reset expiry while preserving the existing reset copy', () => {
   const app = readRendererFile('app.js');
   const formatReset = functionBody(app, 'formatReset', 'formatDuration');
@@ -211,6 +243,30 @@ test('Limits and Home share reset expiry while preserving the existing reset cop
   assert.doesNotMatch(limitWindow, /formatReset\(window\?\.resetsAt\) \|\| window\?\.resetDescription/);
   assert.match(homeLimits, /window\.resetsAt\s*\? resetAt \|\|/);
   assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);
+});
+
+test('Home omits reset rows that have no visible reset content', () => {
+  const body = runHomeLimitModule([
+    {
+      providerId: 'deepseek',
+      key: 'deepseek',
+      name: 'DeepSeek',
+      windows: [
+        { label: 'Balance', value: '$4.00' },
+        { label: 'Expired', value: '0% left', resetsAt: 'expired' },
+        { label: 'Weekly', value: '88% left', resetsAt: 'future' },
+        { label: 'Monthly', value: '50% left', resetDescription: '6d 23h' }
+      ]
+    }
+  ], { future: 'Reset 1h' });
+
+  const metrics = body.children[0].children[1].children;
+  assert.equal(metrics[0].children.length, 1);
+  assert.equal(metrics[1].children.length, 1);
+  assert.equal(metrics[2].children.length, 2);
+  assert.equal(metrics[2].children[1].textContent, 'Reset 1h');
+  assert.equal(metrics[3].children.length, 2);
+  assert.equal(metrics[3].children[1].textContent, 'Reset 6d 23h');
 });
 
 test('capability tags explain how each provider is collected in settings', () => {
@@ -780,7 +836,10 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   assert.match(resetCreditExpiryLabel, /diffMs <= 0 \? 'now'/);
   assert.match(resetCreditExpiryLabel, /formatDuration\(diffMs\)/);
   assert.match(resetCreditExpiryDetailLabel, /`Expires in \$\{formatDuration\(diffMs\)\}`/);
-  assert.match(resetCreditExpiryDateLabel, /Intl\.DateTimeFormat\(currentLocale\(\), \{ month: 'numeric', day: 'numeric' \}\)/);
+  assert.match(
+    resetCreditExpiryDateLabel,
+    /Intl\.DateTimeFormat\(currentLocale\(\), \{\s*month: 'numeric',\s*day: 'numeric',\s*hour: 'numeric',\s*minute: '2-digit'\s*\}\)/
+  );
   assert.match(codexResetCreditsNode, /limit-reset-credits/);
   assert.match(codexResetCreditsNode, /limit-reset-credits-line/);
   assert.match(codexResetCreditsNode, /limit-reset-credits-timeline/);
@@ -790,8 +849,10 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   assert.match(codexResetCreditsNode, /expirationDates\.slice\(0, 3\)\.map\(codexResetCreditExpiryLabel\)/);
   assert.match(codexResetCreditsNode, /hiddenExpirationCount = expirationDates\.length - summaryParts\.length/);
   assert.match(codexResetCreditsNode, /summaryParts\.push\(`\+\$\{hiddenExpirationCount\}`\)/);
-  // The multi-expiry tooltip is the shared builder, not a second copy of its
-  // hover/focus wiring that has to be kept in step by hand.
+  // The expiry tooltip is the shared builder, not a second copy of its
+  // hover/focus wiring that has to be kept in step by hand. It is useful for a
+  // single reset too, not only when several dates are present.
+  assert.match(codexResetCreditsNode, /expiryGroup\.append\(timeline\);\s*if \(expirationDates\.length > 0\) \{/);
   assert.match(
     codexResetCreditsNode,
     /expirationDates\.map\(\(date\) => \[expiryDateLabel\(date\), codexResetCreditExpiryLabel\(date\)\]\)/
@@ -860,8 +921,8 @@ test('Claude prepaid grants list amount, expiry date and time left in separate c
   ], 'USD', now);
 
   assert.deepEqual(rows.map((row) => row.cells), [
-    ['$13.43', '8/8', '11d 17h'],
-    ['$100.00', '8/20', '23d 17h']
+    ['$13.43', '8/8, 5:00 PM', '11d 17h'],
+    ['$100.00', '8/20, 5:00 PM', '23d 17h']
   ]);
   // The columns dropped the wording, so only the spoken label still carries it.
   assert.deepEqual(rows.map((row) => row.aria), [
@@ -883,7 +944,7 @@ test('Claude prepaid grants keep three cells when a grant has no usable expiry',
   // Rows are grid cells, so a short row would slide into the next row's columns.
   assert.deepEqual(rows.map((row) => row.cells.length), [3, 3, 3]);
   assert.deepEqual(rows.map((row) => row.cells[2]), ['No expiry', 'No expiry', 'Expired']);
-  assert.deepEqual(rows.map((row) => row.cells[1]), ['', '', '7/1']);
+  assert.deepEqual(rows.map((row) => row.cells[1]), ['', '', '7/1, 12:00 PM']);
 });
 
 test('The detail tooltip widens its grid and pads short rows for three-column entries', () => {

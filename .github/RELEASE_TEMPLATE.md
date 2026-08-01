@@ -4,25 +4,27 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Compact token units:** With **Show compact token total** on, choose **International (K/M/B)** or **East Asian (萬/億)** under **Settings → Appearance**.
-- **Website:** **Settings → About Token Monitor** now opens the redesigned Token Monitor site, with platform-aware downloads and product previews. (#283)
+- **Token throughput:** Hover the compact `Σ` title mark or live dot to reveal the current reading, then click to switch between output `tok/s` and total `tok/min`; the choice is remembered. (#296)
 
 ### Improved
-- **Battery and CPU:** **Live watch** collection now reacts to native filesystem events on macOS, Windows, and Linux instead of re-checking watched folders every two seconds, and a change refreshes only the tool whose data moved. Updates stay in the usual 3–5 second range; if the OS runs out of watch descriptors, collection falls back to polling on its own. (#282, #285)
-- **Hidden window:** Usage re-renders are coalesced while the widget is hidden, and the latest state is drawn once it becomes visible again. Tray icon updates are never delayed. (#282)
+- **Windows session details:** Claude and Codex transcripts stored in running WSL homes can now open from the Sessions view without blocking the Electron main process. (#297)
+- **Home limits:** Home limit rows are more compact and aligned.
+- **AI Tool Limits details:** Codex reset counts and Claude prepaid grants now show precise expiry times, including when there is only one entry.
 
 ### Fixed
-- **Home activity heatmap:** Hovering a day keeps its tooltip through live refreshes instead of losing it every few seconds.
-- **Kimi icons:** Kimi now uses its own logo in tool lists, **AI Tool Limits**, the tray, and chart colors instead of the Moonshot mark.
+- **Window state:** Maximized windows now restore maximized after restart without losing their normal size; tray popovers and collapsed floating bubbles no longer overwrite normal window bounds. (#300)
+- **Manual refresh:** Clicking Refresh now updates Cursor and Antigravity usage with fresh data instead of showing values up to five minutes old. (#290)
+- **MiMo and Kimi limits:** When usage exceeds the limit, the remaining percentage now correctly shows **0%** instead of nearly **99%**. (#294)
+- **Windows Codex checks:** The app no longer crashes when `taskkill.exe` cannot be resolved. (#291)
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.38.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.38.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.38.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-Setup-0.38.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.38.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.38.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.39.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.39.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-Setup-0.39.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.39.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -60,25 +62,27 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Token 简写单位：** 开启 **显示简写总 Token** 后，可在 **设置 → 外观** 中选择 **国际（K/M/B）** 或 **中文（万/亿）**。
-- **网站：** **设置 → 关于 Token Monitor** 现在可以打开重新设计的 Token Monitor 网站，提供按平台推荐的下载与产品预览。（#283）
+- **Token 吞吐量：** 将鼠标悬停在紧凑 `Σ` 标题标记或实时指示点上即可查看当前读数，点击可在输出 `tok/s` 与总 Token `tok/min` 之间切换，选择会被记住。（#296）
 
 ### 改进
-- **电量与 CPU：** **实时追踪** 现在在 macOS、Windows 和 Linux 上都改用系统原生的文件事件，不再每两秒重新检查一次被监视的目录；数据有变化时只重新扫描对应的那个工具。更新仍保持在 3–5 秒；如果系统的监视句柄用尽，采集会自动回退到轮询。（#282、#285）
-- **窗口隐藏时：** 窗口隐藏期间会合并用量重绘，重新显示时只绘制最新状态；托盘图标更新不会延迟。（#282）
+- **Windows 会话详情：** 存放在运行中 WSL 主目录的 Claude 与 Codex 会话，现在可以从会话视图打开，且不会阻塞 Electron 主进程。（#297）
+- **主页额度：** 主页额度条目现在更紧凑、对齐更整齐。
+- **AI 工具额度详情：** Codex 重置次数和 Claude 预付额度现在会显示精确的到期时间，包括只有一条记录时。
 
 ### 修复
-- **主页 Token 活动：** 悬停某一天时，提示不会再被几秒一次的实时刷新弄丢。
-- **Kimi 图标：** 工具列表、**AI 工具额度**、托盘与图表配色中的 Kimi 现在使用自己的品牌标识，不再沿用 Moonshot 标识。
+- **窗口状态：** 窗口最大化后重启会恢复最大化，同时保留原本的普通窗口大小；托盘弹窗和收起的浮动气泡不再覆盖普通窗口大小。（#300）
+- **手动刷新：** 点击刷新后，Cursor 与 Antigravity 的用量会更新为最新数据，不再显示最多五分钟的旧数据。（#290）
+- **MiMo 与 Kimi 额度：** 使用量超过上限时，剩余比例现在会正确显示为 **0%**，不再错误地显示为接近 **99%**。（#294）
+- **Windows Codex 额度检查：** 找不到 `taskkill.exe` 时不再导致应用崩溃。（#291）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.38.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.38.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.38.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-Setup-0.38.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.38.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.38.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.38.0/Token-Monitor-0.38.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.39.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.39.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-Setup-0.39.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.39.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>

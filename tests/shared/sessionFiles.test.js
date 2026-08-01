@@ -27,6 +27,17 @@ test('resolves a claude session file by walking projects', () => {
   } finally { cleanup(home); }
 });
 
+test('resolves a claude session file from the alternate transcripts root', () => {
+  const home = tmpHome();
+  try {
+    const dir = path.join(home, '.claude', 'transcripts');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'alternate-123.jsonl');
+    fs.writeFileSync(file, '{}\n');
+    assert.equal(resolveSessionFile('claude', 'alternate-123', home), file);
+  } finally { cleanup(home); }
+});
+
 test('resolves a codex rollout via the dated path', () => {
   const home = tmpHome();
   try {

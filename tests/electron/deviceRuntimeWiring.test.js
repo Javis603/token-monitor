@@ -36,7 +36,7 @@ for (const mode of ['local', 'client', 'host']) {
     await Promise.resolve();
     assert.deepEqual(calls, [
       ['limits', { all: true }, 'manual'],
-      ['usage', 'manual', { forceHistory: true }]
+      ['usage', 'manual', { forceHistory: true, forceSelfSync: false }]
     ]);
     usage.resolve();
     await refresh;
@@ -44,6 +44,22 @@ for (const mode of ['local', 'client', 'host']) {
     limits.resolve();
   });
 }
+
+test('only an opted-in manual refresh forces the self-synced clients', async () => {
+  // Every settings toggle and account action refreshes with { force: true }, and
+  // those must not pay for the Cursor and Antigravity sync subprocesses. Just
+  // the refresh button opts in.
+  const ticks = [];
+  const runtime = {
+    refreshLimits: async () => {},
+    tick: async (reason, options) => { ticks.push(options); }
+  };
+
+  await runManualDeviceRefresh(runtime, {});
+  await runManualDeviceRefresh(runtime, { forceSelfSync: true });
+
+  assert.deepEqual(ticks.map((options) => options.forceSelfSync), [false, true]);
+});
 
 test('manual refresh reports a late limits failure without rejecting completed usage', async () => {
   const errors = [];

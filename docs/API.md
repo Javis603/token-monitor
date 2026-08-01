@@ -60,6 +60,9 @@ Example payload:
     "cacheReadTokens": 1100,
     "cacheWriteTokens": 0,
     "outputTokens": 34,
+    "timedTokens": 1230,
+    "timedOutputTokens": 34,
+    "timedDurationMs": 4200,
     "clients": {
       "codex": 1234
     },
@@ -186,6 +189,20 @@ The hub normalizes records before storing them. The Node hub accepts JSON ingest
 `projects` is a bounded rollup keyed by a canonicalized workspace-folder label. Each entry carries the deterministic display `label`, token/cost totals, and a per-client token breakdown. Agents upload `allTime.projects` because synchronized payloads intentionally omit the unbounded `allTime.sessions`; `today.projects` and `month.projects` are normally omitted on upload and rebuilt by the hub from their synchronized sessions. If adding the all-time rollup would exceed the safe ingest budget, the agent drops only that rollup, sets `allTimeProjectsOmitted: true`, and keeps core totals and session data uploadable. If monthly or daily session detail would still exceed the budget, the agent keeps the newest rows that fit, sends the complete project rollup for that period, and sets `sessionDetailsOmitted` to the number of omitted rows per affected period. If that project rollup cannot fit even after all session rows are removed, the agent omits it too and sets `periodProjectsOmitted`; token/cost and client/model totals remain complete while the affected project breakdown is marked incomplete. A normal later upload clears these diagnostics; limits-only updates preserve them. `projectsEnabled: false` tells the hub that project metadata collection is disabled for this device; sync payloads then remove project rollups plus session `projectId` / `projectLabel` fields.
 
 Authenticated stats expose `projectsIncomplete: true` when a device omitted its rollup, disabled project tracking while contributing usage, or could not preserve exact all-time attribution after its tracked-client list changed. Affected device entries expose `allTimeProjectsOmitted`, `allTimeProjectsIncomplete`, or `projectsEnabled: false` as the reason. The public Worker stats endpoint removes the entire `projects` map, including both display labels and canonical keys.
+
+`timedTokens`, `timedOutputTokens` and `timedDurationMs` are optional throughput inputs, summed from tokscale's per-entry `performance` block. `timedDurationMs` is the sum of per-message durations, not a wall-clock span — concurrent sessions contribute their durations separately — and `timedTokens` counts the tokens of the messages that carried a duration. Coverage is only meaningful per tokscale entry and must **not** be reconstructed as `timedTokens / totalTokens` after aggregation: that ratio mixes clients with completely different coverage, and it is not even bounded by 1, because tokscale counts reasoning in its own token total while `totalTokens` deliberately does not.
+
+`timedOutputTokens` is the output of the entries that carried a duration — an entry contributes its output exactly when it contributes its duration, so `timedOutputTokens / timedDurationMs` always divides two totals describing the same entries. The gate is applied per entry rather than rebuilt from period totals: several tracked clients report no durations at all, so anything derived from summed totals lets one client's output ride on another client's clock, and the resulting rate drifts with the client mix rather than with throughput.
+
+tokscale also reports a per-entry `tokenCoverage`, and this deliberately does not scale by it. Doing so would assume output is spread evenly across an entry's tokens; in practice output is ~0.3–3% of an entry's tokens while the untimed remainder measures several times an entry's entire output, so that remainder is cache and input rather than generation, and scaling would discount output that was almost certainly timed. Ignoring it also keeps the field a plain integer counter that merges and deltas like every other token count.
+
+All three are reported as raw sums rather than a pre-divided rate because a ratio cannot be summed: consumers add each field across devices and periods and divide only at the point of display, which makes a fleet-wide rate duration-weighted. Payloads without these fields are accepted and normalize to `0`, which consumers must read as "no throughput data" rather than "zero throughput".
+
+Because the gate is all-or-nothing per entry, `timedOutputTokens ≤ outputTokens` is a physical bound: a period cannot have timed more output than it produced. The two are equal when every entry in the period reported durations. A partly timed entry — 1230 of 1234 tokens in the example above — still contributes all of its output, since the untimed remainder is cache and input rather than generation.
+
+The collector satisfies that bound by construction, but the hub and the Worker normalize records posted by any agent, so normalization **enforces** it: a `timedOutputTokens` larger than the record's own `outputTokens` is capped rather than trusted. Ingest is a trust boundary here, and this value divides straight into a headline rate.
+
+All three are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses to carry a `today` rescan into `month` and `allTime`. The one case where `timedOutputTokens` and a full rescan can disagree is a session that spans the boundary and starts or stops reporting durations partway through, since a rescan then re-gates the whole session on its combined state; the next full scan reconciles it. Closing even that needs a per-message timed-output counter from tokscale.
 
 `trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
 

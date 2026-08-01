@@ -38,7 +38,9 @@ function resolveSessionFile(client, sessionId, home) {
   const id = String(sessionId || '');
   if (!id) return '';
   if (client === 'claude') {
-    return findSessionFiles(path.join(home, '.claude', 'projects'), [id]).get(id) || '';
+    const projectFile = findSessionFiles(path.join(home, '.claude', 'projects'), [id]).get(id);
+    if (projectFile) return projectFile;
+    return findSessionFiles(path.join(home, '.claude', 'transcripts'), [id]).get(id) || '';
   }
   if (client === 'codex') {
     const direct = codexSessionFile(home, id);

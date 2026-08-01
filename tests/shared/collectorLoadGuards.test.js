@@ -77,6 +77,26 @@ test('watchPathsForClients excludes the tokscale cache dirs our own syncs write'
   }
 });
 
+test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
+  // tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox copy, and
+  // that copy can hold sessions the XDG one is missing. Watching only XDG would
+  // leave an orca-driven install without the seconds-level refresh.
+  const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
+  const tmp = withTmpHome([path.join('.local', 'share', 'mimocode'), orcaRoot]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchPathsForClients } = freshCollector();
+    const dirs = watchPathsForClients('micode');
+    assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
+    assert.ok(dirs.includes(path.join(tmp, orcaRoot)));
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchPathsForClients watches the Antigravity CLI data dir but not the IDE sync cache', () => {
   // antigravity is self-synced (its IDE cache is watch-excluded to avoid the
   // issue #15 loop), but the CLI writes parse-local SQLite we don't touch, so it
@@ -1953,11 +1973,16 @@ test('smart collection acknowledges the latest activity revision after tick coal
     await manualTick;
     await waitForCondition(() => updates.length === 3);
     assert.deepEqual(updates, ['interval', 'manual', 'coalesced']);
-    assert.equal(calls.length, 9, 'startup, manual, and coalesced ticks are full scans');
+    // 3 + 3 + 1: the replay honours what the ticks folded into it actually
+    // asked for. Only the anchored interval tick was pending here, so it stays
+    // the `--today` scan it would have been on its own. A pending manual tick,
+    // or an interval tick due for its hourly reconciliation, omits todayOnly
+    // and drags the replay back to a full scan.
+    assert.equal(calls.length, 7, 'the coalesced replay is the warm scan the pending interval tick requested');
 
     await new Promise((resolve) => setTimeout(resolve, 120));
     assert.equal(updates.length, 3, 'coalesced scan acknowledges activity and prevents a redundant interval');
-    assert.equal(calls.length, 9, 'no redundant scan runs on the next interval');
+    assert.equal(calls.length, 7, 'no redundant scan runs on the next interval');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;

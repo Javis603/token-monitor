@@ -150,7 +150,11 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs) {
 // `antigravity sync`), separate from the IDE-backed `antigravity`. Widen the
 // tokscale --client filter so those sub-source rows aren't filtered out;
 // extractUsageFromTokscale's normalizeClientName folds them back into the umbrella
-// id. Unknown ids are dropped silently by tokscale, so this is safe on any 4.x.
+// id. Every alias must be a real tokscale client id: an unknown --client value is
+// rejected with exit 2 and takes the whole scan down with it (verified on 4.7.0
+// and 4.8.0), so this list is not a free-form place to invent sub-source names.
+// Clients tokscale doesn't know at all — `proma`, which we parse ourselves — are
+// stripped in collectUsageOnce before the filter is built, not dropped here.
 const TOKSCALE_CLIENT_ALIASES = { antigravity: ['antigravity-cli'] };
 
 function tokscaleClientFilter(clients) {
@@ -510,6 +514,26 @@ function syncDue(kind, nowMs = Date.now(), force = false) {
   return true;
 }
 
+// Which self-synced clients may bypass that throttle on this tick. `true` means
+// all of them (the manual refresh button, where the user is explicitly asking
+// for fresh numbers); an array means only those. The distinction matters
+// because each sync is its own subprocess: a Cursor sign-in has no reason to
+// pay for `tokscale antigravity sync`, and issue #15 is exactly what happens
+// when these spawns stop being rationed.
+function selfSyncForced(forceSelfSync, kind) {
+  if (forceSelfSync === true) return true;
+  return Array.isArray(forceSelfSync) && forceSelfSync.includes(kind);
+}
+
+function mergeForceSelfSync(left, right) {
+  if (left === true || right === true) return true;
+  const merged = [
+    ...(Array.isArray(left) ? left : []),
+    ...(Array.isArray(right) ? right : [])
+  ];
+  return merged.length ? [...new Set(merged)] : null;
+}
+
 async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!enabled.has('cursor')) return;
@@ -530,11 +554,15 @@ function antigravityDataPresent(home) {
   return ANTIGRAVITY_DATA_ROOTS.some((name) => dirExists(path.join(home, '.gemini', name)));
 }
 
-async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir()) {
+async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), options = {}) {
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!enabled.has('antigravity')) return;
   if (!antigravityDataPresent(home)) return;
-  if (!syncDue('antigravity')) return;
+  if (!syncDue('antigravity', Date.now(), options.force === true)) return;
+  if (typeof options.run === 'function') {
+    await options.run();
+    return;
+  }
   const { bin, prefixArgs, env } = tokscaleCommand();
   await new Promise((resolve) => {
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
@@ -660,8 +688,13 @@ async function collectUsageOnce(options) {
   let promaPricing = null;
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
-    await maybeSyncCursor(syncClients, options.logger, { force: options.forceCursorSync === true });
-    await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir());
+    await maybeSyncCursor(syncClients, options.logger, {
+      force: selfSyncForced(options.forceSelfSync, 'cursor')
+    });
+    await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
+      force: selfSyncForced(options.forceSelfSync, 'antigravity'),
+      run: options.runAntigravitySync
+    });
     if (includesProma && (!targetRequested || targetClients.includes('proma'))) {
       try {
         promaRows = collectPromaRows();
@@ -949,7 +982,16 @@ function clientWatchCandidates(clientsCsv) {
     path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
     path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')
   );
-  add('micode', path.join(home, '.local', 'share', 'mimocode'));
+  // MiMo Code: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
+  // copy (scanner.rs `discover_micode_dbs_in_dirs`), and that copy can hold
+  // sessions the XDG one is missing. Watch both so an orca-driven install still
+  // refreshes in seconds; the orca root only exists on macOS in practice and a
+  // missing dir is dropped by watchClientRootsForClients.
+  add(
+    'micode',
+    path.join(home, '.local', 'share', 'mimocode'),
+    path.join(home, 'Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data')
+  );
   add('zcode', path.join(home, '.zcode', 'projects'));
   // CodeBuddy (Tencent): tokscale reads the home-relative CLI/WebUI JSONL dir on
   // every platform, plus the IDE / VS Code extension logs under a platform-
@@ -1296,7 +1338,12 @@ function startCollector(options) {
   let tickInFlight = false;
   let tickPending = false;
   let pendingForceHistory = false;
-  let pendingForceCursorSync = false;
+  let pendingForceSelfSync = null;
+  // null until something is actually pending. Tracked separately from the
+  // force-sync flags on purpose: a coalesced replay must stay a full scan
+  // unless *every* tick folded into it asked for today-only, and deriving that
+  // from a force flag would let a manual refresh quietly become a warm scan.
+  let pendingTodayOnly = null;
   let pendingActivityRevision = null;
   let lastHistoryAt = 0;
   // Last full-scan snapshot; lets watch ticks scan only --today and derive
@@ -1392,7 +1439,7 @@ function startCollector(options) {
         agentRuntime,
         osInfo: deviceOsInfo,
         includeHistory,
-        forceCursorSync: Boolean(tickOptions.forceCursorSync),
+        forceSelfSync: tickOptions.forceSelfSync ?? null,
         targetClients: anchored && targetAnchorReady ? requestedTargetClients : [],
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
@@ -1510,7 +1557,10 @@ function startCollector(options) {
     if (tickInFlight) {
       tickPending = true;
       pendingForceHistory = pendingForceHistory || Boolean(tickOptions.forceHistory);
-      pendingForceCursorSync = pendingForceCursorSync || Boolean(tickOptions.forceCursorSync);
+      pendingForceSelfSync = mergeForceSelfSync(pendingForceSelfSync, tickOptions.forceSelfSync);
+      pendingTodayOnly = pendingTodayOnly === null
+        ? Boolean(tickOptions.todayOnly)
+        : pendingTodayOnly && Boolean(tickOptions.todayOnly);
       pendingActivityRevision = pendingActivityRevision === null
         ? tickActivityRevision
         : Math.max(pendingActivityRevision, tickActivityRevision);
@@ -1521,16 +1571,18 @@ function startCollector(options) {
       await performTick(reason, effectiveTickOptions);
       while (tickPending && !stopped) {
         const forceHistory = pendingForceHistory;
-        const forceCursorSync = pendingForceCursorSync;
+        const forceSelfSync = pendingForceSelfSync;
+        const todayOnly = pendingTodayOnly === true;
         const activityRevision = pendingActivityRevision;
         tickPending = false;
         pendingForceHistory = false;
-        pendingForceCursorSync = false;
+        pendingForceSelfSync = null;
+        pendingTodayOnly = null;
         pendingActivityRevision = null;
         await performTick('coalesced', {
           forceHistory,
-          forceCursorSync,
-          todayOnly: forceCursorSync,
+          forceSelfSync,
+          todayOnly,
           ...(activityRevision === null ? {} : { activityRevision })
         });
       }
@@ -1688,7 +1740,7 @@ function startCollector(options) {
     }
     return runTick(`client:${normalized}`, {
       todayOnly: true,
-      forceCursorSync: refreshOptions.forceSync === true
+      forceSelfSync: refreshOptions.forceSync === true ? [normalized] : null
     });
   }
 

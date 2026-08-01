@@ -93,6 +93,25 @@ test('MiMo parsers match the official balance and Token Plan shapes', () => {
   });
 });
 
+test('MiMo usage parser reads an over-consumed plan as fully used', () => {
+  // MiMo reports `percent` as a 0-1 ratio, and a spent plan overshoots it: the
+  // request that exhausts the quota pushes used past limit, so percent lands at
+  // 1.005. Reading that as "1% used" rendered an empty plan as 99% left (#292).
+  assert.deepEqual(parseMimoPlanUsage({ data: { monthUsage: { items: [{
+    name: 'month_total_token', used: 10_050_000, limit: 10_000_000, percent: 1.005
+  }] } } }), { used: 10_050_000, limit: 10_000_000, usedPercent: 100 });
+  // Same overshoot with no `used` to fall back on.
+  assert.deepEqual(parseMimoPlanUsage({ data: { monthUsage: { items: [{
+    name: 'month_total_token', limit: 10_000_000, percent: 1.02
+  }] } } }), { used: null, limit: 10_000_000, usedPercent: 100 });
+});
+
+test('MiMo usage parser prefers used/limit over the reported ratio', () => {
+  assert.deepEqual(parseMimoPlanUsage({ data: { monthUsage: { items: [{
+    name: 'month_total_token', used: 25, limit: 100, percent: 0.9
+  }] } } }), { used: 25, limit: 100, usedPercent: 25 });
+});
+
 test('MiMo usage parser selects only the exact month_total_token item', () => {
   assert.deepEqual(parseMimoPlanUsage({ data: { monthUsage: { items: [
     { name: 'model_a', used: 10, limit: 100 },
@@ -164,6 +183,28 @@ test('fetchMimoLimits requests fixed official endpoints concurrently with minimi
   for (const call of calls) {
     assert.equal(call.cookie, 'api-platform_ph=optional; api-platform_serviceToken=secret; userId=123');
   }
+});
+
+test('fetchMimoLimits reports an exhausted Token Plan as 0% left', async () => {
+  const [provider] = await fetchMimoLimits({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url) => {
+      if (url.endsWith('/balance')) return response({ code: 0, data: { balance: '0.34', currency: 'USD' } });
+      if (url.endsWith('/tokenPlan/detail')) return response({ code: 0, data: {
+        planCode: 'MiMo Lite', status: 'active', currentPeriodEnd: '2099-01-01 00:00:00'
+      } });
+      if (url.endsWith('/tokenPlan/usage')) return response({ code: 0, data: {
+        monthUsage: { items: [{
+          name: 'month_total_token', used: 10_050_000, limit: 10_000_000, percent: 1.005
+        }] }
+      } });
+      return response({ code: 0, data: {} });
+    }
+  });
+  const [plan] = planWindows(provider);
+  assert.equal(plan.usedPercent, 100);
+  assert.equal(plan.remainingPercent, 0);
+  assert.equal(plan.remaining, 0);
+  assert.equal(provider.balance.planPercent, 100);
 });
 
 test('fetchMimoLimits keeps balance when optional Token Plan endpoints fail', async () => {

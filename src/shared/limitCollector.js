@@ -2375,6 +2375,13 @@ function codexLoginSpawnSpec(command, platform = process.platform) {
   };
 }
 
+// Absolute path on purpose: a bare `taskkill` is resolved through PATH, and a user
+// PATH that lost %SystemRoot%\System32 turns every tree-kill into a spawn ENOENT.
+function windowsTaskkillCommand(env = process.env) {
+  const root = env.SystemRoot || env.SYSTEMROOT || env.windir || 'C:\\Windows';
+  return path.win32.join(root, 'System32', 'taskkill.exe');
+}
+
 function killCodexLoginProcess(child, platform = process.platform, deps = {}) {
   if (!child || typeof child.kill !== 'function') return;
   const spawnFn = deps.spawn || spawn;
@@ -2382,7 +2389,17 @@ function killCodexLoginProcess(child, platform = process.platform, deps = {}) {
     // Login spawns a browser/callback helper, so kill the whole tree, not just codex.
     if (platform === 'win32') {
       if (child.pid) {
-        try { spawnFn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true }); } catch (_) {}
+        try {
+          const killer = spawnFn(
+            windowsTaskkillCommand(deps.env || process.env),
+            ['/pid', String(child.pid), '/t', '/f'],
+            { windowsHide: true }
+          );
+          // spawn() reports a missing or blocked taskkill.exe asynchronously as an
+          // 'error' event, so the enclosing try/catch never sees it. Without a
+          // listener the EventEmitter rethrows and crashes the main process.
+          killer?.on?.('error', () => {});
+        } catch (_) {}
       }
       child.kill();
       return;
@@ -2440,7 +2457,7 @@ function runCodexLoginWithCommand(command, options = {}, deps = {}) {
       resolve({ outcome, exitCode: exitCode ?? null, output: output.trim() });
     };
     const onAbort = () => {
-      killCodexLoginProcess(child, platform, { spawn: spawnFn });
+      killCodexLoginProcess(child, platform, { spawn: spawnFn, env });
       finish('cancelled', null);
     };
     child.stdout?.on('data', append);
@@ -2453,7 +2470,7 @@ function runCodexLoginWithCommand(command, options = {}, deps = {}) {
       return;
     }
     timer = setTimer(() => {
-      killCodexLoginProcess(child, platform, { spawn: spawnFn });
+      killCodexLoginProcess(child, platform, { spawn: spawnFn, env });
       finish('timedOut', null);
     }, timeoutMs);
   });

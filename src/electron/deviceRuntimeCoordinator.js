@@ -19,7 +19,15 @@ async function runManualDeviceRefresh(runtime, options = {}) {
   if (!runtime) return;
   const limitsTask = Promise.resolve(runtime.refreshLimits({ all: true }, 'manual'));
   limitsTask.catch((error) => options.onLimitsError?.(error));
-  await runtime.tick('manual', { forceHistory: options.forceHistory === true });
+  await runtime.tick('manual', {
+    forceHistory: options.forceHistory === true,
+    // Cursor and Antigravity only move when their sync subprocess runs, and that
+    // is throttled to once per 5 minutes. Without this the refresh button cannot
+    // change their numbers at all, which reads as a broken button rather than as
+    // a throttle. Opt-in for the same reason forceHistory is: the settings and
+    // account flows refresh constantly and must not pay for the spawns.
+    forceSelfSync: options.forceSelfSync === true
+  });
 }
 
 module.exports = {
