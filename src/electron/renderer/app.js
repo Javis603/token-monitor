@@ -8491,13 +8491,7 @@ els.toolIconsInput.addEventListener('change', async () => {
 });
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
-  els.compactTokenUnitsRow?.classList.toggle(
-    'hidden',
-    !supportsLocalizedCompactTokenUnits(currentLocale())
-  );
   await saveAppearanceFromControls();
-  if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
-  renderTokenRate();
 });
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
@@ -8710,9 +8704,10 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   } else if (
     prevLanguage !== next.language
     || prevCompactTokenUnits !== next.compactTokenUnits
-    || prevShowCompactTotalTokens !== next.showCompactTotalTokens
   ) {
     render();
+  } else if (prevShowCompactTotalTokens !== next.showCompactTotalTokens) {
+    updateTotalCompact(state.currentTotal);
   }
 });
 

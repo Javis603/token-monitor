@@ -12,6 +12,7 @@ const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
 const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+const compactTokensSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'compactTokens.js'), 'utf8');
 const compactTokens = require('../../src/shared/compactTokens');
 
 function rendererFunction(name, nextName) {
@@ -43,8 +44,21 @@ test('localized compact token formatter uses ten-thousand units without a thousa
   assert.equal(formatCompact(15_000, 'localized', 'zh-TW'), '1.5萬');
   assert.equal(formatCompact(295_116_445, 'localized', 'zh-TW'), '2.95億');
   assert.equal(formatCompact(295_116_445, 'localized', 'zh-CN'), '2.95亿');
+  assert.equal(formatCompact(15_000, 'localized', 'zh-Hans'), '1.5万');
+  assert.equal(formatCompact(15_000, 'localized', 'zh-Hans-SG'), '1.5万');
+  assert.equal(formatCompact(15_000, 'localized', 'zh-SG'), '1.5万');
+  assert.equal(formatCompact(15_000, 'localized', 'zh-MY'), '1.5万');
+  assert.equal(formatCompact(15_000, 'localized', 'zh-Hant-HK'), '1.5萬');
   assert.equal(formatCompact(295_116_445, 'localized', 'ja'), '2.95億');
   assert.equal(formatCompact(295_116_445, 'localized', 'ko'), '2.95억');
+});
+
+test('compact token module does not pollute the Node global scope', () => {
+  assert.match(compactTokensSource, /typeof window !== 'undefined' \? window : null/);
+  delete globalThis.TokenMonitorCompactTokens;
+  delete require.cache[require.resolve('../../src/shared/compactTokens')];
+  require('../../src/shared/compactTokens');
+  assert.equal(Object.hasOwn(globalThis, 'TokenMonitorCompactTokens'), false);
 });
 
 test('localized compact token formatter promotes rounded values to the next unit', () => {
@@ -90,7 +104,7 @@ test('compact total is an opt-in appearance preference', () => {
   assert.match(app, /!supportsLocalizedCompactTokenUnits\(currentLocale\(\)\)/);
   assert.doesNotMatch(app, /showCompactTotalTokens !== true \|\| !supportsLocalizedCompactTokenUnits/);
   assert.doesNotMatch(app, /!els\.showCompactTotalTokensInput\.checked \|\| !supportsLocalizedCompactTokenUnits/);
-  assert.match(app, /els\.showCompactTotalTokensInput\.addEventListener\('change',[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
+  assert.match(app, /els\.showCompactTotalTokensInput\.addEventListener\('change',[\s\S]*?saveAppearanceFromControls\(\)/);
   assert.match(app, /els\.compactTokenUnitsInput\?\.addEventListener\('change',[\s\S]*?saveAppearanceFromControls\(\)/);
   assert.match(app, /state\.settings\?\.showCompactTotalTokens !== true[\s\S]*?hideTotalCompact\(\)/);
   assert.match(app, /compactTokenApi\.compactTokenUnitThreshold\(unitSystem, currentLocale\(\)\)/);
@@ -106,8 +120,15 @@ test('compact total is an opt-in appearance preference', () => {
     app.indexOf("els.compactTokenUnitsInput?.addEventListener('change'"),
     app.indexOf("window.addEventListener('resize'")
   );
+  const compactVisibilityHandler = app.slice(
+    app.indexOf("els.showCompactTotalTokensInput.addEventListener('change'"),
+    app.indexOf("els.compactTokenUnitsInput?.addEventListener('change'")
+  );
   assert.doesNotMatch(languageHandler, /render\(\)/);
   assert.doesNotMatch(compactUnitsHandler, /render\(\)/);
+  assert.doesNotMatch(compactVisibilityHandler, /updateTotalCompact|renderTokenRate|render\(\)/);
+  assert.match(app, /prevShowCompactTotalTokens !== next\.showCompactTotalTokens\) \{[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
+  assert.doesNotMatch(app, /prevCompactTokenUnits !== next\.compactTokenUnits[\s\S]*?\|\| prevShowCompactTotalTokens !== next\.showCompactTotalTokens/);
   assert.doesNotMatch(i18n, /settings\.tray\.(?:tokensToday|bothToday|tokensTotal|bothTotal)':[^\n]*(?:1\.2M|1\.36B)/);
 });
 

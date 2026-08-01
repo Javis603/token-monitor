@@ -4,7 +4,7 @@
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorCompactTokens = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createCompactTokensApi() {
+})(typeof window !== 'undefined' ? window : null, function createCompactTokensApi() {
   const WESTERN_UNITS = [
     { divisor: 1e3, suffix: 'K' },
     { divisor: 1e6, suffix: 'M' },
@@ -33,7 +33,9 @@
   function localizedSuffixes(locale) {
     const language = normalizedLocale(locale);
     if (language.startsWith('ko')) return ['만', '억'];
-    if (language.startsWith('zh-cn')) return ['万', '亿'];
+    const isSimplifiedChinese = language.startsWith('zh-hans')
+      || /^(?:zh)(?:-[a-z0-9]+)*-(?:cn|sg|my)(?:-|$)/.test(language);
+    if (isSimplifiedChinese) return ['万', '亿'];
     if (language.startsWith('ja')) return ['万', '億'];
     return ['萬', '億'];
   }
