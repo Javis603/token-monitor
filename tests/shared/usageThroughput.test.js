@@ -6,11 +6,11 @@
 // across rows, clients, devices and the today-delta that a watch-triggered scan uses to
 // update month/allTime.
 //
-// timedOutputTokens is the one that has to be built per entry. Coverage is close to
-// all-or-nothing per client, so a coverage rebuilt from period totals lets a client that
-// reports no durations at all move a different client's rate. Several tests below pin that
-// specifically, because the failure is silent: the number stays plausible and just drifts
-// with the client mix.
+// timedOutputTokens is the one that has to be built per entry: an entry contributes its output
+// exactly when it contributes its duration. Whole clients report no durations at all, so
+// anything rebuilt from period totals lets one of them put its output on another client's clock.
+// Several tests below pin that specifically, because the failure is silent — the number stays
+// plausible and just drifts with the client mix.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -70,8 +70,8 @@ test('throughput is summed from every entry performance block', () => {
   });
   assert.equal(result.timedDurationMs, 1500);
   assert.equal(result.timedTokens, 1150);
-  // 40 × 0.9 + 40 × 0.25, each apportioned against its own entry's coverage.
-  assert.equal(result.timedOutputTokens.toFixed(6), '46.000000');
+  // Both entries carried a duration, so both contribute their whole output.
+  assert.equal(result.timedOutputTokens, 80);
 });
 
 test('an entry without a performance block contributes no throughput', () => {
@@ -112,7 +112,12 @@ test('a client that reports no durations cannot move a timed client rate', () =>
   assert.equal(speedFromPeriodTotals(result), 87.5);
 });
 
-test('partial coverage is apportioned per entry rather than rounded to all or nothing', () => {
+test('a partly timed entry contributes its whole output and stays an integer', () => {
+  // tokscale would report tokenCoverage 0.9265 here, and this deliberately does not scale by
+  // it. Output is 1% of this entry's tokens while the untimed remainder is 7,350 — over seven
+  // times the entry's entire output — so the untimed part is cache, not generation. Scaling
+  // would discount output that was almost certainly timed, and would make the field a ratio
+  // instead of a counter.
   const result = extractUsageFromTokscale({
     entries: [tokscaleEntry({
       output: 1_000,
@@ -122,66 +127,9 @@ test('partial coverage is apportioned per entry rather than rounded to all or no
       performance: { totalDurationMs: 20_000, timedTokens: 92_650, tokenCoverage: 0.9265 }
     })]
   });
-  assert.equal(result.timedOutputTokens.toFixed(4), '926.5000', '1000 × 0.9265, unrounded');
+  assert.equal(result.timedOutputTokens, 1_000);
+  assert.ok(Number.isInteger(result.timedOutputTokens), 'a counter, not an apportionment');
   assert.equal(result.timedTokens, 92_650);
-});
-
-test('the apportionment is not rounded per entry', () => {
-  // Rounding each row biases the sum by up to half a token per entry, in a direction fixed by
-  // the fractional part — so many small sessions under partial coverage all bias the same way.
-  // Below 0.5 they would each round to zero and the rate would read as no data at all.
-  const tiny = (sessionId, tokenCoverage) => tokscaleEntry({
-    sessionId,
-    input: 0,
-    output: 1,
-    cacheRead: 99,
-    cacheWrite: 0,
-    performance: { totalDurationMs: 10, timedTokens: 49, tokenCoverage }
-  });
-
-  const under = extractUsageFromTokscale({ entries: Array.from({ length: 100 }, (_, i) => tiny(`s${i}`, 0.49)) });
-  assert.equal(under.timedOutputTokens.toFixed(2), '49.00', 'per-entry rounding would zero every row and report 0');
-  assert.ok(under.timedOutputTokens > 0);
-
-  const over = extractUsageFromTokscale({ entries: Array.from({ length: 100 }, (_, i) => tiny(`s${i}`, 0.51)) });
-  assert.equal(over.timedOutputTokens.toFixed(2), '51.00', 'per-entry rounding would inflate this to 100');
-
-  // The pair also has to survive the wire: a normalize step that rounds would reintroduce the
-  // bias on the hub side even with the collector fixed.
-  assert.equal(normalizePeriod({ timedOutputTokens: 926.5 }).timedOutputTokens, 926.5);
-  assert.equal(normalizePeriod({ timed_output_tokens: 0.4 }).timedOutputTokens, 0.4);
-});
-
-test('tokscale tokenCoverage is preferred over a ratio against our own total', () => {
-  // tokscale counts reasoning in its coverage denominator; our totalTokens deliberately does
-  // not (it is already inside output). So timedTokens can exceed totalTokens on a
-  // reasoning-heavy entry, and a ratio rebuilt here would need clamping to avoid exceeding 1.
-  const result = extractUsageFromTokscale({
-    entries: [tokscaleEntry({
-      input: 0,
-      output: 500,
-      cacheRead: 99_500,
-      cacheWrite: 0,
-      reasoning: 4_000,
-      performance: { totalDurationMs: 10_000, timedTokens: 104_000, tokenCoverage: 1 }
-    })]
-  });
-  assert.equal(result.totalTokens, 100_000, 'reasoning stays out of totalTokens');
-  assert.ok(result.timedTokens > result.totalTokens, 'the entry is the over-100%-raw-coverage case');
-  assert.equal(result.timedOutputTokens, 500, 'fully timed means all of the output counts');
-});
-
-test('a missing tokenCoverage field falls back to the entry own ratio', () => {
-  const result = extractUsageFromTokscale({
-    entries: [tokscaleEntry({
-      input: 0,
-      output: 200,
-      cacheRead: 800,
-      cacheWrite: 0,
-      performance: { totalDurationMs: 5_000, timedTokens: 500 }
-    })]
-  });
-  assert.equal(result.timedOutputTokens, 100, '200 × (500 / 1000)');
 });
 
 test('normalizePeriod accepts both spellings and defaults an older payload to zero', () => {
@@ -346,6 +294,57 @@ test('a targeted watch tick lands on the same throughput as a full rescan', () =
   assert.equal(speed(todayTargeted), 50);
   assert.equal(speedFromPeriodTotals(todayBefore).toFixed(2), '78.50');
   assert.equal(speedFromPeriodTotals(todayTargeted).toFixed(2), '76.98');
+});
+
+// A session spanning midnight is the only case where the delta path and a full rescan can
+// disagree, because a full `--month` scan folds that session's messages from both days into one
+// tokscale entry and re-gates it as a whole. These two pin where the line falls, since the
+// field's contract rests on it.
+function crossDaySession({ output, timedTokens, total, tokenCoverage, totalDurationMs }) {
+  return tokscaleEntry({
+    client: 'claude',
+    sessionId: 'spans-midnight',
+    input: 0,
+    output,
+    cacheRead: total - output,
+    cacheWrite: 0,
+    performance: { totalDurationMs, timedTokens, tokenCoverage }
+  });
+}
+const throughputOf = (entry) => extractUsageFromTokscale({ entries: [entry] }).timedOutputTokens;
+
+test('a session spanning midnight is exact under the delta while it keeps reporting durations', () => {
+  // The realistic regime, and the reason the gate beats an apportionment: a partly timed entry
+  // stays partly timed as it grows, so the gate holds on both sides and the sum is exact —
+  // even though tokscale's coverage moves (0.9965 → 0.9965 → 0.9965 only by construction here;
+  // real sessions drift within a narrow band and would break an apportionment, not a gate).
+  const yesterday = crossDaySession({ output: 500, timedTokens: 996_500, total: 1_000_000, tokenCoverage: 0.9965, totalDurationMs: 10_000 });
+  const todayOnly = crossDaySession({ output: 90, timedTokens: 8_100_000, total: 9_000_000, tokenCoverage: 0.9, totalDurationMs: 2_000 });
+  const wholeSession = crossDaySession({ output: 590, timedTokens: 9_096_500, total: 10_000_000, tokenCoverage: 0.9097, totalDurationMs: 12_000 });
+
+  assert.equal(throughputOf(yesterday) + throughputOf(todayOnly), throughputOf(wholeSession));
+  assert.equal(throughputOf(wholeSession), 590, 'the whole session is timed, so all of its output counts');
+});
+
+test('a session that stops reporting durations diverges by a bounded, self-correcting amount', () => {
+  // The adversarial regime: the client stops emitting durations partway through one session, so
+  // a full rescan still gates the combined entry on the durations it kept from the first half
+  // and picks up the later output too. Documented rather than engineered around — closing it
+  // needs a per-message timed-output counter from tokscale, and rescanning month on every watch
+  // tick would give back exactly the saving targeted partitions were introduced for.
+  const yesterday = crossDaySession({ output: 500, timedTokens: 1_000, total: 1_000, tokenCoverage: 1, totalDurationMs: 10_000 });
+  const todayOnly = crossDaySession({ output: 90, timedTokens: 0, total: 9_000, tokenCoverage: 0, totalDurationMs: 0 });
+  const wholeSession = crossDaySession({ output: 590, timedTokens: 1_000, total: 10_000, tokenCoverage: 0.1, totalDurationMs: 10_000 });
+
+  const viaDelta = throughputOf(yesterday) + throughputOf(todayOnly);
+  const viaFullScan = throughputOf(wholeSession);
+  assert.equal(viaDelta, 500);
+  assert.equal(viaFullScan, 590);
+  // Under-, not over-reporting, and by the later output alone — 18%, where scaling by coverage
+  // would have repriced the whole entry and landed on 59, an 8.5x gap. The next full scan
+  // reconciles either way, so the divergence is bounded by one anchor interval.
+  assert.ok(viaDelta < viaFullScan);
+  assert.equal(viaFullScan - viaDelta, 90);
 });
 
 test('applyPeriodDelta updates throughput exactly from a today-only rescan', () => {

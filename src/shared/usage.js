@@ -32,7 +32,6 @@ const REASONING_TOKEN_KEYS = ['reasoning', 'reasoningTokens', 'reasoning_tokens'
 // it is a pre-divided ratio, and only raw sums survive being added across rows and devices.
 const TIMED_DURATION_KEYS = ['totalDurationMs', 'total_duration_ms', 'timedDurationMs', 'timed_duration_ms'];
 const TIMED_TOKEN_KEYS = ['timedTokens', 'timed_tokens'];
-const TIMED_COVERAGE_KEYS = ['tokenCoverage', 'token_coverage'];
 const STARTED_AT_KEYS = ['startedAt', 'started_at', 'createdAt', 'created_at'];
 const LAST_USED_AT_KEYS = ['lastUsedAt', 'last_used_at', 'updatedAt', 'updated_at', 'lastActivityAt', 'last_activity_at', 'timestamp'];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
@@ -101,18 +100,22 @@ function emptyPeriod() {
     outputTokens: 0,
     // tokscale's per-entry `performance` block, summed. `timedDurationMs` is the sum of
     // per-message durations (NOT a wall-clock span — concurrent sessions count twice), and
-    // `timedTokens` covers only the messages that carried a duration. `timedOutputTokens`
-    // estimates how much of `outputTokens` those timed messages produced, by scaling each
-    // row's output by that row's own coverage — tokscale does not break output out per timed
-    // message. It has to be accumulated per row: coverage varies from 1 to exactly 0 between
-    // clients (several emit no durations at all), so a coverage rebuilt from period totals
-    // would smear a per-client gate across every client and skew any rate derived from it.
-    // Being an apportionment it is fractional, and stays that way through the wire and every
-    // merge; only the display rounds.
+    // `timedTokens` covers only the messages that carried a duration, and `timedOutputTokens`
+    // is the output of the entries that carried one — an entry contributes its output exactly
+    // when it contributes its duration, so numerator and denominator always describe the same
+    // entries. That gate has to be applied per row: whole clients report no durations at all,
+    // so anything rebuilt from period totals would let one client's output ride on another
+    // client's clock.
     //
-    // All three are additive over append-only messages, which is what makes them exact under
-    // applyPeriodDelta. Keep them as raw sums: a rate is a ratio and ratios cannot be summed
-    // across devices or periods, so every consumer divides at the point of display.
+    // tokscale reports a per-entry `tokenCoverage` and this deliberately ignores it. Scaling
+    // output by it assumes output is spread evenly across an entry's tokens, but output is
+    // ~0.3–3% of tokens while the untimed remainder measures 3–11x an entry's entire output —
+    // it is cache and input, not generation. Scaling would therefore discount output that was
+    // almost certainly timed. Ignoring it also keeps this a plain integer counter that merges
+    // and deltas like every other token field, instead of a ratio that has to be re-derived.
+    //
+    // Keep all three as raw sums: a rate is a ratio and ratios cannot be summed across devices
+    // or periods, so every consumer divides at the point of display.
     timedTokens: 0,
     timedOutputTokens: 0,
     timedDurationMs: 0,
@@ -501,7 +504,7 @@ function normalizePeriod(input, options = {}) {
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
-  period.timedOutputTokens = Math.max(0, asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0));
+  period.timedOutputTokens = Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0)));
   period.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
   if (input.clients && typeof input.clients === 'object') {
     for (const [client, value] of Object.entries(input.clients)) {
@@ -580,19 +583,6 @@ function normalizePeriod(input, options = {}) {
 
 const UNATTRIBUTED_USAGE_CLIENT = '__unattributed';
 
-// Share of one row's tokens that came from messages carrying a duration. Prefer tokscale's
-// own `tokenCoverage`: its denominator is tokscale's token total, which counts reasoning,
-// so it never exceeds 1 — whereas a ratio rebuilt against our reasoning-free `totalTokens`
-// runs slightly over 1 on reasoning-heavy rows and would need clamping. The fallback exists
-// only for a tokscale build that reports durations without the coverage field.
-function timedCoverage(performance, row) {
-  const reported = firstNumber(performance, TIMED_COVERAGE_KEYS);
-  if (reported > 0) return Math.min(1, reported);
-  const timed = firstNumber(performance, TIMED_TOKEN_KEYS);
-  if (timed <= 0) return 0;
-  const total = tokenValue(row);
-  return total > 0 ? Math.min(1, timed / total) : 0;
-}
 
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const client = detectedClient;
@@ -604,11 +594,10 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
   const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
-  // Deliberately not rounded. This is a fractional apportionment, and rounding it per row
-  // biases the sum by up to half a token per entry in a fixed direction — toward zero for
-  // short sessions under partial coverage, away from it otherwise. The period already carries
-  // a non-integer in costUsd, so nothing downstream needs this to be whole.
-  const timedOutputTokens = output * timedCoverage(performance, row);
+  // A row contributes its output to the throughput numerator exactly when it contributes to
+  // the denominator. Gating rather than scaling by tokscale's `tokenCoverage` keeps this a
+  // plain counter, which is what lets it merge and delta like every other token field.
+  const timedOutputTokens = timedDurationMs > 0 ? output : 0;
   let model = detectModel(row);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));

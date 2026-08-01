@@ -61,7 +61,7 @@ Example payload:
     "cacheWriteTokens": 0,
     "outputTokens": 34,
     "timedTokens": 1230,
-    "timedOutputTokens": 179.6,
+    "timedOutputTokens": 34,
     "timedDurationMs": 4200,
     "clients": {
       "codex": 1234
@@ -192,9 +192,15 @@ Authenticated stats expose `projectsIncomplete: true` when a device omitted its 
 
 `timedTokens`, `timedOutputTokens` and `timedDurationMs` are optional throughput inputs, summed from tokscale's per-entry `performance` block. `timedDurationMs` is the sum of per-message durations, not a wall-clock span — concurrent sessions contribute their durations separately — and `timedTokens` counts the tokens of the messages that carried a duration. Coverage is only meaningful per tokscale entry and must **not** be reconstructed as `timedTokens / totalTokens` after aggregation: that ratio mixes clients with completely different coverage, and it is not even bounded by 1, because tokscale counts reasoning in its own token total while `totalTokens` deliberately does not.
 
-`timedOutputTokens` estimates how much of `outputTokens` those timed messages produced. tokscale reports per-entry coverage but does not break output out per timed message, so the collector apportions each entry's output by that entry's own coverage and sums the result. It must be accumulated per entry rather than rebuilt from period totals: coverage is close to all-or-nothing per client — several tracked clients report no durations at all — so a coverage derived from summed totals smears one client's gate across every client, and any rate computed from it drifts with the client mix rather than with throughput. Being an apportionment, this field is **fractional** — unlike every other token count in the period — and stays fractional through the wire and every merge, so that rounding cannot accumulate per entry. Round only for display.
+`timedOutputTokens` is the output of the entries that carried a duration — an entry contributes its output exactly when it contributes its duration, so `timedOutputTokens / timedDurationMs` always divides two totals describing the same entries. The gate is applied per entry rather than rebuilt from period totals: several tracked clients report no durations at all, so anything derived from summed totals lets one client's output ride on another client's clock, and the resulting rate drifts with the client mix rather than with throughput.
 
-All three are reported as raw sums rather than a pre-divided rate because a ratio cannot be summed: consumers add each field across devices and periods and divide only at the point of display, which makes a fleet-wide rate duration-weighted. All three are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses. Payloads without these fields are accepted and normalize to `0`, which consumers must read as "no throughput data" rather than "zero throughput".
+tokscale also reports a per-entry `tokenCoverage`, and this deliberately does not scale by it. Doing so would assume output is spread evenly across an entry's tokens; in practice output is ~0.3–3% of an entry's tokens while the untimed remainder measures several times an entry's entire output, so that remainder is cache and input rather than generation, and scaling would discount output that was almost certainly timed. Ignoring it also keeps the field a plain integer counter that merges and deltas like every other token count.
+
+All three are reported as raw sums rather than a pre-divided rate because a ratio cannot be summed: consumers add each field across devices and periods and divide only at the point of display, which makes a fleet-wide rate duration-weighted. Payloads without these fields are accepted and normalize to `0`, which consumers must read as "no throughput data" rather than "zero throughput".
+
+Because the gate is all-or-nothing per entry, `timedOutputTokens ≤ outputTokens` always holds, and the two are equal when every entry in the period reported durations. A partly timed entry — 1230 of 1234 tokens in the example above — still contributes all of its output, since the untimed remainder is cache and input rather than generation.
+
+All three are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses to carry a `today` rescan into `month` and `allTime`. The one case where `timedOutputTokens` and a full rescan can disagree is a session that spans the boundary and starts or stops reporting durations partway through, since a rescan then re-gates the whole session on its combined state; the next full scan reconciles it. Closing even that needs a per-message timed-output counter from tokscale.
 
 `trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
 
