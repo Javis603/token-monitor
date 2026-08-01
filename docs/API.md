@@ -61,7 +61,7 @@ Example payload:
     "cacheWriteTokens": 0,
     "outputTokens": 34,
     "timedTokens": 1230,
-    "timedOutputTokens": 180,
+    "timedOutputTokens": 179.6,
     "timedDurationMs": 4200,
     "clients": {
       "codex": 1234
@@ -190,9 +190,9 @@ The hub normalizes records before storing them. The Node hub accepts JSON ingest
 
 Authenticated stats expose `projectsIncomplete: true` when a device omitted its rollup, disabled project tracking while contributing usage, or could not preserve exact all-time attribution after its tracked-client list changed. Affected device entries expose `allTimeProjectsOmitted`, `allTimeProjectsIncomplete`, or `projectsEnabled: false` as the reason. The public Worker stats endpoint removes the entire `projects` map, including both display labels and canonical keys.
 
-`timedTokens`, `timedOutputTokens` and `timedDurationMs` are optional throughput inputs, summed from tokscale's per-entry `performance` block. `timedDurationMs` is the sum of per-message durations, not a wall-clock span — concurrent sessions contribute their durations separately — and `timedTokens` counts only the messages that carried a duration, so `timedTokens / totalTokens` is the sample coverage for that period.
+`timedTokens`, `timedOutputTokens` and `timedDurationMs` are optional throughput inputs, summed from tokscale's per-entry `performance` block. `timedDurationMs` is the sum of per-message durations, not a wall-clock span — concurrent sessions contribute their durations separately — and `timedTokens` counts the tokens of the messages that carried a duration. Coverage is only meaningful per tokscale entry and must **not** be reconstructed as `timedTokens / totalTokens` after aggregation: that ratio mixes clients with completely different coverage, and it is not even bounded by 1, because tokscale counts reasoning in its own token total while `totalTokens` deliberately does not.
 
-`timedOutputTokens` estimates how much of `outputTokens` those timed messages produced. tokscale reports per-entry coverage but does not break output out per timed message, so the collector apportions each entry's output by that entry's own coverage and sums the result. It must be accumulated per entry rather than rebuilt from period totals: coverage is close to all-or-nothing per client — several tracked clients report no durations at all — so a coverage derived from summed totals smears one client's gate across every client, and any rate computed from it drifts with the client mix rather than with throughput.
+`timedOutputTokens` estimates how much of `outputTokens` those timed messages produced. tokscale reports per-entry coverage but does not break output out per timed message, so the collector apportions each entry's output by that entry's own coverage and sums the result. It must be accumulated per entry rather than rebuilt from period totals: coverage is close to all-or-nothing per client — several tracked clients report no durations at all — so a coverage derived from summed totals smears one client's gate across every client, and any rate computed from it drifts with the client mix rather than with throughput. Being an apportionment, this field is **fractional** — unlike every other token count in the period — and stays fractional through the wire and every merge, so that rounding cannot accumulate per entry. Round only for display.
 
 All three are reported as raw sums rather than a pre-divided rate because a ratio cannot be summed: consumers add each field across devices and periods and divide only at the point of display, which makes a fleet-wide rate duration-weighted. All three are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses. Payloads without these fields are accepted and normalize to `0`, which consumers must read as "no throughput data" rather than "zero throughput".
 

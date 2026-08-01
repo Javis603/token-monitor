@@ -107,6 +107,8 @@ function emptyPeriod() {
     // message. It has to be accumulated per row: coverage varies from 1 to exactly 0 between
     // clients (several emit no durations at all), so a coverage rebuilt from period totals
     // would smear a per-client gate across every client and skew any rate derived from it.
+    // Being an apportionment it is fractional, and stays that way through the wire and every
+    // merge; only the display rounds.
     //
     // All three are additive over append-only messages, which is what makes them exact under
     // applyPeriodDelta. Keep them as raw sums: a rate is a ratio and ratios cannot be summed
@@ -499,7 +501,7 @@ function normalizePeriod(input, options = {}) {
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
-  period.timedOutputTokens = Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0)));
+  period.timedOutputTokens = Math.max(0, asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0));
   period.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
   if (input.clients && typeof input.clients === 'object') {
     for (const [client, value] of Object.entries(input.clients)) {
@@ -602,7 +604,11 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
   const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
-  const timedOutputTokens = Math.round(output * timedCoverage(performance, row));
+  // Deliberately not rounded. This is a fractional apportionment, and rounding it per row
+  // biases the sum by up to half a token per entry in a fixed direction — toward zero for
+  // short sessions under partial coverage, away from it otherwise. The period already carries
+  // a non-integer in costUsd, so nothing downstream needs this to be whole.
+  const timedOutputTokens = output * timedCoverage(performance, row);
   let model = detectModel(row);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));

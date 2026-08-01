@@ -20,6 +20,7 @@ const {
   applyPeriodDelta,
   addPeriodInto,
   emptyPeriod,
+  extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   mergePeriods,
   normalizeDeviceRecord,
@@ -70,7 +71,7 @@ test('throughput is summed from every entry performance block', () => {
   assert.equal(result.timedDurationMs, 1500);
   assert.equal(result.timedTokens, 1150);
   // 40 × 0.9 + 40 × 0.25, each apportioned against its own entry's coverage.
-  assert.equal(result.timedOutputTokens, 46);
+  assert.equal(result.timedOutputTokens.toFixed(6), '46.000000');
 });
 
 test('an entry without a performance block contributes no throughput', () => {
@@ -121,8 +122,34 @@ test('partial coverage is apportioned per entry rather than rounded to all or no
       performance: { totalDurationMs: 20_000, timedTokens: 92_650, tokenCoverage: 0.9265 }
     })]
   });
-  assert.equal(result.timedOutputTokens, 927, '1000 × 0.9265, rounded');
+  assert.equal(result.timedOutputTokens.toFixed(4), '926.5000', '1000 × 0.9265, unrounded');
   assert.equal(result.timedTokens, 92_650);
+});
+
+test('the apportionment is not rounded per entry', () => {
+  // Rounding each row biases the sum by up to half a token per entry, in a direction fixed by
+  // the fractional part — so many small sessions under partial coverage all bias the same way.
+  // Below 0.5 they would each round to zero and the rate would read as no data at all.
+  const tiny = (sessionId, tokenCoverage) => tokscaleEntry({
+    sessionId,
+    input: 0,
+    output: 1,
+    cacheRead: 99,
+    cacheWrite: 0,
+    performance: { totalDurationMs: 10, timedTokens: 49, tokenCoverage }
+  });
+
+  const under = extractUsageFromTokscale({ entries: Array.from({ length: 100 }, (_, i) => tiny(`s${i}`, 0.49)) });
+  assert.equal(under.timedOutputTokens.toFixed(2), '49.00', 'per-entry rounding would zero every row and report 0');
+  assert.ok(under.timedOutputTokens > 0);
+
+  const over = extractUsageFromTokscale({ entries: Array.from({ length: 100 }, (_, i) => tiny(`s${i}`, 0.51)) });
+  assert.equal(over.timedOutputTokens.toFixed(2), '51.00', 'per-entry rounding would inflate this to 100');
+
+  // The pair also has to survive the wire: a normalize step that rounds would reintroduce the
+  // bias on the hub side even with the collector fixed.
+  assert.equal(normalizePeriod({ timedOutputTokens: 926.5 }).timedOutputTokens, 926.5);
+  assert.equal(normalizePeriod({ timed_output_tokens: 0.4 }).timedOutputTokens, 0.4);
 });
 
 test('tokscale tokenCoverage is preferred over a ratio against our own total', () => {
@@ -228,6 +255,97 @@ test('throughput survives the sync upload and aggregates duration-weighted acros
   // Duration-weighted over the timed output only: 12.7 tok/s. Reading the fleet's whole
   // output against the same denominator would claim 21.8.
   assert.equal(speed(today).toFixed(1), '12.7');
+});
+
+test('a watch tick covering two clients at once partitions their throughput separately', () => {
+  // Two tools active together are unioned into one tokscale call, and the bundle splits the
+  // rows back into per-client partitions. Each row carries its own coverage, so the split is
+  // exactly equivalent to having scanned them separately — which is what lets a later tick
+  // replace one of those partitions without disturbing the other.
+  const row = (client, output, timedTokens, totalDurationMs) => tokscaleEntry({
+    client,
+    sessionId: `${client}-1`,
+    input: 0,
+    output,
+    cacheRead: output * 100,
+    cacheWrite: 0,
+    performance: { totalDurationMs, timedTokens, tokenCoverage: 1 }
+  });
+  const claude = row('claude', 6_000, 606_000, 120_000);
+  const codex = row('codex', 3_000, 303_000, 120_000);
+
+  const bundle = extractUsageBundleFromTokscale({ entries: [claude, codex] });
+  assert.deepEqual(Object.keys(bundle.byClient).sort(), ['claude', 'codex']);
+  assert.equal(speed(bundle.byClient.claude), 50, 'each partition keeps its own throughput');
+  assert.equal(speed(bundle.byClient.codex), 25);
+
+  const unioned = mergePeriods(...Object.values(bundle.byClient));
+  const separate = mergePeriods(
+    extractUsageFromTokscale({ entries: [claude] }),
+    extractUsageFromTokscale({ entries: [codex] })
+  );
+  assert.equal(unioned.timedOutputTokens, separate.timedOutputTokens);
+  assert.equal(unioned.timedDurationMs, separate.timedDurationMs);
+  // Concurrent tools sum their busy time rather than sharing a wall clock, so the combined
+  // reading is duration-weighted across them (37.5), not the sum of their rates (75).
+  assert.equal(speed(unioned), 37.5);
+});
+
+test('an unattributed fallback period reads as no throughput data, never NaN', () => {
+  // A tokscale payload whose rows cannot be parsed falls back to a period built from top-level
+  // totals, which carries none of the throughput fields. Both addPeriodInto call sites
+  // normalize first, so those gaps become 0 instead of poisoning a merge.
+  const fallback = extractUsageFromTokscale({ totalOutput: 12_345, totalInput: 100, totalCost: 1 });
+  const timed = extractUsageFromTokscale({ entries: [tokscaleEntry()] });
+  const merged = mergePeriods(fallback, timed);
+  for (const field of ['totalTokens', 'outputTokens', 'timedTokens', 'timedOutputTokens', 'timedDurationMs']) {
+    assert.ok(Number.isFinite(merged[field]), `${field} must stay finite, got ${merged[field]}`);
+  }
+  assert.equal(merged.timedOutputTokens, timed.timedOutputTokens, 'the fallback adds no phantom throughput');
+  assert.equal(normalizePeriod(fallback).timedOutputTokens, 0);
+});
+
+test('a targeted watch tick lands on the same throughput as a full rescan', () => {
+  // The live path is not a whole-fleet rescan: a watch event maps a changed file to one client
+  // and rescans only that client's --today partition, which is then merged back over the other
+  // clients' retained partitions. Per-entry apportionment is what makes that safe — each
+  // partition already carries its own correctly weighted share, so an untimed client sitting in
+  // a stale partition cannot move the rate, and the targeted result has to equal the full one.
+  const claude = (output, timedTokens, totalDurationMs) => tokscaleEntry({
+    client: 'claude',
+    input: 0,
+    output,
+    cacheRead: output * 100,
+    cacheWrite: 0,
+    performance: { totalDurationMs, timedTokens, tokenCoverage: 1 }
+  });
+  const copilot = tokscaleEntry({ client: 'copilot', sessionId: 'p1', input: 0, output: 6_600, cacheRead: 198_000, cacheWrite: 0, performance: undefined });
+
+  const copilotPartition = extractUsageFromTokscale({ entries: [copilot] });
+  const olderMonthOnly = extractUsageFromTokscale({ entries: [claude(50_000, 5_050_000, 1_000_000)] });
+
+  const todayBefore = mergePeriods(extractUsageFromTokscale({ entries: [claude(6_000, 606_000, 120_000)] }), copilotPartition);
+  const monthBefore = mergePeriods(todayBefore, olderMonthOnly);
+
+  // Watch tick: only claude is rescanned, copilot's partition is reused untouched.
+  const claudeAfter = extractUsageFromTokscale({ entries: [claude(6_450, 651_450, 129_000)] });
+  const todayTargeted = mergePeriods(claudeAfter, copilotPartition);
+  const monthTargeted = applyPeriodDelta(monthBefore, todayTargeted, todayBefore);
+
+  const todayFull = mergePeriods(claudeAfter, copilotPartition);
+  const monthFull = mergePeriods(todayFull, olderMonthOnly);
+
+  assert.equal(todayTargeted.timedOutputTokens, todayFull.timedOutputTokens);
+  assert.equal(todayTargeted.timedDurationMs, todayFull.timedDurationMs);
+  assert.equal(monthTargeted.timedOutputTokens.toFixed(6), monthFull.timedOutputTokens.toFixed(6));
+  assert.equal(monthTargeted.timedDurationMs, monthFull.timedDurationMs);
+
+  // Claude's real throughput never changed, so neither may the reading — even though the merged
+  // period's totals did. A coverage rebuilt from those totals would drift on every tick.
+  assert.equal(speed(todayBefore), 50);
+  assert.equal(speed(todayTargeted), 50);
+  assert.equal(speedFromPeriodTotals(todayBefore).toFixed(2), '78.50');
+  assert.equal(speedFromPeriodTotals(todayTargeted).toFixed(2), '76.98');
 });
 
 test('applyPeriodDelta updates throughput exactly from a today-only rescan', () => {

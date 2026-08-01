@@ -124,13 +124,19 @@ test('the reveal triggers stay non-focusable', () => {
   // with the pointer nowhere near the title. The renderer cannot undo it either — it receives
   // no blur, focus or visibilitychange event across a real hide and show. Pointer-only is the
   // design, so the markup must stay inert.
+  //
+  // This asserts the markup rather than the behaviour because the behaviour is not observable
+  // from here — it needs a real Electron window, and the renderer is not told when one is
+  // hidden or shown. Making these focusable is not banned forever: it needs evidence that a
+  // hidden-then-shown window no longer opens the reveal or draws a ring on its own.
+  const reason = 'focusable here reopens the reveal on window show; see the comment above';
   const triggers = [...html.matchAll(/<(\w+)([^>]*\bclass="(?:app-title-mark|live-dot)"[^>]*)>/g)];
   assert.equal(triggers.length, 2, 'both reveal triggers are present in the title');
   for (const [, tag, attrs] of triggers) {
-    assert.notEqual(tag, 'button', 'a button here takes focus on window show');
-    assert.doesNotMatch(attrs, /tabindex/, 'a tabindex here takes focus on window show');
+    assert.notEqual(tag, 'button', reason);
+    assert.doesNotMatch(attrs, /tabindex/, reason);
   }
-  assert.doesNotMatch(css, /app-title-mark:focus/, 'no focus styling implies nothing focusable');
+  assert.doesNotMatch(css, /app-title-mark:focus/, reason);
 });
 
 test('the no-drag hit area stays scoped to the collapsed title states', () => {
