@@ -79,11 +79,19 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
   const schedulerIndex = html.indexOf('<script src="statsRenderScheduler.js"></script>');
   const appIndex = html.indexOf('<script src="app.js"></script>');
+  const visibilityListenerStart = app.indexOf("document.addEventListener('visibilitychange'");
+  const visibilityListenerEnd = app.indexOf('window.tokenMonitor.onStatsPush', visibilityListenerStart);
+  const visibilityListener = visibilityListenerStart >= 0 && visibilityListenerEnd > visibilityListenerStart
+    ? app.slice(visibilityListenerStart, visibilityListenerEnd)
+    : '';
 
   assert.notEqual(schedulerIndex, -1);
   assert.notEqual(appIndex, -1);
   assert.ok(schedulerIndex < appIndex);
-  assert.match(app, /document\.addEventListener\('visibilitychange', \(\) => statsRenderScheduler\.flush\(\)\);/);
+  assert.notEqual(visibilityListenerStart, -1);
+  assert.notEqual(visibilityListenerEnd, -1);
+  assert.match(visibilityListener, /stopTokenRateBoost\(\)/);
+  assert.match(visibilityListener, /statsRenderScheduler\.flush\(\)/);
   assert.match(
     statsPush,
     /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
