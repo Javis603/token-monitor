@@ -130,6 +130,19 @@ test('the boost controller cancels pointercancel and blur immediately', () => {
   }
 });
 
+test('a canceled gesture without a click does not suppress the next short click', () => {
+  const harness = createBoostHarness();
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
+  harness.advance(300);
+  assert.equal(harness.controller.cancel({ type: 'pointercancel', pointerId: 1 }), true);
+  assert.equal(harness.controller.getSnapshot(), null);
+
+  assert.equal(harness.controller.start({ button: 0, pointerId: 2 }), true);
+  harness.advance(100);
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 2 }), false);
+  assert.equal(harness.controller.consumeClick(), false);
+});
+
 test('the boost controller does not start without a usable rate', () => {
   const harness = createBoostHarness({ rate: 0 });
   assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), false);

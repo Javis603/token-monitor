@@ -144,6 +144,10 @@
 
     function start(event) {
       if (event?.button !== undefined && event.button !== 0) return false;
+      // A new primary pointer sequence cannot belong to a canceled gesture. Clear a guard that
+      // was left behind when blur/pointercancel produced no follow-up click; if the canceled
+      // gesture does produce one, consumeClick() runs before this next pointerdown instead.
+      suppressNextClick = false;
       if (state || !canStart() || prefersReducedMotion()) return false;
       const value = currentValue();
       if (!(value.rate > 0)) return false;
