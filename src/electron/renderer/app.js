@@ -3026,10 +3026,17 @@ function setSubscriptionFormOpen(open, formBase = null) {
 
 const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;
 let subscriptionEditorCloseCleanup = null;
+let subscriptionEditorCloseOnCancel = null;
 
 function cancelSubscriptionEditorClose() {
+  const onCancel = subscriptionEditorCloseOnCancel;
+  subscriptionEditorCloseOnCancel = null;
   subscriptionEditorCloseCleanup?.();
   subscriptionEditorCloseCleanup = null;
+  // A successful write defers the full render until the collapse has settled so
+  // the transition can paint. If a new mode cancels that collapse, settle the
+  // deferred render here instead of silently dropping it with the old timer.
+  onCancel?.();
 }
 
 // The class change has to happen in a later frame than the initial collapsed
@@ -3110,6 +3117,7 @@ function closeSubscriptionEditor({ onClosed } = {}) {
   }
 
   setSubscriptionFormOpen(false);
+  subscriptionEditorCloseOnCancel = onClosed;
   let finished = false;
   let timer = null;
   const onTransitionEnd = (event) => {
@@ -3118,7 +3126,10 @@ function closeSubscriptionEditor({ onClosed } = {}) {
   const cleanup = () => {
     details.removeEventListener('transitionend', onTransitionEnd);
     if (timer !== null) clearTimeout(timer);
-    if (subscriptionEditorCloseCleanup === cleanup) subscriptionEditorCloseCleanup = null;
+    if (subscriptionEditorCloseCleanup === cleanup) {
+      subscriptionEditorCloseCleanup = null;
+      subscriptionEditorCloseOnCancel = null;
+    }
   };
   const finish = () => {
     if (finished) return;
@@ -3473,8 +3484,8 @@ async function submitSubscription() {
   const updated = editing
     ? list.map((entry) => (entry.id === editing.id ? next : entry))
     : [...list, next];
-  if (!await saveSubscriptions(updated, state.subscriptionFormBase)) return;
-  closeSubscriptionEditor();
+  if (!await saveSubscriptions(updated, state.subscriptionFormBase, { render: false })) return;
+  closeSubscriptionEditor({ onClosed: renderSubscriptionSettings });
 }
 
 function configuredLimitProviderOrder() {

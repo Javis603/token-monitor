@@ -2048,6 +2048,7 @@ test('closing the subscription editor restores focus to the rebuilt row action',
     `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\n${close}\ncloseSubscriptionEditor({ onClosed: () => { dom.rows = [rowFor(finalEdit)]; } });`,
     context
   );
+  assert.equal(finalEdit.focused, false);
   finish();
 
   assert.equal(newEdit.focused, false);
@@ -2136,7 +2137,40 @@ test('closing a new subscription editor restores focus to the Add action', () =>
   assert.equal(addToggle.focused, true);
 });
 
-test('a successful subscription save renders before starting the close animation', async () => {
+test('canceling a close settles its deferred render exactly once', () => {
+  const app = readRendererFile('app.js');
+  const cancel = functionBody(app, 'cancelSubscriptionEditorClose', 'openSubscriptionEditor');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const details = {
+    classList: { contains: () => false },
+    contains: () => false,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: '', subscriptionEditorTransitionId: 0 };
+  const context = vm.createContext({
+    document: { activeElement: null, body: {} },
+    els: { subscriptionAddDetails: details },
+    state,
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() {},
+    renderSubscriptionRows() {},
+    clearTimeout() {},
+    setTimeout() { return 1; },
+    renderCount: 0
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\nlet subscriptionEditorCloseOnCancel = null;\n${cancel}\n${close}\ncloseSubscriptionEditor({ onClosed: () => { renderCount += 1; } });`,
+    context
+  );
+  assert.equal(context.renderCount, 0);
+  vm.runInContext('cancelSubscriptionEditorClose();', context);
+
+  assert.equal(context.renderCount, 1);
+});
+
+test('a successful subscription save defers the full render until close completes', async () => {
   const app = readRendererFile('app.js');
   const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
   const account = { provider: 'codex', accountKey: 'acct-1', accountName: 'acct' };
@@ -2168,8 +2202,6 @@ test('a successful subscription save renders before starting the close animation
     subscriptionIntervalCountInput: { value: '1' }
   };
   const state = { subscriptionEditingId: 'subscription-1', subscriptionFormBase: { updatedAt: 'v1' } };
-  let fullRenderCompleted = false;
-  let closeArgs = null;
   const context = vm.createContext({
     els,
     state,
@@ -2184,20 +2216,31 @@ test('a successful subscription save renders before starting the close animation
     subscriptionAccountChoices: () => [{ value: 'acct-1', provider: account }],
     subscriptionList: () => list,
     subscriptionForAccountValue: () => false,
+    saveCompleted: false,
+    saveOptions: null,
+    closeOptions: null,
+    renderCount: 0,
     saveSubscriptions: async (updated, base, options) => {
-      if (options?.render === false) return true;
-      fullRenderCompleted = true;
+      context.saveOptions = options;
+      context.saveCompleted = true;
       return true;
     },
-    closeSubscriptionEditor: (...args) => { closeArgs = args; },
+    closeSubscriptionEditor: (options) => {
+      assert.equal(context.saveCompleted, true);
+      context.closeOptions = options;
+    },
+    renderSubscriptionSettings() { context.renderCount += 1; },
     setSubscriptionError() {},
     Promise
   });
 
   await vm.runInContext(`async ${submit}\nsubmitSubscription();`, context);
 
-  assert.equal(fullRenderCompleted, true);
-  assert.deepEqual(closeArgs, []);
+  assert.equal(context.saveOptions?.render, false);
+  assert.equal(context.renderCount, 0);
+  assert.equal(typeof context.closeOptions?.onClosed, 'function');
+  context.closeOptions.onClosed();
+  assert.equal(context.renderCount, 1);
 });
 
 test('subscription row rerenders keep the live editor node attached', () => {
@@ -2277,10 +2320,8 @@ test('editing a subscription moves only the editor beneath its row', () => {
   assert.match(app, /setSubscriptionFormOpen\(false\);[\s\S]*resetSubscriptionForm\(\);/);
   assert.match(app, /state\.subscriptionEditingId === subscription\.id[\s\S]*closeSubscriptionEditor\(\);/);
   assert.match(app, /els\.subscriptionCancelEdit\?\.addEventListener\('click', \(\) => closeSubscriptionEditor\(\)\);/);
-  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase\)/);
-  assert.doesNotMatch(submit, /render: false/);
-  assert.match(submit, /closeSubscriptionEditor\(\);/);
-  assert.doesNotMatch(submit, /onClosed: renderSubscriptionSettings/);
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase, \{ render: false \}\)/);
+  assert.match(submit, /closeSubscriptionEditor\(\{ onClosed: renderSubscriptionSettings \}\);/);
   assert.match(cssBlock(styles, '.subscription-row.is-editing'), /border-color/);
   assert.match(styles, /\.subscription-row\.is-editing \.subscription-row-edit/);
   assert.match(styles, /#subscriptionList > #subscriptionAddDetails/);
