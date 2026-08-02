@@ -33,11 +33,11 @@ const QODER_MODEL_DISPLAY_NAMES = Object.freeze({
   mmodel: 'MiniMax-M3',
   performance: 'Performance',
   q35model: 'Qwen3.5-Plus',
-  q35model_preview: 'Qwen3.7-Max-DogFooding',
+  q35model_preview: 'Qwen3.8-Max-Preview',
   q36fmodel: 'Qwen3.6-Flash',
   qmodel: 'Qwen3.7-Plus',
   qmodel_latest: 'Qwen3.7-Max',
-  qmodel_preview: 'Qwen3.7-Max-DogFooding', // retired code, same preview model
+  qmodel_preview: 'Qwen3.8-Max-Preview', // retired code, same preview model
   ultimate: 'Ultimate'
 });
 const QODER_USAGE_SQL = `
@@ -48,13 +48,27 @@ WHERE role = 'assistant'
   AND trim(token_info) NOT IN ('', '{}')
 ORDER BY gmt_create, rowid
 `;
+const QODER_NORMALIZED_TIMESTAMP_SQL = `
+CASE
+  WHEN typeof(gmt_create) = 'text' AND strftime('%s', trim(gmt_create)) IS NOT NULL
+    THEN CAST(strftime('%s', trim(gmt_create)) AS REAL) * 1000
+  WHEN typeof(gmt_create) = 'text' AND CAST(trim(gmt_create) AS REAL) > 0
+    AND CAST(trim(gmt_create) AS REAL) < 1000000000000
+    THEN CAST(trim(gmt_create) AS REAL) * 1000
+  WHEN typeof(gmt_create) = 'text'
+    THEN 0
+  WHEN CAST(gmt_create AS REAL) > 0 AND CAST(gmt_create AS REAL) < 1000000000000
+    THEN CAST(gmt_create AS REAL) * 1000
+  ELSE CAST(gmt_create AS REAL)
+END
+`;
 const QODER_USAGE_SINCE_SQL = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create
 FROM chat_message
 WHERE role = 'assistant'
   AND token_info IS NOT NULL
   AND trim(token_info) NOT IN ('', '{}')
-  AND gmt_create >= ?
+  AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ?
 ORDER BY gmt_create, rowid
 `;
 

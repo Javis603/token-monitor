@@ -2579,6 +2579,70 @@ test('collector preserves Qoder while publishing other clients after a later Qod
   }
 });
 
+test('collector does not reuse persisted Qoder periods after the DB path changes', async () => {
+  const tmp = withTmpHome([]);
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalQoderDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const oldDbPath = path.join(tmp, 'old', 'local.db');
+  const newDbPath = path.join(tmp, 'new', 'local.db');
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = newDbPath;
+
+  const initialCollector = freshCollector();
+  const oldQoderPeriod = emptyPeriod();
+  oldQoderPeriod.totalTokens = 9;
+  oldQoderPeriod.clients = { qodercn: 9 };
+  fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
+    dateKey: initialCollector.localTodayKey(),
+    today: emptyPeriod(),
+    month: emptyPeriod(),
+    allTime: emptyPeriod(),
+    qoderPeriods: { today: oldQoderPeriod, month: oldQoderPeriod, allTime: oldQoderPeriod },
+    configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath),
+    fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
+  }));
+
+  const qoderPath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderUsage = require(qoderPath);
+  const originalRows = qoderUsage.collectQoderRows;
+  qoderUsage.collectQoderRows = async () => {
+    throw new Error('new Qoder database is temporarily unavailable');
+  };
+  delete require.cache[collectorPath];
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,qodercn',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: 3 }] }),
+      onUpdate: (summary) => updates.push(summary)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(updates.at(-1).today.clients.claude, 3);
+    assert.equal(updates.at(-1).today.clients.qodercn || 0, 0, 'old-path Qoder fallback must not leak into the new path');
+  } finally {
+    if (handle) handle.stop();
+    qoderUsage.collectQoderRows = originalRows;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    if (originalQoderDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = originalQoderDbPath;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('collector publishes other clients when Qoder fails before the first complete snapshot', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;

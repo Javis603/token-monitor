@@ -6,6 +6,9 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+let sqlite = null;
+try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
+
 const {
   QODER_MODEL_DISPLAY_NAMES,
   buildQoderHistoryGraph,
@@ -26,6 +29,8 @@ test('QODER_MODEL_DISPLAY_NAMES covers every official model code and the retired
   }
   assert.equal(QODER_MODEL_DISPLAY_NAMES.qmodel_latest, 'Qwen3.7-Max');
   assert.equal(QODER_MODEL_DISPLAY_NAMES.gm51model, 'GLM-5.2');
+  assert.equal(QODER_MODEL_DISPLAY_NAMES.qmodel_preview, 'Qwen3.8-Max-Preview');
+  assert.equal(QODER_MODEL_DISPLAY_NAMES.q35model_preview, 'Qwen3.8-Max-Preview');
   assert.equal(QODER_MODEL_DISPLAY_NAMES.custom_model, undefined, 'custom models stay unmapped');
 });
 
@@ -193,6 +198,44 @@ test('readQoderDbRows fails loudly when both sqlite backends are unavailable', a
   assert.match(logged[0], /node:sqlite: node:sqlite not available/);
 });
 
+(sqlite ? test : test.skip)('readQoderDbRows handles second and millisecond Qoder timestamps in anchored reads', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-since-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const dbPath = path.join(tmp, 'local.db');
+  const database = new sqlite.DatabaseSync(dbPath);
+  database.exec(`CREATE TABLE chat_message (
+    id TEXT,
+    session_id TEXT,
+    request_id TEXT,
+    token_info TEXT,
+    model_info TEXT,
+    gmt_create INTEGER,
+    role TEXT
+  )`);
+  const insert = database.prepare(`
+    INSERT INTO chat_message (id, session_id, request_id, token_info, model_info, gmt_create, role)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const sinceMs = Date.parse('2026-07-29T00:00:00Z');
+  const add = (id, gmtCreate) => insert.run(
+    id, `session-${id}`, `request-${id}`,
+    JSON.stringify({ prompt_tokens: 2, completion_tokens: 1 }),
+    JSON.stringify({ model_key: 'qmodel' }), gmtCreate, 'assistant'
+  );
+  add('old-ms', sinceMs - 1);
+  add('new-ms', sinceMs + 1_000);
+  add('new-seconds', Math.floor((sinceMs + 2_000) / 1_000));
+  add('new-iso', '2026-07-29T00:00:03.000Z');
+  database.close();
+
+  const rows = await readQoderDbRows(dbPath, {
+    sinceMs,
+    execFile: async () => { throw new Error('sqlite3 unavailable'); }
+  });
+
+  assert.deepEqual(rows.map((row) => row.id).sort(), ['new-iso', 'new-ms', 'new-seconds']);
+});
+
 test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
   let rows;
   try {
@@ -202,7 +245,7 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
     return;
   }
 
-  assert.equal(rows.length, 4);
+  assert.equal(rows.length, 7);
   const byId = new Map(rows.map((row) => [row.messageId.split(':').pop(), row]));
   assert.deepEqual(
     {
@@ -214,4 +257,10 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
     { model: 'Qwen3.7-Max', input: 446, cacheRead: 57_853, output: 2_812 }
   );
   assert.equal(byId.get('msg-8').model, 'qoder-agent');
+  // ISO text timestamps parse to milliseconds; unparseable text becomes 0
+  // (undated), never a fake 1970 timestamp. Numeric text (seconds) keeps
+  // scaling to milliseconds like the numeric branches.
+  assert.equal(byId.get('msg-9').createdAt, Date.parse('2026-07-29T09:00:00'));
+  assert.equal(byId.get('msg-10').createdAt, 0);
+  assert.equal(byId.get('msg-11').createdAt, 1_750_000_000 * 1000);
 });

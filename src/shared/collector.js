@@ -2088,10 +2088,12 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderDbPath = '') {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}`;
+  const qoder = String(qoderDbPath || '').trim();
+  const qoderPart = qoder ? `|qoder:${path.resolve(qoder)}` : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderPart}`;
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2104,10 +2106,10 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
 function collectorAnchorTrust(saved, options = {}) {
-  const { clients = '', allTimeSince = '', projectsEnabled = true, now = new Date() } = options;
+  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderDbPath = '', now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled)) return null;
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderDbPath)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -2222,6 +2224,10 @@ function startCollector(options) {
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
   const log = logger || (() => {});
+  const normalizedClients = normalizeClientsCsv(clients);
+  const qoderDbPath = normalizedClients.split(',').includes('qodercn')
+    ? qoderDataPaths({ homeDir: options.homeDir, platform: process.platform, env: process.env }).dbPaths[0] || ''
+    : '';
   let tickInFlight = false;
   let tickPending = false;
   let pendingForceHistory = false;
@@ -2353,7 +2359,8 @@ function startCollector(options) {
       const trust = collectorAnchorTrust(saved, {
         clients,
         allTimeSince,
-        projectsEnabled: options.projectsEnabled
+        projectsEnabled: options.projectsEnabled,
+        qoderDbPath
       });
       if (trust) {
         anchor = {
@@ -2531,7 +2538,7 @@ function startCollector(options) {
               qoderPeriods: anchor.qoderPeriods,
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderDbPath),
               fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
