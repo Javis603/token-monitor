@@ -1968,6 +1968,93 @@ test('the add action switches directly from editing to a new editor', () => {
   assert.match(app, /if \(state\.subscriptionEditingId\) \{\s*closeSubscriptionEditor\(\{ onClosed: openSubscriptionAddEditor \}\);/);
 });
 
+test('subscription editor captures its version before the opening animation', () => {
+  const app = readRendererFile('app.js');
+  const open = functionBody(app, 'openSubscriptionEditor', 'closeSubscriptionEditor');
+  const frames = [];
+  const details = {
+    classList: { add() {} },
+    getBoundingClientRect() {}
+  };
+  const state = {
+    settings: { subscriptionsHub: 'hub-a', subscriptionsUpdatedAt: 'version-a' },
+    subscriptionEditorTransitionId: 0,
+    subscriptionFormBase: null
+  };
+  const els = { subscriptionAddDetails: details };
+  const subscriptionSettingsVersion = () => ({
+    hub: state.settings.subscriptionsHub,
+    updatedAt: state.settings.subscriptionsUpdatedAt
+  });
+
+  vm.runInNewContext(
+    `${open}\nopenSubscriptionEditor();`,
+    {
+      cancelSubscriptionEditorClose() {},
+      els,
+      requestAnimationFrame: (callback) => frames.push(callback),
+      setSubscriptionFormOpen(open, formBase) {
+        state.subscriptionFormBase = formBase;
+      },
+      state,
+      subscriptionSettingsVersion
+    }
+  );
+
+  state.settings.subscriptionsUpdatedAt = 'version-b';
+  frames[0]();
+  assert.deepEqual(state.subscriptionFormBase, { hub: 'hub-a', updatedAt: 'version-a' });
+});
+
+test('subscription row rerenders keep the live editor node attached', () => {
+  const app = readRendererFile('app.js');
+  const clear = functionBody(app, 'clearSubscriptionListChildren', 'positionSubscriptionEditor');
+  const editor = { removed: false, remove() { this.removed = true; } };
+  const row = { removed: false, remove() { this.removed = true; } };
+  const empty = { removed: false, remove() { this.removed = true; } };
+  const list = { children: [row, editor, empty] };
+
+  vm.runInNewContext(
+    `${clear}\nclearSubscriptionListChildren(list, editor);`,
+    { list, editor }
+  );
+
+  assert.equal(row.removed, true);
+  assert.equal(empty.removed, true);
+  assert.equal(editor.removed, false);
+});
+
+test('the add control is a disclosure only in add mode', () => {
+  const app = readRendererFile('app.js');
+  const control = functionBody(app, 'syncSubscriptionAddControl', 'clearSubscriptionListChildren');
+  const attrs = new Map();
+  const toggle = {
+    removeAttribute(name) { attrs.delete(name); },
+    setAttribute(name, value) { attrs.set(name, value); }
+  };
+  const form = {
+    classList: {
+      expanded: false,
+      remove(name) { if (name === 'expanded') this.expanded = false; },
+      toggle(name, value) { if (name === 'expanded') this.expanded = value; }
+    }
+  };
+  const details = { classList: { contains: () => false } };
+  const state = { subscriptionEditingId: 'subscription-1' };
+  const els = { subscriptionAddToggle: toggle, subscriptionAddForm: form, subscriptionAddDetails: details };
+
+  vm.runInNewContext(`${control}\nsyncSubscriptionAddControl();`, { els, state });
+  assert.equal(attrs.has('aria-expanded'), false);
+  assert.equal(attrs.has('aria-controls'), false);
+  assert.equal(form.classList.expanded, false);
+
+  state.subscriptionEditingId = '';
+  vm.runInNewContext(`${control}\nsyncSubscriptionAddControl();`, { els, state });
+  assert.equal(attrs.get('aria-expanded'), 'true');
+  assert.equal(attrs.get('aria-controls'), 'subscriptionAddDetails');
+  assert.equal(form.classList.expanded, true);
+});
+
 test('subscription rows carry the glyph actions the profile rows above them use', () => {
   const app = readRendererFile('app.js');
   const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
@@ -3562,6 +3649,7 @@ test('an edit is saved against the version its form was opened on', async () => 
       }
     },
     renderSubscriptionSettings: () => {},
+    syncSubscriptionAddControl: () => {},
     resetSubscriptionForm: () => { context.formReset = true; },
     Promise
   });

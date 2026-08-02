@@ -2644,6 +2644,39 @@ function subscriptionRowMeta(subscription, account) {
   return parts.join(' · ');
 }
 
+function syncSubscriptionAddControl() {
+  const toggle = els.subscriptionAddToggle;
+  const form = els.subscriptionAddForm;
+  const details = els.subscriptionAddDetails;
+  if (!toggle || !form) return;
+
+  // While editing, this button is a mode switch, not the disclosure control for
+  // the editor that is currently parked beneath another row. Keeping the add
+  // action's disclosure state separate prevents a plus from turning into an x
+  // and avoids two controls claiming the same expanded region.
+  if (state.subscriptionEditingId) {
+    toggle.removeAttribute('aria-expanded');
+    toggle.removeAttribute('aria-controls');
+    form.classList.remove('expanded');
+    return;
+  }
+
+  const open = Boolean(details && !details.classList.contains('hidden'));
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.setAttribute('aria-controls', 'subscriptionAddDetails');
+  form.classList.toggle('expanded', open);
+}
+
+// Rebuild only the list-owned rows. The editor is a live child of this list
+// while editing, and removing it from the DOM would drop focus from whichever
+// field the user is typing in before positionSubscriptionEditor() can put it
+// back.
+function clearSubscriptionListChildren(listEl, preservedNode) {
+  for (const child of [...listEl.children]) {
+    if (child !== preservedNode) child.remove();
+  }
+}
+
 function positionSubscriptionEditor() {
   const listEl = els.subscriptionList;
   const form = els.subscriptionAddForm;
@@ -2660,6 +2693,7 @@ function positionSubscriptionEditor() {
   for (const row of listEl.querySelectorAll('[data-subscription-id]')) {
     row.classList.toggle('is-editing', row.dataset.subscriptionId === editingId);
   }
+  syncSubscriptionAddControl();
   syncSubscriptionEditControls();
 }
 
@@ -2684,7 +2718,10 @@ function syncSubscriptionEditControls() {
 function renderSubscriptionRows() {
   const listEl = els.subscriptionList;
   if (!listEl) return;
-  listEl.replaceChildren();
+  const editor = els.subscriptionAddDetails?.parentElement === listEl
+    ? els.subscriptionAddDetails
+    : null;
+  clearSubscriptionListChildren(listEl, editor);
   const list = subscriptionList();
   if (list.length === 0) {
     const empty = document.createElement('div');
@@ -2973,17 +3010,18 @@ function setSubscriptionError(message) {
   errorEl.classList.toggle('hidden', !message);
 }
 
-function setSubscriptionFormOpen(open) {
-  els.subscriptionAddToggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
+function setSubscriptionFormOpen(open, formBase = null) {
   els.subscriptionAddDetails?.classList.toggle('hidden', !open);
-  els.subscriptionAddForm?.classList.toggle('expanded', open);
+  syncSubscriptionAddControl();
   if (typeof syncSubscriptionEditControls === 'function') syncSubscriptionEditControls();
   // What the form was filled from, held for as long as it stays open. A push
   // landing mid-edit replaces state.settings, and reading the version at save
   // time would claim to have seen a change the form was never shown — the save is
   // then accepted, taking another device's edit to the same record with it. Null
   // while closed, so the paths that save without a form say so.
-  state.subscriptionFormBase = open ? subscriptionSettingsVersion() : null;
+  state.subscriptionFormBase = open
+    ? (formBase || state.subscriptionFormBase || subscriptionSettingsVersion())
+    : null;
 }
 
 const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;
@@ -3000,6 +3038,10 @@ function cancelSubscriptionEditorClose() {
 function openSubscriptionEditor() {
   const details = els.subscriptionAddDetails;
   if (!details) return;
+  // Capture the concurrency context before the visual transition yields to the
+  // browser. A settings push can arrive before the next frame, but it must not
+  // make fields loaded from the previous list look like a newer edit.
+  const formBase = subscriptionSettingsVersion();
   cancelSubscriptionEditorClose();
   const transitionId = (state.subscriptionEditorTransitionId || 0) + 1;
   state.subscriptionEditorTransitionId = transitionId;
@@ -3010,7 +3052,7 @@ function openSubscriptionEditor() {
     : (callback) => setTimeout(callback, 0);
   schedule(() => {
     if (transitionId !== state.subscriptionEditorTransitionId) return;
-    setSubscriptionFormOpen(true);
+    setSubscriptionFormOpen(true, formBase);
   });
 }
 
