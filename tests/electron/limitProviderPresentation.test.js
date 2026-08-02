@@ -2527,3 +2527,82 @@ test('the section says where the recorded data shows up', () => {
   // The markup fallback is what renders before i18n applies, so it cannot lag.
   assert.ok(html.includes("Hover an account's plan label on the AI Tool Limits page"));
 });
+
+test('subscriptions are written through the hub-aware channel, never as a setting', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+
+  // Both mutation sites go through the one function that knows the write can be
+  // refused. saveSettings() would write settings.json and fork the shared list.
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  assert.match(rows, /if \(!await saveSubscriptions\(/);
+  assert.match(submit, /if \(!await saveSubscriptions\(/);
+  assert.doesNotMatch(app, /saveSettings\(\{ subscriptions/);
+
+  assert.match(preload, /saveSubscriptions: \(subscriptions\) => ipcRenderer\.invoke\('subscriptions:save'/);
+  // settings:update must not be a second way in, or a patch carrying the key
+  // would bypass the hub entirely.
+  assert.match(main, /delete normalizedPatch\.subscriptions;/);
+
+  // A refused write must leave the screen showing what is actually stored.
+  const save = functionBody(app, 'saveSubscriptions', 'renderSubscriptionSyncError');
+  assert.match(save, /window\.tokenMonitor\.getSettings\(\)/);
+  assert.match(save, /stale_write/);
+  for (const key of ['errorStaleWrite', 'errorHubWrite', 'noteShared']) {
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 5);
+  }
+});
+
+test('the note stops promising the data stays on this device once a hub has it', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const note = functionBody(app, 'renderSubscriptionNote', 'setSubscriptionError');
+
+  // Retargeting data-i18n as well as the text keeps a later language switch on
+  // whichever key currently applies.
+  assert.match(note, /subscriptionsShared/);
+  assert.match(note, /el\.dataset\.i18n = key;/);
+  assert.match(main, /subscriptionsShared: subscriptionsAreShared\(\)/);
+
+  // Only the two hub modes share; local mode keeps its own list.
+  const shared = functionBody(main, 'subscriptionsAreShared', 'effectiveSubscriptions');
+  const run = (hubMode) => vm.runInNewContext(`${shared}\nsubscriptionsAreShared();`, { settings: { hubMode } });
+  assert.equal(run('local'), false);
+  assert.equal(run('client'), true);
+  assert.equal(run('host'), true);
+
+  // English is what renders before i18n applies, so the markup cannot lag.
+  const en = readRendererFile('i18n.js').split("'settings.subscriptions.note':")[1].split('\n')[0];
+  assert.match(en, /nothing leaves this device/);
+});
+
+test('a record added on another device turns up without pushing settings at the user mid-edit', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const cache = functionBody(main, 'cacheSharedSubscriptions', 'subscriptionsEndpoint');
+  const poll = functionBody(main, 'maybeRefreshSharedSubscriptions', 'saveSubscriptions');
+
+  // Pushing settings re-renders the whole settings form, so the poll may only do
+  // it when the shared list actually moved.
+  assert.match(poll, /if \(changed\) pushSettingsToRenderer\(\)/);
+  assert.match(poll, /lastSubscriptionRefreshMs < SUBSCRIPTION_REFRESH_MS/);
+  assert.match(main, /maybeRefreshSharedSubscriptions\(\);\n {4}return fetchStats\(options\);/);
+
+  const run = (previous, incoming) => {
+    const context = {
+      hubSubscriptions: previous,
+      settings: { subscriptions: [] },
+      saveSettings: () => { context.saved = true; }
+    };
+    const changed = vm.runInNewContext(`${cache}\ncacheSharedSubscriptions(doc);`, { ...context, doc: incoming });
+    return { changed, saved: Boolean(context.saved) };
+  };
+  const doc = { updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'a' }] };
+  // A changed list is mirrored into settings.json, which is what an unreachable
+  // hub falls back to showing at the next startup.
+  assert.deepEqual(run(null, doc), { changed: true, saved: true });
+  // Same document again: no write, no re-render.
+  assert.deepEqual(run(doc, { ...doc }), { changed: false, saved: false });
+  assert.equal(run(doc, { updatedAt: '2026-08-02T10:00:00.000Z', subscriptions: [] }).changed, true);
+});

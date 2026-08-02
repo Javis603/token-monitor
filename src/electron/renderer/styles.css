@@ -4015,6 +4015,14 @@ html.is-windows .limit-live-badge {
    contribution sizes the settings section's grid column, so on a narrow window
    the whole section was laid out to fit an email address and everything in it
    spilled past the panel. minmax(0, 1fr) contributes zero. */
+/* Sits above the list rather than inside the add form, because a failed delete
+   has no form open to report into. */
+.subscription-sync-error {
+  color: var(--red);
+}
+.subscription-sync-error.hidden {
+  display: none;
+}
 .subscription-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

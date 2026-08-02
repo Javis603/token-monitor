@@ -2474,6 +2474,146 @@ async function postToHub(summary) {
   return response.json();
 }
 
+// ---------------------------------------------------------------------------
+// Shared subscriptions
+//
+// A subscription describes an account, not a machine, so devices that share a hub
+// share ONE list rather than each carrying a copy. settings.subscriptions stays
+// the local store in local mode, and doubles as the last-known cache in sync mode
+// so a hub that is unreachable at startup shows the records instead of an empty
+// list. The hub is the authority whenever it answers; writes made while it does
+// not answer are refused rather than written locally, because a local write would
+// fork the shared list with no way to tell later which side was right.
+// ---------------------------------------------------------------------------
+
+let hubSubscriptions = null;
+let lastSubscriptionRefreshMs = 0;
+const SUBSCRIPTION_REFRESH_MS = 60000;
+
+function subscriptionsAreShared() {
+  return settings?.hubMode === 'client' || settings?.hubMode === 'host';
+}
+
+function effectiveSubscriptions() {
+  if (subscriptionsAreShared() && hubSubscriptions) return hubSubscriptions.subscriptions;
+  return settings.subscriptions || [];
+}
+
+// Returns whether anything actually changed. Callers use that to decide whether
+// to push settings at the renderer: a push re-renders the whole settings form,
+// which would fight whatever the user is typing in it.
+function cacheSharedSubscriptions(doc) {
+  const changed = (hubSubscriptions?.updatedAt || '') !== (doc.updatedAt || '');
+  hubSubscriptions = doc;
+  if (changed) {
+    settings.subscriptions = doc.subscriptions;
+    saveSettings();
+  }
+  return changed;
+}
+
+function subscriptionsEndpoint() {
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  if (!hubUrl) return null;
+  return {
+    url: `${hubUrl.replace(/\/$/, '')}/api/subscriptions`,
+    headers: secret ? { authorization: `Bearer ${secret}` } : {}
+  };
+}
+
+async function fetchSharedSubscriptions() {
+  // A host-mode widget is the hub, so it reads its own store rather than looping
+  // back over HTTP to itself — the same shortcut fetchHubStats() takes.
+  if (settings.hubMode === 'host' && embeddedHub) return embeddedHub.hub.getSubscriptions();
+  const endpoint = subscriptionsEndpoint();
+  if (!endpoint) return null;
+  const response = await fetch(endpoint.url, { headers: endpoint.headers });
+  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  return response.json();
+}
+
+function staleSubscriptionWriteError(current) {
+  const error = new Error('stale_write');
+  error.code = 'stale_write';
+  if (current) cacheSharedSubscriptions(current);
+  return error;
+}
+
+async function writeSharedSubscriptions(list) {
+  const baseUpdatedAt = hubSubscriptions?.updatedAt || '';
+  if (settings.hubMode === 'host' && embeddedHub) {
+    try {
+      cacheSharedSubscriptions(embeddedHub.hub.setSubscriptions(list, baseUpdatedAt));
+      return;
+    } catch (error) {
+      if (error.code === 'stale_write') throw staleSubscriptionWriteError(error.current);
+      throw error;
+    }
+  }
+  const endpoint = subscriptionsEndpoint();
+  if (!endpoint) throw new Error('hub not configured');
+  const response = await fetch(endpoint.url, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...endpoint.headers },
+    body: JSON.stringify({ subscriptions: list, baseUpdatedAt })
+  });
+  // Someone else wrote the list since this device last read it. Overwriting would
+  // erase their records silently, and they exist nowhere else.
+  if (response.status === 409) throw staleSubscriptionWriteError(await response.json().catch(() => null));
+  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  cacheSharedSubscriptions(await response.json());
+}
+
+async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
+  if (!subscriptionsAreShared()) {
+    const had = Boolean(hubSubscriptions);
+    hubSubscriptions = null;
+    return had;
+  }
+  try {
+    // Read before caching: caching overwrites settings.subscriptions with the
+    // hub's answer, which is exactly the list the seed would then be copying.
+    const local = settings.subscriptions || [];
+    const doc = await fetchSharedSubscriptions();
+    if (!doc) return false;
+    // Joining a hub that has never been written to: adopt this device's records
+    // rather than silently replacing them with nothing.
+    if (seedFromLocal && doc.subscriptions.length === 0 && local.length > 0) {
+      hubSubscriptions = doc;
+      await writeSharedSubscriptions(local);
+      return true;
+    }
+    return cacheSharedSubscriptions(doc);
+  } catch (error) {
+    console.log(`[sync] subscriptions unavailable: ${error.message}`);
+    return false;
+  }
+}
+
+// Piggybacked on the stats path the widget already runs, so a record added on
+// another device turns up here without a timer of its own. Throttled because
+// stats tick far more often than a hand-entered subscription changes, and the
+// renderer is only pushed when the list actually moved.
+function maybeRefreshSharedSubscriptions() {
+  if (!subscriptionsAreShared()) return;
+  const now = Date.now();
+  if (now - lastSubscriptionRefreshMs < SUBSCRIPTION_REFRESH_MS) return;
+  lastSubscriptionRefreshMs = now;
+  refreshSharedSubscriptions()
+    .then((changed) => { if (changed) pushSettingsToRenderer(); })
+    .catch(() => {});
+}
+
+async function saveSubscriptions(list) {
+  if (!subscriptionsAreShared()) {
+    settings.subscriptions = subscriptionDisplay.normalizeSubscriptions(list, { currencyApi: { normalizeCurrency } });
+    saveSettings();
+    return settingsForRenderer();
+  }
+  await writeSharedSubscriptions(list);
+  return settingsForRenderer();
+}
+
 function stopSyncCollector() {
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
   deviceRuntimeHandle = null;
@@ -2999,6 +3139,10 @@ function settingsForRenderer() {
   return {
     ...settings,
     ...redactedCredentials,
+    // On a hub the shared list is the truth; settings.subscriptions is only the
+    // last-known cache behind it.
+    subscriptions: effectiveSubscriptions(),
+    subscriptionsShared: subscriptionsAreShared(),
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
     zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
@@ -3386,18 +3530,32 @@ function startMode() {
       }
       startHostStats();
       startHostCollector();
+      await reconcileSharedSubscriptions();
       return;
     }
     await stopEmbeddedHub();
     if (effectiveHubConfig().url) {
       startStatsStream({ resetSnapshot: true });
       startSyncCollector();
+      await reconcileSharedSubscriptions();
     } else {
       startLocalCollector();
+      await reconcileSharedSubscriptions();
     }
   }).catch((err) => {
     console.log(`[mode] reconciliation failed: ${err?.message || err}`);
   });
+}
+
+// Reconciled on every mode change, because switching into a hub adopts a
+// different list and switching out of one falls back to the local cache — the
+// renderer is showing whichever list the previous mode had.
+async function reconcileSharedSubscriptions() {
+  await refreshSharedSubscriptions({ seedFromLocal: true });
+  lastSubscriptionRefreshMs = Date.now();
+  // Unconditional, unlike the throttled poll: a mode change swaps which list is
+  // showing, and the renderer is holding the previous mode's one.
+  pushSettingsToRenderer();
 }
 
 function restartDeviceRuntimeForMode() {
@@ -4257,6 +4415,17 @@ app.whenReady().then(() => {
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
+
+  ipcMain.handle('subscriptions:save', async (_event, subscriptions) => {
+    try {
+      return await saveSubscriptions(subscriptions);
+    } catch (error) {
+      // The renderer has to tell "another device won" apart from "the hub is
+      // down": one means re-read and redo, the other means try again later. Only
+      // the message survives the IPC boundary, so the code goes in it.
+      throw new Error(error.code === 'stale_write' ? 'stale_write' : 'hub_unreachable', { cause: error });
+    }
+  });
   ipcMain.handle('sessionUsageArchive:clear', () => {
     if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
     try {
@@ -4304,6 +4473,10 @@ app.whenReady().then(() => {
     delete normalizedPatch.openrouterProfiles;
     delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
+    // Subscriptions go through subscriptions:save, which knows whether to write
+    // the hub or settings.json. Falling through here would write the local copy
+    // and silently fork the shared list.
+    delete normalizedPatch.subscriptions;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
@@ -4616,7 +4789,10 @@ app.whenReady().then(() => {
     updateTrayDisplay();
     return true;
   });
-  ipcMain.handle('stats:get', (_event, options) => fetchStats(options));
+  ipcMain.handle('stats:get', (_event, options) => {
+    maybeRefreshSharedSubscriptions();
+    return fetchStats(options);
+  });
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],

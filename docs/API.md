@@ -257,3 +257,58 @@ Returns normalized records for all stored devices.
 Deletes one device record from the hub store.
 
 This is useful after renaming a device id.
+
+## `GET /api/subscriptions`
+
+Returns the hub's shared subscription list.
+
+```json
+{
+  "ok": true,
+  "version": 1,
+  "updatedAt": "2026-08-02T09:14:11.204Z",
+  "subscriptions": [
+    {
+      "id": "sub_1754126051204_k3xq",
+      "provider": "codex",
+      "kind": "subscription",
+      "binding": { "profileName": "", "accountKey": "sha256:…", "accountEmail": "you@example.com" },
+      "planName": "Plus",
+      "amountMinor": 9000,
+      "currency": "HKD",
+      "interval": "month",
+      "intervalCount": 1,
+      "startDate": "2026-05-31",
+      "topUps": [],
+      "autoRenew": true,
+      "nextRenewalOverride": null,
+      "endDate": null,
+      "note": "",
+      "updatedAt": "2026-08-02T09:14:11.204Z"
+    }
+  ]
+}
+```
+
+Unlike usage and limits, subscriptions are **not** part of a device record. A subscription describes an account rather than a machine, and account keys are not stable across platforms — the same OAuth login hashes differently on macOS and Windows — so per-device copies could not be reliably deduplicated and a two-machine setup would double its own monthly total. The hub therefore stores exactly one list, shared by every device connected to it, and a delete is a delete with no tombstone needed to stop another device resurrecting it.
+
+Devices in `local` mode keep their own list in the widget's `settings.json` and never call these endpoints. In `client` and `host` mode `settings.json` holds only the last-known copy, so a hub that is unreachable at startup still shows the records; writes made while it is unreachable are refused rather than applied locally, which would fork the shared list.
+
+Both endpoints sit behind the same `secret` gate as every other data route, and the list is never included in `publicStats` / `publicLimits`, which are built from device records alone.
+
+`topUps[]` entries are `{ id, date, amountMinor }`, newest first. Amounts are integer hundredths of a unit in the record's own `currency`. Dates are plain `YYYY-MM-DD` calendar days, never timestamps.
+
+## `PUT /api/subscriptions`
+
+Replaces the shared list.
+
+```json
+{
+  "subscriptions": [],
+  "baseUpdatedAt": "2026-08-02T09:14:11.204Z"
+}
+```
+
+`baseUpdatedAt` is the `updatedAt` the client last read. If it does not match the stored document the hub responds `409` with the current document and writes nothing: a device showing a stale copy would otherwise erase every record added elsewhere since it last looked, and this data exists nowhere else. An empty `baseUpdatedAt` is accepted only against a hub that has never been written to.
+
+Records are re-normalized on ingest exactly as `POST /api/ingest` normalizes device records; unknown fields are dropped and malformed records are discarded rather than stored. A successful write responds `200` with the stored document in the same shape as `GET`.

@@ -1160,7 +1160,12 @@
             <span class="settings-section-meta"><span id="subscriptionsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="subscriptionsSettingsDetails" class="settings-section-details hidden">
-            <p class="settings-note" data-i18n="settings.subscriptions.note">Record what you actually pay for each AI account. Hover an account's plan label on the AI Tool Limits page to see what you recorded here. Nothing is fetched from any provider, and nothing leaves this device.</p>
+            <p id="subscriptionNote" class="settings-note" data-i18n="settings.subscriptions.note">Record what you actually pay for each AI account. Hover an account's plan label on the AI Tool Limits page to see what you recorded here. Nothing is fetched from any provider, and nothing leaves this device.</p>
+            <!-- Writes go to the hub when one is configured, so unlike every
+                 other setting in this panel they can be refused. The message
+                 sits outside the add form because a delete can fail too, and
+                 the form is closed at that point. -->
+            <p id="subscriptionSyncError" class="settings-note subscription-sync-error hidden"></p>
             <div id="subscriptionList" class="opencode-profile-list"></div>
             <div id="subscriptionAddForm" class="opencode-add-form">
               <button id="subscriptionAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="subscriptionAddDetails">

@@ -305,7 +305,7 @@ let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
   shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
-  subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
+  subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
@@ -2747,7 +2747,7 @@ function renderSubscriptionRows() {
         }, 4000);
         return;
       }
-      await saveSettings({ subscriptions: list.filter((entry) => entry.id !== subscription.id) });
+      if (!await saveSubscriptions(list.filter((entry) => entry.id !== subscription.id))) return;
       if (state.subscriptionEditingId === subscription.id) resetSubscriptionForm();
       renderSubscriptionSettings();
     });
@@ -2811,10 +2811,56 @@ function renderSubscriptionTotal() {
 }
 
 function renderSubscriptionSettings() {
+  renderSubscriptionNote();
+  renderSubscriptionSyncError();
   renderSubscriptionRows();
   renderSubscriptionPickers();
   renderSubscriptionTotal();
   renderSettingsSummaries();
+}
+
+// The list may live on a hub shared with other devices, so writing it is a
+// network round trip that can be refused. Whatever happens, what is on screen
+// afterwards is what is actually stored: on failure the optimistic list is
+// thrown away and main.js's copy is re-read and re-rendered.
+async function saveSubscriptions(list) {
+  try {
+    state.settings = await window.tokenMonitor.saveSubscriptions(list);
+    state.subscriptionSyncError = '';
+    renderSubscriptionSettings();
+    return true;
+  } catch (error) {
+    // Another device wrote the list first is a different problem from the hub
+    // being unreachable: one means look at what changed, the other means retry.
+    const stale = /stale_write/.test(error?.message || '');
+    state.subscriptionSyncError = stale
+      ? 'settings.subscriptions.errorStaleWrite'
+      : 'settings.subscriptions.errorHubWrite';
+    try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+    renderSubscriptionSettings();
+    return false;
+  }
+}
+
+function renderSubscriptionSyncError() {
+  const el = els.subscriptionSyncError;
+  if (!el) return;
+  const key = state.subscriptionSyncError;
+  el.textContent = key ? t(key) : '';
+  el.classList.toggle('hidden', !key);
+}
+
+// The note promises the data never leaves this device, which stops being true
+// the moment a hub is configured. Retargeting data-i18n as well as the text
+// keeps a later language switch on whichever key currently applies.
+function renderSubscriptionNote() {
+  const el = els.subscriptionNote;
+  if (!el) return;
+  const key = state.settings?.subscriptionsShared
+    ? 'settings.subscriptions.noteShared'
+    : 'settings.subscriptions.note';
+  el.dataset.i18n = key;
+  el.textContent = t(key);
 }
 
 function setSubscriptionError(message) {
@@ -3150,7 +3196,7 @@ async function submitSubscription() {
   const updated = editing
     ? list.map((entry) => (entry.id === editing.id ? next : entry))
     : [...list, next];
-  await saveSettings({ subscriptions: updated });
+  if (!await saveSubscriptions(updated)) return;
   resetSubscriptionForm();
   setSubscriptionFormOpen(false);
   renderSubscriptionSettings();

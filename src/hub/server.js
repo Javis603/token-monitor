@@ -5,6 +5,11 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const { aggregateDevices, mergeDeviceRecord, aggregateHistory } = require('../shared/usage');
 const { historyPreview, historyRevision } = require('../shared/history');
+const {
+  emptySubscriptionDocument,
+  isStaleSubscriptionWrite,
+  subscriptionDocument
+} = require('../shared/subscriptionDisplay');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
@@ -30,6 +35,11 @@ function createHub({
 } = {}) {
   const store = readJson(dataFile, { version: 1, devices: {} }) || { version: 1, devices: {} };
   if (!store.devices || typeof store.devices !== 'object') store.devices = {};
+  // Subscriptions are shared by every device on this hub rather than owned by one
+  // of them, so they sit beside the device map rather than inside it.
+  if (!store.subscriptions || typeof store.subscriptions !== 'object') {
+    store.subscriptions = emptySubscriptionDocument();
+  }
   const bindHost = resolveBindHost(host, secret);
 
   function persist() {
@@ -92,6 +102,24 @@ function createHub({
     broadcastStats('delete');
   }
 
+  function getSubscriptions() {
+    return store.subscriptions;
+  }
+
+  // Transport-agnostic like ingest(), so a host-mode widget writes its own hub
+  // in-process instead of looping back over HTTP to itself.
+  function setSubscriptions(subscriptions, baseUpdatedAt) {
+    if (isStaleSubscriptionWrite(store.subscriptions, baseUpdatedAt)) {
+      const error = new Error('stale_write');
+      error.code = 'stale_write';
+      error.current = store.subscriptions;
+      throw error;
+    }
+    store.subscriptions = subscriptionDocument(subscriptions);
+    persist();
+    return store.subscriptions;
+  }
+
   function onStats(listener) {
     statsListeners.add(listener);
     return () => statsListeners.delete(listener);
@@ -149,6 +177,29 @@ function createHub({
       }
     }
 
+    // Shared, and deliberately behind the same secret gate as every other data
+    // route: this is the one place the user records money.
+    if (req.method === 'GET' && url.pathname === '/api/subscriptions') {
+      return sendJson(res, 200, { ok: true, ...getSubscriptions() });
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/subscriptions') {
+      try {
+        const payload = await readJsonBody(req);
+        const stored = setSubscriptions(payload?.subscriptions, payload?.baseUpdatedAt);
+        return sendJson(res, 200, { ok: true, ...stored });
+      } catch (error) {
+        if (error.code === 'stale_write') {
+          return sendJson(res, 409, { error: 'stale_write', ...error.current });
+        }
+        if (error.code === 'payload_too_large') {
+          res.shouldKeepAlive = false;
+          return sendJson(res, 413, { error: 'payload_too_large', message: error.message }, { connection: 'close' });
+        }
+        return sendJson(res, 400, { error: 'bad_request', message: error.message });
+      }
+    }
+
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/devices/')) {
       const deviceId = decodeURIComponent(url.pathname.slice('/api/devices/'.length));
       deleteDevice(deviceId);
@@ -183,7 +234,10 @@ function createHub({
     });
   }
 
-  return { start, stop, server, getStats, getHistory, ingest, deleteDevice, onStats, bindHost };
+  return {
+    start, stop, server, getStats, getHistory, ingest, deleteDevice, onStats, bindHost,
+    getSubscriptions, setSubscriptions
+  };
 }
 
 if (require.main === module) {

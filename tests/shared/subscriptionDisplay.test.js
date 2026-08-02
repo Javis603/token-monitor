@@ -449,3 +449,41 @@ test('topUpProjection stays quiet without enough information', () => {
   assert.equal(untouched.dailyBurn, 0);
   assert.equal(untouched.exhaustDate, '');
 });
+
+test('the shared document normalizes what it stores and dates every write', () => {
+  const empty = subscriptions.emptySubscriptionDocument();
+  assert.deepEqual(empty, { version: 1, updatedAt: '', subscriptions: [] });
+  // A fresh object each call: both hubs assign it into a mutable store.
+  assert.notEqual(subscriptions.emptySubscriptionDocument(), empty);
+
+  const doc = subscriptions.subscriptionDocument([
+    { id: 'a', provider: 'codex', startDate: '2026-05-31', amountMinor: 9000 },
+    { provider: '' },
+    null,
+    'nope',
+    { id: 'a', provider: 'claude', startDate: '2026-01-01' }
+  ]);
+  assert.equal(doc.version, 1);
+  assert.match(doc.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  // Malformed records are dropped and duplicate ids collapse: this list arrived
+  // over the network from another device.
+  assert.deepEqual(doc.subscriptions.map((entry) => entry.provider), ['codex']);
+  assert.equal(subscriptions.subscriptionDocument(null).subscriptions.length, 0);
+});
+
+test('a write from a stale copy is refused, and the first write never is', () => {
+  const stored = subscriptions.subscriptionDocument([
+    { id: 'a', provider: 'codex', startDate: '2026-05-31' }
+  ]);
+  // The device wrote from the copy it is holding.
+  assert.equal(subscriptions.isStaleSubscriptionWrite(stored, stored.updatedAt), false);
+  // It is holding an older copy, and blindly writing would erase whatever was
+  // added elsewhere in between — records that exist nowhere else.
+  assert.equal(subscriptions.isStaleSubscriptionWrite(stored, '2026-01-01T00:00:00.000Z'), true);
+  assert.equal(subscriptions.isStaleSubscriptionWrite(stored, ''), true);
+  assert.equal(subscriptions.isStaleSubscriptionWrite(stored, undefined), true);
+  // Nothing stored yet: the first write cannot clobber anything.
+  const empty = subscriptions.emptySubscriptionDocument();
+  assert.equal(subscriptions.isStaleSubscriptionWrite(empty, ''), false);
+  assert.equal(subscriptions.isStaleSubscriptionWrite(null, ''), false);
+});

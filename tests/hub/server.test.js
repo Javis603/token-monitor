@@ -198,3 +198,82 @@ test('ingest accepts payloads above the legacy 256 KiB limit', async () => {
     fs.rmSync(dataFile, { force: true });
   }
 });
+
+test('the hub stores one shared subscription list, not one per device', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const call = (method, body) => fetch(`http://127.0.0.1:${port}/api/subscriptions`, {
+      method,
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+
+    // A hub nobody has written to reports an empty updatedAt, which is what lets
+    // the very first write through the staleness check.
+    const empty = await (await call('GET')).json();
+    assert.deepEqual(empty.subscriptions, []);
+    assert.equal(empty.updatedAt, '');
+
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const written = await (await call('PUT', { subscriptions: [record], baseUpdatedAt: '' })).json();
+    assert.equal(written.subscriptions.length, 1);
+    assert.equal(written.subscriptions[0].id, 'sub_1');
+    assert.notEqual(written.updatedAt, '');
+
+    // Every device reads the same list back — it belongs to the account, not to
+    // whichever machine happened to record it.
+    const read = await (await call('GET')).json();
+    assert.deepEqual(read.subscriptions, written.subscriptions);
+
+    // A device writing from a stale copy would erase records added elsewhere
+    // since it last looked, and they exist nowhere else.
+    const stale = await call('PUT', { subscriptions: [], baseUpdatedAt: '' });
+    assert.equal(stale.status, 409);
+    const conflict = await stale.json();
+    assert.equal(conflict.error, 'stale_write');
+    assert.equal(conflict.subscriptions.length, 1);
+    assert.deepEqual((await (await call('GET')).json()).subscriptions, written.subscriptions);
+
+    // Writing from the copy it just read through does go in, including a delete.
+    const cleared = await (await call('PUT', { subscriptions: [], baseUpdatedAt: written.updatedAt })).json();
+    assert.deepEqual(cleared.subscriptions, []);
+
+    // Malformed records are discarded rather than stored: this arrives over the
+    // network from another device.
+    const junk = await (await call('PUT', { subscriptions: [{ provider: '' }, 'nope', record], baseUpdatedAt: cleared.updatedAt })).json();
+    assert.equal(junk.subscriptions.length, 1);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the shared subscription list survives a hub restart and needs the secret', async () => {
+  const dataFile = tempDataFile();
+  const record = { id: 'sub_1', provider: 'claude', planName: 'Pro', amountMinor: 14600, currency: 'HKD', startDate: '2026-07-19' };
+  const first = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await first.start();
+  try {
+    first.setSubscriptions([record], '');
+  } finally {
+    await first.stop();
+  }
+
+  const second = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await second.start();
+  try {
+    assert.equal(second.getSubscriptions().subscriptions[0].id, 'sub_1');
+    const { port } = second.server.address();
+    // Money the user recorded by hand is behind the same gate as account identity.
+    const unauthorized = await fetch(`http://127.0.0.1:${port}/api/subscriptions`);
+    assert.equal(unauthorized.status, 401);
+    const stats = await (await fetch(`http://127.0.0.1:${port}/api/stats`, { headers: { authorization: 'Bearer shh' } })).json();
+    assert.doesNotMatch(JSON.stringify(stats), /subscription/i);
+  } finally {
+    await second.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
