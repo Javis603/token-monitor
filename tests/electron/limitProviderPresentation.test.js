@@ -2550,7 +2550,13 @@ test('subscriptions are written through the hub-aware channel, never as a settin
   // The version the list was built from travels with it, so the write can be
   // refused rather than silently re-based on whatever main holds by then.
   assert.match(preload, /saveSubscriptions: \(subscriptions, baseUpdatedAt\) => ipcRenderer\.invoke\('subscriptions:save', subscriptions, baseUpdatedAt\)/);
-  assert.match(functionBody(app, 'saveSubscriptions', 'subscriptionWriteErrorKey'), /subscriptionsUpdatedAt/);
+  // An edit says which version it was made on, and that is the one the form was
+  // opened with — not whatever a push has left in state.settings since.
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase \|\| ''\)/);
+  // A row action has no form, so it reads the list and the version together at
+  // the click rather than reusing the list the row was drawn with.
+  assert.doesNotMatch(rows, /saveSubscriptions\(list\.filter/);
+  assert.match(rows, /subscriptionsUpdatedAt/);
 
   // settings:update must not be a second way in. Asserting that the guard LINE
   // exists is not enough — the first version of this deleted the key from
@@ -3324,6 +3330,68 @@ test('coming back to a hub does not write against the other hub token', async ()
   const adopt = functionBody(main, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode');
   assert.doesNotMatch(adopt, /hubSubscriptions\?\./);
   assert.match(adopt, /subscriptionsDocumentFor\(/);
+});
+
+test('an edit is saved against the version its form was opened on', async () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const source = [
+    functionBody(app, 'setSubscriptionFormOpen', 'seedSubscriptionPlanName'),
+    `async ${functionBody(app, 'saveSubscriptions', 'subscriptionWriteErrorKey')}`,
+    functionBody(app, 'subscriptionWriteErrorKey', 'renderSubscriptionOrphanNotice')
+  ].join('\n');
+
+  const context = vm.createContext({
+    els: {},
+    state: { settings: { subscriptionsUpdatedAt: 'v1' }, subscriptionFormBase: null },
+    onHub: 'v1',
+    sent: [],
+    window: {
+      tokenMonitor: {
+        saveSubscriptions: async (list, baseUpdatedAt) => {
+          context.sent.push(baseUpdatedAt);
+          if (baseUpdatedAt !== context.onHub) throw new Error('stale_write');
+          return { subscriptionsUpdatedAt: 'v3', subscriptions: list };
+        },
+        getSettings: async () => ({ subscriptionsUpdatedAt: context.onHub })
+      }
+    },
+    renderSubscriptionSettings: () => {},
+    Promise
+  });
+  vm.runInContext(source, context);
+
+  vm.runInContext('setSubscriptionFormOpen(true);', context);
+  assert.equal(context.state.subscriptionFormBase, 'v1');
+
+  // Another device writes while the form is open. The push replaces settings, and
+  // the row for the record being edited is redrawn — but the fields in front of
+  // the user are still the ones they typed, against v1.
+  context.state.settings = { subscriptionsUpdatedAt: 'v2' };
+  context.onHub = 'v2';
+
+  // So the save says v1 and is refused, instead of claiming to have seen a change
+  // it was never shown and carrying the other device's edit away with it.
+  assert.equal(
+    await vm.runInContext("saveSubscriptions([{ id: 'mine' }], state.subscriptionFormBase || '');", context),
+    false
+  );
+  assert.deepEqual(context.sent, ['v1']);
+  assert.equal(context.state.subscriptionSyncError, 'settings.subscriptions.errorStaleWrite');
+
+  // Re-anchored on what is now on screen, so the user can look at what changed and
+  // save again. Without this the second attempt would be refused too, and every
+  // one after it.
+  assert.equal(context.state.subscriptionFormBase, 'v2');
+  assert.equal(
+    await vm.runInContext("saveSubscriptions([{ id: 'mine' }], state.subscriptionFormBase || '');", context),
+    true
+  );
+  assert.deepEqual(context.sent, ['v1', 'v2']);
+
+  // Closed, there is no form version to speak for — the row actions carry the one
+  // on screen instead.
+  vm.runInContext('setSubscriptionFormOpen(false);', context);
+  assert.equal(context.state.subscriptionFormBase, null);
 });
 
 test('adopting set-aside records keeps whatever the hub gained while it waited', async () => {

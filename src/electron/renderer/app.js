@@ -287,7 +287,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', subscriptionEditingId: '', subscriptionTopUps: [], serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -2725,7 +2725,13 @@ function renderSubscriptionRows() {
         }, 4000);
         return;
       }
-      if (!await saveSubscriptions(list.filter((entry) => entry.id !== subscription.id))) return;
+      // Read now rather than reused from the render this row was drawn in, so the
+      // list and the version sent with it come from the same moment.
+      const current = subscriptionList();
+      if (!await saveSubscriptions(
+        current.filter((entry) => entry.id !== subscription.id),
+        state.settings?.subscriptionsUpdatedAt || ''
+      )) return;
       if (state.subscriptionEditingId === subscription.id) resetSubscriptionForm();
       renderSubscriptionSettings();
     });
@@ -2802,12 +2808,12 @@ function renderSubscriptionSettings() {
 // network round trip that can be refused. Whatever happens, what is on screen
 // afterwards is what is actually stored: on failure the optimistic list is
 // thrown away and main.js's copy is re-read and re-rendered.
-async function saveSubscriptions(list) {
+// baseUpdatedAt is the version the list being saved was built from — the open
+// form's snapshot, or the version on screen for a row action. Passed in rather
+// than read here, because those two are not the same the moment a push lands.
+async function saveSubscriptions(list, baseUpdatedAt) {
   try {
-    // The version the list on screen was built from travels with it: the main
-    // process may already hold a newer one, and letting the write inherit that
-    // would claim to have seen records this edit was never shown.
-    state.settings = await window.tokenMonitor.saveSubscriptions(list, state.settings?.subscriptionsUpdatedAt || '');
+    state.settings = await window.tokenMonitor.saveSubscriptions(list, baseUpdatedAt);
     state.subscriptionSyncError = '';
     renderSubscriptionSettings();
     return true;
@@ -2817,6 +2823,13 @@ async function saveSubscriptions(list) {
     // them would send the user looking in the wrong place.
     state.subscriptionSyncError = subscriptionWriteErrorKey(error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+    // Whatever the refusal was, the list on screen is now the current one and the
+    // form still holds what was typed. Re-anchoring lets the user look at what
+    // changed and save again; keeping the version they opened on would refuse the
+    // second attempt too, and every one after it.
+    if (state.subscriptionFormBase !== null) {
+      state.subscriptionFormBase = state.settings?.subscriptionsUpdatedAt || '';
+    }
     renderSubscriptionSettings();
     return false;
   }
@@ -2877,6 +2890,12 @@ function setSubscriptionFormOpen(open) {
   els.subscriptionAddToggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
   els.subscriptionAddDetails?.classList.toggle('hidden', !open);
   els.subscriptionAddForm?.classList.toggle('expanded', open);
+  // The version the form was filled from, held for as long as it stays open. A
+  // push landing mid-edit replaces state.settings, and reading the version at
+  // save time would claim to have seen a change the form was never shown — the
+  // save is then accepted, taking another device's edit to the same record with
+  // it. Null while closed, so the paths that save without a form say so.
+  state.subscriptionFormBase = open ? (state.settings?.subscriptionsUpdatedAt || '') : null;
 }
 
 // Seeded on explicit picker changes and on opening the form — never from a
@@ -3199,7 +3218,7 @@ async function submitSubscription() {
   const updated = editing
     ? list.map((entry) => (entry.id === editing.id ? next : entry))
     : [...list, next];
-  if (!await saveSubscriptions(updated)) return;
+  if (!await saveSubscriptions(updated, state.subscriptionFormBase || '')) return;
   resetSubscriptionForm();
   setSubscriptionFormOpen(false);
   renderSubscriptionSettings();
