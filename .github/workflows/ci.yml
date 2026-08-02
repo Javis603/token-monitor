@@ -64,6 +64,7 @@ jobs:
           tests/electron/macWidgetSigning.test.js
           tests/electron/macosProvisioning.test.js
           tests/electron/macWidgetIntegration.test.js
+          tests/electron/macWidgetVerifier.test.js
       - name: Run native macOS Widget tests
         run: >-
           xcodebuild
