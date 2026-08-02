@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   // Subscriptions are shared across devices when a hub is configured, so they
   // have their own channel: the write is a network round trip main.js has to
   // await, and it can fail in ways a settings write cannot.
-  saveSubscriptions: (subscriptions, baseUpdatedAt) => ipcRenderer.invoke('subscriptions:save', subscriptions, baseUpdatedAt),
+  saveSubscriptions: (subscriptions, base) => ipcRenderer.invoke('subscriptions:save', subscriptions, base),
   // Records this device held before it joined a hub that already had a list.
   adoptOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:adoptOrphans'),
   discardOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:discardOrphans'),

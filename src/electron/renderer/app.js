@@ -2730,7 +2730,7 @@ function renderSubscriptionRows() {
       const current = subscriptionList();
       if (!await saveSubscriptions(
         current.filter((entry) => entry.id !== subscription.id),
-        state.settings?.subscriptionsUpdatedAt || ''
+        subscriptionSettingsVersion()
       )) return;
       if (state.subscriptionEditingId === subscription.id) resetSubscriptionForm();
       renderSubscriptionSettings();
@@ -2808,6 +2808,16 @@ function renderSubscriptionSettings() {
 // network round trip that can be refused. Whatever happens, what is on screen
 // afterwards is what is actually stored: on failure the optimistic list is
 // thrown away and main.js's copy is re-read and re-rendered.
+// The version of the shared list on screen and the hub that issued it, which are
+// only worth anything together: a hub nobody has written to reports no version,
+// and so does the next one, so a version alone cannot say which list it describes.
+function subscriptionSettingsVersion() {
+  return {
+    hub: state.settings?.subscriptionsHub || '',
+    updatedAt: state.settings?.subscriptionsUpdatedAt || ''
+  };
+}
+
 // Every settings snapshot that arrives because THIS device acted — a save, an
 // adopt, a discard, or the re-read after one of them was refused. An open form
 // re-anchors on the version in it: the user made the change, or has just been
@@ -2818,17 +2828,26 @@ function renderSubscriptionSettings() {
 // the only reason the form holds one at all.
 function applySubscriptionSettings(settings) {
   state.settings = settings;
-  if (state.subscriptionFormBase !== null) {
-    state.subscriptionFormBase = state.settings?.subscriptionsUpdatedAt || '';
+  if (state.subscriptionFormBase === null) return;
+  const current = subscriptionSettingsVersion();
+  // Unless the hub itself changed under it. Then the form is holding an edit made
+  // for a hub the user has left, and re-anchoring would let that edit be saved
+  // into the one they moved to — there is nothing here it could belong to, so it
+  // stops being a form rather than becoming a form for the wrong list.
+  if (state.subscriptionFormBase.hub !== current.hub) {
+    resetSubscriptionForm();
+    setSubscriptionFormOpen(false);
+    return;
   }
+  state.subscriptionFormBase = current;
 }
 
-// baseUpdatedAt is the version the list being saved was built from — the open
-// form's snapshot, or the version on screen for a row action. Passed in rather
-// than read here, because those two are not the same the moment a push lands.
-async function saveSubscriptions(list, baseUpdatedAt) {
+// base is what the list being saved was built from — the open form's snapshot, or
+// what is on screen for a row action. Passed in rather than read here, because
+// those two stop being the same the moment a push lands.
+async function saveSubscriptions(list, base) {
   try {
-    applySubscriptionSettings(await window.tokenMonitor.saveSubscriptions(list, baseUpdatedAt));
+    applySubscriptionSettings(await window.tokenMonitor.saveSubscriptions(list, base));
     state.subscriptionSyncError = '';
     renderSubscriptionSettings();
     return true;
@@ -2902,12 +2921,12 @@ function setSubscriptionFormOpen(open) {
   els.subscriptionAddToggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
   els.subscriptionAddDetails?.classList.toggle('hidden', !open);
   els.subscriptionAddForm?.classList.toggle('expanded', open);
-  // The version the form was filled from, held for as long as it stays open. A
-  // push landing mid-edit replaces state.settings, and reading the version at
-  // save time would claim to have seen a change the form was never shown — the
-  // save is then accepted, taking another device's edit to the same record with
-  // it. Null while closed, so the paths that save without a form say so.
-  state.subscriptionFormBase = open ? (state.settings?.subscriptionsUpdatedAt || '') : null;
+  // What the form was filled from, held for as long as it stays open. A push
+  // landing mid-edit replaces state.settings, and reading the version at save
+  // time would claim to have seen a change the form was never shown — the save is
+  // then accepted, taking another device's edit to the same record with it. Null
+  // while closed, so the paths that save without a form say so.
+  state.subscriptionFormBase = open ? subscriptionSettingsVersion() : null;
 }
 
 // Seeded on explicit picker changes and on opening the form — never from a
@@ -3230,7 +3249,7 @@ async function submitSubscription() {
   const updated = editing
     ? list.map((entry) => (entry.id === editing.id ? next : entry))
     : [...list, next];
-  if (!await saveSubscriptions(updated, state.subscriptionFormBase || '')) return;
+  if (!await saveSubscriptions(updated, state.subscriptionFormBase)) return;
   resetSubscriptionForm();
   setSubscriptionFormOpen(false);
   renderSubscriptionSettings();

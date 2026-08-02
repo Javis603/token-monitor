@@ -2549,14 +2549,18 @@ test('subscriptions are written through the hub-aware channel, never as a settin
 
   // The version the list was built from travels with it, so the write can be
   // refused rather than silently re-based on whatever main holds by then.
-  assert.match(preload, /saveSubscriptions: \(subscriptions, baseUpdatedAt\) => ipcRenderer\.invoke\('subscriptions:save', subscriptions, baseUpdatedAt\)/);
-  // An edit says which version it was made on, and that is the one the form was
-  // opened with — not whatever a push has left in state.settings since.
-  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase \|\| ''\)/);
-  // A row action has no form, so it reads the list and the version together at
-  // the click rather than reusing the list the row was drawn with.
+  assert.match(preload, /saveSubscriptions: \(subscriptions, base\) => ipcRenderer\.invoke\('subscriptions:save', subscriptions, base\)/);
+  // An edit says what it was made on, and that is what the form was opened with —
+  // not whatever a push has left in state.settings since.
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase\)/);
+  // A row action has no form, so it reads the list and what it was taken from
+  // together at the click rather than reusing the list the row was drawn with.
   assert.doesNotMatch(rows, /saveSubscriptions\(list\.filter/);
-  assert.match(rows, /subscriptionsUpdatedAt/);
+  assert.match(rows, /subscriptionSettingsVersion\(\)/);
+  // The hub is checked on its own rather than left to the version, which cannot
+  // answer for it: two hubs nobody has written to report the same nothing.
+  const mainSave = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
+  assert.match(mainSave, /base\?\.hub[^\n]*!== currentHubIdentity\(\)/);
 
   // settings:update must not be a second way in. Asserting that the guard LINE
   // exists is not enough — the first version of this deleted the key from
@@ -3336,6 +3340,7 @@ test('an edit is saved against the version its form was opened on', async () => 
   const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const source = [
     functionBody(app, 'setSubscriptionFormOpen', 'seedSubscriptionPlanName'),
+    functionBody(app, 'subscriptionSettingsVersion', 'applySubscriptionSettings'),
     functionBody(app, 'applySubscriptionSettings', 'saveSubscriptions'),
     `async ${functionBody(app, 'saveSubscriptions', 'subscriptionWriteErrorKey')}`,
     functionBody(app, 'subscriptionWriteErrorKey', 'renderSubscriptionOrphanNotice')
@@ -3343,34 +3348,37 @@ test('an edit is saved against the version its form was opened on', async () => 
 
   const context = vm.createContext({
     els: {},
-    state: { settings: { subscriptionsUpdatedAt: 'v1' }, subscriptionFormBase: null },
+    state: { settings: { subscriptionsHub: 'https://a.example', subscriptionsUpdatedAt: 'v1' }, subscriptionFormBase: null },
+    hub: 'https://a.example',
     onHub: 'v1',
     // What a write would leave behind, set per step the way a hub would.
     nextVersion: '',
     sent: [],
     window: {
       tokenMonitor: {
-        saveSubscriptions: async (list, baseUpdatedAt) => {
-          context.sent.push(baseUpdatedAt);
-          if (baseUpdatedAt !== context.onHub) throw new Error('stale_write');
+        saveSubscriptions: async (list, base) => {
+          context.sent.push(base?.updatedAt);
+          if (base?.hub !== context.hub) throw new Error('hub_changed');
+          if (base?.updatedAt !== context.onHub) throw new Error('stale_write');
           context.onHub = context.nextVersion;
-          return { subscriptionsUpdatedAt: context.onHub, subscriptions: list };
+          return { subscriptionsHub: context.hub, subscriptionsUpdatedAt: context.onHub, subscriptions: list };
         },
-        getSettings: async () => ({ subscriptionsUpdatedAt: context.onHub })
+        getSettings: async () => ({ subscriptionsHub: context.hub, subscriptionsUpdatedAt: context.onHub })
       }
     },
     renderSubscriptionSettings: () => {},
+    resetSubscriptionForm: () => { context.formReset = true; },
     Promise
   });
   vm.runInContext(source, context);
 
   vm.runInContext('setSubscriptionFormOpen(true);', context);
-  assert.equal(context.state.subscriptionFormBase, 'v1');
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v1' });
 
   // Another device writes while the form is open. The push replaces settings, and
   // the row for the record being edited is redrawn — but the fields in front of
   // the user are still the ones they typed, against v1.
-  context.state.settings = { subscriptionsUpdatedAt: 'v2' };
+  context.state.settings = { subscriptionsHub: 'https://a.example', subscriptionsUpdatedAt: 'v2' };
   context.onHub = 'v2';
 
   // So the save says v1 and is refused, instead of claiming to have seen a change
@@ -3381,11 +3389,12 @@ test('an edit is saved against the version its form was opened on', async () => 
   );
   assert.deepEqual(context.sent, ['v1']);
   assert.equal(context.state.subscriptionSyncError, 'settings.subscriptions.errorStaleWrite');
+  assert.equal(context.formReset, undefined);
 
   // Re-anchored on what is now on screen, so the user can look at what changed and
   // save again. Without this the second attempt would be refused too, and every
   // one after it.
-  assert.equal(context.state.subscriptionFormBase, 'v2');
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v2' });
   context.nextVersion = 'v3';
   assert.equal(
     await vm.runInContext("saveSubscriptions([{ id: 'mine' }], state.subscriptionFormBase || '');", context),
@@ -3397,15 +3406,34 @@ test('an edit is saved against the version its form was opened on', async () => 
   // the user has seen — they removed it. The form re-anchors on what this device
   // wrote rather than refusing the edit still in progress, once, for a change it
   // caused itself.
-  assert.equal(context.state.subscriptionFormBase, 'v3');
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v3' });
   context.sent = [];
   context.nextVersion = 'v4';
-  assert.equal(await vm.runInContext("saveSubscriptions([], state.settings?.subscriptionsUpdatedAt || '');", context), true);
+  assert.equal(await vm.runInContext('saveSubscriptions([], subscriptionSettingsVersion());', context), true);
   assert.deepEqual(context.sent, ['v3']);
-  assert.equal(context.state.subscriptionFormBase, 'v4');
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v4' }); 
 
-  // Closed, there is no form version to speak for — the row actions carry the one
-  // on screen instead.
+  // Switching hubs under an open form is the one case re-anchoring must not
+  // handle: the fields hold an edit made for the hub the user left, and giving
+  // them the new hub's version would let that edit be saved into its list. Two
+  // hubs nobody has written to would even agree on the version, so only the hub
+  // itself can answer this.
+  context.hub = 'https://b.example';
+  context.onHub = 'b-v1';
+  context.sent = [];
+  assert.equal(
+    await vm.runInContext('saveSubscriptions([{ id: \'mine\' }], state.subscriptionFormBase);', context),
+    false
+  );
+  assert.equal(context.state.subscriptionSyncError, 'settings.subscriptions.errorHubChanged');
+  assert.equal(context.formReset, true);
+  // The form is gone rather than re-pointed, so there is no second attempt to be
+  // accepted by the hub the edit was never meant for.
+  assert.equal(context.state.subscriptionFormBase, null);
+
+  // And closed, there is no form version to speak for — the row actions carry
+  // what is on screen instead.
+  vm.runInContext('setSubscriptionFormOpen(true);', context);
   vm.runInContext('setSubscriptionFormOpen(false);', context);
   assert.equal(context.state.subscriptionFormBase, null);
 

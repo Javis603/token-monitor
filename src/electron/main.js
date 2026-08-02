@@ -2898,11 +2898,12 @@ function maybeRefreshSharedSubscriptions() {
     .catch(() => {});
 }
 
-// baseUpdatedAt is the version the renderer's list was built from, sent back with
-// it. The alternative is to read the current one here, which would let an edit
-// made against the list on screen go out claiming a version that arrived after
-// it — the hub accepts that, and whatever the newer version added is lost.
-async function saveSubscriptions(list, baseUpdatedAt) {
+// base is the version the renderer's list was built from AND the hub that issued
+// it, sent back together. The alternative is to read the current version here,
+// which would let an edit made against the list on screen go out claiming a
+// version that arrived after it — the hub accepts that, and whatever the newer
+// version added is lost.
+async function saveSubscriptions(list, base) {
   if (!subscriptionsAreShared()) {
     settings.subscriptions = subscriptionDisplay.normalizeSubscriptions(list, { currencyApi: { normalizeCurrency } });
     // Editing here makes the list this device's own again, so a later hub join
@@ -2918,7 +2919,12 @@ async function saveSubscriptions(list, baseUpdatedAt) {
     }
     return settingsForRenderer();
   }
-  await writeSharedSubscriptions(list, String(baseUpdatedAt || ''));
+  // The hub is checked here rather than left to the version, because a version
+  // cannot answer for it: two hubs that have never been written to both report no
+  // version at all, so an edit made against one would pass a version check
+  // against the other and be written into a list it was never meant for.
+  if (String(base?.hub || '') !== currentHubIdentity()) throw hubChangedError();
+  await writeSharedSubscriptions(list, String(base?.updatedAt || ''));
   return settingsForRenderer();
 }
 
@@ -3467,7 +3473,9 @@ function settingsForRenderer() {
     subscriptionsShared: subscriptionsAreShared(),
     // Which version of the shared list the one above was taken from, so an edit
     // built on it can say what it was built on rather than inheriting whatever
-    // this process holds by the time the write goes out.
+    // this process holds by the time the write goes out — and which hub issued
+    // that version, because it does not mean anything without one.
+    subscriptionsHub: currentHubIdentity(),
     subscriptionsUpdatedAt: subscriptionsDocumentFor(currentHubIdentity())?.updatedAt || '',
     subscriptionsOrphaned: pendingOrphanedSubscriptions(),
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
@@ -4764,9 +4772,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle('subscriptions:discardOrphans', () => discardOrphanedSubscriptions());
 
-  ipcMain.handle('subscriptions:save', async (_event, subscriptions, baseUpdatedAt) => {
+  ipcMain.handle('subscriptions:save', async (_event, subscriptions, base) => {
     try {
-      return await saveSubscriptions(subscriptions, baseUpdatedAt);
+      return await saveSubscriptions(subscriptions, base);
     } catch (error) {
       // The renderer has to tell "another device won" apart from "the hub is
       // down": one means re-read and redo, the other means try again later. Only
@@ -4835,6 +4843,7 @@ app.whenReady().then(() => {
     // copy would leave a key on disk that describes a hub as of whenever a form
     // was last saved, waiting to be mistaken for the real thing.
     delete normalizedPatch.subscriptionsShared;
+    delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
