@@ -93,7 +93,7 @@ test('the Worker announces an accepted write on the stream and stamps stats with
 
   // A hub nobody has written to reports an empty version rather than omitting
   // the field, so a device holding nothing compares equal and asks for nothing.
-  assert.equal((await hub.getStats()).subscriptionsUpdatedAt, '');
+  assert.equal((await hub.statsWithSubscriptionVersion()).subscriptionsUpdatedAt, '');
 
   const reasons = [];
   hub.broadcast = async (reason) => { reasons.push(reason); };
@@ -102,7 +102,7 @@ test('the Worker announces an accepted write on the stream and stamps stats with
   // Without the broadcast the other devices only find out on their next poll,
   // which is five minutes apart while the stream is up.
   assert.deepEqual(reasons, ['subscriptions']);
-  assert.equal((await hub.getStats()).subscriptionsUpdatedAt, written.updatedAt);
+  assert.equal((await hub.statsWithSubscriptionVersion()).subscriptionsUpdatedAt, written.updatedAt);
 
   // A refused write moves nothing, so there is nothing to announce.
   assert.equal((await hub.fetch(request('PUT', { subscriptions: [], baseUpdatedAt: '' }))).status, 409);

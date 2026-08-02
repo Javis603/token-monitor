@@ -92,10 +92,21 @@ export class HubDO {
     const history = aggregateHistory(devices);
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
-    // The version of the shared subscription list, never the list itself. A
-    // device compares it against the copy it holds and re-reads only when it has
-    // been overtaken, so learning about another device's edit costs nothing in
-    // the steady state and does not put what the user pays into every frame.
+    return stats;
+  }
+
+  // The version of the shared subscription list, never the list itself. A device
+  // compares it against the copy it holds and re-reads only when it has been
+  // overtaken, so learning about another device's edit costs nothing in the
+  // steady state and does not put what the user pays into every frame.
+  //
+  // Deliberately not folded into getStats(): /api/public/stats is the one
+  // unauthenticated route, it is built by spreading whatever getStats() returns,
+  // and the money document is the last thing that should be reached for on that
+  // path. Adding it here means the public route neither reads it nor has to
+  // remember to drop it back out — every caller below is behind the secret.
+  async statsWithSubscriptionVersion() {
+    const stats = await this.getStats();
     stats.subscriptionsUpdatedAt = (await this.getSubscriptions())?.updatedAt || '';
     return stats;
   }
@@ -125,7 +136,7 @@ export class HubDO {
 
   async broadcast(reason = 'update') {
     if (this.sseClients.size === 0) return;
-    const stats = await this.getStats();
+    const stats = await this.statsWithSubscriptionVersion();
     const payload = this.encoder.encode(sseFormat('stats', {
       type: 'stats', reason, stats, at: new Date().toISOString()
     }));
@@ -153,11 +164,7 @@ export class HubDO {
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/public/stats') {
       if (!this.publicStatsEnabled) return jsonResponse(404, { error: 'not_found' });
       const stats = await this.getStats();
-      // subscriptionsUpdatedAt is dropped rather than spread: this route is
-      // internet-facing and the rest of it is built by allowlist, so a field
-      // added to getStats() for the devices on the hub must be taken back out
-      // here on purpose rather than published because nobody thought about it.
-      const { devices, limits, periods, subscriptionsUpdatedAt, ...rest } = stats;
+      const { devices, limits, periods, ...rest } = stats;
       return jsonResponse(200, {
         ok: true,
         source: 'cloudflare-worker',
@@ -177,7 +184,7 @@ export class HubDO {
     if (!isAuthorized(request, this.secret)) return jsonResponse(401, { error: 'unauthorized' });
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/stats') {
-      return jsonResponse(200, await this.getStats());
+      return jsonResponse(200, await this.statsWithSubscriptionVersion());
     }
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/devices') {
@@ -191,7 +198,7 @@ export class HubDO {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/stats/stream') {
-      const stats = await this.getStats();
+      const stats = await this.statsWithSubscriptionVersion();
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
       writer.write(this.encoder.encode(sseFormat('snapshot', {
@@ -222,7 +229,7 @@ export class HubDO {
       const record = mergeDeviceRecord(existing, { ...payload, receivedAt: new Date().toISOString() });
       await this.state.storage.put(`dev:${record.deviceId}`, record);
       this.broadcast('ingest').catch(() => {});
-      return jsonResponse(200, { ok: true, deviceId: record.deviceId, stats: await this.getStats() });
+      return jsonResponse(200, { ok: true, deviceId: record.deviceId, stats: await this.statsWithSubscriptionVersion() });
     }
 
     // Shared by every device on this hub rather than owned by one of them, and

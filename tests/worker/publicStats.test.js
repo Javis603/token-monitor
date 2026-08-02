@@ -49,9 +49,9 @@ test('Worker public stats strip every account identity and plan field', async ()
   };
   const hub = new worker.HubDO({
     storage: {
-      // Stats also carry the version of the shared subscription list, so this
-      // hub has one to be asked about — an empty one.
-      async get() { return undefined; },
+      // The one unauthenticated route must not reach for the document holding
+      // what the user pays, not even to read a version off it and drop it again.
+      async get(key) { throw new Error(`public stats must not read storage key: ${key}`); },
       async list(options) {
         assert.deepEqual(options, { prefix: 'dev:' });
         return new Map([['dev:macbook', device]]);
@@ -76,10 +76,12 @@ test('Worker authenticated stats expose the effective staleness threshold', asyn
     storage: { async get() { return undefined; }, async list() { return new Map(); } }
   }, { STALE_AFTER_MS: '7654321' });
 
-  const stats = await hub.getStats();
+  const stats = await hub.statsWithSubscriptionVersion();
 
   assert.equal(stats.staleAfterMs, 7654321);
   // A hub nobody has written to reports an empty version rather than omitting
   // the field, so a device holding nothing compares equal and asks for nothing.
   assert.equal(stats.subscriptionsUpdatedAt, '');
+  // And the version is not on the shape the public route is built from.
+  assert.equal('subscriptionsUpdatedAt' in await hub.getStats(), false);
 });
