@@ -2893,7 +2893,45 @@ function maybeRefreshSharedSubscriptions() {
   const now = Date.now();
   if (now - lastSubscriptionRefreshMs < SUBSCRIPTION_REFRESH_MS) return;
   lastSubscriptionRefreshMs = now;
-  refreshSharedSubscriptions()
+  runSubscriptionCatchUp();
+}
+
+// Every hub stamps its stats with the version of the list it holds, so an edit
+// made on another device announces itself on the stream this one is already
+// listening to rather than waiting to be polled for — and polling is five
+// minutes apart precisely while the stream is up. Nothing is fetched unless the
+// versions disagree, so the steady state costs no requests at all.
+//
+// A missing stamp means no news rather than an empty list: it is also what a
+// local collector's own stats look like, and what a hub that predates the field
+// answers with. Reading either as "the hub has nothing" would throw away the
+// records on screen.
+//
+// A lane already running for this hub answers the stamp on its own — a write
+// caches what the hub stored, a read caches what it holds — so the comparison is
+// only meaningful while nothing is in flight. Without that, a device would fetch
+// the list back immediately after writing it: the hub broadcasts the new version
+// before the write is finished being applied here, so its own edit reads as
+// somebody else's news.
+function maybeAdoptSharedSubscriptionRevision(stats) {
+  if (!subscriptionsAreShared()) return;
+  const revision = stats?.subscriptionsUpdatedAt;
+  if (typeof revision !== 'string') return;
+  const hub = currentHubIdentity();
+  if (subscriptionQueues.has(hub)) return;
+  if (revision === (subscriptionsDocumentFor(hub)?.updatedAt || '')) return;
+  // Counts as the periodic read as well: the poll exists to notice exactly what
+  // this just noticed, and letting it fire a moment later would spend a request
+  // to be told the same thing.
+  lastSubscriptionRefreshMs = Date.now();
+  runSubscriptionCatchUp();
+}
+
+// Deliberately not seeded from local: seeding and setting records aside belong
+// to joining a hub, and doing either here would re-answer a question the user
+// has already been asked.
+function runSubscriptionCatchUp() {
+  return refreshSharedSubscriptions()
     .then((changed) => { if (changed) pushSettingsToRenderer(); })
     .catch(() => {});
 }
@@ -3097,6 +3135,7 @@ function sendPush(payload) {
     if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
       try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
     }
+    maybeAdoptSharedSubscriptionRevision(payload.data.stats);
   }
 }
 

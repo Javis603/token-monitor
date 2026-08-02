@@ -154,6 +154,36 @@ test('onStats fires on ingest and on deleteDevice, and unsubscribe stops it', ()
   }
 });
 
+test('a subscription write is announced on the stats stream, carrying the new version', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  try {
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    // A hub nobody has written to reports an empty version rather than omitting
+    // the field, so a device holding nothing compares equal and asks for nothing.
+    assert.equal(hub.getStats().subscriptionsUpdatedAt, '');
+
+    const seen = [];
+    hub.onStats((stats, reason) => seen.push({ reason, version: stats.subscriptionsUpdatedAt }));
+    const written = hub.setSubscriptions([record], '');
+
+    // Without the broadcast the other devices only find out on their next poll,
+    // which is five minutes apart while the stream is up.
+    assert.deepEqual(seen, [{ reason: 'subscriptions', version: written.updatedAt }]);
+    assert.equal(hub.getStats().subscriptionsUpdatedAt, written.updatedAt);
+
+    // The records themselves stay off the stats frame: the version is all a
+    // device needs to tell its copy has been overtaken.
+    assert.equal('subscriptions' in hub.getStats(), false);
+
+    // A refused write moves nothing, so there is nothing to announce.
+    assert.throws(() => hub.setSubscriptions([], 'not-the-version'));
+    assert.equal(seen.length, 1);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
 test('oversized ingest returns 413 without storing the device', async () => {
   const dataFile = tempDataFile();
   const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
@@ -271,7 +301,11 @@ test('the shared subscription list survives a hub restart and needs the secret',
     const unauthorized = await fetch(`http://127.0.0.1:${port}/api/subscriptions`);
     assert.equal(unauthorized.status, 401);
     const stats = await (await fetch(`http://127.0.0.1:${port}/api/stats`, { headers: { authorization: 'Bearer shh' } })).json();
-    assert.doesNotMatch(JSON.stringify(stats), /subscription/i);
+    // The version rides along, so a device can tell its copy has been overtaken
+    // without asking. What the user pays does not.
+    assert.equal(stats.subscriptionsUpdatedAt, second.getSubscriptions().updatedAt);
+    assert.equal('subscriptions' in stats, false);
+    assert.doesNotMatch(JSON.stringify(stats), /amountMinor|planName|sub_1/);
   } finally {
     await second.stop();
     fs.rmSync(dataFile, { force: true });

@@ -2619,11 +2619,12 @@ test('the note stops promising the data stays on this device once a hub has it',
 test('a record added on another device turns up without pushing settings at the user mid-edit', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const cache = functionBody(main, 'cacheSharedSubscriptions', 'subscriptionsEndpoint');
-  const poll = functionBody(main, 'maybeRefreshSharedSubscriptions', 'saveSubscriptions');
+  const poll = functionBody(main, 'maybeRefreshSharedSubscriptions', 'maybeAdoptSharedSubscriptionRevision');
+  const catchUp = functionBody(main, 'runSubscriptionCatchUp', 'saveSubscriptions');
 
-  // Pushing settings re-renders the whole settings form, so the poll may only do
-  // it when the shared list actually moved.
-  assert.match(poll, /if \(changed\) pushSettingsToRenderer\(\)/);
+  // Pushing settings re-renders the whole settings form, so a catch-up may only
+  // do it when the shared list actually moved.
+  assert.match(catchUp, /if \(changed\) pushSettingsToRenderer\(\)/);
   assert.match(poll, /lastSubscriptionRefreshMs < SUBSCRIPTION_REFRESH_MS/);
   assert.match(main, /maybeRefreshSharedSubscriptions\(\);\n {4}return fetchStats\(options\);/);
 
@@ -2678,7 +2679,7 @@ test('a deleted record is not resurrected by another device rejoining', async ()
     functionBody(main, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
     functionBody(main, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
     // functionBody() slices from `function <name>(`, dropping the async keyword.
-    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeRefreshSharedSubscriptions')}`
+    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeAdoptSharedSubscriptionRevision')}`
   ].join('\n');
 
   const run = async ({ doc, local, writeFails = false }) => {
@@ -2867,7 +2868,7 @@ test('a hub timestamp that cannot be parsed does not turn a save into a crash', 
 
 test('one hub cached list is never filed as records belonging to the next hub', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const refresh = functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeRefreshSharedSubscriptions');
+  const refresh = functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeAdoptSharedSubscriptionRevision');
 
   // Once settings.subscriptions is a cache of some hub it is that hub's data.
   // Carrying it into the next hub would seed or offer accounts that were never
@@ -2919,7 +2920,7 @@ test('records held for a decision survive reconnecting to the same hub', async (
     functionBody(main, 'rememberOrphanedSubscriptions', 'currentHubIdentity'),
     functionBody(main, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
     functionBody(main, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
-    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeRefreshSharedSubscriptions')}`
+    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeAdoptSharedSubscriptionRevision')}`
   ].join('\n');
 
   const context = vm.createContext({
@@ -3050,7 +3051,7 @@ test('hub reads and writes run one at a time, in the order they were asked for',
     functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'),
     `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`,
     functionBody(main, 'refreshSharedSubscriptions', 'refreshSharedSubscriptionsNow'),
-    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeRefreshSharedSubscriptions')}`
+    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeAdoptSharedSubscriptionRevision')}`
   ].join('\n');
 
   const build = () => {
@@ -3269,6 +3270,68 @@ test('a hub that is slow to answer does not hold up the one in front of the user
   await new Promise((resolve) => setTimeout(resolve, 0));
   // And the lanes are gone once idle, rather than one per hub ever typed.
   assert.equal(context.subscriptionQueues.size, 0);
+});
+
+test('a stats frame stamped with a newer subscription version is read back, once', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsAreShared', 'subscriptionsDocumentFor'),
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'maybeAdoptSharedSubscriptionRevision', 'runSubscriptionCatchUp')
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    subscriptionQueues: new Map(),
+    hubSubscriptions: { updatedAt: 'v1', subscriptions: [] },
+    hubSubscriptionsHub: 'https://a.example',
+    currentHubIdentity: () => 'https://a.example',
+    lastSubscriptionRefreshMs: 0,
+    Date,
+    reads: 0,
+    runSubscriptionCatchUp: () => { context.reads += 1; return Promise.resolve(); }
+  });
+  vm.runInContext(source, context);
+  const push = (stats) => vm.runInContext(`maybeAdoptSharedSubscriptionRevision(${JSON.stringify(stats)});`, context);
+
+  // The steady state: the hub is stamping every frame with the version this
+  // device already holds, and none of them costs a request.
+  push({ subscriptionsUpdatedAt: 'v1' });
+  assert.equal(context.reads, 0);
+
+  // Another device wrote. Without the stamp this only surfaces on the next poll,
+  // which is five minutes apart while the stream is up.
+  push({ subscriptionsUpdatedAt: 'v2' });
+  assert.equal(context.reads, 1);
+  // And it stands in for the poll rather than being followed by one.
+  assert.ok(context.lastSubscriptionRefreshMs > 0);
+
+  // A local collector's own stats carry no stamp, and neither does a hub older
+  // than the field. Reading either as "the hub holds nothing" would take the
+  // records off the screen.
+  context.hubSubscriptions = { updatedAt: 'v2', subscriptions: [] };
+  push({});
+  push({ subscriptionsUpdatedAt: null });
+  assert.equal(context.reads, 1);
+
+  // A lane already running answers the stamp on its own. This is what a device
+  // sees right after its own write: the hub broadcasts the new version before
+  // the write has finished being applied here, so its own edit would otherwise
+  // read as somebody else's news and be fetched straight back.
+  context.subscriptionQueues.set('https://a.example', Promise.resolve());
+  push({ subscriptionsUpdatedAt: 'v3' });
+  assert.equal(context.reads, 1);
+  context.subscriptionQueues.delete('https://a.example');
+  push({ subscriptionsUpdatedAt: 'v3' });
+  assert.equal(context.reads, 2);
+
+  // Local mode has no shared list to be overtaken.
+  context.settings.hubMode = 'local';
+  push({ subscriptionsUpdatedAt: 'v4' });
+  assert.equal(context.reads, 2);
+
+  // The stamp is only useful if the stats path actually consults it.
+  assert.match(functionBody(main, 'sendPush', 'statsHistoryRevision'), /maybeAdoptSharedSubscriptionRevision\(/);
 });
 
 test('coming back to a hub does not write against the other hub token', async () => {

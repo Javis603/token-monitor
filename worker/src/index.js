@@ -92,6 +92,11 @@ export class HubDO {
     const history = aggregateHistory(devices);
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
+    // The version of the shared subscription list, never the list itself. A
+    // device compares it against the copy it holds and re-reads only when it has
+    // been overtaken, so learning about another device's edit costs nothing in
+    // the steady state and does not put what the user pays into every frame.
+    stats.subscriptionsUpdatedAt = (await this.getSubscriptions())?.updatedAt || '';
     return stats;
   }
 
@@ -148,7 +153,11 @@ export class HubDO {
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/public/stats') {
       if (!this.publicStatsEnabled) return jsonResponse(404, { error: 'not_found' });
       const stats = await this.getStats();
-      const { devices, limits, periods, ...rest } = stats;
+      // subscriptionsUpdatedAt is dropped rather than spread: this route is
+      // internet-facing and the rest of it is built by allowlist, so a field
+      // added to getStats() for the devices on the hub must be taken back out
+      // here on purpose rather than published because nobody thought about it.
+      const { devices, limits, periods, subscriptionsUpdatedAt, ...rest } = stats;
       return jsonResponse(200, {
         ok: true,
         source: 'cloudflare-worker',
@@ -257,6 +266,10 @@ export class HubDO {
         currencyApi: { normalizeCurrency: currency.normalizeCurrency }
       });
       await this.state.storage.put(SUBSCRIPTIONS_KEY, next);
+      // Same reason ingest broadcasts: the other devices are holding a copy that
+      // has just been overtaken, and without this they only find out on their
+      // next poll — which is five minutes apart while the stream is up.
+      this.broadcast('subscriptions').catch(() => {});
       return jsonResponse(200, { ok: true, ...next });
     }
 
