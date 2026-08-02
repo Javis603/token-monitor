@@ -88,6 +88,27 @@ test('the Worker refuses subscription reads without the secret and never publish
   assert.doesNotMatch(JSON.stringify(stats), /amountMinor/);
 });
 
+test('the Worker announces an accepted write on the stream and stamps stats with the version', async () => {
+  const { hub } = await hubDO();
+
+  // A hub nobody has written to reports an empty version rather than omitting
+  // the field, so a device holding nothing compares equal and asks for nothing.
+  assert.equal((await hub.statsWithSubscriptionVersion()).subscriptionsUpdatedAt, '');
+
+  const reasons = [];
+  hub.broadcast = async (reason) => { reasons.push(reason); };
+
+  const written = await (await hub.fetch(request('PUT', { subscriptions: [RECORD], baseUpdatedAt: '' }))).json();
+  // Without the broadcast the other devices only find out on their next poll,
+  // which is five minutes apart while the stream is up.
+  assert.deepEqual(reasons, ['subscriptions']);
+  assert.equal((await hub.statsWithSubscriptionVersion()).subscriptionsUpdatedAt, written.updatedAt);
+
+  // A refused write moves nothing, so there is nothing to announce.
+  assert.equal((await hub.fetch(request('PUT', { subscriptions: [], baseUpdatedAt: '' }))).status, 409);
+  assert.deepEqual(reasons, ['subscriptions']);
+});
+
 test('the Worker refuses a malformed write instead of emptying the ledger', async () => {
   const { hub } = await hubDO();
   const written = await (await hub.fetch(request('PUT', { subscriptions: [RECORD], baseUpdatedAt: '' }))).json();

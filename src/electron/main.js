@@ -2534,8 +2534,11 @@ let hubSubscriptionsHub = '';
 // ordering between them, and a hub that accepts the connection but answers
 // slowly would otherwise hold up the hub the user is actually looking at.
 const subscriptionQueues = new Map();
-let lastSubscriptionRefreshMs = 0;
-const SUBSCRIPTION_REFRESH_MS = 60000;
+// The last version this device tried to catch up to, and when. Only a failed
+// attempt is ever seen twice — a successful one leaves the document in hand
+// matching the stamp, which settles it before this is consulted.
+let lastSubscriptionCatchUp = { hub: '', version: '', at: 0 };
+const SUBSCRIPTION_RETRY_MS = 60000;
 
 function subscriptionsAreShared() {
   return settings?.hubMode === 'client' || settings?.hubMode === 'host';
@@ -2905,16 +2908,63 @@ async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
   }
 }
 
-// Piggybacked on the stats path the widget already runs, so a record added on
-// another device turns up here without a timer of its own. Throttled because
-// stats tick far more often than a hand-entered subscription changes, and the
-// renderer is only pushed when the list actually moved.
-function maybeRefreshSharedSubscriptions() {
+// Every hub stamps its stats with the version of the list it holds, so an edit
+// made on another device announces itself on the frames this one already
+// receives instead of being polled for. Both paths carry it — the stream while
+// it is up, and the widget's own stats read when it is not — and nothing is
+// fetched unless the versions disagree, so the steady state costs no requests at
+// all. This is the whole mechanism; there is no periodic subscription read
+// behind it.
+//
+// A missing stamp means no news rather than an empty list: it is also what a
+// local collector's own stats look like. Reading it as "the hub has nothing"
+// would throw away the records on screen.
+//
+// The stamp is not compared against an operation already in flight for this hub,
+// because what that operation will leave behind is not known yet. It is carried
+// into the lane and compared there instead — see runSubscriptionCatchUp().
+function maybeAdoptSharedSubscriptionRevision(stats) {
   if (!subscriptionsAreShared()) return;
+  const revision = stats?.subscriptionsUpdatedAt;
+  if (typeof revision !== 'string') return;
+  const hub = currentHubIdentity();
+  if (revision === (subscriptionsDocumentFor(hub)?.updatedAt || '')) return;
+  // Getting this far twice for the same version means the last attempt did not
+  // land it. Frames arrive on every ingest from every device, so retrying on each
+  // one would turn a hub that serves /api/stats but not /api/subscriptions into a
+  // request loop. A version that moves is news again and is tried at once — the
+  // wait is a floor on retries, not a polling interval. Paired with its hub for
+  // the reason every version here is: on its own it cannot say which list it
+  // describes.
   const now = Date.now();
-  if (now - lastSubscriptionRefreshMs < SUBSCRIPTION_REFRESH_MS) return;
-  lastSubscriptionRefreshMs = now;
-  refreshSharedSubscriptions()
+  if (hub === lastSubscriptionCatchUp.hub
+    && revision === lastSubscriptionCatchUp.version
+    && now - lastSubscriptionCatchUp.at < SUBSCRIPTION_RETRY_MS) return;
+  lastSubscriptionCatchUp = { hub, version: revision, at: now };
+  runSubscriptionCatchUp(revision);
+}
+
+// Queued rather than run, and the version is compared again once it is this
+// operation's turn. By then whatever was in flight has finished and cached its
+// result, which is the only thing that can tell the two cases apart: this
+// device's own write leaves the document at exactly the version the hub
+// broadcast, so there is nothing left to fetch, while a read that was already in
+// flight when the broadcast landed leaves an older one and the fetch happens.
+// Comparing before queueing cannot distinguish them — it would either re-fetch
+// every write this device makes, or discard the only notice of another device's.
+//
+// refreshSharedSubscriptionsNow() rather than refreshSharedSubscriptions(): the
+// lane is held by this operation, so the queueing wrapper would wait on itself.
+//
+// Deliberately not seeded from local: seeding and setting records aside belong
+// to joining a hub, and doing either here would re-answer a question the user
+// has already been asked.
+function runSubscriptionCatchUp(revision) {
+  return queueSubscriptionOp((hub) => {
+    if (!subscriptionOpIsCurrent(hub)) return false;
+    if (revision === (subscriptionsDocumentFor(hub)?.updatedAt || '')) return false;
+    return refreshSharedSubscriptionsNow();
+  })
     .then((changed) => { if (changed) pushSettingsToRenderer(); })
     .catch(() => {});
 }
@@ -3262,6 +3312,7 @@ function sendPush(payload) {
     if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
       try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
     }
+    maybeAdoptSharedSubscriptionRevision(payload.data.stats);
   }
 }
 
@@ -4087,9 +4138,8 @@ function startMode() {
 async function reconcileSharedSubscriptions() {
   try {
     await refreshSharedSubscriptions({ seedFromLocal: true });
-    lastSubscriptionRefreshMs = Date.now();
-    // Unconditional, unlike the throttled poll: a mode change swaps which list is
-    // showing, and the renderer is holding the previous mode's one.
+    // Unconditional, unlike the stamp comparison: a mode change swaps which list
+    // is showing, and the renderer is holding the previous mode's one.
     pushSettingsToRenderer();
   } catch (error) {
     console.log(`[sync] subscription reconcile failed: ${error?.message || error}`);
@@ -5340,9 +5390,12 @@ app.whenReady().then(() => {
     updateTrayDisplay();
     return true;
   });
-  ipcMain.handle('stats:get', (_event, options) => {
-    maybeRefreshSharedSubscriptions();
-    return fetchStats(options);
+  ipcMain.handle('stats:get', async (_event, options) => {
+    const stats = await fetchStats(options);
+    // The stream normally carries the stamp, but it is precisely when the stream
+    // is down that this read is the only thing still arriving from the hub.
+    maybeAdoptSharedSubscriptionRevision(stats);
+    return stats;
   });
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({

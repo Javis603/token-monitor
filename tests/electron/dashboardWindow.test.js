@@ -94,7 +94,19 @@ test('dashboard.html wires the shared modules and the two panels', () => {
   assert.match(html, /<script src="usageCharts\.js"><\/script>/);
   assert.match(html, /<script src="i18n\.js"><\/script>/);
   assert.match(html, /<script src="\.\.\/\.\.\/shared\/currency\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactMoney\.js"><\/script>/);
   assert.match(html, /<script src="dashboard\.js"><\/script>/);
+  const scriptOrder = [
+    '<script src="../../shared/compactTokens.js"></script>',
+    '<script src="../../shared/currency.js"></script>',
+    '<script src="../../shared/compactMoney.js"></script>',
+    '<script src="dashboard.js"></script>'
+  ].map((script) => html.indexOf(script));
+  assert.ok(scriptOrder.every((index) => index >= 0), 'dashboard should include every compact money dependency');
+  assert.ok(
+    scriptOrder.every((index, position) => position === 0 || scriptOrder[position - 1] < index),
+    'compact money should load after its token and currency dependencies'
+  );
   assert.match(html, /id="trendsTab"/);
   assert.match(html, /id="activityTab"/);
   assert.match(html, /id="dashChart"/);
@@ -198,9 +210,10 @@ test('dashboard shares localized token units and repaints when the setting or la
   const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
   assert.ok(handler, 'dashboard should subscribe to settings pushes');
   assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactTokens\.js"><\/script>/);
+  assert.match(js, /const compactMoneyApi = window\.TokenMonitorCompactMoney/);
   assert.match(js, /const compactTokenApi = window\.TokenMonitorCompactTokens/);
   assert.match(js, /compactTokenApi\.formatCompactTokens\(value, effectiveCompactTokenUnits\(\), state\.locale\)/);
-  assert.match(js, /formatCompactNumber\(currencyApi\.convertUsd\(usd, code\)\)/);
+  assert.match(js, /compactMoneyApi\.formatCompactCurrencyFromUsd\(\s*usd,\s*state\.currency,\s*effectiveCompactTokenUnits\(\),\s*state\.locale/s);
   assert.match(js, /state\.locale = i18n\.resolveLocale\(settings\.locale \|\| settings\.language, navigator\.languages\)/);
   assert.match(handler[1], /nextLocale = i18n\.resolveLocale\(next\.locale \|\| next\.language, navigator\.languages\)/);
   assert.match(handler[1], /nextCompactTokenUnits = compactTokenApi\.normalizeCompactTokenUnits\(next\.compactTokenUnits\)/);

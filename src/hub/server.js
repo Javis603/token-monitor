@@ -55,6 +55,11 @@ function createHub({
     const history = aggregateHistory(Object.values(store.devices));
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
+    // The version of the shared subscription list, never the list itself. A
+    // device compares it against the copy it holds and re-reads only when it has
+    // been overtaken, so learning about another device's edit costs nothing in
+    // the steady state and does not put what the user pays into every frame.
+    stats.subscriptionsUpdatedAt = store.subscriptions?.updatedAt || '';
     return stats;
   }
 
@@ -152,6 +157,10 @@ function createHub({
       store.savedAt = previousSavedAt;
       throw error;
     }
+    // Same reason ingest() broadcasts: the other devices are holding a copy that
+    // has just been overtaken, and without this they only find out on their next
+    // poll — which is five minutes apart while the stream is up.
+    broadcastStats('subscriptions');
     return store.subscriptions;
   }
 

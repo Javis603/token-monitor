@@ -243,6 +243,7 @@ Response includes:
 - `projectsIncomplete` plus the corresponding `devices[].allTimeProjectsOmitted`, `devices[].allTimeProjectsIncomplete`, or `devices[].projectsEnabled` diagnostic
 - `historyPreview.daily[].activeTimeMs`, `historyPreview.monthly[].activeTimeMs`, and `historyPreview.summary.activeTimeMs` when tokscale graph exposes session active-time metrics
 - `limits.providers` aggregated by provider account
+- `subscriptionsUpdatedAt`, the `updatedAt` of the hub's shared subscription list, or `""` if nothing has been written to it. The version only, never the records: a device compares it against the copy it holds and re-reads `/api/subscriptions` only when it has been overtaken. This is how an edit made on one device reaches the others, so a client that does not consult it will only see the shared list as it stood when it connected. Omitted from public Worker stats. An absent field means "no news" rather than an empty list.
 - `devices`, including each device's normalized `periods`, `limits`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`
 - stale status for devices that have not reported recently
 
@@ -316,3 +317,5 @@ Replaces the shared list.
 Because `updatedAt` doubles as the concurrency token, it is guaranteed to increase strictly on every accepted write: two writes landing in the same millisecond would otherwise share a token, and a third holding the older one would pass the staleness check against a document it never read.
 
 Records are re-normalized on ingest exactly as `POST /api/ingest` normalizes device records; unknown fields are dropped and malformed records are discarded rather than stored. `currency` is validated against the display currencies the app carries rates for (`USD`, `TWD`, `HKD`, `CNY`); a record naming anything else responds `400` and stores nothing, because coercing it would report an amount the user never entered. A successful write responds `200` with the stored document in the same shape as `GET`.
+
+An accepted write also broadcasts stats to connected stream clients with `reason: "subscriptions"`, the same way an ingest does. That frame carries the new `subscriptionsUpdatedAt`, which is how the other devices learn their copy has been overtaken.

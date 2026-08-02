@@ -95,6 +95,22 @@ export class HubDO {
     return stats;
   }
 
+  // The version of the shared subscription list, never the list itself. A device
+  // compares it against the copy it holds and re-reads only when it has been
+  // overtaken, so learning about another device's edit costs nothing in the
+  // steady state and does not put what the user pays into every frame.
+  //
+  // Deliberately not folded into getStats(): /api/public/stats is the one
+  // unauthenticated route, it is built by spreading whatever getStats() returns,
+  // and the money document is the last thing that should be reached for on that
+  // path. Adding it here means the public route neither reads it nor has to
+  // remember to drop it back out — every caller below is behind the secret.
+  async statsWithSubscriptionVersion() {
+    const stats = await this.getStats();
+    stats.subscriptionsUpdatedAt = (await this.getSubscriptions())?.updatedAt || '';
+    return stats;
+  }
+
   ensureHeartbeat() {
     if (this.heartbeatTimer || this.sseClients.size === 0) return;
     this.heartbeatTimer = setInterval(() => {
@@ -120,7 +136,7 @@ export class HubDO {
 
   async broadcast(reason = 'update') {
     if (this.sseClients.size === 0) return;
-    const stats = await this.getStats();
+    const stats = await this.statsWithSubscriptionVersion();
     const payload = this.encoder.encode(sseFormat('stats', {
       type: 'stats', reason, stats, at: new Date().toISOString()
     }));
@@ -168,7 +184,7 @@ export class HubDO {
     if (!isAuthorized(request, this.secret)) return jsonResponse(401, { error: 'unauthorized' });
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/stats') {
-      return jsonResponse(200, await this.getStats());
+      return jsonResponse(200, await this.statsWithSubscriptionVersion());
     }
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/devices') {
@@ -182,7 +198,7 @@ export class HubDO {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/stats/stream') {
-      const stats = await this.getStats();
+      const stats = await this.statsWithSubscriptionVersion();
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
       writer.write(this.encoder.encode(sseFormat('snapshot', {
@@ -213,7 +229,7 @@ export class HubDO {
       const record = mergeDeviceRecord(existing, { ...payload, receivedAt: new Date().toISOString() });
       await this.state.storage.put(`dev:${record.deviceId}`, record);
       this.broadcast('ingest').catch(() => {});
-      return jsonResponse(200, { ok: true, deviceId: record.deviceId, stats: await this.getStats() });
+      return jsonResponse(200, { ok: true, deviceId: record.deviceId, stats: await this.statsWithSubscriptionVersion() });
     }
 
     // Shared by every device on this hub rather than owned by one of them, and
@@ -257,6 +273,10 @@ export class HubDO {
         currencyApi: { normalizeCurrency: currency.normalizeCurrency }
       });
       await this.state.storage.put(SUBSCRIPTIONS_KEY, next);
+      // Same reason ingest broadcasts: the other devices are holding a copy that
+      // has just been overtaken, and without this they only find out on their
+      // next poll — which is five minutes apart while the stream is up.
+      this.broadcast('subscriptions').catch(() => {});
       return jsonResponse(200, { ok: true, ...next });
     }
 
