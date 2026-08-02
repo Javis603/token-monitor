@@ -551,7 +551,10 @@ test('capability tags are settings-only and do not alter the main Limits panel',
   assert.match(renderHead, /limitProviderMeta\(provider, provenance\)/);
   assert.match(renderMeta, /limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(state\.settings\?\.showLimitSource\) \}\)/);
   assert.doesNotMatch(renderLimits, /limitProviderSettingsTags/);
-  assert.match(renderHead, /head\.append\(titleBlock, plan\);/);
+  // The head still carries exactly the title block and the plan label. The plan
+  // is wrapped so hovering it can reveal manual subscription details, which adds
+  // no tag and no status of its own.
+  assert.match(renderHead, /head\.append\(titleBlock, decoratePlanWithSubscription\(plan, provider\)\);/);
   assert.match(renderSettings, /limitProviderSettingsTags\(provider, provenance/);
   assert.doesNotMatch(styles, /\.limit-status\b/);
 });
@@ -1890,4 +1893,1673 @@ test('Kimi usage and limits share the canonical provider id and vendor color', (
   const app = readRendererFile('app.js');
   assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
   assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
+});
+
+// A value produced inside a vm realm carries that realm's prototypes, which
+// deepStrictEqual rejects as "same structure but not reference-equal".
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function cssBlock(styles, selector) {
+  const start = styles.indexOf(`${selector} {`);
+  assert.notEqual(start, -1, `${selector} rule should exist`);
+  const end = styles.indexOf('}', start);
+  assert.notEqual(end, -1, `${selector} rule should close`);
+  return styles.slice(start, end + 1);
+}
+
+test('the subscription tooltip escapes both the plan label and the scrolling panel', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const decorate = functionBody(app, 'decoratePlanWithSubscription', 'subscriptionRowTitle');
+  const position = functionBody(app, 'positionSubscriptionTooltip', 'decoratePlanWithSubscription');
+
+  // The wrap also carries .limit-plan, whose overflow:hidden clips the card away
+  // entirely — the card sits above the label, outside that 10px-tall box.
+  assert.match(cssBlock(styles, '.subscription-plan-wrap'), /overflow: visible;/);
+  // And .limits-panel clips its own overflow, so on the topmost row the upward
+  // card lands outside the panel. It flips below when there is no room above.
+  assert.match(decorate, /positionSubscriptionTooltip\(wrap, card\);/);
+  assert.match(position, /closest\('\.limits-panel'\)/);
+  assert.match(position, /classList\.toggle\('is-below'/);
+  assert.match(styles, /\.subscription-tooltip\.is-below \{/);
+});
+
+test('an attached subscription adds no resting decoration to the plan label', () => {
+  const styles = readRendererFile('styles.css');
+  assert.doesNotMatch(cssBlock(styles, '.subscription-plan-trigger'), /border-bottom/);
+});
+
+test('subscription form controls stay shrinkable so a long option cannot overflow the panel', () => {
+  const styles = readRendererFile('styles.css');
+  const block = cssBlock(styles, '.subscription-add-body .settings-row > :is(input, select)');
+  assert.match(block, /flex: 1 1 0;/);
+  assert.match(block, /min-width: 0;/);
+  // Descendant, not child: each kind of record wraps its own rows, so a child
+  // selector would stop reaching most of the form.
+  assert.doesNotMatch(styles, /\.subscription-add-body > \.settings-row/);
+});
+
+test('subscription rows carry the glyph actions the profile rows above them use', () => {
+  const app = readRendererFile('app.js');
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  assert.match(rows, /edit\.textContent = '✎';/);
+  assert.match(rows, /remove\.textContent = '✕';/);
+  assert.match(rows, /remove\.textContent = '✓';/);
+});
+
+test('the plan-name seed never runs from a render, so it cannot wipe what is being typed', () => {
+  const app = readRendererFile('app.js');
+  const renderPickers = functionBody(app, 'renderSubscriptionPickers', 'renderSubscriptionTotal');
+  const renderSettings = functionBody(app, 'renderSubscriptionSettings', 'setSubscriptionError');
+  const beginEdit = functionBody(app, 'beginSubscriptionEdit', 'submitSubscription');
+
+  assert.doesNotMatch(renderPickers, /seedSubscriptionPlanName|applySubscriptionAccountSelection/);
+  assert.doesNotMatch(renderSettings, /seedSubscriptionPlanName|applySubscriptionAccountSelection/);
+  // Opening an edit assigns the selects programmatically, which fires no change
+  // event — that is what preserves the saved plan name without a mode guard.
+  assert.doesNotMatch(beginEdit, /seedSubscriptionPlanName|applySubscriptionAccountSelection/);
+  assert.match(beginEdit, /els\.subscriptionPlanNameInput\.value = subscription\.planName;/);
+});
+
+test('switching the account mid-edit re-seeds the plan name and relabels the form', () => {
+  const app = readRendererFile('app.js');
+  const apply = functionBody(app, 'applySubscriptionAccountSelection', 'syncSubscriptionDateBounds');
+
+  assert.match(apply, /seedSubscriptionPlanName\(\);/);
+  assert.match(apply, /setSubscriptionFormMode\(\);/);
+  assert.match(app, /els\.subscriptionAccountInput\?\.addEventListener\('change', applySubscriptionAccountSelection\);/);
+});
+
+test('the subscription list shrinks with the panel instead of widening its section', () => {
+  const styles = readRendererFile('styles.css');
+  // `min-width: 0` on a flex child only lets it shrink during layout — the row's
+  // min-content contribution stays as wide as the longest account label, and
+  // that contribution sizes the settings section's grid column. On a narrow
+  // window the whole section was laid out around an email address. The profile
+  // rows above them never had the problem because they are grids.
+  const row = cssBlock(styles, '.subscription-row');
+  assert.match(row, /display: grid;/);
+  assert.match(row, /grid-template-columns: minmax\(0, 1fr\) auto;/);
+  assert.match(cssBlock(styles, '.subscription-topup-row'), /grid-template-columns: minmax\(0, 1fr\) auto auto;/);
+  assert.match(cssBlock(styles, '.opencode-profile-item'), /minmax\(0, 1fr\)/);
+});
+
+test('every account is offered, and one record keeps one currency', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const choices = functionBody(app, 'subscriptionAccountChoices', 'subscriptionAccountValue');
+  const mode = functionBody(app, 'setSubscriptionFormMode', 'subscriptionFormIsTopUp');
+
+  // The record kind made "include balance accounts" redundant: the form can
+  // describe either shape now, so hiding the accounts only hid them.
+  assert.doesNotMatch(choices, /isCreditsProvider/);
+  assert.doesNotMatch(app, /subscriptionShowAllAccounts/);
+  assert.doesNotMatch(html, /subscriptionShowAllAccountsInput/);
+  assert.doesNotMatch(readRendererFile('i18n.js'), /settings\.subscriptions\.showAllAccounts/);
+
+  // The select moves between the two money fields rather than being duplicated
+  // or taking a labelled row of its own.
+  assert.match(mode, /slot\.append\(els\.subscriptionCurrencyInput\)/);
+  assert.equal((html.match(/id="subscriptionCurrencyInput"/g) || []).length, 1);
+  assert.match(html, /id="subscriptionAmountRow"/);
+  assert.match(html, /id="subscriptionTopUpHeadingRow"/);
+
+  // A bare <button> falls outside this stylesheet's button allow-list and lands
+  // on the unstyled UA control.
+  assert.match(html, /id="subscriptionTopUpAddButton"[^>]*class="icon-button subscription-topup-add"/);
+  assert.match(readRendererFile('styles.css'), /\.icon-button, \.refresh-button, \.settings-actions button/);
+});
+
+test('the record kind swaps whole field groups, and the user has the last word', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const mode = functionBody(app, 'setSubscriptionFormMode', 'subscriptionFormIsTopUp');
+  const isTopUp = functionBody(app, 'subscriptionFormIsTopUp', 'setSubscriptionFormKind');
+  const apply = functionBody(app, 'applySubscriptionAccountSelection', 'subscriptionFormTopUps');
+
+  // The kind is read from the radio the user can change, never re-derived from
+  // the account at render time.
+  assert.match(isTopUp, /els\.subscriptionKindInputs/);
+  assert.doesNotMatch(isTopUp, /isCreditsProvider/);
+  // The balance marker only seeds it, on an explicit account change.
+  assert.match(apply, /setSubscriptionFormKind\(isCreditsProvider\(subscriptionSelectedAccount\(\)\) \? 'topup' : 'subscription'\)/);
+  assert.match(mode, /els\.subscriptionPlanFields\?\.classList\.toggle\('hidden', topUp\)/);
+  assert.match(mode, /els\.subscriptionTopUpFields\?\.classList\.toggle\('hidden', !topUp\)/);
+  // This stylesheet has no blanket `.hidden` rule, so toggling the class only
+  // hides anything because these wrappers declare one.
+  const styles = readRendererFile('styles.css');
+  assert.match(cssBlock(styles, '.subscription-kind-fields.hidden'), /display: none;/);
+  assert.match(html, /id="subscriptionPlanFields" class="subscription-kind-fields"/);
+  assert.match(html, /id="subscriptionTopUpFields" class="subscription-kind-fields hidden"/);
+
+  // Both groups carry their own data-i18n now that neither is relabelled, which
+  // is what keeps them correct across a language change.
+  assert.match(html, /id="subscriptionStartDateInput"/);
+  assert.match(html, /data-i18n="settings\.subscriptions\.startDateNote"/);
+  assert.match(html, /data-i18n="settings\.subscriptions\.topUpEntriesNote"/);
+  // The wording the old single-shape form needed is gone from every locale.
+  const i18n = readRendererFile('i18n.js');
+  for (const key of ['topUpInterval', 'topUpRecurring', 'topUpNext', 'topUpNextNote', 'topsUpOn']) {
+    assert.doesNotMatch(i18n, new RegExp(`settings\\.subscriptions\\.${key}'`), `${key} should be gone`);
+  }
+});
+
+test('a top-up record keeps a ledger, and the tooltip reads from it', () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const rows = functionBody(app, 'topUpTooltipRows', 'topUpRollupRows');
+  const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+
+  const ledger = subscriptionApi.normalizeSubscription({
+    provider: 'openrouter',
+    kind: 'topup',
+    currency: 'USD',
+    topUps: [
+      { date: '2026-08-01', amountMinor: 20000 },
+      { date: '2026-08-06', amountMinor: 10000 }
+    ]
+  });
+  const labels = Array.from(vm.runInNewContext(
+    `${rows}\ntopUpTooltipRows(subscription, provider, today, false).map((row) => row.label);`,
+    {
+      subscription: ledger,
+      provider: { windows: [{ metric: 'credits', amount: 150, currency: 'USD' }] },
+      today: '2026-08-11',
+      subscriptionApi,
+      t: (key) => key,
+      topUpMinorText: (record, minor) => `$${(minor / 100).toFixed(2)}`,
+      subscriptionDateText: (date) => date,
+      subscriptionDaysText: (days) => `${days}d`,
+      isCreditsWindow: (window) => window?.metric === 'credits',
+      creditsAmount: (_provider, window) => window?.amount ?? null,
+      formatMoney: (value) => `${value}`,
+      currencyApi: require('../../src/shared/currency'),
+      topUpRollupRows: (built) => built
+    }
+  ));
+  assert.deepEqual(labels, [
+    'subscription.tooltip.lastTopUp',
+    'subscription.tooltip.topUpMonth',
+    'subscription.tooltip.topUpTotal',
+    'subscription.tooltip.balance',
+    'subscription.tooltip.burnRate',
+    'subscription.tooltip.exhausts'
+  ]);
+
+  // The settings row summarises the same ledger, and a ledger with nothing in it
+  // never saves.
+  assert.match(meta, /subscriptionApi\.isTopUp\(subscription\)/);
+  assert.match(meta, /settings\.subscriptions\.topUpMonthMeta/);
+  assert.match(submit, /topUps\.length === 0/);
+  assert.match(submit, /settings\.subscriptions\.errorTopUpEntries/);
+
+  // Entries are normalized as they enter form state. normalizeTopUps() mints an
+  // id for anything lacking one, so raw entries would be re-identified on every
+  // render and the delete button would never match its own row.
+  const add = functionBody(app, 'addSubscriptionTopUpEntry', 'setSubscriptionDateBound');
+  assert.match(add, /state\.subscriptionTopUps = subscriptionApi\.normalizeTopUps\(\[/);
+  const raw = subscriptionApi.normalizeTopUps([
+    { date: '2026-07-08', amountMinor: 10000 },
+    { date: '2026-08-01', amountMinor: 9996 }
+  ]);
+  assert.match(raw[0].id, /^top_/);
+  // Re-normalizing keeps the ids, which is the only reason a delete button
+  // captured on one render still matches its row on the next.
+  assert.deepEqual(
+    subscriptionApi.normalizeTopUps(raw).map((entry) => entry.id),
+    raw.map((entry) => entry.id)
+  );
+});
+
+test('the settings row is titled by account and carries the plan name in its meta', () => {
+  const app = readRendererFile('app.js');
+  const title = functionBody(app, 'subscriptionRowTitle', 'subscriptionRowMeta');
+  const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
+
+  const run = (subscription, account) => vm.runInNewContext(
+    `${title}\nsubscriptionRowTitle(subscription, account);`,
+    {
+      subscription,
+      account,
+      state: { settings: {} },
+      subscriptionProviderLabel: (id) => id,
+      accountIdentityApi: {
+        accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
+      }
+    }
+  );
+
+  const record = { provider: 'codex', planName: 'Plus', binding: { accountEmail: 'b@example.com' } };
+  assert.equal(run(record, { provider: 'codex', accountEmail: 'live@example.com' }), 'codex · live@example.com');
+  // No live account yet — the record's own binding still tells the rows apart,
+  // where the plan name would have made all three of them read "codex · Plus".
+  assert.equal(run(record, null), 'codex · b@example.com');
+  assert.equal(run({ provider: 'codex', planName: 'Plus', binding: {} }, null), 'codex · Plus');
+
+  // Which leaves the plan name a place of its own — except on the row where the
+  // title already spent itself on it. The second line is the one that runs out of
+  // room, so it never repeats what the first line just said.
+  const metaFor = (subscription, account) => vm.runInNewContext(
+    `${title}\n${meta}\nsubscriptionRowMeta(subscription, account);`,
+    {
+      subscription,
+      account,
+      state: { settings: {} },
+      subscriptionProviderLabel: (id) => id,
+      accountIdentityApi: {
+        accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
+      },
+      subscriptionApi: require('../../src/shared/subscriptionDisplay'),
+      t: (key, vars) => `${key}(${vars?.date || ''})`,
+      subscriptionPriceText: () => '$20.00 / mo',
+      subscriptionShortDateText: (date) => date,
+      topUpMinorText: (_record, minor) => `$${minor / 100}`
+    }
+  );
+  const named = { provider: 'codex', planName: 'Plus', startDate: '2026-06-08', autoRenew: true, binding: { accountEmail: 'b@example.com' } };
+  assert.match(metaFor(named, null), /^Plus · \$20\.00 \/ mo/);
+  assert.doesNotMatch(metaFor({ ...named, binding: {} }, null), /^Plus/);
+});
+
+test('a subscription card belongs to one account, and a group header summarises', () => {
+  const app = readRendererFile('app.js');
+  const forProvider = functionBody(app, 'subscriptionForProvider', 'subscriptionsForProviderGroup');
+  const cardFor = functionBody(app, 'subscriptionCardForRow', 'positionSubscriptionTooltip');
+
+  // matchProviderAccount falls back to "the provider has exactly one account",
+  // so it must see every account, not just the row being rendered.
+  assert.match(forProvider, /const accounts = limitProvidersForSubscriptions\(\);/);
+  assert.match(forProvider, /subscriptionAccountValue\(account\) === identity/);
+  assert.doesNotMatch(forProvider, /matchProviderAccount\(subscription, \[provider\]\)/);
+  assert.match(cardFor, /provider\?\.accountGroup === true/);
+  assert.match(cardFor, /subscriptionGroupTooltipRows\(provider\.provider/);
+});
+
+test('the seeded plan name is a real plan, never a status label', () => {
+  const app = readRendererFile('app.js');
+  const suggest = functionBody(app, 'subscriptionSuggestedPlanName', 'subscriptionSelectedAccount');
+  // limitProviderPlan() doubles as the status-label producer.
+  assert.match(suggest, /provider\.status !== 'ok' && !provider\.stale/);
+  assert.match(suggest, /return limitProviderPlan\(provider\);/);
+});
+
+test("one account's subscription never appears on its siblings", () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
+  const forProvider = functionBody(app, 'subscriptionForProvider', 'subscriptionsForProviderGroup');
+
+  const resolve = (accounts, subscriptions, provider) => vm.runInNewContext(
+    `${accountValue}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
+    {
+      subscriptionApi,
+      limitProvidersForSubscriptions: () => accounts,
+      subscriptionList: () => subscriptions,
+      provider
+    }
+  );
+
+  const three = [
+    { provider: 'codex', accountKey: 'k1', accountEmail: 'a@example.com' },
+    { provider: 'codex', accountKey: 'k2', accountEmail: 'b@example.com' },
+    { provider: 'codex', accountKey: 'k3', accountEmail: 'c@example.com' }
+  ];
+  const middle = [{ id: 's1', provider: 'codex', binding: { accountEmail: 'b@example.com' } }];
+  assert.deepEqual(
+    three.map((account) => resolve(three, middle, account)),
+    [null, 's1', null]
+  );
+
+  // The sole-account fallback still heals a rotated credential — it just may not
+  // reach across siblings any more.
+  const one = [{ provider: 'codex', accountKey: 'rotated', accountEmail: '' }];
+  const stale = [{ id: 's2', provider: 'codex', binding: { accountKey: 'expired' } }];
+  assert.equal(resolve(one, stale, one[0]), 's2');
+
+  // A subscription for another provider never leaks across provider ids.
+  const claude = [{ provider: 'claude', accountKey: 'k1', accountEmail: 'a@example.com' }];
+  assert.equal(resolve([...three, ...claude], middle, claude[0]), null);
+});
+
+test('the provider rollup appears once, on the row that stands for the provider', () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const planRows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
+  const hasHeader = functionBody(app, 'subscriptionProviderHasGroupHeader', 'subscriptionCardForRow');
+  const cardFor = functionBody(app, 'subscriptionCardForRow', 'positionSubscriptionTooltip');
+
+  const subscription = subscriptionApi.normalizeSubscription({
+    provider: 'codex', startDate: '2026-06-08', amountMinor: 2000, currency: 'USD'
+  });
+  const labels = (includeRollup) => Array.from(vm.runInNewContext(
+    `${planRows}\nsubscriptionPlanTooltipRows(subscription, {}, today, includeRollup).map((row) => (row.separator ? '--' : row.label));`,
+    {
+      subscription,
+      today: '2026-08-01',
+      includeRollup,
+      subscriptionApi,
+      t: (key) => key,
+      subscriptionPriceText: () => '$20.00 / mo',
+      subscriptionDateText: (date) => date,
+      subscriptionDaysText: (days) => `${days}d`,
+      subscriptionElapsedText: () => '2 mo',
+      subscriptionUsageCostUsd: () => 125,
+      subscriptionList: () => [subscription],
+      subscriptionProviderLabel: (id) => id,
+      currencyApi: { normalizeCurrency: () => 'USD', CURRENCY_RATES: { USD: { symbol: '$' } } },
+      formatCost: (value) => `$${value}`
+    }
+  ));
+
+  assert.deepEqual(labels(false), [
+    'subscription.tooltip.price',
+    'subscription.tooltip.nextCharge',
+    'subscription.tooltip.subscribed'
+  ]);
+  assert.deepEqual(labels(true).slice(3), [
+    '--',
+    'subscription.tooltip.monthUsage',
+    'subscription.tooltip.valueMultiple'
+  ]);
+
+  // A group header exists exactly when the provider has more than one account,
+  // and that is what moves the rollup off the member rows. Counted from the list
+  // renderLimits() groups on, not the device-narrowed matching list.
+  assert.match(hasHeader, /state\.stats\?\.limits\?\.providers/);
+  assert.doesNotMatch(hasHeader, /limitProvidersForSubscriptions/);
+  const headerFor = (accounts) => vm.runInNewContext(
+    `${hasHeader}\nsubscriptionProviderHasGroupHeader('codex');`,
+    { state: { stats: { limits: { providers: accounts } } } }
+  );
+  assert.equal(headerFor([{ provider: 'codex' }]), false);
+  assert.equal(headerFor([{ provider: 'codex' }, { provider: 'codex' }]), true);
+  assert.equal(headerFor([{ provider: 'codex' }, { provider: 'claude' }]), false);
+  assert.match(cardFor, /!subscriptionProviderHasGroupHeader\(provider\.provider\)/);
+});
+
+test('the subscription card carries no heading of its own', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const card = functionBody(app, 'subscriptionCardNode', 'subscriptionProviderHasGroupHeader');
+  // Hovering the plan label is what names the card; a "Subscription" line above
+  // the rows only repeats the gesture.
+  assert.doesNotMatch(card, /subscription-tooltip-title/);
+  assert.doesNotMatch(styles, /\.subscription-tooltip-title/);
+  assert.doesNotMatch(readRendererFile('i18n.js'), /'subscription\.tooltip\.(topUp)?[Tt]itle'/);
+});
+
+test('elapsed subscription time never reads as zero months', () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const elapsed = functionBody(app, 'subscriptionElapsedText', 'subscriptionPlanTooltipRows');
+
+  const run = (startDate, today) => vm.runInNewContext(
+    `${elapsed}\nsubscriptionElapsedText(subscription, today);`,
+    {
+      subscription: subscriptionApi.normalizeSubscription({
+        provider: 'codex', startDate, amountMinor: 16000, currency: 'USD'
+      }),
+      today,
+      subscriptionApi,
+      currencyApi: { normalizeCurrency: () => 'USD', CURRENCY_RATES: { USD: { symbol: '$' } } },
+      t: (key, vars) => `${key}|${JSON.stringify(vars || {})}`
+    }
+  );
+
+  // Three weeks in, one payment taken: "0 months · $160 total" reads as a bug.
+  assert.match(run('2026-07-08', '2026-08-01'), /^subscription\.tooltip\.daysCount\|\{"days":24\}/);
+  assert.match(run('2026-06-08', '2026-08-01'), /^subscription\.tooltip\.months\|\{"months":1\}/);
+  // A start date that has not arrived has nothing elapsed and nothing paid.
+  assert.match(run('2026-08-08', '2026-08-01'), /^subscription\.tooltip\.notStarted\|/);
+  assert.doesNotMatch(run('2026-08-08', '2026-08-01'), /paidTotal/);
+
+  const i18n = readRendererFile('i18n.js');
+  for (const key of ['subscription.tooltip.daysCount', 'subscription.tooltip.notStarted']) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+  }
+});
+
+test('a date bound is only written when it actually changes', () => {
+  const app = readRendererFile('app.js');
+  const setBound = functionBody(app, 'setSubscriptionDateBound', 'syncSubscriptionDateBounds');
+  const sync = functionBody(app, 'syncSubscriptionDateBounds', 'resetSubscriptionForm');
+
+  // Rewriting min/max rebuilds Chromium's date editor and drops the segment
+  // being typed, and this runs on the input's own change event.
+  const input = {
+    writes: 0,
+    attrs: { max: '2026-08-01' },
+    getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name) ? this.attrs[name] : null; },
+    setAttribute(name, value) { this.writes += 1; this.attrs[name] = value; }
+  };
+  vm.runInNewContext(
+    `${setBound}\nsetSubscriptionDateBound(input, 'max', '2026-08-01');`,
+    { input }
+  );
+  assert.equal(input.writes, 0);
+  vm.runInNewContext(
+    `${setBound}\nsetSubscriptionDateBound(input, 'max', '2026-08-02');`,
+    { input }
+  );
+  assert.equal(input.writes, 1);
+  assert.match(sync, /setSubscriptionDateBound\(els\.subscriptionStartDateInput, 'max', today\)/);
+  assert.doesNotMatch(sync, /\.max = /);
+});
+
+test('one account holds one subscription record', () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
+  const forAccount = functionBody(app, 'subscriptionForAccountValue', 'subscriptionTooltipRows');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+
+  const accounts = [
+    { provider: 'codex', accountKey: 'k1', accountEmail: 'a@example.com' },
+    { provider: 'codex', accountKey: 'k2', accountEmail: 'b@example.com' }
+  ];
+  const existing = [{ id: 's1', provider: 'codex', binding: { accountEmail: 'b@example.com' } }];
+  const clash = (target, excludeId) => vm.runInNewContext(
+    `${accountValue}\n${forAccount}\nsubscriptionForAccountValue(list, 'codex', subscriptionAccountValue(target), excludeId)?.id || null;`,
+    {
+      subscriptionApi,
+      limitProvidersForSubscriptions: () => accounts,
+      list: existing,
+      target,
+      excludeId
+    }
+  );
+
+  assert.equal(clash(accounts[1]), 's1');
+  // A sibling account is free, and editing the record does not clash with itself.
+  assert.equal(clash(accounts[0]), null);
+  assert.equal(clash(accounts[1], 's1'), null);
+  assert.match(submit, /settings\.subscriptions\.errorDuplicate/);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorDuplicate':").length - 1, 5);
+});
+
+test('a first charge or last top-up cannot be dated in the future', () => {
+  const app = readRendererFile('app.js');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  // `max` on a date input only marks an out-of-range value invalid; typing one
+  // still submits it, and a future anchor makes every derived figure nonsense.
+  assert.match(submit, /startDate > subscriptionApi\.todayString\(\)/);
+  assert.match(submit, /settings\.subscriptions\.errorFutureDate/);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorFutureDate':").length - 1, 5);
+});
+
+test('the subscription card is revealed by having a record, not by a preference', () => {
+  // A second switch on top of "did you enter the data" only made it possible to
+  // fill the form in and see nothing happen. An account with no record still
+  // decorates nothing, so the record itself is the switch.
+  const app = readRendererFile('app.js');
+  const decorate = functionBody(app, 'decoratePlanWithSubscription', 'subscriptionRowTitle');
+  assert.match(decorate, /subscriptionCardForRow\(provider\)/);
+  assert.doesNotMatch(decorate, /state\.settings\?\.show/);
+
+  for (const file of ['app.js', 'index.html', 'i18n.js']) {
+    assert.doesNotMatch(readRendererFile(file), /showSubscriptionInfo/);
+  }
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.doesNotMatch(main, /showSubscriptionInfo/);
+});
+
+test('a plan that does not auto-renew asks when it ends, and stores it there', () => {
+  const app = readRendererFile('app.js');
+  const fieldMode = functionBody(app, 'setSubscriptionRenewalFieldMode', 'subscriptionFormIsTopUp');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  const beginEdit = functionBody(app, 'beginSubscriptionEdit', 'submitSubscription');
+
+  // One field, two meanings — so a language switch later has to land on the key
+  // the field currently means, not the one the markup shipped with.
+  const label = { dataset: {}, textContent: '' };
+  const note = { dataset: {}, textContent: '' };
+  const run = (checked) => vm.runInNewContext(
+    `${fieldMode}\nsetSubscriptionRenewalFieldMode();`,
+    {
+      t: (key) => `t:${key}`,
+      els: {
+        subscriptionAutoRenewInput: { checked },
+        subscriptionNextRenewalLabel: label,
+        subscriptionNextRenewalNote: note
+      }
+    }
+  );
+
+  run(true);
+  assert.equal(label.dataset.i18n, 'settings.subscriptions.nextRenewal');
+  assert.equal(note.dataset.i18n, 'settings.subscriptions.nextRenewalNote');
+  assert.equal(label.textContent, 't:settings.subscriptions.nextRenewal');
+  run(false);
+  assert.equal(label.dataset.i18n, 'settings.subscriptions.coverageEnd');
+  assert.equal(note.dataset.i18n, 'settings.subscriptions.coverageEndNote');
+  assert.equal(label.textContent, 't:settings.subscriptions.coverageEnd');
+
+  // The saved record must never carry both dates: a stale override left behind
+  // by the toggle would keep scheduling charges on a cancelled plan.
+  assert.match(submit, /nextRenewalOverride: kind === 'topup' \|\| !autoRenew \? null : renewalDate \|\| null/);
+  assert.match(submit, /endDate: kind === 'topup' \|\| autoRenew \? null : renewalDate \|\| null/);
+  assert.match(submit, /settings\.subscriptions\.errorRenewalDate/);
+  assert.match(beginEdit, /subscription\.autoRenew \? subscription\.nextRenewalOverride : subscription\.endDate/);
+  for (const key of ['coverageEnd', 'coverageEndNote', 'errorRenewalDate']) {
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 5);
+  }
+});
+
+test('a lapsed plan reads as ended rather than counting days backwards', () => {
+  const app = readRendererFile('app.js');
+  const rows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
+  const elapsed = functionBody(app, 'subscriptionElapsedText', 'subscriptionPlanTooltipRows');
+  assert.match(rows, /daysLeft < 0 \? t\('subscription\.tooltip\.expired'\)/);
+  assert.equal(readRendererFile('i18n.js').split("'subscription.tooltip.expired':").length - 1, 5);
+  // Time on the plan stops at the day coverage ran out; it does not keep ageing
+  // after the plan ended.
+  assert.match(elapsed, /coverageStopDate\(subscription\)/);
+  assert.match(elapsed, /stop && stop < today \? stop : today/);
+});
+
+test('removing a ledger entry has to be confirmed, like the rows above it', () => {
+  const app = readRendererFile('app.js');
+  const render = functionBody(app, 'renderSubscriptionTopUpEntries', 'addSubscriptionTopUpEntry');
+  // A mis-click rewrites the month total the ledger exists to report, and the
+  // entry is recorded nowhere else.
+  assert.match(render, /if \(!armed\) \{/);
+  assert.match(render, /remove\.textContent = '✓'/);
+  assert.match(render, /settings\.subscriptions\.topUpRemoveConfirm/);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.topUpRemoveConfirm':").length - 1, 5);
+  assert.ok(cssBlock(readRendererFile('styles.css'), '.subscription-topup-row .subscription-topup-remove.is-armed'));
+});
+
+test('every provider a subscription can name has a mark to identify it by', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const providerBlock = app.slice(app.indexOf('const LIMIT_PROVIDERS = ['));
+  const ids = [...providerBlock.slice(0, providerBlock.indexOf('];')).matchAll(/\bid: '([^']+)'/g)]
+    .map((match) => match[1]);
+  assert.ok(ids.length >= 19, 'LIMIT_PROVIDERS should be parsed, not empty');
+
+  // .row-icon paints currentColor through a mask, so an id with no mask rule
+  // behind it renders as a solid square — worse than no icon at all.
+  for (const id of ids) {
+    assert.ok(
+      new RegExp(`\\.row-icon-${id}\\b[^{]*\\{`).test(styles),
+      `.row-icon-${id} mask rule should exist for LIMIT_PROVIDERS id ${id}`
+    );
+  }
+
+  const iconClass = functionBody(app, 'subscriptionProviderIconClass', 'isCreditsProvider');
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  // Unknown ids are the case the mask list cannot cover: a record stays bound to
+  // its provider even after that provider leaves the list.
+  assert.match(iconClass, /LIMIT_PROVIDERS\.some\(/);
+  assert.match(rows, /toolIconsEnabled\(state\.settings\?\.showToolIcons\)/);
+  assert.match(rows, /subscriptionProviderIconClass\(subscription\.provider\)/);
+  // The gutter only exists when something occupies it.
+  assert.match(
+    cssBlock(styles, '.subscription-row:has(.subscription-row-icon)'),
+    /grid-template-columns: auto minmax\(0, 1fr\) auto/
+  );
+  assert.ok(cssBlock(styles, '.subscription-row-icon'));
+});
+
+test('the settings rows date themselves in short form, the tooltip in full', () => {
+  const app = readRendererFile('app.js');
+  const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
+  const short = functionBody(app, 'subscriptionShortDateText', 'subscriptionLocalDate');
+  const full = functionBody(app, 'subscriptionDateText', 'subscriptionShortDateText');
+  const planRows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
+
+  // Two dense lines in a ~300px panel: the date is the longest thing on the
+  // second one, and the locale already defines a numeric short form for it.
+  assert.match(short, /dateStyle: 'short'/);
+  assert.match(full, /month: 'short'/);
+  assert.doesNotMatch(meta, /subscriptionDateText\(/);
+  // The tooltip has the room, so it keeps spelling the date out.
+  assert.match(planRows, /subscriptionDateText\(/);
+});
+
+test('the section says where the recorded data shows up', () => {
+  const i18n = readRendererFile('i18n.js');
+  const html = readRendererFile('index.html');
+  // A record decorates a plan label somewhere else entirely; without being told,
+  // there is nothing in this panel that points at it.
+  const notes = [...i18n.matchAll(/'settings\.subscriptions\.note': '(.+?)',\n/g)].map((match) => match[1]);
+  assert.equal(notes.length, 5);
+  for (const note of notes) {
+    assert.match(note, /Hover|游標|光标|마우스|カーソル/);
+  }
+  // The markup fallback is what renders before i18n applies, so it cannot lag.
+  assert.ok(html.includes("Hover an account's plan label on the AI Tool Limits page"));
+});
+
+test('subscriptions are written through the hub-aware channel, never as a setting', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+
+  // Both mutation sites go through the one function that knows the write can be
+  // refused. saveSettings() would write settings.json and fork the shared list.
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  assert.match(rows, /if \(!await saveSubscriptions\(/);
+  assert.match(submit, /if \(!await saveSubscriptions\(/);
+  assert.doesNotMatch(app, /saveSettings\(\{ subscriptions/);
+
+  // The version the list was built from travels with it, so the write can be
+  // refused rather than silently re-based on whatever main holds by then.
+  assert.match(preload, /saveSubscriptions: \(subscriptions, base\) => ipcRenderer\.invoke\('subscriptions:save', subscriptions, base\)/);
+  // An edit says what it was made on, and that is what the form was opened with —
+  // not whatever a push has left in state.settings since.
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase\)/);
+  // A row action has no form, so it reads the list and what it was taken from
+  // together at the click rather than reusing the list the row was drawn with.
+  assert.doesNotMatch(rows, /saveSubscriptions\(list\.filter/);
+  assert.match(rows, /subscriptionSettingsVersion\(\)/);
+  // The hub is checked on its own rather than left to the version, which cannot
+  // answer for it: two hubs nobody has written to report the same nothing.
+  // Checked before the modes divide, or a form opened on a hub would be written
+  // into this device's own list — the one write the shared-mode guard never sees.
+  const mainSave = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
+  const hubCheckAt = mainSave.search(/base\?\.hub[^\n]*!== currentHubIdentity\(\)/);
+  assert.ok(hubCheckAt > -1, 'the hub the edit was composed against must be checked');
+  assert.ok(hubCheckAt < mainSave.indexOf('if (!subscriptionsAreShared())'));
+
+  // settings:update must not be a second way in. Asserting that the guard LINE
+  // exists is not enough — the first version of this deleted the key from
+  // normalizedPatch while the normalizer below read it straight off `patch`, so
+  // the guard was inert and this test was green. Assert the dangerous read is
+  // gone instead: nothing in the handler may source subscriptions from a patch.
+  const handler = main.slice(main.indexOf("ipcMain.handle('settings:update'"));
+  const handlerBody = handler.slice(0, handler.indexOf("ipcMain.handle('", 1));
+  assert.match(handlerBody, /subscriptions: subscriptionDisplay\.normalizeSubscriptions\(\s*settings\.subscriptions,/);
+  assert.doesNotMatch(handlerBody, /patch\.subscriptions/);
+  assert.doesNotMatch(handlerBody, /patch\.subscriptionsOrphaned/);
+
+  // A refused write must leave the screen showing what is actually stored.
+  const save = functionBody(app, 'saveSubscriptions', 'renderSubscriptionSyncError');
+  assert.match(save, /window\.tokenMonitor\.getSettings\(\)/);
+  assert.match(save, /stale_write/);
+  for (const key of ['errorStaleWrite', 'errorHubWrite', 'noteShared']) {
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 5);
+  }
+});
+
+test('the note stops promising the data stays on this device once a hub has it', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const note = functionBody(app, 'renderSubscriptionNote', 'setSubscriptionError');
+
+  // Retargeting data-i18n as well as the text keeps a later language switch on
+  // whichever key currently applies.
+  assert.match(note, /subscriptionsShared/);
+  assert.match(note, /el\.dataset\.i18n = key;/);
+  assert.match(main, /subscriptionsShared: subscriptionsAreShared\(\)/);
+
+  // Only the two hub modes share; local mode keeps its own list.
+  const shared = functionBody(main, 'subscriptionsAreShared', 'effectiveSubscriptions');
+  const run = (hubMode) => vm.runInNewContext(`${shared}\nsubscriptionsAreShared();`, { settings: { hubMode } });
+  assert.equal(run('local'), false);
+  assert.equal(run('client'), true);
+  assert.equal(run('host'), true);
+
+  // English is what renders before i18n applies, so the markup cannot lag.
+  const en = readRendererFile('i18n.js').split("'settings.subscriptions.note':")[1].split('\n')[0];
+  const english = en.slice(en.indexOf("'") + 1, en.lastIndexOf("',")).replace(/\\'/g, "'");
+  assert.ok(readRendererFile('index.html').includes(english), `markup fallback should read: ${english}`);
+  // The shared variant differs by exactly one thing: where the list lives. The
+  // old "nothing leaves this device" reassurance answered a question nobody
+  // asked and stopped being unconditionally true.
+  const sharedNote = readRendererFile('i18n.js').split("'settings.subscriptions.noteShared':")[1].split('\n')[0];
+  assert.match(sharedNote, /kept on your hub/);
+  assert.doesNotMatch(readRendererFile('i18n.js'), /nothing leaves this device/);
+});
+
+test('a record added on another device turns up without pushing settings at the user mid-edit', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const cache = functionBody(main, 'cacheSharedSubscriptions', 'subscriptionsEndpoint');
+  const poll = functionBody(main, 'maybeRefreshSharedSubscriptions', 'saveSubscriptions');
+
+  // Pushing settings re-renders the whole settings form, so the poll may only do
+  // it when the shared list actually moved.
+  assert.match(poll, /if \(changed\) pushSettingsToRenderer\(\)/);
+  assert.match(poll, /lastSubscriptionRefreshMs < SUBSCRIPTION_REFRESH_MS/);
+  assert.match(main, /maybeRefreshSharedSubscriptions\(\);\n {4}return fetchStats\(options\);/);
+
+  // persistSubscriptionState() sits between the two, so the slice carries it and
+  // this exercises the real rollback path rather than a stand-in.
+  const run = (previous, incoming, { saveOk = true } = {}) => {
+    const context = vm.createContext({
+      hubSubscriptions: previous,
+      hubSubscriptionsHub: previous ? 'https://hub.example' : '',
+      settings: {
+        subscriptions: [{ id: 'stale' }],
+        subscriptionsOrphaned: { hubUrl: 'https://hub.example', records: [{ id: 'held' }] },
+        subscriptionsCacheHub: previous ? 'https://hub.example' : ''
+      },
+      currentHubIdentity: () => 'https://hub.example',
+      saveSettings: () => { context.saved = true; return saveOk; },
+      console: { log() {} },
+      doc: incoming
+    });
+    const changed = vm.runInContext(`${cache}\ncacheSharedSubscriptions(doc, 'https://hub.example');`, context);
+    return { changed, saved: Boolean(context.saved), settings: plain(context.settings) };
+  };
+  const doc = { updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'a' }] };
+  // A changed list is mirrored into settings.json, which is what an unreachable
+  // hub falls back to showing at the next startup, and tagged with the hub it
+  // came from so a later switch does not treat it as this device's own data.
+  const first = run(null, doc);
+  assert.equal(first.changed, true);
+  assert.equal(first.saved, true);
+  assert.deepEqual(first.settings.subscriptions, [{ id: 'a' }]);
+  assert.equal(first.settings.subscriptionsCacheHub, 'https://hub.example');
+  // Same document again: no write, no re-render.
+  assert.deepEqual(
+    (({ changed, saved }) => ({ changed, saved }))(run(doc, { ...doc })),
+    { changed: false, saved: false }
+  );
+  assert.equal(run(doc, { updatedAt: '2026-08-02T10:00:00.000Z', subscriptions: [] }).changed, true);
+
+  // saveSettings() rolls the whole settings object back when the file cannot be
+  // written. The set-aside records would go with it and their notice would
+  // disappear mid-session, with nothing on screen saying anything went wrong.
+  const failed = run(null, doc, { saveOk: false });
+  assert.deepEqual(failed.settings.subscriptions, [{ id: 'a' }]);
+  assert.deepEqual(failed.settings.subscriptionsOrphaned.records, [{ id: 'held' }]);
+});
+
+test('a deleted record is not resurrected by another device rejoining', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'rememberOrphanedSubscriptions', 'currentHubIdentity'),
+    functionBody(main, 'currentHubIdentity', 'orphanedSubscriptions'),
+    functionBody(main, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(main, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    // functionBody() slices from `function <name>(`, dropping the async keyword.
+    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeRefreshSharedSubscriptions')}`
+  ].join('\n');
+
+  const run = async ({ doc, local, writeFails = false }) => {
+    const written = [];
+    const context = vm.createContext({
+      settings: {
+        hubMode: 'client',
+        subscriptions: local,
+        subscriptionsOrphaned: { hubUrl: '', records: [] },
+        subscriptionsCacheHub: ''
+      },
+      hubSubscriptions: null,
+      hubSubscriptionsHub: '',
+      subscriptionOpIsCurrent: (hub) => hub === context.currentHubIdentity(),
+      subscriptionsAreShared: () => true,
+      effectiveHubConfig: () => ({ url: 'https://hub.example' }),
+      fetchSharedSubscriptions: async () => doc,
+      writeSharedSubscriptionsNow: async (list) => {
+        if (writeFails) throw new Error('hub down');
+        written.push(list);
+        context.hubSubscriptions = { updatedAt: 'written', subscriptions: list };
+      },
+      cacheSharedSubscriptions: (next, hub) => {
+        context.hubSubscriptions = next;
+        context.hubSubscriptionsHub = hub;
+        return true;
+      },
+      saveSettings: () => true,
+      console: { log() {} },
+      JSON
+    });
+    await vm.runInContext(`${source}\nrefreshSharedSubscriptionsNow({ seedFromLocal: true });`, context);
+    return { written, context };
+  };
+
+  // Deleting the last record leaves an empty list WITH a timestamp. Treating
+  // that as "never written" makes a device holding a stale cache re-upload it,
+  // undoing somebody else's delete.
+  const afterDelete = await run({
+    doc: { updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [] },
+    local: [{ id: 'old' }]
+  });
+  assert.deepEqual(afterDelete.written, []);
+  assert.deepEqual(plain(afterDelete.context.settings.subscriptionsOrphaned), {
+    hubUrl: 'https://hub.example',
+    records: [{ id: 'old' }]
+  });
+
+  // A hub nobody has ever written to still adopts this device's records.
+  const virgin = await run({ doc: { updatedAt: '', subscriptions: [] }, local: [{ id: 'mine' }] });
+  assert.deepEqual(virgin.written, [[{ id: 'mine' }]]);
+
+  // If that seed fails, the empty document must not stay installed: in shared
+  // mode it is what the UI reads, so every record would appear to be gone.
+  const failed = await run({ doc: { updatedAt: '', subscriptions: [] }, local: [{ id: 'mine' }], writeFails: true });
+  assert.equal(failed.context.hubSubscriptions, null);
+});
+
+test('joining a hub that already has records sets this device aside, never over', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const remember = functionBody(main, 'rememberOrphanedSubscriptions', 'adoptOrphanedSubscriptions');
+  const adopt = functionBody(main, 'adoptOrphanedSubscriptions', 'discardOrphanedSubscriptions');
+
+  const helpers = [
+    remember,
+    functionBody(main, 'currentHubIdentity', 'orphanedSubscriptions'),
+    functionBody(main, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(main, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions')
+  ].join('\n');
+  const context = vm.createContext({
+    settings: {
+      subscriptions: [{ id: 'a', amountMinor: 1000 }, { id: 'b' }],
+      subscriptionsOrphaned: { hubUrl: '', records: [] }
+    },
+    subscriptionsAreShared: () => true,
+    effectiveHubConfig: () => ({ url: 'https://hub.example' }),
+    JSON
+  });
+  const shared = `{ subscriptions: [{ id: 'a', amountMinor: 1000 }, { id: 'z' }] }`;
+  const changed = vm.runInContext(
+    `${helpers}\nrememberOrphanedSubscriptions(settings.subscriptions, ${shared});`,
+    context
+  );
+  // Only what the shared list does not already have. Matched on record id, not
+  // on the account: the same plan entered on two machines has two ids, and
+  // folding those together silently would double the monthly total.
+  assert.equal(changed, true);
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'b' }]);
+  // Re-running changes nothing, so a reconnect does not keep re-prompting.
+  assert.equal(vm.runInContext(`rememberOrphanedSubscriptions(settings.subscriptions, ${shared});`, context), false);
+
+  // A record edited here while the device was in local mode keeps its id, so an
+  // id-only comparison would let the shared copy silently win and drop the edit.
+  const edited = `{ subscriptions: [{ id: 'a', amountMinor: 2000 }, { id: 'z' }] }`;
+  assert.equal(vm.runInContext(`rememberOrphanedSubscriptions(settings.subscriptions, ${edited});`, context), true);
+  assert.deepEqual(
+    plain(context.settings.subscriptionsOrphaned.records),
+    [{ id: 'a', amountMinor: 1000 }, { id: 'b' }]
+  );
+
+  // Held back from one hub, never offered to another — or to local mode, where
+  // there is nothing to adopt into.
+  assert.deepEqual(plain(vm.runInContext('pendingOrphanedSubscriptions();', context)).map((entry) => entry.id), ['a', 'b']);
+  context.effectiveHubConfig = () => ({ url: 'https://other.example' });
+  assert.deepEqual(plain(vm.runInContext('pendingOrphanedSubscriptions();', context)), []);
+  context.effectiveHubConfig = () => ({ url: 'https://hub.example' });
+  context.subscriptionsAreShared = () => false;
+  assert.deepEqual(plain(vm.runInContext('pendingOrphanedSubscriptions();', context)), []);
+
+  // Adopting appends to the shared list and only then forgets them.
+  // Same-id orphans replace rather than append, or normalization would drop the
+  // adopted edit as a duplicate id.
+  assert.match(adopt, /merged\.set\(orphan\.id, orphan\)/);
+  const order = [adopt.indexOf('await writeSharedSubscriptions'), adopt.indexOf("settings.subscriptionsOrphaned = { hubUrl: '', records: [] }")];
+  assert.ok(order[0] > -1 && order[0] < order[1], 'orphans must survive a failed adopt');
+});
+
+test('a refused write says which problem it was', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const app = readRendererFile('app.js');
+  const mapCode = functionBody(main, 'subscriptionWriteFailureCode', 'discardOrphanedSubscriptions');
+  const mapKey = functionBody(app, 'subscriptionWriteErrorKey', 'renderSubscriptionOrphanNotice');
+
+  const code = (error) => vm.runInNewContext(`${mapCode}\nsubscriptionWriteFailureCode(error);`, { error });
+  // A hub that answered 401 is reachable — telling the user to check their
+  // network sends them looking in the wrong place for a wrong secret.
+  assert.equal(code({ code: 'rejected', status: 401 }), 'hub_rejected');
+  assert.equal(code({ code: 'stale_write' }), 'stale_write');
+  assert.equal(code({ code: 'write_failed' }), 'write_failed');
+  assert.equal(code(new TypeError('fetch failed')), 'hub_unreachable');
+
+  const key = (message) => vm.runInNewContext(`${mapKey}\nsubscriptionWriteErrorKey({ message });`, { message });
+  assert.match(key("Error invoking remote method 'subscriptions:save': Error: hub_rejected"), /errorHubRejected$/);
+  assert.match(key('Error: write_failed'), /errorWriteFailed$/);
+  assert.match(key('Error: stale_write'), /errorStaleWrite$/);
+  assert.match(key('Error: hub_unreachable'), /errorHubWrite$/);
+
+  // A local save that was rolled back is not a save.
+  const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
+  assert.match(save, /if \(!saveSettings\(\)\) \{/);
+  for (const k of ['errorHubRejected', 'errorWriteFailed', 'orphanNotice', 'orphanAdopt', 'orphanDiscard']) {
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${k}':`).length - 1, 5);
+  }
+});
+
+test('a device with no limits of its own can still name the accounts on the hub', () => {
+  const app = readRendererFile('app.js');
+  const source = [
+    functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue'),
+    functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName')
+  ].join('\n');
+  const run = (local, aggregate) => plain(vm.runInNewContext(
+    `${source}\nlimitProvidersForSubscriptions();`,
+    { localDeviceLimitsProviders: () => local, state: { stats: { limits: { providers: aggregate } } } }
+  ));
+  const remote = [{ provider: 'codex', accountKey: 'remote', accountEmail: 'a@example.com' }];
+
+  // localDeviceLimitsProviders() returns [] when this device is known but reports
+  // no limits, and [] is truthy — a plain `||` handed back the empty array and
+  // left the picker blank while the accounts sat on another machine.
+  assert.deepEqual(run([], remote), remote);
+  assert.deepEqual(run(null, remote), remote);
+  assert.deepEqual(run([], undefined), []);
+
+  // A shared list names accounts across devices, so both sides show up. Keeping
+  // only the local ones hid remote rows — and left a lone local account as the
+  // only candidate, which matchProviderAccount()'s sole-account fallback would
+  // then bind a remote subscription to.
+  const mine = [{ provider: 'claude', accountKey: 'local', accountEmail: 'me@example.com' }];
+  assert.deepEqual(run(mine, remote).map((entry) => entry.accountKey), ['local', 'remote']);
+  const sameProvider = [{ provider: 'codex', accountKey: 'local', accountEmail: 'me@example.com' }];
+  assert.deepEqual(run(sameProvider, remote).map((entry) => entry.accountKey), ['local', 'remote']);
+  // The aggregate normally carries this device's accounts too; they appear once.
+  assert.deepEqual(run(mine, [...mine, ...remote]).map((entry) => entry.accountKey), ['local', 'remote']);
+});
+
+test('a hub timestamp that cannot be parsed does not turn a save into a crash', () => {
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  // A stored document could carry a malformed or legacy updatedAt; Date.parse
+  // would hand toISOString() a NaN and throw where a save was expected.
+  for (const previous of ['not-a-date', '2026-13-45', '∞']) {
+    const doc = subscriptionApi.subscriptionDocument([], { previousUpdatedAt: previous });
+    assert.match(doc.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  }
+});
+
+test('one hub cached list is never filed as records belonging to the next hub', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const refresh = functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeRefreshSharedSubscriptions');
+
+  // Once settings.subscriptions is a cache of some hub it is that hub's data.
+  // Carrying it into the next hub would seed or offer accounts that were never
+  // entered on this device.
+  assert.match(refresh, /const local = settings\.subscriptionsCacheHub \? \[\] : \(settings\.subscriptions \|\| \[\]\);/);
+  // And a document from another hub is dropped rather than shown as this one's.
+  assert.match(refresh, /hubSubscriptions && hubSubscriptionsHub !== hub/);
+  // The identity is captured before the request, so a hub switch mid-flight
+  // cannot make a late answer land under the wrong hub's name.
+  assert.match(refresh, /const hub = currentHubIdentity\(\);/);
+  assert.match(refresh, /if \(!subscriptionOpIsCurrent\(hub\)\) return false;/);
+  // Every hub read and write goes through the lane for its own hub, so nothing
+  // can observe the state between another operation on it starting and finishing.
+  assert.match(functionBody(main, 'refreshSharedSubscriptions', 'refreshSharedSubscriptionsNow'), /queueSubscriptionOp\(/);
+  assert.match(functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'), /queueSubscriptionOp\(/);
+  // Neither can outlast a hub that accepts the connection and stops answering.
+  assert.match(functionBody(main, 'fetchSharedSubscriptions', 'staleSubscriptionWriteError'), /signal: AbortSignal\.timeout\(15_000\)/);
+  assert.match(functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions'), /signal: AbortSignal\.timeout\(15_000\)/);
+
+  // Editing in local mode hands ownership back, which is what clears the marker.
+  const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
+  assert.match(save, /settings\.subscriptionsCacheHub = '';/);
+
+  // A trailing slash the user typed must not read as a different hub.
+  const identity = functionBody(main, 'currentHubIdentity', 'orphanedSubscriptions');
+  const run = (url) => vm.runInNewContext(`${identity}\ncurrentHubIdentity();`, { effectiveHubConfig: () => ({ url }) });
+  assert.equal(run('https://hub.example/'), 'https://hub.example');
+  assert.equal(run('https://hub.example'), 'https://hub.example');
+  assert.equal(run(null), '');
+});
+
+test('both hubs answer a stale write the same way, even when it is also malformed', async () => {
+  const worker = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'src', 'index.js'), 'utf8');
+  const staleAt = worker.indexOf('isStaleSubscriptionWrite');
+  const currencyAt = worker.indexOf('unsupported currency');
+  // A stale write is exactly the case where the client needs the stored document
+  // back to re-base on; answering 400 instead would withhold it.
+  assert.ok(staleAt > -1 && staleAt < currencyAt, 'staleness must be checked before currency');
+
+  const hubSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'hub', 'server.js'), 'utf8');
+  const set = functionBody(hubSource, 'setSubscriptions', 'onStats');
+  assert.ok(set.indexOf('isStaleSubscriptionWrite') < set.indexOf('unsupported currency'));
+});
+
+test('records held for a decision survive reconnecting to the same hub', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'cacheSharedSubscriptions', 'persistSubscriptionState'),
+    functionBody(main, 'rememberOrphanedSubscriptions', 'currentHubIdentity'),
+    functionBody(main, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(main, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeRefreshSharedSubscriptions')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: {
+      hubMode: 'client',
+      subscriptions: [{ id: 'mine' }],
+      subscriptionsOrphaned: { hubUrl: '', records: [] },
+      subscriptionsCacheHub: ''
+    },
+    hubSubscriptions: null,
+    hubSubscriptionsHub: '',
+    subscriptionOpIsCurrent: (hub) => hub === context.currentHubIdentity(),
+    subscriptionsAreShared: () => true,
+    currentHubIdentity: () => 'https://hub.example',
+    fetchSharedSubscriptions: async () => ({ updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'theirs' }] }),
+    writeSharedSubscriptionsNow: async () => {},
+    persistSubscriptionState: () => true,
+    console: { log() {} },
+    JSON
+  });
+  const refresh = () => vm.runInContext(`${source}\nrefreshSharedSubscriptionsNow({ seedFromLocal: true });`, context);
+
+  // Joining a hub that already has records sets this device's aside.
+  await refresh();
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'mine' }]);
+
+  // A restart, or any later mode change, reconciles against the same hub again.
+  // settings.subscriptions is now that hub's cache, so comparing it against the
+  // hub finds no differences — and used to answer that by clearing a set the
+  // user had not decided about yet.
+  await refresh();
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'mine' }]);
+  assert.deepEqual(plain(vm.runInContext('pendingOrphanedSubscriptions();', context)), [{ id: 'mine' }]);
+});
+
+test('a hub that cannot be reached never shows the previous hub records', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const effective = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'effectiveSubscriptions', 'cacheSharedSubscriptions')
+  ].join('\n');
+  const run = (context) => plain(vm.runInNewContext(`${effective}\neffectiveSubscriptions();`, {
+    subscriptionsAreShared: () => true,
+    currentHubIdentity: () => 'https://b.example',
+    ...context
+  }));
+
+  const cached = { subscriptions: [{ id: 'from-a' }] };
+  // Hub B is unreachable, so nothing was fetched and the document in hand is
+  // still hub A's. Showing it would describe hub B with hub A's records.
+  assert.deepEqual(
+    run({
+      hubSubscriptions: cached,
+      hubSubscriptionsHub: 'https://a.example',
+      settings: { subscriptions: [{ id: 'from-a' }], subscriptionsCacheHub: 'https://a.example' }
+    }),
+    []
+  );
+  // The on-disk copy answers when it belongs to this hub.
+  assert.deepEqual(
+    run({
+      hubSubscriptions: null,
+      hubSubscriptionsHub: '',
+      settings: { subscriptions: [{ id: 'from-b' }], subscriptionsCacheHub: 'https://b.example' }
+    }),
+    [{ id: 'from-b' }]
+  );
+  // An unmarked list is this device's own, waiting to be seeded.
+  assert.deepEqual(
+    run({
+      hubSubscriptions: null,
+      hubSubscriptionsHub: '',
+      settings: { subscriptions: [{ id: 'mine' }], subscriptionsCacheHub: '' }
+    }),
+    [{ id: 'mine' }]
+  );
+});
+
+test('a rejection from the hub the user just left does not empty the one they are on', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(main, 'staleSubscriptionWriteError', 'writeSharedSubscriptions'),
+    `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    hubSubscriptions: { updatedAt: 'v1', subscriptions: [] },
+    hubSubscriptionsHub: 'https://a.example',
+    hub: 'https://a.example',
+    currentHubIdentity: () => context.hub,
+    embeddedHub: null,
+    subscriptionsEndpoint: () => ({ url: 'https://a.example/api/subscriptions', headers: {} }),
+    // Hub A rejects the write as stale, and the user switches to hub B before the
+    // rejection arrives. Its body is hub A's list; caching it would describe hub
+    // B with hub A's records — or, as here, with an empty list hub B never had.
+    fetch: async () => {
+      context.hub = 'https://b.example';
+      return { status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [] }) };
+    },
+    cacheSharedSubscriptions: (doc) => { context.cached = doc; return true; },
+    AbortSignal: { timeout: () => null },
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  await assert.rejects(
+    () => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example', 'v1');", context),
+    /stale_write/
+  );
+  assert.equal(context.cached, undefined);
+
+  // Staying put, the same rejection is worth caching: it is the hub's current list.
+  context.hub = 'https://a.example';
+  context.fetch = async () => ({ status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] }) });
+  await assert.rejects(() => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example', 'v1');", context), /stale_write/);
+  assert.deepEqual(plain(context.cached), { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] });
+});
+
+test('hub reads and writes run one at a time, in the order they were asked for', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'),
+    `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`,
+    functionBody(main, 'refreshSharedSubscriptions', 'refreshSharedSubscriptionsNow'),
+    `async ${functionBody(main, 'refreshSharedSubscriptionsNow', 'maybeRefreshSharedSubscriptions')}`
+  ].join('\n');
+
+  const build = () => {
+    const context = vm.createContext({
+      settings: {
+        hubMode: 'client',
+        subscriptions: [],
+        subscriptionsOrphaned: { hubUrl: '', records: [] },
+        subscriptionsCacheHub: 'https://hub.example'
+      },
+      hubSubscriptions: { updatedAt: 'v0', subscriptions: [] },
+      hubSubscriptionsHub: 'https://hub.example',
+      subscriptionQueues: new Map(),
+      AbortSignal: { timeout: () => null },
+      subscriptionsAreShared: () => true,
+      currentHubIdentity: () => 'https://hub.example',
+      embeddedHub: null,
+      // The hub's state, so a read really does observe whatever the last write left.
+      server: { updatedAt: 'v0', subscriptions: [] },
+      log: [],
+      subscriptionsEndpoint: () => ({ url: 'https://hub.example/api/subscriptions', headers: {} }),
+      // Deliberately slow, so an unserialized read would have every chance to
+      // overtake a write and observe the state before it.
+      fetchSharedSubscriptions: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        context.log.push(`read:${context.server.updatedAt}`);
+        return { ...context.server };
+      },
+      fetch: async (_url, init) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        const body = JSON.parse(init.body);
+        context.server = { updatedAt: body.subscriptions[0].id, subscriptions: body.subscriptions };
+        context.log.push(`write:${context.server.updatedAt}`);
+        return { ok: true, status: 200, json: async () => ({ ...context.server }) };
+      },
+      cacheSharedSubscriptions: (doc, hub) => {
+        context.cached = doc;
+        context.hubSubscriptions = doc;
+        context.hubSubscriptionsHub = hub;
+        return true;
+      },
+      rememberOrphanedSubscriptions: () => false,
+      persistSubscriptionState: () => true,
+      console: { log() {} },
+      setTimeout,
+      Promise,
+      JSON
+    });
+    vm.runInContext(source, context);
+    return context;
+  };
+
+  // A read started while a write is still in flight would answer with the state
+  // before it, land last because it was quicker, and leave the saved record
+  // invisible. The lane means the read cannot start until the write is done.
+  const a = build();
+  const write = vm.runInContext("writeSharedSubscriptions([{ id: 'saved' }], 'v0');", a);
+  const read = vm.runInContext('refreshSharedSubscriptions({});', a);
+  await Promise.all([write, read]);
+  assert.deepEqual(a.log, ['write:saved', 'read:saved']);
+  assert.equal(a.cached.updatedAt, 'saved');
+
+  // And the same the other way round, which is the case the epoch used to cover.
+  const b = build();
+  const first = vm.runInContext('refreshSharedSubscriptions({});', b);
+  const second = vm.runInContext("writeSharedSubscriptions([{ id: 'saved' }], 'v0');", b);
+  await Promise.all([first, second]);
+  assert.deepEqual(b.log, ['read:v0', 'write:saved']);
+  assert.equal(b.cached.updatedAt, 'saved');
+
+  // Two writes built on the same version, the second queued before the first came
+  // back. Ordering them is not licence to re-base the second on what the first
+  // left: its list was made without that change, and sending it under the token
+  // the first produced is how a row deleted a moment ago comes back.
+  const c = build();
+  const one = vm.runInContext("writeSharedSubscriptions([{ id: 'one' }], 'v0');", c);
+  const two = vm.runInContext("writeSharedSubscriptions([{ id: 'two' }], 'v0');", c);
+  await one;
+  await assert.rejects(() => two, /stale_write/);
+  assert.deepEqual(c.log, ['write:one']);
+  assert.equal(c.cached.updatedAt, 'one');
+});
+
+test('a failed operation does not block the lane behind it', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const queue = functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent');
+  const context = vm.createContext({
+    subscriptionQueues: new Map(),
+    currentHubIdentity: () => 'https://hub.example',
+    Promise
+  });
+  vm.runInContext(queue, context);
+
+  const ran = [];
+  context.boom = () => { ran.push('boom'); return Promise.reject(new Error('hub down')); };
+  context.after = () => { ran.push('after'); return Promise.resolve('ok'); };
+  // The caller still sees the failure, but one unreachable hub must not wedge
+  // every later read and write for the rest of the session.
+  await assert.rejects(() => vm.runInContext('queueSubscriptionOp(boom);', context), /hub down/);
+  assert.equal(await vm.runInContext('queueSubscriptionOp(after);', context), 'ok');
+  assert.deepEqual(ran, ['boom', 'after']);
+});
+
+test('a hub that accepts the connection and stops answering does not wedge the lane', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    `async ${functionBody(main, 'fetchSharedSubscriptions', 'staleSubscriptionWriteError')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    embeddedHub: null,
+    subscriptionQueues: new Map(),
+    currentHubIdentity: () => 'https://hub.example',
+    subscriptionsEndpoint: () => ({ url: 'https://hub.example/api/subscriptions', headers: {} }),
+    // Records the deadline each request was given, and stands in for a socket
+    // that stays open: the first request ends only because the deadline ends it.
+    AbortSignal: { timeout: (ms) => ({ ms }) },
+    deadlines: [],
+    fetch: async (_url, init) => {
+      context.deadlines.push(init?.signal?.ms);
+      if (context.deadlines.length === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+      }
+      return { ok: true, status: 200, json: async () => ({ updatedAt: 'v1', subscriptions: [] }) };
+    },
+    setTimeout,
+    Promise
+  });
+  vm.runInContext(source, context);
+
+  await assert.rejects(() => vm.runInContext('queueSubscriptionOp(() => fetchSharedSubscriptions());', context), /aborted/);
+  // Without a deadline the first request would still be open, and this one — and
+  // every save after it — would wait behind it until the app restarted.
+  const answered = await vm.runInContext('queueSubscriptionOp(() => fetchSharedSubscriptions());', context);
+  assert.equal(answered.updatedAt, 'v1');
+  assert.deepEqual(context.deadlines, [15_000, 15_000]);
+});
+
+test('a save queued against one hub is not written to the one the user moved to', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'),
+    `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    embeddedHub: null,
+    subscriptionQueues: new Map(),
+    hub: 'https://a.example',
+    currentHubIdentity: () => context.hub,
+    hubSubscriptions: { updatedAt: 'a-v1', subscriptions: [] },
+    hubSubscriptionsHub: 'https://a.example',
+    subscriptionsEndpoint: () => ({ url: `${context.hub}/api/subscriptions`, headers: {} }),
+    AbortSignal: { timeout: () => null },
+    written: [],
+    fetch: async (url) => {
+      context.written.push(url);
+      return { ok: true, status: 200, json: async () => ({ updatedAt: 'v2', subscriptions: [] }) };
+    },
+    cacheSharedSubscriptions: () => true,
+    staleSubscriptionWriteError: () => new Error('stale_write'),
+    Promise,
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  // Hold the lane so the save is still queued when the user switches hubs.
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  context.hold = () => held;
+  const holding = vm.runInContext('queueSubscriptionOp(hold);', context);
+  const queued = vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }]);", context);
+  context.hub = 'https://b.example';
+  release();
+  await holding;
+
+  await assert.rejects(() => queued, /hub changed/);
+  // Not merely unsaved: the records the user entered against A must not reach B
+  // at all, least of all based on an updatedAt that was never read from it.
+  assert.deepEqual(context.written, []);
+});
+
+test('a hub that is slow to answer does not hold up the one in front of the user', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const context = vm.createContext({
+    subscriptionQueues: new Map(),
+    hub: 'https://slow.example',
+    currentHubIdentity: () => context.hub,
+    Promise
+  });
+  vm.runInContext(functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'), context);
+
+  const ran = [];
+  let finish;
+  const stall = new Promise((resolve) => { finish = resolve; });
+  const release = () => { ran.push('slow'); finish(); };
+  context.slow = () => stall;
+  context.quick = () => { ran.push('quick'); return Promise.resolve('quick'); };
+
+  const stalled = vm.runInContext('queueSubscriptionOp(slow);', context);
+  context.hub = 'https://near.example';
+  // Ordering is only worth anything against one shared document. Behind a single
+  // lane this would wait on a hub the user has already left.
+  assert.equal(await vm.runInContext('queueSubscriptionOp(quick);', context), 'quick');
+  assert.deepEqual(ran, ['quick']);
+
+  release();
+  await stalled;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  // And the lanes are gone once idle, rather than one per hub ever typed.
+  assert.equal(context.subscriptionQueues.size, 0);
+});
+
+test('coming back to a hub does not write against the other hub token', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'),
+    `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    embeddedHub: null,
+    subscriptionQueues: new Map(),
+    hub: 'https://a.example',
+    currentHubIdentity: () => context.hub,
+    // A → B → A: hub B's document is still the one installed, because A's own
+    // refresh has not replaced it yet. The queued-hub check passes — A really is
+    // in front of the user — and only the document says otherwise.
+    hubSubscriptions: { updatedAt: 'b-v9', subscriptions: [{ id: 'b-record' }] },
+    hubSubscriptionsHub: 'https://b.example',
+    subscriptionsEndpoint: () => ({ url: `${context.hub}/api/subscriptions`, headers: {} }),
+    AbortSignal: { timeout: () => null },
+    sent: [],
+    fetch: async (url, init) => {
+      context.sent.push({ url, base: JSON.parse(init.body).baseUpdatedAt });
+      return { ok: true, status: 200, json: async () => ({ updatedAt: 'a-v2', subscriptions: [] }) };
+    },
+    cacheSharedSubscriptions: () => true,
+    staleSubscriptionWriteError: () => new Error('stale_write'),
+    Promise,
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  // An edit made while B was on screen claims B's token. Sent to A it claims to
+  // have read a list that was never A's, and an A carrying the same token would
+  // accept it outright, over records this device has never seen. Refused here
+  // instead, which tells the user to look at what A actually holds.
+  await assert.rejects(
+    () => vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }], 'b-v9');", context),
+    /stale_write/
+  );
+  assert.deepEqual(plain(context.sent), []);
+
+  // With A's own document in hand and an edit built on it, the write goes out —
+  // carrying the version it was built from, which is what keeps 409 meaningful.
+  context.hubSubscriptions = { updatedAt: 'a-v1', subscriptions: [] };
+  context.hubSubscriptionsHub = 'https://a.example';
+  await vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }], 'a-v1');", context);
+  assert.deepEqual(plain(context.sent), [{ url: 'https://a.example/api/subscriptions', base: 'a-v1' }]);
+
+  // And an edit built on a version this device has already moved past is stale
+  // for the same reason another device's write is, without a round trip to hear it.
+  context.hubSubscriptions = { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] };
+  context.sent = [];
+  await assert.rejects(
+    () => vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }], 'a-v1');", context),
+    /stale_write/
+  );
+  assert.deepEqual(plain(context.sent), []);
+
+  // Adopting set-aside records merges into the document in hand, so it has to ask
+  // the same question — otherwise B's records join A's list as though entered here.
+  const adopt = functionBody(main, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode');
+  assert.doesNotMatch(adopt, /hubSubscriptions\?\./);
+  assert.match(adopt, /subscriptionsDocumentFor\(/);
+});
+
+test('an edit is saved against the version its form was opened on', async () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const source = [
+    functionBody(app, 'setSubscriptionFormOpen', 'seedSubscriptionPlanName'),
+    functionBody(app, 'subscriptionSettingsVersion', 'applySubscriptionSettings'),
+    functionBody(app, 'applySubscriptionSettings', 'saveSubscriptions'),
+    `async ${functionBody(app, 'saveSubscriptions', 'subscriptionWriteErrorKey')}`,
+    functionBody(app, 'subscriptionWriteErrorKey', 'renderSubscriptionOrphanNotice')
+  ].join('\n');
+
+  const context = vm.createContext({
+    els: {},
+    state: { settings: { subscriptionsHub: 'https://a.example', subscriptionsUpdatedAt: 'v1' }, subscriptionFormBase: null },
+    hub: 'https://a.example',
+    onHub: 'v1',
+    // What a write would leave behind, set per step the way a hub would.
+    nextVersion: '',
+    sent: [],
+    window: {
+      tokenMonitor: {
+        saveSubscriptions: async (list, base) => {
+          context.sent.push(base?.updatedAt);
+          if (base?.hub !== context.hub) throw new Error('hub_changed');
+          if (base?.updatedAt !== context.onHub) throw new Error('stale_write');
+          context.onHub = context.nextVersion;
+          return { subscriptionsHub: context.hub, subscriptionsUpdatedAt: context.onHub, subscriptions: list };
+        },
+        getSettings: async () => ({ subscriptionsHub: context.hub, subscriptionsUpdatedAt: context.onHub })
+      }
+    },
+    renderSubscriptionSettings: () => {},
+    resetSubscriptionForm: () => { context.formReset = true; },
+    Promise
+  });
+  vm.runInContext(source, context);
+
+  vm.runInContext('setSubscriptionFormOpen(true);', context);
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v1' });
+
+  // Another device writes while the form is open. The push replaces settings, and
+  // the row for the record being edited is redrawn — but the fields in front of
+  // the user are still the ones they typed, against v1.
+  context.state.settings = { subscriptionsHub: 'https://a.example', subscriptionsUpdatedAt: 'v2' };
+  context.onHub = 'v2';
+
+  // So the save says v1 and is refused, instead of claiming to have seen a change
+  // it was never shown and carrying the other device's edit away with it.
+  assert.equal(
+    await vm.runInContext("saveSubscriptions([{ id: 'mine' }], state.subscriptionFormBase || '');", context),
+    false
+  );
+  assert.deepEqual(context.sent, ['v1']);
+  assert.equal(context.state.subscriptionSyncError, 'settings.subscriptions.errorStaleWrite');
+  assert.equal(context.formReset, undefined);
+
+  // Re-anchored on what is now on screen, so the user can look at what changed and
+  // save again. Without this the second attempt would be refused too, and every
+  // one after it.
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v2' });
+  context.nextVersion = 'v3';
+  assert.equal(
+    await vm.runInContext("saveSubscriptions([{ id: 'mine' }], state.subscriptionFormBase || '');", context),
+    true
+  );
+  assert.deepEqual(context.sent, ['v1', 'v2']);
+
+  // Removing a row while a form is open writes a new version too, and that one
+  // the user has seen — they removed it. The form re-anchors on what this device
+  // wrote rather than refusing the edit still in progress, once, for a change it
+  // caused itself.
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v3' });
+  context.sent = [];
+  context.nextVersion = 'v4';
+  assert.equal(await vm.runInContext('saveSubscriptions([], subscriptionSettingsVersion());', context), true);
+  assert.deepEqual(context.sent, ['v3']);
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v4' });
+
+  // Switching hubs under an open form is the one case re-anchoring must not
+  // handle: the fields hold an edit made for the hub the user left, and giving
+  // them the new hub's version would let that edit be saved into its list. Two
+  // hubs nobody has written to would even agree on the version, so only the hub
+  // itself can answer this.
+  context.hub = 'https://b.example';
+  context.onHub = 'b-v1';
+  context.sent = [];
+  assert.equal(
+    await vm.runInContext('saveSubscriptions([{ id: \'mine\' }], state.subscriptionFormBase);', context),
+    false
+  );
+  assert.equal(context.state.subscriptionSyncError, 'settings.subscriptions.errorHubChanged');
+  assert.equal(context.formReset, true);
+  // The form is gone rather than re-pointed, so there is no second attempt to be
+  // accepted by the hub the edit was never meant for.
+  assert.equal(context.state.subscriptionFormBase, null);
+
+  // And closed, there is no form version to speak for — the row actions carry
+  // what is on screen instead.
+  vm.runInContext('setSubscriptionFormOpen(true);', context);
+  vm.runInContext('setSubscriptionFormOpen(false);', context);
+  assert.equal(context.state.subscriptionFormBase, null);
+
+  // Adopting and discarding move the shared list on too, and each was found to
+  // have forgotten this rule one at a time. None of the three may take a settings
+  // snapshot straight from the channel that produced it — they go through the one
+  // function that knows what an open form has to do about it.
+  assert.doesNotMatch(
+    app,
+    /state\.settings = await window\.tokenMonitor\.(saveSubscriptions|adoptOrphanedSubscriptions|discardOrphanedSubscriptions)/
+  );
+  for (const channel of ['saveSubscriptions', 'adoptOrphanedSubscriptions', 'discardOrphanedSubscriptions']) {
+    assert.match(app, new RegExp(`applySubscriptionSettings\\(await window\\.tokenMonitor\\.${channel}\\(`));
+  }
+});
+
+test('a form opened on a hub is not written into this device own list instead', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'hubChangedError', 'subscriptionsEndpoint'),
+    `async ${functionBody(main, 'saveSubscriptions', 'stopSyncCollector')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    // Switched to local mode with the hub still configured, which is the state
+    // the mode switch leaves behind. Only the mode says which list is in front of
+    // the user, so only the mode can say which one an edit belongs to.
+    settings: { hubMode: 'local', hubUrl: 'https://a.example', subscriptions: [{ id: 'cached' }], subscriptionsCacheHub: 'https://a.example' },
+    subscriptionsAreShared: () => false,
+    currentHubIdentity: () => '',
+    subscriptionDisplay: { normalizeSubscriptions: (list) => list },
+    normalizeCurrency: (value) => value,
+    saveSettings: () => { context.saved = true; return true; },
+    settingsForRenderer: () => ({}),
+    writeSharedSubscriptions: async () => { context.wrote = true; },
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(source, context);
+
+  // The form was composed against hub A's list. Landing it here would take those
+  // records as this device's own — subscriptionsCacheHub cleared, ownership
+  // handed over — on the strength of an edit that was never about this list.
+  await assert.rejects(
+    () => vm.runInContext("saveSubscriptions([{ id: 'mine' }], { hub: 'https://a.example', updatedAt: 'a-v1' });", context),
+    /hub changed/
+  );
+  assert.equal(context.saved, undefined);
+  assert.equal(context.wrote, undefined);
+  assert.equal(context.settings.subscriptionsCacheHub, 'https://a.example');
+  assert.deepEqual(plain(context.settings.subscriptions), [{ id: 'cached' }]);
+
+  // A form opened in local mode carries the empty identity and saves normally.
+  await vm.runInContext("saveSubscriptions([{ id: 'mine' }], { hub: '', updatedAt: '' });", context);
+  assert.equal(context.saved, true);
+  assert.equal(context.settings.subscriptionsCacheHub, '');
+});
+
+test('adopting set-aside records keeps whatever the hub gained while it waited', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`,
+    `async ${functionBody(main, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client', subscriptionsOrphaned: { hubUrl: 'https://a.example', records: [{ id: 'mine' }] } },
+    embeddedHub: null,
+    subscriptionQueues: new Map(),
+    currentHubIdentity: () => 'https://a.example',
+    hubSubscriptions: { updatedAt: 'a-v1', subscriptions: [] },
+    hubSubscriptionsHub: 'https://a.example',
+    pendingOrphanedSubscriptions: () => context.settings.subscriptionsOrphaned.records,
+    subscriptionsEndpoint: () => ({ url: 'https://a.example/api/subscriptions', headers: {} }),
+    AbortSignal: { timeout: () => null },
+    sent: [],
+    fetch: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      context.sent.push({ base: body.baseUpdatedAt, ids: body.subscriptions.map((entry) => entry.id) });
+      return { ok: true, status: 200, json: async () => ({ updatedAt: 'a-v3', subscriptions: body.subscriptions }) };
+    },
+    cacheSharedSubscriptions: () => true,
+    staleSubscriptionWriteError: () => new Error('stale_write'),
+    settingsForRenderer: () => ({}),
+    saveSettings: () => true,
+    setTimeout,
+    Promise,
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  // Already in the lane, and it moves the hub on: another device's record arrives
+  // and the document the merge would have read becomes the one before it.
+  context.ahead = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    context.hubSubscriptions = { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] };
+  };
+  const queued = vm.runInContext('queueSubscriptionOp(ahead);', context);
+  const adopting = vm.runInContext('adoptOrphanedSubscriptions();', context);
+  await Promise.all([queued, adopting]);
+
+  // Merging outside the lane would pair a-v1's list with a-v2's token: current
+  // enough for the hub to accept, and 'theirs' would be gone without a word.
+  assert.deepEqual(plain(context.sent), [{ base: 'a-v2', ids: ['theirs', 'mine'] }]);
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned), { hubUrl: '', records: [] });
+});
+
+test('switching hubs does not wait out the old hub request before starting', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const startMode = functionBody(main, 'startMode', 'reconcileSharedSubscriptions');
+  // The mode queue orders hub infrastructure so a port edit cannot finish behind
+  // the mode change that preceded it. Subscriptions are not part of that — they
+  // have a lane of their own, per hub — and awaiting them here makes the next
+  // hub's stream and collector wait out this one's 15s deadline with nothing on
+  // screen.
+  assert.doesNotMatch(startMode, /await reconcileSharedSubscriptions/);
+  assert.match(startMode, /reconcileSharedSubscriptions\(\);/);
+  // Nothing awaits it any more, so it has to keep its own failures rather than
+  // surface them as an unhandled rejection.
+  assert.match(functionBody(main, 'reconcileSharedSubscriptions', 'restartDeviceRuntimeForMode'), /\} catch \(error\) \{/);
 });

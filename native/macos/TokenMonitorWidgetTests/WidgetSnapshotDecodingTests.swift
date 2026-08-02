@@ -10,6 +10,23 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(snapshot.activity.days.first, WidgetActivityDay(date: "2026-07-16", intensity: 4, totalTokens: 37_400_000))
     }
 
+    func testCompactTokenUnitsFollowPresentationAndLegacyDefaults() throws {
+        let localized = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","presentation":{"numberStyle":"compact","compactTokenUnits":"localized","locale":"zh-TW"},"status":{"noData":true}}
+        """)
+
+        XCTAssertEqual(localized.presentation.compactTokenUnits, "localized")
+        XCTAssertEqual(WidgetFormat.tokens(15_000, style: localized.presentation.numberStyle, presentation: localized.presentation), "1.5萬")
+        XCTAssertEqual(WidgetFormat.tokens(295_116_445, style: localized.presentation.numberStyle, presentation: localized.presentation), "2.95億")
+
+        let legacy = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","presentation":{"numberStyle":"compact","locale":"zh-TW"},"status":{"noData":true}}
+        """)
+
+        XCTAssertEqual(legacy.presentation.compactTokenUnits, "western")
+        XCTAssertEqual(WidgetFormat.tokens(15_000, style: legacy.presentation.numberStyle, presentation: legacy.presentation), "15.0K")
+    }
+
     func testDecodesSchemaV4ProviderBalances() throws {
         let snapshot = try decode("""
         {"schemaVersion":4,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"currentPeriod":"today","totalTokens":100,"updatedAt":"2026-07-17T08:59:00.000Z"}}},"quota":[{"provider":"mimo","status":"ok","balance":{"amount":3.62,"currency":"CNY"},"windows":[]},{"provider":"deepseek","status":"ok","balance":{"amount":9.33,"currency":"USD"},"windows":[]},{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":2}]}],"status":{"noData":false}}

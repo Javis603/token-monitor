@@ -198,3 +198,203 @@ test('ingest accepts payloads above the legacy 256 KiB limit', async () => {
     fs.rmSync(dataFile, { force: true });
   }
 });
+
+test('the hub stores one shared subscription list, not one per device', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const call = (method, body) => fetch(`http://127.0.0.1:${port}/api/subscriptions`, {
+      method,
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+
+    // A hub nobody has written to reports an empty updatedAt, which is what lets
+    // the very first write through the staleness check.
+    const empty = await (await call('GET')).json();
+    assert.deepEqual(empty.subscriptions, []);
+    assert.equal(empty.updatedAt, '');
+
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const written = await (await call('PUT', { subscriptions: [record], baseUpdatedAt: '' })).json();
+    assert.equal(written.subscriptions.length, 1);
+    assert.equal(written.subscriptions[0].id, 'sub_1');
+    assert.notEqual(written.updatedAt, '');
+
+    // Every device reads the same list back — it belongs to the account, not to
+    // whichever machine happened to record it.
+    const read = await (await call('GET')).json();
+    assert.deepEqual(read.subscriptions, written.subscriptions);
+
+    // A device writing from a stale copy would erase records added elsewhere
+    // since it last looked, and they exist nowhere else.
+    const stale = await call('PUT', { subscriptions: [], baseUpdatedAt: '' });
+    assert.equal(stale.status, 409);
+    const conflict = await stale.json();
+    assert.equal(conflict.error, 'stale_write');
+    assert.equal(conflict.subscriptions.length, 1);
+    assert.deepEqual((await (await call('GET')).json()).subscriptions, written.subscriptions);
+
+    // Writing from the copy it just read through does go in, including a delete.
+    const cleared = await (await call('PUT', { subscriptions: [], baseUpdatedAt: written.updatedAt })).json();
+    assert.deepEqual(cleared.subscriptions, []);
+
+    // Malformed records are discarded rather than stored: this arrives over the
+    // network from another device.
+    const junk = await (await call('PUT', { subscriptions: [{ provider: '' }, 'nope', record], baseUpdatedAt: cleared.updatedAt })).json();
+    assert.equal(junk.subscriptions.length, 1);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the shared subscription list survives a hub restart and needs the secret', async () => {
+  const dataFile = tempDataFile();
+  const record = { id: 'sub_1', provider: 'claude', planName: 'Pro', amountMinor: 14600, currency: 'HKD', startDate: '2026-07-19' };
+  const first = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await first.start();
+  try {
+    first.setSubscriptions([record], '');
+  } finally {
+    await first.stop();
+  }
+
+  const second = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await second.start();
+  try {
+    assert.equal(second.getSubscriptions().subscriptions[0].id, 'sub_1');
+    const { port } = second.server.address();
+    // Money the user recorded by hand is behind the same gate as account identity.
+    const unauthorized = await fetch(`http://127.0.0.1:${port}/api/subscriptions`);
+    assert.equal(unauthorized.status, 401);
+    const stats = await (await fetch(`http://127.0.0.1:${port}/api/stats`, { headers: { authorization: 'Bearer shh' } })).json();
+    assert.doesNotMatch(JSON.stringify(stats), /subscription/i);
+  } finally {
+    await second.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('a malformed subscription write is refused instead of emptying the ledger', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const put = (body) => fetch(`http://127.0.0.1:${port}/api/subscriptions`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+      body: JSON.stringify(body)
+    });
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const written = await (await put({ subscriptions: [record], baseUpdatedAt: '' })).json();
+
+    // A non-array normalizes to [] and would store as a perfectly successful
+    // replacement, wiping records that exist nowhere else.
+    for (const bad of [undefined, null, 'oops', 42, { 0: record }]) {
+      const response = await put({ subscriptions: bad, baseUpdatedAt: written.updatedAt });
+      assert.equal(response.status, 400, `subscriptions: ${JSON.stringify(bad)} should be refused`);
+    }
+    assert.equal(hub.getSubscriptions().subscriptions.length, 1);
+
+    // An intentional clear still goes through.
+    assert.equal((await (await put({ subscriptions: [], baseUpdatedAt: written.updatedAt })).json()).subscriptions.length, 0);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the hub advertises PUT so a browser preflight does not block the write', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    // The endpoint existing is not enough: a browser-origin client is stopped at
+    // the preflight if the method is not advertised.
+    const preflight = await fetch(`http://127.0.0.1:${port}/api/subscriptions`, { method: 'OPTIONS' });
+    assert.match(preflight.headers.get('access-control-allow-methods') || '', /\bPUT\b/);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('back-to-back writes each get their own concurrency token', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  try {
+    const record = (id) => ({ id, provider: 'codex', startDate: '2026-05-31' });
+    const first = hub.setSubscriptions([record('a')], '');
+    const second = hub.setSubscriptions([record('a'), record('b')], first.updatedAt);
+    // Same millisecond is entirely possible here; if the token repeated, a third
+    // write holding `first` would sail through and drop record b.
+    assert.ok(second.updatedAt > first.updatedAt);
+    assert.throws(() => hub.setSubscriptions([], first.updatedAt), /stale_write/);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('a subscription write that cannot reach disk does not take effect in memory', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  try {
+    const record = (id) => ({ id, provider: 'codex', startDate: '2026-05-31', currency: 'USD' });
+    const written = hub.setSubscriptions([record('a')], '');
+
+    // A directory where the temp file belongs makes the atomic write fail. If
+    // memory moved anyway, this process would serve a record the file does not
+    // have and a restart would silently revert it.
+    fs.mkdirSync(`${dataFile}.tmp`, { recursive: true });
+    try {
+      assert.throws(() => hub.setSubscriptions([record('a'), record('b')], written.updatedAt));
+    } finally {
+      fs.rmSync(`${dataFile}.tmp`, { recursive: true, force: true });
+    }
+    assert.deepEqual(hub.getSubscriptions().subscriptions.map((entry) => entry.id), ['a']);
+    assert.equal(hub.getSubscriptions().updatedAt, written.updatedAt);
+    // And the file still agrees, so a restart lands on the same list.
+    assert.deepEqual(JSON.parse(fs.readFileSync(dataFile, 'utf8')).subscriptions.subscriptions.map((e) => e.id), ['a']);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('a currency the app carries no rate for is refused, not rewritten', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const put = (body) => fetch(`http://127.0.0.1:${port}/api/subscriptions`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+      body: JSON.stringify(body)
+    });
+    // Coercing EUR to USD reports an amount the user never entered, and the
+    // endpoint documents this as validation.
+    const refused = await put({
+      subscriptions: [{ id: 'a', provider: 'codex', startDate: '2026-05-31', amountMinor: 10000, currency: 'EUR' }],
+      baseUpdatedAt: ''
+    });
+    assert.equal(refused.status, 400);
+    assert.match((await refused.json()).message, /EUR/);
+    assert.deepEqual(hub.getSubscriptions().subscriptions, []);
+
+    for (const code of ['USD', 'TWD', 'HKD', 'CNY']) {
+      const ok = await put({
+        subscriptions: [{ id: 'a', provider: 'codex', startDate: '2026-05-31', currency: code }],
+        baseUpdatedAt: hub.getSubscriptions().updatedAt
+      });
+      assert.equal(ok.status, 200, `${code} should be accepted`);
+    }
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});

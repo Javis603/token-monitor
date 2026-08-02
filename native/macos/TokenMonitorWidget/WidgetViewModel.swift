@@ -582,7 +582,7 @@ struct WidgetViewModel: Equatable {
             return WidgetViewModel(
                 page: page,
                 title: snapshot.overview.currentPeriod.uppercased(),
-                primaryValue: WidgetFormat.tokens(snapshot.overview.totalTokens, style: snapshot.presentation.numberStyle),
+                primaryValue: WidgetFormat.tokens(snapshot.overview.totalTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation),
                 secondaryValue: snapshot.presentation.showCost ? WidgetFormat.cost(snapshot.overview.costUsd, presentation: snapshot.presentation) : "",
                 rows: []
             )
@@ -603,7 +603,7 @@ struct WidgetViewModel: Equatable {
                 page: page,
                 title: WidgetL10n.text("Models"),
                 primaryValue: models.first?.displayName ?? WidgetL10n.text("No model data"),
-                secondaryValue: models.first.map { "\(WidgetFormat.tokens($0.totalTokens, style: snapshot.presentation.numberStyle)) · \(Int($0.sharePercent.rounded()))%" } ?? "",
+                secondaryValue: models.first.map { "\(WidgetFormat.tokens($0.totalTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation)) · \(Int($0.sharePercent.rounded()))%" } ?? "",
                 rows: models.dropFirst().map { "\($0.displayName) · \(Int($0.sharePercent.rounded()))%" }
             )
         case .activity:
@@ -618,9 +618,9 @@ struct WidgetViewModel: Equatable {
             return WidgetViewModel(
                 page: page,
                 title: WidgetL10n.text("Trend"),
-                primaryValue: WidgetFormat.tokens(snapshot.trend.currentTokens, style: snapshot.presentation.numberStyle),
+                primaryValue: WidgetFormat.tokens(snapshot.trend.currentTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation),
                 secondaryValue: snapshot.trend.startDate.flatMap { start in snapshot.trend.endDate.map { "\(start) – \($0)" } } ?? WidgetL10n.text("No trend data"),
-                rows: [WidgetL10n.format("Peak · %@", WidgetFormat.tokens(snapshot.trend.peakTokens, style: snapshot.presentation.numberStyle))]
+                rows: [WidgetL10n.format("Peak · %@", WidgetFormat.tokens(snapshot.trend.peakTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation))]
             )
         }
     }
@@ -628,13 +628,72 @@ struct WidgetViewModel: Equatable {
 
 enum WidgetFormat {
     static func tokens(_ value: Int, style: String = "compact") -> String {
+        tokens(value, style: style, unitSystem: "western", locale: "auto")
+    }
+
+    static func tokens(_ value: Int, style: String = "compact", presentation: WidgetPresentation) -> String {
+        tokens(value, style: style, unitSystem: presentation.compactTokenUnits, locale: presentation.locale)
+    }
+
+    private static func tokens(_ value: Int, style: String, unitSystem: String, locale: String) -> String {
         guard style == "compact" else { return value.formatted(.number.grouping(.automatic)) }
-        switch value {
-        case 1_000_000_000...: return String(format: "%.1fB", Double(value) / 1_000_000_000)
-        case 1_000_000...: return String(format: "%.1fM", Double(value) / 1_000_000)
-        case 1_000...: return String(format: "%.1fK", Double(value) / 1_000)
-        default: return value.formatted()
+
+        let language = normalizedLocale(locale)
+        let isChinese = language == "zh" || language.hasPrefix("zh-")
+        let isJapanese = language == "ja" || language.hasPrefix("ja-")
+        let isKorean = language == "ko" || language.hasPrefix("ko-")
+        guard unitSystem == "localized", isChinese || isJapanese || isKorean else {
+            switch value {
+            case 1_000_000_000...: return String(format: "%.1fB", Double(value) / 1_000_000_000)
+            case 1_000_000...: return String(format: "%.1fM", Double(value) / 1_000_000)
+            case 1_000...: return String(format: "%.1fK", Double(value) / 1_000)
+            default: return value.formatted()
+            }
         }
+
+        let suffixes: [String]
+        if isKorean {
+            suffixes = ["\u{B9CC}", "\u{C5B5}"]
+        } else if isJapanese {
+            suffixes = ["\u{4E07}", "\u{5104}"]
+        } else {
+            let simplified = language.hasPrefix("zh-hans")
+                || language == "zh-cn" || language.hasPrefix("zh-cn-")
+                || language == "zh-sg" || language.hasPrefix("zh-sg-")
+                || language == "zh-my" || language.hasPrefix("zh-my-")
+            suffixes = simplified ? ["\u{4E07}", "\u{4EBF}"] : ["\u{842C}", "\u{5104}"]
+        }
+        let divisors: [Double] = [1e4, 1e8]
+        let absolute = abs(Double(value))
+        var unitIndex = -1
+        for index in stride(from: divisors.count - 1, through: 0, by: -1) {
+            if absolute >= divisors[index] {
+                unitIndex = index
+                break
+            }
+        }
+        guard unitIndex >= 0 else { return String(value) }
+
+        func formatScaled(_ scaled: Double) -> String {
+            let decimals = abs(scaled) < 10 ? 2 : 1
+            return decimals == 2
+                ? String(format: "%.2f", scaled)
+                : String(format: "%.1f", scaled)
+        }
+
+        var display = formatScaled(Double(value) / divisors[unitIndex])
+        if abs(Double(display) ?? 0) >= 10_000, unitIndex < divisors.count - 1 {
+            unitIndex += 1
+            display = formatScaled(Double(value) / divisors[unitIndex])
+        }
+        while display.last == "0" { display.removeLast() }
+        if display.last == "." { display.removeLast() }
+        return "\(display)\(suffixes[unitIndex])"
+    }
+
+    private static func normalizedLocale(_ value: String) -> String {
+        let source = value.lowercased() == "auto" ? Locale.current.identifier : value
+        return source.replacingOccurrences(of: "_", with: "-").lowercased()
     }
 
     static func cost(_ usd: Double, presentation: WidgetPresentation) -> String {

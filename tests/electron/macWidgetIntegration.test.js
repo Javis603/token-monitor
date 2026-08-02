@@ -55,6 +55,7 @@ test('publishes final stats to the macOS Widget from the single sendPush outlet'
   const sendPush = mainSource.slice(start, end);
   assert.match(sendPush, /latestStats = payload\.data\.stats;\s+scheduleMacWidgetSnapshot\(latestStats\);/);
   assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(latestStats\)/g) || []).length, 1);
+  assert.match(mainSource, /compactTokenUnits: settings\?\.compactTokenUnits/);
 });
 
 test('keeps Widget packaging opt-in and injects artifacts only after a successful build', () => {
@@ -377,7 +378,7 @@ test('Medium and Large activity cells are App Intent buttons with stable selecti
   assert.match(widgetSource, /context\.layout == \.large \{[\s\S]*secondary\(largeActivityCaptionText\(snapshot, layout: spec\)\)/);
   assert.match(widgetSource, /private func largeActivityCaptionText\([\s\S]*return activityDateRangeText\(layout\)/);
   assert.doesNotMatch(widgetSource, /selectedDayDetailLine/);
-  assert.match(widgetSource, /WidgetFormat\.tokens\(day\.totalTokens, style: snapshot\.presentation\.numberStyle\)/);
+  assert.match(widgetSource, /WidgetFormat\.tokens\(day\.totalTokens, style: snapshot\.presentation\.numberStyle, presentation: snapshot\.presentation\)/);
   assert.match(widgetSource, /WidgetActivitySelection\.detailDay\(/);
   assert.doesNotMatch(widgetSource, /onHover|@State/);
 });

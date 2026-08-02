@@ -5,7 +5,7 @@ const MAX_JSON_BODY_BYTES = 1024 * 1024;
 function corsHeaders(extraHeaders = {}) {
   return {
     'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+    'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
     'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret',
     ...extraHeaders
   };

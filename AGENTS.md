@@ -88,6 +88,12 @@ One caveat on top of the table:
 
 The hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). The wire shape between agent/widget and hub is whatever `collectUsageOnce()` returns — that function is the source of truth, and `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osName` / `osVersion` / `agentRuntime` / `history` / `limits`. The Worker hub uses the exact same shapes.
 
+### Subscriptions are hub-scoped, not device-scoped
+
+Manually recorded subscriptions (`src/shared/subscriptionDisplay.js`) are the one thing a hub stores that is **not** part of a device record. A subscription describes an account, and `accountKey` is not stable across platforms — the collapse pass in `limits.js` exists precisely because the same OAuth login hashes differently on macOS and Windows — so per-device copies could not be deduped and a two-machine setup would double its own monthly total. `GET`/`PUT /api/subscriptions` therefore read and write one shared list per hub; a delete is a delete, with no tombstone needed.
+
+`PUT` carries `baseUpdatedAt` and answers `409` when it does not match the stored document: this data exists nowhere else, so a device writing from a stale copy must not silently erase records added elsewhere. In the widget that token belongs to whoever built the list — the renderer sends back the version its edit was made on — and is never re-derived at write time. Hub reads and writes run in a per-hub lane, but ordering is not re-basing: a write queued behind a refresh that pulled in another device's records is refused, not quietly retargeted at the version that refresh left. In `local` mode the list lives in the widget's `settings.json`; in `client`/`host` mode that key is only the last-known cache, and writes attempted while the hub is unreachable are refused rather than applied locally (a local write would fork the shared list). The list is never part of `publicStats`.
+
 ### Stale devices
 
 A device is "stale" if `Date.now() - receivedAt > staleAfterMs` (default 10 min). Stale devices still appear in `/api/stats` with `stale: true`, and the renderer greys them out — this is intentional, not a bug.

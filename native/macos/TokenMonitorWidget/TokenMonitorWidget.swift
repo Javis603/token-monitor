@@ -333,14 +333,14 @@ struct TokenMonitorWidgetView: View {
                     itemCount: snapshot.models.count,
                     availableHeight: context.size.height
                 )
-                largeModelList(snapshot, context: context, plan: largePlan)
+                largeModelList(snapshot, context: context, plan: largePlan, presentation: snapshot.presentation)
             } else {
                 let plan = WidgetListCapacity.plan(
                     itemCount: snapshot.models.count,
                     availableHeight: context.size.height,
                     kind: .models
                 )
-                modelList(snapshot, context: context, plan: plan)
+                modelList(snapshot, context: context, plan: plan, presentation: snapshot.presentation)
             }
         }
     }
@@ -599,7 +599,7 @@ struct TokenMonitorWidgetView: View {
         let rows = Array(snapshot.models.prefix(max(0, limit))).map {
             LargeOverviewListRow.Model(
                 label: $0.displayName,
-                value: WidgetFormat.tokens($0.totalTokens, style: snapshot.presentation.numberStyle),
+                value: WidgetFormat.tokens($0.totalTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation),
                 style: .primary
             )
         }
@@ -716,7 +716,8 @@ struct TokenMonitorWidgetView: View {
     private func modelList(
         _ snapshot: WidgetSnapshot,
         context: WidgetContentContext,
-        plan: WidgetListLayoutPlan
+        plan: WidgetListLayoutPlan,
+        presentation: WidgetPresentation
     ) -> some View {
         let rows = Array(snapshot.models.prefix(plan.visibleCount))
         let showsDetails = plan.density == .regular
@@ -732,7 +733,8 @@ struct TokenMonitorWidgetView: View {
                         density: plan.density,
                         showsBars: showsDetails && context.layout != .small,
                         showsTokens: showsDetails,
-                        style: snapshot.presentation.numberStyle
+                        style: snapshot.presentation.numberStyle,
+                        presentation: presentation
                     )
                     .frame(height: plan.rowHeight, alignment: .topLeading)
                     .overlay(alignment: .bottom) {
@@ -753,7 +755,8 @@ struct TokenMonitorWidgetView: View {
     private func largeModelList(
         _ snapshot: WidgetSnapshot,
         context: WidgetContentContext,
-        plan: WidgetLargeListLayoutPlan
+        plan: WidgetLargeListLayoutPlan,
+        presentation: WidgetPresentation
     ) -> some View {
         let rows = Array(snapshot.models.prefix(plan.visibleCount))
 
@@ -765,7 +768,8 @@ struct TokenMonitorWidgetView: View {
                     largeModelRow(
                         model,
                         plan: plan,
-                        style: snapshot.presentation.numberStyle
+                        style: snapshot.presentation.numberStyle,
+                        presentation: presentation
                     )
                     .frame(height: plan.rowHeight, alignment: .topLeading)
                     .overlay(alignment: .bottom) {
@@ -786,7 +790,8 @@ struct TokenMonitorWidgetView: View {
     private func largeModelRow(
         _ model: WidgetModel,
         plan: WidgetLargeListLayoutPlan,
-        style: String
+        style: String,
+        presentation: WidgetPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
@@ -802,7 +807,7 @@ struct TokenMonitorWidgetView: View {
             }
             modelBar(model.sharePercent)
                 .frame(height: plan.barHeight)
-            Text(WidgetFormat.tokens(model.totalTokens, style: style))
+            Text(WidgetFormat.tokens(model.totalTokens, style: style, presentation: presentation))
                 .font(.system(size: plan.tokenFontSize, design: .monospaced))
                 .foregroundStyle(.tertiary)
         }
@@ -814,7 +819,8 @@ struct TokenMonitorWidgetView: View {
         density: WidgetContentDensity,
         showsBars: Bool,
         showsTokens: Bool,
-        style: String
+        style: String,
+        presentation: WidgetPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
@@ -832,7 +838,7 @@ struct TokenMonitorWidgetView: View {
                 modelBar(model.sharePercent)
             }
             if showsTokens {
-                Text(WidgetFormat.tokens(model.totalTokens, style: style))
+                Text(WidgetFormat.tokens(model.totalTokens, style: style, presentation: presentation))
                     .font(.system(size: WidgetDesignTokens.microSize, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
@@ -942,7 +948,7 @@ struct TokenMonitorWidgetView: View {
         if let day = selectedActivityDay(in: snapshot) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(day.date)
-                Text(WidgetL10n.format("%@ tokens", WidgetFormat.tokens(day.totalTokens, style: snapshot.presentation.numberStyle)))
+                Text(WidgetL10n.format("%@ tokens", WidgetFormat.tokens(day.totalTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation)))
             }
             .font(.system(size: WidgetDesignTokens.microSize, weight: .medium, design: .monospaced))
             .foregroundStyle(.secondary)
@@ -955,7 +961,7 @@ struct TokenMonitorWidgetView: View {
         layout: WidgetHeatmapLayout
     ) -> String {
         if let day = selectedActivityDay(in: snapshot) {
-            return WidgetL10n.format("%@ · %@ tokens", day.date, WidgetFormat.tokens(day.totalTokens, style: snapshot.presentation.numberStyle))
+            return WidgetL10n.format("%@ · %@ tokens", day.date, WidgetFormat.tokens(day.totalTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation))
         }
         return activityDateRangeText(layout)
     }
@@ -1015,14 +1021,14 @@ struct TokenMonitorWidgetView: View {
         return AnyView(VStack(alignment: .leading, spacing: density == .summary ? 4 : 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 primary(
-                    WidgetFormat.tokens(snapshot.trend.currentTokens, style: snapshot.presentation.numberStyle),
+                    WidgetFormat.tokens(snapshot.trend.currentTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation),
                     size: context.layout == .small ? 22 : 25
                 )
                 Spacer(minLength: 4)
                 if density == .regular {
-                    secondary(WidgetL10n.format("Peak %@", WidgetFormat.tokens(snapshot.trend.peakTokens, style: snapshot.presentation.numberStyle)))
+                    secondary(WidgetL10n.format("Peak %@", WidgetFormat.tokens(snapshot.trend.peakTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation)))
                 } else {
-                    secondary(trendDeltaText(snapshot.trend))
+                    secondary(trendDeltaText(snapshot.trend, presentation: snapshot.presentation))
                 }
             }
             sparkline(snapshot.trend.points)
@@ -1060,7 +1066,7 @@ struct TokenMonitorWidgetView: View {
         return values.isEmpty ? WidgetL10n.text("No trend data") : values.joined(separator: " — ")
     }
 
-    private func trendDeltaText(_ trend: WidgetTrend) -> String {
+    private func trendDeltaText(_ trend: WidgetTrend, presentation: WidgetPresentation) -> String {
         guard let first = trend.points.first?.totalTokens, let last = trend.points.last?.totalTokens else {
             return WidgetL10n.text("No change")
         }
@@ -1074,7 +1080,7 @@ struct TokenMonitorWidgetView: View {
         }
         if delta == 0 { return WidgetL10n.text("Unchanged from first day") }
         let prefix = delta > 0 ? "+" : "−"
-        return "\(prefix)\(WidgetFormat.tokens(abs(delta)))"
+        return "\(prefix)\(WidgetFormat.tokens(abs(delta), presentation: presentation))"
     }
 
     private func quotaBar(_ remaining: Double) -> some View {

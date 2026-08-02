@@ -7,10 +7,13 @@
   const balanceDisplay = (typeof require === 'function')
     ? require('./limitBalanceDisplay')
     : (root && root.TokenMonitorLimitBalanceDisplay);
-  const api = factory(currency, balanceDisplay);
+  const compactTokens = (typeof require === 'function')
+    ? require('./compactTokens')
+    : (root && root.TokenMonitorCompactTokens);
+  const api = factory(currency, balanceDisplay, compactTokens);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayText = api;
-})(typeof window !== 'undefined' ? window : null, function createTrayText(currency, balanceDisplay) {
+})(typeof window !== 'undefined' ? window : null, function createTrayText(currency, balanceDisplay, compactTokens) {
   const { formatCurrencyFromUsd } = currency;
   const BARS_TRAY_ICON_MODES = new Set(['bars', 'barsSession', 'barsWeekly', 'barsAllSessions']);
 
@@ -29,7 +32,15 @@
     return platform === 'darwin';
   }
 
-  function formatCompactNumber(value) {
+  function formatCompactNumber(value, options = {}) {
+    if (compactTokens?.formatCompactTokens) {
+      return compactTokens.formatCompactTokens(
+        value,
+        options.compactTokenUnits,
+        options.locale || options.language || 'en',
+        { style: 'tray' }
+      );
+    }
     const n = Math.round(Number(value) || 0);
     if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -282,10 +293,10 @@
     const allTime = stats?.periods?.allTime || {};
     if (contentMode === 'cost') return formatCurrencyFromUsd(today.costUsd, currencyCode);
     if (contentMode === 'costAll') return formatCurrencyFromUsd(allTime.costUsd, currencyCode);
-    if (contentMode === 'tokensAll') return formatCompactNumber(allTime.totalTokens);
-    if (contentMode === 'bothAll') return `${formatCompactNumber(allTime.totalTokens)} · ${formatCurrencyFromUsd(allTime.costUsd, currencyCode)}`;
-    if (contentMode === 'both') return `${formatCompactNumber(today.totalTokens)} · ${formatCurrencyFromUsd(today.costUsd, currencyCode)}`;
-    return formatCompactNumber(today.totalTokens);
+    if (contentMode === 'tokensAll') return formatCompactNumber(allTime.totalTokens, options);
+    if (contentMode === 'bothAll') return `${formatCompactNumber(allTime.totalTokens, options)} · ${formatCurrencyFromUsd(allTime.costUsd, currencyCode)}`;
+    if (contentMode === 'both') return `${formatCompactNumber(today.totalTokens, options)} · ${formatCurrencyFromUsd(today.costUsd, currencyCode)}`;
+    return formatCompactNumber(today.totalTokens, options);
   }
 
   return {

@@ -2,6 +2,7 @@
 
 const { Client } = require('@xhayper/discord-rpc');
 const { formatCurrencyFromUsd, normalizeCurrency } = require('../shared/currency');
+const compactTokens = require('../shared/compactTokens');
 
 const CLIENT_ID = '1507034330436862062';
 const GITHUB_URL = 'https://github.com/Javis603/token-monitor';
@@ -24,17 +25,16 @@ let isConnected = false;
 let startTimestamp = 0;
 let latestStats = null;
 let latestCurrency = 'USD';
+let latestCompactTokenUnits = 'western';
+let latestLocale = 'en';
 let pendingPayload = null;
 let lastSentAt = 0;
 let flushTimer = null;
 let reconnectTimer = null;
 let stopped = true;
 
-function formatTokensCompact(value) {
-  const n = Math.round(Number(value || 0));
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
-  return String(n);
+function formatTokensCompact(value, unitSystem = 'western', locale = 'en') {
+  return compactTokens.formatCompactTokens(value, unitSystem, locale);
 }
 
 function topClient(today) {
@@ -44,7 +44,7 @@ function topClient(today) {
   return entries[0]?.[0] || null;
 }
 
-function buildPayload(stats, currency = 'USD') {
+function buildPayload(stats, currency = 'USD', compactTokenUnits = 'western', locale = 'en') {
   const today = stats?.periods?.today || { totalTokens: 0, costUsd: 0, clients: {} };
   const displayCurrency = normalizeCurrency(currency);
   const totalTokens = Number(today.totalTokens || 0);
@@ -62,7 +62,7 @@ function buildPayload(stats, currency = 'USD') {
   const label = (top && CLIENT_LABELS[top]) || (top ? top : 'Active');
   const payload = {
     ...base,
-    details: `${label} · ${formatTokensCompact(totalTokens)} tokens`,
+    details: `${label} · ${formatTokensCompact(totalTokens, compactTokenUnits, locale)} tokens`,
     state: `${formatCurrencyFromUsd(today.costUsd, displayCurrency)} today`
   };
   if (top && KNOWN_CLIENT_ASSETS.has(top)) {
@@ -105,7 +105,7 @@ function connect() {
   client.on('ready', () => {
     isConnected = true;
     startTimestamp = Date.now();
-    pendingPayload = buildPayload(latestStats, latestCurrency);
+    pendingPayload = buildPayload(latestStats, latestCurrency, latestCompactTokenUnits, latestLocale);
     flush();
   });
   client.on('disconnected', () => {
@@ -144,11 +144,13 @@ function stopDiscordRpc() {
   isConnected = false;
 }
 
-function updateDiscordRpc(stats, currency = 'USD') {
+function updateDiscordRpc(stats, currency = 'USD', options = {}) {
   latestStats = stats;
   latestCurrency = normalizeCurrency(currency);
+  latestCompactTokenUnits = compactTokens.normalizeCompactTokenUnits(options.compactTokenUnits);
+  latestLocale = options.locale || options.language || 'en';
   if (stopped) return;
-  pendingPayload = buildPayload(stats, latestCurrency);
+  pendingPayload = buildPayload(stats, latestCurrency, latestCompactTokenUnits, latestLocale);
   scheduleFlush();
 }
 

@@ -1,10 +1,12 @@
 import { publicLimits } from './shared/limits.js';
+import subscriptionDisplay from './shared/subscriptionDisplay.js';
+import currency from './shared/currency.js';
 import { aggregateDevices, mergeDeviceRecord, aggregateHistory } from './shared/usage.js';
 import { historyPreview, historyRevision } from './shared/history.js';
 
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+  'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
   'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret'
 };
 
@@ -34,6 +36,8 @@ function isAuthorized(request, expectedSecret) {
   if (!expectedSecret) return true;
   return requestSecret(request) === expectedSecret;
 }
+
+const SUBSCRIPTIONS_KEY = 'subscriptions';
 
 function sseFormat(event, data) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -67,6 +71,13 @@ export class HubDO {
 
   get publicStatsEnabled() {
     return ['1', 'true', 'yes', 'on'].includes(String(this.env.PUBLIC_STATS_ENABLED || '').trim().toLowerCase());
+  }
+
+  // Devices live under the `dev:` prefix; the shared subscription document is a
+  // single key outside it, so listDevices() never picks it up.
+  async getSubscriptions() {
+    const stored = await this.state.storage.get(SUBSCRIPTIONS_KEY);
+    return stored || subscriptionDisplay.emptySubscriptionDocument();
   }
 
   async listDevices() {
@@ -203,6 +214,50 @@ export class HubDO {
       await this.state.storage.put(`dev:${record.deviceId}`, record);
       this.broadcast('ingest').catch(() => {});
       return jsonResponse(200, { ok: true, deviceId: record.deviceId, stats: await this.getStats() });
+    }
+
+    // Shared by every device on this hub rather than owned by one of them, and
+    // behind the same secret gate as every other data route: this is the one
+    // place the user records money. It is never part of /api/public/stats, which
+    // is built from device records alone.
+    if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/subscriptions') {
+      return jsonResponse(200, { ok: true, ...(await this.getSubscriptions()) });
+    }
+
+    if (request.method === 'PUT' && url.pathname === '/api/subscriptions') {
+      let payload;
+      try { payload = await request.json(); }
+      catch (error) { return jsonResponse(400, { error: 'bad_request', message: error.message }); }
+      // A non-array would normalize to an empty list and store as a perfectly
+      // successful replacement, wiping records that exist nowhere else. An
+      // intentional clear still sends [].
+      if (!Array.isArray(payload?.subscriptions)) {
+        return jsonResponse(400, { error: 'bad_request', message: 'subscriptions must be an array' });
+      }
+      const stored = await this.getSubscriptions();
+      // Staleness first, matching the Node hub: a stale write is exactly the case
+      // where the client needs the stored document back to re-base, and answering
+      // 400 for a request that is both stale and malformed would withhold it.
+      if (subscriptionDisplay.isStaleSubscriptionWrite(stored, payload?.baseUpdatedAt)) {
+        return jsonResponse(409, { error: 'stale_write', ...stored });
+      }
+      // A currency with no exchange rate would be coerced to USD and reported as
+      // an amount the user never entered.
+      const unsupported = payload.subscriptions.find(
+        (entry) => entry?.currency && !currency.CURRENCY_CODES.includes(String(entry.currency).trim().toUpperCase())
+      );
+      if (unsupported) {
+        return jsonResponse(400, {
+          error: 'bad_request',
+          message: `unsupported currency: ${String(unsupported.currency).trim().toUpperCase()}`
+        });
+      }
+      const next = subscriptionDisplay.subscriptionDocument(payload.subscriptions, {
+        previousUpdatedAt: stored?.updatedAt,
+        currencyApi: { normalizeCurrency: currency.normalizeCurrency }
+      });
+      await this.state.storage.put(SUBSCRIPTIONS_KEY, next);
+      return jsonResponse(200, { ok: true, ...next });
     }
 
     if (request.method === 'DELETE' && url.pathname.startsWith('/api/devices/')) {

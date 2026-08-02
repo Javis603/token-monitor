@@ -1058,6 +1058,7 @@ span.settings-note.settings-item-desc {
 .settings-section-icon-tools { --settings-section-icon-url: url("icons/settings/collection.svg"); }
 .settings-section-icon-limits { --settings-section-icon-url: url("icons/settings/limits.svg"); }
 .settings-section-icon-sync { --settings-section-icon-url: url("icons/settings/sync.svg"); }
+.settings-section-icon-subscriptions { --settings-section-icon-url: url("icons/settings/subscriptions.svg"); }
 .settings-section-icon-appearance { --settings-section-icon-url: url("icons/settings/appearance.svg"); }
 .cursor-settings-toggle {
   width: 100%;
@@ -3865,6 +3866,353 @@ html.is-windows .limit-live-badge {
     transition: none;
   }
 }
+/* Subscriptions */
+
+/* The shared .opencode-add-body rule sizes `input` only, so with the global
+   `button, input, select { font: inherit }` every select and date field falls
+   back to the panel's base size and renders noticeably larger. Scoped here
+   rather than widened on the shared rule, which the other provider forms
+   already lay out against. Height is pinned for the same reason the
+   third-party form pins it: select and input carry different paddings. */
+.subscription-add-body :is(input:not([type="checkbox"]), select) {
+  height: 30px;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+/* Align every field's control on one edge; the longest label ("first charge")
+   sets the column. Descendant rather than child selectors: the two kinds of
+   record each live in their own wrapper, so the rows are no longer all direct
+   children of the form body. */
+.subscription-add-body .settings-row label {
+  flex: 0 0 auto;
+  min-width: 5.2em;
+}
+/* A select's intrinsic width is its widest option, and an account option can be
+   a whole email address. Nothing gives that width a shrinkable basis by default,
+   so the row overflowed and dragged the entire settings panel into a horizontal
+   scroll. */
+.subscription-add-body .settings-row > :is(input, select) {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* Count+interval reads as one phrase ("1 month"), so it shares a row and a label
+   rather than splitting into two labelled columns. Its controls stay on the same
+   left edge as every other field, which keeps the form on one alignment grid. */
+.subscription-add-body .subscription-pair-row > input {
+  flex: 2 1 0;
+}
+.subscription-add-body .subscription-pair-row > select {
+  flex: 1 1 0;
+}
+.subscription-field-note {
+  margin-top: -2px;
+}
+/* This stylesheet has no blanket `.hidden { display: none }` — every hidden
+   thing declares its own rule — so a bare `hidden` class on these wrappers left
+   both kinds of field on screen at once. */
+.subscription-kind-fields.hidden {
+  display: none;
+}
+/* The ledger stands where a labelled field would, so it keeps the form's left
+   edge rather than indenting to the control column. Its currency select is
+   parked on the same line by setSubscriptionFormMode(). */
+.subscription-topup-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.subscription-topup-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.subscription-add-body .subscription-topup-heading-row > select {
+  flex: 0 0 auto;
+  width: 6.5em;
+}
+.subscription-topup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.subscription-topup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--sunken-rgb), 0.36);
+  font-size: 11px;
+}
+.subscription-topup-date {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subscription-topup-amount {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.subscription-topup-remove {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.55;
+}
+.subscription-topup-row .subscription-topup-remove:hover {
+  opacity: 0.85;
+}
+.subscription-topup-row .subscription-topup-remove.is-armed {
+  border-radius: 4px;
+  opacity: 1;
+  color: var(--red);
+  background: rgba(255, 91, 91, 0.12);
+}
+/* No label: the two fields are the entry, and the button says what happens to
+   them. Dropping the label column also buys the date field the width it needs. */
+.subscription-topup-add-row {
+  margin-top: 6px;
+}
+.subscription-add-body .subscription-topup-add-row > input[type="date"] {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* Unshrinkable: sharing the row three ways squeezed the amount until its own
+   placeholder was clipped. The date takes what is left over instead. */
+.subscription-add-body .subscription-topup-add-row > input[type="number"] {
+  flex: 0 0 auto;
+  width: 5.5em;
+}
+/* .icon-button is the app's small-action-attached-to-a-row convention (the hub
+   secret row uses it the same way); only its height needs to match the 30px
+   controls beside it. A plain <button> would have fallen outside the stylesheet's
+   button allow-list and rendered as an unstyled UA control. */
+.subscription-topup-add {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+}
+/* Sized and behaved as .opencode-profile-item, the row convention every other
+   account list in this panel already uses: 11/9px type, a faint always-there
+   delete and a hover-revealed edit. */
+/* Grid with a minmax(0, 1fr) text column, exactly as .opencode-profile-item
+   does it — and for the same reason. `min-width: 0` on a flex child only lets it
+   shrink during layout; it does NOT reduce the row's min-content contribution,
+   which stays as wide as the longest unbreakable account label. That
+   contribution sizes the settings section's grid column, so on a narrow window
+   the whole section was laid out to fit an email address and everything in it
+   spilled past the panel. minmax(0, 1fr) contributes zero. */
+.subscription-orphan-notice {
+  margin: 6px 0 8px;
+  padding: 8px;
+  border: 1px solid rgba(255, 176, 46, 0.32);
+  border-radius: 6px;
+  background: rgba(255, 176, 46, 0.08);
+}
+.subscription-orphan-notice.hidden {
+  display: none;
+}
+.subscription-orphan-notice .settings-note {
+  margin: 0 0 6px;
+}
+.subscription-orphan-actions {
+  display: flex;
+  gap: 6px;
+}
+.subscription-orphan-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(var(--sunken-rgb), 0.5);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10px;
+}
+.subscription-orphan-actions button:hover {
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+/* Sits above the list rather than inside the add form, because a failed delete
+   has no form open to report into. */
+.subscription-sync-error {
+  color: var(--red);
+}
+.subscription-sync-error.hidden {
+  display: none;
+}
+.subscription-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--sunken-rgb), 0.36);
+}
+.subscription-row + .subscription-row {
+  margin-top: 6px;
+}
+/* The icon column only exists when there is an icon: a row without one keeps the
+   two-column template, so the title still starts against the padding edge rather
+   than in an empty gutter. */
+.subscription-row:has(.subscription-row-icon) {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.subscription-row-icon {
+  width: 13px;
+  height: 13px;
+  margin-left: 1px;
+  color: var(--text);
+  opacity: 0.85;
+}
+.subscription-row-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.subscription-row-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subscription-row-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subscription-row-warn {
+  margin-top: 1px;
+  color: var(--red);
+  font-size: 9px;
+  line-height: 1.2;
+}
+.subscription-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+.subscription-row-actions button {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.subscription-row-edit { opacity: 0; }
+.subscription-row-delete { opacity: 0.55; }
+.subscription-row:hover .subscription-row-edit { opacity: 0.6; }
+.subscription-row:hover .subscription-row-delete { opacity: 0.85; }
+.subscription-row .subscription-row-actions button:hover,
+.subscription-row .subscription-row-actions button:focus-visible {
+  opacity: 1;
+  color: var(--text);
+}
+.subscription-row .subscription-row-delete.is-armed {
+  opacity: 1;
+  color: var(--red);
+  background: rgba(255, 91, 91, 0.12);
+}
+.subscription-total {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 11px;
+  text-align: right;
+}
+
+/* The plan label doubles as the subscription tooltip trigger, so the wrap sizes
+   to its text instead of the 14px info dot the base class assumes. The wrap also
+   carries .limit-plan, whose overflow:hidden clipped the card away entirely —
+   the card sits above the label, wholly outside that 10px-tall box. */
+.subscription-plan-wrap {
+  position: relative;
+  display: inline-grid;
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  place-items: end;
+  overflow: visible;
+  transform: none;
+}
+/* No resting decoration. The plan label appears on every limits row, and it has
+   to look identical whether or not a subscription is attached to that account;
+   hovering brightens it, which is affordance enough. */
+.subscription-plan-trigger {
+  max-width: 100%;
+  overflow: hidden;
+  cursor: default;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+.subscription-plan-wrap:hover .subscription-plan-trigger,
+.subscription-plan-wrap:focus-within .subscription-plan-trigger {
+  color: var(--text);
+}
+/* The wrap carries .limit-plan, whose `text-align: right` inherits into the card
+   and dragged the labels over to their column's right edge — a ragged left edge
+   against right-aligned values. A key/value card reads as labels left, values
+   right; the value cells set their own alignment already. */
+.subscription-tooltip {
+  right: 0;
+  text-align: left;
+}
+/* The card opens upward, and .limits-panel scrolls behind `overflow: hidden
+   auto` — so on the topmost provider the whole card landed above the panel's
+   edge and was clipped away. positionSubscriptionTooltip() flips it below when
+   the row has no room above it. */
+.subscription-tooltip.is-below {
+  top: calc(100% + 5px);
+  bottom: auto;
+}
+.subscription-tooltip.is-below::after {
+  top: -4px;
+  bottom: auto;
+  border-top: 1px solid rgba(var(--line-rgb), 0.22);
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid rgba(var(--line-rgb), 0.22);
+}
+.subscription-tooltip-rule {
+  height: 1px;
+  margin: 2px 0;
+  background: rgba(var(--line-rgb), 0.16);
+  grid-column: 1 / -1;
+}
+.limit-detail-tooltip-row span.subscription-tooltip-warn {
+  color: var(--red);
+  opacity: 1;
+}
+
 .limit-window-note .limit-reset {
   min-height: 0;
   font-size: 10px;

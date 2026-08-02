@@ -82,7 +82,7 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
     now: NOW,
     presentation: {
       defaultPeriod: 'today', currencyCode: 'CNY', currencyRate: 7.1,
-      compactNumbers: true, showCost: true, locale: 'zh-CN', theme: 'custom'
+      compactNumbers: true, compactTokenUnits: 'localized', showCost: true, locale: 'zh-CN', theme: 'custom'
     }
   });
 
@@ -110,7 +110,7 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
   assert.equal(snapshot.trend.peakTokens, 200);
   assert.deepEqual(snapshot.presentation, {
     defaultPeriod: 'today', currencyCode: 'CNY', currencySymbol: '¥', currencyRate: 7.1,
-    numberStyle: 'compact', showCost: true, locale: 'zh-CN', theme: 'custom'
+    numberStyle: 'compact', compactTokenUnits: 'localized', showCost: true, locale: 'zh-CN', theme: 'custom'
   });
   assert.equal(snapshot.status.noData, false);
   assert.equal(snapshot.status.isStale, false);

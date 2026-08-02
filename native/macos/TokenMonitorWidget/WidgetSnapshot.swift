@@ -354,10 +354,11 @@ struct WidgetPresentation: Decodable, Equatable {
     let currencySymbol: String
     let currencyRate: Double
     let numberStyle: String
+    let compactTokenUnits: String
     let showCost: Bool
     let locale: String
     let theme: String
-    static let `default` = WidgetPresentation(defaultPeriod: "today", currencyCode: "USD", currencySymbol: "$", currencyRate: 1, numberStyle: "compact", showCost: true, locale: "auto", theme: "system")
+    static let `default` = WidgetPresentation(defaultPeriod: "today", currencyCode: "USD", currencySymbol: "$", currencyRate: 1, numberStyle: "compact", compactTokenUnits: "western", showCost: true, locale: "auto", theme: "system")
 }
 
 struct WidgetStatus: Decodable, Equatable {
@@ -549,7 +550,7 @@ extension WidgetTrend {
 }
 
 extension WidgetPresentation {
-    private enum CodingKeys: String, CodingKey { case defaultPeriod, currencyCode, currencySymbol, currencyRate, numberStyle, showCost, locale, theme }
+    private enum CodingKeys: String, CodingKey { case defaultPeriod, currencyCode, currencySymbol, currencyRate, numberStyle, compactTokenUnits, showCost, locale, theme }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         defaultPeriod = c.string(.defaultPeriod, default: "today")
@@ -557,6 +558,7 @@ extension WidgetPresentation {
         currencySymbol = c.string(.currencySymbol, default: "$")
         currencyRate = c.double(.currencyRate, default: 1)
         numberStyle = c.string(.numberStyle, default: "compact")
+        compactTokenUnits = c.string(.compactTokenUnits, default: "western")
         showCost = c.bool(.showCost, default: true)
         locale = c.string(.locale, default: "auto")
         theme = c.string(.theme, default: "system")
