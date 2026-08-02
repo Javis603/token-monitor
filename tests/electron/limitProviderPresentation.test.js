@@ -2675,7 +2675,9 @@ test('a deleted record is not resurrected by another device rejoining', async ()
       },
       hubSubscriptions: null,
       hubSubscriptionsHub: '',
-      subscriptionFetchEpoch: 0,
+      subscriptionOpEpoch: 0,
+      beginSubscriptionOp: () => ++context.subscriptionOpEpoch,
+      subscriptionOpIsCurrent: (epoch, hub) => epoch === context.subscriptionOpEpoch && hub === context.currentHubIdentity(),
       subscriptionsAreShared: () => true,
       effectiveHubConfig: () => ({ url: 'https://hub.example' }),
       fetchSharedSubscriptions: async () => doc,
@@ -2861,8 +2863,8 @@ test('one hub cached list is never filed as records belonging to the next hub', 
   // The identity is captured before the request, so a hub switch mid-flight
   // cannot make a late answer land under the wrong hub's name.
   assert.match(refresh, /const hub = currentHubIdentity\(\);/);
-  assert.match(refresh, /const epoch = \+\+subscriptionFetchEpoch;/);
-  assert.match(refresh, /if \(epoch !== subscriptionFetchEpoch \|\| hub !== currentHubIdentity\(\)\) return false;/);
+  assert.match(refresh, /const epoch = beginSubscriptionOp\(\);/);
+  assert.match(refresh, /if \(!subscriptionOpIsCurrent\(epoch, hub\)\) return false;/);
 
   // Editing in local mode hands ownership back, which is what clears the marker.
   const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
@@ -2908,7 +2910,9 @@ test('records held for a decision survive reconnecting to the same hub', async (
     },
     hubSubscriptions: null,
     hubSubscriptionsHub: '',
-    subscriptionFetchEpoch: 0,
+    subscriptionOpEpoch: 0,
+      beginSubscriptionOp: () => ++context.subscriptionOpEpoch,
+      subscriptionOpIsCurrent: (epoch, hub) => epoch === context.subscriptionOpEpoch && hub === context.currentHubIdentity(),
     subscriptionsAreShared: () => true,
     currentHubIdentity: () => 'https://hub.example',
     fetchSharedSubscriptions: async () => ({ updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'theirs' }] }),
@@ -2985,7 +2989,9 @@ test('a hub answer that arrives after the user moved on is discarded', async () 
     },
     hubSubscriptions: null,
     hubSubscriptionsHub: '',
-    subscriptionFetchEpoch: 0,
+    subscriptionOpEpoch: 0,
+      beginSubscriptionOp: () => ++context.subscriptionOpEpoch,
+      subscriptionOpIsCurrent: (epoch, hub) => epoch === context.subscriptionOpEpoch && hub === context.currentHubIdentity(),
     subscriptionsAreShared: () => true,
     currentHubIdentity: () => context.hub,
     hub: 'https://a.example',
@@ -3009,9 +3015,145 @@ test('a hub answer that arrives after the user moved on is discarded', async () 
   // epoch moved on while it was waiting.
   context.hub = 'https://a.example';
   context.fetchSharedSubscriptions = async () => {
-    context.subscriptionFetchEpoch += 1;
+    context.subscriptionOpEpoch += 1;
     return { updatedAt: '2026-08-02T08:00:00.000Z', subscriptions: [{ id: 'older' }] };
   };
   assert.equal(await vm.runInContext('refreshSharedSubscriptions({ seedFromLocal: true });', context), false);
   assert.equal(context.cached, undefined);
+});
+
+test('a write is never undone by a read that was already in flight', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'beginSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    `async ${functionBody(main, 'writeSharedSubscriptions', 'rememberOrphanedSubscriptions')}`,
+    `async ${functionBody(main, 'refreshSharedSubscriptions', 'maybeRefreshSharedSubscriptions')}`
+  ].join('\n');
+
+  const build = () => {
+    const releases = [];
+    const context = vm.createContext({
+      settings: {
+        hubMode: 'client',
+        subscriptions: [],
+        subscriptionsOrphaned: { hubUrl: '', records: [] },
+        subscriptionsCacheHub: 'https://hub.example'
+      },
+      hubSubscriptions: { updatedAt: 'v1', subscriptions: [{ id: 'old' }] },
+      hubSubscriptionsHub: 'https://hub.example',
+      subscriptionOpEpoch: 0,
+      subscriptionsAreShared: () => true,
+      currentHubIdentity: () => 'https://hub.example',
+      embeddedHub: null,
+      // Held open until the test releases it, so the two operations genuinely overlap.
+      fetchSharedSubscriptions: () => new Promise((resolve) => {
+        releases.push(() => resolve({ updatedAt: 'v1', subscriptions: [{ id: 'old' }] }));
+      }),
+      subscriptionsEndpoint: () => ({ url: 'https://hub.example/api/subscriptions', headers: {} }),
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ updatedAt: 'v2', subscriptions: [{ id: 'new' }] }) }),
+      cacheSharedSubscriptions: (doc) => { context.cached = doc; return true; },
+      rememberOrphanedSubscriptions: () => false,
+      persistSubscriptionState: () => true,
+      console: { log() {} },
+      JSON
+    });
+    vm.runInContext(source, context);
+    return { context, releases };
+  };
+
+  const { context, releases } = build();
+  // A read is already waiting when the user saves.
+  const reading = vm.runInContext('refreshSharedSubscriptions({});', context);
+  await vm.runInContext("writeSharedSubscriptions([{ id: 'new' }]);", context);
+  assert.deepEqual(plain(context.cached), { updatedAt: 'v2', subscriptions: [{ id: 'new' }] });
+
+  // The read now comes back holding the list as it was before the write. Landing
+  // it would put the saved record back on screen as though it had never been made.
+  releases.forEach((release) => release());
+  assert.equal(await reading, false);
+  assert.deepEqual(plain(context.cached), { updatedAt: 'v2', subscriptions: [{ id: 'new' }] });
+});
+
+test('two writes answering out of order leave the newer one showing', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'beginSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    `async ${functionBody(main, 'writeSharedSubscriptions', 'rememberOrphanedSubscriptions')}`
+  ].join('\n');
+
+  const pending = [];
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    hubSubscriptions: { updatedAt: 'v1', subscriptions: [] },
+    hubSubscriptionsHub: 'https://hub.example',
+    subscriptionOpEpoch: 0,
+    currentHubIdentity: () => 'https://hub.example',
+    embeddedHub: null,
+    subscriptionsEndpoint: () => ({ url: 'https://hub.example/api/subscriptions', headers: {} }),
+    fetch: (_url, init) => new Promise((resolve) => {
+      const body = JSON.parse(init.body);
+      pending.push(() => resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ updatedAt: body.subscriptions[0].id, subscriptions: body.subscriptions })
+      }));
+    }),
+    cacheSharedSubscriptions: (doc) => { context.cached = doc; return true; },
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  const first = vm.runInContext("writeSharedSubscriptions([{ id: 'first' }]);", context);
+  const second = vm.runInContext("writeSharedSubscriptions([{ id: 'second' }]);", context);
+  // The second write answers first, then the first one straggles in. Caching by
+  // arrival order would leave the earlier list on screen and in settings.json.
+  pending[1]();
+  pending[0]();
+  await Promise.all([first, second]);
+  assert.equal(context.cached.updatedAt, 'second');
+});
+
+test('a rejection from the hub the user just left does not empty the one they are on', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'beginSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(main, 'staleSubscriptionWriteError', 'writeSharedSubscriptions'),
+    `async ${functionBody(main, 'writeSharedSubscriptions', 'rememberOrphanedSubscriptions')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    hubSubscriptions: { updatedAt: 'v1', subscriptions: [] },
+    hubSubscriptionsHub: 'https://a.example',
+    subscriptionOpEpoch: 0,
+    hub: 'https://a.example',
+    currentHubIdentity: () => context.hub,
+    embeddedHub: null,
+    subscriptionsEndpoint: () => ({ url: 'https://a.example/api/subscriptions', headers: {} }),
+    // Hub A rejects the write as stale, and the user switches to hub B before the
+    // rejection arrives. Its body is hub A's list; caching it would describe hub
+    // B with hub A's records — or, as here, with an empty list hub B never had.
+    fetch: async () => {
+      context.hub = 'https://b.example';
+      return { status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [] }) };
+    },
+    cacheSharedSubscriptions: (doc) => { context.cached = doc; return true; },
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  await assert.rejects(
+    () => vm.runInContext("writeSharedSubscriptions([{ id: 'x' }]);", context),
+    /stale_write/
+  );
+  assert.equal(context.cached, undefined);
+
+  // Staying put, the same rejection is worth caching: it is the hub's current list.
+  context.hub = 'https://a.example';
+  context.fetch = async () => ({ status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] }) });
+  await assert.rejects(() => vm.runInContext("writeSharedSubscriptions([{ id: 'x' }]);", context), /stale_write/);
+  assert.deepEqual(plain(context.cached), { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] });
 });
