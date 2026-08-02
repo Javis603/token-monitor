@@ -1971,6 +1971,7 @@ test('the add action switches directly from editing to a new editor', () => {
 test('subscription editor captures its version before the opening animation', () => {
   const app = readRendererFile('app.js');
   const open = functionBody(app, 'openSubscriptionEditor', 'closeSubscriptionEditor');
+  const setOpen = functionBody(app, 'setSubscriptionFormOpen', 'seedSubscriptionPlanName');
   const frames = [];
   const details = {
     classList: { add() {} },
@@ -2004,6 +2005,53 @@ test('subscription editor captures its version before the opening animation', ()
   state.settings.subscriptionsUpdatedAt = 'version-b';
   frames[0]();
   assert.deepEqual(state.subscriptionFormBase, { hub: 'hub-a', updatedAt: 'version-a' });
+  assert.doesNotMatch(setOpen, /formBase \|\| state\.subscriptionFormBase/);
+});
+
+test('closing the subscription editor restores focus to the rebuilt row action', () => {
+  const app = readRendererFile('app.js');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const input = {};
+  const oldEdit = { focus() {} };
+  const newEdit = { focused: false, focus() { this.focused = true; } };
+  const finalEdit = { focused: false, focus() { this.focused = true; } };
+  const rowFor = (edit) => ({
+    dataset: { subscriptionId: 'subscription-1' },
+    querySelector: (selector) => selector === '.subscription-row-edit' ? edit : null
+  });
+  const dom = { rows: [rowFor(oldEdit)] };
+  let finish;
+  const list = { querySelectorAll: () => dom.rows };
+  const details = {
+    classList: { contains: () => false },
+    contains: (node) => node === input,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: 'subscription-1', subscriptionEditorTransitionId: 0 };
+  const context = vm.createContext({
+    document: { activeElement: oldEdit },
+    els: { subscriptionAddDetails: details, subscriptionList: list },
+    state,
+    dom,
+    rowFor,
+    finalEdit,
+    cancelSubscriptionEditorClose() {},
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() { state.subscriptionEditingId = ''; },
+    renderSubscriptionRows() { dom.rows = [rowFor(newEdit)]; },
+    clearTimeout() {},
+    setTimeout(callback) { finish = callback; return 1; }
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\n${close}\ncloseSubscriptionEditor({ onClosed: () => { dom.rows = [rowFor(finalEdit)]; } });`,
+    context
+  );
+  finish();
+
+  assert.equal(newEdit.focused, false);
+  assert.equal(finalEdit.focused, true);
 });
 
 test('subscription row rerenders keep the live editor node attached', () => {

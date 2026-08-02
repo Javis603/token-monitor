@@ -3020,7 +3020,7 @@ function setSubscriptionFormOpen(open, formBase = null) {
   // then accepted, taking another device's edit to the same record with it. Null
   // while closed, so the paths that save without a form say so.
   state.subscriptionFormBase = open
-    ? (formBase || state.subscriptionFormBase || subscriptionSettingsVersion())
+    ? (formBase || subscriptionSettingsVersion())
     : null;
 }
 
@@ -3061,6 +3061,29 @@ function openSubscriptionEditor() {
 function closeSubscriptionEditor({ onClosed } = {}) {
   cancelSubscriptionEditorClose();
   const details = els.subscriptionAddDetails;
+  const editingId = String(state.subscriptionEditingId || '');
+  const activeElement = typeof document !== 'undefined' ? document.activeElement : null;
+  const editingRow = editingId && els.subscriptionList
+    ? [...els.subscriptionList.querySelectorAll('[data-subscription-id]')]
+      .find((row) => row.dataset?.subscriptionId === editingId)
+    : null;
+  const editingButton = editingRow?.querySelector('.subscription-row-edit');
+  // Keep the focus contract of a disclosure: when the editor closes, keyboard
+  // users return to the control that opened it. Do not steal focus from the Add
+  // mode switch or from a user who moved elsewhere while the close animation ran.
+  const shouldRestoreFocus = Boolean(
+    editingId && activeElement && (
+      activeElement === editingButton
+      || activeElement === details
+      || details?.contains?.(activeElement)
+    )
+  );
+  const restoreFocus = () => {
+    if (!shouldRestoreFocus) return;
+    const row = [...(els.subscriptionList?.querySelectorAll?.('[data-subscription-id]') || [])]
+      .find((candidate) => candidate.dataset?.subscriptionId === editingId);
+    row?.querySelector('.subscription-row-edit')?.focus();
+  };
   const transitionId = (state.subscriptionEditorTransitionId || 0) + 1;
   state.subscriptionEditorTransitionId = transitionId;
 
@@ -3069,6 +3092,7 @@ function closeSubscriptionEditor({ onClosed } = {}) {
     resetSubscriptionForm();
     if (typeof renderSubscriptionRows === 'function') renderSubscriptionRows();
     onClosed?.();
+    restoreFocus();
     return;
   }
 
@@ -3091,6 +3115,7 @@ function closeSubscriptionEditor({ onClosed } = {}) {
     resetSubscriptionForm();
     if (typeof renderSubscriptionRows === 'function') renderSubscriptionRows();
     onClosed?.();
+    restoreFocus();
   };
   details.addEventListener('transitionend', onTransitionEnd);
   subscriptionEditorCloseCleanup = cleanup;
