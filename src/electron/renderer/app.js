@@ -3027,17 +3027,17 @@ function setSubscriptionFormOpen(open, formBase = null) {
 
 const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;
 let subscriptionEditorCloseCleanup = null;
-let subscriptionEditorCloseOnCancel = null;
+let subscriptionEditorCloseOnCanceled = null;
 
 function cancelSubscriptionEditorClose() {
-  const onCancel = subscriptionEditorCloseOnCancel;
-  subscriptionEditorCloseOnCancel = null;
+  const onCanceled = subscriptionEditorCloseOnCanceled;
+  subscriptionEditorCloseOnCanceled = null;
   subscriptionEditorCloseCleanup?.();
   subscriptionEditorCloseCleanup = null;
   // A successful write defers the full render until the collapse has settled so
   // the transition can paint. If a new mode cancels that collapse, settle the
   // deferred render here instead of silently dropping it with the old timer.
-  onCancel?.();
+  onCanceled?.();
 }
 
 // The class change has to happen in a later frame than the initial collapsed
@@ -3066,7 +3066,7 @@ function openSubscriptionEditor() {
 
 // Keep the editor in place until its collapse has finished. Moving it back to
 // the add form in the same task as hiding it cancels the transition entirely.
-function closeSubscriptionEditor({ onClosed } = {}) {
+function closeSubscriptionEditor({ onClosed, onCanceled } = {}) {
   cancelSubscriptionEditorClose();
   const details = els.subscriptionAddDetails;
   const editingId = String(state.subscriptionEditingId || '');
@@ -3118,7 +3118,7 @@ function closeSubscriptionEditor({ onClosed } = {}) {
   }
 
   setSubscriptionFormOpen(false);
-  subscriptionEditorCloseOnCancel = onClosed;
+  subscriptionEditorCloseOnCanceled = onCanceled;
   let finished = false;
   let timer = null;
   const onTransitionEnd = (event) => {
@@ -3129,7 +3129,7 @@ function closeSubscriptionEditor({ onClosed } = {}) {
     if (timer !== null) clearTimeout(timer);
     if (subscriptionEditorCloseCleanup === cleanup) {
       subscriptionEditorCloseCleanup = null;
-      subscriptionEditorCloseOnCancel = null;
+      subscriptionEditorCloseOnCanceled = null;
     }
   };
   const finish = () => {
@@ -3486,7 +3486,10 @@ async function submitSubscription() {
     ? list.map((entry) => (entry.id === editing.id ? next : entry))
     : [...list, next];
   if (!await saveSubscriptions(updated, state.subscriptionFormBase, { render: false })) return;
-  closeSubscriptionEditor({ onClosed: renderSubscriptionSettings });
+  closeSubscriptionEditor({
+    onClosed: renderSubscriptionSettings,
+    onCanceled: renderSubscriptionSettings
+  });
 }
 
 function configuredLimitProviderOrder() {

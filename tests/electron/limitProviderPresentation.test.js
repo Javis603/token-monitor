@@ -2161,13 +2161,139 @@ test('canceling a close settles its deferred render exactly once', () => {
   });
 
   vm.runInContext(
-    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\nlet subscriptionEditorCloseOnCancel = null;\n${cancel}\n${close}\ncloseSubscriptionEditor({ onClosed: () => { renderCount += 1; } });`,
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\nlet subscriptionEditorCloseOnCanceled = null;\n${cancel}\n${close}\ncloseSubscriptionEditor({ onCanceled: () => { renderCount += 1; } });`,
     context
   );
   assert.equal(context.renderCount, 0);
   vm.runInContext('cancelSubscriptionEditorClose();', context);
 
   assert.equal(context.renderCount, 1);
+});
+
+test('canceling an edit-to-add close does not run its stale onClosed callback', () => {
+  const app = readRendererFile('app.js');
+  const cancel = functionBody(app, 'cancelSubscriptionEditorClose', 'openSubscriptionEditor');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const details = {
+    classList: { contains: () => false },
+    contains: () => false,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: 'subscription-a', subscriptionEditorTransitionId: 0 };
+  const context = vm.createContext({
+    document: { activeElement: null, body: {} },
+    els: { subscriptionAddDetails: details },
+    state,
+    cancelSubscriptionEditorClose() {},
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() {},
+    renderSubscriptionRows() {},
+    clearTimeout() {},
+    setTimeout() { return 1; },
+    staleCallbackCalls: 0,
+    canceledCallbackCalls: 0
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\nlet subscriptionEditorCloseOnCanceled = null;\n${cancel}\n${close}\ncloseSubscriptionEditor({ onClosed: () => { staleCallbackCalls += 1; }, onCanceled: () => { canceledCallbackCalls += 1; } });`,
+    context
+  );
+  vm.runInContext('cancelSubscriptionEditorClose();', context);
+
+  assert.equal(context.staleCallbackCalls, 0);
+  assert.equal(context.canceledCallbackCalls, 1);
+});
+
+test('switching to another edit preserves its form values during a canceled close', () => {
+  const app = readRendererFile('app.js');
+  const cancel = functionBody(app, 'cancelSubscriptionEditorClose', 'openSubscriptionEditor');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const beginEdit = functionBody(app, 'beginSubscriptionEdit', 'submitSubscription');
+  const details = {
+    classList: { contains: () => false },
+    contains: () => false,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const fields = {
+    provider: { value: '' },
+    account: { value: '' },
+    kind: '',
+    plan: { value: '' },
+    amount: { value: '' },
+    currency: { value: '' },
+    intervalCount: { value: '' },
+    interval: { value: '' },
+    startDate: { value: '' },
+    nextRenewal: { value: '' },
+    autoRenew: { checked: false },
+    submit: { textContent: '' },
+    cancel: { classList: { add() {}, remove() {} } }
+  };
+  const kindInputs = [
+    { value: 'subscription', checked: false },
+    { value: 'topup', checked: false }
+  ];
+  const account = { provider: 'codex', accountKey: 'acct-b', accountName: 'B' };
+  const records = [
+    { id: 'subscription-a', provider: 'codex', kind: 'subscription', planName: 'A plan', amountMinor: 1000, currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-01-01', autoRenew: true, nextRenewalOverride: '', endDate: null, topUps: [] },
+    { id: 'subscription-b', provider: 'codex', kind: 'topup', planName: 'B plan', amountMinor: 2000, currency: 'HKD', intervalCount: 1, interval: 'month', startDate: '2026-02-01', autoRenew: true, nextRenewalOverride: '2026-03-01', endDate: null, topUps: [{ id: 'topup-b', date: '2026-02-01', amountMinor: 2000 }] }
+  ];
+  const state = { subscriptionEditingId: 'subscription-a', subscriptionEditorTransitionId: 0, subscriptionTopUps: [] };
+  const context = vm.createContext({
+    document: { activeElement: null, body: {} },
+    els: {
+      subscriptionAddDetails: details,
+      subscriptionList: { querySelectorAll: () => [] },
+      subscriptionProviderInput: fields.provider,
+      subscriptionAccountInput: fields.account,
+      subscriptionPlanNameInput: fields.plan,
+      subscriptionAmountInput: fields.amount,
+      subscriptionCurrencyInput: fields.currency,
+      subscriptionIntervalCountInput: fields.intervalCount,
+      subscriptionIntervalInput: fields.interval,
+      subscriptionStartDateInput: fields.startDate,
+      subscriptionNextRenewalInput: fields.nextRenewal,
+      subscriptionAutoRenewInput: fields.autoRenew,
+      subscriptionSubmit: fields.submit,
+      subscriptionCancelEdit: fields.cancel,
+      subscriptionKindInputs: kindInputs
+    },
+    fields,
+    kindInputs,
+    state,
+    subscriptionList: () => records,
+    subscriptionApi: {
+      matchProviderAccount: () => account,
+      amountUnits: (subscription) => subscription.amountMinor / 100
+    },
+    limitProvidersForSubscriptions: () => [],
+    subscriptionAccountValue: () => 'acct-b',
+    renderSubscriptionPickers() {},
+    setSubscriptionFormMode: () => {},
+    syncSubscriptionDateBounds: () => {},
+    positionSubscriptionEditor: () => {},
+    setSubscriptionError: () => {},
+    t: () => 'Update subscription',
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() {},
+    renderSubscriptionRows() {},
+    clearTimeout() {},
+    setTimeout() { return 1; },
+    staleCallbackCalls: 0
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\nlet subscriptionEditorCloseOnCanceled = null;\n${cancel}\n${close}\nfunction openSubscriptionEditor() { cancelSubscriptionEditorClose(); }\n${beginEdit}\ncloseSubscriptionEditor({ onClosed: () => { staleCallbackCalls += 1; fields.plan.value = 'Add default'; kindInputs[0].checked = true; kindInputs[1].checked = false; } });\nbeginSubscriptionEdit('subscription-b');`,
+    context
+  );
+
+  assert.equal(context.staleCallbackCalls, 0);
+  assert.equal(context.fields.plan.value, 'B plan');
+  assert.equal(context.kindInputs[0].checked, false);
+  assert.equal(context.kindInputs[1].checked, true);
+  assert.equal(context.fields.amount.value, '20');
 });
 
 test('a successful subscription save defers the full render until close completes', async () => {
@@ -2356,7 +2482,7 @@ test('editing a subscription moves only the editor beneath its row', () => {
   assert.match(app, /state\.subscriptionEditingId === subscription\.id[\s\S]*closeSubscriptionEditor\(\);/);
   assert.match(app, /els\.subscriptionCancelEdit\?\.addEventListener\('click', \(\) => closeSubscriptionEditor\(\)\);/);
   assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase, \{ render: false \}\)/);
-  assert.match(submit, /closeSubscriptionEditor\(\{ onClosed: renderSubscriptionSettings \}\);/);
+  assert.match(submit, /closeSubscriptionEditor\(\{\s*onClosed: renderSubscriptionSettings,\s*onCanceled: renderSubscriptionSettings\s*\}\);/);
   assert.match(cssBlock(styles, '.subscription-row.is-editing'), /border-color/);
   assert.match(styles, /\.subscription-row\.is-editing \.subscription-row-edit/);
   assert.match(styles, /#subscriptionList > #subscriptionAddDetails/);
