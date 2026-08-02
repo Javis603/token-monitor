@@ -2619,14 +2619,11 @@ test('the note stops promising the data stays on this device once a hub has it',
 test('a record added on another device turns up without pushing settings at the user mid-edit', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const cache = functionBody(main, 'cacheSharedSubscriptions', 'subscriptionsEndpoint');
-  const poll = functionBody(main, 'maybeRefreshSharedSubscriptions', 'maybeAdoptSharedSubscriptionRevision');
   const catchUp = functionBody(main, 'runSubscriptionCatchUp', 'saveSubscriptions');
 
   // Pushing settings re-renders the whole settings form, so a catch-up may only
   // do it when the shared list actually moved.
   assert.match(catchUp, /if \(changed\) pushSettingsToRenderer\(\)/);
-  assert.match(poll, /lastSubscriptionRefreshMs < SUBSCRIPTION_REFRESH_MS/);
-  assert.match(main, /maybeRefreshSharedSubscriptions\(\);\n {4}return fetchStats\(options\);/);
 
   // persistSubscriptionState() sits between the two, so the slice carries it and
   // this exercises the real rollback path rather than a stand-in.
@@ -3286,8 +3283,10 @@ test('a stats frame stamped with a newer subscription version is read back, once
     hubSubscriptions: { updatedAt: 'v1', subscriptions: [] },
     hubSubscriptionsHub: 'https://a.example',
     currentHubIdentity: () => 'https://a.example',
-    lastSubscriptionRefreshMs: 0,
-    Date,
+    lastSubscriptionCatchUp: { hub: '', version: '', at: 0 },
+    SUBSCRIPTION_RETRY_MS: 60000,
+    now: 1_000_000,
+    Date: { now: () => context.now },
     reads: 0,
     runSubscriptionCatchUp: () => { context.reads += 1; return Promise.resolve(); }
   });
@@ -3295,21 +3294,21 @@ test('a stats frame stamped with a newer subscription version is read back, once
   const push = (stats) => vm.runInContext(`maybeAdoptSharedSubscriptionRevision(${JSON.stringify(stats)});`, context);
 
   // The steady state: the hub is stamping every frame with the version this
-  // device already holds, and none of them costs a request.
+  // device already holds, and none of them costs a request. This is what
+  // replaced the periodic read, so it has to be free.
   push({ subscriptionsUpdatedAt: 'v1' });
   assert.equal(context.reads, 0);
 
-  // Another device wrote. Without the stamp this only surfaces on the next poll,
-  // which is five minutes apart while the stream is up.
+  // Another device wrote. Landing it settles the question — the document in hand
+  // now matches what the hub keeps stamping.
   push({ subscriptionsUpdatedAt: 'v2' });
   assert.equal(context.reads, 1);
-  // And it stands in for the poll rather than being followed by one.
-  assert.ok(context.lastSubscriptionRefreshMs > 0);
-
-  // A local collector's own stats carry no stamp, and neither does a hub older
-  // than the field. Reading either as "the hub holds nothing" would take the
-  // records off the screen.
   context.hubSubscriptions = { updatedAt: 'v2', subscriptions: [] };
+  push({ subscriptionsUpdatedAt: 'v2' });
+  assert.equal(context.reads, 1);
+
+  // A local collector's own stats carry no stamp. Reading that as "the hub holds
+  // nothing" would take the records off the screen.
   push({});
   push({ subscriptionsUpdatedAt: null });
   assert.equal(context.reads, 1);
@@ -3325,13 +3324,36 @@ test('a stats frame stamped with a newer subscription version is read back, once
   push({ subscriptionsUpdatedAt: 'v3' });
   assert.equal(context.reads, 2);
 
-  // Local mode has no shared list to be overtaken.
-  context.settings.hubMode = 'local';
-  push({ subscriptionsUpdatedAt: 'v4' });
+  // That attempt did not land — the document in hand is still v2. Frames arrive
+  // on every ingest from every device, so a hub serving /api/stats but failing
+  // /api/subscriptions would be asked again on each one.
+  push({ subscriptionsUpdatedAt: 'v3' });
+  push({ subscriptionsUpdatedAt: 'v3' });
   assert.equal(context.reads, 2);
 
-  // The stamp is only useful if the stats path actually consults it.
+  // The wait is a floor on retrying the same version, not a polling interval:
+  // a transient failure still heals on its own …
+  context.now += 60_000;
+  push({ subscriptionsUpdatedAt: 'v3' });
+  assert.equal(context.reads, 3);
+
+  // … and a version that moves is news again, tried at once rather than waited out.
+  push({ subscriptionsUpdatedAt: 'v4' });
+  assert.equal(context.reads, 4);
+
+  // Local mode has no shared list to be overtaken.
+  context.settings.hubMode = 'local';
+  push({ subscriptionsUpdatedAt: 'v5' });
+  assert.equal(context.reads, 4);
+
+  // The stamp is only useful if both stats paths consult it: the stream while it
+  // is up, and the widget's own read when it is not.
   assert.match(functionBody(main, 'sendPush', 'statsHistoryRevision'), /maybeAdoptSharedSubscriptionRevision\(/);
+  assert.match(main, /const stats = await fetchStats\(options\);[\s\S]{0,240}maybeAdoptSharedSubscriptionRevision\(stats\);/);
+  // And there is no periodic subscription read left behind it. One existed while
+  // the stamp did not; keeping it would spend a request every five minutes per
+  // device to be told what every frame already says.
+  assert.doesNotMatch(main, /maybeRefreshSharedSubscriptions/);
 });
 
 test('coming back to a hub does not write against the other hub token', async () => {
