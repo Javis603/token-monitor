@@ -15,6 +15,12 @@
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   }
 
+  function cappedTokenRate(value) {
+    const parsed = Number(value);
+    if (Number.isNaN(parsed) || parsed <= 0) return 0;
+    return Math.min(TOKEN_RATE_MAX_DISPLAY_RATE, parsed);
+  }
+
   function tokenRateBoostValue(baseRate, elapsedMs, maxRate = TOKEN_RATE_MAX_DISPLAY_RATE) {
     const base = positiveNumber(baseRate);
     const cap = positiveNumber(maxRate) || TOKEN_RATE_MAX_DISPLAY_RATE;
@@ -27,26 +33,26 @@
   }
 
   function tokenRateSettleValue(fromRate, toRate, elapsedMs) {
-    const from = Math.max(0, Number(fromRate) || 0);
-    const to = Math.max(0, Number(toRate) || 0);
+    const from = cappedTokenRate(fromRate);
+    const to = cappedTokenRate(toRate);
     const elapsed = Math.max(0, Number(elapsedMs) || 0);
     const progress = Math.min(1, elapsed / TOKEN_RATE_SETTLE_MS);
     const eased = 1 - Math.pow(1 - progress, 3);
-    return from + (to - from) * eased;
+    return cappedTokenRate(from + (to - from) * eased);
   }
 
   function tokenRatePerSecond(period) {
     const durationMs = positiveNumber(period?.timedDurationMs);
     const timedOutput = positiveNumber(period?.timedOutputTokens);
     if (!durationMs || !timedOutput) return 0;
-    return timedOutput * 1000 / durationMs;
+    return cappedTokenRate(timedOutput * 1000 / durationMs);
   }
 
   function tokenBurnPerMinute(period) {
     const durationMs = positiveNumber(period?.timedDurationMs);
     const timed = positiveNumber(period?.timedTokens);
     if (!durationMs || !timed) return 0;
-    return timed * 60000 / durationMs;
+    return cappedTokenRate(timed * 60000 / durationMs);
   }
 
   function defaultNow() {
@@ -96,7 +102,7 @@
     function currentValue() {
       const value = readValue() || {};
       return {
-        rate: positiveNumber(value.rate),
+        rate: Math.min(displayCap, cappedTokenRate(value.rate)),
         mode: value.mode === 'burn' || value.burn === true ? 'burn' : 'speed'
       };
     }
@@ -144,17 +150,20 @@
 
     function start(event) {
       if (event?.button !== undefined && event.button !== 0) return false;
+      const enabled = canStart();
+      const reduced = prefersReducedMotion();
       // A new primary pointer sequence cannot belong to a canceled gesture. Clear a guard that
       // was left behind when blur/pointercancel produced no follow-up click; if the canceled
       // gesture does produce one, consumeClick() runs before this next pointerdown instead.
       suppressNextClick = false;
+      if (!enabled || reduced) return false;
       if (state?.phase === 'settling') {
         // A second hold is a new gesture, not a mode click. Interrupt the old release animation
         // so the new pointer can own the controller immediately.
         state = null;
         cancelScheduledFrame();
       }
-      if (state || !canStart() || prefersReducedMotion()) return false;
+      if (state) return false;
       const value = currentValue();
       if (!(value.rate > 0)) return false;
       state = {
@@ -229,6 +238,7 @@
     TOKEN_RATE_HOLD_THRESHOLD_MS,
     TOKEN_RATE_MAX_DISPLAY_RATE,
     TOKEN_RATE_SETTLE_MS,
+    cappedTokenRate,
     createTokenRateBoostController,
     positiveNumber,
     tokenBurnPerMinute,

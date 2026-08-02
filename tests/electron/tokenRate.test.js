@@ -22,16 +22,17 @@ function tokenRateFunctions() {
   return tokenRateApi;
 }
 
-function createBoostHarness({ rate = 100, mode = 'speed', reducedMotion = false } = {}) {
+function createBoostHarness({ rate = 100, mode = 'speed', reducedMotion = false, canStart = true } = {}) {
   let now = 0;
   let nextFrameId = 0;
+  let enabled = canStart;
   let controller;
   const frames = new Map();
   const changes = [];
   const value = { rate, mode };
   controller = tokenRateApi.createTokenRateBoostController({
     readValue: () => value,
-    canStart: () => true,
+    canStart: () => enabled,
     prefersReducedMotion: () => reducedMotion,
     now: () => now,
     requestFrame: (callback) => {
@@ -53,6 +54,7 @@ function createBoostHarness({ rate = 100, mode = 'speed', reducedMotion = false 
       callback();
     },
     frames,
+    setCanStart(value) { enabled = value; },
     value
   };
 }
@@ -103,7 +105,7 @@ test('the burn reading reads zero without throughput data', () => {
 });
 
 test('holding the title mark accelerates from the real rate and keeps rising', () => {
-  const { tokenRateBoostValue, tokenRateSettleValue } = tokenRateFunctions();
+  const { tokenRateBoostValue, tokenRateSettleValue, tokenRatePerSecond, tokenBurnPerMinute } = tokenRateFunctions();
   assert.equal(tokenRateBoostValue(0, 0), 0);
   assert.equal(tokenRateBoostValue(100, -1), 100);
   assert.ok(tokenRateBoostValue(100, 520) >= 200);
@@ -115,6 +117,9 @@ test('holding the title mark accelerates from the real rate and keeps rising', (
   assert.equal(tokenRateSettleValue(boosted, 100, 720), 100);
   assert.equal(tokenRateBoostValue(100, Number.POSITIVE_INFINITY), tokenRateApi.TOKEN_RATE_MAX_DISPLAY_RATE);
   assert.ok(Number.isFinite(tokenRateBoostValue(100, 30_000)));
+  assert.equal(tokenRatePerSecond({ timedOutputTokens: Number.MAX_VALUE, timedDurationMs: 1 }), tokenRateApi.TOKEN_RATE_MAX_DISPLAY_RATE);
+  assert.equal(tokenBurnPerMinute({ timedTokens: Number.MAX_VALUE, timedDurationMs: 1 }), tokenRateApi.TOKEN_RATE_MAX_DISPLAY_RATE);
+  assert.equal(tokenRateSettleValue(Number.POSITIVE_INFINITY, 100, 0), tokenRateApi.TOKEN_RATE_MAX_DISPLAY_RATE);
 });
 
 test('the boost controller cancels pointercancel and blur immediately', () => {
@@ -196,6 +201,19 @@ test('a new hold interrupts settling and suppresses its own click', () => {
   assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 2 }), true);
   assert.equal(harness.controller.getSnapshot().phase, 'settling');
   assert.equal(harness.controller.consumeClick(), true);
+});
+
+test('a failed new hold does not clear settling without a repaint', () => {
+  const harness = createBoostHarness();
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
+  harness.advance(1_000);
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 1 }), true);
+  const changesBeforeFailedStart = harness.changes.length;
+
+  harness.setCanStart(false);
+  assert.equal(harness.controller.start({ button: 0, pointerId: 2 }), false);
+  assert.equal(harness.controller.getSnapshot().phase, 'settling');
+  assert.equal(harness.changes.length, changesBeforeFailedStart);
 });
 
 test('lost pointer capture cancels boosting but preserves a normal release settlement', () => {
@@ -302,7 +320,9 @@ test('the token-rate hold has release, cancellation, reduced-motion, and click-g
   assert.match(app, /document\.addEventListener\('pointercancel', \(event\) => \{\s*cancelTokenRateBoost\(event\)/);
   assert.match(app, /window\.addEventListener\('blur', \(\) => \{\s*cancelTokenRateBoost\(\)/);
   assert.match(app, /if \(document\.hidden\) cancelTokenRateBoost\(\)/);
-  assert.match(tokenRatePresentation, /if \(state \|\| !canStart\(\) \|\| prefersReducedMotion\(\)\) return false/);
+  assert.match(tokenRatePresentation, /const enabled = canStart\(\);/);
+  assert.match(tokenRatePresentation, /const reduced = prefersReducedMotion\(\);/);
+  assert.match(tokenRatePresentation, /if \(!enabled \|\| reduced\) return false/);
   assert.match(tokenRatePresentation, /if \(!\(value\.rate > 0\)\) return false/);
   assert.match(tokenRatePresentation, /if \(state\?\.phase === 'settling'\) \{[\s\S]*?cancelScheduledFrame\(\)/);
   assert.match(app, /cancelTokenRateBoost\(event, \{ preserveSettling: true \}\)/);
