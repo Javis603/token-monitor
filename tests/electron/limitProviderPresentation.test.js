@@ -2547,7 +2547,10 @@ test('subscriptions are written through the hub-aware channel, never as a settin
   assert.match(submit, /if \(!await saveSubscriptions\(/);
   assert.doesNotMatch(app, /saveSettings\(\{ subscriptions/);
 
-  assert.match(preload, /saveSubscriptions: \(subscriptions\) => ipcRenderer\.invoke\('subscriptions:save'/);
+  // The version the list was built from travels with it, so the write can be
+  // refused rather than silently re-based on whatever main holds by then.
+  assert.match(preload, /saveSubscriptions: \(subscriptions, baseUpdatedAt\) => ipcRenderer\.invoke\('subscriptions:save', subscriptions, baseUpdatedAt\)/);
+  assert.match(functionBody(app, 'saveSubscriptions', 'subscriptionWriteErrorKey'), /subscriptionsUpdatedAt/);
 
   // settings:update must not be a second way in. Asserting that the guard LINE
   // exists is not enough — the first version of this deleted the key from
@@ -3012,7 +3015,7 @@ test('a rejection from the hub the user just left does not empty the one they ar
   vm.runInContext(source, context);
 
   await assert.rejects(
-    () => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example');", context),
+    () => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example', 'v1');", context),
     /stale_write/
   );
   assert.equal(context.cached, undefined);
@@ -3020,7 +3023,7 @@ test('a rejection from the hub the user just left does not empty the one they ar
   // Staying put, the same rejection is worth caching: it is the hub's current list.
   context.hub = 'https://a.example';
   context.fetch = async () => ({ status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] }) });
-  await assert.rejects(() => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example');", context), /stale_write/);
+  await assert.rejects(() => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example', 'v1');", context), /stale_write/);
   assert.deepEqual(plain(context.cached), { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] });
 });
 
@@ -3069,7 +3072,12 @@ test('hub reads and writes run one at a time, in the order they were asked for',
         context.log.push(`write:${context.server.updatedAt}`);
         return { ok: true, status: 200, json: async () => ({ ...context.server }) };
       },
-      cacheSharedSubscriptions: (doc) => { context.cached = doc; return true; },
+      cacheSharedSubscriptions: (doc, hub) => {
+        context.cached = doc;
+        context.hubSubscriptions = doc;
+        context.hubSubscriptionsHub = hub;
+        return true;
+      },
       rememberOrphanedSubscriptions: () => false,
       persistSubscriptionState: () => true,
       console: { log() {} },
@@ -3085,7 +3093,7 @@ test('hub reads and writes run one at a time, in the order they were asked for',
   // before it, land last because it was quicker, and leave the saved record
   // invisible. The lane means the read cannot start until the write is done.
   const a = build();
-  const write = vm.runInContext("writeSharedSubscriptions([{ id: 'saved' }]);", a);
+  const write = vm.runInContext("writeSharedSubscriptions([{ id: 'saved' }], 'v0');", a);
   const read = vm.runInContext('refreshSharedSubscriptions({});', a);
   await Promise.all([write, read]);
   assert.deepEqual(a.log, ['write:saved', 'read:saved']);
@@ -3094,20 +3102,22 @@ test('hub reads and writes run one at a time, in the order they were asked for',
   // And the same the other way round, which is the case the epoch used to cover.
   const b = build();
   const first = vm.runInContext('refreshSharedSubscriptions({});', b);
-  const second = vm.runInContext("writeSharedSubscriptions([{ id: 'saved' }]);", b);
+  const second = vm.runInContext("writeSharedSubscriptions([{ id: 'saved' }], 'v0');", b);
   await Promise.all([first, second]);
   assert.deepEqual(b.log, ['read:v0', 'write:saved']);
   assert.equal(b.cached.updatedAt, 'saved');
 
-  // Two writes keep their order, and the second bases on what the first left —
-  // which is also what stops it 409ing against its own predecessor.
+  // Two writes built on the same version, the second queued before the first came
+  // back. Ordering them is not licence to re-base the second on what the first
+  // left: its list was made without that change, and sending it under the token
+  // the first produced is how a row deleted a moment ago comes back.
   const c = build();
-  await Promise.all([
-    vm.runInContext("writeSharedSubscriptions([{ id: 'one' }]);", c),
-    vm.runInContext("writeSharedSubscriptions([{ id: 'two' }]);", c)
-  ]);
-  assert.deepEqual(c.log, ['write:one', 'write:two']);
-  assert.equal(c.cached.updatedAt, 'two');
+  const one = vm.runInContext("writeSharedSubscriptions([{ id: 'one' }], 'v0');", c);
+  const two = vm.runInContext("writeSharedSubscriptions([{ id: 'two' }], 'v0');", c);
+  await one;
+  await assert.rejects(() => two, /stale_write/);
+  assert.deepEqual(c.log, ['write:one']);
+  assert.equal(c.cached.updatedAt, 'one');
 });
 
 test('a failed operation does not block the lane behind it', async () => {
@@ -3282,24 +3292,90 @@ test('coming back to a hub does not write against the other hub token', async ()
   });
   vm.runInContext(source, context);
 
-  await vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }]);", context);
-  // Offering B's token claims to have read a list that was never A's. A that
-  // happened to carry the same token would accept the write outright, over
-  // records this device has never seen; claiming nothing gets a 409 instead.
-  assert.deepEqual(plain(context.sent), [{ url: 'https://a.example/api/subscriptions', base: '' }]);
+  // An edit made while B was on screen claims B's token. Sent to A it claims to
+  // have read a list that was never A's, and an A carrying the same token would
+  // accept it outright, over records this device has never seen. Refused here
+  // instead, which tells the user to look at what A actually holds.
+  await assert.rejects(
+    () => vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }], 'b-v9');", context),
+    /stale_write/
+  );
+  assert.deepEqual(plain(context.sent), []);
 
-  // With A's own document in hand it is used, which is what keeps 409 meaningful.
+  // With A's own document in hand and an edit built on it, the write goes out —
+  // carrying the version it was built from, which is what keeps 409 meaningful.
   context.hubSubscriptions = { updatedAt: 'a-v1', subscriptions: [] };
   context.hubSubscriptionsHub = 'https://a.example';
-  context.sent = [];
-  await vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }]);", context);
+  await vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }], 'a-v1');", context);
   assert.deepEqual(plain(context.sent), [{ url: 'https://a.example/api/subscriptions', base: 'a-v1' }]);
+
+  // And an edit built on a version this device has already moved past is stale
+  // for the same reason another device's write is, without a round trip to hear it.
+  context.hubSubscriptions = { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] };
+  context.sent = [];
+  await assert.rejects(
+    () => vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }], 'a-v1');", context),
+    /stale_write/
+  );
+  assert.deepEqual(plain(context.sent), []);
 
   // Adopting set-aside records merges into the document in hand, so it has to ask
   // the same question — otherwise B's records join A's list as though entered here.
   const adopt = functionBody(main, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode');
   assert.doesNotMatch(adopt, /hubSubscriptions\?\./);
   assert.match(adopt, /subscriptionsDocumentFor\(/);
+});
+
+test('adopting set-aside records keeps whatever the hub gained while it waited', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`,
+    `async ${functionBody(main, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client', subscriptionsOrphaned: { hubUrl: 'https://a.example', records: [{ id: 'mine' }] } },
+    embeddedHub: null,
+    subscriptionQueues: new Map(),
+    currentHubIdentity: () => 'https://a.example',
+    hubSubscriptions: { updatedAt: 'a-v1', subscriptions: [] },
+    hubSubscriptionsHub: 'https://a.example',
+    pendingOrphanedSubscriptions: () => context.settings.subscriptionsOrphaned.records,
+    subscriptionsEndpoint: () => ({ url: 'https://a.example/api/subscriptions', headers: {} }),
+    AbortSignal: { timeout: () => null },
+    sent: [],
+    fetch: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      context.sent.push({ base: body.baseUpdatedAt, ids: body.subscriptions.map((entry) => entry.id) });
+      return { ok: true, status: 200, json: async () => ({ updatedAt: 'a-v3', subscriptions: body.subscriptions }) };
+    },
+    cacheSharedSubscriptions: () => true,
+    staleSubscriptionWriteError: () => new Error('stale_write'),
+    settingsForRenderer: () => ({}),
+    saveSettings: () => true,
+    setTimeout,
+    Promise,
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  // Already in the lane, and it moves the hub on: another device's record arrives
+  // and the document the merge would have read becomes the one before it.
+  context.ahead = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    context.hubSubscriptions = { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] };
+  };
+  const queued = vm.runInContext('queueSubscriptionOp(ahead);', context);
+  const adopting = vm.runInContext('adoptOrphanedSubscriptions();', context);
+  await Promise.all([queued, adopting]);
+
+  // Merging outside the lane would pair a-v1's list with a-v2's token: current
+  // enough for the hub to accept, and 'theirs' would be gone without a word.
+  assert.deepEqual(plain(context.sent), [{ base: 'a-v2', ids: ['theirs', 'mine'] }]);
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned), { hubUrl: '', records: [] });
 });
 
 test('switching hubs does not wait out the old hub request before starting', () => {

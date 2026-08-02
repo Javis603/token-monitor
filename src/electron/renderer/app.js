@@ -2840,7 +2840,10 @@ function renderSubscriptionSettings() {
 // thrown away and main.js's copy is re-read and re-rendered.
 async function saveSubscriptions(list) {
   try {
-    state.settings = await window.tokenMonitor.saveSubscriptions(list);
+    // The version the list on screen was built from travels with it: the main
+    // process may already hold a newer one, and letting the write inherit that
+    // would claim to have seen records this edit was never shown.
+    state.settings = await window.tokenMonitor.saveSubscriptions(list, state.settings?.subscriptionsUpdatedAt || '');
     state.subscriptionSyncError = '';
     renderSubscriptionSettings();
     return true;

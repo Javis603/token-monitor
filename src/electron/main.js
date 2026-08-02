@@ -2502,8 +2502,14 @@ let hubSubscriptionsHub = '';
 // hub-side work. Discarding whichever answer came back last is not enough: a read
 // that STARTS after a write can still observe the state before it, come back
 // first, and leave the write invisible on screen and in settings.json. Only
-// ordering the operations themselves removes that, and it also gives each write
-// the previous one's updatedAt to base on instead of a stale one.
+// ordering the operations themselves removes that.
+//
+// Ordering is not re-basing, though. A write queued behind another does NOT adopt
+// whatever version that one left: its list was built from a particular version,
+// and if what ran ahead of it pulled in another device's records, writing over
+// them under their own token is the silent erase this design exists to prevent.
+// Each write carries the version it was built from and is refused if that has
+// moved on.
 //
 // Per hub rather than one lane for all of them, because ordering is only worth
 // anything against a single shared document: two hubs hold two documents with no
@@ -2602,6 +2608,12 @@ function subscriptionOpIsCurrent(hub) {
   return hub === currentHubIdentity();
 }
 
+// Reported rather than dropped: whatever the user was acting on is still on
+// screen, and silence would read as done.
+function hubChangedError() {
+  return Object.assign(new Error('hub changed'), { code: 'hub_changed' });
+}
+
 function subscriptionsEndpoint() {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return null;
@@ -2636,33 +2648,34 @@ function staleSubscriptionWriteError(current, hub) {
   return error;
 }
 
-function writeSharedSubscriptions(list) {
+function writeSharedSubscriptions(list, baseUpdatedAt) {
   return queueSubscriptionOp((hub) => {
     // Queued against one hub, reached the front of the lane after the user moved
     // to another. The list in hand is the one they were editing on the hub they
     // left, and hubSubscriptions now holds the new hub's updatedAt to base on, so
     // sending it would write one hub's records into another against a base that
-    // was never read from it. Reported rather than dropped: the record is still
-    // in the form, and silence would read as saved.
-    if (!subscriptionOpIsCurrent(hub)) {
-      throw Object.assign(new Error('hub changed'), { code: 'hub_changed' });
-    }
-    return writeSharedSubscriptionsNow(list, hub);
+    // was never read from it.
+    if (!subscriptionOpIsCurrent(hub)) throw hubChangedError();
+    return writeSharedSubscriptionsNow(list, hub, baseUpdatedAt);
   });
 }
 
-// Takes the hub rather than reading it: the identity this write was queued
-// against is the one it has to stay consistent with, and re-deriving it here
-// would only give the same answer while nothing had changed.
-async function writeSharedSubscriptionsNow(list, hub) {
-  // Claiming a base means claiming to have read what is on the hub. Holding
-  // another hub's document is not that, and offering its updatedAt asks this hub
-  // to overwrite a list the device has never seen — accepted outright if the two
-  // happen to carry the same token. Nothing in hand means claiming nothing: a hub
-  // that has been written to answers 409 and hands its document back to re-base
-  // on, and one that has not is seeded, which is what an empty base means
-  // everywhere else.
-  const baseUpdatedAt = subscriptionsDocumentFor(hub)?.updatedAt || '';
+// Takes the hub and the base rather than reading either. The identity is the one
+// this write was queued against; the base is the version the list was built from,
+// which is the whole meaning of the token. Reading it here instead would answer
+// "the newest version this process knows of", and pairing that with a list made
+// from an older one is a write the hub has no way to refuse: the token is
+// current, so it accepts, and whatever arrived in between is gone.
+async function writeSharedSubscriptionsNow(list, hub, baseUpdatedAt) {
+  // Which makes the base worth checking, not just carrying. A list built on a
+  // version this process has already moved past is stale for exactly the reason
+  // another device's write is, and the answer is the same one the hub would give:
+  // re-read and redo. Held nothing for this hub and the caller claims a version,
+  // and they read it somewhere else — another hub, before a switch back to this
+  // one — which is not a version of this list at all.
+  if (baseUpdatedAt !== (subscriptionsDocumentFor(hub)?.updatedAt || '')) {
+    throw Object.assign(new Error('stale_write'), { code: 'stale_write' });
+  }
   if (settings.hubMode === 'host' && embeddedHub) {
     try {
       const stored = embeddedHub.hub.setSubscriptions(list, baseUpdatedAt);
@@ -2747,19 +2760,33 @@ function pendingOrphanedSubscriptions() {
 }
 
 async function adoptOrphanedSubscriptions() {
-  const orphans = pendingOrphanedSubscriptions();
-  if (orphans.length === 0) return settingsForRenderer();
-  // Same-id records replace rather than append: two entries sharing an id would
-  // collapse on normalization anyway, and the local edit is the one being adopted.
-  // Merging into another hub's document would carry its records into this one as
-  // though they had been entered here; with none in hand the write goes out
-  // claiming no base, which this hub answers with 409 rather than an overwrite.
-  const held = subscriptionsDocumentFor(currentHubIdentity());
-  const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
-  for (const orphan of orphans) merged.set(orphan.id, orphan);
-  await writeSharedSubscriptions([...merged.values()]);
-  settings.subscriptionsOrphaned = { hubUrl: '', records: [] };
-  if (!saveSettings()) throw Object.assign(new Error('settings write failed'), { code: 'write_failed' });
+  // Nothing to decide about; the answer that counts is taken inside the lane.
+  if (pendingOrphanedSubscriptions().length === 0) return settingsForRenderer();
+  // Reading, merging and writing is one operation, so all three happen in one
+  // turn of the lane. Merging outside it took the document as it stood before
+  // whatever was already queued, and the write that followed then carried the
+  // base that operation left behind — a pairing the hub has no way to refuse,
+  // because the token is current. It accepts the write, and the records the other
+  // operation added in between are gone with nothing to say they were dropped.
+  await queueSubscriptionOp(async (hub) => {
+    if (!subscriptionOpIsCurrent(hub)) throw hubChangedError();
+    const orphans = pendingOrphanedSubscriptions();
+    if (orphans.length === 0) return;
+    // Same-id records replace rather than append: two entries sharing an id would
+    // collapse on normalization anyway, and the local edit is the one being
+    // adopted. Merging into another hub's document would carry its records into
+    // this one as though they had been entered here; with none in hand the write
+    // goes out claiming no base, which the hub answers with 409 rather than an
+    // overwrite.
+    const held = subscriptionsDocumentFor(hub);
+    const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
+    for (const orphan of orphans) merged.set(orphan.id, orphan);
+    await writeSharedSubscriptionsNow([...merged.values()], hub, held?.updatedAt || '');
+    // Cleared in the same turn: between the write landing and this, the records
+    // are on the hub and still marked as waiting for a decision here.
+    settings.subscriptionsOrphaned = { hubUrl: '', records: [] };
+    if (!saveSettings()) throw Object.assign(new Error('settings write failed'), { code: 'write_failed' });
+  });
   return settingsForRenderer();
 }
 
@@ -2828,7 +2855,9 @@ async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
       hubSubscriptions = doc;
       hubSubscriptionsHub = hub;
       try {
-        await writeSharedSubscriptionsNow(local, hub);
+        // The document just fetched is the base by definition: it is what this
+        // hub answered a moment ago, and an unwritten hub answers with no token.
+        await writeSharedSubscriptionsNow(local, hub, doc.updatedAt || '');
         return true;
       } catch (error) {
         // The seed failed, so the empty document must not stay installed: in
@@ -2872,7 +2901,11 @@ function maybeRefreshSharedSubscriptions() {
     .catch(() => {});
 }
 
-async function saveSubscriptions(list) {
+// baseUpdatedAt is the version the renderer's list was built from, sent back with
+// it. The alternative is to read the current one here, which would let an edit
+// made against the list on screen go out claiming a version that arrived after
+// it — the hub accepts that, and whatever the newer version added is lost.
+async function saveSubscriptions(list, baseUpdatedAt) {
   if (!subscriptionsAreShared()) {
     settings.subscriptions = subscriptionDisplay.normalizeSubscriptions(list, { currencyApi: { normalizeCurrency } });
     // Editing here makes the list this device's own again, so a later hub join
@@ -2888,7 +2921,7 @@ async function saveSubscriptions(list) {
     }
     return settingsForRenderer();
   }
-  await writeSharedSubscriptions(list);
+  await writeSharedSubscriptions(list, String(baseUpdatedAt || ''));
   return settingsForRenderer();
 }
 
@@ -3421,6 +3454,10 @@ function settingsForRenderer() {
     // last-known cache behind it.
     subscriptions: effectiveSubscriptions(),
     subscriptionsShared: subscriptionsAreShared(),
+    // Which version of the shared list the one above was taken from, so an edit
+    // built on it can say what it was built on rather than inheriting whatever
+    // this process holds by the time the write goes out.
+    subscriptionsUpdatedAt: subscriptionsDocumentFor(currentHubIdentity())?.updatedAt || '',
     subscriptionsOrphaned: pendingOrphanedSubscriptions(),
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
@@ -4716,9 +4753,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle('subscriptions:discardOrphans', () => discardOrphanedSubscriptions());
 
-  ipcMain.handle('subscriptions:save', async (_event, subscriptions) => {
+  ipcMain.handle('subscriptions:save', async (_event, subscriptions, baseUpdatedAt) => {
     try {
-      return await saveSubscriptions(subscriptions);
+      return await saveSubscriptions(subscriptions, baseUpdatedAt);
     } catch (error) {
       // The renderer has to tell "another device won" apart from "the hub is
       // down": one means re-read and redo, the other means try again later. Only
@@ -4781,6 +4818,11 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptions;
     delete normalizedPatch.subscriptionsOrphaned;
     delete normalizedPatch.subscriptionsCacheHub;
+    // Derived for the renderer from the hub document, not settings. Persisting a
+    // copy would leave a key on disk that describes a hub as of whenever a form
+    // was last saved, waiting to be mistaken for the real thing.
+    delete normalizedPatch.subscriptionsShared;
+    delete normalizedPatch.subscriptionsUpdatedAt;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
