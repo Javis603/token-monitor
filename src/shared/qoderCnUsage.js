@@ -162,7 +162,7 @@ async function readQoderDbRows(dbPath, options = {}) {
   const sinceMs = options.sinceMs;
   const sql = sinceMs ? QODER_USAGE_SINCE_SQL : QODER_USAGE_SQL;
   const cliArgs = sinceMs
-    ? ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql.replace('?', String(sinceMs)).replace('?', String(sinceMs - 86_400_000))]
+    ? ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql.replace('?', String(sinceMs)).replace('?', String(sinceMs))]
     : ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql];
   try {
     const result = await run('sqlite3', cliArgs, {
@@ -178,7 +178,7 @@ async function readQoderDbRows(dbPath, options = {}) {
       try {
         database.exec('PRAGMA busy_timeout = 250');
         return sinceMs
-          ? database.prepare(QODER_USAGE_SINCE_SQL).all(sinceMs, sinceMs - 86_400_000)
+          ? database.prepare(QODER_USAGE_SINCE_SQL).all(sinceMs, sinceMs)
           : database.prepare(QODER_USAGE_SQL).all();
       } finally {
         database.close();

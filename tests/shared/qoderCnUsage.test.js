@@ -245,7 +245,7 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
     return;
   }
 
-  assert.equal(rows.length, 8);
+  assert.equal(rows.length, 10);
   const byId = new Map(rows.map((row) => [row.messageId.split(':').pop(), row]));
   assert.deepEqual(
     {
@@ -282,6 +282,11 @@ test('anchored read applies a lenient window to text timestamps and filters in S
   // filtered by the exact numeric branch.
   assert.ok(ids.includes('msg-9'), 'Z-suffixed ISO at sinceMs must be kept');
   assert.ok(ids.includes('msg-12'), 'text milliseconds within the window must be kept');
+  // Discriminating case: msg-13 is a text ISO 8h below sinceMs — it survives
+  // ONLY because of the lenient one-day window; msg-14 is a numeric row at the
+  // same instant, which the exact numeric branch must still filter out.
+  assert.ok(ids.includes('msg-13'), 'text row inside the lenient window must be kept');
+  assert.ok(!ids.includes('msg-14'), 'numeric row at the same instant must be filtered exactly');
   assert.ok(!ids.includes('msg-10'), 'unparseable text must not survive the filter');
   assert.ok(!ids.includes('msg-2'), 'numeric row below sinceMs must be filtered exactly');
 });
