@@ -2815,6 +2815,15 @@ async function saveSubscriptions(list, baseUpdatedAt) {
   try {
     state.settings = await window.tokenMonitor.saveSubscriptions(list, baseUpdatedAt);
     state.subscriptionSyncError = '';
+    // A version this device just wrote is a change the user has already seen —
+    // they are the one who made it — so an open form re-anchors on it. Without
+    // this, removing one row would leave the edit in progress on another holding
+    // the version from before, and refuse it once for a change it caused itself.
+    // Only what this device wrote counts: a version arriving from elsewhere does
+    // not come through here, which is the whole point of holding one.
+    if (state.subscriptionFormBase !== null) {
+      state.subscriptionFormBase = state.settings?.subscriptionsUpdatedAt || '';
+    }
     renderSubscriptionSettings();
     return true;
   } catch (error) {

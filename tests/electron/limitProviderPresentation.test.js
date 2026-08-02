@@ -3344,13 +3344,16 @@ test('an edit is saved against the version its form was opened on', async () => 
     els: {},
     state: { settings: { subscriptionsUpdatedAt: 'v1' }, subscriptionFormBase: null },
     onHub: 'v1',
+    // What a write would leave behind, set per step the way a hub would.
+    nextVersion: '',
     sent: [],
     window: {
       tokenMonitor: {
         saveSubscriptions: async (list, baseUpdatedAt) => {
           context.sent.push(baseUpdatedAt);
           if (baseUpdatedAt !== context.onHub) throw new Error('stale_write');
-          return { subscriptionsUpdatedAt: 'v3', subscriptions: list };
+          context.onHub = context.nextVersion;
+          return { subscriptionsUpdatedAt: context.onHub, subscriptions: list };
         },
         getSettings: async () => ({ subscriptionsUpdatedAt: context.onHub })
       }
@@ -3382,11 +3385,23 @@ test('an edit is saved against the version its form was opened on', async () => 
   // save again. Without this the second attempt would be refused too, and every
   // one after it.
   assert.equal(context.state.subscriptionFormBase, 'v2');
+  context.nextVersion = 'v3';
   assert.equal(
     await vm.runInContext("saveSubscriptions([{ id: 'mine' }], state.subscriptionFormBase || '');", context),
     true
   );
   assert.deepEqual(context.sent, ['v1', 'v2']);
+
+  // Removing a row while a form is open writes a new version too, and that one
+  // the user has seen — they removed it. The form re-anchors on what this device
+  // wrote rather than refusing the edit still in progress, once, for a change it
+  // caused itself.
+  assert.equal(context.state.subscriptionFormBase, 'v3');
+  context.sent = [];
+  context.nextVersion = 'v4';
+  assert.equal(await vm.runInContext("saveSubscriptions([], state.settings?.subscriptionsUpdatedAt || '');", context), true);
+  assert.deepEqual(context.sent, ['v3']);
+  assert.equal(context.state.subscriptionFormBase, 'v4');
 
   // Closed, there is no form version to speak for — the row actions carry the one
   // on screen instead.
