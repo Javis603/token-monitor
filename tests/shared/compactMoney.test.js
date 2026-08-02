@@ -34,3 +34,13 @@ test('compact currency preserves exact currency precision below the unit thresho
   assert.equal(formatCompactCurrencyFromUsd(999.5, 'USD', 'western', 'en'), '$999.50');
   assert.equal(formatCompactCurrencyFromUsd(9_999.5, 'USD', 'localized', 'zh-TW'), '$9999.50');
 });
+
+test('compact currency preserves fractional precision after crossing a unit threshold', () => {
+  assert.equal(formatCompactCurrencyFromUsd(1_249.5, 'USD', 'western', 'en'), '$1.2K');
+  assert.equal(formatCompactCurrencyFromUsd(1_250, 'USD', 'western', 'en'), '$1.3K');
+  assert.equal(formatCompactCurrencyFromUsd(999_949.5, 'USD', 'western', 'en'), '$999.9K');
+  assert.equal(formatCompactCurrencyFromUsd(999_950, 'USD', 'western', 'en'), '$1M');
+  assert.equal(formatCompactCurrencyFromUsd(12_449.5, 'USD', 'localized', 'zh-TW'), '$1.24萬');
+  assert.equal(formatCompactCurrencyFromUsd(99_999_499.5, 'USD', 'localized', 'zh-TW'), '$9999.9萬');
+  assert.equal(formatCompactCurrencyFromUsd(99_999_500, 'USD', 'localized', 'zh-TW'), '$1億');
+});

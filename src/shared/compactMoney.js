@@ -21,7 +21,7 @@
     }
 
     const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-    return `${symbol}${compactTokenApi.formatCompactTokens(amount, unitSystem, locale)}`;
+    return `${symbol}${compactTokenApi.formatCompactValue(amount, unitSystem, locale)}`;
   }
 
   return { formatCompactCurrencyFromUsd };

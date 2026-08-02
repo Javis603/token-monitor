@@ -33,6 +33,13 @@ test('compact token formatter uses western units and promotes rounded values', (
   assert.equal(compactTokens.formatCompactTokens(999_950_000), '1B');
 });
 
+test('compact value core preserves fractional input while token formatting stays integer-based', () => {
+  assert.equal(compactTokens.formatCompactValue(1_249.5), '1.2K');
+  assert.equal(compactTokens.formatCompactValue(1_250), '1.3K');
+  assert.equal(compactTokens.formatCompactValue(999_949.5), '999.9K');
+  assert.equal(compactTokens.formatCompactValue(999_950), '1M');
+});
+
 test('compact token formatter uses locale-specific East Asian units', () => {
   assert.equal(compactTokens.formatCompactTokens(9_999, 'localized', 'zh-TW'), '9999');
   assert.equal(compactTokens.formatCompactTokens(15_000, 'localized', 'zh-TW'), '1.5萬');
@@ -40,6 +47,12 @@ test('compact token formatter uses locale-specific East Asian units', () => {
   assert.equal(compactTokens.formatCompactTokens(295_116_445, 'localized', 'ja'), '2.95億');
   assert.equal(compactTokens.formatCompactTokens(295_116_445, 'localized', 'ko'), '2.95억');
   assert.equal(compactTokens.formatCompactTokens(99_999_500, 'localized', 'zh-TW'), '1億');
+});
+
+test('compact value core preserves localized fractional boundaries', () => {
+  assert.equal(compactTokens.formatCompactValue(12_449.5, 'localized', 'zh-TW'), '1.24萬');
+  assert.equal(compactTokens.formatCompactValue(99_999_499.5, 'localized', 'zh-TW'), '9999.9萬');
+  assert.equal(compactTokens.formatCompactValue(99_999_500, 'localized', 'zh-TW'), '1億');
 });
 
 test('tray formatting keeps its existing western precision while sharing localized units', () => {
