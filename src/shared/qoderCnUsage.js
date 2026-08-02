@@ -70,7 +70,8 @@ FROM chat_message
 WHERE role = 'assistant'
   AND token_info IS NOT NULL
   AND trim(token_info) NOT IN ('', '{}')
-  AND (typeof(gmt_create) != 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ? OR typeof(gmt_create) = 'text')
+  AND (typeof(gmt_create) != 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ?
+    OR typeof(gmt_create) = 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ? - 86400000)
 ORDER BY gmt_create, rowid
 `;
 
@@ -161,7 +162,7 @@ async function readQoderDbRows(dbPath, options = {}) {
   const sinceMs = options.sinceMs;
   const sql = sinceMs ? QODER_USAGE_SINCE_SQL : QODER_USAGE_SQL;
   const cliArgs = sinceMs
-    ? ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql.replace('?', String(sinceMs))]
+    ? ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql.replace('?', String(sinceMs)).replace('?', String(sinceMs - 86_400_000))]
     : ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql];
   try {
     const result = await run('sqlite3', cliArgs, {
@@ -177,7 +178,7 @@ async function readQoderDbRows(dbPath, options = {}) {
       try {
         database.exec('PRAGMA busy_timeout = 250');
         return sinceMs
-          ? database.prepare(QODER_USAGE_SINCE_SQL).all(sinceMs)
+          ? database.prepare(QODER_USAGE_SINCE_SQL).all(sinceMs, sinceMs - 86_400_000)
           : database.prepare(QODER_USAGE_SQL).all();
       } finally {
         database.close();

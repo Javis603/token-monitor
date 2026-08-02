@@ -266,3 +266,22 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
   assert.equal(byId.get('msg-11').createdAt, 1_750_000_000 * 1000);
   assert.equal(byId.get('msg-12').createdAt, 1_785_286_800_000);
 });
+
+test('anchored read applies a lenient window to text timestamps and filters in SQL', async (t) => {
+  let rows;
+  try {
+    rows = await readQoderDbRows(QODER_DB_FIXTURE, { sinceMs: 1_785_286_800_000 });
+  } catch (error) {
+    t.skip(`no sqlite backend available: ${error.message}`);
+    return;
+  }
+  const ids = rows.map((row) => row.id);
+  // msg-9 (Z-suffixed ISO at exactly sinceMs) and msg-12 (text milliseconds)
+  // must survive the lenient text window; msg-10 (unparseable text → 0) must
+  // still be filtered out by SQL, and msg-2 (numeric ms below sinceMs) must be
+  // filtered by the exact numeric branch.
+  assert.ok(ids.includes('msg-9'), 'Z-suffixed ISO at sinceMs must be kept');
+  assert.ok(ids.includes('msg-12'), 'text milliseconds within the window must be kept');
+  assert.ok(!ids.includes('msg-10'), 'unparseable text must not survive the filter');
+  assert.ok(!ids.includes('msg-2'), 'numeric row below sinceMs must be filtered exactly');
+});
