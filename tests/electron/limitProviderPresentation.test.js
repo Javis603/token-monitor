@@ -2615,10 +2615,11 @@ test('a record added on another device turns up without pushing settings at the 
   const run = (previous, incoming, { saveOk = true } = {}) => {
     const context = vm.createContext({
       hubSubscriptions: previous,
+      hubSubscriptionsHub: previous ? 'https://hub.example' : '',
       settings: {
         subscriptions: [{ id: 'stale' }],
         subscriptionsOrphaned: { hubUrl: 'https://hub.example', records: [{ id: 'held' }] },
-        subscriptionsCacheHub: ''
+        subscriptionsCacheHub: previous ? 'https://hub.example' : ''
       },
       currentHubIdentity: () => 'https://hub.example',
       saveSettings: () => { context.saved = true; return saveOk; },
@@ -2666,8 +2667,14 @@ test('a deleted record is not resurrected by another device rejoining', async ()
   const run = async ({ doc, local, writeFails = false }) => {
     const written = [];
     const context = vm.createContext({
-      settings: { hubMode: 'client', subscriptions: local, subscriptionsOrphaned: { hubUrl: '', records: [] } },
+      settings: {
+        hubMode: 'client',
+        subscriptions: local,
+        subscriptionsOrphaned: { hubUrl: '', records: [] },
+        subscriptionsCacheHub: ''
+      },
       hubSubscriptions: null,
+      hubSubscriptionsHub: '',
       subscriptionsAreShared: () => true,
       effectiveHubConfig: () => ({ url: 'https://hub.example' }),
       fetchSharedSubscriptions: async () => doc,
@@ -2843,8 +2850,9 @@ test('one hub cached list is never filed as records belonging to the next hub', 
   // Once settings.subscriptions is a cache of some hub it is that hub's data.
   // Carrying it into the next hub would seed or offer accounts that were never
   // entered on this device.
-  assert.match(refresh, /const cacheHub = String\(settings\.subscriptionsCacheHub \|\| ''\);/);
-  assert.match(refresh, /cacheHub && cacheHub !== currentHubIdentity\(\) \? \[\] : \(settings\.subscriptions \|\| \[\]\)/);
+  assert.match(refresh, /const local = settings\.subscriptionsCacheHub \? \[\] : \(settings\.subscriptions \|\| \[\]\);/);
+  // And a document from another hub is dropped rather than shown as this one's.
+  assert.match(refresh, /hubSubscriptionsHub !== currentHubIdentity\(\)/);
 
   // Editing in local mode hands ownership back, which is what clears the marker.
   const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
@@ -2869,4 +2877,86 @@ test('both hubs answer a stale write the same way, even when it is also malforme
   const hubSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'hub', 'server.js'), 'utf8');
   const set = functionBody(hubSource, 'setSubscriptions', 'onStats');
   assert.ok(set.indexOf('isStaleSubscriptionWrite') < set.indexOf('unsupported currency'));
+});
+
+test('records held for a decision survive reconnecting to the same hub', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'cacheSharedSubscriptions', 'persistSubscriptionState'),
+    functionBody(main, 'rememberOrphanedSubscriptions', 'currentHubIdentity'),
+    functionBody(main, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(main, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    `async ${functionBody(main, 'refreshSharedSubscriptions', 'maybeRefreshSharedSubscriptions')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: {
+      hubMode: 'client',
+      subscriptions: [{ id: 'mine' }],
+      subscriptionsOrphaned: { hubUrl: '', records: [] },
+      subscriptionsCacheHub: ''
+    },
+    hubSubscriptions: null,
+    hubSubscriptionsHub: '',
+    subscriptionsAreShared: () => true,
+    currentHubIdentity: () => 'https://hub.example',
+    fetchSharedSubscriptions: async () => ({ updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'theirs' }] }),
+    writeSharedSubscriptions: async () => {},
+    persistSubscriptionState: () => true,
+    console: { log() {} },
+    JSON
+  });
+  const refresh = () => vm.runInContext(`${source}\nrefreshSharedSubscriptions({ seedFromLocal: true });`, context);
+
+  // Joining a hub that already has records sets this device's aside.
+  await refresh();
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'mine' }]);
+
+  // A restart, or any later mode change, reconciles against the same hub again.
+  // settings.subscriptions is now that hub's cache, so comparing it against the
+  // hub finds no differences — and used to answer that by clearing a set the
+  // user had not decided about yet.
+  await refresh();
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'mine' }]);
+  assert.deepEqual(plain(vm.runInContext('pendingOrphanedSubscriptions();', context)), [{ id: 'mine' }]);
+});
+
+test('a hub that cannot be reached never shows the previous hub records', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const effective = functionBody(main, 'effectiveSubscriptions', 'cacheSharedSubscriptions');
+  const run = (context) => plain(vm.runInNewContext(`${effective}\neffectiveSubscriptions();`, {
+    subscriptionsAreShared: () => true,
+    currentHubIdentity: () => 'https://b.example',
+    ...context
+  }));
+
+  const cached = { subscriptions: [{ id: 'from-a' }] };
+  // Hub B is unreachable, so nothing was fetched and the document in hand is
+  // still hub A's. Showing it would describe hub B with hub A's records.
+  assert.deepEqual(
+    run({
+      hubSubscriptions: cached,
+      hubSubscriptionsHub: 'https://a.example',
+      settings: { subscriptions: [{ id: 'from-a' }], subscriptionsCacheHub: 'https://a.example' }
+    }),
+    []
+  );
+  // The on-disk copy answers when it belongs to this hub.
+  assert.deepEqual(
+    run({
+      hubSubscriptions: null,
+      hubSubscriptionsHub: '',
+      settings: { subscriptions: [{ id: 'from-b' }], subscriptionsCacheHub: 'https://b.example' }
+    }),
+    [{ id: 'from-b' }]
+  );
+  // An unmarked list is this device's own, waiting to be seeded.
+  assert.deepEqual(
+    run({
+      hubSubscriptions: null,
+      hubSubscriptionsHub: '',
+      settings: { subscriptions: [{ id: 'mine' }], subscriptionsCacheHub: '' }
+    }),
+    [{ id: 'mine' }]
+  );
 });

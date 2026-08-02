@@ -2494,6 +2494,10 @@ async function postToHub(summary) {
 // ---------------------------------------------------------------------------
 
 let hubSubscriptions = null;
+// Which hub the document in hand came from. Without it, switching to a hub that
+// cannot be reached kept showing the previous hub's records as though they were
+// this one's.
+let hubSubscriptionsHub = '';
 let lastSubscriptionRefreshMs = 0;
 const SUBSCRIPTION_REFRESH_MS = 60000;
 
@@ -2502,19 +2506,33 @@ function subscriptionsAreShared() {
 }
 
 function effectiveSubscriptions() {
-  if (subscriptionsAreShared() && hubSubscriptions) return hubSubscriptions.subscriptions;
-  return settings.subscriptions || [];
+  if (!subscriptionsAreShared()) return settings.subscriptions || [];
+  const hub = currentHubIdentity();
+  if (hubSubscriptions && hubSubscriptionsHub === hub) return hubSubscriptions.subscriptions;
+  // The on-disk copy only answers for this hub, or for no hub at all — in which
+  // case it is this device's own list, waiting to be seeded. Another hub's
+  // records are not an answer to "what is on this one", so nothing is shown
+  // rather than something wrong.
+  const cacheHub = String(settings.subscriptionsCacheHub || '');
+  return cacheHub === hub || cacheHub === '' ? (settings.subscriptions || []) : [];
 }
 
 // Returns whether anything actually changed. Callers use that to decide whether
 // to push settings at the renderer: a push re-renders the whole settings form,
 // which would fight whatever the user is typing in it.
 function cacheSharedSubscriptions(doc) {
-  const changed = (hubSubscriptions?.updatedAt || '') !== (doc.updatedAt || '');
+  const hub = currentHubIdentity();
+  // Identity counts as a change on its own: two hubs can hold the same
+  // updatedAt — an empty one, most obviously, when neither has been written to —
+  // and comparing timestamps alone left the marker pointing at the previous hub,
+  // so an offline restart came back showing its records.
+  const changed = (hubSubscriptions?.updatedAt || '') !== (doc.updatedAt || '')
+    || String(settings.subscriptionsCacheHub || '') !== hub;
   hubSubscriptions = doc;
+  hubSubscriptionsHub = hub;
   if (changed) {
     settings.subscriptions = doc.subscriptions;
-    settings.subscriptionsCacheHub = currentHubIdentity();
+    settings.subscriptionsCacheHub = hub;
     persistSubscriptionState();
   }
   return changed;
@@ -2677,7 +2695,14 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
   if (!subscriptionsAreShared()) {
     const had = Boolean(hubSubscriptions);
     hubSubscriptions = null;
+    hubSubscriptionsHub = '';
     return had;
+  }
+  // A document fetched from another hub is not an answer about this one, and
+  // holding on to it is what made an unreachable new hub show the old one's list.
+  if (hubSubscriptions && hubSubscriptionsHub !== currentHubIdentity()) {
+    hubSubscriptions = null;
+    hubSubscriptionsHub = '';
   }
   try {
     // Only records this device actually owns may be seeded or set aside. Once
@@ -2685,8 +2710,10 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     // carrying it into the next hub would file one hub's records on another —
     // duplicating accounts that were never entered here. Switching to local mode
     // and editing hands ownership back, which is what clears the marker.
-    const cacheHub = String(settings.subscriptionsCacheHub || '');
-    const local = cacheHub && cacheHub !== currentHubIdentity() ? [] : (settings.subscriptions || []);
+    // A marked cache is some hub's data, never this device's — including the hub
+    // in front of us, whose own list is exactly what the cache holds. Only an
+    // unmarked list is owned here and eligible to be seeded or set aside.
+    const local = settings.subscriptionsCacheHub ? [] : (settings.subscriptions || []);
     const doc = await fetchSharedSubscriptions();
     if (!doc) return false;
     // A hub nobody has ever written to: adopt this device's records rather than
@@ -2695,7 +2722,9 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     // re-uploading a stale cache over it resurrects what they removed.
     if (seedFromLocal && !doc.updatedAt && local.length > 0) {
       const previous = hubSubscriptions;
+      const previousHub = hubSubscriptionsHub;
       hubSubscriptions = doc;
+      hubSubscriptionsHub = currentHubIdentity();
       try {
         await writeSharedSubscriptions(local);
         return true;
@@ -2704,13 +2733,20 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
         // shared mode it is what the UI reads, and the user would watch every
         // record they entered vanish with only a console line to explain it.
         hubSubscriptions = previous;
+        hubSubscriptionsHub = previousHub;
         throw error;
       }
     }
     // Joining a hub that already holds records. Until this moment the local list
     // was this device's own data, not a cache of the hub's, so anything missing
     // from the shared list is set aside for the user rather than overwritten.
-    const orphansChanged = seedFromLocal ? rememberOrphanedSubscriptions(local, doc) : false;
+    // Only recompute while there is something owned here to compare. Running it
+    // against an empty list would answer "no differences" and quietly clear a set
+    // of records the user has not decided about yet — which is what a second
+    // reconcile against the same hub used to do.
+    const orphansChanged = seedFromLocal && local.length > 0
+      ? rememberOrphanedSubscriptions(local, doc)
+      : false;
     const changed = cacheSharedSubscriptions(doc);
     if (orphansChanged && !changed) persistSubscriptionState();
     return changed || orphansChanged;
