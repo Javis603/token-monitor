@@ -2899,18 +2899,14 @@ async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
 // local collector's own stats look like. Reading it as "the hub has nothing"
 // would throw away the records on screen.
 //
-// A lane already running for this hub answers the stamp on its own — a write
-// caches what the hub stored, a read caches what it holds — so the comparison is
-// only meaningful while nothing is in flight. Without that, a device would fetch
-// the list back immediately after writing it: the hub broadcasts the new version
-// before the write is finished being applied here, so its own edit reads as
-// somebody else's news.
+// The stamp is not compared against an operation already in flight for this hub,
+// because what that operation will leave behind is not known yet. It is carried
+// into the lane and compared there instead — see runSubscriptionCatchUp().
 function maybeAdoptSharedSubscriptionRevision(stats) {
   if (!subscriptionsAreShared()) return;
   const revision = stats?.subscriptionsUpdatedAt;
   if (typeof revision !== 'string') return;
   const hub = currentHubIdentity();
-  if (subscriptionQueues.has(hub)) return;
   if (revision === (subscriptionsDocumentFor(hub)?.updatedAt || '')) return;
   // Getting this far twice for the same version means the last attempt did not
   // land it. Frames arrive on every ingest from every device, so retrying on each
@@ -2924,14 +2920,30 @@ function maybeAdoptSharedSubscriptionRevision(stats) {
     && revision === lastSubscriptionCatchUp.version
     && now - lastSubscriptionCatchUp.at < SUBSCRIPTION_RETRY_MS) return;
   lastSubscriptionCatchUp = { hub, version: revision, at: now };
-  runSubscriptionCatchUp();
+  runSubscriptionCatchUp(revision);
 }
 
+// Queued rather than run, and the version is compared again once it is this
+// operation's turn. By then whatever was in flight has finished and cached its
+// result, which is the only thing that can tell the two cases apart: this
+// device's own write leaves the document at exactly the version the hub
+// broadcast, so there is nothing left to fetch, while a read that was already in
+// flight when the broadcast landed leaves an older one and the fetch happens.
+// Comparing before queueing cannot distinguish them — it would either re-fetch
+// every write this device makes, or discard the only notice of another device's.
+//
+// refreshSharedSubscriptionsNow() rather than refreshSharedSubscriptions(): the
+// lane is held by this operation, so the queueing wrapper would wait on itself.
+//
 // Deliberately not seeded from local: seeding and setting records aside belong
 // to joining a hub, and doing either here would re-answer a question the user
 // has already been asked.
-function runSubscriptionCatchUp() {
-  return refreshSharedSubscriptions()
+function runSubscriptionCatchUp(revision) {
+  return queueSubscriptionOp((hub) => {
+    if (!subscriptionOpIsCurrent(hub)) return false;
+    if (revision === (subscriptionsDocumentFor(hub)?.updatedAt || '')) return false;
+    return refreshSharedSubscriptionsNow();
+  })
     .then((changed) => { if (changed) pushSettingsToRenderer(); })
     .catch(() => {});
 }

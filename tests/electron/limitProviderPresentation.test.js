@@ -3269,6 +3269,67 @@ test('a hub that is slow to answer does not hold up the one in front of the user
   assert.equal(context.subscriptionQueues.size, 0);
 });
 
+test('a version broadcast while an operation is in flight is compared again once it settles', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(main, 'runSubscriptionCatchUp', 'saveSubscriptions')
+  ].join('\n');
+
+  // `leaves` is the version the operation holding the lane caches before it
+  // finishes. That is the whole difference between the two cases below, and it
+  // is not knowable when the frame arrives — only after.
+  const run = async (leaves) => {
+    const context = vm.createContext({
+      subscriptionQueues: new Map(),
+      hubSubscriptions: { updatedAt: 'v1', subscriptions: [] },
+      hubSubscriptionsHub: 'https://a.example',
+      currentHubIdentity: () => 'https://a.example',
+      fetched: 0,
+      pushed: 0,
+      pushSettingsToRenderer: () => { context.pushed += 1; },
+      refreshSharedSubscriptionsNow: async () => {
+        context.fetched += 1;
+        context.hubSubscriptions = { updatedAt: 'v2', subscriptions: [{ id: 'theirs' }] };
+        return true;
+      },
+      Promise
+    });
+    vm.runInContext(source, context);
+
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    context.hold = () => held.then(() => {
+      context.hubSubscriptions = { updatedAt: leaves, subscriptions: [] };
+    });
+    const holding = vm.runInContext('queueSubscriptionOp(hold);', context);
+
+    // The frame lands while that operation is still running, and is the only
+    // notice this device gets — nothing arrives afterwards to repeat it.
+    const catchUp = vm.runInContext("runSubscriptionCatchUp('v2');", context);
+    release();
+    await holding;
+    await catchUp;
+    return context;
+  };
+
+  // Its own write: the hub broadcast v2 because this device wrote it, and the
+  // write's own response leaves the document at v2. Nothing left to fetch, so
+  // recording a subscription must not cost a read back of what was just sent.
+  const afterWrite = await run('v2');
+  assert.equal(afterWrite.fetched, 0);
+  assert.equal(afterWrite.pushed, 0);
+
+  // A read already in flight when the broadcast landed answers with the document
+  // from before the write, and caches it. Deciding at frame time would have
+  // discarded the only notice of it, leaving this device on the old list.
+  const afterRead = await run('v1');
+  assert.equal(afterRead.fetched, 1);
+  assert.equal(afterRead.pushed, 1);
+});
+
 test('a stats frame stamped with a newer subscription version is read back, once', async () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const source = [
@@ -3313,20 +3374,11 @@ test('a stats frame stamped with a newer subscription version is read back, once
   push({ subscriptionsUpdatedAt: null });
   assert.equal(context.reads, 1);
 
-  // A lane already running answers the stamp on its own. This is what a device
-  // sees right after its own write: the hub broadcasts the new version before
-  // the write has finished being applied here, so its own edit would otherwise
-  // read as somebody else's news and be fetched straight back.
-  context.subscriptionQueues.set('https://a.example', Promise.resolve());
-  push({ subscriptionsUpdatedAt: 'v3' });
-  assert.equal(context.reads, 1);
-  context.subscriptionQueues.delete('https://a.example');
+  // This one does not land — the document in hand stays at v2. Frames arrive on
+  // every ingest from every device, so a hub serving /api/stats but failing
+  // /api/subscriptions would be asked again on each one.
   push({ subscriptionsUpdatedAt: 'v3' });
   assert.equal(context.reads, 2);
-
-  // That attempt did not land — the document in hand is still v2. Frames arrive
-  // on every ingest from every device, so a hub serving /api/stats but failing
-  // /api/subscriptions would be asked again on each one.
   push({ subscriptionsUpdatedAt: 'v3' });
   push({ subscriptionsUpdatedAt: 'v3' });
   assert.equal(context.reads, 2);
