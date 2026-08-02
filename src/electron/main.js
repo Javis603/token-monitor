@@ -2517,10 +2517,22 @@ function subscriptionsAreShared() {
   return settings?.hubMode === 'client' || settings?.hubMode === 'host';
 }
 
+// The document in hand, but only when it is the one this hub answered with.
+// Everything that reads it has to ask, because the two are not kept in step: a
+// switch to another hub and back leaves that hub's document installed while the
+// first is in front of the user again, until its own refresh replaces it.
+// Neither the records in it nor the updatedAt on it describe the hub being asked
+// about, and both are load-bearing — one is what gets written, the other is what
+// the hub checks it against.
+function subscriptionsDocumentFor(hub) {
+  return hubSubscriptionsHub === hub ? hubSubscriptions : null;
+}
+
 function effectiveSubscriptions() {
   if (!subscriptionsAreShared()) return settings.subscriptions || [];
   const hub = currentHubIdentity();
-  if (hubSubscriptions && hubSubscriptionsHub === hub) return hubSubscriptions.subscriptions;
+  const doc = subscriptionsDocumentFor(hub);
+  if (doc) return doc.subscriptions;
   // The on-disk copy only answers for this hub, or for no hub at all — in which
   // case it is this device's own list, waiting to be seeded. Another hub's
   // records are not an answer to "what is on this one", so nothing is shown
@@ -2635,16 +2647,22 @@ function writeSharedSubscriptions(list) {
     if (!subscriptionOpIsCurrent(hub)) {
       throw Object.assign(new Error('hub changed'), { code: 'hub_changed' });
     }
-    return writeSharedSubscriptionsNow(list);
+    return writeSharedSubscriptionsNow(list, hub);
   });
 }
 
-async function writeSharedSubscriptionsNow(list) {
-  const baseUpdatedAt = hubSubscriptions?.updatedAt || '';
-  // Captured before the request, not read after it: the user can switch hubs
-  // while a write is in flight, and stamping this answer with wherever they
-  // landed would file one hub's list under another's name.
-  const hub = currentHubIdentity();
+// Takes the hub rather than reading it: the identity this write was queued
+// against is the one it has to stay consistent with, and re-deriving it here
+// would only give the same answer while nothing had changed.
+async function writeSharedSubscriptionsNow(list, hub) {
+  // Claiming a base means claiming to have read what is on the hub. Holding
+  // another hub's document is not that, and offering its updatedAt asks this hub
+  // to overwrite a list the device has never seen — accepted outright if the two
+  // happen to carry the same token. Nothing in hand means claiming nothing: a hub
+  // that has been written to answers 409 and hands its document back to re-base
+  // on, and one that has not is seeded, which is what an empty base means
+  // everywhere else.
+  const baseUpdatedAt = subscriptionsDocumentFor(hub)?.updatedAt || '';
   if (settings.hubMode === 'host' && embeddedHub) {
     try {
       const stored = embeddedHub.hub.setSubscriptions(list, baseUpdatedAt);
@@ -2733,7 +2751,11 @@ async function adoptOrphanedSubscriptions() {
   if (orphans.length === 0) return settingsForRenderer();
   // Same-id records replace rather than append: two entries sharing an id would
   // collapse on normalization anyway, and the local edit is the one being adopted.
-  const merged = new Map((hubSubscriptions?.subscriptions || []).map((entry) => [entry.id, entry]));
+  // Merging into another hub's document would carry its records into this one as
+  // though they had been entered here; with none in hand the write goes out
+  // claiming no base, which this hub answers with 409 rather than an overwrite.
+  const held = subscriptionsDocumentFor(currentHubIdentity());
+  const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
   for (const orphan of orphans) merged.set(orphan.id, orphan);
   await writeSharedSubscriptions([...merged.values()]);
   settings.subscriptionsOrphaned = { hubUrl: '', records: [] };
@@ -2806,7 +2828,7 @@ async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
       hubSubscriptions = doc;
       hubSubscriptionsHub = hub;
       try {
-        await writeSharedSubscriptionsNow(local);
+        await writeSharedSubscriptionsNow(local, hub);
         return true;
       } catch (error) {
         // The seed failed, so the empty document must not stay installed: in
@@ -3787,17 +3809,17 @@ function startMode() {
       }
       startHostStats();
       startHostCollector();
-      await reconcileSharedSubscriptions();
+      reconcileSharedSubscriptions();
       return;
     }
     await stopEmbeddedHub();
     if (effectiveHubConfig().url) {
       startStatsStream({ resetSnapshot: true });
       startSyncCollector();
-      await reconcileSharedSubscriptions();
+      reconcileSharedSubscriptions();
     } else {
       startLocalCollector();
-      await reconcileSharedSubscriptions();
+      reconcileSharedSubscriptions();
     }
   }).catch((err) => {
     console.log(`[mode] reconciliation failed: ${err?.message || err}`);
@@ -3807,12 +3829,23 @@ function startMode() {
 // Reconciled on every mode change, because switching into a hub adopts a
 // different list and switching out of one falls back to the local cache — the
 // renderer is showing whichever list the previous mode had.
+//
+// Started by the mode queue but not awaited by it. Subscriptions have a lane of
+// their own, per hub, so nothing here needs the queue to order it — while holding
+// the queue open for a hub request means the next hub the user picks waits out
+// this one's 15s deadline before its stream and collector start, with no data on
+// screen in the meantime. Its failures stay here for the same reason: nothing
+// downstream is waiting to hear about them.
 async function reconcileSharedSubscriptions() {
-  await refreshSharedSubscriptions({ seedFromLocal: true });
-  lastSubscriptionRefreshMs = Date.now();
-  // Unconditional, unlike the throttled poll: a mode change swaps which list is
-  // showing, and the renderer is holding the previous mode's one.
-  pushSettingsToRenderer();
+  try {
+    await refreshSharedSubscriptions({ seedFromLocal: true });
+    lastSubscriptionRefreshMs = Date.now();
+    // Unconditional, unlike the throttled poll: a mode change swaps which list is
+    // showing, and the renderer is holding the previous mode's one.
+    pushSettingsToRenderer();
+  } catch (error) {
+    console.log(`[sync] subscription reconcile failed: ${error?.message || error}`);
+  }
 }
 
 function restartDeviceRuntimeForMode() {

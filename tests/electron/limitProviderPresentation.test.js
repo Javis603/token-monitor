@@ -2940,7 +2940,10 @@ test('records held for a decision survive reconnecting to the same hub', async (
 
 test('a hub that cannot be reached never shows the previous hub records', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const effective = functionBody(main, 'effectiveSubscriptions', 'cacheSharedSubscriptions');
+  const effective = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'effectiveSubscriptions', 'cacheSharedSubscriptions')
+  ].join('\n');
   const run = (context) => plain(vm.runInNewContext(`${effective}\neffectiveSubscriptions();`, {
     subscriptionsAreShared: () => true,
     currentHubIdentity: () => 'https://b.example',
@@ -2981,6 +2984,7 @@ test('a hub that cannot be reached never shows the previous hub records', () => 
 test('a rejection from the hub the user just left does not empty the one they are on', async () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
     functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
     functionBody(main, 'staleSubscriptionWriteError', 'writeSharedSubscriptions'),
     `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`
@@ -3008,7 +3012,7 @@ test('a rejection from the hub the user just left does not empty the one they ar
   vm.runInContext(source, context);
 
   await assert.rejects(
-    () => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }]);", context),
+    () => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example');", context),
     /stale_write/
   );
   assert.equal(context.cached, undefined);
@@ -3016,13 +3020,14 @@ test('a rejection from the hub the user just left does not empty the one they ar
   // Staying put, the same rejection is worth caching: it is the hub's current list.
   context.hub = 'https://a.example';
   context.fetch = async () => ({ status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] }) });
-  await assert.rejects(() => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }]);", context), /stale_write/);
+  await assert.rejects(() => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example');", context), /stale_write/);
   assert.deepEqual(plain(context.cached), { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] });
 });
 
 test('hub reads and writes run one at a time, in the order they were asked for', async () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
     functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
     functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
     functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'),
@@ -3166,6 +3171,7 @@ test('a hub that accepts the connection and stops answering does not wedge the l
 test('a save queued against one hub is not written to the one the user moved to', async () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
     functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
     functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
     functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'),
@@ -3178,9 +3184,8 @@ test('a save queued against one hub is not written to the one the user moved to'
     subscriptionQueues: new Map(),
     hub: 'https://a.example',
     currentHubIdentity: () => context.hub,
-    // The base is whatever hub is in hand by the time the write runs — which is
-    // exactly why a write must not be allowed to land on a hub it never read.
     hubSubscriptions: { updatedAt: 'a-v1', subscriptions: [] },
+    hubSubscriptionsHub: 'https://a.example',
     subscriptionsEndpoint: () => ({ url: `${context.hub}/api/subscriptions`, headers: {} }),
     AbortSignal: { timeout: () => null },
     written: [],
@@ -3240,4 +3245,74 @@ test('a hub that is slow to answer does not hold up the one in front of the user
   await new Promise((resolve) => setTimeout(resolve, 0));
   // And the lanes are gone once idle, rather than one per hub ever typed.
   assert.equal(context.subscriptionQueues.size, 0);
+});
+
+test('coming back to a hub does not write against the other hub token', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'),
+    `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    embeddedHub: null,
+    subscriptionQueues: new Map(),
+    hub: 'https://a.example',
+    currentHubIdentity: () => context.hub,
+    // A → B → A: hub B's document is still the one installed, because A's own
+    // refresh has not replaced it yet. The queued-hub check passes — A really is
+    // in front of the user — and only the document says otherwise.
+    hubSubscriptions: { updatedAt: 'b-v9', subscriptions: [{ id: 'b-record' }] },
+    hubSubscriptionsHub: 'https://b.example',
+    subscriptionsEndpoint: () => ({ url: `${context.hub}/api/subscriptions`, headers: {} }),
+    AbortSignal: { timeout: () => null },
+    sent: [],
+    fetch: async (url, init) => {
+      context.sent.push({ url, base: JSON.parse(init.body).baseUpdatedAt });
+      return { ok: true, status: 200, json: async () => ({ updatedAt: 'a-v2', subscriptions: [] }) };
+    },
+    cacheSharedSubscriptions: () => true,
+    staleSubscriptionWriteError: () => new Error('stale_write'),
+    Promise,
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  await vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }]);", context);
+  // Offering B's token claims to have read a list that was never A's. A that
+  // happened to carry the same token would accept the write outright, over
+  // records this device has never seen; claiming nothing gets a 409 instead.
+  assert.deepEqual(plain(context.sent), [{ url: 'https://a.example/api/subscriptions', base: '' }]);
+
+  // With A's own document in hand it is used, which is what keeps 409 meaningful.
+  context.hubSubscriptions = { updatedAt: 'a-v1', subscriptions: [] };
+  context.hubSubscriptionsHub = 'https://a.example';
+  context.sent = [];
+  await vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }]);", context);
+  assert.deepEqual(plain(context.sent), [{ url: 'https://a.example/api/subscriptions', base: 'a-v1' }]);
+
+  // Adopting set-aside records merges into the document in hand, so it has to ask
+  // the same question — otherwise B's records join A's list as though entered here.
+  const adopt = functionBody(main, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode');
+  assert.doesNotMatch(adopt, /hubSubscriptions\?\./);
+  assert.match(adopt, /subscriptionsDocumentFor\(/);
+});
+
+test('switching hubs does not wait out the old hub request before starting', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const startMode = functionBody(main, 'startMode', 'reconcileSharedSubscriptions');
+  // The mode queue orders hub infrastructure so a port edit cannot finish behind
+  // the mode change that preceded it. Subscriptions are not part of that — they
+  // have a lane of their own, per hub — and awaiting them here makes the next
+  // hub's stream and collector wait out this one's 15s deadline with nothing on
+  // screen.
+  assert.doesNotMatch(startMode, /await reconcileSharedSubscriptions/);
+  assert.match(startMode, /reconcileSharedSubscriptions\(\);/);
+  // Nothing awaits it any more, so it has to keep its own failures rather than
+  // surface them as an unhandled rejection.
+  assert.match(functionBody(main, 'reconcileSharedSubscriptions', 'restartDeviceRuntimeForMode'), /\} catch \(error\) \{/);
 });
