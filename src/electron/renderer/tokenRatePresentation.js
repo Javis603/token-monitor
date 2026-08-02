@@ -32,11 +32,14 @@
     return Math.min(cap, base * 2 ** (boundedElapsed / TOKEN_RATE_BOOST_DOUBLING_MS));
   }
 
-  function tokenRateSettleValue(fromRate, toRate, elapsedMs) {
+  function tokenRateSettleValue(fromRate, toRate, elapsedMs, durationMs = TOKEN_RATE_SETTLE_MS) {
     const from = cappedTokenRate(fromRate);
     const to = cappedTokenRate(toRate);
     const elapsed = Math.max(0, Number(elapsedMs) || 0);
-    const progress = Math.min(1, elapsed / TOKEN_RATE_SETTLE_MS);
+    const duration = Number(durationMs);
+    const progress = duration >= 0 && Number.isFinite(duration) && duration > 0
+      ? Math.min(1, elapsed / duration)
+      : duration === 0 ? 1 : Math.min(1, elapsed / TOKEN_RATE_SETTLE_MS);
     const eased = 1 - Math.pow(1 - progress, 3);
     return cappedTokenRate(from + (to - from) * eased);
   }
@@ -120,8 +123,9 @@
       if (!state) return null;
       const timestamp = currentTime();
       const elapsed = Math.max(0, timestamp - state.startedAt);
+      const settleDuration = state.settleDurationMs ?? TOKEN_RATE_SETTLE_MS;
       const displayRate = state.phase === 'settling'
-        ? tokenRateSettleValue(state.settleFromRate, state.settleToRate, timestamp - state.settledAt)
+        ? tokenRateSettleValue(state.settleFromRate, state.settleToRate, timestamp - state.settledAt, settleDuration)
         : tokenRateBoostValue(state.baseRate, elapsed, displayCap);
       return { ...state, displayRate, elapsedMs: elapsed };
     }
@@ -135,13 +139,39 @@
       frameId = null;
       if (!state) return;
       const timestamp = currentTime();
-      if (state.phase === 'settling' && timestamp - state.settledAt >= TOKEN_RATE_SETTLE_MS) {
+      if (state.phase === 'settling' && timestamp - state.settledAt >= (state.settleDurationMs ?? TOKEN_RATE_SETTLE_MS)) {
         state = null;
         notify();
         return;
       }
       notify();
       schedule();
+    }
+
+    function refresh() {
+      if (!state || state.phase !== 'settling') return false;
+      const timestamp = currentTime();
+      const elapsed = Math.max(0, timestamp - state.settledAt);
+      const duration = state.settleDurationMs ?? TOKEN_RATE_SETTLE_MS;
+      if (elapsed >= duration) return false;
+
+      const value = currentValue();
+      if (value.mode !== state.mode) {
+        state = null;
+        cancelScheduledFrame();
+        suppressNextClick = false;
+        return true;
+      }
+      if (value.rate === state.settleToRate) return false;
+
+      state = {
+        ...state,
+        settleFromRate: tokenRateSettleValue(state.settleFromRate, state.settleToRate, elapsed, duration),
+        settleToRate: value.rate,
+        settledAt: timestamp,
+        settleDurationMs: duration - elapsed
+      };
+      return true;
     }
 
     function matchesPointer(event) {
@@ -194,7 +224,8 @@
         phase: 'settling',
         settleFromRate: tokenRateBoostValue(state.baseRate, elapsed, displayCap),
         settleToRate: value.rate,
-        settledAt: timestamp
+        settledAt: timestamp,
+        settleDurationMs: TOKEN_RATE_SETTLE_MS
       };
       suppressNextClick = true;
       notify();
@@ -228,6 +259,7 @@
       cancel,
       consumeClick,
       getSnapshot: snapshot,
+      refresh,
       release,
       start
     };

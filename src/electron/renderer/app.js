@@ -737,6 +737,7 @@ function tokenRateText(rate, burn) {
 }
 function renderTokenRate() {
   if (!els.tokenRateReveal) return;
+  tokenRateBoost.refresh();
   const { burn, rate } = currentTokenRateValue();
   const boost = tokenRateBoost.getSnapshot();
   const displayRate = boost ? boost.displayRate : rate;

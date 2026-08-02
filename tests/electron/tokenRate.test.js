@@ -189,6 +189,29 @@ test('a held pointer settles to the latest rate and suppresses only the next cli
   assert.equal(harness.controller.getSnapshot(), null);
 });
 
+test('settling retargets from the current display to a live rate without extending the animation', () => {
+  const harness = createBoostHarness();
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
+  harness.advance(1_000);
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 1 }), true);
+
+  harness.advance(240);
+  const beforeRetarget = harness.controller.getSnapshot();
+  const currentDisplayRate = beforeRetarget.displayRate;
+  harness.value.rate = 500;
+  assert.equal(harness.controller.refresh(), true);
+
+  const afterRetarget = harness.controller.getSnapshot();
+  assert.equal(afterRetarget.settleToRate, 500);
+  assert.equal(afterRetarget.settleFromRate, currentDisplayRate);
+  assert.equal(afterRetarget.displayRate, currentDisplayRate);
+  assert.equal(afterRetarget.settleDurationMs, 480);
+
+  harness.advance(480);
+  harness.frame();
+  assert.equal(harness.controller.getSnapshot(), null);
+});
+
 test('a new hold interrupts settling and suppresses its own click', () => {
   const harness = createBoostHarness();
   assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
@@ -329,9 +352,10 @@ test('the token-rate hold has release, cancellation, reduced-motion, and click-g
   assert.match(app, /function cancelTokenRateBoost\(event, options\)/);
   assert.match(tokenRatePresentation, /const TOKEN_RATE_BOOST_DOUBLING_MS = 520/);
   assert.match(tokenRatePresentation, /const TOKEN_RATE_SETTLE_MS = 720/);
-  assert.match(tokenRatePresentation, /function tokenRateSettleValue\(fromRate, toRate, elapsedMs\)/);
+  assert.match(tokenRatePresentation, /function tokenRateSettleValue\(fromRate, toRate, elapsedMs, durationMs/);
   assert.match(tokenRatePresentation, /phase: 'settling'/);
   assert.match(tokenRatePresentation, /requestFrame\(step\)/);
+  assert.match(app, /tokenRateBoost\.refresh\(\);\s*const \{ burn, rate \} = currentTokenRateValue\(\)/);
   assert.match(app, /document\.addEventListener\('pointercancel', \(event\) => \{\s*cancelTokenRateBoost\(event\)/);
   assert.match(app, /window\.addEventListener\('blur', \(\) => \{\s*cancelTokenRateBoost\(\)/);
   assert.match(app, /if \(document\.hidden\) cancelTokenRateBoost\(\)/);
