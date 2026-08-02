@@ -26,7 +26,9 @@ function tokenRateFunctions() {
   vm.runInNewContext(
     `${tokenRateSource()}
      this.tokenRatePerSecond = tokenRatePerSecond;
-     this.tokenBurnPerMinute = tokenBurnPerMinute;`,
+     this.tokenBurnPerMinute = tokenBurnPerMinute;
+     this.tokenRateBoostValue = tokenRateBoostValue;
+     this.tokenRateSettleValue = tokenRateSettleValue;`,
     context
   );
   return context;
@@ -75,6 +77,19 @@ test('the burn reading reads zero without throughput data', () => {
   assert.equal(tokenBurnPerMinute({ totalTokens: 9000 }), 0);
   assert.equal(tokenBurnPerMinute({ timedTokens: 4500, timedDurationMs: 0 }), 0);
   assert.equal(tokenBurnPerMinute(undefined), 0);
+});
+
+test('holding the title mark accelerates from the real rate and keeps rising', () => {
+  const { tokenRateBoostValue, tokenRateSettleValue } = tokenRateFunctions();
+  assert.equal(tokenRateBoostValue(0, 0), 1);
+  assert.equal(tokenRateBoostValue(100, -1), 100);
+  assert.ok(tokenRateBoostValue(100, 520) >= 200);
+  assert.ok(tokenRateBoostValue(100, 1000) > 300);
+  assert.ok(tokenRateBoostValue(100, 2000) > tokenRateBoostValue(100, 1000));
+  const boosted = tokenRateBoostValue(100, 2000);
+  assert.ok(tokenRateSettleValue(boosted, 100, 360) < boosted);
+  assert.ok(tokenRateSettleValue(boosted, 100, 360) > 100);
+  assert.equal(tokenRateSettleValue(boosted, 100, 720), 100);
 });
 
 test('the reveal mode is a persisted setting that defaults to speed', () => {
@@ -137,6 +152,24 @@ test('the reveal triggers stay non-focusable', () => {
     assert.doesNotMatch(attrs, /tabindex/, reason);
   }
   assert.doesNotMatch(css, /app-title-mark:focus/, reason);
+});
+
+test('the token-rate hold has release, cancellation, reduced-motion, and click-guard paths', () => {
+  assert.match(app, /function startTokenRateBoost\(event\)/);
+  assert.match(app, /function stopTokenRateBoost\(event\)/);
+  assert.match(app, /const TOKEN_RATE_BOOST_DOUBLING_MS = 520/);
+  assert.match(app, /const TOKEN_RATE_SETTLE_MS = 720/);
+  assert.match(app, /function tokenRateSettleValue\(fromRate, toRate, elapsedMs\)/);
+  assert.match(app, /phase: 'settling'/);
+  assert.match(app, /tokenRateBoostAnimation = requestAnimationFrame\(updateTokenRateBoost\)/);
+  assert.match(app, /document\.addEventListener\('pointercancel', \(event\) => \{\s*stopTokenRateBoost\(event\)/);
+  assert.match(app, /window\.addEventListener\('blur', \(\) => \{\s*stopTokenRateBoost\(\)/);
+  assert.match(app, /if \(document\.hidden\) stopTokenRateBoost\(\)/);
+  assert.match(app, /if \(tokenRateBoost \|\| prefersReducedMotion\(\)\) return/);
+  assert.match(app, /function suppressTokenRateClickAfterHold\(event\)/);
+  assert.match(css, /\.shell\.title-icon-only \.token-rate-reveal\.boosting/);
+  assert.match(css, /\.shell\.title-icon-only \.token-rate-reveal\.settling/);
+  assert.match(css, /color: var\(--accent\)/);
 });
 
 test('the no-drag hit area stays scoped to the collapsed title states', () => {

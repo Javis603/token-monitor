@@ -315,6 +315,20 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   color: var(--text);
   opacity: 0.82;
 }
+.shell.title-collapsed .token-rate-reveal.boosting,
+.shell.title-icon-only .token-rate-reveal.boosting {
+  max-width: 18ch;
+  color: var(--accent);
+  opacity: 0.96;
+  text-shadow: 0 0 8px rgba(var(--accent-rgb), 0.35);
+}
+.shell.title-collapsed .token-rate-reveal.settling,
+.shell.title-icon-only .token-rate-reveal.settling {
+  max-width: 18ch;
+  color: var(--text);
+  opacity: 0.82;
+  text-shadow: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .token-rate-reveal { transition: none; }
 }
