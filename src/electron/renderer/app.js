@@ -2818,10 +2818,11 @@ function renderSubscriptionRows() {
       const current = subscriptionList();
       if (!await saveSubscriptions(
         current.filter((entry) => entry.id !== subscription.id),
-        subscriptionSettingsVersion()
+        subscriptionSettingsVersion(),
+        { render: false }
       )) return;
       if (state.subscriptionEditingId === subscription.id) resetSubscriptionForm();
-      renderSubscriptionSettings();
+      preserveSettingsPanelScroll(renderSubscriptionSettings);
     });
     actions.append(edit, remove);
     row.append(main, actions);
@@ -10182,7 +10183,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   const prevShowCompactTotalTokens = state.settings?.showCompactTotalTokens;
   state.settings = next;
   applyEffectiveCurrencyRates();
-  syncSettingsForm();
+  preserveSettingsPanelScroll(syncSettingsForm);
   maybeUpdateBarsIcon();
   if ((prevMetric || 'cost') !== (next.heatmapMetric || 'cost')) {
     render();

@@ -2301,6 +2301,41 @@ test('subscription rows carry the glyph actions the profile rows above them use'
   assert.match(rows, /remove\.textContent = '✓';/);
 });
 
+test('deleting a subscription preserves the settings scroll position and renders once', () => {
+  const app = readRendererFile('app.js');
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+  const preserve = functionBody(app, 'preserveSettingsPanelScroll', 'saveSettings');
+
+  assert.match(rows, /subscriptionSettingsVersion\(\),\s*\{ render: false \}\s*\)\)/);
+  assert.match(rows, /preserveSettingsPanelScroll\(renderSubscriptionSettings\);/);
+  assert.match(settingsPush, /preserveSettingsPanelScroll\(syncSettingsForm\);/);
+
+  const frames = [];
+  const panel = {
+    scrollTop: 240,
+    scrollLeft: 0,
+    classList: { contains: () => false }
+  };
+  const context = vm.createContext({
+    els: { settingsPanel: panel },
+    panel,
+    settingsScrollInteractionRevision: 0,
+    requestAnimationFrame(callback) {
+      frames.push(callback);
+    }
+  });
+
+  vm.runInContext(
+    `${preserve}\npreserveSettingsPanelScroll(() => { panel.scrollTop = 0; });`,
+    context
+  );
+  assert.equal(panel.scrollTop, 240);
+  panel.scrollTop = 0;
+  frames[0]();
+  assert.equal(panel.scrollTop, 240);
+});
+
 test('editing a subscription moves only the editor beneath its row', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
