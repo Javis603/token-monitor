@@ -3080,6 +3080,14 @@ function closeSubscriptionEditor({ onClosed } = {}) {
   );
   const restoreFocus = () => {
     if (!shouldRestoreFocus) return;
+    const current = typeof document !== 'undefined' ? document.activeElement : null;
+    const body = typeof document !== 'undefined' ? document.body : null;
+    const stillInClosingContext = current === activeElement
+      || current === body
+      || current === editingButton
+      || current === details
+      || details?.contains?.(current);
+    if (!stillInClosingContext) return;
     const row = [...(els.subscriptionList?.querySelectorAll?.('[data-subscription-id]') || [])]
       .find((candidate) => candidate.dataset?.subscriptionId === editingId);
     row?.querySelector('.subscription-row-edit')?.focus();
@@ -3460,8 +3468,8 @@ async function submitSubscription() {
   const updated = editing
     ? list.map((entry) => (entry.id === editing.id ? next : entry))
     : [...list, next];
-  if (!await saveSubscriptions(updated, state.subscriptionFormBase, { render: false })) return;
-  closeSubscriptionEditor({ onClosed: renderSubscriptionSettings });
+  if (!await saveSubscriptions(updated, state.subscriptionFormBase)) return;
+  closeSubscriptionEditor();
 }
 
 function configuredLimitProviderOrder() {

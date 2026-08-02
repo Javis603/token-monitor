@@ -2054,6 +2054,117 @@ test('closing the subscription editor restores focus to the rebuilt row action',
   assert.equal(finalEdit.focused, true);
 });
 
+test('closing the subscription editor does not steal focus moved to another control', () => {
+  const app = readRendererFile('app.js');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const oldEdit = { focus() {} };
+  const otherControl = {};
+  const finalEdit = { focused: false, focus() { this.focused = true; } };
+  const rowFor = (edit) => ({
+    dataset: { subscriptionId: 'subscription-1' },
+    querySelector: (selector) => selector === '.subscription-row-edit' ? edit : null
+  });
+  const dom = { rows: [rowFor(oldEdit)] };
+  const documentState = { activeElement: oldEdit, body: {} };
+  let finish;
+  const list = { querySelectorAll: () => dom.rows };
+  const details = {
+    classList: { contains: () => false },
+    contains: () => false,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: 'subscription-1', subscriptionEditorTransitionId: 0 };
+  const context = vm.createContext({
+    document: documentState,
+    els: { subscriptionAddDetails: details, subscriptionList: list },
+    state,
+    dom,
+    rowFor,
+    finalEdit,
+    cancelSubscriptionEditorClose() {},
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() { state.subscriptionEditingId = ''; },
+    renderSubscriptionRows() { dom.rows = [rowFor(finalEdit)]; },
+    clearTimeout() {},
+    setTimeout(callback) { finish = callback; return 1; }
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\n${close}\ncloseSubscriptionEditor();`,
+    context
+  );
+  documentState.activeElement = otherControl;
+  finish();
+
+  assert.equal(documentState.activeElement, otherControl);
+  assert.equal(finalEdit.focused, false);
+});
+
+test('a successful subscription save renders before starting the close animation', async () => {
+  const app = readRendererFile('app.js');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  const account = { provider: 'codex', accountKey: 'acct-1', accountName: 'acct' };
+  const list = [{
+    id: 'subscription-1',
+    provider: 'codex',
+    binding: { accountKey: 'acct-1', accountEmail: 'acct@example.com' },
+    planName: 'Old plan',
+    amountMinor: 1000,
+    currency: 'USD',
+    interval: 'month',
+    intervalCount: 1,
+    startDate: '2026-01-01',
+    topUps: [],
+    autoRenew: true,
+    nextRenewalOverride: null,
+    endDate: null
+  }];
+  const els = {
+    subscriptionProviderInput: { value: 'codex' },
+    subscriptionAccountInput: { value: 'acct-1' },
+    subscriptionAmountInput: { value: '10' },
+    subscriptionStartDateInput: { value: '2026-01-01' },
+    subscriptionAutoRenewInput: { checked: true },
+    subscriptionNextRenewalInput: { value: '' },
+    subscriptionPlanNameInput: { value: 'Updated plan' },
+    subscriptionCurrencyInput: { value: 'USD' },
+    subscriptionIntervalInput: { value: 'month' },
+    subscriptionIntervalCountInput: { value: '1' }
+  };
+  const state = { subscriptionEditingId: 'subscription-1', subscriptionFormBase: { updatedAt: 'v1' } };
+  let fullRenderCompleted = false;
+  let closeArgs = null;
+  const context = vm.createContext({
+    els,
+    state,
+    subscriptionApi: {
+      todayString: () => '2026-02-01',
+      bindingFromAccount: () => ({ accountKey: 'acct-1' }),
+      normalizeSubscription: (value) => value
+    },
+    currencyApi: {},
+    subscriptionFormTopUps: () => [],
+    subscriptionFormIsTopUp: () => false,
+    subscriptionAccountChoices: () => [{ value: 'acct-1', provider: account }],
+    subscriptionList: () => list,
+    subscriptionForAccountValue: () => false,
+    saveSubscriptions: async (updated, base, options) => {
+      if (options?.render === false) return true;
+      fullRenderCompleted = true;
+      return true;
+    },
+    closeSubscriptionEditor: (...args) => { closeArgs = args; },
+    setSubscriptionError() {},
+    Promise
+  });
+
+  await vm.runInContext(`async ${submit}\nsubmitSubscription();`, context);
+
+  assert.equal(fullRenderCompleted, true);
+  assert.deepEqual(closeArgs, []);
+});
+
 test('subscription row rerenders keep the live editor node attached', () => {
   const app = readRendererFile('app.js');
   const clear = functionBody(app, 'clearSubscriptionListChildren', 'positionSubscriptionEditor');
@@ -2131,8 +2242,10 @@ test('editing a subscription moves only the editor beneath its row', () => {
   assert.match(app, /setSubscriptionFormOpen\(false\);[\s\S]*resetSubscriptionForm\(\);/);
   assert.match(app, /state\.subscriptionEditingId === subscription\.id[\s\S]*closeSubscriptionEditor\(\);/);
   assert.match(app, /els\.subscriptionCancelEdit\?\.addEventListener\('click', \(\) => closeSubscriptionEditor\(\)\);/);
-  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase, \{ render: false \}\)/);
-  assert.match(submit, /closeSubscriptionEditor\(\{ onClosed: renderSubscriptionSettings \}\);/);
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase\)/);
+  assert.doesNotMatch(submit, /render: false/);
+  assert.match(submit, /closeSubscriptionEditor\(\);/);
+  assert.doesNotMatch(submit, /onClosed: renderSubscriptionSettings/);
   assert.match(cssBlock(styles, '.subscription-row.is-editing'), /border-color/);
   assert.match(styles, /\.subscription-row\.is-editing \.subscription-row-edit/);
   assert.match(styles, /#subscriptionList > #subscriptionAddDetails/);
