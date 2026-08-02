@@ -2559,8 +2559,12 @@ test('subscriptions are written through the hub-aware channel, never as a settin
   assert.match(rows, /subscriptionSettingsVersion\(\)/);
   // The hub is checked on its own rather than left to the version, which cannot
   // answer for it: two hubs nobody has written to report the same nothing.
+  // Checked before the modes divide, or a form opened on a hub would be written
+  // into this device's own list — the one write the shared-mode guard never sees.
   const mainSave = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
-  assert.match(mainSave, /base\?\.hub[^\n]*!== currentHubIdentity\(\)/);
+  const hubCheckAt = mainSave.search(/base\?\.hub[^\n]*!== currentHubIdentity\(\)/);
+  assert.ok(hubCheckAt > -1, 'the hub the edit was composed against must be checked');
+  assert.ok(hubCheckAt < mainSave.indexOf('if (!subscriptionsAreShared())'));
 
   // settings:update must not be a second way in. Asserting that the guard LINE
   // exists is not enough — the first version of this deleted the key from
@@ -3448,6 +3452,49 @@ test('an edit is saved against the version its form was opened on', async () => 
   for (const channel of ['saveSubscriptions', 'adoptOrphanedSubscriptions', 'discardOrphanedSubscriptions']) {
     assert.match(app, new RegExp(`applySubscriptionSettings\\(await window\\.tokenMonitor\\.${channel}\\(`));
   }
+});
+
+test('a form opened on a hub is not written into this device own list instead', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'hubChangedError', 'subscriptionsEndpoint'),
+    `async ${functionBody(main, 'saveSubscriptions', 'stopSyncCollector')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    // Switched to local mode with the hub still configured, which is the state
+    // the mode switch leaves behind. Only the mode says which list is in front of
+    // the user, so only the mode can say which one an edit belongs to.
+    settings: { hubMode: 'local', hubUrl: 'https://a.example', subscriptions: [{ id: 'cached' }], subscriptionsCacheHub: 'https://a.example' },
+    subscriptionsAreShared: () => false,
+    currentHubIdentity: () => '',
+    subscriptionDisplay: { normalizeSubscriptions: (list) => list },
+    normalizeCurrency: (value) => value,
+    saveSettings: () => { context.saved = true; return true; },
+    settingsForRenderer: () => ({}),
+    writeSharedSubscriptions: async () => { context.wrote = true; },
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(source, context);
+
+  // The form was composed against hub A's list. Landing it here would take those
+  // records as this device's own — subscriptionsCacheHub cleared, ownership
+  // handed over — on the strength of an edit that was never about this list.
+  await assert.rejects(
+    () => vm.runInContext("saveSubscriptions([{ id: 'mine' }], { hub: 'https://a.example', updatedAt: 'a-v1' });", context),
+    /hub changed/
+  );
+  assert.equal(context.saved, undefined);
+  assert.equal(context.wrote, undefined);
+  assert.equal(context.settings.subscriptionsCacheHub, 'https://a.example');
+  assert.deepEqual(plain(context.settings.subscriptions), [{ id: 'cached' }]);
+
+  // A form opened in local mode carries the empty identity and saves normally.
+  await vm.runInContext("saveSubscriptions([{ id: 'mine' }], { hub: '', updatedAt: '' });", context);
+  assert.equal(context.saved, true);
+  assert.equal(context.settings.subscriptionsCacheHub, '');
 });
 
 test('adopting set-aside records keeps whatever the hub gained while it waited', async () => {

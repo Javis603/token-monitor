@@ -2904,6 +2904,13 @@ function maybeRefreshSharedSubscriptions() {
 // version that arrived after it — the hub accepts that, and whatever the newer
 // version added is lost.
 async function saveSubscriptions(list, base) {
+  // Before the modes divide, because the answer applies to both. Local mode has
+  // no hub, so its identity is the empty one — which makes it a context of its
+  // own rather than a continuation of whichever hub was last configured, and an
+  // edit composed against a hub's list is not an edit to this device's own. The
+  // check below could not do this on its own: it only runs once a hub is
+  // configured, and the write it guards is the one that never reaches a hub.
+  if (String(base?.hub || '') !== currentHubIdentity()) throw hubChangedError();
   if (!subscriptionsAreShared()) {
     settings.subscriptions = subscriptionDisplay.normalizeSubscriptions(list, { currencyApi: { normalizeCurrency } });
     // Editing here makes the list this device's own again, so a later hub join
@@ -2919,11 +2926,10 @@ async function saveSubscriptions(list, base) {
     }
     return settingsForRenderer();
   }
-  // The hub is checked here rather than left to the version, because a version
-  // cannot answer for it: two hubs that have never been written to both report no
-  // version at all, so an edit made against one would pass a version check
+  // The hub is checked at all — rather than left to the version — because a
+  // version cannot answer for it: two hubs that have never been written to both
+  // report no version, so an edit made against one would pass a version check
   // against the other and be written into a list it was never meant for.
-  if (String(base?.hub || '') !== currentHubIdentity()) throw hubChangedError();
   await writeSharedSubscriptions(list, String(base?.updatedAt || ''));
   return settingsForRenderer();
 }
