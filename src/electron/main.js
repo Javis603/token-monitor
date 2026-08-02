@@ -353,8 +353,9 @@ function defaultSettings() {
     // live in settings.json and cross to the renderer unredacted.
     subscriptions: [],
     // Local records left behind when this device joined a hub that already had a
-    // list. Held until the user says whether to add or drop them.
-    subscriptionsOrphaned: [],
+    // list, with the hub they were held back from. Kept until the user says
+    // whether to add or drop them.
+    subscriptionsOrphaned: { hubUrl: '', records: [] },
     windowBounds: null,
     windowMaximized: false,
     zoomFactor: 1,
@@ -2510,7 +2511,10 @@ function cacheSharedSubscriptions(doc) {
   hubSubscriptions = doc;
   if (changed) {
     settings.subscriptions = doc.subscriptions;
-    saveSettings();
+    // The cache is only there so an unreachable hub still shows the records at
+    // startup. A rolled-back write means it will not, and saying so beats
+    // discovering it after the next restart.
+    if (!saveSettings()) console.log('[sync] subscription cache could not be written to disk');
   }
   return changed;
 }
@@ -2575,24 +2579,60 @@ async function writeSharedSubscriptions(list) {
   cacheSharedSubscriptions(await response.json());
 }
 
-// Records this device holds that the shared list does not. Matched on record id
-// rather than on the account they name: the same plan entered separately on two
-// machines has two ids, and silently folding those together would double the
-// monthly total. Offering them instead lets the one person who knows decide.
+// Records this device holds that the shared list does not have, or has
+// differently. Comparing ids alone is not enough: a record edited here while the
+// device was in local mode keeps its id, so the shared copy would silently win
+// and the edit would be gone. Neither is folding them in automatically — the
+// same plan entered separately on two machines has two ids, and merging those
+// would double the monthly total. So both cases are set aside for the one person
+// who can tell them apart.
 function rememberOrphanedSubscriptions(local, doc) {
-  const shared = new Set((doc.subscriptions || []).map((entry) => entry.id));
-  const orphans = (local || []).filter((entry) => entry?.id && !shared.has(entry.id));
-  if (JSON.stringify(orphans) === JSON.stringify(settings.subscriptionsOrphaned || [])) return false;
-  settings.subscriptionsOrphaned = orphans;
+  const shared = new Map((doc.subscriptions || []).map((entry) => [entry.id, entry]));
+  const orphans = (local || []).filter((entry) => {
+    if (!entry?.id) return false;
+    const match = shared.get(entry.id);
+    return !match || JSON.stringify(match) !== JSON.stringify(entry);
+  });
+  const next = orphans.length > 0
+    ? { hubUrl: currentHubIdentity(), records: orphans }
+    : { hubUrl: '', records: [] };
+  if (JSON.stringify(next) === JSON.stringify(orphanedSubscriptions())) return false;
+  settings.subscriptionsOrphaned = next;
   return true;
 }
 
+// Which hub the set-aside records were held back from. Offering them to a
+// different hub would file this device's records somewhere they never belonged.
+function currentHubIdentity() {
+  return String(effectiveHubConfig().url || '');
+}
+
+function orphanedSubscriptions() {
+  const stored = settings.subscriptionsOrphaned;
+  // Tolerates the bare array this field held before it carried a hub.
+  if (Array.isArray(stored)) return { hubUrl: '', records: stored };
+  return { hubUrl: String(stored?.hubUrl || ''), records: Array.isArray(stored?.records) ? stored.records : [] };
+}
+
+// Empty unless they belong to the hub in front of the user right now: a set held
+// back from another hub, or from before a switch to local mode, has nowhere to
+// go, and offering to adopt it promises something that cannot happen.
+function pendingOrphanedSubscriptions() {
+  const { hubUrl, records } = orphanedSubscriptions();
+  if (!subscriptionsAreShared() || hubUrl !== currentHubIdentity()) return [];
+  return records;
+}
+
 async function adoptOrphanedSubscriptions() {
-  const orphans = settings.subscriptionsOrphaned || [];
+  const orphans = pendingOrphanedSubscriptions();
   if (orphans.length === 0) return settingsForRenderer();
-  await writeSharedSubscriptions([...(hubSubscriptions?.subscriptions || []), ...orphans]);
-  settings.subscriptionsOrphaned = [];
-  saveSettings();
+  // Same-id records replace rather than append: two entries sharing an id would
+  // collapse on normalization anyway, and the local edit is the one being adopted.
+  const merged = new Map((hubSubscriptions?.subscriptions || []).map((entry) => [entry.id, entry]));
+  for (const orphan of orphans) merged.set(orphan.id, orphan);
+  await writeSharedSubscriptions([...merged.values()]);
+  settings.subscriptionsOrphaned = { hubUrl: '', records: [] };
+  if (!saveSettings()) throw Object.assign(new Error('settings write failed'), { code: 'write_failed' });
   return settingsForRenderer();
 }
 
@@ -2607,8 +2647,8 @@ function subscriptionWriteFailureCode(error) {
 }
 
 function discardOrphanedSubscriptions() {
-  settings.subscriptionsOrphaned = [];
-  saveSettings();
+  settings.subscriptionsOrphaned = { hubUrl: '', records: [] };
+  if (!saveSettings()) throw Object.assign(new Error('settings write failed'), { code: 'write_failed' });
   return settingsForRenderer();
 }
 
@@ -2647,7 +2687,9 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     // from the shared list is set aside for the user rather than overwritten.
     const orphansChanged = seedFromLocal ? rememberOrphanedSubscriptions(local, doc) : false;
     const changed = cacheSharedSubscriptions(doc);
-    if (orphansChanged && !changed) saveSettings();
+    if (orphansChanged && !changed && !saveSettings()) {
+      console.log('[sync] set-aside records could not be written to disk');
+    }
     return changed || orphansChanged;
   } catch (error) {
     console.log(`[sync] subscriptions unavailable: ${error.message}`);
@@ -3215,7 +3257,7 @@ function settingsForRenderer() {
     // last-known cache behind it.
     subscriptions: effectiveSubscriptions(),
     subscriptionsShared: subscriptionsAreShared(),
-    subscriptionsOrphaned: settings.subscriptionsOrphaned || [],
+    subscriptionsOrphaned: pendingOrphanedSubscriptions(),
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
     zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
@@ -4618,10 +4660,13 @@ app.whenReady().then(() => {
         settings.subscriptions,
         { currencyApi: { normalizeCurrency } }
       ),
-      subscriptionsOrphaned: subscriptionDisplay.normalizeSubscriptions(
-        settings.subscriptionsOrphaned,
-        { currencyApi: { normalizeCurrency } }
-      ),
+      subscriptionsOrphaned: {
+        hubUrl: orphanedSubscriptions().hubUrl,
+        records: subscriptionDisplay.normalizeSubscriptions(
+          orphanedSubscriptions().records,
+          { currencyApi: { normalizeCurrency } }
+        )
+      },
       limitProviders: patch.limitProviders !== undefined ? parseLimitProviders(patch.limitProviders).join(',') : settings.limitProviders,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),

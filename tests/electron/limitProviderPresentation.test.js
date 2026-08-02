@@ -1895,6 +1895,12 @@ test('Kimi usage and limits share the canonical provider id and vendor color', (
   assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
 });
 
+// A value produced inside a vm realm carries that realm's prototypes, which
+// deepStrictEqual rejects as "same structure but not reference-equal".
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function cssBlock(styles, selector) {
   const start = styles.indexOf(`${selector} {`);
   assert.notEqual(start, -1, `${selector} rule should exist`);
@@ -2618,7 +2624,10 @@ test('a record added on another device turns up without pushing settings at the 
 test('a deleted record is not resurrected by another device rejoining', async () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const source = [
-    functionBody(main, 'rememberOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    functionBody(main, 'rememberOrphanedSubscriptions', 'currentHubIdentity'),
+    functionBody(main, 'currentHubIdentity', 'orphanedSubscriptions'),
+    functionBody(main, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(main, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
     // functionBody() slices from `function <name>(`, dropping the async keyword.
     `async ${functionBody(main, 'refreshSharedSubscriptions', 'maybeRefreshSharedSubscriptions')}`
   ].join('\n');
@@ -2626,9 +2635,10 @@ test('a deleted record is not resurrected by another device rejoining', async ()
   const run = async ({ doc, local, writeFails = false }) => {
     const written = [];
     const context = vm.createContext({
-      settings: { hubMode: 'client', subscriptions: local, subscriptionsOrphaned: [] },
+      settings: { hubMode: 'client', subscriptions: local, subscriptionsOrphaned: { hubUrl: '', records: [] } },
       hubSubscriptions: null,
       subscriptionsAreShared: () => true,
+      effectiveHubConfig: () => ({ url: 'https://hub.example' }),
       fetchSharedSubscriptions: async () => doc,
       writeSharedSubscriptions: async (list) => {
         if (writeFails) throw new Error('hub down');
@@ -2652,7 +2662,10 @@ test('a deleted record is not resurrected by another device rejoining', async ()
     local: [{ id: 'old' }]
   });
   assert.deepEqual(afterDelete.written, []);
-  assert.deepEqual(afterDelete.context.settings.subscriptionsOrphaned, [{ id: 'old' }]);
+  assert.deepEqual(plain(afterDelete.context.settings.subscriptionsOrphaned), {
+    hubUrl: 'https://hub.example',
+    records: [{ id: 'old' }]
+  });
 
   // A hub nobody has ever written to still adopts this device's records.
   const virgin = await run({ doc: { updatedAt: '', subscriptions: [] }, local: [{ id: 'mine' }] });
@@ -2669,28 +2682,57 @@ test('joining a hub that already has records sets this device aside, never over'
   const remember = functionBody(main, 'rememberOrphanedSubscriptions', 'adoptOrphanedSubscriptions');
   const adopt = functionBody(main, 'adoptOrphanedSubscriptions', 'discardOrphanedSubscriptions');
 
+  const helpers = [
+    remember,
+    functionBody(main, 'currentHubIdentity', 'orphanedSubscriptions'),
+    functionBody(main, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(main, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions')
+  ].join('\n');
   const context = vm.createContext({
-    settings: { subscriptions: [{ id: 'a' }, { id: 'b' }], subscriptionsOrphaned: [] },
+    settings: {
+      subscriptions: [{ id: 'a', amountMinor: 1000 }, { id: 'b' }],
+      subscriptionsOrphaned: { hubUrl: '', records: [] }
+    },
+    subscriptionsAreShared: () => true,
+    effectiveHubConfig: () => ({ url: 'https://hub.example' }),
     JSON
   });
+  const shared = `{ subscriptions: [{ id: 'a', amountMinor: 1000 }, { id: 'z' }] }`;
   const changed = vm.runInContext(
-    `${remember}\nrememberOrphanedSubscriptions(settings.subscriptions, { subscriptions: [{ id: 'a' }, { id: 'z' }] });`,
+    `${helpers}\nrememberOrphanedSubscriptions(settings.subscriptions, ${shared});`,
     context
   );
   // Only what the shared list does not already have. Matched on record id, not
   // on the account: the same plan entered on two machines has two ids, and
   // folding those together silently would double the monthly total.
   assert.equal(changed, true);
-  assert.deepEqual(context.settings.subscriptionsOrphaned, [{ id: 'b' }]);
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'b' }]);
   // Re-running changes nothing, so a reconnect does not keep re-prompting.
-  assert.equal(
-    vm.runInContext(`rememberOrphanedSubscriptions(settings.subscriptions, { subscriptions: [{ id: 'a' }, { id: 'z' }] });`, context),
-    false
+  assert.equal(vm.runInContext(`rememberOrphanedSubscriptions(settings.subscriptions, ${shared});`, context), false);
+
+  // A record edited here while the device was in local mode keeps its id, so an
+  // id-only comparison would let the shared copy silently win and drop the edit.
+  const edited = `{ subscriptions: [{ id: 'a', amountMinor: 2000 }, { id: 'z' }] }`;
+  assert.equal(vm.runInContext(`rememberOrphanedSubscriptions(settings.subscriptions, ${edited});`, context), true);
+  assert.deepEqual(
+    plain(context.settings.subscriptionsOrphaned.records),
+    [{ id: 'a', amountMinor: 1000 }, { id: 'b' }]
   );
 
+  // Held back from one hub, never offered to another — or to local mode, where
+  // there is nothing to adopt into.
+  assert.deepEqual(plain(vm.runInContext('pendingOrphanedSubscriptions();', context)).map((entry) => entry.id), ['a', 'b']);
+  context.effectiveHubConfig = () => ({ url: 'https://other.example' });
+  assert.deepEqual(plain(vm.runInContext('pendingOrphanedSubscriptions();', context)), []);
+  context.effectiveHubConfig = () => ({ url: 'https://hub.example' });
+  context.subscriptionsAreShared = () => false;
+  assert.deepEqual(plain(vm.runInContext('pendingOrphanedSubscriptions();', context)), []);
+
   // Adopting appends to the shared list and only then forgets them.
-  assert.match(adopt, /\[\.\.\.\(hubSubscriptions\?\.subscriptions \|\| \[\]\), \.\.\.orphans\]/);
-  const order = [adopt.indexOf('await writeSharedSubscriptions'), adopt.indexOf('settings.subscriptionsOrphaned = []')];
+  // Same-id orphans replace rather than append, or normalization would drop the
+  // adopted edit as a duplicate id.
+  assert.match(adopt, /merged\.set\(orphan\.id, orphan\)/);
+  const order = [adopt.indexOf('await writeSharedSubscriptions'), adopt.indexOf("settings.subscriptionsOrphaned = { hubUrl: '', records: [] }")];
   assert.ok(order[0] > -1 && order[0] < order[1], 'orphans must survive a failed adopt');
 });
 
@@ -2719,5 +2761,35 @@ test('a refused write says which problem it was', () => {
   assert.match(save, /if \(!saveSettings\(\)\) \{/);
   for (const k of ['errorHubRejected', 'errorWriteFailed', 'orphanNotice', 'orphanAdopt', 'orphanDiscard']) {
     assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${k}':`).length - 1, 5);
+  }
+});
+
+test('a device with no limits of its own can still name the accounts on the hub', () => {
+  const app = readRendererFile('app.js');
+  const helper = functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountChoices');
+  const run = (local, aggregate) => vm.runInNewContext(
+    `${helper}\nlimitProvidersForSubscriptions();`,
+    { localDeviceLimitsProviders: () => local, state: { stats: { limits: { providers: aggregate } } } }
+  );
+  const remote = [{ provider: 'codex', accountEmail: 'a@example.com' }];
+
+  // localDeviceLimitsProviders() returns [] when this device is known but reports
+  // no limits, and [] is truthy — a plain `||` handed back the empty array and
+  // left the picker blank while the accounts sat on another machine.
+  assert.deepEqual(plain(run([], remote)), remote);
+  assert.deepEqual(plain(run(null, remote)), remote);
+  // A device with its own accounts still speaks for itself.
+  const mine = [{ provider: 'claude', accountEmail: 'me@example.com' }];
+  assert.deepEqual(plain(run(mine, remote)), mine);
+  assert.deepEqual(plain(run([], undefined)), []);
+});
+
+test('a hub timestamp that cannot be parsed does not turn a save into a crash', () => {
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  // A stored document could carry a malformed or legacy updatedAt; Date.parse
+  // would hand toISOString() a NaN and throw where a save was expected.
+  for (const previous of ['not-a-date', '2026-13-45', '∞']) {
+    const doc = subscriptionApi.subscriptionDocument([], { previousUpdatedAt: previous });
+    assert.match(doc.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
   }
 });

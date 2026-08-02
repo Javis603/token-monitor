@@ -257,7 +257,12 @@
     // would read as "not stale" against the first and overwrite it unnoticed.
     // Both are fixed-width UTC ISO strings, so lexicographic order is chronological.
     if (!explicit && previous && updatedAt <= previous) {
-      updatedAt = new Date(Date.parse(previous) + 1).toISOString();
+      // A stored document could carry a malformed or legacy timestamp, and
+      // Date.parse would then hand toISOString() a NaN and throw — turning a
+      // save into a crash. An unparseable previous simply cannot be compared
+      // against, so the fresh stamp stands.
+      const bumped = Date.parse(previous) + 1;
+      if (Number.isFinite(bumped)) updatedAt = new Date(bumped).toISOString();
     }
     return { version: 1, updatedAt, subscriptions: normalizeSubscriptions(subscriptions, options) };
   }

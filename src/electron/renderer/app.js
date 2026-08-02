@@ -2142,8 +2142,14 @@ function isCreditsProvider(provider) {
   return subscriptionApi.isBalanceOnlyAccount(provider);
 }
 
+// `||` was wrong here: localDeviceLimitsProviders() returns [] when this device
+// is known but reports no limits of its own, and an empty array is truthy, so
+// the aggregate never got a look in. On a hub where the accounts live on another
+// machine that left the picker empty and unbound every existing record.
 function limitProvidersForSubscriptions() {
-  return localDeviceLimitsProviders() || state.stats?.limits?.providers || [];
+  const local = localDeviceLimitsProviders();
+  if (local && local.length > 0) return local;
+  return state.stats?.limits?.providers || [];
 }
 
 // Every configured account, balance ones included. They used to be hidden behind
@@ -9556,7 +9562,15 @@ els.subscriptionOrphanAdopt?.addEventListener('click', async () => {
   renderSubscriptionSettings();
 });
 els.subscriptionOrphanDiscard?.addEventListener('click', async () => {
-  state.settings = await window.tokenMonitor.discardOrphanedSubscriptions();
+  try {
+    state.settings = await window.tokenMonitor.discardOrphanedSubscriptions();
+    // A discard that worked resolves whatever the failed adopt was complaining
+    // about; leaving the message up would describe a state that is over.
+    state.subscriptionSyncError = '';
+  } catch (error) {
+    state.subscriptionSyncError = subscriptionWriteErrorKey(error);
+    try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+  }
   renderSubscriptionSettings();
 });
 for (const input of els.subscriptionKindInputs || []) {

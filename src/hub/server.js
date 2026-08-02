@@ -10,7 +10,7 @@ const {
   isStaleSubscriptionWrite,
   subscriptionDocument
 } = require('../shared/subscriptionDisplay');
-const { normalizeCurrency } = require('../shared/currency');
+const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
@@ -124,11 +124,34 @@ function createHub({
       error.current = store.subscriptions;
       throw error;
     }
-    store.subscriptions = subscriptionDocument(subscriptions, {
+    // A currency with no exchange rate would be coerced to USD and reported as
+    // an amount the user never entered. The endpoint says it validates, so it
+    // refuses rather than quietly rewriting what somebody pays.
+    const unsupported = subscriptions.find(
+      (entry) => entry?.currency && !CURRENCY_CODES.includes(String(entry.currency).trim().toUpperCase())
+    );
+    if (unsupported) {
+      const error = new Error(`unsupported currency: ${String(unsupported.currency).trim().toUpperCase()}`);
+      error.code = 'bad_subscriptions';
+      throw error;
+    }
+    const next = subscriptionDocument(subscriptions, {
       previousUpdatedAt: store.subscriptions?.updatedAt,
       currencyApi: { normalizeCurrency }
     });
-    persist();
+    // Persist before the in-memory list moves. Otherwise a failed write leaves
+    // this process serving records the file does not have, and a restart quietly
+    // reverts to the old ones — the worst shape for data that exists nowhere else.
+    const previous = store.subscriptions;
+    const previousSavedAt = store.savedAt;
+    store.subscriptions = next;
+    try {
+      persist();
+    } catch (error) {
+      store.subscriptions = previous;
+      store.savedAt = previousSavedAt;
+      throw error;
+    }
     return store.subscriptions;
   }
 

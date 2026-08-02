@@ -115,10 +115,13 @@ test('the Worker matches the Node hub on tokens and currencies', async () => {
   assert.ok(second.updatedAt > first.updatedAt);
   assert.equal((await hub.fetch(request('PUT', { subscriptions: [], baseUpdatedAt: first.updatedAt }))).status, 409);
 
-  // A currency the app cannot convert would later be valued as USD.
-  const euro = await (await hub.fetch(request('PUT', {
+  // A currency the app carries no rate for is refused, not quietly rewritten:
+  // storing 100 EUR as 100 USD reports an amount the user never entered.
+  const euro = await hub.fetch(request('PUT', {
     subscriptions: [{ ...RECORD, currency: 'EUR' }],
     baseUpdatedAt: second.updatedAt
-  }))).json();
-  assert.equal(euro.subscriptions[0].currency, 'USD');
+  }));
+  assert.equal(euro.status, 400);
+  assert.match((await euro.json()).message, /EUR/);
+  assert.equal((await (await hub.fetch(request('GET'))).json()).subscriptions.length, 2);
 });
