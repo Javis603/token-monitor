@@ -109,7 +109,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
 - **Optional Status view** — Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
 - **Data export** — export usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
-- **Subscription records** — note by hand what each AI account actually costs you, and the plan label's tooltip says whether the month's usage was worth it, along with when the plan renews or runs out; recurring plans and top-up balances both
+- **Subscription records** — record by hand what each AI account actually costs; the plan label's tooltip then reports the price, the next renewal or end date, time subscribed, and the month's usage cost as a multiple of what the plan costs, for recurring plans and top-up ledgers alike
 
 ### Multi-device & deployment
 
