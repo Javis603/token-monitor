@@ -99,9 +99,10 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   assert.equal(mac.extraResources[1].to, 'TokenMonitorWidgetReloader');
   assert.equal(mac.sign, 'scripts/sign-macos-with-widget.js');
   assert.match(packageJson.scripts['pack'], /electron-builder --config scripts\/electron-builder\.config\.js/);
-  assert.match(packageJson.scripts['dist:mac:widget'], /TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 node scripts\/macos-packaging\.js/);
-  assert.match(packageJson.scripts['dist:mac:widget'], /TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 electron-builder/);
+  assert.match(packageJson.scripts['dist:mac:widget'], /TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 TOKEN_MONITOR_WIDGET_ARCH=arm64 node scripts\/macos-packaging\.js/);
+  assert.match(packageJson.scripts['dist:mac:widget'], /TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 TOKEN_MONITOR_WIDGET_ARCH=arm64 electron-builder/);
   assert.match(packageJson.scripts['dist:mac:widget:x64'], /TOKEN_MONITOR_WIDGET_ARCH=x64/);
+  assert.match(packageJson.scripts['pack:mac:widget:x64'], /--mac --x64 --dir/);
 });
 
 test('supports an isolated local Widget URL scheme without changing the release default', () => {

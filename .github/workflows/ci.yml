@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -100,5 +103,16 @@ jobs:
           test "$(lipo -archs build/macos-widget/TokenMonitorWidget.appex/Contents/MacOS/TokenMonitorWidget)" = "x86_64"
           test "$(lipo -archs build/macos-widget/TokenMonitorWidgetReloader)" = "x86_64"
           test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' build/macos-widget/TokenMonitorWidget.entitlements)" = "group.com.example.tokenmonitor"
+      - name: Package and verify a complete x64 local Widget app
+        env:
+          TOKEN_MONITOR_WIDGET_ENABLED: '1'
+          TOKEN_MONITOR_WIDGET_ARCH: x64
+          TOKEN_MONITOR_APP_GROUP: group.com.example.tokenmonitor
+          TOKEN_MONITOR_WIDGET_BUNDLE_ID: com.example.tokenmonitor.widget
+          TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING: '1'
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: |
+          npm run pack:mac:widget:x64
+          npm run verify:mac:widget-app -- "dist/mac-x64/mac/Token Monitor.app"
       - name: Check Widget CI diff
         run: git diff --check
