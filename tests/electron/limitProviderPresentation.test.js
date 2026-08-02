@@ -2862,10 +2862,13 @@ test('one hub cached list is never filed as records belonging to the next hub', 
   // cannot make a late answer land under the wrong hub's name.
   assert.match(refresh, /const hub = currentHubIdentity\(\);/);
   assert.match(refresh, /if \(!subscriptionOpIsCurrent\(hub\)\) return false;/);
-  // Every hub read and write goes through one lane, so nothing can observe the
-  // state between another operation starting and finishing.
-  assert.match(main, /return queueSubscriptionOp\(\(\) => refreshSharedSubscriptionsNow\(options\)\);/);
-  assert.match(main, /return queueSubscriptionOp\(\(\) => writeSharedSubscriptionsNow\(list\)\);/);
+  // Every hub read and write goes through the lane for its own hub, so nothing
+  // can observe the state between another operation on it starting and finishing.
+  assert.match(functionBody(main, 'refreshSharedSubscriptions', 'refreshSharedSubscriptionsNow'), /queueSubscriptionOp\(/);
+  assert.match(functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'), /queueSubscriptionOp\(/);
+  // Neither can outlast a hub that accepts the connection and stops answering.
+  assert.match(functionBody(main, 'fetchSharedSubscriptions', 'staleSubscriptionWriteError'), /signal: AbortSignal\.timeout\(15_000\)/);
+  assert.match(functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions'), /signal: AbortSignal\.timeout\(15_000\)/);
 
   // Editing in local mode hands ownership back, which is what clears the marker.
   const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
@@ -2999,6 +3002,7 @@ test('a rejection from the hub the user just left does not empty the one they ar
       return { status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [] }) };
     },
     cacheSharedSubscriptions: (doc) => { context.cached = doc; return true; },
+    AbortSignal: { timeout: () => null },
     JSON
   });
   vm.runInContext(source, context);
@@ -3037,7 +3041,8 @@ test('hub reads and writes run one at a time, in the order they were asked for',
       },
       hubSubscriptions: { updatedAt: 'v0', subscriptions: [] },
       hubSubscriptionsHub: 'https://hub.example',
-      subscriptionQueue: Promise.resolve(),
+      subscriptionQueues: new Map(),
+      AbortSignal: { timeout: () => null },
       subscriptionsAreShared: () => true,
       currentHubIdentity: () => 'https://hub.example',
       embeddedHub: null,
@@ -3103,7 +3108,11 @@ test('hub reads and writes run one at a time, in the order they were asked for',
 test('a failed operation does not block the lane behind it', async () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const queue = functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent');
-  const context = vm.createContext({ subscriptionQueue: Promise.resolve(), Promise });
+  const context = vm.createContext({
+    subscriptionQueues: new Map(),
+    currentHubIdentity: () => 'https://hub.example',
+    Promise
+  });
   vm.runInContext(queue, context);
 
   const ran = [];
@@ -3114,4 +3123,121 @@ test('a failed operation does not block the lane behind it', async () => {
   await assert.rejects(() => vm.runInContext('queueSubscriptionOp(boom);', context), /hub down/);
   assert.equal(await vm.runInContext('queueSubscriptionOp(after);', context), 'ok');
   assert.deepEqual(ran, ['boom', 'after']);
+});
+
+test('a hub that accepts the connection and stops answering does not wedge the lane', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    `async ${functionBody(main, 'fetchSharedSubscriptions', 'staleSubscriptionWriteError')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    embeddedHub: null,
+    subscriptionQueues: new Map(),
+    currentHubIdentity: () => 'https://hub.example',
+    subscriptionsEndpoint: () => ({ url: 'https://hub.example/api/subscriptions', headers: {} }),
+    // Records the deadline each request was given, and stands in for a socket
+    // that stays open: the first request ends only because the deadline ends it.
+    AbortSignal: { timeout: (ms) => ({ ms }) },
+    deadlines: [],
+    fetch: async (_url, init) => {
+      context.deadlines.push(init?.signal?.ms);
+      if (context.deadlines.length === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+      }
+      return { ok: true, status: 200, json: async () => ({ updatedAt: 'v1', subscriptions: [] }) };
+    },
+    setTimeout,
+    Promise
+  });
+  vm.runInContext(source, context);
+
+  await assert.rejects(() => vm.runInContext('queueSubscriptionOp(() => fetchSharedSubscriptions());', context), /aborted/);
+  // Without a deadline the first request would still be open, and this one — and
+  // every save after it — would wait behind it until the app restarted.
+  const answered = await vm.runInContext('queueSubscriptionOp(() => fetchSharedSubscriptions());', context);
+  assert.equal(answered.updatedAt, 'v1');
+  assert.deepEqual(context.deadlines, [15_000, 15_000]);
+});
+
+test('a save queued against one hub is not written to the one the user moved to', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(main, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(main, 'writeSharedSubscriptions', 'writeSharedSubscriptionsNow'),
+    `async ${functionBody(main, 'writeSharedSubscriptionsNow', 'rememberOrphanedSubscriptions')}`
+  ].join('\n');
+
+  const context = vm.createContext({
+    settings: { hubMode: 'client' },
+    embeddedHub: null,
+    subscriptionQueues: new Map(),
+    hub: 'https://a.example',
+    currentHubIdentity: () => context.hub,
+    // The base is whatever hub is in hand by the time the write runs — which is
+    // exactly why a write must not be allowed to land on a hub it never read.
+    hubSubscriptions: { updatedAt: 'a-v1', subscriptions: [] },
+    subscriptionsEndpoint: () => ({ url: `${context.hub}/api/subscriptions`, headers: {} }),
+    AbortSignal: { timeout: () => null },
+    written: [],
+    fetch: async (url) => {
+      context.written.push(url);
+      return { ok: true, status: 200, json: async () => ({ updatedAt: 'v2', subscriptions: [] }) };
+    },
+    cacheSharedSubscriptions: () => true,
+    staleSubscriptionWriteError: () => new Error('stale_write'),
+    Promise,
+    JSON
+  });
+  vm.runInContext(source, context);
+
+  // Hold the lane so the save is still queued when the user switches hubs.
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  context.hold = () => held;
+  const holding = vm.runInContext('queueSubscriptionOp(hold);', context);
+  const queued = vm.runInContext("writeSharedSubscriptions([{ id: 'mine' }]);", context);
+  context.hub = 'https://b.example';
+  release();
+  await holding;
+
+  await assert.rejects(() => queued, /hub changed/);
+  // Not merely unsaved: the records the user entered against A must not reach B
+  // at all, least of all based on an updatedAt that was never read from it.
+  assert.deepEqual(context.written, []);
+});
+
+test('a hub that is slow to answer does not hold up the one in front of the user', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const context = vm.createContext({
+    subscriptionQueues: new Map(),
+    hub: 'https://slow.example',
+    currentHubIdentity: () => context.hub,
+    Promise
+  });
+  vm.runInContext(functionBody(main, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'), context);
+
+  const ran = [];
+  let finish;
+  const stall = new Promise((resolve) => { finish = resolve; });
+  const release = () => { ran.push('slow'); finish(); };
+  context.slow = () => stall;
+  context.quick = () => { ran.push('quick'); return Promise.resolve('quick'); };
+
+  const stalled = vm.runInContext('queueSubscriptionOp(slow);', context);
+  context.hub = 'https://near.example';
+  // Ordering is only worth anything against one shared document. Behind a single
+  // lane this would wait on a hub the user has already left.
+  assert.equal(await vm.runInContext('queueSubscriptionOp(quick);', context), 'quick');
+  assert.deepEqual(ran, ['quick']);
+
+  release();
+  await stalled;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  // And the lanes are gone once idle, rather than one per hub ever typed.
+  assert.equal(context.subscriptionQueues.size, 0);
 });

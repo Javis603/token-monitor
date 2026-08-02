@@ -2860,6 +2860,7 @@ function subscriptionWriteErrorKey(error) {
   if (/stale_write/.test(message)) return 'settings.subscriptions.errorStaleWrite';
   if (/hub_rejected/.test(message)) return 'settings.subscriptions.errorHubRejected';
   if (/write_failed/.test(message)) return 'settings.subscriptions.errorWriteFailed';
+  if (/hub_changed/.test(message)) return 'settings.subscriptions.errorHubChanged';
   return 'settings.subscriptions.errorHubWrite';
 }
 

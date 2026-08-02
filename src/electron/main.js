@@ -2498,13 +2498,18 @@ let hubSubscriptions = null;
 // cannot be reached kept showing the previous hub's records as though they were
 // this one's.
 let hubSubscriptionsHub = '';
-// One lane for every hub read and write, the same way startMode() serializes
+// One lane per hub for its reads and writes, the same way startMode() serializes
 // hub-side work. Discarding whichever answer came back last is not enough: a read
 // that STARTS after a write can still observe the state before it, come back
 // first, and leave the write invisible on screen and in settings.json. Only
 // ordering the operations themselves removes that, and it also gives each write
 // the previous one's updatedAt to base on instead of a stale one.
-let subscriptionQueue = Promise.resolve();
+//
+// Per hub rather than one lane for all of them, because ordering is only worth
+// anything against a single shared document: two hubs hold two documents with no
+// ordering between them, and a hub that accepts the connection but answers
+// slowly would otherwise hold up the hub the user is actually looking at.
+const subscriptionQueues = new Map();
 let lastSubscriptionRefreshMs = 0;
 const SUBSCRIPTION_REFRESH_MS = 60000;
 
@@ -2563,9 +2568,19 @@ function persistSubscriptionState() {
 }
 
 function queueSubscriptionOp(run) {
-  const result = subscriptionQueue.then(run, run);
+  // Captured on the way in, not when the operation runs: it was decided against
+  // the hub in front of the user now, and a switch before it starts turns it
+  // into work about a hub they have left. Each operation is handed the identity
+  // it was queued for so it can say what to do about that.
+  const hub = currentHubIdentity();
+  const previous = subscriptionQueues.get(hub) || Promise.resolve();
+  const result = previous.then(() => run(hub), () => run(hub));
   // The lane has to survive a failed operation; the caller still sees the error.
-  subscriptionQueue = result.then(() => {}, () => {});
+  const lane = result.then(() => {}, () => {});
+  subscriptionQueues.set(hub, lane);
+  // Dropped once idle, so the map holds the hub in use and, briefly, whichever
+  // one is still draining — not an entry per hub the user has ever typed.
+  lane.then(() => { if (subscriptionQueues.get(hub) === lane) subscriptionQueues.delete(hub); });
   return result;
 }
 
@@ -2590,7 +2605,11 @@ async function fetchSharedSubscriptions() {
   if (settings.hubMode === 'host' && embeddedHub) return embeddedHub.hub.getSubscriptions();
   const endpoint = subscriptionsEndpoint();
   if (!endpoint) return null;
-  const response = await fetch(endpoint.url, { headers: endpoint.headers });
+  // A hub that accepts the connection and then never answers would hold this
+  // lane open for the rest of the session, and every later read and save for that
+  // hub behind it. fetch() has no deadline of its own, so it gets the same 15s
+  // the other hub requests use.
+  const response = await fetch(endpoint.url, { headers: endpoint.headers, signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
 }
@@ -2606,7 +2625,18 @@ function staleSubscriptionWriteError(current, hub) {
 }
 
 function writeSharedSubscriptions(list) {
-  return queueSubscriptionOp(() => writeSharedSubscriptionsNow(list));
+  return queueSubscriptionOp((hub) => {
+    // Queued against one hub, reached the front of the lane after the user moved
+    // to another. The list in hand is the one they were editing on the hub they
+    // left, and hubSubscriptions now holds the new hub's updatedAt to base on, so
+    // sending it would write one hub's records into another against a base that
+    // was never read from it. Reported rather than dropped: the record is still
+    // in the form, and silence would read as saved.
+    if (!subscriptionOpIsCurrent(hub)) {
+      throw Object.assign(new Error('hub changed'), { code: 'hub_changed' });
+    }
+    return writeSharedSubscriptionsNow(list);
+  });
 }
 
 async function writeSharedSubscriptionsNow(list) {
@@ -2630,7 +2660,8 @@ async function writeSharedSubscriptionsNow(list) {
   const response = await fetch(endpoint.url, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', ...endpoint.headers },
-    body: JSON.stringify({ subscriptions: list, baseUpdatedAt })
+    body: JSON.stringify({ subscriptions: list, baseUpdatedAt }),
+    signal: AbortSignal.timeout(15_000)
   });
   // Someone else wrote the list since this device last read it. Overwriting would
   // erase their records silently, and they exist nowhere else.
@@ -2717,6 +2748,7 @@ function subscriptionWriteFailureCode(error) {
   if (error?.code === 'stale_write') return 'stale_write';
   if (error?.code === 'rejected') return 'hub_rejected';
   if (error?.code === 'write_failed') return 'write_failed';
+  if (error?.code === 'hub_changed') return 'hub_changed';
   return 'hub_unreachable';
 }
 
@@ -2727,7 +2759,10 @@ function discardOrphanedSubscriptions() {
 }
 
 function refreshSharedSubscriptions(options = {}) {
-  return queueSubscriptionOp(() => refreshSharedSubscriptionsNow(options));
+  // Nothing left to answer for a hub the user has moved off: the switch enqueues
+  // its own refresh for the hub they moved to, and this one would only spend a
+  // request to be discarded on arrival.
+  return queueSubscriptionOp((hub) => (subscriptionOpIsCurrent(hub) ? refreshSharedSubscriptionsNow(options) : false));
 }
 
 async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
