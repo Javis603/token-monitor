@@ -356,6 +356,9 @@ function defaultSettings() {
     // list, with the hub they were held back from. Kept until the user says
     // whether to add or drop them.
     subscriptionsOrphaned: { hubUrl: '', records: [] },
+    // Which hub `subscriptions` is currently a cache of, or '' when this device
+    // owns the list outright.
+    subscriptionsCacheHub: '',
     windowBounds: null,
     windowMaximized: false,
     zoomFactor: 1,
@@ -2511,12 +2514,28 @@ function cacheSharedSubscriptions(doc) {
   hubSubscriptions = doc;
   if (changed) {
     settings.subscriptions = doc.subscriptions;
-    // The cache is only there so an unreachable hub still shows the records at
-    // startup. A rolled-back write means it will not, and saying so beats
-    // discovering it after the next restart.
-    if (!saveSettings()) console.log('[sync] subscription cache could not be written to disk');
+    settings.subscriptionsCacheHub = currentHubIdentity();
+    persistSubscriptionState();
   }
   return changed;
+}
+
+// saveSettings() rolls the WHOLE settings object back to its last persisted
+// snapshot when the file cannot be written, so a failed write here would discard
+// the set-aside records this refresh just computed along with the cache — and
+// their notice would vanish until the next restart, with nothing on screen
+// saying anything went wrong. Re-apply both: disk is behind, but what the user
+// still has to decide about stays in front of them.
+function persistSubscriptionState() {
+  const subscriptions = settings.subscriptions;
+  const orphaned = settings.subscriptionsOrphaned;
+  const cacheHub = settings.subscriptionsCacheHub;
+  if (saveSettings()) return true;
+  settings.subscriptions = subscriptions;
+  settings.subscriptionsOrphaned = orphaned;
+  settings.subscriptionsCacheHub = cacheHub;
+  console.log('[sync] subscription state could not be written to disk');
+  return false;
 }
 
 function subscriptionsEndpoint() {
@@ -2603,8 +2622,10 @@ function rememberOrphanedSubscriptions(local, doc) {
 
 // Which hub the set-aside records were held back from. Offering them to a
 // different hub would file this device's records somewhere they never belonged.
+// Trimmed the same way subscriptionsEndpoint() trims it, so a trailing slash the
+// user typed does not read as a different hub and strand them.
 function currentHubIdentity() {
-  return String(effectiveHubConfig().url || '');
+  return String(effectiveHubConfig().url || '').replace(/\/$/, '');
 }
 
 function orphanedSubscriptions() {
@@ -2659,9 +2680,13 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     return had;
   }
   try {
-    // Read before caching: caching overwrites settings.subscriptions with the
-    // hub's answer, which is exactly the list the seed would then be copying.
-    const local = settings.subscriptions || [];
+    // Only records this device actually owns may be seeded or set aside. Once
+    // settings.subscriptions is a cache of some hub it is that hub's data, and
+    // carrying it into the next hub would file one hub's records on another —
+    // duplicating accounts that were never entered here. Switching to local mode
+    // and editing hands ownership back, which is what clears the marker.
+    const cacheHub = String(settings.subscriptionsCacheHub || '');
+    const local = cacheHub && cacheHub !== currentHubIdentity() ? [] : (settings.subscriptions || []);
     const doc = await fetchSharedSubscriptions();
     if (!doc) return false;
     // A hub nobody has ever written to: adopt this device's records rather than
@@ -2687,9 +2712,7 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     // from the shared list is set aside for the user rather than overwritten.
     const orphansChanged = seedFromLocal ? rememberOrphanedSubscriptions(local, doc) : false;
     const changed = cacheSharedSubscriptions(doc);
-    if (orphansChanged && !changed && !saveSettings()) {
-      console.log('[sync] set-aside records could not be written to disk');
-    }
+    if (orphansChanged && !changed) persistSubscriptionState();
     return changed || orphansChanged;
   } catch (error) {
     console.log(`[sync] subscriptions unavailable: ${error.message}`);
@@ -2714,6 +2737,9 @@ function maybeRefreshSharedSubscriptions() {
 async function saveSubscriptions(list) {
   if (!subscriptionsAreShared()) {
     settings.subscriptions = subscriptionDisplay.normalizeSubscriptions(list, { currencyApi: { normalizeCurrency } });
+    // Editing here makes the list this device's own again, so a later hub join
+    // offers these records instead of treating them as some other hub's cache.
+    settings.subscriptionsCacheHub = '';
     // saveSettings() rolls the whole object back when the file cannot be
     // written, so reporting success here would tell the user their record was
     // stored while it was being discarded.
@@ -4605,6 +4631,7 @@ app.whenReady().then(() => {
     // reorder from quietly turning the spread back into a second way in.
     delete normalizedPatch.subscriptions;
     delete normalizedPatch.subscriptionsOrphaned;
+    delete normalizedPatch.subscriptionsCacheHub;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
@@ -4660,6 +4687,7 @@ app.whenReady().then(() => {
         settings.subscriptions,
         { currencyApi: { normalizeCurrency } }
       ),
+      subscriptionsCacheHub: String(settings.subscriptionsCacheHub || ''),
       subscriptionsOrphaned: {
         hubUrl: orphanedSubscriptions().hubUrl,
         records: subscriptionDisplay.normalizeSubscriptions(

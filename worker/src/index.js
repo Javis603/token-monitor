@@ -234,6 +234,13 @@ export class HubDO {
       if (!Array.isArray(payload?.subscriptions)) {
         return jsonResponse(400, { error: 'bad_request', message: 'subscriptions must be an array' });
       }
+      const stored = await this.getSubscriptions();
+      // Staleness first, matching the Node hub: a stale write is exactly the case
+      // where the client needs the stored document back to re-base, and answering
+      // 400 for a request that is both stale and malformed would withhold it.
+      if (subscriptionDisplay.isStaleSubscriptionWrite(stored, payload?.baseUpdatedAt)) {
+        return jsonResponse(409, { error: 'stale_write', ...stored });
+      }
       // A currency with no exchange rate would be coerced to USD and reported as
       // an amount the user never entered.
       const unsupported = payload.subscriptions.find(
@@ -244,10 +251,6 @@ export class HubDO {
           error: 'bad_request',
           message: `unsupported currency: ${String(unsupported.currency).trim().toUpperCase()}`
         });
-      }
-      const stored = await this.getSubscriptions();
-      if (subscriptionDisplay.isStaleSubscriptionWrite(stored, payload?.baseUpdatedAt)) {
-        return jsonResponse(409, { error: 'stale_write', ...stored });
       }
       const next = subscriptionDisplay.subscriptionDocument(payload.subscriptions, {
         previousUpdatedAt: stored?.updatedAt,

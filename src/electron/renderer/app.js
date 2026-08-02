@@ -2142,14 +2142,22 @@ function isCreditsProvider(provider) {
   return subscriptionApi.isBalanceOnlyAccount(provider);
 }
 
-// `||` was wrong here: localDeviceLimitsProviders() returns [] when this device
-// is known but reports no limits of its own, and an empty array is truthy, so
-// the aggregate never got a look in. On a hub where the accounts live on another
-// machine that left the picker empty and unbound every existing record.
+// Every account the limits page renders, which is the cross-device aggregate —
+// a shared list names accounts that may be signed in on another machine.
+// Preferring this device's own list hid those rows, and worse, left a single
+// local account as the only candidate: matchProviderAccount()'s sole-account
+// fallback would then bind a remote subscription to whatever is signed in here.
+// Local entries come first so this device wins a tie on identical accounts.
 function limitProvidersForSubscriptions() {
-  const local = localDeviceLimitsProviders();
-  if (local && local.length > 0) return local;
-  return state.stats?.limits?.providers || [];
+  const seen = new Set();
+  const merged = [];
+  for (const provider of [...(localDeviceLimitsProviders() || []), ...(state.stats?.limits?.providers || [])]) {
+    const key = subscriptionAccountValue(provider);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(provider);
+  }
+  return merged;
 }
 
 // Every configured account, balance ones included. They used to be hidden behind

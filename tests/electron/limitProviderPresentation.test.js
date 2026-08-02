@@ -2589,7 +2589,14 @@ test('the note stops promising the data stays on this device once a hub has it',
 
   // English is what renders before i18n applies, so the markup cannot lag.
   const en = readRendererFile('i18n.js').split("'settings.subscriptions.note':")[1].split('\n')[0];
-  assert.match(en, /nothing leaves this device/);
+  const english = en.slice(en.indexOf("'") + 1, en.lastIndexOf("',")).replace(/\\'/g, "'");
+  assert.ok(readRendererFile('index.html').includes(english), `markup fallback should read: ${english}`);
+  // The shared variant differs by exactly one thing: where the list lives. The
+  // old "nothing leaves this device" reassurance answered a question nobody
+  // asked and stopped being unconditionally true.
+  const sharedNote = readRendererFile('i18n.js').split("'settings.subscriptions.noteShared':")[1].split('\n')[0];
+  assert.match(sharedNote, /kept on your hub/);
+  assert.doesNotMatch(readRendererFile('i18n.js'), /nothing leaves this device/);
 });
 
 test('a record added on another device turns up without pushing settings at the user mid-edit', () => {
@@ -2603,22 +2610,46 @@ test('a record added on another device turns up without pushing settings at the 
   assert.match(poll, /lastSubscriptionRefreshMs < SUBSCRIPTION_REFRESH_MS/);
   assert.match(main, /maybeRefreshSharedSubscriptions\(\);\n {4}return fetchStats\(options\);/);
 
-  const run = (previous, incoming) => {
-    const context = {
+  // persistSubscriptionState() sits between the two, so the slice carries it and
+  // this exercises the real rollback path rather than a stand-in.
+  const run = (previous, incoming, { saveOk = true } = {}) => {
+    const context = vm.createContext({
       hubSubscriptions: previous,
-      settings: { subscriptions: [] },
-      saveSettings: () => { context.saved = true; }
-    };
-    const changed = vm.runInNewContext(`${cache}\ncacheSharedSubscriptions(doc);`, { ...context, doc: incoming });
-    return { changed, saved: Boolean(context.saved) };
+      settings: {
+        subscriptions: [{ id: 'stale' }],
+        subscriptionsOrphaned: { hubUrl: 'https://hub.example', records: [{ id: 'held' }] },
+        subscriptionsCacheHub: ''
+      },
+      currentHubIdentity: () => 'https://hub.example',
+      saveSettings: () => { context.saved = true; return saveOk; },
+      console: { log() {} },
+      doc: incoming
+    });
+    const changed = vm.runInContext(`${cache}\ncacheSharedSubscriptions(doc);`, context);
+    return { changed, saved: Boolean(context.saved), settings: plain(context.settings) };
   };
   const doc = { updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'a' }] };
   // A changed list is mirrored into settings.json, which is what an unreachable
-  // hub falls back to showing at the next startup.
-  assert.deepEqual(run(null, doc), { changed: true, saved: true });
+  // hub falls back to showing at the next startup, and tagged with the hub it
+  // came from so a later switch does not treat it as this device's own data.
+  const first = run(null, doc);
+  assert.equal(first.changed, true);
+  assert.equal(first.saved, true);
+  assert.deepEqual(first.settings.subscriptions, [{ id: 'a' }]);
+  assert.equal(first.settings.subscriptionsCacheHub, 'https://hub.example');
   // Same document again: no write, no re-render.
-  assert.deepEqual(run(doc, { ...doc }), { changed: false, saved: false });
+  assert.deepEqual(
+    (({ changed, saved }) => ({ changed, saved }))(run(doc, { ...doc })),
+    { changed: false, saved: false }
+  );
   assert.equal(run(doc, { updatedAt: '2026-08-02T10:00:00.000Z', subscriptions: [] }).changed, true);
+
+  // saveSettings() rolls the whole settings object back when the file cannot be
+  // written. The set-aside records would go with it and their notice would
+  // disappear mid-session, with nothing on screen saying anything went wrong.
+  const failed = run(null, doc, { saveOk: false });
+  assert.deepEqual(failed.settings.subscriptions, [{ id: 'a' }]);
+  assert.deepEqual(failed.settings.subscriptionsOrphaned.records, [{ id: 'held' }]);
 });
 
 test('a deleted record is not resurrected by another device rejoining', async () => {
@@ -2766,22 +2797,33 @@ test('a refused write says which problem it was', () => {
 
 test('a device with no limits of its own can still name the accounts on the hub', () => {
   const app = readRendererFile('app.js');
-  const helper = functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountChoices');
-  const run = (local, aggregate) => vm.runInNewContext(
-    `${helper}\nlimitProvidersForSubscriptions();`,
+  const source = [
+    functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue'),
+    functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName')
+  ].join('\n');
+  const run = (local, aggregate) => plain(vm.runInNewContext(
+    `${source}\nlimitProvidersForSubscriptions();`,
     { localDeviceLimitsProviders: () => local, state: { stats: { limits: { providers: aggregate } } } }
-  );
-  const remote = [{ provider: 'codex', accountEmail: 'a@example.com' }];
+  ));
+  const remote = [{ provider: 'codex', accountKey: 'remote', accountEmail: 'a@example.com' }];
 
   // localDeviceLimitsProviders() returns [] when this device is known but reports
   // no limits, and [] is truthy — a plain `||` handed back the empty array and
   // left the picker blank while the accounts sat on another machine.
-  assert.deepEqual(plain(run([], remote)), remote);
-  assert.deepEqual(plain(run(null, remote)), remote);
-  // A device with its own accounts still speaks for itself.
-  const mine = [{ provider: 'claude', accountEmail: 'me@example.com' }];
-  assert.deepEqual(plain(run(mine, remote)), mine);
-  assert.deepEqual(plain(run([], undefined)), []);
+  assert.deepEqual(run([], remote), remote);
+  assert.deepEqual(run(null, remote), remote);
+  assert.deepEqual(run([], undefined), []);
+
+  // A shared list names accounts across devices, so both sides show up. Keeping
+  // only the local ones hid remote rows — and left a lone local account as the
+  // only candidate, which matchProviderAccount()'s sole-account fallback would
+  // then bind a remote subscription to.
+  const mine = [{ provider: 'claude', accountKey: 'local', accountEmail: 'me@example.com' }];
+  assert.deepEqual(run(mine, remote).map((entry) => entry.accountKey), ['local', 'remote']);
+  const sameProvider = [{ provider: 'codex', accountKey: 'local', accountEmail: 'me@example.com' }];
+  assert.deepEqual(run(sameProvider, remote).map((entry) => entry.accountKey), ['local', 'remote']);
+  // The aggregate normally carries this device's accounts too; they appear once.
+  assert.deepEqual(run(mine, [...mine, ...remote]).map((entry) => entry.accountKey), ['local', 'remote']);
 });
 
 test('a hub timestamp that cannot be parsed does not turn a save into a crash', () => {
@@ -2792,4 +2834,39 @@ test('a hub timestamp that cannot be parsed does not turn a save into a crash', 
     const doc = subscriptionApi.subscriptionDocument([], { previousUpdatedAt: previous });
     assert.match(doc.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
   }
+});
+
+test('one hub cached list is never filed as records belonging to the next hub', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const refresh = functionBody(main, 'refreshSharedSubscriptions', 'maybeRefreshSharedSubscriptions');
+
+  // Once settings.subscriptions is a cache of some hub it is that hub's data.
+  // Carrying it into the next hub would seed or offer accounts that were never
+  // entered on this device.
+  assert.match(refresh, /const cacheHub = String\(settings\.subscriptionsCacheHub \|\| ''\);/);
+  assert.match(refresh, /cacheHub && cacheHub !== currentHubIdentity\(\) \? \[\] : \(settings\.subscriptions \|\| \[\]\)/);
+
+  // Editing in local mode hands ownership back, which is what clears the marker.
+  const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
+  assert.match(save, /settings\.subscriptionsCacheHub = '';/);
+
+  // A trailing slash the user typed must not read as a different hub.
+  const identity = functionBody(main, 'currentHubIdentity', 'orphanedSubscriptions');
+  const run = (url) => vm.runInNewContext(`${identity}\ncurrentHubIdentity();`, { effectiveHubConfig: () => ({ url }) });
+  assert.equal(run('https://hub.example/'), 'https://hub.example');
+  assert.equal(run('https://hub.example'), 'https://hub.example');
+  assert.equal(run(null), '');
+});
+
+test('both hubs answer a stale write the same way, even when it is also malformed', async () => {
+  const worker = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'src', 'index.js'), 'utf8');
+  const staleAt = worker.indexOf('isStaleSubscriptionWrite');
+  const currencyAt = worker.indexOf('unsupported currency');
+  // A stale write is exactly the case where the client needs the stored document
+  // back to re-base on; answering 400 instead would withhold it.
+  assert.ok(staleAt > -1 && staleAt < currencyAt, 'staleness must be checked before currency');
+
+  const hubSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'hub', 'server.js'), 'utf8');
+  const set = functionBody(hubSource, 'setSubscriptions', 'onStats');
+  assert.ok(set.indexOf('isStaleSubscriptionWrite') < set.indexOf('unsupported currency'));
 });
