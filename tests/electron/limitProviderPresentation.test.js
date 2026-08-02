@@ -2101,6 +2101,41 @@ test('closing the subscription editor does not steal focus moved to another cont
   assert.equal(finalEdit.focused, false);
 });
 
+test('closing a new subscription editor restores focus to the Add action', () => {
+  const app = readRendererFile('app.js');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const input = {};
+  const addToggle = { focused: false, focus() { this.focused = true; } };
+  const documentState = { activeElement: input, body: {} };
+  const details = {
+    classList: { contains: () => false },
+    contains: (node) => node === input,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: '', subscriptionEditorTransitionId: 0 };
+  let finish;
+  const context = vm.createContext({
+    document: documentState,
+    els: { subscriptionAddDetails: details, subscriptionAddToggle: addToggle },
+    state,
+    cancelSubscriptionEditorClose() {},
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() {},
+    renderSubscriptionRows() {},
+    clearTimeout() {},
+    setTimeout(callback) { finish = callback; return 1; }
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\n${close}\ncloseSubscriptionEditor();`,
+    context
+  );
+  finish();
+
+  assert.equal(addToggle.focused, true);
+});
+
 test('a successful subscription save renders before starting the close animation', async () => {
   const app = readRendererFile('app.js');
   const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');

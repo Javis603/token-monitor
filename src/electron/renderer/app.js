@@ -3068,12 +3068,13 @@ function closeSubscriptionEditor({ onClosed } = {}) {
       .find((row) => row.dataset?.subscriptionId === editingId)
     : null;
   const editingButton = editingRow?.querySelector('.subscription-row-edit');
+  const returnFocusTarget = editingId ? editingButton : els.subscriptionAddToggle;
   // Keep the focus contract of a disclosure: when the editor closes, keyboard
-  // users return to the control that opened it. Do not steal focus from the Add
-  // mode switch or from a user who moved elsewhere while the close animation ran.
+  // users return to the control that opened it. Do not steal focus from a user
+  // who moved elsewhere while the close animation ran.
   const shouldRestoreFocus = Boolean(
-    editingId && activeElement && (
-      activeElement === editingButton
+    activeElement && (
+      activeElement === returnFocusTarget
       || activeElement === details
       || details?.contains?.(activeElement)
     )
@@ -3084,13 +3085,17 @@ function closeSubscriptionEditor({ onClosed } = {}) {
     const body = typeof document !== 'undefined' ? document.body : null;
     const stillInClosingContext = current === activeElement
       || current === body
-      || current === editingButton
+      || current === returnFocusTarget
       || current === details
       || details?.contains?.(current);
     if (!stillInClosingContext) return;
-    const row = [...(els.subscriptionList?.querySelectorAll?.('[data-subscription-id]') || [])]
-      .find((candidate) => candidate.dataset?.subscriptionId === editingId);
-    row?.querySelector('.subscription-row-edit')?.focus();
+    if (editingId) {
+      const row = [...(els.subscriptionList?.querySelectorAll?.('[data-subscription-id]') || [])]
+        .find((candidate) => candidate.dataset?.subscriptionId === editingId);
+      row?.querySelector('.subscription-row-edit')?.focus();
+      return;
+    }
+    returnFocusTarget?.focus();
   };
   const transitionId = (state.subscriptionEditorTransitionId || 0) + 1;
   state.subscriptionEditorTransitionId = transitionId;
