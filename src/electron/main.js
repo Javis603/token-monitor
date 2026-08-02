@@ -2498,6 +2498,10 @@ let hubSubscriptions = null;
 // cannot be reached kept showing the previous hub's records as though they were
 // this one's.
 let hubSubscriptionsHub = '';
+// Bumped by every fetch, so a response can tell whether it is still the newest
+// one in flight. Two refreshes can overlap — a mode change reconciles while the
+// throttled poll is already waiting — and the slower answer must not land last.
+let subscriptionFetchEpoch = 0;
 let lastSubscriptionRefreshMs = 0;
 const SUBSCRIPTION_REFRESH_MS = 60000;
 
@@ -2520,8 +2524,7 @@ function effectiveSubscriptions() {
 // Returns whether anything actually changed. Callers use that to decide whether
 // to push settings at the renderer: a push re-renders the whole settings form,
 // which would fight whatever the user is typing in it.
-function cacheSharedSubscriptions(doc) {
-  const hub = currentHubIdentity();
+function cacheSharedSubscriptions(doc, hub) {
   // Identity counts as a change on its own: two hubs can hold the same
   // updatedAt — an empty one, most obviously, when neither has been written to —
   // and comparing timestamps alone left the marker pointing at the previous hub,
@@ -2576,21 +2579,25 @@ async function fetchSharedSubscriptions() {
   return response.json();
 }
 
-function staleSubscriptionWriteError(current) {
+function staleSubscriptionWriteError(current, hub) {
   const error = new Error('stale_write');
   error.code = 'stale_write';
-  if (current) cacheSharedSubscriptions(current);
+  if (current) cacheSharedSubscriptions(current, hub);
   return error;
 }
 
 async function writeSharedSubscriptions(list) {
   const baseUpdatedAt = hubSubscriptions?.updatedAt || '';
+  // Captured before the request, not read after it: the user can switch hubs
+  // while a write is in flight, and stamping this answer with wherever they
+  // landed would file one hub's list under another's name.
+  const hub = currentHubIdentity();
   if (settings.hubMode === 'host' && embeddedHub) {
     try {
-      cacheSharedSubscriptions(embeddedHub.hub.setSubscriptions(list, baseUpdatedAt));
+      cacheSharedSubscriptions(embeddedHub.hub.setSubscriptions(list, baseUpdatedAt), hub);
       return;
     } catch (error) {
-      if (error.code === 'stale_write') throw staleSubscriptionWriteError(error.current);
+      if (error.code === 'stale_write') throw staleSubscriptionWriteError(error.current, hub);
       throw error;
     }
   }
@@ -2603,7 +2610,7 @@ async function writeSharedSubscriptions(list) {
   });
   // Someone else wrote the list since this device last read it. Overwriting would
   // erase their records silently, and they exist nowhere else.
-  if (response.status === 409) throw staleSubscriptionWriteError(await response.json().catch(() => null));
+  if (response.status === 409) throw staleSubscriptionWriteError(await response.json().catch(() => null), hub);
   if (!response.ok) {
     // The hub answered, so it is reachable — a 401 is the wrong secret and a 400
     // is a bad payload. Reporting either as "could not reach the hub" sends the
@@ -2613,7 +2620,11 @@ async function writeSharedSubscriptions(list) {
     rejected.status = response.status;
     throw rejected;
   }
-  cacheSharedSubscriptions(await response.json());
+  const stored = await response.json();
+  // The write itself succeeded, but if the user moved to another hub while it
+  // was in flight, this answer no longer describes the one in front of them.
+  if (hub !== currentHubIdentity()) return;
+  cacheSharedSubscriptions(stored, hub);
 }
 
 // Records this device holds that the shared list does not have, or has
@@ -2700,10 +2711,12 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
   }
   // A document fetched from another hub is not an answer about this one, and
   // holding on to it is what made an unreachable new hub show the old one's list.
-  if (hubSubscriptions && hubSubscriptionsHub !== currentHubIdentity()) {
+  const hub = currentHubIdentity();
+  if (hubSubscriptions && hubSubscriptionsHub !== hub) {
     hubSubscriptions = null;
     hubSubscriptionsHub = '';
   }
+  const epoch = ++subscriptionFetchEpoch;
   try {
     // Only records this device actually owns may be seeded or set aside. Once
     // settings.subscriptions is a cache of some hub it is that hub's data, and
@@ -2716,6 +2729,11 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     const local = settings.subscriptionsCacheHub ? [] : (settings.subscriptions || []);
     const doc = await fetchSharedSubscriptions();
     if (!doc) return false;
+    // The hub can change while a request is in flight, and two refreshes can
+    // overlap. Either way this answer describes a state nobody is looking at any
+    // more, and applying it would show one hub's records under another's name or
+    // let a slower response overwrite a newer one.
+    if (epoch !== subscriptionFetchEpoch || hub !== currentHubIdentity()) return false;
     // A hub nobody has ever written to: adopt this device's records rather than
     // replacing them with nothing. Keyed on updatedAt rather than on the list
     // being empty — an empty list WITH a timestamp is somebody's delete, and
@@ -2724,7 +2742,7 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
       const previous = hubSubscriptions;
       const previousHub = hubSubscriptionsHub;
       hubSubscriptions = doc;
-      hubSubscriptionsHub = currentHubIdentity();
+      hubSubscriptionsHub = hub;
       try {
         await writeSharedSubscriptions(local);
         return true;
@@ -2747,7 +2765,7 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     const orphansChanged = seedFromLocal && local.length > 0
       ? rememberOrphanedSubscriptions(local, doc)
       : false;
-    const changed = cacheSharedSubscriptions(doc);
+    const changed = cacheSharedSubscriptions(doc, hub);
     if (orphansChanged && !changed) persistSubscriptionState();
     return changed || orphansChanged;
   } catch (error) {

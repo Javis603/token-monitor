@@ -2626,7 +2626,7 @@ test('a record added on another device turns up without pushing settings at the 
       console: { log() {} },
       doc: incoming
     });
-    const changed = vm.runInContext(`${cache}\ncacheSharedSubscriptions(doc);`, context);
+    const changed = vm.runInContext(`${cache}\ncacheSharedSubscriptions(doc, 'https://hub.example');`, context);
     return { changed, saved: Boolean(context.saved), settings: plain(context.settings) };
   };
   const doc = { updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'a' }] };
@@ -2675,6 +2675,7 @@ test('a deleted record is not resurrected by another device rejoining', async ()
       },
       hubSubscriptions: null,
       hubSubscriptionsHub: '',
+      subscriptionFetchEpoch: 0,
       subscriptionsAreShared: () => true,
       effectiveHubConfig: () => ({ url: 'https://hub.example' }),
       fetchSharedSubscriptions: async () => doc,
@@ -2683,7 +2684,11 @@ test('a deleted record is not resurrected by another device rejoining', async ()
         written.push(list);
         context.hubSubscriptions = { updatedAt: 'written', subscriptions: list };
       },
-      cacheSharedSubscriptions: (next) => { context.hubSubscriptions = next; return true; },
+      cacheSharedSubscriptions: (next, hub) => {
+        context.hubSubscriptions = next;
+        context.hubSubscriptionsHub = hub;
+        return true;
+      },
       saveSettings: () => true,
       console: { log() {} },
       JSON
@@ -2852,7 +2857,12 @@ test('one hub cached list is never filed as records belonging to the next hub', 
   // entered on this device.
   assert.match(refresh, /const local = settings\.subscriptionsCacheHub \? \[\] : \(settings\.subscriptions \|\| \[\]\);/);
   // And a document from another hub is dropped rather than shown as this one's.
-  assert.match(refresh, /hubSubscriptionsHub !== currentHubIdentity\(\)/);
+  assert.match(refresh, /hubSubscriptions && hubSubscriptionsHub !== hub/);
+  // The identity is captured before the request, so a hub switch mid-flight
+  // cannot make a late answer land under the wrong hub's name.
+  assert.match(refresh, /const hub = currentHubIdentity\(\);/);
+  assert.match(refresh, /const epoch = \+\+subscriptionFetchEpoch;/);
+  assert.match(refresh, /if \(epoch !== subscriptionFetchEpoch \|\| hub !== currentHubIdentity\(\)\) return false;/);
 
   // Editing in local mode hands ownership back, which is what clears the marker.
   const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
@@ -2898,6 +2908,7 @@ test('records held for a decision survive reconnecting to the same hub', async (
     },
     hubSubscriptions: null,
     hubSubscriptionsHub: '',
+    subscriptionFetchEpoch: 0,
     subscriptionsAreShared: () => true,
     currentHubIdentity: () => 'https://hub.example',
     fetchSharedSubscriptions: async () => ({ updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'theirs' }] }),
@@ -2959,4 +2970,48 @@ test('a hub that cannot be reached never shows the previous hub records', () => 
     }),
     [{ id: 'mine' }]
   );
+});
+
+test('a hub answer that arrives after the user moved on is discarded', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = `async ${functionBody(main, 'refreshSharedSubscriptions', 'maybeRefreshSharedSubscriptions')}`;
+
+  const context = vm.createContext({
+    settings: {
+      hubMode: 'client',
+      subscriptions: [],
+      subscriptionsOrphaned: { hubUrl: '', records: [] },
+      subscriptionsCacheHub: ''
+    },
+    hubSubscriptions: null,
+    hubSubscriptionsHub: '',
+    subscriptionFetchEpoch: 0,
+    subscriptionsAreShared: () => true,
+    currentHubIdentity: () => context.hub,
+    hub: 'https://a.example',
+    // Hub A is slow to answer, and the user switches to hub B while it is in
+    // flight. Reading the identity after the await stamped A's records as B's.
+    fetchSharedSubscriptions: async () => {
+      context.hub = 'https://b.example';
+      return { updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [{ id: 'from-a' }] };
+    },
+    cacheSharedSubscriptions: (doc, hub) => { context.cached = { doc, hub }; return true; },
+    rememberOrphanedSubscriptions: () => false,
+    writeSharedSubscriptions: async () => {},
+    persistSubscriptionState: () => true,
+    console: { log() {} },
+    JSON
+  });
+  assert.equal(await vm.runInContext(`${source}\nrefreshSharedSubscriptions({ seedFromLocal: true });`, context), false);
+  assert.equal(context.cached, undefined);
+
+  // And a slower response for the same hub cannot land after a newer one: the
+  // epoch moved on while it was waiting.
+  context.hub = 'https://a.example';
+  context.fetchSharedSubscriptions = async () => {
+    context.subscriptionFetchEpoch += 1;
+    return { updatedAt: '2026-08-02T08:00:00.000Z', subscriptions: [{ id: 'older' }] };
+  };
+  assert.equal(await vm.runInContext('refreshSharedSubscriptions({ seedFromLocal: true });', context), false);
+  assert.equal(context.cached, undefined);
 });
