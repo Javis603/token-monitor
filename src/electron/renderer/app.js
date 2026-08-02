@@ -2808,22 +2808,28 @@ function renderSubscriptionSettings() {
 // network round trip that can be refused. Whatever happens, what is on screen
 // afterwards is what is actually stored: on failure the optimistic list is
 // thrown away and main.js's copy is re-read and re-rendered.
+// Every settings snapshot that arrives because THIS device acted — a save, an
+// adopt, a discard, or the re-read after one of them was refused. An open form
+// re-anchors on the version in it: the user made the change, or has just been
+// shown it, so it is not one they need to be stopped over. Which is also the
+// rule stated in one place rather than at each write, because the paths that
+// move the shared list on have outnumbered the ones that remember to say so.
+// A version arriving from another device does not come through here, and that is
+// the only reason the form holds one at all.
+function applySubscriptionSettings(settings) {
+  state.settings = settings;
+  if (state.subscriptionFormBase !== null) {
+    state.subscriptionFormBase = state.settings?.subscriptionsUpdatedAt || '';
+  }
+}
+
 // baseUpdatedAt is the version the list being saved was built from — the open
 // form's snapshot, or the version on screen for a row action. Passed in rather
 // than read here, because those two are not the same the moment a push lands.
 async function saveSubscriptions(list, baseUpdatedAt) {
   try {
-    state.settings = await window.tokenMonitor.saveSubscriptions(list, baseUpdatedAt);
+    applySubscriptionSettings(await window.tokenMonitor.saveSubscriptions(list, baseUpdatedAt));
     state.subscriptionSyncError = '';
-    // A version this device just wrote is a change the user has already seen —
-    // they are the one who made it — so an open form re-anchors on it. Without
-    // this, removing one row would leave the edit in progress on another holding
-    // the version from before, and refuse it once for a change it caused itself.
-    // Only what this device wrote counts: a version arriving from elsewhere does
-    // not come through here, which is the whole point of holding one.
-    if (state.subscriptionFormBase !== null) {
-      state.subscriptionFormBase = state.settings?.subscriptionsUpdatedAt || '';
-    }
     renderSubscriptionSettings();
     return true;
   } catch (error) {
@@ -2831,14 +2837,11 @@ async function saveSubscriptions(list, baseUpdatedAt) {
     // fix the secret, retry later, or free some disk. One message for all of
     // them would send the user looking in the wrong place.
     state.subscriptionSyncError = subscriptionWriteErrorKey(error);
-    try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
-    // Whatever the refusal was, the list on screen is now the current one and the
-    // form still holds what was typed. Re-anchoring lets the user look at what
-    // changed and save again; keeping the version they opened on would refuse the
-    // second attempt too, and every one after it.
-    if (state.subscriptionFormBase !== null) {
-      state.subscriptionFormBase = state.settings?.subscriptionsUpdatedAt || '';
-    }
+    // Refused, so the list on screen is now the current one and the form still
+    // holds what was typed. Re-anchoring lets the user look at what changed and
+    // save again; keeping the version they opened on would refuse the second
+    // attempt too, and every one after it.
+    try { applySubscriptionSettings(await window.tokenMonitor.getSettings()); } catch (_) {}
     renderSubscriptionSettings();
     return false;
   }
@@ -9553,25 +9556,25 @@ els.subscriptionStartDateInput?.addEventListener('change', syncSubscriptionDateB
 els.subscriptionAutoRenewInput?.addEventListener('change', setSubscriptionRenewalFieldMode);
 els.subscriptionOrphanAdopt?.addEventListener('click', async () => {
   try {
-    state.settings = await window.tokenMonitor.adoptOrphanedSubscriptions();
+    applySubscriptionSettings(await window.tokenMonitor.adoptOrphanedSubscriptions());
     state.subscriptionSyncError = '';
   } catch (error) {
     // The records stay set aside on failure — they are only cleared once the
     // shared list has actually accepted them.
     state.subscriptionSyncError = subscriptionWriteErrorKey(error);
-    try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+    try { applySubscriptionSettings(await window.tokenMonitor.getSettings()); } catch (_) {}
   }
   renderSubscriptionSettings();
 });
 els.subscriptionOrphanDiscard?.addEventListener('click', async () => {
   try {
-    state.settings = await window.tokenMonitor.discardOrphanedSubscriptions();
+    applySubscriptionSettings(await window.tokenMonitor.discardOrphanedSubscriptions());
     // A discard that worked resolves whatever the failed adopt was complaining
     // about; leaving the message up would describe a state that is over.
     state.subscriptionSyncError = '';
   } catch (error) {
     state.subscriptionSyncError = subscriptionWriteErrorKey(error);
-    try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+    try { applySubscriptionSettings(await window.tokenMonitor.getSettings()); } catch (_) {}
   }
   renderSubscriptionSettings();
 });

@@ -3336,6 +3336,7 @@ test('an edit is saved against the version its form was opened on', async () => 
   const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const source = [
     functionBody(app, 'setSubscriptionFormOpen', 'seedSubscriptionPlanName'),
+    functionBody(app, 'applySubscriptionSettings', 'saveSubscriptions'),
     `async ${functionBody(app, 'saveSubscriptions', 'subscriptionWriteErrorKey')}`,
     functionBody(app, 'subscriptionWriteErrorKey', 'renderSubscriptionOrphanNotice')
   ].join('\n');
@@ -3407,6 +3408,18 @@ test('an edit is saved against the version its form was opened on', async () => 
   // on screen instead.
   vm.runInContext('setSubscriptionFormOpen(false);', context);
   assert.equal(context.state.subscriptionFormBase, null);
+
+  // Adopting and discarding move the shared list on too, and each was found to
+  // have forgotten this rule one at a time. None of the three may take a settings
+  // snapshot straight from the channel that produced it — they go through the one
+  // function that knows what an open form has to do about it.
+  assert.doesNotMatch(
+    app,
+    /state\.settings = await window\.tokenMonitor\.(saveSubscriptions|adoptOrphanedSubscriptions|discardOrphanedSubscriptions)/
+  );
+  for (const channel of ['saveSubscriptions', 'adoptOrphanedSubscriptions', 'discardOrphanedSubscriptions']) {
+    assert.match(app, new RegExp(`applySubscriptionSettings\\(await window\\.tokenMonitor\\.${channel}\\(`));
+  }
 });
 
 test('adopting set-aside records keeps whatever the hub gained while it waited', async () => {
