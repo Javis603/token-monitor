@@ -1154,6 +1154,112 @@
             </div>
         </div>
 
+        <div class="settings-group settings-collapsible-group settings-subscriptions-group">
+          <button class="settings-section-toggle" type="button" data-settings-section="subscriptions" aria-expanded="false" aria-controls="subscriptionsSettingsDetails">
+            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-subscriptions" aria-hidden="true"></span><span data-i18n="settings.subscriptions.title">Subscriptions</span></span>
+            <span class="settings-section-meta"><span id="subscriptionsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
+          </button>
+          <div id="subscriptionsSettingsDetails" class="settings-section-details hidden">
+            <p class="settings-note" data-i18n="settings.subscriptions.note">Record what you actually pay for each AI account. Hover an account's plan label on the AI Tool Limits page to see what you recorded here. Nothing is fetched from any provider, and nothing leaves this device.</p>
+            <div id="subscriptionList" class="opencode-profile-list"></div>
+            <div id="subscriptionAddForm" class="opencode-add-form">
+              <button id="subscriptionAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="subscriptionAddDetails">
+                <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span data-i18n="settings.subscriptions.add">Add subscription</span>
+              </button>
+              <div id="subscriptionAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                <div class="accordion-animation-inner opencode-add-body subscription-add-body">
+                  <div class="settings-row">
+                    <label for="subscriptionProviderInput" data-i18n="settings.subscriptions.provider">Provider</label>
+                    <select id="subscriptionProviderInput"></select>
+                  </div>
+                  <div class="settings-row">
+                    <label for="subscriptionAccountInput" data-i18n="settings.subscriptions.account">Account</label>
+                    <select id="subscriptionAccountInput"></select>
+                  </div>
+                  <!-- What is being recorded. A subscription is one recurring
+                       charge; a top-up is a ledger of irregular payments. The
+                       account's balance marker only seeds this — z.ai bills a
+                       plan and API credits through one account, so the user has
+                       the last word. -->
+                  <div class="settings-item">
+                    <span id="subscriptionKindLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.subscriptions.kind">Record</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="subscriptionKindLabel">
+                      <label class="inline-option"><input type="radio" name="subscriptionKind" value="subscription" id="subscriptionKindSubscription" checked /><span data-i18n="settings.subscriptions.kindSubscription">Subscription</span></label>
+                      <label class="inline-option"><input type="radio" name="subscriptionKind" value="topup" id="subscriptionKindTopUp" /><span data-i18n="settings.subscriptions.kindTopUp">Top-ups</span></label>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label for="subscriptionPlanNameInput" data-i18n="settings.subscriptions.planName">Plan name</label>
+                    <input id="subscriptionPlanNameInput" type="text" data-i18n-placeholder="settings.subscriptions.planNamePlaceholder" placeholder="optional, e.g. Plus">
+                  </div>
+                  <div id="subscriptionPlanFields" class="subscription-kind-fields">
+                    <!-- The currency select is moved between here and the ledger
+                         heading by setSubscriptionFormMode(): one record has one
+                         currency, and it belongs beside whichever money field is
+                         on screen rather than on a row of its own. -->
+                    <div id="subscriptionAmountRow" class="settings-row subscription-pair-row">
+                      <label for="subscriptionAmountInput" data-i18n="settings.subscriptions.amount">Amount</label>
+                      <input id="subscriptionAmountInput" type="number" min="0" step="0.01" placeholder="0.00">
+                      <select id="subscriptionCurrencyInput" data-i18n-aria-label="settings.subscriptions.currency" aria-label="Currency"></select>
+                    </div>
+                    <div class="settings-row subscription-pair-row">
+                      <label for="subscriptionIntervalCountInput" data-i18n="settings.subscriptions.interval">Interval</label>
+                      <input id="subscriptionIntervalCountInput" type="number" min="1" max="24" step="1" value="1" data-i18n-aria-label="settings.subscriptions.every" aria-label="Every">
+                      <select id="subscriptionIntervalInput" data-i18n-aria-label="settings.subscriptions.interval" aria-label="Interval">
+                        <option value="month" data-i18n="settings.subscriptions.intervalMonth">Month</option>
+                        <option value="year" data-i18n="settings.subscriptions.intervalYear">Year</option>
+                      </select>
+                    </div>
+                    <div class="settings-row">
+                      <label for="subscriptionStartDateInput" data-i18n="settings.subscriptions.startDate">First charge</label>
+                      <input id="subscriptionStartDateInput" type="date">
+                    </div>
+                    <p class="settings-note subscription-field-note" data-i18n="settings.subscriptions.startDateNote">The date money first left your account. A free trial start does not count.</p>
+                    <label class="checkbox-label settings-item">
+                      <span class="settings-item-text">
+                        <span class="settings-item-title" data-i18n="settings.subscriptions.autoRenew">Auto-renews</span>
+                      </span>
+                      <input id="subscriptionAutoRenewInput" type="checkbox" checked />
+                    </label>
+                    <!-- One date field, two meanings. While the plan renews it
+                         is the next charge; with auto-renew off there is no next
+                         charge and the same date is where coverage ends, so
+                         setSubscriptionRenewalFieldMode() retargets the label,
+                         the note and the stored field rather than showing a
+                         second input that is dead half the time. -->
+                    <div class="settings-row">
+                      <label id="subscriptionNextRenewalLabel" for="subscriptionNextRenewalInput" data-i18n="settings.subscriptions.nextRenewal">Next charge</label>
+                      <input id="subscriptionNextRenewalInput" type="date">
+                    </div>
+                    <p id="subscriptionNextRenewalNote" class="settings-note subscription-field-note" data-i18n="settings.subscriptions.nextRenewalNote">Leave empty to work it out from the first charge. Set it only when a trial, plan change or promotion shifted the date once.</p>
+                  </div>
+                  <div id="subscriptionTopUpFields" class="subscription-kind-fields hidden">
+                    <div id="subscriptionTopUpHeadingRow" class="subscription-topup-heading-row">
+                      <span class="subscription-topup-heading" data-i18n="settings.subscriptions.topUpEntries">Top-ups</span>
+                    </div>
+                    <div id="subscriptionTopUpList" class="subscription-topup-list"></div>
+                    <div class="settings-row subscription-topup-add-row">
+                      <input id="subscriptionTopUpDateInput" type="date" data-i18n-aria-label="settings.subscriptions.topUpDate" aria-label="Date">
+                      <input id="subscriptionTopUpAmountInput" type="number" min="0" step="0.01" placeholder="0.00" data-i18n-aria-label="settings.subscriptions.topUpAmount" aria-label="Amount">
+                      <button id="subscriptionTopUpAddButton" type="button" class="icon-button subscription-topup-add" data-i18n-aria-label="settings.subscriptions.topUpAdd" aria-label="Add">+</button>
+                    </div>
+                    <p class="settings-note subscription-field-note" data-i18n="settings.subscriptions.topUpEntriesNote">Record every top-up. This month's total is what gets compared against this month's usage.</p>
+                  </div>
+                  <div class="settings-actions">
+                    <button id="subscriptionSubmit" data-i18n="settings.subscriptions.save">Save subscription</button>
+                    <button id="subscriptionCancelEdit" class="hidden" data-i18n="settings.subscriptions.cancelEdit">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="subscriptionTotalRow" class="subscription-total hidden"></div>
+            <div id="subscriptionErrorMessage" class="settings-note error hidden"></div>
+          </div>
+        </div>
+
         <div class="settings-group settings-collapsible-group settings-sync-group">
           <button class="settings-section-toggle" type="button" data-settings-section="sync" aria-expanded="false" aria-controls="syncSettingsDetails">
             <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-sync" aria-hidden="true"></span><span data-i18n="settings.sync.title">Multi-device Sync</span></span>
@@ -1300,6 +1406,7 @@
     <script src="customPricingForm.js"></script>
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
+    <script src="../../shared/subscriptionDisplay.js"></script>
     <script src="../../shared/trayText.js"></script>
     <script src="../../shared/trayLayout.js"></script>
     <script src="../motionPreference.js"></script>

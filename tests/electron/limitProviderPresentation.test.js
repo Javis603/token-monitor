@@ -551,7 +551,10 @@ test('capability tags are settings-only and do not alter the main Limits panel',
   assert.match(renderHead, /limitProviderMeta\(provider, provenance\)/);
   assert.match(renderMeta, /limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(state\.settings\?\.showLimitSource\) \}\)/);
   assert.doesNotMatch(renderLimits, /limitProviderSettingsTags/);
-  assert.match(renderHead, /head\.append\(titleBlock, plan\);/);
+  // The head still carries exactly the title block and the plan label. The plan
+  // is wrapped so hovering it can reveal manual subscription details, which adds
+  // no tag and no status of its own.
+  assert.match(renderHead, /head\.append\(titleBlock, decoratePlanWithSubscription\(plan, provider\)\);/);
   assert.match(renderSettings, /limitProviderSettingsTags\(provider, provenance/);
   assert.doesNotMatch(styles, /\.limit-status\b/);
 });
@@ -1890,4 +1893,637 @@ test('Kimi usage and limits share the canonical provider id and vendor color', (
   const app = readRendererFile('app.js');
   assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
   assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
+});
+
+function cssBlock(styles, selector) {
+  const start = styles.indexOf(`${selector} {`);
+  assert.notEqual(start, -1, `${selector} rule should exist`);
+  const end = styles.indexOf('}', start);
+  assert.notEqual(end, -1, `${selector} rule should close`);
+  return styles.slice(start, end + 1);
+}
+
+test('the subscription tooltip escapes both the plan label and the scrolling panel', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const decorate = functionBody(app, 'decoratePlanWithSubscription', 'subscriptionRowTitle');
+  const position = functionBody(app, 'positionSubscriptionTooltip', 'decoratePlanWithSubscription');
+
+  // The wrap also carries .limit-plan, whose overflow:hidden clips the card away
+  // entirely — the card sits above the label, outside that 10px-tall box.
+  assert.match(cssBlock(styles, '.subscription-plan-wrap'), /overflow: visible;/);
+  // And .limits-panel clips its own overflow, so on the topmost row the upward
+  // card lands outside the panel. It flips below when there is no room above.
+  assert.match(decorate, /positionSubscriptionTooltip\(wrap, card\);/);
+  assert.match(position, /closest\('\.limits-panel'\)/);
+  assert.match(position, /classList\.toggle\('is-below'/);
+  assert.match(styles, /\.subscription-tooltip\.is-below \{/);
+});
+
+test('an attached subscription adds no resting decoration to the plan label', () => {
+  const styles = readRendererFile('styles.css');
+  assert.doesNotMatch(cssBlock(styles, '.subscription-plan-trigger'), /border-bottom/);
+});
+
+test('subscription form controls stay shrinkable so a long option cannot overflow the panel', () => {
+  const styles = readRendererFile('styles.css');
+  const block = cssBlock(styles, '.subscription-add-body .settings-row > :is(input, select)');
+  assert.match(block, /flex: 1 1 0;/);
+  assert.match(block, /min-width: 0;/);
+  // Descendant, not child: each kind of record wraps its own rows, so a child
+  // selector would stop reaching most of the form.
+  assert.doesNotMatch(styles, /\.subscription-add-body > \.settings-row/);
+});
+
+test('subscription rows carry the glyph actions the profile rows above them use', () => {
+  const app = readRendererFile('app.js');
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  assert.match(rows, /edit\.textContent = '✎';/);
+  assert.match(rows, /remove\.textContent = '✕';/);
+  assert.match(rows, /remove\.textContent = '✓';/);
+});
+
+test('the plan-name seed never runs from a render, so it cannot wipe what is being typed', () => {
+  const app = readRendererFile('app.js');
+  const renderPickers = functionBody(app, 'renderSubscriptionPickers', 'renderSubscriptionTotal');
+  const renderSettings = functionBody(app, 'renderSubscriptionSettings', 'setSubscriptionError');
+  const beginEdit = functionBody(app, 'beginSubscriptionEdit', 'submitSubscription');
+
+  assert.doesNotMatch(renderPickers, /seedSubscriptionPlanName|applySubscriptionAccountSelection/);
+  assert.doesNotMatch(renderSettings, /seedSubscriptionPlanName|applySubscriptionAccountSelection/);
+  // Opening an edit assigns the selects programmatically, which fires no change
+  // event — that is what preserves the saved plan name without a mode guard.
+  assert.doesNotMatch(beginEdit, /seedSubscriptionPlanName|applySubscriptionAccountSelection/);
+  assert.match(beginEdit, /els\.subscriptionPlanNameInput\.value = subscription\.planName;/);
+});
+
+test('switching the account mid-edit re-seeds the plan name and relabels the form', () => {
+  const app = readRendererFile('app.js');
+  const apply = functionBody(app, 'applySubscriptionAccountSelection', 'syncSubscriptionDateBounds');
+
+  assert.match(apply, /seedSubscriptionPlanName\(\);/);
+  assert.match(apply, /setSubscriptionFormMode\(\);/);
+  assert.match(app, /els\.subscriptionAccountInput\?\.addEventListener\('change', applySubscriptionAccountSelection\);/);
+});
+
+test('the subscription list shrinks with the panel instead of widening its section', () => {
+  const styles = readRendererFile('styles.css');
+  // `min-width: 0` on a flex child only lets it shrink during layout — the row's
+  // min-content contribution stays as wide as the longest account label, and
+  // that contribution sizes the settings section's grid column. On a narrow
+  // window the whole section was laid out around an email address. The profile
+  // rows above them never had the problem because they are grids.
+  const row = cssBlock(styles, '.subscription-row');
+  assert.match(row, /display: grid;/);
+  assert.match(row, /grid-template-columns: minmax\(0, 1fr\) auto;/);
+  assert.match(cssBlock(styles, '.subscription-topup-row'), /grid-template-columns: minmax\(0, 1fr\) auto auto;/);
+  assert.match(cssBlock(styles, '.opencode-profile-item'), /minmax\(0, 1fr\)/);
+});
+
+test('every account is offered, and one record keeps one currency', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const choices = functionBody(app, 'subscriptionAccountChoices', 'subscriptionAccountValue');
+  const mode = functionBody(app, 'setSubscriptionFormMode', 'subscriptionFormIsTopUp');
+
+  // The record kind made "include balance accounts" redundant: the form can
+  // describe either shape now, so hiding the accounts only hid them.
+  assert.doesNotMatch(choices, /isCreditsProvider/);
+  assert.doesNotMatch(app, /subscriptionShowAllAccounts/);
+  assert.doesNotMatch(html, /subscriptionShowAllAccountsInput/);
+  assert.doesNotMatch(readRendererFile('i18n.js'), /settings\.subscriptions\.showAllAccounts/);
+
+  // The select moves between the two money fields rather than being duplicated
+  // or taking a labelled row of its own.
+  assert.match(mode, /slot\.append\(els\.subscriptionCurrencyInput\)/);
+  assert.equal((html.match(/id="subscriptionCurrencyInput"/g) || []).length, 1);
+  assert.match(html, /id="subscriptionAmountRow"/);
+  assert.match(html, /id="subscriptionTopUpHeadingRow"/);
+
+  // A bare <button> falls outside this stylesheet's button allow-list and lands
+  // on the unstyled UA control.
+  assert.match(html, /id="subscriptionTopUpAddButton"[^>]*class="icon-button subscription-topup-add"/);
+  assert.match(readRendererFile('styles.css'), /\.icon-button, \.refresh-button, \.settings-actions button/);
+});
+
+test('the record kind swaps whole field groups, and the user has the last word', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const mode = functionBody(app, 'setSubscriptionFormMode', 'subscriptionFormIsTopUp');
+  const isTopUp = functionBody(app, 'subscriptionFormIsTopUp', 'setSubscriptionFormKind');
+  const apply = functionBody(app, 'applySubscriptionAccountSelection', 'subscriptionFormTopUps');
+
+  // The kind is read from the radio the user can change, never re-derived from
+  // the account at render time.
+  assert.match(isTopUp, /els\.subscriptionKindInputs/);
+  assert.doesNotMatch(isTopUp, /isCreditsProvider/);
+  // The balance marker only seeds it, on an explicit account change.
+  assert.match(apply, /setSubscriptionFormKind\(isCreditsProvider\(subscriptionSelectedAccount\(\)\) \? 'topup' : 'subscription'\)/);
+  assert.match(mode, /els\.subscriptionPlanFields\?\.classList\.toggle\('hidden', topUp\)/);
+  assert.match(mode, /els\.subscriptionTopUpFields\?\.classList\.toggle\('hidden', !topUp\)/);
+  // This stylesheet has no blanket `.hidden` rule, so toggling the class only
+  // hides anything because these wrappers declare one.
+  const styles = readRendererFile('styles.css');
+  assert.match(cssBlock(styles, '.subscription-kind-fields.hidden'), /display: none;/);
+  assert.match(html, /id="subscriptionPlanFields" class="subscription-kind-fields"/);
+  assert.match(html, /id="subscriptionTopUpFields" class="subscription-kind-fields hidden"/);
+
+  // Both groups carry their own data-i18n now that neither is relabelled, which
+  // is what keeps them correct across a language change.
+  assert.match(html, /id="subscriptionStartDateInput"/);
+  assert.match(html, /data-i18n="settings\.subscriptions\.startDateNote"/);
+  assert.match(html, /data-i18n="settings\.subscriptions\.topUpEntriesNote"/);
+  // The wording the old single-shape form needed is gone from every locale.
+  const i18n = readRendererFile('i18n.js');
+  for (const key of ['topUpInterval', 'topUpRecurring', 'topUpNext', 'topUpNextNote', 'topsUpOn']) {
+    assert.doesNotMatch(i18n, new RegExp(`settings\\.subscriptions\\.${key}'`), `${key} should be gone`);
+  }
+});
+
+test('a top-up record keeps a ledger, and the tooltip reads from it', () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const rows = functionBody(app, 'topUpTooltipRows', 'topUpRollupRows');
+  const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+
+  const ledger = subscriptionApi.normalizeSubscription({
+    provider: 'openrouter',
+    kind: 'topup',
+    currency: 'USD',
+    topUps: [
+      { date: '2026-08-01', amountMinor: 20000 },
+      { date: '2026-08-06', amountMinor: 10000 }
+    ]
+  });
+  const labels = Array.from(vm.runInNewContext(
+    `${rows}\ntopUpTooltipRows(subscription, provider, today, false).map((row) => row.label);`,
+    {
+      subscription: ledger,
+      provider: { windows: [{ metric: 'credits', amount: 150, currency: 'USD' }] },
+      today: '2026-08-11',
+      subscriptionApi,
+      t: (key) => key,
+      topUpMinorText: (record, minor) => `$${(minor / 100).toFixed(2)}`,
+      subscriptionDateText: (date) => date,
+      subscriptionDaysText: (days) => `${days}d`,
+      isCreditsWindow: (window) => window?.metric === 'credits',
+      creditsAmount: (_provider, window) => window?.amount ?? null,
+      formatMoney: (value) => `${value}`,
+      currencyApi: require('../../src/shared/currency'),
+      topUpRollupRows: (built) => built
+    }
+  ));
+  assert.deepEqual(labels, [
+    'subscription.tooltip.lastTopUp',
+    'subscription.tooltip.topUpMonth',
+    'subscription.tooltip.topUpTotal',
+    'subscription.tooltip.balance',
+    'subscription.tooltip.burnRate',
+    'subscription.tooltip.exhausts'
+  ]);
+
+  // The settings row summarises the same ledger, and a ledger with nothing in it
+  // never saves.
+  assert.match(meta, /subscriptionApi\.isTopUp\(subscription\)/);
+  assert.match(meta, /settings\.subscriptions\.topUpMonthMeta/);
+  assert.match(submit, /topUps\.length === 0/);
+  assert.match(submit, /settings\.subscriptions\.errorTopUpEntries/);
+
+  // Entries are normalized as they enter form state. normalizeTopUps() mints an
+  // id for anything lacking one, so raw entries would be re-identified on every
+  // render and the delete button would never match its own row.
+  const add = functionBody(app, 'addSubscriptionTopUpEntry', 'setSubscriptionDateBound');
+  assert.match(add, /state\.subscriptionTopUps = subscriptionApi\.normalizeTopUps\(\[/);
+  const raw = subscriptionApi.normalizeTopUps([
+    { date: '2026-07-08', amountMinor: 10000 },
+    { date: '2026-08-01', amountMinor: 9996 }
+  ]);
+  assert.match(raw[0].id, /^top_/);
+  // Re-normalizing keeps the ids, which is the only reason a delete button
+  // captured on one render still matches its row on the next.
+  assert.deepEqual(
+    subscriptionApi.normalizeTopUps(raw).map((entry) => entry.id),
+    raw.map((entry) => entry.id)
+  );
+});
+
+test('the settings row is titled by account and carries the plan name in its meta', () => {
+  const app = readRendererFile('app.js');
+  const title = functionBody(app, 'subscriptionRowTitle', 'subscriptionRowMeta');
+  const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
+
+  const run = (subscription, account) => vm.runInNewContext(
+    `${title}\nsubscriptionRowTitle(subscription, account);`,
+    {
+      subscription,
+      account,
+      state: { settings: {} },
+      subscriptionProviderLabel: (id) => id,
+      accountIdentityApi: {
+        accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
+      }
+    }
+  );
+
+  const record = { provider: 'codex', planName: 'Plus', binding: { accountEmail: 'b@example.com' } };
+  assert.equal(run(record, { provider: 'codex', accountEmail: 'live@example.com' }), 'codex · live@example.com');
+  // No live account yet — the record's own binding still tells the rows apart,
+  // where the plan name would have made all three of them read "codex · Plus".
+  assert.equal(run(record, null), 'codex · b@example.com');
+  assert.equal(run({ provider: 'codex', planName: 'Plus', binding: {} }, null), 'codex · Plus');
+
+  // Which leaves the plan name a place of its own — except on the row where the
+  // title already spent itself on it. The second line is the one that runs out of
+  // room, so it never repeats what the first line just said.
+  const metaFor = (subscription, account) => vm.runInNewContext(
+    `${title}\n${meta}\nsubscriptionRowMeta(subscription, account);`,
+    {
+      subscription,
+      account,
+      state: { settings: {} },
+      subscriptionProviderLabel: (id) => id,
+      accountIdentityApi: {
+        accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
+      },
+      subscriptionApi: require('../../src/shared/subscriptionDisplay'),
+      t: (key, vars) => `${key}(${vars?.date || ''})`,
+      subscriptionPriceText: () => '$20.00 / mo',
+      subscriptionShortDateText: (date) => date,
+      topUpMinorText: (_record, minor) => `$${minor / 100}`
+    }
+  );
+  const named = { provider: 'codex', planName: 'Plus', startDate: '2026-06-08', autoRenew: true, binding: { accountEmail: 'b@example.com' } };
+  assert.match(metaFor(named, null), /^Plus · \$20\.00 \/ mo/);
+  assert.doesNotMatch(metaFor({ ...named, binding: {} }, null), /^Plus/);
+});
+
+test('a subscription card belongs to one account, and a group header summarises', () => {
+  const app = readRendererFile('app.js');
+  const forProvider = functionBody(app, 'subscriptionForProvider', 'subscriptionsForProviderGroup');
+  const cardFor = functionBody(app, 'subscriptionCardForRow', 'positionSubscriptionTooltip');
+
+  // matchProviderAccount falls back to "the provider has exactly one account",
+  // so it must see every account, not just the row being rendered.
+  assert.match(forProvider, /const accounts = limitProvidersForSubscriptions\(\);/);
+  assert.match(forProvider, /subscriptionAccountValue\(account\) === identity/);
+  assert.doesNotMatch(forProvider, /matchProviderAccount\(subscription, \[provider\]\)/);
+  assert.match(cardFor, /provider\?\.accountGroup === true/);
+  assert.match(cardFor, /subscriptionGroupTooltipRows\(provider\.provider/);
+});
+
+test('the seeded plan name is a real plan, never a status label', () => {
+  const app = readRendererFile('app.js');
+  const suggest = functionBody(app, 'subscriptionSuggestedPlanName', 'subscriptionSelectedAccount');
+  // limitProviderPlan() doubles as the status-label producer.
+  assert.match(suggest, /provider\.status !== 'ok' && !provider\.stale/);
+  assert.match(suggest, /return limitProviderPlan\(provider\);/);
+});
+
+test("one account's subscription never appears on its siblings", () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
+  const forProvider = functionBody(app, 'subscriptionForProvider', 'subscriptionsForProviderGroup');
+
+  const resolve = (accounts, subscriptions, provider) => vm.runInNewContext(
+    `${accountValue}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
+    {
+      subscriptionApi,
+      limitProvidersForSubscriptions: () => accounts,
+      subscriptionList: () => subscriptions,
+      provider
+    }
+  );
+
+  const three = [
+    { provider: 'codex', accountKey: 'k1', accountEmail: 'a@example.com' },
+    { provider: 'codex', accountKey: 'k2', accountEmail: 'b@example.com' },
+    { provider: 'codex', accountKey: 'k3', accountEmail: 'c@example.com' }
+  ];
+  const middle = [{ id: 's1', provider: 'codex', binding: { accountEmail: 'b@example.com' } }];
+  assert.deepEqual(
+    three.map((account) => resolve(three, middle, account)),
+    [null, 's1', null]
+  );
+
+  // The sole-account fallback still heals a rotated credential — it just may not
+  // reach across siblings any more.
+  const one = [{ provider: 'codex', accountKey: 'rotated', accountEmail: '' }];
+  const stale = [{ id: 's2', provider: 'codex', binding: { accountKey: 'expired' } }];
+  assert.equal(resolve(one, stale, one[0]), 's2');
+
+  // A subscription for another provider never leaks across provider ids.
+  const claude = [{ provider: 'claude', accountKey: 'k1', accountEmail: 'a@example.com' }];
+  assert.equal(resolve([...three, ...claude], middle, claude[0]), null);
+});
+
+test('the provider rollup appears once, on the row that stands for the provider', () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const planRows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
+  const hasHeader = functionBody(app, 'subscriptionProviderHasGroupHeader', 'subscriptionCardForRow');
+  const cardFor = functionBody(app, 'subscriptionCardForRow', 'positionSubscriptionTooltip');
+
+  const subscription = subscriptionApi.normalizeSubscription({
+    provider: 'codex', startDate: '2026-06-08', amountMinor: 2000, currency: 'USD'
+  });
+  const labels = (includeRollup) => Array.from(vm.runInNewContext(
+    `${planRows}\nsubscriptionPlanTooltipRows(subscription, {}, today, includeRollup).map((row) => (row.separator ? '--' : row.label));`,
+    {
+      subscription,
+      today: '2026-08-01',
+      includeRollup,
+      subscriptionApi,
+      t: (key) => key,
+      subscriptionPriceText: () => '$20.00 / mo',
+      subscriptionDateText: (date) => date,
+      subscriptionDaysText: (days) => `${days}d`,
+      subscriptionElapsedText: () => '2 mo',
+      subscriptionUsageCostUsd: () => 125,
+      subscriptionList: () => [subscription],
+      subscriptionProviderLabel: (id) => id,
+      currencyApi: { normalizeCurrency: () => 'USD', CURRENCY_RATES: { USD: { symbol: '$' } } },
+      formatCost: (value) => `$${value}`
+    }
+  ));
+
+  assert.deepEqual(labels(false), [
+    'subscription.tooltip.price',
+    'subscription.tooltip.nextCharge',
+    'subscription.tooltip.subscribed'
+  ]);
+  assert.deepEqual(labels(true).slice(3), [
+    '--',
+    'subscription.tooltip.monthUsage',
+    'subscription.tooltip.valueMultiple'
+  ]);
+
+  // A group header exists exactly when the provider has more than one account,
+  // and that is what moves the rollup off the member rows. Counted from the list
+  // renderLimits() groups on, not the device-narrowed matching list.
+  assert.match(hasHeader, /state\.stats\?\.limits\?\.providers/);
+  assert.doesNotMatch(hasHeader, /limitProvidersForSubscriptions/);
+  const headerFor = (accounts) => vm.runInNewContext(
+    `${hasHeader}\nsubscriptionProviderHasGroupHeader('codex');`,
+    { state: { stats: { limits: { providers: accounts } } } }
+  );
+  assert.equal(headerFor([{ provider: 'codex' }]), false);
+  assert.equal(headerFor([{ provider: 'codex' }, { provider: 'codex' }]), true);
+  assert.equal(headerFor([{ provider: 'codex' }, { provider: 'claude' }]), false);
+  assert.match(cardFor, /!subscriptionProviderHasGroupHeader\(provider\.provider\)/);
+});
+
+test('the subscription card carries no heading of its own', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const card = functionBody(app, 'subscriptionCardNode', 'subscriptionProviderHasGroupHeader');
+  // Hovering the plan label is what names the card; a "Subscription" line above
+  // the rows only repeats the gesture.
+  assert.doesNotMatch(card, /subscription-tooltip-title/);
+  assert.doesNotMatch(styles, /\.subscription-tooltip-title/);
+  assert.doesNotMatch(readRendererFile('i18n.js'), /'subscription\.tooltip\.(topUp)?[Tt]itle'/);
+});
+
+test('elapsed subscription time never reads as zero months', () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const elapsed = functionBody(app, 'subscriptionElapsedText', 'subscriptionPlanTooltipRows');
+
+  const run = (startDate, today) => vm.runInNewContext(
+    `${elapsed}\nsubscriptionElapsedText(subscription, today);`,
+    {
+      subscription: subscriptionApi.normalizeSubscription({
+        provider: 'codex', startDate, amountMinor: 16000, currency: 'USD'
+      }),
+      today,
+      subscriptionApi,
+      currencyApi: { normalizeCurrency: () => 'USD', CURRENCY_RATES: { USD: { symbol: '$' } } },
+      t: (key, vars) => `${key}|${JSON.stringify(vars || {})}`
+    }
+  );
+
+  // Three weeks in, one payment taken: "0 months · $160 total" reads as a bug.
+  assert.match(run('2026-07-08', '2026-08-01'), /^subscription\.tooltip\.daysCount\|\{"days":24\}/);
+  assert.match(run('2026-06-08', '2026-08-01'), /^subscription\.tooltip\.months\|\{"months":1\}/);
+  // A start date that has not arrived has nothing elapsed and nothing paid.
+  assert.match(run('2026-08-08', '2026-08-01'), /^subscription\.tooltip\.notStarted\|/);
+  assert.doesNotMatch(run('2026-08-08', '2026-08-01'), /paidTotal/);
+
+  const i18n = readRendererFile('i18n.js');
+  for (const key of ['subscription.tooltip.daysCount', 'subscription.tooltip.notStarted']) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+  }
+});
+
+test('a date bound is only written when it actually changes', () => {
+  const app = readRendererFile('app.js');
+  const setBound = functionBody(app, 'setSubscriptionDateBound', 'syncSubscriptionDateBounds');
+  const sync = functionBody(app, 'syncSubscriptionDateBounds', 'resetSubscriptionForm');
+
+  // Rewriting min/max rebuilds Chromium's date editor and drops the segment
+  // being typed, and this runs on the input's own change event.
+  const input = {
+    writes: 0,
+    attrs: { max: '2026-08-01' },
+    getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name) ? this.attrs[name] : null; },
+    setAttribute(name, value) { this.writes += 1; this.attrs[name] = value; }
+  };
+  vm.runInNewContext(
+    `${setBound}\nsetSubscriptionDateBound(input, 'max', '2026-08-01');`,
+    { input }
+  );
+  assert.equal(input.writes, 0);
+  vm.runInNewContext(
+    `${setBound}\nsetSubscriptionDateBound(input, 'max', '2026-08-02');`,
+    { input }
+  );
+  assert.equal(input.writes, 1);
+  assert.match(sync, /setSubscriptionDateBound\(els\.subscriptionStartDateInput, 'max', today\)/);
+  assert.doesNotMatch(sync, /\.max = /);
+});
+
+test('one account holds one subscription record', () => {
+  const app = readRendererFile('app.js');
+  const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+  const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
+  const forAccount = functionBody(app, 'subscriptionForAccountValue', 'subscriptionTooltipRows');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+
+  const accounts = [
+    { provider: 'codex', accountKey: 'k1', accountEmail: 'a@example.com' },
+    { provider: 'codex', accountKey: 'k2', accountEmail: 'b@example.com' }
+  ];
+  const existing = [{ id: 's1', provider: 'codex', binding: { accountEmail: 'b@example.com' } }];
+  const clash = (target, excludeId) => vm.runInNewContext(
+    `${accountValue}\n${forAccount}\nsubscriptionForAccountValue(list, 'codex', subscriptionAccountValue(target), excludeId)?.id || null;`,
+    {
+      subscriptionApi,
+      limitProvidersForSubscriptions: () => accounts,
+      list: existing,
+      target,
+      excludeId
+    }
+  );
+
+  assert.equal(clash(accounts[1]), 's1');
+  // A sibling account is free, and editing the record does not clash with itself.
+  assert.equal(clash(accounts[0]), null);
+  assert.equal(clash(accounts[1], 's1'), null);
+  assert.match(submit, /settings\.subscriptions\.errorDuplicate/);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorDuplicate':").length - 1, 5);
+});
+
+test('a first charge or last top-up cannot be dated in the future', () => {
+  const app = readRendererFile('app.js');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  // `max` on a date input only marks an out-of-range value invalid; typing one
+  // still submits it, and a future anchor makes every derived figure nonsense.
+  assert.match(submit, /startDate > subscriptionApi\.todayString\(\)/);
+  assert.match(submit, /settings\.subscriptions\.errorFutureDate/);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorFutureDate':").length - 1, 5);
+});
+
+test('the subscription card is revealed by having a record, not by a preference', () => {
+  // A second switch on top of "did you enter the data" only made it possible to
+  // fill the form in and see nothing happen. An account with no record still
+  // decorates nothing, so the record itself is the switch.
+  const app = readRendererFile('app.js');
+  const decorate = functionBody(app, 'decoratePlanWithSubscription', 'subscriptionRowTitle');
+  assert.match(decorate, /subscriptionCardForRow\(provider\)/);
+  assert.doesNotMatch(decorate, /state\.settings\?\.show/);
+
+  for (const file of ['app.js', 'index.html', 'i18n.js']) {
+    assert.doesNotMatch(readRendererFile(file), /showSubscriptionInfo/);
+  }
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.doesNotMatch(main, /showSubscriptionInfo/);
+});
+
+test('a plan that does not auto-renew asks when it ends, and stores it there', () => {
+  const app = readRendererFile('app.js');
+  const fieldMode = functionBody(app, 'setSubscriptionRenewalFieldMode', 'subscriptionFormIsTopUp');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  const beginEdit = functionBody(app, 'beginSubscriptionEdit', 'submitSubscription');
+
+  // One field, two meanings — so a language switch later has to land on the key
+  // the field currently means, not the one the markup shipped with.
+  const label = { dataset: {}, textContent: '' };
+  const note = { dataset: {}, textContent: '' };
+  const run = (checked) => vm.runInNewContext(
+    `${fieldMode}\nsetSubscriptionRenewalFieldMode();`,
+    {
+      t: (key) => `t:${key}`,
+      els: {
+        subscriptionAutoRenewInput: { checked },
+        subscriptionNextRenewalLabel: label,
+        subscriptionNextRenewalNote: note
+      }
+    }
+  );
+
+  run(true);
+  assert.equal(label.dataset.i18n, 'settings.subscriptions.nextRenewal');
+  assert.equal(note.dataset.i18n, 'settings.subscriptions.nextRenewalNote');
+  assert.equal(label.textContent, 't:settings.subscriptions.nextRenewal');
+  run(false);
+  assert.equal(label.dataset.i18n, 'settings.subscriptions.coverageEnd');
+  assert.equal(note.dataset.i18n, 'settings.subscriptions.coverageEndNote');
+  assert.equal(label.textContent, 't:settings.subscriptions.coverageEnd');
+
+  // The saved record must never carry both dates: a stale override left behind
+  // by the toggle would keep scheduling charges on a cancelled plan.
+  assert.match(submit, /nextRenewalOverride: kind === 'topup' \|\| !autoRenew \? null : renewalDate \|\| null/);
+  assert.match(submit, /endDate: kind === 'topup' \|\| autoRenew \? null : renewalDate \|\| null/);
+  assert.match(submit, /settings\.subscriptions\.errorRenewalDate/);
+  assert.match(beginEdit, /subscription\.autoRenew \? subscription\.nextRenewalOverride : subscription\.endDate/);
+  for (const key of ['coverageEnd', 'coverageEndNote', 'errorRenewalDate']) {
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 5);
+  }
+});
+
+test('a lapsed plan reads as ended rather than counting days backwards', () => {
+  const app = readRendererFile('app.js');
+  const rows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
+  const elapsed = functionBody(app, 'subscriptionElapsedText', 'subscriptionPlanTooltipRows');
+  assert.match(rows, /daysLeft < 0 \? t\('subscription\.tooltip\.expired'\)/);
+  assert.equal(readRendererFile('i18n.js').split("'subscription.tooltip.expired':").length - 1, 5);
+  // Time on the plan stops at the day coverage ran out; it does not keep ageing
+  // after the plan ended.
+  assert.match(elapsed, /coverageStopDate\(subscription\)/);
+  assert.match(elapsed, /stop && stop < today \? stop : today/);
+});
+
+test('removing a ledger entry has to be confirmed, like the rows above it', () => {
+  const app = readRendererFile('app.js');
+  const render = functionBody(app, 'renderSubscriptionTopUpEntries', 'addSubscriptionTopUpEntry');
+  // A mis-click rewrites the month total the ledger exists to report, and the
+  // entry is recorded nowhere else.
+  assert.match(render, /if \(!armed\) \{/);
+  assert.match(render, /remove\.textContent = '✓'/);
+  assert.match(render, /settings\.subscriptions\.topUpRemoveConfirm/);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.topUpRemoveConfirm':").length - 1, 5);
+  assert.ok(cssBlock(readRendererFile('styles.css'), '.subscription-topup-row .subscription-topup-remove.is-armed'));
+});
+
+test('every provider a subscription can name has a mark to identify it by', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const providerBlock = app.slice(app.indexOf('const LIMIT_PROVIDERS = ['));
+  const ids = [...providerBlock.slice(0, providerBlock.indexOf('];')).matchAll(/\bid: '([^']+)'/g)]
+    .map((match) => match[1]);
+  assert.ok(ids.length >= 19, 'LIMIT_PROVIDERS should be parsed, not empty');
+
+  // .row-icon paints currentColor through a mask, so an id with no mask rule
+  // behind it renders as a solid square — worse than no icon at all.
+  for (const id of ids) {
+    assert.ok(
+      new RegExp(`\\.row-icon-${id}\\b[^{]*\\{`).test(styles),
+      `.row-icon-${id} mask rule should exist for LIMIT_PROVIDERS id ${id}`
+    );
+  }
+
+  const iconClass = functionBody(app, 'subscriptionProviderIconClass', 'isCreditsProvider');
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  // Unknown ids are the case the mask list cannot cover: a record stays bound to
+  // its provider even after that provider leaves the list.
+  assert.match(iconClass, /LIMIT_PROVIDERS\.some\(/);
+  assert.match(rows, /toolIconsEnabled\(state\.settings\?\.showToolIcons\)/);
+  assert.match(rows, /subscriptionProviderIconClass\(subscription\.provider\)/);
+  // The gutter only exists when something occupies it.
+  assert.match(
+    cssBlock(styles, '.subscription-row:has(.subscription-row-icon)'),
+    /grid-template-columns: auto minmax\(0, 1fr\) auto/
+  );
+  assert.ok(cssBlock(styles, '.subscription-row-icon'));
+});
+
+test('the settings rows date themselves in short form, the tooltip in full', () => {
+  const app = readRendererFile('app.js');
+  const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
+  const short = functionBody(app, 'subscriptionShortDateText', 'subscriptionLocalDate');
+  const full = functionBody(app, 'subscriptionDateText', 'subscriptionShortDateText');
+  const planRows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
+
+  // Two dense lines in a ~300px panel: the date is the longest thing on the
+  // second one, and the locale already defines a numeric short form for it.
+  assert.match(short, /dateStyle: 'short'/);
+  assert.match(full, /month: 'short'/);
+  assert.doesNotMatch(meta, /subscriptionDateText\(/);
+  // The tooltip has the room, so it keeps spelling the date out.
+  assert.match(planRows, /subscriptionDateText\(/);
+});
+
+test('the section says where the recorded data shows up', () => {
+  const i18n = readRendererFile('i18n.js');
+  const html = readRendererFile('index.html');
+  // A record decorates a plan label somewhere else entirely; without being told,
+  // there is nothing in this panel that points at it.
+  const notes = [...i18n.matchAll(/'settings\.subscriptions\.note': '(.+?)',\n/g)].map((match) => match[1]);
+  assert.equal(notes.length, 5);
+  for (const note of notes) {
+    assert.match(note, /Hover|游標|光标|마우스|カーソル/);
+  }
+  // The markup fallback is what renders before i18n applies, so it cannot lag.
+  assert.ok(html.includes("Hover an account's plan label on the AI Tool Limits page"));
 });
