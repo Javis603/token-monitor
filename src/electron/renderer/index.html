@@ -1166,6 +1166,16 @@
                  sits outside the add form because a delete can fail too, and
                  the form is closed at that point. -->
             <p id="subscriptionSyncError" class="settings-note subscription-sync-error hidden"></p>
+            <!-- Shown once, when this device joined a hub that already had a
+                 list: its own records are not in it, and dropping them silently
+                 is not ours to do. -->
+            <div id="subscriptionOrphanNotice" class="subscription-orphan-notice hidden">
+              <p id="subscriptionOrphanText" class="settings-note"></p>
+              <div class="subscription-orphan-actions">
+                <button id="subscriptionOrphanAdopt" type="button" class="subscription-orphan-adopt" data-i18n="settings.subscriptions.orphanAdopt">Add them to the shared list</button>
+                <button id="subscriptionOrphanDiscard" type="button" class="subscription-orphan-discard" data-i18n="settings.subscriptions.orphanDiscard">Discard</button>
+              </div>
+            </div>
             <div id="subscriptionList" class="opencode-profile-list"></div>
             <div id="subscriptionAddForm" class="opencode-add-form">
               <button id="subscriptionAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="subscriptionAddDetails">

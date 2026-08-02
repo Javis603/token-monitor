@@ -2542,9 +2542,17 @@ test('subscriptions are written through the hub-aware channel, never as a settin
   assert.doesNotMatch(app, /saveSettings\(\{ subscriptions/);
 
   assert.match(preload, /saveSubscriptions: \(subscriptions\) => ipcRenderer\.invoke\('subscriptions:save'/);
-  // settings:update must not be a second way in, or a patch carrying the key
-  // would bypass the hub entirely.
-  assert.match(main, /delete normalizedPatch\.subscriptions;/);
+
+  // settings:update must not be a second way in. Asserting that the guard LINE
+  // exists is not enough — the first version of this deleted the key from
+  // normalizedPatch while the normalizer below read it straight off `patch`, so
+  // the guard was inert and this test was green. Assert the dangerous read is
+  // gone instead: nothing in the handler may source subscriptions from a patch.
+  const handler = main.slice(main.indexOf("ipcMain.handle('settings:update'"));
+  const handlerBody = handler.slice(0, handler.indexOf("ipcMain.handle('", 1));
+  assert.match(handlerBody, /subscriptions: subscriptionDisplay\.normalizeSubscriptions\(\s*settings\.subscriptions,/);
+  assert.doesNotMatch(handlerBody, /patch\.subscriptions/);
+  assert.doesNotMatch(handlerBody, /patch\.subscriptionsOrphaned/);
 
   // A refused write must leave the screen showing what is actually stored.
   const save = functionBody(app, 'saveSubscriptions', 'renderSubscriptionSyncError');
@@ -2605,4 +2613,111 @@ test('a record added on another device turns up without pushing settings at the 
   // Same document again: no write, no re-render.
   assert.deepEqual(run(doc, { ...doc }), { changed: false, saved: false });
   assert.equal(run(doc, { updatedAt: '2026-08-02T10:00:00.000Z', subscriptions: [] }).changed, true);
+});
+
+test('a deleted record is not resurrected by another device rejoining', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const source = [
+    functionBody(main, 'rememberOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    // functionBody() slices from `function <name>(`, dropping the async keyword.
+    `async ${functionBody(main, 'refreshSharedSubscriptions', 'maybeRefreshSharedSubscriptions')}`
+  ].join('\n');
+
+  const run = async ({ doc, local, writeFails = false }) => {
+    const written = [];
+    const context = vm.createContext({
+      settings: { hubMode: 'client', subscriptions: local, subscriptionsOrphaned: [] },
+      hubSubscriptions: null,
+      subscriptionsAreShared: () => true,
+      fetchSharedSubscriptions: async () => doc,
+      writeSharedSubscriptions: async (list) => {
+        if (writeFails) throw new Error('hub down');
+        written.push(list);
+        context.hubSubscriptions = { updatedAt: 'written', subscriptions: list };
+      },
+      cacheSharedSubscriptions: (next) => { context.hubSubscriptions = next; return true; },
+      saveSettings: () => true,
+      console: { log() {} },
+      JSON
+    });
+    await vm.runInContext(`${source}\nrefreshSharedSubscriptions({ seedFromLocal: true });`, context);
+    return { written, context };
+  };
+
+  // Deleting the last record leaves an empty list WITH a timestamp. Treating
+  // that as "never written" makes a device holding a stale cache re-upload it,
+  // undoing somebody else's delete.
+  const afterDelete = await run({
+    doc: { updatedAt: '2026-08-02T09:00:00.000Z', subscriptions: [] },
+    local: [{ id: 'old' }]
+  });
+  assert.deepEqual(afterDelete.written, []);
+  assert.deepEqual(afterDelete.context.settings.subscriptionsOrphaned, [{ id: 'old' }]);
+
+  // A hub nobody has ever written to still adopts this device's records.
+  const virgin = await run({ doc: { updatedAt: '', subscriptions: [] }, local: [{ id: 'mine' }] });
+  assert.deepEqual(virgin.written, [[{ id: 'mine' }]]);
+
+  // If that seed fails, the empty document must not stay installed: in shared
+  // mode it is what the UI reads, so every record would appear to be gone.
+  const failed = await run({ doc: { updatedAt: '', subscriptions: [] }, local: [{ id: 'mine' }], writeFails: true });
+  assert.equal(failed.context.hubSubscriptions, null);
+});
+
+test('joining a hub that already has records sets this device aside, never over', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const remember = functionBody(main, 'rememberOrphanedSubscriptions', 'adoptOrphanedSubscriptions');
+  const adopt = functionBody(main, 'adoptOrphanedSubscriptions', 'discardOrphanedSubscriptions');
+
+  const context = vm.createContext({
+    settings: { subscriptions: [{ id: 'a' }, { id: 'b' }], subscriptionsOrphaned: [] },
+    JSON
+  });
+  const changed = vm.runInContext(
+    `${remember}\nrememberOrphanedSubscriptions(settings.subscriptions, { subscriptions: [{ id: 'a' }, { id: 'z' }] });`,
+    context
+  );
+  // Only what the shared list does not already have. Matched on record id, not
+  // on the account: the same plan entered on two machines has two ids, and
+  // folding those together silently would double the monthly total.
+  assert.equal(changed, true);
+  assert.deepEqual(context.settings.subscriptionsOrphaned, [{ id: 'b' }]);
+  // Re-running changes nothing, so a reconnect does not keep re-prompting.
+  assert.equal(
+    vm.runInContext(`rememberOrphanedSubscriptions(settings.subscriptions, { subscriptions: [{ id: 'a' }, { id: 'z' }] });`, context),
+    false
+  );
+
+  // Adopting appends to the shared list and only then forgets them.
+  assert.match(adopt, /\[\.\.\.\(hubSubscriptions\?\.subscriptions \|\| \[\]\), \.\.\.orphans\]/);
+  const order = [adopt.indexOf('await writeSharedSubscriptions'), adopt.indexOf('settings.subscriptionsOrphaned = []')];
+  assert.ok(order[0] > -1 && order[0] < order[1], 'orphans must survive a failed adopt');
+});
+
+test('a refused write says which problem it was', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const app = readRendererFile('app.js');
+  const mapCode = functionBody(main, 'subscriptionWriteFailureCode', 'discardOrphanedSubscriptions');
+  const mapKey = functionBody(app, 'subscriptionWriteErrorKey', 'renderSubscriptionOrphanNotice');
+
+  const code = (error) => vm.runInNewContext(`${mapCode}\nsubscriptionWriteFailureCode(error);`, { error });
+  // A hub that answered 401 is reachable — telling the user to check their
+  // network sends them looking in the wrong place for a wrong secret.
+  assert.equal(code({ code: 'rejected', status: 401 }), 'hub_rejected');
+  assert.equal(code({ code: 'stale_write' }), 'stale_write');
+  assert.equal(code({ code: 'write_failed' }), 'write_failed');
+  assert.equal(code(new TypeError('fetch failed')), 'hub_unreachable');
+
+  const key = (message) => vm.runInNewContext(`${mapKey}\nsubscriptionWriteErrorKey({ message });`, { message });
+  assert.match(key("Error invoking remote method 'subscriptions:save': Error: hub_rejected"), /errorHubRejected$/);
+  assert.match(key('Error: write_failed'), /errorWriteFailed$/);
+  assert.match(key('Error: stale_write'), /errorStaleWrite$/);
+  assert.match(key('Error: hub_unreachable'), /errorHubWrite$/);
+
+  // A local save that was rolled back is not a save.
+  const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
+  assert.match(save, /if \(!saveSettings\(\)\) \{/);
+  for (const k of ['errorHubRejected', 'errorWriteFailed', 'orphanNotice', 'orphanAdopt', 'orphanDiscard']) {
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${k}':`).length - 1, 5);
+  }
 });

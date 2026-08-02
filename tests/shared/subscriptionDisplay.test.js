@@ -487,3 +487,67 @@ test('a write from a stale copy is refused, and the first write never is', () =>
   assert.equal(subscriptions.isStaleSubscriptionWrite(empty, ''), false);
   assert.equal(subscriptions.isStaleSubscriptionWrite(null, ''), false);
 });
+
+test('an exact identifier beats a shared profile name', () => {
+  const accounts = [
+    { provider: 'opencode', accountKey: 'k1', accountName: 'work', accountEmail: 'one@example.com' },
+    { provider: 'opencode', accountKey: 'k2', accountName: 'work', accountEmail: 'two@example.com' }
+  ];
+  // Two accounts the user labelled the same. The binding names one of them
+  // exactly, so the cost must land on that row and not on whichever came first.
+  const byKey = subscriptions.matchProviderAccount(
+    { provider: 'opencode', binding: { profileName: 'work', accountKey: 'k2' } }, accounts
+  );
+  assert.equal(byKey.accountKey, 'k2');
+  const byEmail = subscriptions.matchProviderAccount(
+    { provider: 'opencode', binding: { profileName: 'work', accountEmail: 'two@example.com' } }, accounts
+  );
+  assert.equal(byEmail.accountKey, 'k2');
+
+  // Nothing but the ambiguous name: guessing would put the money on the wrong
+  // account, so it stays unmatched and the rebind prompt asks.
+  assert.equal(
+    subscriptions.matchProviderAccount({ provider: 'opencode', binding: { profileName: 'work' } }, accounts),
+    null
+  );
+  // A unique name still matches, which is the rung that survives a rotated key.
+  assert.equal(
+    subscriptions.matchProviderAccount(
+      { provider: 'opencode', binding: { profileName: 'work', accountKey: 'expired' } },
+      [accounts[0], { provider: 'opencode', accountKey: 'k9', accountName: 'personal' }]
+    ).accountKey,
+    'k1'
+  );
+});
+
+test('two writes in the same millisecond cannot share a concurrency token', () => {
+  const first = subscriptions.subscriptionDocument([], { updatedAt: '2026-08-02T09:00:00.000Z' });
+  // updatedAt IS the token, so a second write landing in the same millisecond
+  // must not reproduce it — the third write would then pass the staleness check
+  // against a document it never read.
+  const second = subscriptions.subscriptionDocument([], { previousUpdatedAt: first.updatedAt });
+  assert.ok(second.updatedAt > first.updatedAt, `${second.updatedAt} should follow ${first.updatedAt}`);
+  assert.equal(subscriptions.isStaleSubscriptionWrite(second, first.updatedAt), true);
+
+  // A clock that has genuinely moved on is left alone.
+  const later = subscriptions.subscriptionDocument([], { previousUpdatedAt: '2020-01-01T00:00:00.000Z' });
+  assert.ok(later.updatedAt > '2020-01-01T00:00:00.000Z');
+});
+
+test('a currency with no exchange rate is not silently reinterpreted as USD', () => {
+  const currencyApi = require('../../src/shared/currency');
+  // The hubs validate against the same set the app can actually convert; storing
+  // EUR and later valuing it as USD would misreport the recorded cost.
+  const stored = subscriptions.subscriptionDocument(
+    [{ id: 'a', provider: 'codex', startDate: '2026-05-31', amountMinor: 1000, currency: 'EUR' }],
+    { currencyApi }
+  );
+  assert.equal(stored.subscriptions[0].currency, 'USD');
+  assert.equal(
+    subscriptions.subscriptionDocument(
+      [{ id: 'a', provider: 'codex', startDate: '2026-05-31', currency: 'HKD' }],
+      { currencyApi }
+    ).subscriptions[0].currency,
+    'HKD'
+  );
+});

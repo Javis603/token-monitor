@@ -309,6 +309,10 @@ Replaces the shared list.
 }
 ```
 
-`baseUpdatedAt` is the `updatedAt` the client last read. If it does not match the stored document the hub responds `409` with the current document and writes nothing: a device showing a stale copy would otherwise erase every record added elsewhere since it last looked, and this data exists nowhere else. An empty `baseUpdatedAt` is accepted only against a hub that has never been written to.
+`subscriptions` must be an array; anything else responds `400` and stores nothing. An empty array is a valid clear, but a malformed or truncated body would otherwise normalize to an empty list and be stored as a perfectly successful replacement.
 
-Records are re-normalized on ingest exactly as `POST /api/ingest` normalizes device records; unknown fields are dropped and malformed records are discarded rather than stored. A successful write responds `200` with the stored document in the same shape as `GET`.
+`baseUpdatedAt` is the `updatedAt` the client last read. If it does not match the stored document the hub responds `409` with the current document and writes nothing: a device showing a stale copy would otherwise erase every record added elsewhere since it last looked, and this data exists nowhere else. An empty `baseUpdatedAt` is accepted only against a hub that has never been written to — a hub whose list is empty but whose `updatedAt` is set has had its records deleted, and re-seeding it from a stale cache would undo that.
+
+Because `updatedAt` doubles as the concurrency token, it is guaranteed to increase strictly on every accepted write: two writes landing in the same millisecond would otherwise share a token, and a third holding the older one would pass the staleness check against a document it never read.
+
+Records are re-normalized on ingest exactly as `POST /api/ingest` normalizes device records; unknown fields are dropped and malformed records are discarded rather than stored. `currency` is validated against the display currencies the app carries rates for and falls back to `USD`, so a code with no rate can never be stored and later valued as something it is not. A successful write responds `200` with the stored document in the same shape as `GET`.

@@ -10,6 +10,7 @@ const {
   isStaleSubscriptionWrite,
   subscriptionDocument
 } = require('../shared/subscriptionDisplay');
+const { normalizeCurrency } = require('../shared/currency');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
@@ -109,13 +110,24 @@ function createHub({
   // Transport-agnostic like ingest(), so a host-mode widget writes its own hub
   // in-process instead of looping back over HTTP to itself.
   function setSubscriptions(subscriptions, baseUpdatedAt) {
+    // A non-array would normalize to an empty list and be stored as a perfectly
+    // successful replacement, wiping records that exist nowhere else. An
+    // intentional clear still sends [].
+    if (!Array.isArray(subscriptions)) {
+      const error = new Error('subscriptions must be an array');
+      error.code = 'bad_subscriptions';
+      throw error;
+    }
     if (isStaleSubscriptionWrite(store.subscriptions, baseUpdatedAt)) {
       const error = new Error('stale_write');
       error.code = 'stale_write';
       error.current = store.subscriptions;
       throw error;
     }
-    store.subscriptions = subscriptionDocument(subscriptions);
+    store.subscriptions = subscriptionDocument(subscriptions, {
+      previousUpdatedAt: store.subscriptions?.updatedAt,
+      currencyApi: { normalizeCurrency }
+    });
     persist();
     return store.subscriptions;
   }
@@ -191,6 +203,9 @@ function createHub({
       } catch (error) {
         if (error.code === 'stale_write') {
           return sendJson(res, 409, { error: 'stale_write', ...error.current });
+        }
+        if (error.code === 'bad_subscriptions') {
+          return sendJson(res, 400, { error: 'bad_request', message: error.message });
         }
         if (error.code === 'payload_too_large') {
           res.shouldKeepAlive = false;

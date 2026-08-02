@@ -277,3 +277,65 @@ test('the shared subscription list survives a hub restart and needs the secret',
     fs.rmSync(dataFile, { force: true });
   }
 });
+
+test('a malformed subscription write is refused instead of emptying the ledger', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const put = (body) => fetch(`http://127.0.0.1:${port}/api/subscriptions`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+      body: JSON.stringify(body)
+    });
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const written = await (await put({ subscriptions: [record], baseUpdatedAt: '' })).json();
+
+    // A non-array normalizes to [] and would store as a perfectly successful
+    // replacement, wiping records that exist nowhere else.
+    for (const bad of [undefined, null, 'oops', 42, { 0: record }]) {
+      const response = await put({ subscriptions: bad, baseUpdatedAt: written.updatedAt });
+      assert.equal(response.status, 400, `subscriptions: ${JSON.stringify(bad)} should be refused`);
+    }
+    assert.equal(hub.getSubscriptions().subscriptions.length, 1);
+
+    // An intentional clear still goes through.
+    assert.equal((await (await put({ subscriptions: [], baseUpdatedAt: written.updatedAt })).json()).subscriptions.length, 0);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the hub advertises PUT so a browser preflight does not block the write', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    // The endpoint existing is not enough: a browser-origin client is stopped at
+    // the preflight if the method is not advertised.
+    const preflight = await fetch(`http://127.0.0.1:${port}/api/subscriptions`, { method: 'OPTIONS' });
+    assert.match(preflight.headers.get('access-control-allow-methods') || '', /\bPUT\b/);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('back-to-back writes each get their own concurrency token', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  try {
+    const record = (id) => ({ id, provider: 'codex', startDate: '2026-05-31' });
+    const first = hub.setSubscriptions([record('a')], '');
+    const second = hub.setSubscriptions([record('a'), record('b')], first.updatedAt);
+    // Same millisecond is entirely possible here; if the token repeated, a third
+    // write holding `first` would sail through and drop record b.
+    assert.ok(second.updatedAt > first.updatedAt);
+    assert.throws(() => hub.setSubscriptions([], first.updatedAt), /stale_write/);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});

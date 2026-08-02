@@ -1,5 +1,6 @@
 import { publicLimits } from './shared/limits.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
+import currency from './shared/currency.js';
 import { aggregateDevices, mergeDeviceRecord, aggregateHistory } from './shared/usage.js';
 import { historyPreview, historyRevision } from './shared/history.js';
 
@@ -227,11 +228,20 @@ export class HubDO {
       let payload;
       try { payload = await request.json(); }
       catch (error) { return jsonResponse(400, { error: 'bad_request', message: error.message }); }
+      // A non-array would normalize to an empty list and store as a perfectly
+      // successful replacement, wiping records that exist nowhere else. An
+      // intentional clear still sends [].
+      if (!Array.isArray(payload?.subscriptions)) {
+        return jsonResponse(400, { error: 'bad_request', message: 'subscriptions must be an array' });
+      }
       const stored = await this.getSubscriptions();
       if (subscriptionDisplay.isStaleSubscriptionWrite(stored, payload?.baseUpdatedAt)) {
         return jsonResponse(409, { error: 'stale_write', ...stored });
       }
-      const next = subscriptionDisplay.subscriptionDocument(payload?.subscriptions);
+      const next = subscriptionDisplay.subscriptionDocument(payload.subscriptions, {
+        previousUpdatedAt: stored?.updatedAt,
+        currencyApi: { normalizeCurrency: currency.normalizeCurrency }
+      });
       await this.state.storage.put(SUBSCRIPTIONS_KEY, next);
       return jsonResponse(200, { ok: true, ...next });
     }

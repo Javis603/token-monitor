@@ -352,6 +352,9 @@ function defaultSettings() {
     // Manual subscription metadata. Plain preferences, not credentials, so they
     // live in settings.json and cross to the renderer unredacted.
     subscriptions: [],
+    // Local records left behind when this device joined a hub that already had a
+    // list. Held until the user says whether to add or drop them.
+    subscriptionsOrphaned: [],
     windowBounds: null,
     windowMaximized: false,
     zoomFactor: 1,
@@ -2560,8 +2563,53 @@ async function writeSharedSubscriptions(list) {
   // Someone else wrote the list since this device last read it. Overwriting would
   // erase their records silently, and they exist nowhere else.
   if (response.status === 409) throw staleSubscriptionWriteError(await response.json().catch(() => null));
-  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  if (!response.ok) {
+    // The hub answered, so it is reachable — a 401 is the wrong secret and a 400
+    // is a bad payload. Reporting either as "could not reach the hub" sends the
+    // user looking at their network instead of their settings.
+    const rejected = new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    rejected.code = 'rejected';
+    rejected.status = response.status;
+    throw rejected;
+  }
   cacheSharedSubscriptions(await response.json());
+}
+
+// Records this device holds that the shared list does not. Matched on record id
+// rather than on the account they name: the same plan entered separately on two
+// machines has two ids, and silently folding those together would double the
+// monthly total. Offering them instead lets the one person who knows decide.
+function rememberOrphanedSubscriptions(local, doc) {
+  const shared = new Set((doc.subscriptions || []).map((entry) => entry.id));
+  const orphans = (local || []).filter((entry) => entry?.id && !shared.has(entry.id));
+  if (JSON.stringify(orphans) === JSON.stringify(settings.subscriptionsOrphaned || [])) return false;
+  settings.subscriptionsOrphaned = orphans;
+  return true;
+}
+
+async function adoptOrphanedSubscriptions() {
+  const orphans = settings.subscriptionsOrphaned || [];
+  if (orphans.length === 0) return settingsForRenderer();
+  await writeSharedSubscriptions([...(hubSubscriptions?.subscriptions || []), ...orphans]);
+  settings.subscriptionsOrphaned = [];
+  saveSettings();
+  return settingsForRenderer();
+}
+
+// Only the message survives the IPC boundary, so the outcome goes in it. The
+// renderer needs these apart: another device winning means re-read and redo, a
+// rejected write means fix the secret, and an unreachable hub means try later.
+function subscriptionWriteFailureCode(error) {
+  if (error?.code === 'stale_write') return 'stale_write';
+  if (error?.code === 'rejected') return 'hub_rejected';
+  if (error?.code === 'write_failed') return 'write_failed';
+  return 'hub_unreachable';
+}
+
+function discardOrphanedSubscriptions() {
+  settings.subscriptionsOrphaned = [];
+  saveSettings();
+  return settingsForRenderer();
 }
 
 async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
@@ -2576,14 +2624,31 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     const local = settings.subscriptions || [];
     const doc = await fetchSharedSubscriptions();
     if (!doc) return false;
-    // Joining a hub that has never been written to: adopt this device's records
-    // rather than silently replacing them with nothing.
-    if (seedFromLocal && doc.subscriptions.length === 0 && local.length > 0) {
+    // A hub nobody has ever written to: adopt this device's records rather than
+    // replacing them with nothing. Keyed on updatedAt rather than on the list
+    // being empty — an empty list WITH a timestamp is somebody's delete, and
+    // re-uploading a stale cache over it resurrects what they removed.
+    if (seedFromLocal && !doc.updatedAt && local.length > 0) {
+      const previous = hubSubscriptions;
       hubSubscriptions = doc;
-      await writeSharedSubscriptions(local);
-      return true;
+      try {
+        await writeSharedSubscriptions(local);
+        return true;
+      } catch (error) {
+        // The seed failed, so the empty document must not stay installed: in
+        // shared mode it is what the UI reads, and the user would watch every
+        // record they entered vanish with only a console line to explain it.
+        hubSubscriptions = previous;
+        throw error;
+      }
     }
-    return cacheSharedSubscriptions(doc);
+    // Joining a hub that already holds records. Until this moment the local list
+    // was this device's own data, not a cache of the hub's, so anything missing
+    // from the shared list is set aside for the user rather than overwritten.
+    const orphansChanged = seedFromLocal ? rememberOrphanedSubscriptions(local, doc) : false;
+    const changed = cacheSharedSubscriptions(doc);
+    if (orphansChanged && !changed) saveSettings();
+    return changed || orphansChanged;
   } catch (error) {
     console.log(`[sync] subscriptions unavailable: ${error.message}`);
     return false;
@@ -2607,7 +2672,14 @@ function maybeRefreshSharedSubscriptions() {
 async function saveSubscriptions(list) {
   if (!subscriptionsAreShared()) {
     settings.subscriptions = subscriptionDisplay.normalizeSubscriptions(list, { currencyApi: { normalizeCurrency } });
-    saveSettings();
+    // saveSettings() rolls the whole object back when the file cannot be
+    // written, so reporting success here would tell the user their record was
+    // stored while it was being discarded.
+    if (!saveSettings()) {
+      const error = new Error('settings write failed');
+      error.code = 'write_failed';
+      throw error;
+    }
     return settingsForRenderer();
   }
   await writeSharedSubscriptions(list);
@@ -3143,6 +3215,7 @@ function settingsForRenderer() {
     // last-known cache behind it.
     subscriptions: effectiveSubscriptions(),
     subscriptionsShared: subscriptionsAreShared(),
+    subscriptionsOrphaned: settings.subscriptionsOrphaned || [],
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
     zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
@@ -4416,6 +4489,16 @@ app.whenReady().then(() => {
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
 
+  ipcMain.handle('subscriptions:adoptOrphans', async () => {
+    try {
+      return await adoptOrphanedSubscriptions();
+    } catch (error) {
+      throw new Error(subscriptionWriteFailureCode(error), { cause: error });
+    }
+  });
+
+  ipcMain.handle('subscriptions:discardOrphans', () => discardOrphanedSubscriptions());
+
   ipcMain.handle('subscriptions:save', async (_event, subscriptions) => {
     try {
       return await saveSubscriptions(subscriptions);
@@ -4423,7 +4506,7 @@ app.whenReady().then(() => {
       // The renderer has to tell "another device won" apart from "the hub is
       // down": one means re-read and redo, the other means try again later. Only
       // the message survives the IPC boundary, so the code goes in it.
-      throw new Error(error.code === 'stale_write' ? 'stale_write' : 'hub_unreachable', { cause: error });
+      throw new Error(subscriptionWriteFailureCode(error), { cause: error });
     }
   });
   ipcMain.handle('sessionUsageArchive:clear', () => {
@@ -4473,10 +4556,13 @@ app.whenReady().then(() => {
     delete normalizedPatch.openrouterProfiles;
     delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
-    // Subscriptions go through subscriptions:save, which knows whether to write
-    // the hub or settings.json. Falling through here would write the local copy
-    // and silently fork the shared list.
+    // Subscriptions go through subscriptions:save, which knows whether this
+    // device owns the list or shares it with a hub. The explicit fields further
+    // down are what actually hold the line — they are applied after the spread
+    // and source from settings — but stripping the keys here keeps a future
+    // reorder from quietly turning the spread back into a second way in.
     delete normalizedPatch.subscriptions;
+    delete normalizedPatch.subscriptionsOrphaned;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
@@ -4524,8 +4610,16 @@ app.whenReady().then(() => {
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),
+      // Sourced from settings only, never from the patch: subscriptions:save is
+      // the one write path, because it knows whether this device owns the list
+      // or shares it with a hub. Reading the patch here would let any caller
+      // fork the shared list past that decision.
       subscriptions: subscriptionDisplay.normalizeSubscriptions(
-        patch.subscriptions !== undefined ? patch.subscriptions : settings.subscriptions,
+        settings.subscriptions,
+        { currencyApi: { normalizeCurrency } }
+      ),
+      subscriptionsOrphaned: subscriptionDisplay.normalizeSubscriptions(
+        settings.subscriptionsOrphaned,
         { currencyApi: { normalizeCurrency } }
       ),
       limitProviders: patch.limitProviders !== undefined ? parseLimitProviders(patch.limitProviders).join(',') : settings.limitProviders,

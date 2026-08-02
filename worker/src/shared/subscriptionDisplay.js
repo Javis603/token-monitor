@@ -252,11 +252,17 @@
   // implementations cannot drift, and so a list is re-normalized on the way in
   // rather than trusted — it arrives from a device, over the network.
   function subscriptionDocument(subscriptions, options = {}) {
-    return {
-      version: 1,
-      updatedAt: cleanText(options.updatedAt) || new Date().toISOString(),
-      subscriptions: normalizeSubscriptions(subscriptions, options)
-    };
+    const explicit = cleanText(options.updatedAt);
+    const previous = cleanText(options.previousUpdatedAt);
+    let updatedAt = explicit || new Date().toISOString();
+    // updatedAt doubles as the optimistic-concurrency token below, so two writes
+    // landing in the same millisecond must not produce the same one — the second
+    // would read as "not stale" against the first and overwrite it unnoticed.
+    // Both are fixed-width UTC ISO strings, so lexicographic order is chronological.
+    if (!explicit && previous && updatedAt <= previous) {
+      updatedAt = new Date(Date.parse(previous) + 1).toISOString();
+    }
+    return { version: 1, updatedAt, subscriptions: normalizeSubscriptions(subscriptions, options) };
   }
 
   // Optimistic concurrency, and the reason writes are a full list rather than a
@@ -511,14 +517,10 @@
     if (accounts.length === 0) return null;
     const binding = normalizeBinding(subscription?.binding);
 
-    // A named profile is the user's own label for the account, so it survives
-    // credential changes that every hashed key does not.
-    if (binding.profileName) {
-      const byProfile = accounts.find(
-        (account) => cleanText(account?.accountName) === binding.profileName
-      );
-      if (byProfile) return byProfile;
-    }
+    // Exact identifiers first. A key that has rotated simply fails to match and
+    // falls through to the rungs below, so the healing this ladder exists for is
+    // unaffected — but while a precise identifier is available it has to win, or
+    // two accounts sharing a profile name bind to whichever happens to be first.
     if (binding.accountKey) {
       const byKey = accounts.find((account) => cleanText(account?.accountKey) === binding.accountKey);
       if (byKey) return byKey;
@@ -528,6 +530,15 @@
         (account) => cleanText(account?.accountEmail || account?.email).toLowerCase() === binding.accountEmail
       );
       if (byEmail) return byEmail;
+    }
+    // A named profile is the user's own label for the account, so it survives
+    // credential changes that every hashed key does not — but only when it names
+    // exactly one account. Two profiles called "work" is a real ambiguity, and
+    // guessing puts the cost on the wrong row; returning nothing surfaces the
+    // rebind prompt, which asks the one person who knows.
+    if (binding.profileName) {
+      const named = accounts.filter((account) => cleanText(account?.accountName) === binding.profileName);
+      if (named.length === 1) return named[0];
     }
     // Nothing matched, but the provider has exactly one account, so there is no
     // ambiguity about what the user meant. This is the case that silently heals

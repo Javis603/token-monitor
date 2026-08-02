@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   // have their own channel: the write is a network round trip main.js has to
   // await, and it can fail in ways a settings write cannot.
   saveSubscriptions: (subscriptions) => ipcRenderer.invoke('subscriptions:save', subscriptions),
+  // Records this device held before it joined a hub that already had a list.
+  adoptOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:adoptOrphans'),
+  discardOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:discardOrphans'),
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),

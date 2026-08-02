@@ -4015,6 +4015,35 @@ html.is-windows .limit-live-badge {
    contribution sizes the settings section's grid column, so on a narrow window
    the whole section was laid out to fit an email address and everything in it
    spilled past the panel. minmax(0, 1fr) contributes zero. */
+.subscription-orphan-notice {
+  margin: 6px 0 8px;
+  padding: 8px;
+  border: 1px solid rgba(255, 176, 46, 0.32);
+  border-radius: 6px;
+  background: rgba(255, 176, 46, 0.08);
+}
+.subscription-orphan-notice.hidden {
+  display: none;
+}
+.subscription-orphan-notice .settings-note {
+  margin: 0 0 6px;
+}
+.subscription-orphan-actions {
+  display: flex;
+  gap: 6px;
+}
+.subscription-orphan-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(var(--sunken-rgb), 0.5);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10px;
+}
+.subscription-orphan-actions button:hover {
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
 /* Sits above the list rather than inside the add form, because a failed delete
    has no form open to report into. */
 .subscription-sync-error {

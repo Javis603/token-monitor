@@ -87,3 +87,38 @@ test('the Worker refuses subscription reads without the secret and never publish
   assert.doesNotMatch(JSON.stringify(stats), /subscription/i);
   assert.doesNotMatch(JSON.stringify(stats), /amountMinor/);
 });
+
+test('the Worker refuses a malformed write instead of emptying the ledger', async () => {
+  const { hub } = await hubDO();
+  const written = await (await hub.fetch(request('PUT', { subscriptions: [RECORD], baseUpdatedAt: '' }))).json();
+
+  for (const bad of [undefined, null, 'oops', 42, { 0: RECORD }]) {
+    const response = await hub.fetch(request('PUT', { subscriptions: bad, baseUpdatedAt: written.updatedAt }));
+    assert.equal(response.status, 400, `subscriptions: ${JSON.stringify(bad)} should be refused`);
+  }
+  assert.equal((await (await hub.fetch(request('GET'))).json()).subscriptions.length, 1);
+
+  // An intentional clear still goes through.
+  const cleared = await hub.fetch(request('PUT', { subscriptions: [], baseUpdatedAt: written.updatedAt }));
+  assert.equal(cleared.status, 200);
+});
+
+test('the Worker matches the Node hub on tokens and currencies', async () => {
+  const { hub } = await hubDO();
+  const first = await (await hub.fetch(request('PUT', { subscriptions: [RECORD], baseUpdatedAt: '' }))).json();
+  const second = await (await hub.fetch(request('PUT', {
+    subscriptions: [RECORD, { ...RECORD, id: 'sub_2' }],
+    baseUpdatedAt: first.updatedAt
+  }))).json();
+  // Same millisecond is possible; a repeated token would let a third write
+  // holding `first` overwrite this one unnoticed.
+  assert.ok(second.updatedAt > first.updatedAt);
+  assert.equal((await hub.fetch(request('PUT', { subscriptions: [], baseUpdatedAt: first.updatedAt }))).status, 409);
+
+  // A currency the app cannot convert would later be valued as USD.
+  const euro = await (await hub.fetch(request('PUT', {
+    subscriptions: [{ ...RECORD, currency: 'EUR' }],
+    baseUpdatedAt: second.updatedAt
+  }))).json();
+  assert.equal(euro.subscriptions[0].currency, 'USD');
+});
