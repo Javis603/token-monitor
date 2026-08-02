@@ -2498,12 +2498,13 @@ let hubSubscriptions = null;
 // cannot be reached kept showing the previous hub's records as though they were
 // this one's.
 let hubSubscriptionsHub = '';
-// One sequence covering reads AND writes. Guarding only reads was not enough: a
-// write that succeeds while an older read is still in flight would be undone by
-// it, and two writes whose answers arrive out of order would leave the older one
-// showing. Overlap is routine here — a mode change reconciles while the throttled
-// poll is already waiting, and the user can save during either.
-let subscriptionOpEpoch = 0;
+// One lane for every hub read and write, the same way startMode() serializes
+// hub-side work. Discarding whichever answer came back last is not enough: a read
+// that STARTS after a write can still observe the state before it, come back
+// first, and leave the write invisible on screen and in settings.json. Only
+// ordering the operations themselves removes that, and it also gives each write
+// the previous one's updatedAt to base on instead of a stale one.
+let subscriptionQueue = Promise.resolve();
 let lastSubscriptionRefreshMs = 0;
 const SUBSCRIPTION_REFRESH_MS = 60000;
 
@@ -2561,15 +2562,17 @@ function persistSubscriptionState() {
   return false;
 }
 
-function beginSubscriptionOp() {
-  return ++subscriptionOpEpoch;
+function queueSubscriptionOp(run) {
+  const result = subscriptionQueue.then(run, run);
+  // The lane has to survive a failed operation; the caller still sees the error.
+  subscriptionQueue = result.then(() => {}, () => {});
+  return result;
 }
 
-// True only while this operation is still the newest one against the hub the
-// user is looking at. Anything else describes a state nobody is on any more, and
-// applying it would put stale records on screen and in settings.json.
-function subscriptionOpIsCurrent(epoch, hub) {
-  return epoch === subscriptionOpEpoch && hub === currentHubIdentity();
+// The user can switch hubs while an operation is queued or in flight, and an
+// answer about the hub they left is not an answer about the one they are on.
+function subscriptionOpIsCurrent(hub) {
+  return hub === currentHubIdentity();
 }
 
 function subscriptionsEndpoint() {
@@ -2595,29 +2598,30 @@ async function fetchSharedSubscriptions() {
 // The 409 body is the hub's current list, worth caching — but only while this is
 // still the newest operation. A late rejection carrying an older document would
 // otherwise overwrite a write that has already landed.
-function staleSubscriptionWriteError(current, hub, epoch) {
+function staleSubscriptionWriteError(current, hub) {
   const error = new Error('stale_write');
   error.code = 'stale_write';
-  if (current && subscriptionOpIsCurrent(epoch, hub)) cacheSharedSubscriptions(current, hub);
+  if (current && subscriptionOpIsCurrent(hub)) cacheSharedSubscriptions(current, hub);
   return error;
 }
 
-async function writeSharedSubscriptions(list) {
+function writeSharedSubscriptions(list) {
+  return queueSubscriptionOp(() => writeSharedSubscriptionsNow(list));
+}
+
+async function writeSharedSubscriptionsNow(list) {
   const baseUpdatedAt = hubSubscriptions?.updatedAt || '';
   // Captured before the request, not read after it: the user can switch hubs
   // while a write is in flight, and stamping this answer with wherever they
-  // landed would file one hub's list under another's name. Taking an epoch also
-  // invalidates any read already waiting, which would otherwise come back with
-  // the list as it was before this write and undo it on screen.
+  // landed would file one hub's list under another's name.
   const hub = currentHubIdentity();
-  const epoch = beginSubscriptionOp();
   if (settings.hubMode === 'host' && embeddedHub) {
     try {
       const stored = embeddedHub.hub.setSubscriptions(list, baseUpdatedAt);
-      if (subscriptionOpIsCurrent(epoch, hub)) cacheSharedSubscriptions(stored, hub);
+      if (subscriptionOpIsCurrent(hub)) cacheSharedSubscriptions(stored, hub);
       return;
     } catch (error) {
-      if (error.code === 'stale_write') throw staleSubscriptionWriteError(error.current, hub, epoch);
+      if (error.code === 'stale_write') throw staleSubscriptionWriteError(error.current, hub);
       throw error;
     }
   }
@@ -2630,7 +2634,7 @@ async function writeSharedSubscriptions(list) {
   });
   // Someone else wrote the list since this device last read it. Overwriting would
   // erase their records silently, and they exist nowhere else.
-  if (response.status === 409) throw staleSubscriptionWriteError(await response.json().catch(() => null), hub, epoch);
+  if (response.status === 409) throw staleSubscriptionWriteError(await response.json().catch(() => null), hub);
   if (!response.ok) {
     // The hub answered, so it is reachable — a 401 is the wrong secret and a 400
     // is a bad payload. Reporting either as "could not reach the hub" sends the
@@ -2641,10 +2645,9 @@ async function writeSharedSubscriptions(list) {
     throw rejected;
   }
   const stored = await response.json();
-  // The write itself succeeded, but a newer operation may have overtaken it, or
-  // the user may have moved to another hub while it was in flight. Either way
-  // this answer no longer describes what is in front of them.
-  if (!subscriptionOpIsCurrent(epoch, hub)) return;
+  // The write succeeded, but if the user moved to another hub while it was in
+  // flight this answer no longer describes what is in front of them.
+  if (!subscriptionOpIsCurrent(hub)) return;
   cacheSharedSubscriptions(stored, hub);
 }
 
@@ -2723,7 +2726,11 @@ function discardOrphanedSubscriptions() {
   return settingsForRenderer();
 }
 
-async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
+function refreshSharedSubscriptions(options = {}) {
+  return queueSubscriptionOp(() => refreshSharedSubscriptionsNow(options));
+}
+
+async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
   if (!subscriptionsAreShared()) {
     const had = Boolean(hubSubscriptions);
     hubSubscriptions = null;
@@ -2737,7 +2744,7 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     hubSubscriptions = null;
     hubSubscriptionsHub = '';
   }
-  const epoch = beginSubscriptionOp();
+
   try {
     // Only records this device actually owns may be seeded or set aside. Once
     // settings.subscriptions is a cache of some hub it is that hub's data, and
@@ -2750,10 +2757,10 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
     const local = settings.subscriptionsCacheHub ? [] : (settings.subscriptions || []);
     const doc = await fetchSharedSubscriptions();
     if (!doc) return false;
-    // A write may have landed, another refresh may have overtaken this one, or
-    // the hub may have changed while this request was in flight. Applying it now
-    // would undo the write, or show one hub's records under another's name.
-    if (!subscriptionOpIsCurrent(epoch, hub)) return false;
+    // Nothing else can have run against the hub in the meantime — the lane saw to
+    // that — but the user may have switched hubs while this request was waiting,
+    // and applying it would show one hub's records under another's name.
+    if (!subscriptionOpIsCurrent(hub)) return false;
     // A hub nobody has ever written to: adopt this device's records rather than
     // replacing them with nothing. Keyed on updatedAt rather than on the list
     // being empty — an empty list WITH a timestamp is somebody's delete, and
@@ -2764,7 +2771,7 @@ async function refreshSharedSubscriptions({ seedFromLocal = false } = {}) {
       hubSubscriptions = doc;
       hubSubscriptionsHub = hub;
       try {
-        await writeSharedSubscriptions(local);
+        await writeSharedSubscriptionsNow(local);
         return true;
       } catch (error) {
         // The seed failed, so the empty document must not stay installed: in
