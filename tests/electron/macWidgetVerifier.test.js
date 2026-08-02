@@ -78,10 +78,10 @@ function entitlementXml(appGroup, { app = false, includeGroup = true } = {}) {
 </dict></plist>`;
 }
 
-function signatureText(teamIdentifier, authority = true) {
+function signatureText(teamIdentifier, authority = true, includeTeamIdentifier = true) {
   return [
     'Identifier=com.javis.tokenmonitor',
-    `TeamIdentifier=${teamIdentifier}`,
+    includeTeamIdentifier ? `TeamIdentifier=${teamIdentifier}` : '',
     authority ? 'Authority=Developer ID Application: Example (ABCDE12345)' : ''
   ].filter(Boolean).join('\n');
 }
@@ -95,7 +95,8 @@ function verifyFixture(bundle, {
   widgetTeam = appTeam,
   appEntitlementGroup = appGroup,
   widgetEntitlementGroup = appGroup,
-  authority = true
+  authority = true,
+  includeTeamIdentifier = true
 } = {}) {
   const execFileSyncImpl = (command, args) => {
     if (command === 'plutil') {
@@ -105,7 +106,12 @@ function verifyFixture(bundle, {
     }
     if (command === 'codesign' && args[0] === '--verify') return '';
     if (command === 'codesign' && args[0] === '-dv') {
-      return { stdout: '', stderr: args.at(-1) === bundle.extension ? signatureText(widgetTeam, authority) : signatureText(appTeam, authority) };
+      return {
+        stdout: '',
+        stderr: args.at(-1) === bundle.extension
+          ? signatureText(widgetTeam, authority, includeTeamIdentifier)
+          : signatureText(appTeam, authority, includeTeamIdentifier)
+      };
     }
     if (command === 'spctl') return '';
     throw new Error(`unexpected ${command} ${args.join(' ')}`);
@@ -156,6 +162,13 @@ test('parses codesign metadata emitted on stderr', () => {
       'Developer ID Certification Authority'
     ]
   });
+});
+
+test('local ad-hoc verification does not require a TeamIdentifier', (t) => {
+  const appGroup = 'group.com.example.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+  assert.doesNotThrow(() => verifyFixture(bundle, { appGroup, includeTeamIdentifier: false }));
 });
 
 test('cross-checks the expected App Group across config, Info.plist, and signed entitlements', (t) => {
