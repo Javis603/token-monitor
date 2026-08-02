@@ -1096,24 +1096,28 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`qoder history parse failed: ${err.message}`);
       }
     }
-    if (!qoderHistoryReadFailed) {
-      const history = await collectHistoryOnce({
-        clients: tokscaleClients,
-        promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
-        qoderGraph,
-        historyEnabled: options.historyEnabled,
-        commandTimeoutMs: options.historyTimeoutMs,
-        capDays: options.historyCapDays,
-        todayKey: localTodayKey(collectedAt),
-        runGraph: options.runGraph,
-        dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
-        dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
-        dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
-        dailyHistoryLiveDays,
-        onHistoryStatus: options.onHistoryStatus,
-        logger: options.logger
-      });
-      if (history) summary.history = history;
+    const historyQoderGraph = qoderHistoryReadFailed
+      ? options.qoderHistoryFallbackGraph
+      : qoderGraph;
+    const history = await collectHistoryOnce({
+      clients: tokscaleClients,
+      promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+      qoderGraph: historyQoderGraph || null,
+      historyEnabled: options.historyEnabled,
+      commandTimeoutMs: options.historyTimeoutMs,
+      capDays: options.historyCapDays,
+      todayKey: localTodayKey(collectedAt),
+      runGraph: options.runGraph,
+      dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
+      dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
+      dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
+      dailyHistoryLiveDays,
+      onHistoryStatus: options.onHistoryStatus,
+      logger: options.logger
+    });
+    if (history) summary.history = history;
+    if (!qoderHistoryReadFailed && qoderGraph && typeof options.onQoderHistoryGraph === 'function') {
+      options.onQoderHistoryGraph(qoderGraph);
     }
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
@@ -2254,6 +2258,7 @@ function startCollector(options) {
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
   let liveDailyHistoryDays = {};
+  let qoderHistoryGraph = null;
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
@@ -2436,8 +2441,10 @@ function startCollector(options) {
         lastActivityDays: activityDaysAnchor,
         refreshWsl: anchored ? refreshWsl : false,
         qoderFallbackPeriods: anchor?.qoderPeriods || null,
+        qoderHistoryFallbackGraph: qoderHistoryGraph,
         qoderReadState,
         onAnchorComputed: (x) => { captured = x; },
+        onQoderHistoryGraph: (graph) => { qoderHistoryGraph = graph; },
         onProgress: (partial) => {
           if (!partial.today) return;
           try {
@@ -2500,7 +2507,6 @@ function startCollector(options) {
         scheduledWatchNeedsFullScan = true;
         log('collector tick skipped: preserving the last snapshot after a Qoder CN read failure');
         return false;
-      }
       }
       if (!anchored && captured) {
         anchor = {

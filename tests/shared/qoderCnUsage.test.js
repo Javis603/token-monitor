@@ -127,6 +127,10 @@ test('undated qoder rows count for allTime only, mirroring the proma includeUnda
   assert.equal(periods.today.totalInput, 20, 'undated row must not leak into today');
   assert.equal(periods.month.totalInput, 20, 'undated row must not leak into month');
   assert.equal(periods.allTime.totalInput, 30, 'undated row must count in allTime');
+
+  const graph = buildQoderHistoryGraph({ rows });
+  assert.equal(graph.contributions.length, 1, 'undated rows must not create a history day');
+  assert.equal(graph.contributions[0].clients[0].tokens.input, 20);
 });
 
 test('qoderDataPaths resolves QoderCN DB path per platform', () => {

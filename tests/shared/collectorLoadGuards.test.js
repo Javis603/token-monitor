@@ -2579,6 +2579,58 @@ test('collector preserves Qoder while publishing other clients after a later Qod
   }
 });
 
+test('collector publishes other clients when Qoder fails before the first complete snapshot', async () => {
+  const tmp = withTmpHome([]);
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const qoderPath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderUsage = require(qoderPath);
+  const originalRows = qoderUsage.collectQoderRows;
+  let qoderReads = 0;
+  let claudeTokens = 3;
+  qoderUsage.collectQoderRows = async () => {
+    qoderReads += 1;
+    throw new Error('Qoder unavailable before first complete snapshot');
+  };
+  delete require.cache[collectorPath];
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,qodercn',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      anchorPersistenceEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: claudeTokens }] }),
+      onUpdate: (summary) => updates.push(summary)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    claudeTokens = 5;
+    await handle.tick('incremental', { todayOnly: true });
+
+    assert.equal(qoderReads, 2, 'Qoder is retried on the incremental read');
+    assert.equal(updates.length, 2, 'a first-read Qoder failure must not suppress other clients');
+    assert.equal(updates.at(-1).today.clients.claude, 5, 'the incremental Claude period is published');
+  } finally {
+    if (handle) handle.stop();
+    qoderUsage.collectQoderRows = originalRows;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('collector publishes live periods when only Qoder history read fails', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
@@ -2589,10 +2641,16 @@ test('collector publishes live periods when only Qoder history read fails', asyn
   const originalRows = qoderUsage.collectQoderRows;
   const originalHistory = qoderUsage.buildQoderHistoryGraph;
   let failHistory = false;
+  const todayKey = new Date().toISOString().slice(0, 10);
   qoderUsage.collectQoderRows = async () => [];
   qoderUsage.buildQoderHistoryGraph = () => {
     if (failHistory) throw new Error('temporary Qoder history read failure');
-    return { contributions: [] };
+    return {
+      contributions: [{
+        date: todayKey,
+        clients: [{ client: 'qodercn', modelId: 'qmodel', tokens: { input: 2 }, cost: 0, messages: 1 }]
+      }]
+    };
   };
   delete require.cache[collectorPath];
 
@@ -2612,7 +2670,12 @@ test('collector publishes live periods when only Qoder history read fails', asyn
       limitsEnabled: false,
       historyEnabled: true,
       runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: 3 }] }),
-      runGraph: async () => ({ entries: [] }),
+      runGraph: async () => ({
+        contributions: [{
+          date: todayKey,
+          clients: [{ client: 'claude', modelId: 'm', tokens: { input: 3 }, cost: 0, messages: 1 }]
+        }]
+      }),
       onUpdate: (summary) => updates.push(summary)
     });
 
@@ -2622,7 +2685,8 @@ test('collector publishes live periods when only Qoder history read fails', asyn
 
     assert.equal(updates.length, 2, 'history-only failure must not suppress fresh live periods');
     assert.equal(Object.prototype.hasOwnProperty.call(updates.at(-1), 'qoderStatus'), false);
-    assert.equal(Object.prototype.hasOwnProperty.call(updates.at(-1), 'history'), false);
+    assert.equal(updates.at(-1).history.daily[0].perClient.claude.tokens, 3);
+    assert.equal(updates.at(-1).history.daily[0].perClient.qodercn.tokens, 2);
     assert.equal(updates.at(-1).today.clients.claude, 3);
   } finally {
     if (handle) handle.stop();
