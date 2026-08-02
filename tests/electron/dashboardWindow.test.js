@@ -92,11 +92,15 @@ test('dashboard.html wires the shared modules and the two panels', () => {
   assert.match(html, /<script src="\.\.\/\.\.\/shared\/currency\.js"><\/script>/);
   assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactMoney\.js"><\/script>/);
   assert.match(html, /<script src="dashboard\.js"><\/script>/);
+  const scriptOrder = [
+    '<script src="../../shared/compactTokens.js"></script>',
+    '<script src="../../shared/currency.js"></script>',
+    '<script src="../../shared/compactMoney.js"></script>',
+    '<script src="dashboard.js"></script>'
+  ].map((script) => html.indexOf(script));
+  assert.ok(scriptOrder.every((index) => index >= 0), 'dashboard should include every compact money dependency');
   assert.ok(
-    html.indexOf('../../shared/compactTokens.js')
-      < html.indexOf('../../shared/currency.js')
-      && html.indexOf('../../shared/currency.js')
-        < html.indexOf('../../shared/compactMoney.js'),
+    scriptOrder.every((index, position) => position === 0 || scriptOrder[position - 1] < index),
     'compact money should load after its token and currency dependencies'
   );
   assert.match(html, /id="trendsTab"/);
