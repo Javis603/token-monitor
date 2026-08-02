@@ -2473,10 +2473,12 @@ function startCollector(options) {
                 // Merge the frozen WSL snapshot into today (as month/allTime do
                 // below) so the today card keeps its WSL contribution during a
                 // warm scan instead of dropping to host-only until the final tick.
-                today: mergePeriods(
-                  qoderAnchorToday ? mergePeriods(partial.today, qoderAnchorToday) : partial.today,
-                  wsl.today
-                )
+                // The upstream wsl.today guard is preserved: non-WSL machines
+                // keep the identity pass-through instead of a normalize round
+                // trip on this shared preview path.
+                today: qoderAnchorToday
+                  ? mergePeriods(partial.today, qoderAnchorToday, wsl.today)
+                  : (wsl.today ? mergePeriods(partial.today, wsl.today) : partial.today)
               };
               // Only include month/allTime when actually scanned. During warm
               // full scans the main.js handler carries the previous values
