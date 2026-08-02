@@ -90,7 +90,7 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.ok(schedulerIndex < appIndex);
   assert.notEqual(visibilityListenerStart, -1);
   assert.notEqual(visibilityListenerEnd, -1);
-  assert.match(visibilityListener, /stopTokenRateBoost\(\)/);
+  assert.match(visibilityListener, /cancelTokenRateBoost\(\)/);
   assert.match(visibilityListener, /statsRenderScheduler\.flush\(\)/);
   assert.match(
     statsPush,

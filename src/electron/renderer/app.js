@@ -7,6 +7,8 @@ const windowsGlassApi = window.TokenMonitorWindowsGlass;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
+const tokenRateApi = window.TokenMonitorTokenRate;
+const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
@@ -456,7 +458,7 @@ document.addEventListener('pointerdown', (event) => {
 });
 
 document.addEventListener('pointerup', (event) => {
-  stopTokenRateBoost(event);
+  releaseTokenRateBoost(event);
   clearViewSwitcherLongPress();
   if (viewSwitcherLongPressTriggered) {
     setTimeout(() => { viewSwitcherLongPressTriggered = false; }, 0);
@@ -464,7 +466,7 @@ document.addEventListener('pointerup', (event) => {
 });
 
 document.addEventListener('pointercancel', (event) => {
-  stopTokenRateBoost(event);
+  cancelTokenRateBoost(event);
   clearViewSwitcherLongPress();
   viewSwitcherLongPressTriggered = false;
 });
@@ -709,66 +711,21 @@ function hideTotalCompact() {
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
 }
-function positiveNumber(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-const TOKEN_RATE_BOOST_DOUBLING_MS = 520;
-const TOKEN_RATE_HOLD_THRESHOLD_MS = 180;
-const TOKEN_RATE_SETTLE_MS = 720;
-let tokenRateBoost = null;
-let tokenRateBoostAnimation = 0;
-let ignoreNextTokenRateClick = false;
-
-function tokenRateBoostValue(baseRate, elapsedMs) {
-  const base = Math.max(1, positiveNumber(baseRate));
-  const elapsed = Math.max(0, Number(elapsedMs) || 0);
-  return base * 2 ** (elapsed / TOKEN_RATE_BOOST_DOUBLING_MS);
-}
-function tokenRateSettleValue(fromRate, toRate, elapsedMs) {
-  const from = Math.max(0, Number(fromRate) || 0);
-  const to = Math.max(0, Number(toRate) || 0);
-  const elapsed = Math.max(0, Number(elapsedMs) || 0);
-  const progress = Math.min(1, elapsed / TOKEN_RATE_SETTLE_MS);
-  const eased = 1 - Math.pow(1 - progress, 3);
-  return from + (to - from) * eased;
-}
-
-// Estimated output tokens per second of model-busy time — roughly the unit an inference
-// benchmark reports, so the number is sanity-checkable against a known model's streaming
-// speed. An estimate, not a measurement: tokscale times a message as a whole rather than
-// its decode phase, and does not break output out per timed message, so the collector counts
-// an entry's output whenever that entry reported a duration (see timedOutputTokens in usage.js).
-//
-// Output rather than total tokens because cache reads dominate the total (typically >90%)
-// and were never generated, which would inflate the rate by two orders of magnitude and
-// read as a bug.
-//
-// Numerator and denominator describe the same entries, so this stays correct when periods are
-// summed across clients and devices — an all-output numerator over a timed-only denominator
-// would read high on any device running a client that reports no durations. Both ride the same
-// tokscale scan as the headline total, so it never divides a live numerator by a stale
-// denominator — the reason it dropped History activeTimeMs.
-function tokenRatePerSecond(period) {
-  const durationMs = positiveNumber(period?.timedDurationMs);
-  const timedOutput = positiveNumber(period?.timedOutputTokens);
-  if (!durationMs || !timedOutput) return 0;
-  return timedOutput * 1000 / durationMs;
-}
-// Every token per minute of the same model-busy window — the burn framing rather than the
-// speed one. This needs no coverage correction: timedTokens is exactly what the timed
-// messages carried, so numerator and denominator describe the identical set of messages.
-function tokenBurnPerMinute(period) {
-  const durationMs = positiveNumber(period?.timedDurationMs);
-  const timed = positiveNumber(period?.timedTokens);
-  if (!durationMs || !timed) return 0;
-  return timed * 60000 / durationMs;
-}
 function currentTokenRateValue() {
   const period = state.stats?.periods?.[state.period];
   const burn = state.settings?.tokenRateMode === 'burn';
-  return { burn, rate: burn ? tokenBurnPerMinute(period) : tokenRatePerSecond(period) };
+  return {
+    burn,
+    mode: burn ? 'burn' : 'speed',
+    rate: burn ? tokenBurnPerMinute(period) : tokenRatePerSecond(period)
+  };
 }
+const tokenRateBoost = tokenRateApi.createTokenRateBoostController({
+  readValue: currentTokenRateValue,
+  canStart: () => els.shell?.classList.contains('title-icon-only') || els.shell?.classList.contains('title-collapsed'),
+  prefersReducedMotion,
+  onChange: () => renderTokenRate()
+});
 function tokenRateText(rate, burn) {
   // formatCompact rounds, so a sub-0.5 rate would render as a bare "0". Treat that as no
   // data and stay hidden rather than claim a zero pace.
@@ -781,88 +738,26 @@ function tokenRateText(rate, burn) {
 function renderTokenRate() {
   if (!els.tokenRateReveal) return;
   const { burn, rate } = currentTokenRateValue();
-  const displayRate = tokenRateBoost
-    ? tokenRateBoostDisplayRate(tokenRateBoostNow())
-    : rate;
-  const text = tokenRateText(displayRate, burn);
+  const boost = tokenRateBoost.getSnapshot();
+  const displayRate = boost ? boost.displayRate : rate;
+  const text = tokenRateText(displayRate, boost ? boost.mode === 'burn' : burn);
   els.tokenRateReveal.textContent = text;
   els.tokenRateReveal.classList.toggle('has-value', Boolean(text));
-  els.tokenRateReveal.classList.toggle('boosting', tokenRateBoost?.phase === 'boosting');
-  els.tokenRateReveal.classList.toggle('settling', tokenRateBoost?.phase === 'settling');
-}
-function tokenRateBoostNow() {
-  return typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? performance.now()
-    : Date.now();
-}
-function tokenRateBoostDisplayRate(now) {
-  if (tokenRateBoost?.phase === 'settling') {
-    return tokenRateSettleValue(
-      tokenRateBoost.settleFromRate,
-      tokenRateBoost.settleToRate,
-      now - tokenRateBoost.settledAt
-    );
-  }
-  return tokenRateBoostValue(tokenRateBoost.baseRate, now - tokenRateBoost.startedAt);
-}
-function updateTokenRateBoost() {
-  if (!tokenRateBoost) return;
-  const now = tokenRateBoostNow();
-  if (tokenRateBoost.phase === 'settling' && now - tokenRateBoost.settledAt >= TOKEN_RATE_SETTLE_MS) {
-    tokenRateBoost = null;
-    tokenRateBoostAnimation = 0;
-    renderTokenRate();
-    return;
-  }
-  renderTokenRate();
-  tokenRateBoostAnimation = requestAnimationFrame(updateTokenRateBoost);
-}
-function cancelTokenRateBoostAnimation() {
-  if (tokenRateBoostAnimation) cancelAnimationFrame(tokenRateBoostAnimation);
-  tokenRateBoostAnimation = 0;
+  els.tokenRateReveal.classList.toggle('boosting', boost?.phase === 'boosting');
+  els.tokenRateReveal.classList.toggle('settling', boost?.phase === 'settling');
 }
 function startTokenRateBoost(event) {
-  if (event.button !== undefined && event.button !== 0) return;
-  ignoreNextTokenRateClick = false;
-  if (tokenRateBoost || prefersReducedMotion()) return;
-  if (!els.shell?.classList.contains('title-icon-only') && !els.shell?.classList.contains('title-collapsed')) return;
-  const { rate } = currentTokenRateValue();
-  tokenRateBoost = {
-    phase: 'boosting',
-    baseRate: Math.max(1, rate),
-    pointerId: event.pointerId,
-    startedAt: tokenRateBoostNow()
-  };
+  if (!tokenRateBoost.start(event)) return;
   try { event.currentTarget?.setPointerCapture?.(event.pointerId); } catch (_) {}
-  renderTokenRate();
-  tokenRateBoostAnimation = requestAnimationFrame(updateTokenRateBoost);
 }
-function stopTokenRateBoost(event) {
-  if (!tokenRateBoost || tokenRateBoost.phase === 'settling') return;
-  if (event?.pointerId !== undefined && event.pointerId !== tokenRateBoost.pointerId) return;
-  const elapsed = tokenRateBoostNow() - tokenRateBoost.startedAt;
-  const suppressClick = (event?.type === 'pointerup' || event?.type === 'lostpointercapture') && elapsed >= TOKEN_RATE_HOLD_THRESHOLD_MS;
-  if (elapsed < TOKEN_RATE_HOLD_THRESHOLD_MS) {
-    tokenRateBoost = null;
-    cancelTokenRateBoostAnimation();
-    renderTokenRate();
-    return;
-  }
-  const { rate: settleToRate } = currentTokenRateValue();
-  tokenRateBoost = {
-    ...tokenRateBoost,
-    phase: 'settling',
-    settleFromRate: tokenRateBoostValue(tokenRateBoost.baseRate, elapsed),
-    settleToRate,
-    settledAt: tokenRateBoostNow()
-  };
-  if (suppressClick) ignoreNextTokenRateClick = true;
-  renderTokenRate();
-  if (!tokenRateBoostAnimation) tokenRateBoostAnimation = requestAnimationFrame(updateTokenRateBoost);
+function releaseTokenRateBoost(event) {
+  tokenRateBoost.release(event);
+}
+function cancelTokenRateBoost(event, options) {
+  tokenRateBoost.cancel(event, options);
 }
 function suppressTokenRateClickAfterHold(event) {
-  if (!ignoreNextTokenRateClick) return;
-  ignoreNextTokenRateClick = false;
+  if (!tokenRateBoost.consumeClick()) return;
   event.stopImmediatePropagation();
 }
 // The title mark is the only pixel of the reveal that can take a click: a drag region does
@@ -872,10 +767,13 @@ function suppressTokenRateClickAfterHold(event) {
 // control here is worse than no keyboard path: the window assigns focus to a control when it
 // is shown, and Chromium then derives :focus-visible from that activation rather than from
 // any click, so the reveal reopens with a focus ring on a window the user just summoned with
-// the pointer nowhere near the title. The renderer cannot even clean that up, because it
-// receives no blur, focus or visibilitychange event across a real hide and show. Short clicks
-// still switch the reading; a sustained pointer hold is the transient boost affordance.
+// the pointer nowhere near the title. Visibility cancellation keeps transient state from
+// surviving a hide/show, but it does not make this hover-only reading a useful keyboard control.
+// Short clicks still switch the reading; a sustained pointer hold is the transient boost affordance.
 function toggleTokenRateMode() {
+  // A mode switch during settling would relabel the old reading with the new unit. End the
+  // transient state first; the next render then starts from the selected framing's real rate.
+  tokenRateBoost.cancel(undefined, { suppressClick: false });
   const next = state.settings?.tokenRateMode === 'burn' ? 'speed' : 'burn';
   // Repaint before the settings round trip. saveSettings re-syncs the entire settings form,
   // which is orders of magnitude heavier than this label and would make the switch lag.
@@ -9478,7 +9376,7 @@ els.backHomeButton?.addEventListener('click', (event) => {
 });
 
 window.addEventListener('blur', () => {
-  stopTokenRateBoost();
+  cancelTokenRateBoost();
   clearViewSwitcherLongPress();
   clearViewSwitcherHoverClose();
   viewSwitcherLongPressTriggered = false;
@@ -9600,8 +9498,15 @@ els.hubModeOptions.addEventListener('change', async (event) => {
 // the persisted speed/burn framing when its pointerup synthesizes a click.
 els.appTitleMark?.addEventListener('pointerdown', startTokenRateBoost);
 els.liveDot?.addEventListener('pointerdown', startTokenRateBoost);
-els.appTitleMark?.addEventListener('lostpointercapture', stopTokenRateBoost);
-els.liveDot?.addEventListener('lostpointercapture', stopTokenRateBoost);
+els.appTitleMark?.addEventListener('lostpointercapture', (event) => {
+  // A normal pointerup has already entered settling before capture is released. Only an
+  // unexpected loss while boosting is a cancellation; otherwise the release animation would
+  // be cut off immediately by the browser's follow-up lostpointercapture event.
+  cancelTokenRateBoost(event, { preserveSettling: true });
+});
+els.liveDot?.addEventListener('lostpointercapture', (event) => {
+  cancelTokenRateBoost(event, { preserveSettling: true });
+});
 els.appTitleMark?.addEventListener('click', suppressTokenRateClickAfterHold);
 els.liveDot?.addEventListener('click', suppressTokenRateClickAfterHold);
 els.appTitleMark?.addEventListener('click', toggleTokenRateMode);
@@ -10138,7 +10043,7 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   render: renderStatsUpdate
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) stopTokenRateBoost();
+  if (document.hidden) cancelTokenRateBoost();
   statsRenderScheduler.flush();
 });
 

@@ -4,34 +4,57 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+const tokenRatePresentation = fs.readFileSync(path.join(rendererDir, 'tokenRatePresentation.js'), 'utf8');
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
+const tokenRateApi = require(path.join(rendererDir, 'tokenRatePresentation.js'));
 
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
 function tokenRateSource() {
-  const start = app.indexOf('function positiveNumber(');
-  const end = app.indexOf('function renderTokenRate(', start);
-  assert.notEqual(start, -1, 'token-rate helpers should exist');
-  assert.notEqual(end, -1, 'renderTokenRate should follow the rate helpers');
-  return app.slice(start, end);
+  return tokenRatePresentation;
 }
 
 function tokenRateFunctions() {
-  const context = {};
-  vm.runInNewContext(
-    `${tokenRateSource()}
-     this.tokenRatePerSecond = tokenRatePerSecond;
-     this.tokenBurnPerMinute = tokenBurnPerMinute;
-     this.tokenRateBoostValue = tokenRateBoostValue;
-     this.tokenRateSettleValue = tokenRateSettleValue;`,
-    context
-  );
-  return context;
+  return tokenRateApi;
+}
+
+function createBoostHarness({ rate = 100, mode = 'speed', reducedMotion = false } = {}) {
+  let now = 0;
+  let nextFrameId = 0;
+  let controller;
+  const frames = new Map();
+  const changes = [];
+  const value = { rate, mode };
+  controller = tokenRateApi.createTokenRateBoostController({
+    readValue: () => value,
+    canStart: () => true,
+    prefersReducedMotion: () => reducedMotion,
+    now: () => now,
+    requestFrame: (callback) => {
+      const frameId = ++nextFrameId;
+      frames.set(frameId, callback);
+      return frameId;
+    },
+    cancelFrame: (frameId) => frames.delete(frameId),
+    onChange: () => changes.push(controller.getSnapshot())
+  });
+  return {
+    advance(ms) { now += ms; },
+    changes,
+    controller,
+    frame() {
+      const [frameId, callback] = frames.entries().next().value || [];
+      assert.notEqual(frameId, undefined, 'a frame should be scheduled');
+      frames.delete(frameId);
+      callback();
+    },
+    frames,
+    value
+  };
 }
 
 test('token rate is timed output tokens per second of timed model duration', () => {
@@ -81,7 +104,7 @@ test('the burn reading reads zero without throughput data', () => {
 
 test('holding the title mark accelerates from the real rate and keeps rising', () => {
   const { tokenRateBoostValue, tokenRateSettleValue } = tokenRateFunctions();
-  assert.equal(tokenRateBoostValue(0, 0), 1);
+  assert.equal(tokenRateBoostValue(0, 0), 0);
   assert.equal(tokenRateBoostValue(100, -1), 100);
   assert.ok(tokenRateBoostValue(100, 520) >= 200);
   assert.ok(tokenRateBoostValue(100, 1000) > 300);
@@ -90,6 +113,89 @@ test('holding the title mark accelerates from the real rate and keeps rising', (
   assert.ok(tokenRateSettleValue(boosted, 100, 360) < boosted);
   assert.ok(tokenRateSettleValue(boosted, 100, 360) > 100);
   assert.equal(tokenRateSettleValue(boosted, 100, 720), 100);
+  assert.equal(tokenRateBoostValue(100, Number.POSITIVE_INFINITY), tokenRateApi.TOKEN_RATE_MAX_DISPLAY_RATE);
+  assert.ok(Number.isFinite(tokenRateBoostValue(100, 30_000)));
+});
+
+test('the boost controller cancels pointercancel and blur immediately', () => {
+  for (const cancelEvent of [{ type: 'pointercancel', pointerId: 7 }, undefined]) {
+    const harness = createBoostHarness();
+    assert.equal(harness.controller.start({ button: 0, pointerId: 7 }), true);
+    harness.advance(300);
+    assert.equal(harness.controller.cancel(cancelEvent), true);
+    assert.equal(harness.controller.getSnapshot(), null);
+    assert.equal(harness.frames.size, 0);
+    assert.equal(harness.controller.consumeClick(), true);
+    assert.equal(harness.controller.consumeClick(), false);
+  }
+});
+
+test('the boost controller does not start without a usable rate', () => {
+  const harness = createBoostHarness({ rate: 0 });
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), false);
+  assert.equal(harness.controller.getSnapshot(), null);
+  assert.equal(harness.frames.size, 0);
+});
+
+test('reduced motion disables the transient boost', () => {
+  const harness = createBoostHarness({ reducedMotion: true });
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), false);
+  assert.equal(harness.controller.getSnapshot(), null);
+  assert.equal(harness.frames.size, 0);
+});
+
+test('a short click clears the transient state without suppressing the mode toggle', () => {
+  const harness = createBoostHarness();
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
+  harness.advance(100);
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 1 }), false);
+  assert.equal(harness.controller.getSnapshot(), null);
+  assert.equal(harness.controller.consumeClick(), false);
+});
+
+test('a held pointer settles to the latest rate and suppresses only the next click', () => {
+  const harness = createBoostHarness();
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
+  harness.advance(2_000);
+  harness.value.rate = 40;
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 1 }), true);
+  assert.equal(harness.controller.getSnapshot().phase, 'settling');
+  assert.equal(harness.controller.getSnapshot().settleToRate, 40);
+  assert.equal(harness.controller.consumeClick(), true);
+  assert.equal(harness.controller.consumeClick(), false);
+  harness.advance(360);
+  harness.frame();
+  assert.equal(harness.controller.getSnapshot().phase, 'settling');
+  harness.advance(360);
+  harness.frame();
+  assert.equal(harness.controller.getSnapshot(), null);
+});
+
+test('lost pointer capture cancels boosting but preserves a normal release settlement', () => {
+  const canceled = createBoostHarness();
+  assert.equal(canceled.controller.start({ button: 0, pointerId: 1 }), true);
+  canceled.advance(300);
+  assert.equal(canceled.controller.cancel({ type: 'lostpointercapture', pointerId: 1 }, { preserveSettling: true }), true);
+  assert.equal(canceled.controller.getSnapshot(), null);
+
+  const released = createBoostHarness();
+  assert.equal(released.controller.start({ button: 0, pointerId: 1 }), true);
+  released.advance(300);
+  assert.equal(released.controller.release({ type: 'pointerup', pointerId: 1 }), true);
+  assert.equal(released.controller.cancel({ type: 'lostpointercapture', pointerId: 1 }, { preserveSettling: true }), false);
+  assert.equal(released.controller.getSnapshot().phase, 'settling');
+});
+
+test('mode changes cancel settling before the next interaction uses the new unit', () => {
+  const harness = createBoostHarness();
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
+  harness.advance(1_000);
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 1 }), true);
+  assert.equal(harness.controller.getSnapshot().mode, 'speed');
+  assert.equal(harness.controller.cancel(undefined, { suppressClick: false }), true);
+  harness.value.mode = 'burn';
+  assert.equal(harness.controller.start({ button: 0, pointerId: 2 }), true);
+  assert.equal(harness.controller.getSnapshot().mode, 'burn');
 });
 
 test('the reveal mode is a persisted setting that defaults to speed', () => {
@@ -100,6 +206,10 @@ test('the reveal mode is a persisted setting that defaults to speed', () => {
   // Hover and click must cover the same surface, so both reveal triggers toggle.
   assert.match(app, /els\.appTitleMark\?\.addEventListener\('click', toggleTokenRateMode\)/);
   assert.match(app, /els\.liveDot\?\.addEventListener\('click', toggleTokenRateMode\)/);
+  const presentationIndex = html.indexOf('<script src="tokenRatePresentation.js"></script>');
+  const appIndex = html.indexOf('<script src="app.js"></script>');
+  assert.notEqual(presentationIndex, -1);
+  assert.ok(presentationIndex < appIndex);
 });
 
 test('every element that reveals on hover is also clickable and shows a pointer', () => {
@@ -136,14 +246,13 @@ test('the reveal triggers stay non-focusable', () => {
   // Making either trigger focusable reopens the reveal on its own: the window assigns focus to
   // a control when it is shown, and Chromium derives :focus-visible from that activation rather
   // than from any click, so the reading and a focus ring appear on a freshly summoned window
-  // with the pointer nowhere near the title. The renderer cannot undo it either — it receives
-  // no blur, focus or visibilitychange event across a real hide and show. Pointer-only is the
-  // design, so the markup must stay inert.
+  // with the pointer nowhere near the title. Pointer-only is the design, so the markup must stay
+  // inert; the separate visibility cancellation path only protects transient hold state.
   //
   // This asserts the markup rather than the behaviour because the behaviour is not observable
-  // from here — it needs a real Electron window, and the renderer is not told when one is
-  // hidden or shown. Making these focusable is not banned forever: it needs evidence that a
-  // hidden-then-shown window no longer opens the reveal or draws a ring on its own.
+  // from here — it needs a real Electron window. Making these focusable is not banned forever:
+  // it needs evidence that a hidden-then-shown window no longer opens the reveal or draws a ring
+  // on its own.
   const reason = 'focusable here reopens the reveal on window show; see the comment above';
   const triggers = [...html.matchAll(/<(\w+)([^>]*\bclass="(?:app-title-mark|live-dot)"[^>]*)>/g)];
   assert.equal(triggers.length, 2, 'both reveal triggers are present in the title');
@@ -156,17 +265,22 @@ test('the reveal triggers stay non-focusable', () => {
 
 test('the token-rate hold has release, cancellation, reduced-motion, and click-guard paths', () => {
   assert.match(app, /function startTokenRateBoost\(event\)/);
-  assert.match(app, /function stopTokenRateBoost\(event\)/);
-  assert.match(app, /const TOKEN_RATE_BOOST_DOUBLING_MS = 520/);
-  assert.match(app, /const TOKEN_RATE_SETTLE_MS = 720/);
-  assert.match(app, /function tokenRateSettleValue\(fromRate, toRate, elapsedMs\)/);
-  assert.match(app, /phase: 'settling'/);
-  assert.match(app, /tokenRateBoostAnimation = requestAnimationFrame\(updateTokenRateBoost\)/);
-  assert.match(app, /document\.addEventListener\('pointercancel', \(event\) => \{\s*stopTokenRateBoost\(event\)/);
-  assert.match(app, /window\.addEventListener\('blur', \(\) => \{\s*stopTokenRateBoost\(\)/);
-  assert.match(app, /if \(document\.hidden\) stopTokenRateBoost\(\)/);
-  assert.match(app, /if \(tokenRateBoost \|\| prefersReducedMotion\(\)\) return/);
+  assert.match(app, /function releaseTokenRateBoost\(event\)/);
+  assert.match(app, /function cancelTokenRateBoost\(event, options\)/);
+  assert.match(tokenRatePresentation, /const TOKEN_RATE_BOOST_DOUBLING_MS = 520/);
+  assert.match(tokenRatePresentation, /const TOKEN_RATE_SETTLE_MS = 720/);
+  assert.match(tokenRatePresentation, /function tokenRateSettleValue\(fromRate, toRate, elapsedMs\)/);
+  assert.match(tokenRatePresentation, /phase: 'settling'/);
+  assert.match(tokenRatePresentation, /requestFrame\(step\)/);
+  assert.match(app, /document\.addEventListener\('pointercancel', \(event\) => \{\s*cancelTokenRateBoost\(event\)/);
+  assert.match(app, /window\.addEventListener\('blur', \(\) => \{\s*cancelTokenRateBoost\(\)/);
+  assert.match(app, /if \(document\.hidden\) cancelTokenRateBoost\(\)/);
+  assert.match(tokenRatePresentation, /if \(state \|\| !canStart\(\) \|\| prefersReducedMotion\(\)\) return false/);
+  assert.match(tokenRatePresentation, /if \(!\(value\.rate > 0\)\) return false/);
+  assert.match(app, /cancelTokenRateBoost\(event, \{ preserveSettling: true \}\)/);
   assert.match(app, /function suppressTokenRateClickAfterHold\(event\)/);
+  assert.match(tokenRatePresentation, /function consumeClick\(\)/);
+  assert.match(app, /tokenRateBoost\.cancel\(undefined, \{ suppressClick: false \}\)/);
   assert.match(css, /\.shell\.title-icon-only \.token-rate-reveal\.boosting/);
   assert.match(css, /\.shell\.title-icon-only \.token-rate-reveal\.settling/);
   assert.match(css, /color: var\(--accent\)/);
