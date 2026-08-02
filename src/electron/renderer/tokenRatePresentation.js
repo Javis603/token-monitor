@@ -148,6 +148,12 @@
       // was left behind when blur/pointercancel produced no follow-up click; if the canceled
       // gesture does produce one, consumeClick() runs before this next pointerdown instead.
       suppressNextClick = false;
+      if (state?.phase === 'settling') {
+        // A second hold is a new gesture, not a mode click. Interrupt the old release animation
+        // so the new pointer can own the controller immediately.
+        state = null;
+        cancelScheduledFrame();
+      }
       if (state || !canStart() || prefersReducedMotion()) return false;
       const value = currentValue();
       if (!(value.rate > 0)) return false;

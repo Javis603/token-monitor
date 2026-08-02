@@ -184,6 +184,20 @@ test('a held pointer settles to the latest rate and suppresses only the next cli
   assert.equal(harness.controller.getSnapshot(), null);
 });
 
+test('a new hold interrupts settling and suppresses its own click', () => {
+  const harness = createBoostHarness();
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
+  harness.advance(1_000);
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 1 }), true);
+  assert.equal(harness.controller.consumeClick(), true);
+
+  assert.equal(harness.controller.start({ button: 0, pointerId: 2 }), true);
+  harness.advance(300);
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 2 }), true);
+  assert.equal(harness.controller.getSnapshot().phase, 'settling');
+  assert.equal(harness.controller.consumeClick(), true);
+});
+
 test('lost pointer capture cancels boosting but preserves a normal release settlement', () => {
   const canceled = createBoostHarness();
   assert.equal(canceled.controller.start({ button: 0, pointerId: 1 }), true);
@@ -290,6 +304,7 @@ test('the token-rate hold has release, cancellation, reduced-motion, and click-g
   assert.match(app, /if \(document\.hidden\) cancelTokenRateBoost\(\)/);
   assert.match(tokenRatePresentation, /if \(state \|\| !canStart\(\) \|\| prefersReducedMotion\(\)\) return false/);
   assert.match(tokenRatePresentation, /if \(!\(value\.rate > 0\)\) return false/);
+  assert.match(tokenRatePresentation, /if \(state\?\.phase === 'settling'\) \{[\s\S]*?cancelScheduledFrame\(\)/);
   assert.match(app, /cancelTokenRateBoost\(event, \{ preserveSettling: true \}\)/);
   assert.match(app, /function suppressTokenRateClickAfterHold\(event\)/);
   assert.match(tokenRatePresentation, /function consumeClick\(\)/);

@@ -1345,6 +1345,7 @@ function prefersReducedMotion() {
 }
 
 function settleMotionAnimations() {
+  cancelTokenRateBoost(undefined, { suppressClick: false });
   cancelNumberAnimation();
   numberAnimValue = state.currentTotal;
   els.totalTokens.textContent = formatNumber(state.currentTotal);
