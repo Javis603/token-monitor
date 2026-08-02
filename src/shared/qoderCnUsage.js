@@ -41,7 +41,8 @@ const QODER_MODEL_DISPLAY_NAMES = Object.freeze({
   ultimate: 'Ultimate'
 });
 const QODER_USAGE_SQL = `
-SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create
+SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create,
+  (SELECT cs.project_name FROM chat_session cs WHERE cs.session_id = chat_message.session_id LIMIT 1) AS project_name
 FROM chat_message
 WHERE role = 'assistant'
   AND token_info IS NOT NULL
@@ -65,6 +66,29 @@ CASE
 END
 `;
 const QODER_USAGE_SINCE_SQL = `
+SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create,
+  (SELECT cs.project_name FROM chat_session cs WHERE cs.session_id = chat_message.session_id LIMIT 1) AS project_name
+FROM chat_message
+WHERE role = 'assistant'
+  AND token_info IS NOT NULL
+  AND trim(token_info) NOT IN ('', '{}')
+  AND (typeof(gmt_create) != 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ?
+    OR typeof(gmt_create) = 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ? - 86400000)
+ORDER BY gmt_create, rowid
+`;
+
+// Fallbacks for Qoder CN versions whose database has no chat_session table:
+// the scalar subquery would fail the whole read, so probe once per process and
+// use the plain queries instead (sessions then stay unattributed).
+const QODER_USAGE_SQL_NO_PROJECT = `
+SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create
+FROM chat_message
+WHERE role = 'assistant'
+  AND token_info IS NOT NULL
+  AND trim(token_info) NOT IN ('', '{}')
+ORDER BY gmt_create, rowid
+`;
+const QODER_USAGE_SINCE_SQL_NO_PROJECT = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create
 FROM chat_message
 WHERE role = 'assistant'
@@ -74,6 +98,51 @@ WHERE role = 'assistant'
     OR typeof(gmt_create) = 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ? - 86400000)
 ORDER BY gmt_create, rowid
 `;
+const QODER_CHAT_SESSION_PROBE_SQL = `SELECT 1 FROM sqlite_master
+WHERE type = 'table' AND name = 'chat_session'
+  AND EXISTS (SELECT 1 FROM pragma_table_info('chat_session') WHERE name = 'project_name')
+LIMIT 1`;
+
+function normalizeQoderProjectLabel(value) {
+  // '.' is Qoder CN's "no project" sentinel; keep it unattributed so it does
+  // not surface as a phantom project named '.' in the Projects view.
+  const label = String(value || '').trim();
+  return label === '.' ? '' : label;
+}
+
+// Only probed outcomes are cached: a confirmed answer (table+column present
+// or absent) is stable for the life of the database file, while a transient
+// probe failure returns null so the next read retries instead of locking the
+// process into the no-project fallback.
+const chatSessionTableCache = new Map();
+
+// Returns true when chat_session.project_name exists, false when the database
+// was read successfully without it, or null when the probe itself failed.
+async function probeChatSessionTable(dbPath, { run, requireFn } = {}) {
+  const probe = QODER_CHAT_SESSION_PROBE_SQL;
+  try {
+    if (run) {
+      const result = await run('sqlite3', ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, probe], {
+        encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 10_000, windowsHide: true
+      });
+      const parsed = JSON.parse(String(result?.stdout || '').trim() || '[]');
+      return Array.isArray(parsed) ? parsed.length > 0 : null;
+    }
+  } catch (_) { /* fall through to node:sqlite */ }
+  try {
+    const requireFnLocal = requireFn || require;
+    const { DatabaseSync } = requireFnLocal('node:sqlite');
+    const database = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      database.exec('PRAGMA busy_timeout = 250');
+      return database.prepare(probe).get() !== undefined;
+    } finally {
+      database.close();
+    }
+  } catch (_) {
+    return null;
+  }
+}
 
 function numeric(value) {
   const number = Number(value);
@@ -128,6 +197,7 @@ function normalizeQoderDbRow(row, source = 'local') {
     sessionId: `qodercn:${source}:${session}`,
     messageId: `qodercn:${source}:${session}:${message}`,
     model: displayName || modelKey,
+    projectLabel: normalizeQoderProjectLabel(row?.project_name),
     input: Math.max(0, prompt - cached),
     output,
     cacheRead: Math.min(prompt, cached),
@@ -160,7 +230,17 @@ function qoderDataPaths(options = {}) {
 async function readQoderDbRows(dbPath, options = {}) {
   const run = options.execFile || execFileAsync;
   const sinceMs = options.sinceMs;
-  const sql = sinceMs ? QODER_USAGE_SINCE_SQL : QODER_USAGE_SQL;
+  let probed = chatSessionTableCache.get(dbPath);
+  if (probed === undefined) {
+    probed = await probeChatSessionTable(dbPath, { run, requireFn: options.requireFn });
+    // Only a successful probe outcome is cached (true or confirmed absent); a
+    // null probe failure is retried on the next read.
+    if (probed !== null) chatSessionTableCache.set(dbPath, probed);
+  }
+  const withProject = probed === true;
+  const sql = sinceMs
+    ? (withProject ? QODER_USAGE_SINCE_SQL : QODER_USAGE_SINCE_SQL_NO_PROJECT)
+    : (withProject ? QODER_USAGE_SQL : QODER_USAGE_SQL_NO_PROJECT);
   const cliArgs = sinceMs
     ? ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql.replace('?', String(sinceMs)).replace('?', String(sinceMs))]
     : ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql];
@@ -178,8 +258,8 @@ async function readQoderDbRows(dbPath, options = {}) {
       try {
         database.exec('PRAGMA busy_timeout = 250');
         return sinceMs
-          ? database.prepare(QODER_USAGE_SINCE_SQL).all(sinceMs, sinceMs)
-          : database.prepare(QODER_USAGE_SQL).all();
+          ? database.prepare(withProject ? QODER_USAGE_SINCE_SQL : QODER_USAGE_SINCE_SQL_NO_PROJECT).all(sinceMs, sinceMs)
+          : database.prepare(withProject ? QODER_USAGE_SQL : QODER_USAGE_SQL_NO_PROJECT).all();
       } finally {
         database.close();
       }
@@ -240,7 +320,8 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
     input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
     reasoning: 0, messageCount: row.messages, cost: row.cost,
     startedAt: row.startedAt ? new Date(row.startedAt).toISOString() : '',
-    lastUsedAt: row.lastUsedAt ? new Date(row.lastUsedAt).toISOString() : '', performance: null
+    lastUsedAt: row.lastUsedAt ? new Date(row.lastUsedAt).toISOString() : '',
+    projectLabel: row.projectLabel || '', performance: null
   }));
   const sum = (key) => entries.reduce((total, row) => total + row[key], 0);
   return {
@@ -295,12 +376,11 @@ function buildQoderHistoryGraph(options = {}) {
 
 module.exports = {
   QODER_MODEL_DISPLAY_NAMES,
-  QODER_USAGE_SQL,
-  QODER_USAGE_SINCE_SQL,
   buildQoderHistoryGraph,
   buildQoderPeriods,
   collectQoderRows,
   normalizeQoderDbRow,
   qoderDataPaths,
-  readQoderDbRows
+  readQoderDbRows,
+  resetQoderChatSessionProbe() { chatSessionTableCache.clear(); }
 };

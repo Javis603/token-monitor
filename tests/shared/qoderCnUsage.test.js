@@ -51,6 +51,7 @@ test('normalizeQoderDbRow separates cached input without double-counting', () =>
     cacheRead: 57_853,
     cacheWrite: 0,
     createdAt: 1_784_681_696_263,
+    projectLabel: '',
     messages: 1
   });
 });
@@ -212,6 +213,17 @@ test('readQoderDbRows fails loudly when both sqlite backends are unavailable', a
     gmt_create INTEGER,
     role TEXT
   )`);
+  database.exec(`CREATE TABLE chat_session (
+    session_id varchar(64) primary key,
+    user_id varchar(64) not null,
+    user_name varchar(64),
+    session_title varchar(256) not null,
+    project_id varchar(64) not null,
+    project_uri varchar(512),
+    project_name varchar(64),
+    gmt_create INTEGER,
+    gmt_modified INTEGER
+  )`);
   const insert = database.prepare(`
     INSERT INTO chat_message (id, session_id, request_id, token_info, model_info, gmt_create, role)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -265,6 +277,11 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
   assert.equal(byId.get('msg-10').createdAt, 0);
   assert.equal(byId.get('msg-11').createdAt, 1_750_000_000 * 1000);
   assert.equal(byId.get('msg-12').createdAt, 1_785_286_800_000);
+  // project_name from chat_session flows through as the session project label.
+  assert.equal(byId.get('msg-1').projectLabel, 'token-monitor-main');
+  assert.equal(byId.get('msg-3').projectLabel, 'ZCodeProject');
+  assert.equal(byId.get('msg-10').projectLabel, '', 'the "." sentinel is filtered out');
+  assert.equal(byId.get('msg-13').projectLabel, 'qoder-demo');
 });
 
 test('anchored read applies a lenient window to text timestamps and filters in SQL', async (t) => {
@@ -276,10 +293,10 @@ test('anchored read applies a lenient window to text timestamps and filters in S
     return;
   }
   const ids = rows.map((row) => row.id);
-  // msg-9 (Z-suffixed ISO at exactly sinceMs) and msg-12 (text milliseconds)
-  // must survive the lenient text window; msg-10 (unparseable text → 0) must
-  // still be filtered out by SQL, and msg-2 (numeric ms below sinceMs) must be
-  // filtered by the exact numeric branch.
+  // msg-9 (Z-suffixed ISO, 15 h below sinceMs) and msg-12 (text milliseconds)
+  // survive the anchored read via the lenient 24 h text window; msg-10
+  // (unparseable text → 0) must still be filtered out by SQL, and msg-2
+  // (numeric ms below sinceMs) must be filtered by the exact numeric branch.
   assert.ok(ids.includes('msg-9'), 'Z-suffixed ISO at sinceMs must be kept');
   assert.ok(ids.includes('msg-12'), 'text milliseconds within the window must be kept');
   // Discriminating case: msg-13 is a text ISO 8h below sinceMs — it survives
@@ -289,4 +306,62 @@ test('anchored read applies a lenient window to text timestamps and filters in S
   assert.ok(!ids.includes('msg-14'), 'numeric row at the same instant must be filtered exactly');
   assert.ok(!ids.includes('msg-10'), 'unparseable text must not survive the filter');
   assert.ok(!ids.includes('msg-2'), 'numeric row below sinceMs must be filtered exactly');
+});
+
+test('sessions reach the projects rollup with project labels end to end', async (t) => {
+  const { collectQoderRows, buildQoderPeriods, resetQoderChatSessionProbe } = require('../../src/shared/qoderCnUsage');
+  const { extractUsageFromTokscale } = require('../../src/shared/usage');
+  resetQoderChatSessionProbe();
+  let rows;
+  try {
+    rows = await collectQoderRows({ dbPaths: [QODER_DB_FIXTURE] });
+  } catch (error) {
+    t.skip(`no sqlite backend available: ${error.message}`);
+    return;
+  }
+  const periods = buildQoderPeriods({ now: new Date(), allTimeSince: '2024-01-01', rows });
+  const period = extractUsageFromTokscale(periods.allTime);
+  const sessions = Object.values(period.sessions);
+  const withProject = sessions.filter((s) => s.projectLabel);
+  assert.ok(withProject.length >= 2, 'sessions must carry project labels');
+  assert.ok(withProject.some((s) => s.projectLabel === 'token-monitor-main'));
+  assert.ok(withProject.some((s) => s.projectLabel === 'ZCodeProject'));
+  assert.ok(!withProject.some((s) => s.projectLabel === '.'), 'the "." sentinel must stay unattributed');
+});
+
+test('reads survive a database without the chat_session table (fallback SQL)', async (t) => {
+  const { readQoderDbRows, resetQoderChatSessionProbe } = require('../../src/shared/qoderCnUsage');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-no-session-'));
+  t.after(() => { fs.rmSync(tmp, { recursive: true, force: true }); resetQoderChatSessionProbe(); });
+  const dbPath = path.join(tmp, 'local.db');
+  let sql;
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    sql = new DatabaseSync(dbPath);
+  } catch (error) {
+    t.skip(`node:sqlite unavailable: ${error.message}`);
+    return;
+  }
+  try {
+    sql.exec(`CREATE TABLE chat_message (
+      id TEXT, session_id TEXT, request_id TEXT, token_info TEXT, model_info TEXT, gmt_create INTEGER, role TEXT
+    )`);
+    sql.prepare(`INSERT INTO chat_message VALUES ('m1','s1','r1','{"prompt_tokens":5,"completion_tokens":2}','{"model_key":"qmodel"}',${Date.now()},'assistant')`).run();
+    sql.close();
+  } catch (error) {
+    sql.close();
+    throw error;
+  }
+  resetQoderChatSessionProbe();
+  let rows;
+  try {
+    rows = await readQoderDbRows(dbPath);
+  } catch (error) {
+    t.fail(`read must not fail without chat_session: ${error.message}`);
+    return;
+  }
+  assert.equal(rows.length, 1, 'fallback query still returns rows');
+  assert.equal(rows[0].project_name, undefined, 'no project column in fallback');
 });
