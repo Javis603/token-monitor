@@ -109,6 +109,7 @@ const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
 const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
+const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
   applyArchivedClientUsage,
@@ -409,10 +410,6 @@ function normalizeCollectionMode(value, fallback = 'live') {
   const next = String(value || '').trim();
   if (COLLECTION_MODE_VALUES.has(next)) return next;
   return COLLECTION_MODE_VALUES.has(fallback) ? fallback : 'live';
-}
-
-function normalizeCompactTokenUnits(value) {
-  return value === 'localized' ? 'localized' : 'western';
 }
 
 // Which throughput reading the title-mark reveal shows. 'speed' is estimated output tokens
@@ -2948,7 +2945,7 @@ function startSyncCollector() {
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
-        updateDiscordRpc(displayStats, settings.currency);
+        updateDiscordRpcDisplay(displayStats);
         sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
       }
       await syncUploadScheduler.enqueue(visibleSummary, revision);
@@ -3028,7 +3025,7 @@ function startHostStats() {
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
-    updateDiscordRpc(stats, settings.currency);
+    updateDiscordRpcDisplay(stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
   };
   embeddedHubUnsub = embeddedHub.hub.onStats((stats, reason) => emit(stats, reason || 'hub'));
@@ -3133,18 +3130,31 @@ async function refreshExchangeRates({ force = false } = {}) {
   }
   applyEffectiveRates();
   updateTrayDisplay();
-  if (settings?.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
+  if (settings?.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
   pushSettingsToRenderer();
+}
+
+function compactTokenDisplayOptions() {
+  return {
+    compactTokenUnits: settings?.compactTokenUnits,
+    locale: trayMenuLocale()
+  };
+}
+
+function updateDiscordRpcDisplay(stats) {
+  updateDiscordRpc(stats, settings?.currency, compactTokenDisplayOptions());
 }
 
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);
+  const compactOptions = compactTokenDisplayOptions();
   const limitText = formatTrayText(latestStats, mode, currency, {
     limitProviderOrder: settings?.limitProviderOrder,
     limitProviders: settings?.limitProviders,
-    showLimitUsed: settings?.showLimitUsed
+    showLimitUsed: settings?.showLimitUsed,
+    ...compactOptions
   });
   const barsImageMode = isBarsTrayIconMode(mode) && !limitText && providerTrayIcons[mode];
   // A renderer-generated icon is cached in the main process. Only reuse it
@@ -3155,7 +3165,7 @@ function updateTrayDisplay() {
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
-  const tip = formatTrayText(latestStats, 'both', currency);
+  const tip = formatTrayText(latestStats, 'both', currency, compactOptions);
   tray.setToolTip(`Token Monitor - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
@@ -3198,7 +3208,7 @@ function startLocalCollector() {
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
-      updateDiscordRpc(localStats, settings.currency);
+      updateDiscordRpcDisplay(localStats);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
     },
@@ -3269,7 +3279,7 @@ async function startStatsStream(options = {}) {
             latestHubStats = parsed.data.stats;
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
-            updateDiscordRpc(displayStats, settings.currency);
+            updateDiscordRpcDisplay(displayStats);
           }
           sendPush(parsed);
         }
@@ -3449,6 +3459,7 @@ function settingsForRenderer() {
   });
   return {
     ...settings,
+    locale: trayMenuLocale(),
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
     // last-known cache behind it.
@@ -4799,6 +4810,8 @@ app.whenReady().then(() => {
     const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousCurrency = settings.currency;
+    const previousCompactTokenUnits = settings.compactTokenUnits;
+    const previousLanguage = settings.language;
     const previousStartAtLogin = settings.startAtLogin;
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
@@ -4979,10 +4992,14 @@ app.whenReady().then(() => {
     if (patch.zoomFactor !== undefined) applyZoomFactor();
     if (settings.discordRpcEnabled && !previousDiscordRpcEnabled) {
       startDiscordRpc();
-      if (latestStats) updateDiscordRpc(latestStats, settings.currency);
+      if (latestStats) updateDiscordRpcDisplay(latestStats);
     }
     else if (!settings.discordRpcEnabled && previousDiscordRpcEnabled) stopDiscordRpc();
-    else if (settings.discordRpcEnabled && settings.currency !== previousCurrency && latestStats) updateDiscordRpc(latestStats, settings.currency);
+    else if (settings.discordRpcEnabled && (
+      settings.currency !== previousCurrency
+      || settings.compactTokenUnits !== previousCompactTokenUnits
+      || settings.language !== previousLanguage
+    ) && latestStats) updateDiscordRpcDisplay(latestStats);
     applyWindowSettings();
     syncFloatingBubbleAvailability();
     const nextNativeMaterial = nativeBlurEnabled();
@@ -5028,14 +5045,16 @@ app.whenReady().then(() => {
       JSON.stringify(settings.trayCustomLayout || {}) !== previousTrayCustomLayout ||
       JSON.stringify(settings.floatingBubbleCustomLayout || {}) !== previousFloatingBubbleCustomLayout ||
       settings.showTrayProviderBadge !== previousShowTrayProviderBadge ||
-      settings.currency !== previousCurrency
+      settings.currency !== previousCurrency ||
+      settings.compactTokenUnits !== previousCompactTokenUnits ||
+      settings.language !== previousLanguage
     ) {
       updateTrayDisplay();
     }
     if (patch.currency !== undefined || patch.currencyRates !== undefined) {
       applyEffectiveRates();               // sync: settingsForRenderer() below sees fresh effective map
       updateTrayDisplay();
-      if (settings.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
+      if (settings.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
       refreshExchangeRates();              // async: fetch if stale, then re-push
     }
     pushSettingsToRenderer();

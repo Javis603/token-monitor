@@ -188,6 +188,21 @@ test('dashboard repains on a rate-only settings push, not just a currency-code c
   assert.match(handler[1], /if \(needsRender\) render\(\)/);
 });
 
+test('dashboard shares localized token units and repaints when the setting or language changes', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
+  assert.ok(handler, 'dashboard should subscribe to settings pushes');
+  assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactTokens\.js"><\/script>/);
+  assert.match(js, /const compactTokenApi = window\.TokenMonitorCompactTokens/);
+  assert.match(js, /compactTokenApi\.formatCompactTokens\(value, effectiveCompactTokenUnits\(\), state\.locale\)/);
+  assert.match(js, /formatCompactNumber\(currencyApi\.convertUsd\(usd, code\)\)/);
+  assert.match(js, /state\.locale = i18n\.resolveLocale\(settings\.locale \|\| settings\.language, navigator\.languages\)/);
+  assert.match(handler[1], /nextLocale = i18n\.resolveLocale\(next\.locale \|\| next\.language, navigator\.languages\)/);
+  assert.match(handler[1], /nextCompactTokenUnits = compactTokenApi\.normalizeCompactTokenUnits\(next\.compactTokenUnits\)/);
+  assert.match(handler[1], /needsRender = true/);
+});
+
 test('the trends preview opens the dashboard via IPC', () => {
   const app = read('src', 'electron', 'renderer', 'app.js');
   assert.match(app, /trendsPanel\.addEventListener/);

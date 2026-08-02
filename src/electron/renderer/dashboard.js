@@ -4,6 +4,7 @@ const charts = window.TokenMonitorUsageCharts;
 const themePresetsApi = window.TokenMonitorThemePresets;
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
+const compactTokenApi = window.TokenMonitorCompactTokens;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
@@ -35,7 +36,7 @@ const els = {
 const RANGES = ['7', '30', '90', '365', 'all'];
 const state = {
   tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
-  locale: 'en', currency: 'USD', history: null, chartModel: null,
+  locale: 'en', currency: 'USD', compactTokenUnits: 'western', history: null, chartModel: null,
   chartKind: 'bars', motion: 'none', reduceMotion: 'system',
   heatmapMetric: 'cost'
 };
@@ -197,6 +198,10 @@ function animateHeatmapEntry() {
 
 function t(key, params) { return i18n.translate(state.locale, key, params); }
 
+function effectiveCompactTokenUnits() {
+  return compactTokenApi.effectiveCompactTokenUnits(state.compactTokenUnits, state.locale);
+}
+
 function applyTranslations() {
   document.querySelectorAll('[data-i18n]').forEach((node) => { node.textContent = t(node.getAttribute('data-i18n')); });
   document.documentElement.lang = state.locale;
@@ -228,12 +233,10 @@ function applyVendorColorOverrides(overrides) {
 }
 
 function formatCompact(value) {
-  const num = Math.round(Number(value || 0));
-  const abs = Math.abs(num);
-  if (abs >= 1e9) return `${(num / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
-  if (abs >= 1e6) return `${(num / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
-  if (abs >= 1e3) return `${(num / 1e3).toFixed(1).replace(/\.0$/, '')}K`;
-  return String(num);
+  return compactTokenApi.formatCompactTokens(value, effectiveCompactTokenUnits(), state.locale);
+}
+function formatCompactNumber(value) {
+  return compactTokenApi.formatCompactTokens(value, 'western', state.locale);
 }
 function formatDurationCompact(ms) {
   const totalMinutes = Math.max(0, Math.round(Number(ms || 0) / 60000));
@@ -247,7 +250,7 @@ function formatCost(usd) { return currencyApi.formatCurrencyFromUsd(usd, currenc
 function formatCostCompact(usd) {
   const code = currencyApi.normalizeCurrency(state.currency);
   const sym = (currencyApi.CURRENCY_RATES[code] || {}).symbol || '$';
-  return `${sym}${formatCompact(currencyApi.convertUsd(usd, code))}`;
+  return `${sym}${formatCompactNumber(currencyApi.convertUsd(usd, code))}`;
 }
 function shortDate(key) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key)); return m ? `${Number(m[2])}/${Number(m[3])}` : String(key); }
 function axisEvery(list) { return Math.max(1, Math.ceil(list.length / 9)); }
@@ -591,8 +594,9 @@ async function refresh() {
 async function boot() {
   let settings = {};
   try { settings = await window.tokenMonitor.getSettings(); } catch (_) {}
-  state.locale = i18n.resolveLocale(settings.language, navigator.languages);
+  state.locale = i18n.resolveLocale(settings.locale || settings.language, navigator.languages);
   state.currency = settings.currency || 'USD';
+  state.compactTokenUnits = compactTokenApi.normalizeCompactTokenUnits(settings.compactTokenUnits);
   if (settings.currencyRatesEffective && window.TokenMonitorCurrency?.configureRates) {
     window.TokenMonitorCurrency.configureRates(settings.currencyRatesEffective);
   }
@@ -611,6 +615,18 @@ async function boot() {
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   let needsRender = false;
+  const nextLocale = i18n.resolveLocale(next.locale || next.language, navigator.languages);
+  if (state.locale !== nextLocale) {
+    state.locale = nextLocale;
+    applyTranslations();
+    populateRangeSelect();
+    needsRender = true;
+  }
+  const nextCompactTokenUnits = compactTokenApi.normalizeCompactTokenUnits(next.compactTokenUnits);
+  if (state.compactTokenUnits !== nextCompactTokenUnits) {
+    state.compactTokenUnits = nextCompactTokenUnits;
+    needsRender = true;
+  }
   if (next.currencyRatesEffective && window.TokenMonitorCurrency?.configureRates) {
     window.TokenMonitorCurrency.configureRates(next.currencyRatesEffective);
     // A rate-only change (auto refresh / same-currency manual override) keeps

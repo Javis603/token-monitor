@@ -166,6 +166,7 @@ const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMod
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
 const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
+const compactTokenApi = window.TokenMonitorCompactTokens;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
@@ -475,18 +476,19 @@ function currentLanguage() {
 }
 
 function currentLocale() {
-  return i18n.resolveLocale(currentLanguage(), preferredLanguages());
+  return i18n.resolveLocale(state.settings?.locale || currentLanguage(), preferredLanguages());
 }
 
 function supportsLocalizedCompactTokenUnits(locale) {
-  return /^(zh|ja|ko)(?:-|$)/i.test(String(locale || ''));
+  return compactTokenApi.supportsLocalizedCompactTokenUnits(locale);
 }
 
 function effectiveCompactTokenUnits() {
-  return supportsLocalizedCompactTokenUnits(currentLocale())
-    && state.settings?.compactTokenUnits === 'localized'
-    ? 'localized'
-    : 'western';
+  return compactTokenApi.effectiveCompactTokenUnits(state.settings?.compactTokenUnits, currentLocale());
+}
+
+function compactTokenDisplayOptions() {
+  return { ...(state.settings || {}), locale: currentLocale() };
 }
 
 function t(key, params) {
@@ -680,56 +682,18 @@ function renderSettingsSummaries() {
 }
 
 function formatNumber(value) { return Math.round(Number(value || 0)).toLocaleString('en-US'); }
-function formatCompact(value, unitSystem = 'western', locale = 'en') {
-  const num = Math.round(Number(value || 0));
-  const abs = Math.abs(num);
-  const localized = unitSystem === 'localized';
-  const language = String(locale || '').toLowerCase();
-  const localizedSuffixes = language.startsWith('ko')
-    ? ['만', '억']
-    : language.startsWith('zh-cn')
-      ? ['万', '亿']
-      : language.startsWith('ja')
-        ? ['万', '億']
-        : ['萬', '億'];
-  const units = localized
-    ? [
-        { divisor: 1e4, suffix: localizedSuffixes[0] },
-        { divisor: 1e8, suffix: localizedSuffixes[1] }
-      ]
-    : [
-        { divisor: 1e3, suffix: 'K' },
-        { divisor: 1e6, suffix: 'M' },
-        { divisor: 1e9, suffix: 'B' }
-      ];
-  let unitIndex = -1;
-  for (let index = units.length - 1; index >= 0; index -= 1) {
-    if (abs >= units[index].divisor) {
-      unitIndex = index;
-      break;
-    }
-  }
-  if (unitIndex < 0) return String(num);
-
-  let unit = units[unitIndex];
-  const formatted = () => {
-    const scaled = num / unit.divisor;
-    const digits = localized && Math.abs(scaled) < 10 ? 2 : 1;
-    return scaled.toFixed(digits);
-  };
-  let display = formatted();
-  const promotionBoundary = localized ? 10000 : 1000;
-  if (Math.abs(Number(display)) >= promotionBoundary && unitIndex < units.length - 1) {
-    unit = units[unitIndex + 1];
-    display = formatted();
-  }
-  return `${display.replace(/\.?0+$/, '')}${unit.suffix}`;
+function formatCompact(value, unitSystem, locale) {
+  return compactTokenApi.formatCompactTokens(
+    value,
+    unitSystem === undefined ? effectiveCompactTokenUnits() : unitSystem,
+    locale === undefined ? currentLocale() : locale
+  );
 }
 function updateTotalCompact(value) {
   if (!els.totalTokensCompact) return;
   const num = Math.round(Number(value || 0));
   const unitSystem = effectiveCompactTokenUnits();
-  const threshold = unitSystem === 'localized' ? 1e4 : 1e3;
+  const threshold = compactTokenApi.compactTokenUnitThreshold(unitSystem, currentLocale());
   if (state.settings?.showCompactTotalTokens !== true || Math.abs(num) < threshold) {
     hideTotalCompact();
   } else {
@@ -6989,13 +6953,13 @@ function renderFloatingBubbleContent() {
       return;
     }
     el.classList.remove('bars');
-    el.textContent = (state.stats && window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), state.settings)) || 'Σ';
+    el.textContent = (state.stats && window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), compactTokenDisplayOptions())) || 'Σ';
   } else if (mode === 'icon') {
     el.classList.remove('bars');
     el.textContent = 'Σ';
   } else {
     el.classList.remove('bars');
-    el.textContent = state.stats ? (window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), state.settings) || '0') : '0';
+    el.textContent = state.stats ? (window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), compactTokenDisplayOptions()) || '0') : '0';
   }
   reportFloatingBubbleSize();
 }
@@ -7390,7 +7354,7 @@ function syncSettingsForm() {
   }
   els.compactTokenUnitsRow?.classList.toggle(
     'hidden',
-    state.settings.showCompactTotalTokens !== true || !supportsLocalizedCompactTokenUnits(currentLocale())
+    !supportsLocalizedCompactTokenUnits(currentLocale())
   );
   els.swapSettingsRefreshInput.checked = state.settings.settingsInTitlebar === true;
   els.discordRpcInput.checked = Boolean(state.settings.discordRpcEnabled);
@@ -9477,8 +9441,6 @@ els.liveDot?.addEventListener('click', toggleTokenRateMode);
 
 els.languageInput?.addEventListener('change', async () => {
   await saveSettings({ language: els.languageInput.value });
-  if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
-  renderTokenRate();
 });
 
 els.currencyInput?.addEventListener('change', async () => {
@@ -9731,18 +9693,10 @@ els.toolIconsInput.addEventListener('change', async () => {
 });
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
-  els.compactTokenUnitsRow?.classList.toggle(
-    'hidden',
-    !els.showCompactTotalTokensInput.checked || !supportsLocalizedCompactTokenUnits(currentLocale())
-  );
   await saveAppearanceFromControls();
-  if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
-  renderTokenRate();
 });
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
-  if (!numberAnimHandle) updateTotalCompact(state.currentTotal);
-  renderTokenRate();
 });
 window.addEventListener('resize', () => { if (!numberAnimHandle) fitTotalNumber(); });
 els.swapSettingsRefreshInput.addEventListener('change', () => {
@@ -9940,12 +9894,22 @@ els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   const prevMetric = state.settings?.heatmapMetric;
+  const prevLanguage = state.settings?.language;
+  const prevCompactTokenUnits = state.settings?.compactTokenUnits;
+  const prevShowCompactTotalTokens = state.settings?.showCompactTotalTokens;
   state.settings = next;
   applyEffectiveCurrencyRates();
   syncSettingsForm();
   maybeUpdateBarsIcon();
   if ((prevMetric || 'cost') !== (next.heatmapMetric || 'cost')) {
     render();
+  } else if (
+    prevLanguage !== next.language
+    || prevCompactTokenUnits !== next.compactTokenUnits
+  ) {
+    render();
+  } else if (prevShowCompactTotalTokens !== next.showCompactTotalTokens) {
+    updateTotalCompact(state.currentTotal);
   }
 });
 
@@ -10714,6 +10678,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     : '';
   const resolved = trayLayoutApi.resolveTrayLayout(layout, stats, {
     currency: currentCurrency(),
+    ...compactTokenDisplayOptions(),
     nowMs: Date.now(),
     activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {},
     availableProviderIds: Object.keys(trayProviderImages)
@@ -10940,7 +10905,7 @@ function renderStandardUsageTrayPreview(mode, stats) {
     stats,
     mode,
     currentCurrency(),
-    state.settings
+    compactTokenDisplayOptions()
   );
   const title = text
     ? renderCustomTrayItemCanvas({ type: 'text', text, fontStyle: 'normal' }, height, colors)
@@ -10989,7 +10954,7 @@ function trayComposerPreview(surface) {
       stats,
       mode,
       currentCurrency(),
-      state.settings
+      compactTokenDisplayOptions()
     ) || '—'
   };
 }

@@ -727,6 +727,18 @@ test('tray cost text uses the selected display currency', () => {
   assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'both', 'HKD'), '12.0K · HK$7.80');
 });
 
+test('tray token text follows the shared localized unit setting', () => {
+  assert.equal(
+    formatTrayText(
+      { periods: { today: { totalTokens: 12_000, costUsd: 1 } } },
+      'both',
+      'HKD',
+      { compactTokenUnits: 'localized', locale: 'zh-TW' }
+    ),
+    '1.2萬 · HK$7.80'
+  );
+});
+
 test('only macOS draws a tray title beside the icon', () => {
   // main.js gates tray.setTitle() on darwin; Windows and Linux show the icon
   // alone and put the text in the tooltip. The settings Live preview reads the
