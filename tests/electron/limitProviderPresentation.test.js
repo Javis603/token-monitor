@@ -1941,12 +1941,66 @@ test('subscription form controls stay shrinkable so a long option cannot overflo
   assert.doesNotMatch(styles, /\.subscription-add-body > \.settings-row/);
 });
 
+test('subscription field groups keep their rows separated', () => {
+  const styles = readRendererFile('styles.css');
+  const fields = cssBlock(styles, '.subscription-add-body .subscription-kind-fields');
+  assert.match(fields, /display: flex;/);
+  assert.match(fields, /flex-direction: column;/);
+  assert.match(fields, /gap: 8px;/);
+  assert.doesNotMatch(cssBlock(styles, '.subscription-topup-heading-row'), /margin-bottom/);
+  assert.doesNotMatch(styles, /\.subscription-topup-add-row\s*\{\s*margin-top/);
+});
+
+test('subscription validation errors stay inside the active editor', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /id="subscriptionErrorMessage" class="settings-note error subscription-form-error hidden" role="alert"/);
+  assert.match(html, /subscriptionErrorMessage[\s\S]*subscriptionSubmit/);
+  assert.doesNotMatch(html, /subscriptionTotalRow[\s\S]*subscriptionErrorMessage/);
+});
+
+test('the add action switches directly from editing to a new editor', () => {
+  const app = readRendererFile('app.js');
+  const beginAdd = functionBody(app, 'beginSubscriptionAdd', 'beginSubscriptionEdit');
+
+  assert.match(beginAdd, /resetSubscriptionForm\(\);/);
+  assert.match(beginAdd, /renderSubscriptionRows\(\);/);
+  assert.match(beginAdd, /openSubscriptionAddEditor\(\);/);
+  assert.match(app, /if \(state\.subscriptionEditingId\) \{\s*closeSubscriptionEditor\(\{ onClosed: openSubscriptionAddEditor \}\);/);
+});
+
 test('subscription rows carry the glyph actions the profile rows above them use', () => {
   const app = readRendererFile('app.js');
   const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
-  assert.match(rows, /edit\.textContent = '✎';/);
+  assert.match(rows, /edit\.textContent = editOpen \? '×' : '✎';/);
+  assert.match(rows, /edit\.setAttribute\('aria-expanded', editOpen \? 'true' : 'false'\);/);
   assert.match(rows, /remove\.textContent = '✕';/);
   assert.match(rows, /remove\.textContent = '✓';/);
+});
+
+test('editing a subscription moves only the editor beneath its row', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  const beginEdit = functionBody(app, 'beginSubscriptionEdit', 'submitSubscription');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  const reset = functionBody(app, 'resetSubscriptionForm', 'beginSubscriptionEdit');
+
+  assert.match(rows, /row\.dataset\.subscriptionId = subscription\.id;/);
+  assert.match(rows, /positionSubscriptionEditor\(\);/);
+  assert.match(beginEdit, /positionSubscriptionEditor\(\);\s*openSubscriptionEditor\(\);/);
+  assert.match(reset, /positionSubscriptionEditor\(\);/);
+  assert.match(app, /editingRow\.after\(details\);/);
+  assert.match(app, /else form\.append\(details\);/);
+  assert.doesNotMatch(app, /editingRow\.after\(form\)/);
+  assert.match(app, /details\.getBoundingClientRect\(\);/);
+  assert.match(app, /setSubscriptionFormOpen\(false\);[\s\S]*resetSubscriptionForm\(\);/);
+  assert.match(app, /state\.subscriptionEditingId === subscription\.id[\s\S]*closeSubscriptionEditor\(\);/);
+  assert.match(app, /els\.subscriptionCancelEdit\?\.addEventListener\('click', \(\) => closeSubscriptionEditor\(\)\);/);
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase, \{ render: false \}\)/);
+  assert.match(submit, /closeSubscriptionEditor\(\{ onClosed: renderSubscriptionSettings \}\);/);
+  assert.match(cssBlock(styles, '.subscription-row.is-editing'), /border-color/);
+  assert.match(styles, /\.subscription-row\.is-editing \.subscription-row-edit/);
+  assert.match(styles, /#subscriptionList > #subscriptionAddDetails/);
 });
 
 test('the plan-name seed never runs from a render, so it cannot wipe what is being typed', () => {
@@ -2552,7 +2606,7 @@ test('subscriptions are written through the hub-aware channel, never as a settin
   assert.match(preload, /saveSubscriptions: \(subscriptions, base\) => ipcRenderer\.invoke\('subscriptions:save', subscriptions, base\)/);
   // An edit says what it was made on, and that is what the form was opened with —
   // not whatever a push has left in state.settings since.
-  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase\)/);
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase(?:, \{ render: false \})?\)/);
   // A row action has no form, so it reads the list and what it was taken from
   // together at the click rather than reusing the list the row was drawn with.
   assert.doesNotMatch(rows, /saveSubscriptions\(list\.filter/);

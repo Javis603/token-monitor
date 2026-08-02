@@ -287,7 +287,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -2644,6 +2644,43 @@ function subscriptionRowMeta(subscription, account) {
   return parts.join(' · ');
 }
 
+function positionSubscriptionEditor() {
+  const listEl = els.subscriptionList;
+  const form = els.subscriptionAddForm;
+  const details = els.subscriptionAddDetails;
+  if (!listEl || !form || !details) return;
+
+  const editingId = String(state.subscriptionEditingId || '');
+  const editingRow = editingId
+    ? [...listEl.children].find((child) => child.dataset?.subscriptionId === editingId)
+    : null;
+  if (editingRow) editingRow.after(details);
+  else form.append(details);
+
+  for (const row of listEl.querySelectorAll('[data-subscription-id]')) {
+    row.classList.toggle('is-editing', row.dataset.subscriptionId === editingId);
+  }
+  syncSubscriptionEditControls();
+}
+
+function syncSubscriptionEditControls() {
+  const listEl = els.subscriptionList;
+  const details = els.subscriptionAddDetails;
+  if (!listEl) return;
+  const editingId = String(state.subscriptionEditingId || '');
+  const editorOpen = Boolean(details && !details.classList.contains('hidden'));
+  for (const row of listEl.querySelectorAll('[data-subscription-id]')) {
+    const edit = row.querySelector('.subscription-row-edit');
+    if (!edit) continue;
+    const editOpen = editorOpen && row.dataset.subscriptionId === editingId;
+    const editLabel = editOpen ? t('settings.subscriptions.cancelEdit') : t('settings.subscriptions.edit');
+    edit.textContent = editOpen ? '×' : '✎';
+    edit.title = editLabel;
+    edit.setAttribute('aria-label', editLabel);
+    edit.setAttribute('aria-expanded', editOpen ? 'true' : 'false');
+  }
+}
+
 function renderSubscriptionRows() {
   const listEl = els.subscriptionList;
   if (!listEl) return;
@@ -2654,6 +2691,7 @@ function renderSubscriptionRows() {
     empty.className = 'opencode-empty';
     empty.textContent = t('settings.subscriptions.emptyList');
     listEl.append(empty);
+    positionSubscriptionEditor();
     return;
   }
 
@@ -2661,7 +2699,8 @@ function renderSubscriptionRows() {
   for (const subscription of list) {
     const account = subscriptionApi.matchProviderAccount(subscription, providers);
     const row = document.createElement('div');
-    row.className = 'subscription-row';
+    row.className = `subscription-row${state.subscriptionEditingId === subscription.id ? ' is-editing' : ''}`;
+    row.dataset.subscriptionId = subscription.id;
 
     // The provider name is in the title too, but these rows are a dense stack of
     // near-identical text — four Codex accounts read as one block until the mark
@@ -2695,16 +2734,28 @@ function renderSubscriptionRows() {
       main.append(warn);
     }
 
-    // Glyph buttons, titled rather than labelled, matching the profile rows
-    // directly above them in this panel.
+    // Keep the edit control as a disclosure toggle: the active row gets an
+    // explicit cancel state, and the accessible state follows the editor.
     const actions = document.createElement('div');
     actions.className = 'subscription-row-actions';
     const edit = document.createElement('button');
     edit.type = 'button';
     edit.className = 'subscription-row-edit';
-    edit.textContent = '✎';
-    edit.title = t('settings.subscriptions.edit');
-    edit.addEventListener('click', () => beginSubscriptionEdit(subscription.id));
+    const editing = state.subscriptionEditingId === subscription.id;
+    const editOpen = editing && Boolean(els.subscriptionAddDetails && !els.subscriptionAddDetails.classList.contains('hidden'));
+    const editLabel = editOpen ? t('settings.subscriptions.cancelEdit') : t('settings.subscriptions.edit');
+    edit.textContent = editOpen ? '×' : '✎';
+    edit.title = editLabel;
+    edit.setAttribute('aria-label', editLabel);
+    edit.setAttribute('aria-expanded', editOpen ? 'true' : 'false');
+    edit.setAttribute('aria-controls', 'subscriptionAddDetails');
+    edit.addEventListener('click', () => {
+      if (state.subscriptionEditingId === subscription.id && els.subscriptionAddDetails && !els.subscriptionAddDetails.classList.contains('hidden')) {
+        closeSubscriptionEditor();
+        return;
+      }
+      beginSubscriptionEdit(subscription.id);
+    });
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'subscription-row-delete';
@@ -2739,6 +2790,7 @@ function renderSubscriptionRows() {
     row.append(main, actions);
     listEl.append(row);
   }
+  positionSubscriptionEditor();
 }
 
 function renderSubscriptionPickers() {
@@ -2835,8 +2887,12 @@ function applySubscriptionSettings(settings) {
   // into the one they moved to — there is nothing here it could belong to, so it
   // stops being a form rather than becoming a form for the wrong list.
   if (state.subscriptionFormBase.hub !== current.hub) {
-    resetSubscriptionForm();
-    setSubscriptionFormOpen(false);
+    if (typeof closeSubscriptionEditor === 'function') {
+      closeSubscriptionEditor();
+    } else {
+      setSubscriptionFormOpen(false);
+      resetSubscriptionForm();
+    }
     return;
   }
   state.subscriptionFormBase = current;
@@ -2845,11 +2901,11 @@ function applySubscriptionSettings(settings) {
 // base is what the list being saved was built from — the open form's snapshot, or
 // what is on screen for a row action. Passed in rather than read here, because
 // those two stop being the same the moment a push lands.
-async function saveSubscriptions(list, base) {
+async function saveSubscriptions(list, base, { render = true } = {}) {
   try {
     applySubscriptionSettings(await window.tokenMonitor.saveSubscriptions(list, base));
     state.subscriptionSyncError = '';
-    renderSubscriptionSettings();
+    if (render) renderSubscriptionSettings();
     return true;
   } catch (error) {
     // Four different problems with four different answers: look at what changed,
@@ -2921,12 +2977,82 @@ function setSubscriptionFormOpen(open) {
   els.subscriptionAddToggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
   els.subscriptionAddDetails?.classList.toggle('hidden', !open);
   els.subscriptionAddForm?.classList.toggle('expanded', open);
+  if (typeof syncSubscriptionEditControls === 'function') syncSubscriptionEditControls();
   // What the form was filled from, held for as long as it stays open. A push
   // landing mid-edit replaces state.settings, and reading the version at save
   // time would claim to have seen a change the form was never shown — the save is
   // then accepted, taking another device's edit to the same record with it. Null
   // while closed, so the paths that save without a form say so.
   state.subscriptionFormBase = open ? subscriptionSettingsVersion() : null;
+}
+
+const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;
+let subscriptionEditorCloseCleanup = null;
+
+function cancelSubscriptionEditorClose() {
+  subscriptionEditorCloseCleanup?.();
+  subscriptionEditorCloseCleanup = null;
+}
+
+// The class change has to happen in a later frame than the initial collapsed
+// layout. Otherwise Chromium batches both states into one paint and there is no
+// transition for the grid track to animate between.
+function openSubscriptionEditor() {
+  const details = els.subscriptionAddDetails;
+  if (!details) return;
+  cancelSubscriptionEditorClose();
+  const transitionId = (state.subscriptionEditorTransitionId || 0) + 1;
+  state.subscriptionEditorTransitionId = transitionId;
+  details.classList.add('hidden');
+  details.getBoundingClientRect();
+  const schedule = typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : (callback) => setTimeout(callback, 0);
+  schedule(() => {
+    if (transitionId !== state.subscriptionEditorTransitionId) return;
+    setSubscriptionFormOpen(true);
+  });
+}
+
+// Keep the editor in place until its collapse has finished. Moving it back to
+// the add form in the same task as hiding it cancels the transition entirely.
+function closeSubscriptionEditor({ onClosed } = {}) {
+  cancelSubscriptionEditorClose();
+  const details = els.subscriptionAddDetails;
+  const transitionId = (state.subscriptionEditorTransitionId || 0) + 1;
+  state.subscriptionEditorTransitionId = transitionId;
+
+  if (!details || details.classList.contains('hidden')) {
+    setSubscriptionFormOpen(false);
+    resetSubscriptionForm();
+    if (typeof renderSubscriptionRows === 'function') renderSubscriptionRows();
+    onClosed?.();
+    return;
+  }
+
+  setSubscriptionFormOpen(false);
+  let finished = false;
+  let timer = null;
+  const onTransitionEnd = (event) => {
+    if (event.target === details && event.propertyName === 'grid-template-rows') finish();
+  };
+  const cleanup = () => {
+    details.removeEventListener('transitionend', onTransitionEnd);
+    if (timer !== null) clearTimeout(timer);
+    if (subscriptionEditorCloseCleanup === cleanup) subscriptionEditorCloseCleanup = null;
+  };
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    if (transitionId !== state.subscriptionEditorTransitionId) return;
+    resetSubscriptionForm();
+    if (typeof renderSubscriptionRows === 'function') renderSubscriptionRows();
+    onClosed?.();
+  };
+  details.addEventListener('transitionend', onTransitionEnd);
+  subscriptionEditorCloseCleanup = cleanup;
+  timer = setTimeout(finish, SUBSCRIPTION_EDITOR_TRANSITION_MS + 50);
 }
 
 // Seeded on explicit picker changes and on opening the form — never from a
@@ -3128,12 +3254,29 @@ function resetSubscriptionForm() {
   els.subscriptionCancelEdit?.classList.add('hidden');
   setSubscriptionFormMode();
   syncSubscriptionDateBounds();
+  positionSubscriptionEditor();
   setSubscriptionError('');
+}
+
+function openSubscriptionAddEditor() {
+  renderSubscriptionPickers();
+  applySubscriptionAccountSelection();
+  openSubscriptionEditor();
+}
+
+function beginSubscriptionAdd() {
+  resetSubscriptionForm();
+  renderSubscriptionRows();
+  openSubscriptionAddEditor();
 }
 
 function beginSubscriptionEdit(id) {
   const subscription = subscriptionList().find((entry) => entry.id === id);
   if (!subscription) return;
+  if (state.subscriptionEditingId === id && els.subscriptionAddDetails && !els.subscriptionAddDetails.classList.contains('hidden')) {
+    closeSubscriptionEditor();
+    return;
+  }
   state.subscriptionEditingId = id;
 
   const account = subscriptionApi.matchProviderAccount(subscription, limitProvidersForSubscriptions());
@@ -3160,7 +3303,8 @@ function beginSubscriptionEdit(id) {
   els.subscriptionCancelEdit?.classList.remove('hidden');
   setSubscriptionFormMode();
   syncSubscriptionDateBounds();
-  setSubscriptionFormOpen(true);
+  positionSubscriptionEditor();
+  openSubscriptionEditor();
   setSubscriptionError('');
 }
 
@@ -3249,10 +3393,8 @@ async function submitSubscription() {
   const updated = editing
     ? list.map((entry) => (entry.id === editing.id ? next : entry))
     : [...list, next];
-  if (!await saveSubscriptions(updated, state.subscriptionFormBase)) return;
-  resetSubscriptionForm();
-  setSubscriptionFormOpen(false);
-  renderSubscriptionSettings();
+  if (!await saveSubscriptions(updated, state.subscriptionFormBase, { render: false })) return;
+  closeSubscriptionEditor({ onClosed: renderSubscriptionSettings });
 }
 
 function configuredLimitProviderOrder() {
@@ -9560,11 +9702,14 @@ els.maskLimitAccountEmailsInput.addEventListener('change', async () => {
 els.subscriptionAddToggle?.addEventListener('click', () => {
   const opening = els.subscriptionAddDetails?.classList.contains('hidden');
   if (opening) {
-    resetSubscriptionForm();
-    renderSubscriptionPickers();
-    applySubscriptionAccountSelection();
+    beginSubscriptionAdd();
+    return;
   }
-  setSubscriptionFormOpen(Boolean(opening));
+  if (state.subscriptionEditingId) {
+    closeSubscriptionEditor({ onClosed: openSubscriptionAddEditor });
+    return;
+  }
+  closeSubscriptionEditor();
 });
 els.subscriptionProviderInput?.addEventListener('change', () => {
   renderSubscriptionPickers();
@@ -9605,10 +9750,7 @@ for (const input of els.subscriptionKindInputs || []) {
 els.subscriptionCurrencyInput?.addEventListener('change', renderSubscriptionTopUpEntries);
 els.subscriptionTopUpAddButton?.addEventListener('click', addSubscriptionTopUpEntry);
 els.subscriptionSubmit?.addEventListener('click', submitSubscription);
-els.subscriptionCancelEdit?.addEventListener('click', () => {
-  resetSubscriptionForm();
-  setSubscriptionFormOpen(false);
-});
+els.subscriptionCancelEdit?.addEventListener('click', () => closeSubscriptionEditor());
 for (const input of els.showLimitUsedInputs || []) {
   input.addEventListener('change', async () => {
     if (input.checked) await saveSettings({ showLimitUsed: input.value === 'used' });
