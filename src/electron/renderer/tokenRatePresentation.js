@@ -157,15 +157,15 @@
       // gesture does produce one, consumeClick() runs before this next pointerdown instead.
       suppressNextClick = false;
       if (!enabled || reduced) return false;
+      if (state && state.phase !== 'settling') return false;
+      const value = currentValue();
+      if (!(value.rate > 0)) return false;
       if (state?.phase === 'settling') {
         // A second hold is a new gesture, not a mode click. Interrupt the old release animation
         // so the new pointer can own the controller immediately.
         state = null;
         cancelScheduledFrame();
       }
-      if (state) return false;
-      const value = currentValue();
-      if (!(value.rate > 0)) return false;
       state = {
         phase: 'boosting',
         baseRate: value.rate,

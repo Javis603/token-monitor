@@ -216,6 +216,21 @@ test('a failed new hold does not clear settling without a repaint', () => {
   assert.equal(harness.changes.length, changesBeforeFailedStart);
 });
 
+test('a new hold with no rate does not clear settling without a repaint', () => {
+  const harness = createBoostHarness();
+  assert.equal(harness.controller.start({ button: 0, pointerId: 1 }), true);
+  harness.advance(1_000);
+  assert.equal(harness.controller.release({ type: 'pointerup', pointerId: 1 }), true);
+  const changesBeforeFailedStart = harness.changes.length;
+  assert.equal(harness.frames.size, 1);
+
+  harness.value.rate = 0;
+  assert.equal(harness.controller.start({ button: 0, pointerId: 2 }), false);
+  assert.equal(harness.controller.getSnapshot().phase, 'settling');
+  assert.equal(harness.changes.length, changesBeforeFailedStart);
+  assert.equal(harness.frames.size, 1);
+});
+
 test('lost pointer capture cancels boosting but preserves a normal release settlement', () => {
   const canceled = createBoostHarness();
   assert.equal(canceled.controller.start({ button: 0, pointerId: 1 }), true);
