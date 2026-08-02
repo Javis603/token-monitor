@@ -245,7 +245,7 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
     return;
   }
 
-  assert.equal(rows.length, 7);
+  assert.equal(rows.length, 8);
   const byId = new Map(rows.map((row) => [row.messageId.split(':').pop(), row]));
   assert.deepEqual(
     {
@@ -257,10 +257,12 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
     { model: 'Qwen3.7-Max', input: 446, cacheRead: 57_853, output: 2_812 }
   );
   assert.equal(byId.get('msg-8').model, 'qoder-agent');
-  // ISO text timestamps parse to milliseconds; unparseable text becomes 0
-  // (undated), never a fake 1970 timestamp. Numeric text (seconds) keeps
-  // scaling to milliseconds like the numeric branches.
-  assert.equal(byId.get('msg-9').createdAt, Date.parse('2026-07-29T09:00:00'));
+  // ISO text timestamps (Z-suffixed so SQL and JS agree on UTC everywhere)
+  // parse to milliseconds; unparseable text becomes 0 (undated), never a fake
+  // 1970 timestamp. Numeric text scales like numeric columns: seconds ×1000,
+  // milliseconds ≥1e12 pass through unchanged.
+  assert.equal(byId.get('msg-9').createdAt, Date.parse('2026-07-29T09:00:00Z'));
   assert.equal(byId.get('msg-10').createdAt, 0);
   assert.equal(byId.get('msg-11').createdAt, 1_750_000_000 * 1000);
+  assert.equal(byId.get('msg-12').createdAt, 1_785_286_800_000);
 });

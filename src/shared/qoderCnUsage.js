@@ -55,6 +55,8 @@ CASE
   WHEN typeof(gmt_create) = 'text' AND CAST(trim(gmt_create) AS REAL) > 0
     AND CAST(trim(gmt_create) AS REAL) < 1000000000000
     THEN CAST(trim(gmt_create) AS REAL) * 1000
+  WHEN typeof(gmt_create) = 'text' AND CAST(trim(gmt_create) AS REAL) >= 1000000000000
+    THEN CAST(trim(gmt_create) AS REAL)
   WHEN typeof(gmt_create) = 'text'
     THEN 0
   WHEN CAST(gmt_create AS REAL) > 0 AND CAST(gmt_create AS REAL) < 1000000000000
@@ -68,7 +70,7 @@ FROM chat_message
 WHERE role = 'assistant'
   AND token_info IS NOT NULL
   AND trim(token_info) NOT IN ('', '{}')
-  AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ?
+  AND (typeof(gmt_create) != 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ? OR typeof(gmt_create) = 'text')
 ORDER BY gmt_create, rowid
 `;
 
