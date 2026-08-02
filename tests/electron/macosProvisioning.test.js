@@ -68,11 +68,12 @@ test('classifies and validates the two supported App Group formats', () => {
   assert.equal(classifyAppGroup('SHORT.com.example.tokenmonitor'), 'invalid');
   assert.equal(classifyAppGroup('ABCDEFGHIJK.com.example.tokenmonitor'), 'invalid');
   assert.equal(classifyAppGroup('../../credentials'), 'invalid');
+  assert.doesNotThrow(() => validateAppGroup('ABCDE12345.com.example.tokenmonitor'));
   assert.throws(() => validateAppGroup(
     'ABCDE12345.com.example.tokenmonitor', { developmentTeam: 'ZZZZZ99999' }
   ), /does not match DEVELOPMENT_TEAM/);
   assert.throws(() => validateAppGroup(
-    'ABCDE12345.com.example.tokenmonitor'
+    'ABCDE12345.com.example.tokenmonitor', { requireMatchingTeamPrefix: true }
   ), /DEVELOPMENT_TEAM is required/);
 });
 

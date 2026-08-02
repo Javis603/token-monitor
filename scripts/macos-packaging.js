@@ -6,7 +6,8 @@ const {
   DEFAULT_WIDGET_URL_SCHEME,
   normalizeMacDistributionChannel,
   normalizeWidgetURLScheme,
-  validateAppGroup
+  validateAppGroupForDistribution,
+  validateAppGroupSyntax
 } = require('./macos-widget-config');
 const { profileIsRequired } = require('./macos-provisioning');
 
@@ -46,7 +47,8 @@ function assertWidgetArtifacts(root, options = {}) {
   const appGroup = String(env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor').trim();
   const distributionBuild = String(env.TOKEN_MONITOR_WIDGET_DISTRIBUTION || '').trim() === '1';
   const developmentTeam = String(env.DEVELOPMENT_TEAM || '').trim();
-  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: distributionBuild });
+  if (distributionBuild) validateAppGroupForDistribution(appGroup, developmentTeam);
+  else validateAppGroupSyntax(appGroup);
   if (distributionBuild) normalizeMacDistributionChannel(env.TOKEN_MONITOR_MAC_DISTRIBUTION_CHANNEL);
   if (profileIsRequired({
     distributionBuild,

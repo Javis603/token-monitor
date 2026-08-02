@@ -8,7 +8,7 @@ const {
   classifyAppGroup,
   isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
-  validateAppGroup
+  validateAppGroupForDistribution
 } = require('../src/shared/macWidgetConfig');
 
 function profilePath(env, name) {
@@ -125,7 +125,7 @@ function validateProvisioningProfile(profile, {
 }) {
   const label = role === 'extension' ? 'Widget extension' : 'main app';
   if (!profile || typeof profile !== 'object') throw new Error(`${label} provisioning profile could not be decoded`);
-  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: true });
+  validateAppGroupForDistribution(appGroup, developmentTeam);
   normalizeMacDistributionChannel(distributionChannel);
   if (!/^[A-Z0-9]{10}$/.test(profile.teamIdentifier)) {
     throw new Error(`${label} provisioning profile has no valid Team ID`);
@@ -166,7 +166,7 @@ function validateProvisioningProfiles({
   developmentTeam,
   distributionChannel
 }) {
-  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: true });
+  validateAppGroupForDistribution(appGroup, developmentTeam);
   normalizeMacDistributionChannel(distributionChannel);
   if (!appProfilePath || !widgetProfilePath) {
     throw new Error('Production Widget distribution with a group.* App Group requires TOKEN_MONITOR_APP_PROVISIONING_PROFILE and TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE');

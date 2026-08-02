@@ -121,7 +121,6 @@ test('resolves only safe macOS App Group snapshot paths', () => {
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'ABCDEFGHIJ.dev.example.widgettest',
-    developmentTeam: 'ABCDEFGHIJ',
     home: '/Users/example'
   }), path.join(
     '/Users/example',

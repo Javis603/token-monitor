@@ -6,7 +6,8 @@ const { spawnSync } = require('node:child_process');
 const {
   normalizeMacDistributionChannel,
   normalizeWidgetURLScheme,
-  validateAppGroup
+  validateAppGroupForDistribution,
+  validateAppGroupSyntax
 } = require('./macos-widget-config');
 const {
   profileIsRequired,
@@ -107,7 +108,7 @@ function validateDistributionIdentifiers({
   developmentTeam = process.env.DEVELOPMENT_TEAM
 }) {
   if (!distributionBuild) {
-    validateAppGroup(appGroup, { developmentTeam });
+    validateAppGroupSyntax(appGroup);
     return;
   }
   if (!process.env.TOKEN_MONITOR_APP_GROUP || /^group\.com\.example\./i.test(appGroup)) {
@@ -119,7 +120,7 @@ function validateDistributionIdentifiers({
   if (!bundleId.startsWith(`${appId}.`)) {
     throw new Error(`TOKEN_MONITOR_WIDGET_BUNDLE_ID must be in the ${appId}. namespace`);
   }
-  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: true });
+  validateAppGroupForDistribution(appGroup, developmentTeam);
 }
 
 function xmlEscape(value) {

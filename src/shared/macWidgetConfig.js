@@ -24,11 +24,7 @@ function classifyAppGroup(value) {
   return 'invalid';
 }
 
-function isTeamPrefixedAppGroup(value) {
-  return classifyAppGroup(value) === 'team-prefixed';
-}
-
-function validateAppGroup(value, options = {}) {
+function validateAppGroupSyntax(value) {
   const appGroup = String(value || '').trim();
   const classification = classifyAppGroup(appGroup);
   if (classification === 'invalid') {
@@ -36,12 +32,22 @@ function validateAppGroup(value, options = {}) {
       `TOKEN_MONITOR_APP_GROUP has invalid format: ${appGroup || '(empty)'}; expected group.<name> or <10-character-DEVELOPMENT_TEAM>.<name>`
     );
   }
+  return classification;
+}
+
+function isTeamPrefixedAppGroup(value) {
+  return classifyAppGroup(value) === 'team-prefixed';
+}
+
+function validateAppGroup(value, options = {}) {
+  const appGroup = String(value || '').trim();
+  const classification = validateAppGroupSyntax(appGroup);
 
   const developmentTeam = String(options.developmentTeam || '').trim();
   if (developmentTeam && !DEVELOPMENT_TEAM.test(developmentTeam)) {
     throw new Error('DEVELOPMENT_TEAM must be exactly 10 uppercase letters or digits');
   }
-  if (classification === 'team-prefixed') {
+  if (classification === 'team-prefixed' && (developmentTeam || options.requireMatchingTeamPrefix || options.requireDevelopmentTeam)) {
     if (!developmentTeam) {
       throw new Error('DEVELOPMENT_TEAM is required for a Team-prefixed TOKEN_MONITOR_APP_GROUP');
     }
@@ -54,6 +60,14 @@ function validateAppGroup(value, options = {}) {
     throw new Error('DEVELOPMENT_TEAM is required for this macOS Widget distribution');
   }
   return classification;
+}
+
+function validateAppGroupForDistribution(value, developmentTeam) {
+  return validateAppGroup(value, {
+    developmentTeam,
+    requireDevelopmentTeam: true,
+    requireMatchingTeamPrefix: true
+  });
 }
 
 function normalizeMacDistributionChannel(value) {
@@ -73,5 +87,7 @@ module.exports = {
   isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
   validateAppGroup,
+  validateAppGroupForDistribution,
+  validateAppGroupSyntax,
   normalizeWidgetURLScheme
 };

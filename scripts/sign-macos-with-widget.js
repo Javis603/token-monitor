@@ -9,7 +9,8 @@ const { signApp } = require('@electron/osx-sign');
 const {
   normalizeMacDistributionChannel,
   normalizeWidgetURLScheme,
-  validateAppGroup
+  validateAppGroupForDistribution,
+  validateAppGroupSyntax
 } = require('./macos-widget-config');
 const { copyProvisioningProfiles, profileIsRequired } = require('./macos-provisioning');
 
@@ -182,7 +183,8 @@ module.exports = async function signMacAppWithWidget(options) {
   const appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor').trim();
   const distributionBuild = process.env.TOKEN_MONITOR_WIDGET_DISTRIBUTION === '1';
   const developmentTeam = String(process.env.DEVELOPMENT_TEAM || '').trim();
-  validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: distributionBuild });
+  if (distributionBuild) validateAppGroupForDistribution(appGroup, developmentTeam);
+  else validateAppGroupSyntax(appGroup);
   if (distributionBuild) normalizeMacDistributionChannel(process.env.TOKEN_MONITOR_MAC_DISTRIBUTION_CHANNEL);
   if (profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup })) {
     const output = path.resolve(__dirname, '..', 'build', 'macos-widget');

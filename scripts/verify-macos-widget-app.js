@@ -5,8 +5,10 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const packageJson = require('../package.json');
 const {
+  isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
-  validateAppGroup
+  validateAppGroupForDistribution,
+  validateAppGroupSyntax
 } = require('../src/shared/macWidgetConfig');
 const {
   readProvisioningProfile,
@@ -43,6 +45,46 @@ function codesignOutput(filePath, spawnSyncImpl = spawnSync) {
   return `${result.stdout || ''}\n${result.stderr || ''}`;
 }
 
+function readCodesignMetadata(filePath, execFileSyncImpl = execFileSync, spawnSyncImpl = spawnSync) {
+  let output;
+  try {
+    const result = execFileSyncImpl('codesign', ['-dv', '--verbose=4', filePath], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    output = typeof result === 'object' && result !== null
+      ? `${result.stdout || ''}\n${result.stderr || ''}`
+      : String(result || '');
+    // codesign writes -d diagnostics to stderr. The real execFileSync API only
+    // returns stdout on success, so capture stderr explicitly when its output
+    // was not exposed by an injected test double.
+    if (!/^(?:TeamIdentifier|Authority|Identifier)=/m.test(output) && execFileSyncImpl === execFileSync) {
+      const fallback = spawnSyncImpl('codesign', ['-dv', '--verbose=4', filePath], { encoding: 'utf8' });
+      if (fallback.error || fallback.status !== 0) {
+        fail(`cannot read code signature ${path.basename(filePath)}: ${fallback.error?.message || fallback.stderr || fallback.status}`);
+      }
+      output = `${fallback.stdout || ''}\n${fallback.stderr || ''}`;
+    }
+  } catch (error) {
+    if (String(error?.message || '').startsWith('[mac-widget] packaged app verification failed:')) throw error;
+    fail(`cannot read code signature ${path.basename(filePath)}: ${error.message || error}`);
+  }
+  const text = String(output || '');
+  const teamIdentifier = text.match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim() || null;
+  const identifier = text.match(/^Identifier=(.+)$/m)?.[1]?.trim() || null;
+  const authorities = Array.from(text.matchAll(/^Authority=(.+)$/gm), (match) => match[1].trim());
+  return { teamIdentifier, authorities, identifier };
+}
+
+function entitlementValues(xml, key) {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(xml || '').match(new RegExp(
+    `<key>${escapedKey}</key>\\s*<array>([\\s\\S]*?)</array>`
+  ));
+  if (!match) return [];
+  return Array.from(match[1].matchAll(/<string>([\s\S]*?)<\/string>/g), (entry) => entry[1]);
+}
+
 function verifyCodesign(filePath, execFileSyncImpl = execFileSync) {
   try {
     execFileSyncImpl('codesign', ['--verify', '--deep', '--strict', '--verbose=2', filePath], {
@@ -57,7 +99,50 @@ function verifyCodesign(filePath, execFileSyncImpl = execFileSync) {
 function hasEntitlement(xml, key, value) {
   const keyPattern = new RegExp(`<key>${key.replaceAll('.', '\\.')}</key>[\\s\\S]{0,240}?`);
   if (!keyPattern.test(xml)) return false;
-  return value === undefined || new RegExp(`<string>${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</string>`).test(xml);
+  return value === undefined || entitlementValues(xml, key).includes(value);
+}
+
+function verifyAppGroupSources({ appGroup, config, extensionInfo, appEntitlements, extensionEntitlements }) {
+  if (config.appGroup !== appGroup) {
+    fail(`Widget config App Group ${config.appGroup || '(missing)'} does not match expected ${appGroup}`);
+  }
+  if (extensionInfo.TokenMonitorAppGroup !== appGroup) {
+    fail(`Widget Info.plist App Group ${extensionInfo.TokenMonitorAppGroup || '(missing)'} does not match expected ${appGroup}`);
+  }
+  if (appEntitlements === undefined && extensionEntitlements === undefined) return;
+  for (const [label, entitlements] of [
+    ['main app', appEntitlements],
+    ['Widget extension', extensionEntitlements]
+  ]) {
+    const groups = entitlementValues(entitlements, 'com.apple.security.application-groups');
+    if (groups.length !== 1 || groups[0] !== appGroup) {
+      fail(`${label} entitlements App Group ${groups.join(',') || '(missing)'} does not match expected ${appGroup}`);
+    }
+  }
+}
+
+function verifyFormalCodeSignature({ appPath, extensionPath, appGroup, developmentTeam, execFileSyncImpl, spawnSyncImpl }) {
+  const appSignature = readCodesignMetadata(appPath, execFileSyncImpl, spawnSyncImpl);
+  const widgetSignature = readCodesignMetadata(extensionPath, execFileSyncImpl, spawnSyncImpl);
+  if (isTeamPrefixedAppGroup(appGroup) && appGroup.slice(0, 10) !== appSignature.teamIdentifier) {
+    fail('Team-prefixed App Group does not match the actual signing TeamIdentifier');
+  }
+  if (appSignature.teamIdentifier !== widgetSignature.teamIdentifier) {
+    fail('Widget extension TeamIdentifier differs from main app');
+  }
+  if (appSignature.teamIdentifier !== developmentTeam) {
+    fail(`main app TeamIdentifier ${appSignature.teamIdentifier || '(missing)'} does not match DEVELOPMENT_TEAM ${developmentTeam}`);
+  }
+  if (widgetSignature.teamIdentifier !== developmentTeam) {
+    fail(`Widget extension TeamIdentifier ${widgetSignature.teamIdentifier || '(missing)'} does not match DEVELOPMENT_TEAM ${developmentTeam}`);
+  }
+  if (!appSignature.authorities.some((authority) => authority.includes('Developer ID Application'))) {
+    fail('main app code signature is missing a Developer ID Application authority');
+  }
+  if (!widgetSignature.authorities.some((authority) => authority.includes('Developer ID Application'))) {
+    fail('Widget extension code signature is missing a Developer ID Application authority');
+  }
+  return { appSignature, widgetSignature };
 }
 
 function verifyWidgetAppStructure(appPath) {
@@ -105,7 +190,8 @@ function verifyMacWidgetApp({
   const resolvedApp = path.resolve(String(appPath || '').trim());
   if (!resolvedApp.endsWith('.app')) fail('input must be a complete .app bundle');
   try {
-    validateAppGroup(appGroup, { developmentTeam, requireDevelopmentTeam: distributionBuild });
+    if (distributionBuild) validateAppGroupForDistribution(appGroup, developmentTeam);
+    else validateAppGroupSyntax(appGroup);
     if (distributionBuild) normalizeMacDistributionChannel(distributionChannel);
   } catch (error) {
     fail(error.message);
@@ -122,6 +208,7 @@ function verifyMacWidgetApp({
 
   if (appInfo.CFBundleIdentifier !== appId) fail(`app bundle identifier does not match ${appId}`);
   if (widgetBundleId && extensionInfo.CFBundleIdentifier !== widgetBundleId) fail('Widget bundle identifier does not match configured value');
+  verifyAppGroupSources({ appGroup, config, extensionInfo });
   if (extensionInfo.TMWidgetKind !== config.widgetKind) fail('Widget kind differs between Info.plist and widget config');
   if (extensionInfo.TokenMonitorURLScheme !== config.urlScheme) fail('Widget URL scheme differs between Info.plist and widget config');
   const urlTypes = Array.isArray(appInfo.CFBundleURLTypes) ? appInfo.CFBundleURLTypes : [];
@@ -140,19 +227,29 @@ function verifyMacWidgetApp({
 
   if (!skipCodesign) {
     verifyCodesign(resolvedApp, execFileSyncImpl);
+    verifyCodesign(paths.extension, execFileSyncImpl);
     verifyCodesign(paths.reloader, execFileSyncImpl);
     const appEntitlements = codesignOutput(resolvedApp, spawnSyncImpl);
     const extensionEntitlements = codesignOutput(paths.extension, spawnSyncImpl);
     const reloaderEntitlements = codesignOutput(paths.reloader, spawnSyncImpl);
-    if (appGroup && !hasEntitlement(appEntitlements, 'com.apple.security.application-groups', appGroup)) fail('main app is missing its App Group entitlement');
+    verifyAppGroupSources({ appGroup, config, extensionInfo, appEntitlements, extensionEntitlements });
     if (!hasEntitlement(appEntitlements, 'com.apple.security.cs.allow-jit')) fail('main app hardened-runtime entitlements were not preserved');
-    if (appGroup && !hasEntitlement(extensionEntitlements, 'com.apple.security.application-groups', appGroup)) fail('Widget extension is missing its App Group entitlement');
     if (!hasEntitlement(extensionEntitlements, 'com.apple.security.app-sandbox')) fail('Widget extension is missing App Sandbox entitlement');
     if (
       hasEntitlement(extensionEntitlements, 'com.apple.security.cs.allow-jit')
       || hasEntitlement(reloaderEntitlements, 'com.apple.security.cs.allow-jit')
       || hasEntitlement(reloaderEntitlements, 'com.apple.security.application-groups')
     ) fail('Widget extension or reloader contains forbidden entitlements');
+    if (distributionBuild && !localDevelopmentSigning) {
+      verifyFormalCodeSignature({
+        appPath: resolvedApp,
+        extensionPath: paths.extension,
+        appGroup,
+        developmentTeam,
+        execFileSyncImpl,
+        spawnSyncImpl
+      });
+    }
     if (distributionBuild && !localDevelopmentSigning) {
       try {
         execFileSyncImpl('spctl', ['--assess', '--type', 'execute', '--verbose', resolvedApp], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -213,7 +310,11 @@ if (require.main === module) {
 
 module.exports = {
   exactArchitectures,
+  entitlementValues,
   hasEntitlement,
+  readCodesignMetadata,
+  verifyAppGroupSources,
+  verifyFormalCodeSignature,
   verifyMacWidgetApp,
   verifyWidgetAppStructure
 };
