@@ -35,6 +35,7 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildQoderHistoryGraph, buildQoderPeriods, collectQoderRows, qoderDataPaths } = require('./qoderCnUsage');
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 const {
@@ -680,6 +681,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
+  if (options.qoderGraph) {
+    rawGraphs.push(options.qoderGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.qoderGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -743,15 +748,21 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // tokscale doesn't know about Proma yet — filter it out of the subprocess
-  // calls so --client doesn't reject an unknown value. Proma is parsed
-  // separately below and merged back in.
-  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',') : normalizedClients;
+  // tokscale doesn't know about these local adapters yet — filter them out of
+  // subprocess calls, parse them once here, then merge their standard rows.
+  const localClients = new Set(['proma', 'qodercn']);
+  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
+  const includesQoder = normalizedClients.split(',').includes('qodercn');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
-  const targetTokscaleClients = targetClients.filter((client) => client !== 'proma').join(',');
+  const targetTokscaleClients = targetClients.filter((client) => !localClients.has(client)).join(',');
+  const qoderReadState = options.qoderReadState;
+  if (qoderReadState) {
+    qoderReadState.periodFailed = false;
+    qoderReadState.fallbackUsed = false;
+  }
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
@@ -766,6 +777,17 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
+  let qoderPeriods = null;
+  let qoderRows = null;
+  let qoderPricing = null;
+  let qoderPeriodReadFailed = false;
+  const emitProgress = (periods) => {
+    if (typeof options.onProgress !== 'function') return;
+    const progress = { ...periods };
+    if (qoderPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderPeriods.today);
+    if (qoderPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderPeriods.month);
+    try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
+  };
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
     await maybeSyncCursor(syncClients, options.logger, {
@@ -795,6 +817,31 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
       }
     }
+    if (includesQoder && (!targetRequested || targetClients.includes('qodercn'))) {
+      try {
+        const qoderSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        qoderRows = await collectQoderRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: qoderSinceMs });
+        qoderPricing = await resolvePromaPricing(qoderRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const qoderJson = buildQoderPeriods({ now: collectedAt, allTimeSince, rows: qoderRows, pricingByModel: qoderPricing });
+        qoderPeriods = {
+          today: extractUsageFromTokscale(qoderJson.today),
+          month: extractUsageFromTokscale(qoderJson.month),
+          allTime: extractUsageFromTokscale(qoderJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`qoder parse failed: ${err.message}`);
+        qoderPeriodReadFailed = true;
+        if (qoderReadState) {
+          qoderReadState.periodFailed = true;
+          qoderReadState.fallbackUsed = Boolean(options.qoderFallbackPeriods);
+        }
+        qoderPeriods = options.qoderFallbackPeriods || null;
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -820,6 +867,12 @@ async function collectUsageOnce(options) {
         }
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
+      if (qoderPeriods) freshPartitions.qodercn = qoderPeriods.today;
+      if (qoderPeriodReadFailed && anchor.todayPartitions?.qodercn) {
+        // A transient local.db read failure must not turn the existing Qoder
+        // partition into an empty one or subtract it from month/allTime.
+        freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
@@ -834,11 +887,11 @@ async function collectUsageOnce(options) {
       today = todayBundle.period;
       todayPartitions = todayBundle.byClient;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
-      try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
+      emitProgress({ today });
       const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
       month = extractUsageFromTokscale(monthJson);
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
-      try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
+      emitProgress({ today, month });
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
@@ -863,6 +916,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, promaPeriods.month);
       allTime = mergePeriods(allTime, promaPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), proma: promaPeriods.today };
+    }
+    if (qoderPeriods && !anchorUsed) {
+      today = mergePeriods(today, qoderPeriods.today);
+      month = mergePeriods(month, qoderPeriods.month);
+      allTime = mergePeriods(allTime, qoderPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), qodercn: qoderPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -979,7 +1038,7 @@ async function collectUsageOnce(options) {
   }
 
   if (typeof options.onAnchorComputed === 'function') {
-    options.onAnchorComputed({ windowsPeriods, todayPartitions, wslBundle, wslStatus });
+    options.onAnchorComputed({ windowsPeriods, todayPartitions, qoderPeriods, wslBundle, wslStatus });
   }
 
   // One filesystem probe per tick, shared by the legacy status and the health
@@ -1009,22 +1068,53 @@ async function collectUsageOnce(options) {
   if (options.historyEnabled === false) {
     summary.history = null;
   } else if (options.includeHistory) {
-    const history = await collectHistoryOnce({
-      clients: tokscaleClients,
-      promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
-      historyEnabled: options.historyEnabled,
-      commandTimeoutMs: options.historyTimeoutMs,
-      capDays: options.historyCapDays,
-      todayKey: localTodayKey(collectedAt),
-      runGraph: options.runGraph,
-      dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
-      dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
-      dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
-      dailyHistoryLiveDays,
-      onHistoryStatus: options.onHistoryStatus,
-      logger: options.logger
-    });
-    if (history) summary.history = history;
+    // The history graph needs the full qoder row set: anchored (watch/interval)
+    // ticks collect qoder rows only since local midnight for the period delta,
+    // so reusing qoderRows here would truncate the history panel to today and
+    // archive that truncated graph. Read full rows for the graph only — this
+    // block is gated by includeHistory (historyIntervalMs), mirroring the proma
+    // full-read pattern; resolvePromaPricing is cached (6h TTL) so the second
+    // pass is cheap when the scan already priced the same models.
+    let qoderGraph = null;
+    let qoderHistoryReadFailed = false;
+    if (includesQoder) {
+      try {
+        // Reuse the scan's full rows on non-anchored ticks; anchored ticks read
+        // only since local midnight, so the graph needs its own full read there.
+        // resolvePromaPricing is cached (6h TTL), so the second pass is cheap.
+        const rows = (!anchorUsed && qoderRows) ? qoderRows : await collectQoderRows({ homeDir: options.homeDir, logger: options.logger });
+        const pricing = (!anchorUsed && qoderPricing) ? qoderPricing : await resolvePromaPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        qoderGraph = buildQoderHistoryGraph({ rows, pricingByModel: pricing });
+      } catch (err) {
+        // A failed history read must not take down the whole tick — the live
+        // periods stay authoritative and the failure remains in the local log.
+        qoderHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`qoder history parse failed: ${err.message}`);
+      }
+    }
+    if (!qoderHistoryReadFailed) {
+      const history = await collectHistoryOnce({
+        clients: tokscaleClients,
+        promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+        qoderGraph,
+        historyEnabled: options.historyEnabled,
+        commandTimeoutMs: options.historyTimeoutMs,
+        capDays: options.historyCapDays,
+        todayKey: localTodayKey(collectedAt),
+        runGraph: options.runGraph,
+        dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
+        dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
+        dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
+        dailyHistoryLiveDays,
+        onHistoryStatus: options.onHistoryStatus,
+        logger: options.logger
+      });
+      if (history) summary.history = history;
+    }
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
   // scan already produced rather than from a second source of truth.
@@ -1296,6 +1386,9 @@ function clientSourceRoots(clientsCsv) {
   add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // Qoder CN — SQLite DB under the platform Application Support dir.
+  const qoderPaths = qoderDataPaths({ homeDir: home, platform: process.platform, env: process.env });
+  add('qodercn', ...qoderPaths.dbPaths.map((dbPath) => path.dirname(dbPath)));
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
@@ -2096,6 +2189,13 @@ function watcherOptions(usePolling, ignored) {
   };
 }
 
+function isQoderSelfWatchEvent(filePath, rootsByClient = {}) {
+  if (!filePath || !path.basename(filePath).endsWith('.db-shm')) return false;
+  const resolved = path.resolve(filePath);
+  return (rootsByClient.qodercn || [])
+    .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
+}
+
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
@@ -2256,6 +2356,7 @@ function startCollector(options) {
           today: saved.today,
           month: saved.month,
           allTime: saved.allTime,
+          qoderPeriods: saved.qoderPeriods || null,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2296,6 +2397,7 @@ function startCollector(options) {
     lastTickScope = tickScopeCode(tickOptions);
     try {
       let captured = null;
+      const qoderReadState = { periodFailed: false };
       const summary = await collectUsageOnce({
         ...options,
         clients,
@@ -2333,6 +2435,8 @@ function startCollector(options) {
         wslStatus: anchored ? wslStatusAnchor : null,
         lastActivityDays: activityDaysAnchor,
         refreshWsl: anchored ? refreshWsl : false,
+        qoderFallbackPeriods: anchor?.qoderPeriods || null,
+        qoderReadState,
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
           if (!partial.today) return;
@@ -2341,6 +2445,9 @@ function startCollector(options) {
               // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
               // doesn't merge a stale period's WSL usage into the preview.
               const wsl = wslPeriodsForPreview(wslAnchor, anchor?.dateKey, todayKey);
+              const qoderAnchorToday = qoderReadState.periodFailed && !qoderReadState.fallbackUsed
+                ? anchor?.todayPartitions?.qodercn
+                : null;
               const preview = {
                 deviceId, hostname: os.hostname(),
                 platform: `${process.platform}-${process.arch}`,
@@ -2352,20 +2459,28 @@ function startCollector(options) {
                 // Merge the frozen WSL snapshot into today (as month/allTime do
                 // below) so the today card keeps its WSL contribution during a
                 // warm scan instead of dropping to host-only until the final tick.
-                today: wsl.today ? mergePeriods(partial.today, wsl.today) : partial.today
+                today: mergePeriods(
+                  qoderAnchorToday ? mergePeriods(partial.today, qoderAnchorToday) : partial.today,
+                  wsl.today
+                )
               };
               // Only include month/allTime when actually scanned. During warm
               // full scans the main.js handler carries the previous values
               // forward for omitted fields, so these cards don't flash empty.
-              if (partial.month) {
+              if (partial.month && !qoderReadState.periodFailed) {
                 preview.month = wsl.month
                   ? mergePeriods(partial.month, wsl.month)
                   : partial.month;
               }
-              if (partial.allTime) {
+              if (partial.allTime && !qoderReadState.periodFailed) {
                 preview.allTime = wslAnchor
                   ? mergePeriods(partial.allTime, wslAnchor.allTime)
                   : partial.allTime;
+              }
+              // Only derive clientStatus when allTime is available; warm
+              // scans carry the previous status forward in main.js.
+              if (partial.allTime && !qoderReadState.periodFailed) {
+                preview.clientStatus = deriveClientStatus(clients, partial.allTime);
               }
               onPreview(preview);
             }
@@ -2379,17 +2494,26 @@ function startCollector(options) {
       for (const [client, entry] of Object.entries(summary.clientHealth?.clients || {})) {
         if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
       }
+      if (qoderReadState.periodFailed && anchor && !qoderReadState.fallbackUsed) {
+        // Do not replace a known-good snapshot with a full scan that omitted
+        // Qoder data. The next interval/full reconciliation will retry it.
+        scheduledWatchNeedsFullScan = true;
+        log('collector tick skipped: preserving the last snapshot after a Qoder CN read failure');
+        return false;
+      }
+      }
       if (!anchored && captured) {
         anchor = {
           dateKey: todayKey,
           today: captured.windowsPeriods.today,
           month: captured.windowsPeriods.month,
           allTime: captured.windowsPeriods.allTime,
-          todayPartitions: captured.todayPartitions
+          todayPartitions: captured.todayPartitions,
+          qoderPeriods: captured.qoderPeriods
         };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
-        lastFullScanAt = Date.now();
+        if (!qoderReadState.periodFailed) lastFullScanAt = Date.now();
         if (options.anchorPersistenceEnabled !== false) {
           try {
             fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
@@ -2398,10 +2522,11 @@ function startCollector(options) {
               today: anchor.today,
               month: anchor.month,
               allTime: anchor.allTime,
+              qoderPeriods: anchor.qoderPeriods,
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
               configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
-              fullScanAt: new Date().toISOString()
+              fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
         }
@@ -2409,11 +2534,19 @@ function startCollector(options) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
+        if (!qoderReadState.periodFailed && captured.qoderPeriods?.today && anchor.qoderPeriods) {
+          anchor.qoderPeriods = {
+            today: captured.qoderPeriods.today,
+            month: applyPeriodDelta(anchor.qoderPeriods.month, captured.qoderPeriods.today, anchor.qoderPeriods.today),
+            allTime: applyPeriodDelta(anchor.qoderPeriods.allTime, captured.qoderPeriods.today, anchor.qoderPeriods.today)
+          };
+        }
         if (refreshWsl) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
       }
+      if (qoderReadState.periodFailed) scheduledWatchNeedsFullScan = true;
       const transformedSummary = await onUpdate?.(summary, reason);
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
@@ -2680,6 +2813,14 @@ function startCollector(options) {
         // The quit path leaves the watcher open (see stop), so events can still
         // arrive after the collector is done with them.
         if (stopped) return;
+        // Our own read-only opens of Qoder CN's local.db recreate its SQLite
+        // wal-index (local.db-shm), so watching that sidecar re-triggers the
+        // watch loop forever — confirmed: 142 events/5min with Qoder CN fully
+        // stopped, dropping to 0 after this filter. The real data signal lives
+        // in local.db / local.db-wal, so drop *.db-shm events under the
+        // qodercn roots only. (hermes/micode may share this pattern upstream —
+        // out of scope here, their watch behaviour is left untouched.)
+        if (isQoderSelfWatchEvent(filePath, rootsByClient)) return;
         activityRevision += 1;
         if (tickPending) {
           pendingActivityRevision = pendingActivityRevision === null
@@ -2868,6 +3009,7 @@ module.exports = {
   // read or pin a client's floor directly instead of inferring it from tick
   // timings; the collector never takes a second instance.
   selfSyncThrottle,
+  isQoderSelfWatchEvent,
   shouldIncludeHistory,
   startCollector,
   tokscaleCommand,
