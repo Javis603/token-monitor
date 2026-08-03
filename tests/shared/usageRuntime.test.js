@@ -148,6 +148,45 @@ test('a scoped force syncs only the client it names', async () => {
   }
 });
 
+test('a backwards clock step cannot strand a self-sync behind its own stamp', async () => {
+  // An NTP correction or a VM resume can move Date.now backwards, leaving the
+  // last-sync stamp in the future. A negative elapsed compares below every floor,
+  // so without a guard the throttle would hold for the length of the jump — and
+  // the manual refresh, whose floor is zero, would be refused outright.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-clock-step-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  let antigravitySyncs = 0;
+  const options = {
+    clients: 'antigravity',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-only',
+    historyEnabled: false,
+    homeDir: home,
+    runTokscale: async () => emptyTokscaleResult(),
+    runAntigravitySync: async () => { antigravitySyncs += 1; }
+  };
+
+  const originalNow = Date.now;
+  let clockOffsetMs = 0;
+  Date.now = () => originalNow() + clockOffsetMs;
+  try {
+    await collectUsageOnce({ ...options, forceSelfSync: true });
+    const primed = antigravitySyncs;
+
+    clockOffsetMs = -60 * 60 * 1000;
+    await collectUsageOnce({ ...options, forceSelfSync: true });
+    assert.equal(antigravitySyncs, primed + 1, 'a manual refresh still waits for nothing');
+
+    // Re-anchored to the stepped clock, so the ordinary floor applies again.
+    await collectUsageOnce(options);
+    assert.equal(antigravitySyncs, primed + 1);
+  } finally {
+    Date.now = originalNow;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('refreshClient cursor runs one targeted today scan without rebuilding the runtime', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;

@@ -97,11 +97,13 @@ test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
   }
 });
 
-test('watchPathsForClients watches the Antigravity CLI data dir but not the IDE sync cache', () => {
-  // antigravity is self-synced (its IDE cache is watch-excluded to avoid the
-  // issue #15 loop), but the CLI writes parse-local SQLite we don't touch, so it
-  // must be watched for the seconds-level refresh the sync path can't give.
+test('watchPathsForClients watches Antigravity source and CLI data but not the sync cache', () => {
+  // The IDE source roots are read by `antigravity sync`, while the CLI writes
+  // parse-local SQLite that we do not touch. Both are safe watch inputs; the
+  // normalized cache remains excluded to avoid the issue #15 loop.
   const tmp = withTmpHome([
+    path.join('.gemini', 'antigravity', 'brain'),
+    path.join('.gemini', 'antigravity-ide', 'conversations'),
     path.join('.gemini', 'antigravity-cli', 'conversations'),
     path.join('.config', 'tokscale', 'antigravity-cache')
   ]);
@@ -112,8 +114,298 @@ test('watchPathsForClients watches the Antigravity CLI data dir but not the IDE 
     delete process.env.GEMINI_CLI_HOME;
     const { watchPathsForClients } = freshCollector();
     const dirs = watchPathsForClients('antigravity');
+    assert.ok(dirs.includes(path.join(tmp, '.gemini', 'antigravity')));
+    assert.ok(dirs.includes(path.join(tmp, '.gemini', 'antigravity-ide')));
     assert.ok(dirs.includes(path.join(tmp, '.gemini', 'antigravity-cli', 'conversations')));
     assert.equal(dirs.filter((dir) => dir.includes(path.join('.config', 'tokscale'))).length, 0);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = previousGeminiHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher bounds Antigravity roots to source and metadata inputs', () => {
+  // Top-level names here are the real ones an Antigravity IDE home carries, so
+  // the pruned side of the assertion keeps meaning something: builtin/ alone
+  // churns more than brain/ does.
+  const root = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([
+    path.join(root, 'brain'),
+    path.join(root, 'conversations'),
+    path.join(root, 'annotations'),
+    path.join(root, 'agyhub_summaries_proto.pb'),
+    path.join(root, 'builtin'),
+    path.join(root, 'crashes'),
+    path.join('.config', 'tokscale', 'antigravity-cache')
+  ]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('antigravity');
+    assert.equal(ignored(path.join(tmp, root)), false);
+    assert.equal(ignored(path.join(tmp, root, 'brain')), false);
+    assert.equal(ignored(path.join(tmp, root, 'conversations', 'session-a.db-wal')), false);
+    assert.equal(ignored(path.join(tmp, root, 'annotations', 'session-a.pbtxt')), false);
+    assert.equal(ignored(path.join(tmp, root, 'agyhub_summaries_proto.pb')), false);
+    assert.equal(ignored(path.join(tmp, root, 'builtin', 'keep.txt')), true);
+    assert.equal(ignored(path.join(tmp, root, 'crashes', 'crash_1.log')), true);
+    assert.equal(ignored(path.join(tmp, root, 'antigravity_state.pbtxt')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher watches brain session dirs but never recurses into them', () => {
+  // A new session shows up as a new brain/<id> directory, so brain/ itself has
+  // to stay watched. Its contents are plans, uploads and screenshots — hundreds
+  // of directories per home for a handful of writes a week — and each one costs
+  // an inotify descriptor on Linux, which is what pushes the watcher into the
+  // sticky polling fallback where the whole tree then gets stat'd every pass.
+  const root = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(root, 'brain', 'session-a', '.system_generated')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('antigravity');
+    assert.equal(ignored(path.join(tmp, root, 'brain')), false);
+    assert.equal(ignored(path.join(tmp, root, 'brain', 'session-a')), false);
+    assert.equal(ignored(path.join(tmp, root, 'brain', 'session-a', 'media__1.png')), true);
+    assert.equal(ignored(path.join(tmp, root, 'brain', 'session-a', '.system_generated')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity source events target its umbrella client without watching sync cache', async () => {
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([
+    path.join(sourceRoot, 'brain'),
+    path.join('.config', 'tokscale', 'antigravity-cache')
+  ]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  let watchedDirs = null;
+  let ignored = null;
+  chokidar.watch = (dirs, options) => {
+    watchedDirs = dirs;
+    ignored = options.ignored;
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setImmediate(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  // Advancing a shared offset rather than freezing the clock: every other
+  // deadline in the collector stays monotonic, only further ahead.
+  const originalNow = Date.now;
+  let clockOffsetMs = 0;
+  Date.now = () => originalNow() + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => { syncCalls += 1; },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1, 'startup sync still runs while the IDE source exists');
+    assert.ok(watchedDirs.includes(path.join(tmp, sourceRoot)));
+    assert.equal(
+      watchedDirs.some((dir) => dir.includes(path.join('.config', 'tokscale'))),
+      false,
+      'the sync output cache remains outside the watcher'
+    );
+    assert.equal(ignored(path.join(tmp, sourceRoot, 'brain', 'session-a')), false);
+    assert.equal(ignored(path.join(tmp, sourceRoot, 'builtin', 'keep.txt')), true);
+    assert.ok(watchHandler, 'watcher handler captured');
+
+    // The floor is shorter than the idle cadence, not absent: `antigravity sync`
+    // re-fetches over RPC and rewrites every known session artifact on every run,
+    // and the per-turn source file is a SQLite WAL that churns for the whole
+    // turn, so an unrationed sync would spawn one of those per quiet gap.
+    watchHandler('change', path.join(tmp, sourceRoot, 'annotations', 'session-a.pbtxt'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1, 'a source event inside the floor reuses the fresh cache');
+    const targeted = calls[calls.length - 1];
+    assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.ok(targeted.includes('--today'));
+
+    // Past the floor but nowhere near the five-minute idle cadence: this is the
+    // window the watcher exists to serve.
+    assert.ok(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS < 60 * 1000);
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => updates.length === 3);
+    assert.equal(syncCalls, 2, 'a source event past the floor refreshes the cache');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('an Antigravity CLI event rescans without paying for an IDE sync', async () => {
+  // Both roots share the umbrella client id, so the scan target is the same for
+  // either. Only the IDE roots feed `antigravity sync`; the CLI writes
+  // parse-local SQLite tokscale reads directly, so a CLI write has nothing to
+  // re-sync and must not skip the idle cadence to spawn one.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const cliRoot = path.join('.gemini', 'antigravity-cli');
+  const tmp = withTmpHome([
+    path.join(sourceRoot, 'conversations'),
+    path.join(cliRoot, 'conversations')
+  ]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const previousGeminiHome = process.env.GEMINI_CLI_HOME;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  delete process.env.GEMINI_CLI_HOME;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => { syncCalls += 1; },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1, 'startup sync still runs');
+
+    watchHandler('change', path.join(tmp, cliRoot, 'conversations', 'state.db'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1, 'a CLI-only event leaves the sync on its idle cadence');
+    const targeted = calls[calls.length - 1];
+    assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.ok(targeted.includes('--today'));
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = previousGeminiHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('selfSyncSourceRootsForClients covers the IDE roots and excludes the CLI dir', () => {
+  const tmp = withTmpHome([
+    path.join('.gemini', 'antigravity', 'brain'),
+    path.join('.gemini', 'antigravity-ide', 'conversations'),
+    path.join('.gemini', 'antigravity-cli', 'conversations'),
+    path.join('.config', 'tokscale', 'antigravity-cache')
+  ]);
+  const originalHomedir = os.homedir;
+  const previousGeminiHome = process.env.GEMINI_CLI_HOME;
+  os.homedir = () => tmp;
+  try {
+    delete process.env.GEMINI_CLI_HOME;
+    const { selfSyncSourceRootsForClients } = freshCollector();
+    assert.deepEqual(selfSyncSourceRootsForClients('antigravity'), {
+      antigravity: [
+        path.join(tmp, '.gemini', 'antigravity'),
+        path.join(tmp, '.gemini', 'antigravity-ide')
+      ]
+    });
+    assert.deepEqual(selfSyncSourceRootsForClients('claude'), {});
   } finally {
     os.homedir = originalHomedir;
     if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
@@ -152,6 +444,20 @@ test('clientDataDirPresence still detects cursor/antigravity via their cache dir
     const presence = clientDataDirPresence('cursor,antigravity');
     assert.equal(presence.cursor, true);
     assert.equal(presence.antigravity, true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('clientDataDirPresence detects Antigravity native source roots', () => {
+  const tmp = withTmpHome([path.join('.gemini', 'antigravity', 'brain')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientDataDirPresence } = freshCollector();
+    assert.deepEqual(clientDataDirPresence('antigravity'), { antigravity: true });
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
