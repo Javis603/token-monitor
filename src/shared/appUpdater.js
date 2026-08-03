@@ -69,10 +69,23 @@ function decodeHtmlEntities(value) {
   });
 }
 
+function isAsciiLetterAt(value, index) {
+  const code = value.charCodeAt(index);
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function startsHtmlMarkup(value, index) {
+  if (value[index] !== '<') return false;
+  if (isAsciiLetterAt(value, index + 1)) return true;
+  if (value[index + 1] === '/') return isAsciiLetterAt(value, index + 2);
+  return value[index + 1] === '!' || value[index + 1] === '?';
+}
+
 function textOutsideHtmlMarkup(value) {
-  const input = decodeHtmlEntities(value);
+  const input = String(value || '');
   let output = '';
   let mode = 'text';
+  let tagQuote = '';
   for (let index = 0; index < input.length; index += 1) {
     if (mode === 'comment') {
       if (input[index] === '-' && input[index + 1] === '-' && input[index + 2] === '>') {
@@ -82,21 +95,28 @@ function textOutsideHtmlMarkup(value) {
       continue;
     }
     if (mode === 'tag') {
-      if (input[index] === '>') mode = 'text';
+      if (tagQuote) {
+        if (input[index] === tagQuote) tagQuote = '';
+      } else if (input[index] === '"' || input[index] === "'") {
+        tagQuote = input[index];
+      } else if (input[index] === '>') {
+        mode = 'text';
+      }
       continue;
     }
-    if (input[index] === '<') {
+    if (startsHtmlMarkup(input, index)) {
       if (input[index + 1] === '!' && input[index + 2] === '-' && input[index + 3] === '-') {
         mode = 'comment';
         index += 3;
       } else {
         mode = 'tag';
+        tagQuote = '';
       }
       continue;
     }
     output += input[index];
   }
-  return output;
+  return decodeHtmlEntities(output);
 }
 
 function plainReleaseNoteText(value, maxChars = MAX_RELEASE_NOTE_ITEM_CHARS) {
@@ -209,9 +229,10 @@ function extractHtmlReleaseNotes(value) {
     const contentStart = (heading.index || 0) + heading[0].length;
     const contentEnd = index + 1 < headings.length ? headings[index + 1].index : body.length;
     const localeSection = body.slice(contentStart, contentEnd);
-    // GitHub strips Markdown comment markers from Atom content. The first h2
-    // after each language heading is the app summary; the next h2 begins its
-    // download section. Category h3 names deliberately remain unrestricted.
+    // GitHub strips Markdown comment markers and may omit collapsed <details>
+    // content from Atom entirely. Parse only locale headings present in the
+    // feed; the renderer owns locale fallback when a section is absent. The
+    // first h2 is the app summary and the next begins its download section.
     const sectionHeadings = Array.from(localeSection.matchAll(/<h2\b[^>]*>[\s\S]*?<\/h2>/gi));
     if (sectionHeadings.length === 0) continue;
     const summaryStart = (sectionHeadings[0].index || 0) + sectionHeadings[0][0].length;
@@ -317,6 +338,15 @@ function classifyAppUpdateError(error) {
     return { kind: 'metadata', message };
   }
   return { kind: 'unknown', message };
+}
+
+function resolveAppUpdateCheckError(previousError, result, { force = false } = {}) {
+  if (result?.ok) return null;
+  if (!force) return previousError || null;
+  return {
+    kind: result?.errorKind || 'unknown',
+    message: result?.error || 'Update check failed'
+  };
 }
 
 function shouldSkipAppUpdateCheck({
@@ -430,6 +460,7 @@ module.exports = {
   parseLatestReleasePayload,
   latestFromUpdaterInfo,
   classifyAppUpdateError,
+  resolveAppUpdateCheckError,
   shouldSkipAppUpdateCheck,
   downloadedAppUpdateMatchesLatest,
   shouldDownloadAutomaticAppUpdate,

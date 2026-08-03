@@ -99,6 +99,7 @@ const {
   downloadedAppUpdateMatchesLatest,
   latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
+  resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
 } = require('../shared/appUpdater');
@@ -4288,14 +4289,9 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
     const activeResult = await appUpdateCheckPromise;
     if (force) {
       appUpdateLastAttemptAt = activeResult?.checkedAt || new Date().toISOString();
+      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, activeResult, { force: true });
       if (activeResult?.ok) {
         if (activeResult.newer) restoreDismissedAppUpdate(activeResult.latest?.version);
-        appUpdateLastError = null;
-      } else {
-        appUpdateLastError = {
-          kind: activeResult?.errorKind || 'unknown',
-          message: activeResult?.error || 'Update check failed'
-        };
       }
       sendAppUpdatePush();
     }
@@ -4313,27 +4309,26 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
   }
   const checkTask = (async () => {
     appUpdateCheckInFlight = true;
-    appUpdateLastError = null;
     appUpdateLastAttemptAt = new Date().toISOString();
     if (force) sendAppUpdatePush();
     let result;
     try {
       result = await checkAppUpdateProvider();
       appUpdateLastAttemptAt = result.checkedAt || appUpdateLastAttemptAt;
+      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, result, { force });
       if (result.ok) {
         rememberLatestAppUpdate(result.latest, result.checkedAt);
         if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
-        appUpdateLastError = null;
       } else {
-        appUpdateLastError = force ? {
-          kind: result.errorKind || 'unknown',
-          message: result.error || 'Update check failed'
-        } : null;
         if (!force) console.warn('App update check failed:', result.error);
       }
     } catch (error) {
       const classified = classifyAppUpdateError(error);
-      appUpdateLastError = force ? classified : null;
+      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, {
+        ok: false,
+        error: classified.message,
+        errorKind: classified.kind
+      }, { force });
       if (!force) console.warn('App update check threw:', error);
       return {
         ok: false,

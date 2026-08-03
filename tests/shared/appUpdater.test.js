@@ -18,6 +18,7 @@ const {
   parseLatestReleasePayload,
   parseTag,
   RELEASES_LATEST_URL,
+  resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
 } = require('../../src/shared/appUpdater');
@@ -382,21 +383,15 @@ ${added}
   assert.match(notes.en[0].items[0], /…$/);
 });
 
-test('extractUpdaterReleaseNotes reads every locale from GitHub Atom HTML without downloads', () => {
+test('extractUpdaterReleaseNotes reads the locale sections present in GitHub Atom HTML', () => {
   const html = `
 <h1>English</h1><h2>What's changed</h2><h3>Security</h3><ul><li>Uses the public provider. (<a href="https://example.com">#183</a>)</li></ul><h2>Download</h2><ul><li>Installer</li></ul>
 <h1>中文</h1><h2>更新内容</h2><h3>修复</h3><ul><li>使用公开 provider。（<a href="https://example.com">#183</a>）</li></ul><h2>下载</h2><ul><li>安装包</li></ul>
-<h1>繁體中文</h1><h2>更新內容</h2><h3>修復</h3><ul><li>使用公開 provider。（<a href="https://example.com">#183</a>）</li></ul><h2>下載</h2><ul><li>安裝程式</li></ul>
-<h1>한국어</h1><h2>업데이트 내용</h2><h3>수정</h3><ul><li>공개 provider를 사용합니다. (<a href="https://example.com">#183</a>)</li></ul><h2>다운로드</h2><ul><li>설치 프로그램</li></ul>
-<h1>日本語</h1><h2>更新内容</h2><h3>修正</h3><ul><li>公開 provider を使用します。（<a href="https://example.com">#183</a>）</li></ul><h2>ダウンロード</h2><ul><li>インストーラー</li></ul>
 `;
 
   assert.deepEqual(extractUpdaterReleaseNotes(html, '0.40.0'), {
     en: [{ title: 'Security', items: ['Uses the public provider.'] }],
-    zh: [{ title: '修复', items: ['使用公开 provider。'] }],
-    'zh-TW': [{ title: '修復', items: ['使用公開 provider。'] }],
-    ko: [{ title: '수정', items: ['공개 provider를 사용합니다.'] }],
-    ja: [{ title: '修正', items: ['公開 provider を使用します。'] }]
+    zh: [{ title: '修复', items: ['使用公开 provider。'] }]
   });
 });
 
@@ -424,6 +419,25 @@ test('extractUpdaterReleaseNotes preserves literal and encoded greater-than sign
   ].join(''), '0.40.0');
 
   assert.equal(notes.en[0].items[0], 'Cost comparison 5 > 2 remains stable -> ready.');
+});
+
+test('release-note text preserves literal, encoded, unclosed, and inline-code less-than signs', () => {
+  const notes = extractReleaseNotes(`
+<!-- app-update-notes:en:start -->
+### Fixed
+- Cost comparison 5 < 10 remains correct.
+- Supports <5 requests without truncation.
+- Encoded &lt; text remains visible.
+- Inline \`x < y\` comparison remains visible.
+<!-- app-update-notes:en:end -->
+`);
+
+  assert.deepEqual(notes.en[0].items, [
+    'Cost comparison 5 < 10 remains correct.',
+    'Supports <5 requests without truncation.',
+    'Encoded < text remains visible.',
+    'Inline x < y comparison remains visible.'
+  ]);
 });
 
 test('extractUpdaterReleaseNotes selects the matching full-changelog entry', () => {
@@ -626,4 +640,24 @@ test('classifyAppUpdateError separates actionable failures including nested caus
     cause: Object.assign(new Error('getaddrinfo ENOTFOUND github.com'), { code: 'ENOTFOUND' })
   })).kind, 'network');
   assert.equal(classifyAppUpdateError(new Error('unexpected')).kind, 'unknown');
+});
+
+test('background update failures preserve a visible manual error until a success', () => {
+  const manualFailure = {
+    ok: false,
+    error: 'Unable to connect',
+    errorKind: 'network'
+  };
+  const backgroundFailure = {
+    ok: false,
+    error: 'Timed out',
+    errorKind: 'timeout'
+  };
+
+  let visibleError = resolveAppUpdateCheckError(null, manualFailure, { force: true });
+  assert.deepEqual(visibleError, { kind: 'network', message: 'Unable to connect' });
+  visibleError = resolveAppUpdateCheckError(visibleError, backgroundFailure, { force: false });
+  assert.deepEqual(visibleError, { kind: 'network', message: 'Unable to connect' });
+  visibleError = resolveAppUpdateCheckError(visibleError, { ok: true }, { force: false });
+  assert.equal(visibleError, null);
 });

@@ -26,9 +26,15 @@ test('manual checks preserve feedback when reusing an in-flight background check
   const check = sourceBetween('async function runAppUpdateCheck', 'function maybeRunBackgroundUpdateCheck');
   assert.match(check, /if \(force\) sendAppUpdatePush\(\);\s*const activeResult = await appUpdateCheckPromise/);
   assert.match(check, /if \(activeResult\.newer\) restoreDismissedAppUpdate\(activeResult\.latest\?\.version\)/);
-  assert.match(check, /kind: activeResult\?\.errorKind \|\| 'unknown'/);
-  assert.match(check, /message: activeResult\?\.error \|\| 'Update check failed'/);
+  assert.match(check, /resolveAppUpdateCheckError\(appUpdateLastError, activeResult, \{ force: true \}\)/);
   assert.match(check, /error: classified\.message,[\s\S]*errorKind: classified\.kind/);
+});
+
+test('background failures preserve the last visible update-check error', () => {
+  const check = sourceBetween('async function runAppUpdateCheck', 'function maybeRunBackgroundUpdateCheck');
+  assert.doesNotMatch(check, /appUpdateCheckInFlight = true;\s*appUpdateLastError = null/);
+  assert.match(check, /resolveAppUpdateCheckError\(appUpdateLastError, result, \{ force \}\)/);
+  assert.match(check, /resolveAppUpdateCheckError\(appUpdateLastError, \{\s*ok: false,[\s\S]*\}, \{ force \}\)/);
 });
 
 test('packaged update checks use electron-updater while source runs use the public fallback', () => {
