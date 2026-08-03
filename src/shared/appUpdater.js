@@ -399,6 +399,22 @@ function latestFromUpdaterInfo(info) {
   };
 }
 
+function providerUpdateCheckAvailability(result, currentVersion) {
+  const latest = latestFromUpdaterInfo(result?.updateInfo);
+  if (!latest) return { valid: false, newer: false, latest: null, clearLatest: false };
+  const current = parseTag(currentVersion);
+  const newer = Boolean(result?.isUpdateAvailable === true
+    && current
+    && semver.gt(latest.version, current));
+  const isCurrent = Boolean(current && latest.version === current);
+  return {
+    valid: true,
+    newer,
+    latest: newer || isCurrent ? latest : null,
+    clearLatest: !newer && !isCurrent
+  };
+}
+
 function errorDetails(error) {
   const details = [];
   const seen = new Set();
@@ -559,6 +575,7 @@ module.exports = {
   parseTag,
   parseLatestReleasePayload,
   latestFromUpdaterInfo,
+  providerUpdateCheckAvailability,
   classifyAppUpdateError,
   resolveAppUpdateCheckError,
   shouldSkipAppUpdateCheck,

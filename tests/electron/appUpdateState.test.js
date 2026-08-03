@@ -42,7 +42,9 @@ test('packaged update checks use electron-updater while source runs use the publ
   assert.match(check, /if \(!app\.isPackaged\) return checkLatestRelease\(app\.getVersion\(\)\)/);
   assert.match(check, /configureNativeAppUpdater\(\)/);
   assert.match(check, /await autoUpdater\.checkForUpdates\(\)/);
-  assert.match(check, /latestFromUpdaterInfo\(result\?\.updateInfo\)/);
+  assert.match(check, /providerUpdateCheckAvailability\(result, app\.getVersion\(\)\)/);
+  assert.match(check, /newer: availability\.newer/);
+  assert.match(check, /clearLatest: availability\.clearLatest/);
 });
 
 test('update state separates the last successful check from the latest attempt error', () => {
@@ -56,8 +58,10 @@ test('update state separates the last successful check from the latest attempt e
 test('starting a user-requested download restores its dismissed notification', () => {
   const download = sourceBetween('async function downloadAndPrepareAppUpdate', 'function installDownloadedAppUpdate');
   assert.match(download, /if \(appUpdateCheckPromise\) await appUpdateCheckPromise/);
-  assert.match(download, /restoreDismissedAppUpdate\(latest\?\.version\)/);
-  assert.match(download, /rememberSuccessfulAppUpdateCheck\(latestFromUpdaterInfo\(info\), checkedAt\)/);
+  assert.match(download, /providerUpdateCheckAvailability\(result, app\.getVersion\(\)\)/);
+  assert.match(download, /if \(!availability\.newer \|\| !version\)/);
+  assert.match(download, /restoreDismissedAppUpdate\(version\)/);
+  assert.match(download, /await autoUpdater\.downloadUpdate\(\)/);
 });
 
 test('successful checks share one state transition that clears stale errors', () => {
@@ -65,13 +69,13 @@ test('successful checks share one state transition that clears stale errors', ()
   const check = sourceBetween('async function runAppUpdateCheck', 'function maybeRunBackgroundUpdateCheck');
   const download = sourceBetween('async function downloadAndPrepareAppUpdate', 'function installDownloadedAppUpdate');
 
-  assert.match(success, /const remembered = rememberLatestAppUpdate\(latest, checkedAt\)/);
-  assert.match(success, /if \(!remembered\) return null/);
+  assert.match(success, /if \(!latest && !clearLatest\) return null/);
+  assert.match(success, /lastKnownLatest: remembered/);
   assert.match(success, /appUpdateLastAttemptAt = checkedAt/);
   assert.match(success, /appUpdateLastError = null/);
-  assert.match(check, /rememberSuccessfulAppUpdateCheck\(result\.latest, result\.checkedAt\)/);
+  assert.match(check, /rememberSuccessfulAppUpdateCheck\(result\.latest, result\.checkedAt, \{ clearLatest: result\.clearLatest \}\)/);
   assert.match(download, /const checkedAt = new Date\(\)\.toISOString\(\)/);
-  assert.match(download, /rememberSuccessfulAppUpdateCheck\(latestFromUpdaterInfo\(info\), checkedAt\)/);
+  assert.match(download, /rememberSuccessfulAppUpdateCheck\(\s*availability\.latest,\s*checkedAt,\s*\{ clearLatest: availability\.clearLatest \}\s*\)/);
 });
 
 test('automatic updates are opt-in and download without installing', () => {

@@ -99,6 +99,7 @@ const {
   downloadedAppUpdateMatchesLatest,
   latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
+  providerUpdateCheckAvailability,
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
@@ -109,7 +110,6 @@ const opencodeWeb = require('../shared/opencodeWeb');
 const openrouterLimits = require('../shared/openrouterLimits');
 const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
-const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
@@ -4162,21 +4162,17 @@ let appUpdateNativeState = {
   error: null
 };
 
-function rememberLatestAppUpdate(latest, checkedAt = new Date().toISOString()) {
-  if (!latest) return null;
-  const merged = mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest);
+function rememberSuccessfulAppUpdateCheck(latest, checkedAt = new Date().toISOString(), { clearLatest = false } = {}) {
+  if (!latest && !clearLatest) return null;
+  const remembered = latest
+    ? mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest)
+    : null;
   settings.appUpdate = {
     ...(settings.appUpdate || {}),
     lastCheckedAt: checkedAt,
-    lastKnownLatest: merged
+    lastKnownLatest: remembered
   };
   saveSettings();
-  return merged;
-}
-
-function rememberSuccessfulAppUpdateCheck(latest, checkedAt = new Date().toISOString()) {
-  const remembered = rememberLatestAppUpdate(latest, checkedAt);
-  if (!remembered) return null;
   appUpdateLastAttemptAt = checkedAt;
   appUpdateLastError = null;
   return remembered;
@@ -4219,8 +4215,8 @@ async function checkAppUpdateProvider() {
   const checkedAt = new Date().toISOString();
   configureNativeAppUpdater();
   const result = await autoUpdater.checkForUpdates();
-  const latest = latestFromUpdaterInfo(result?.updateInfo);
-  if (!latest) {
+  const availability = providerUpdateCheckAvailability(result, app.getVersion());
+  if (!availability.valid) {
     return {
       ok: false,
       newer: false,
@@ -4232,8 +4228,9 @@ async function checkAppUpdateProvider() {
   }
   return {
     ok: true,
-    newer: semver.gt(latest.version, app.getVersion()),
-    latest,
+    newer: availability.newer,
+    latest: availability.latest,
+    clearLatest: availability.clearLatest,
     error: null,
     errorKind: null,
     checkedAt
@@ -4324,7 +4321,7 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
       result = await checkAppUpdateProvider();
       appUpdateLastAttemptAt = result.checkedAt || appUpdateLastAttemptAt;
       if (result.ok) {
-        rememberSuccessfulAppUpdateCheck(result.latest, result.checkedAt);
+        rememberSuccessfulAppUpdateCheck(result.latest, result.checkedAt, { clearLatest: result.clearLatest });
         if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
       } else {
         appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, result, { force });
@@ -4404,21 +4401,26 @@ async function downloadAndPrepareAppUpdate() {
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
-  restoreDismissedAppUpdate(latest?.version);
   configureNativeAppUpdater();
   appUpdateNativeBusy = true;
   setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
   try {
     const result = await autoUpdater.checkForUpdates();
-    const info = result?.updateInfo || null;
+    const availability = providerUpdateCheckAvailability(result, app.getVersion());
+    if (!availability.valid) throw new Error('Update metadata missing or invalid');
     const checkedAt = new Date().toISOString();
-    const latestFromCheck = rememberSuccessfulAppUpdateCheck(latestFromUpdaterInfo(info), checkedAt);
+    const latestFromCheck = rememberSuccessfulAppUpdateCheck(
+      availability.latest,
+      checkedAt,
+      { clearLatest: availability.clearLatest }
+    );
     const version = latestFromCheck?.version || null;
-    if (!version || !semver.gt(version, app.getVersion())) {
+    if (!availability.newer || !version) {
       appUpdateNativeBusy = false;
       setNativeAppUpdateState({ phase: 'idle', version, progress: null, error: null });
       return deriveAppUpdateState();
     }
+    restoreDismissedAppUpdate(version);
     setNativeAppUpdateState({ phase: 'downloading', version, progress: 0, error: null });
     await autoUpdater.downloadUpdate();
   } catch (error) {

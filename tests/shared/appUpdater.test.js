@@ -17,6 +17,7 @@ const {
   mergeLatestReleaseMetadata,
   parseLatestReleasePayload,
   parseTag,
+  providerUpdateCheckAvailability,
   RELEASES_LATEST_URL,
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
@@ -678,6 +679,43 @@ test('latestFromUpdaterInfo normalizes provider metadata and release notes', () 
     publishedAt: '2026-08-03T08:00:00Z',
     releaseNotes: { en: [{ title: 'Fixed', items: ['Updater fix.'] }] }
   });
+});
+
+test('providerUpdateCheckAvailability rejects newer versions excluded by the provider', () => {
+  const result = providerUpdateCheckAvailability({
+    isUpdateAvailable: false,
+    updateInfo: {
+      version: '0.40.0',
+      releaseName: 'Rollout release'
+    }
+  }, '0.39.0');
+
+  assert.deepEqual(result, {
+    valid: true,
+    newer: false,
+    latest: null,
+    clearLatest: true
+  });
+});
+
+test('providerUpdateCheckAvailability accepts eligible updates and current metadata', () => {
+  const eligible = providerUpdateCheckAvailability({
+    isUpdateAvailable: true,
+    updateInfo: { version: '0.40.0' }
+  }, '0.39.0');
+  const current = providerUpdateCheckAvailability({
+    isUpdateAvailable: false,
+    updateInfo: { version: '0.39.0' }
+  }, '0.39.0');
+
+  assert.equal(eligible.valid, true);
+  assert.equal(eligible.newer, true);
+  assert.equal(eligible.latest.version, '0.40.0');
+  assert.equal(eligible.clearLatest, false);
+  assert.equal(current.valid, true);
+  assert.equal(current.newer, false);
+  assert.equal(current.latest.version, '0.39.0');
+  assert.equal(current.clearLatest, false);
 });
 
 test('classifyAppUpdateError separates actionable failures including nested causes', () => {
