@@ -100,6 +100,7 @@ const {
   latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
   providerUpdateCheckAvailability,
+  resolveProviderUpdateCheck,
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
@@ -4231,6 +4232,7 @@ async function checkAppUpdateProvider() {
     newer: availability.newer,
     latest: availability.latest,
     clearLatest: availability.clearLatest,
+    providerReady: true,
     error: null,
     errorKind: null,
     checkedAt
@@ -4300,7 +4302,7 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
       }
       sendAppUpdatePush();
     }
-    return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
+    return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState(), activeResult);
   }
   const block = settings?.appUpdate || {};
   if (!bypassCooldown && shouldSkipAppUpdateCheck({
@@ -4350,20 +4352,21 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
     return result;
   })();
   appUpdateCheckPromise = checkTask;
+  let completedCheck;
   try {
-    await checkTask;
+    completedCheck = await checkTask;
   } finally {
     if (appUpdateCheckPromise === checkTask) appUpdateCheckPromise = null;
   }
-  return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
+  return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState(), completedCheck);
 }
 
-async function maybeDownloadAutomaticAppUpdate(updateState) {
+async function maybeDownloadAutomaticAppUpdate(updateState, completedCheck = null) {
   if (!shouldDownloadAutomaticAppUpdate({
     automaticAppUpdates: settings?.automaticAppUpdates,
     updateState
   })) return updateState;
-  return downloadAndPrepareAppUpdate();
+  return downloadAndPrepareAppUpdate({ completedCheck });
 }
 
 function maybeRunBackgroundUpdateCheck() {
@@ -4387,7 +4390,7 @@ function dismissAppUpdateVersion(version) {
   return deriveAppUpdateState();
 }
 
-async function downloadAndPrepareAppUpdate() {
+async function downloadAndPrepareAppUpdate({ completedCheck = null } = {}) {
   const support = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
   if (!support.supported) {
     setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
@@ -4405,15 +4408,20 @@ async function downloadAndPrepareAppUpdate() {
   appUpdateNativeBusy = true;
   setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
   try {
-    const result = await autoUpdater.checkForUpdates();
-    const availability = providerUpdateCheckAvailability(result, app.getVersion());
+    const providerCheck = await resolveProviderUpdateCheck({
+      completedCheck,
+      currentVersion: app.getVersion(),
+      checkForUpdates: () => autoUpdater.checkForUpdates()
+    });
+    const { availability } = providerCheck;
     if (!availability.valid) throw new Error('Update metadata missing or invalid');
-    const checkedAt = new Date().toISOString();
-    const latestFromCheck = rememberSuccessfulAppUpdateCheck(
-      availability.latest,
-      checkedAt,
-      { clearLatest: availability.clearLatest }
-    );
+    const latestFromCheck = providerCheck.reused
+      ? settings?.appUpdate?.lastKnownLatest || availability.latest
+      : rememberSuccessfulAppUpdateCheck(
+        availability.latest,
+        new Date().toISOString(),
+        { clearLatest: availability.clearLatest }
+      );
     const version = latestFromCheck?.version || null;
     if (!availability.newer || !version) {
       appUpdateNativeBusy = false;

@@ -415,6 +415,30 @@ function providerUpdateCheckAvailability(result, currentVersion) {
   };
 }
 
+async function resolveProviderUpdateCheck({
+  completedCheck = null,
+  currentVersion,
+  checkForUpdates
+} = {}) {
+  if (completedCheck?.ok && completedCheck.providerReady) {
+    return {
+      reused: true,
+      availability: {
+        valid: true,
+        newer: Boolean(completedCheck.newer),
+        latest: completedCheck.latest || null,
+        clearLatest: Boolean(completedCheck.clearLatest)
+      }
+    };
+  }
+  if (typeof checkForUpdates !== 'function') throw new TypeError('checkForUpdates must be a function');
+  const result = await checkForUpdates();
+  return {
+    reused: false,
+    availability: providerUpdateCheckAvailability(result, currentVersion)
+  };
+}
+
 function errorDetails(error) {
   const details = [];
   const seen = new Set();
@@ -576,6 +600,7 @@ module.exports = {
   parseLatestReleasePayload,
   latestFromUpdaterInfo,
   providerUpdateCheckAvailability,
+  resolveProviderUpdateCheck,
   classifyAppUpdateError,
   resolveAppUpdateCheckError,
   shouldSkipAppUpdateCheck,

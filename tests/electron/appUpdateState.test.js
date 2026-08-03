@@ -58,7 +58,8 @@ test('update state separates the last successful check from the latest attempt e
 test('starting a user-requested download restores its dismissed notification', () => {
   const download = sourceBetween('async function downloadAndPrepareAppUpdate', 'function installDownloadedAppUpdate');
   assert.match(download, /if \(appUpdateCheckPromise\) await appUpdateCheckPromise/);
-  assert.match(download, /providerUpdateCheckAvailability\(result, app\.getVersion\(\)\)/);
+  assert.match(download, /resolveProviderUpdateCheck\(\{\s*completedCheck,\s*currentVersion: app\.getVersion\(\)/);
+  assert.match(download, /checkForUpdates: \(\) => autoUpdater\.checkForUpdates\(\)/);
   assert.match(download, /if \(!availability\.newer \|\| !version\)/);
   assert.match(download, /restoreDismissedAppUpdate\(version\)/);
   assert.match(download, /await autoUpdater\.downloadUpdate\(\)/);
@@ -74,16 +75,18 @@ test('successful checks share one state transition that clears stale errors', ()
   assert.match(success, /appUpdateLastAttemptAt = checkedAt/);
   assert.match(success, /appUpdateLastError = null/);
   assert.match(check, /rememberSuccessfulAppUpdateCheck\(result\.latest, result\.checkedAt, \{ clearLatest: result\.clearLatest \}\)/);
-  assert.match(download, /const checkedAt = new Date\(\)\.toISOString\(\)/);
-  assert.match(download, /rememberSuccessfulAppUpdateCheck\(\s*availability\.latest,\s*checkedAt,\s*\{ clearLatest: availability\.clearLatest \}\s*\)/);
+  assert.match(download, /providerCheck\.reused[\s\S]*rememberSuccessfulAppUpdateCheck\(\s*availability\.latest,\s*new Date\(\)\.toISOString\(\),\s*\{ clearLatest: availability\.clearLatest \}\s*\)/);
 });
 
 test('automatic updates are opt-in and download without installing', () => {
   const defaults = sourceBetween('function defaultSettings', 'function normalizeCollectionMode');
+  const check = sourceBetween('async function runAppUpdateCheck', 'function maybeRunBackgroundUpdateCheck');
   const automaticDownload = sourceBetween('async function maybeDownloadAutomaticAppUpdate', 'function maybeRunBackgroundUpdateCheck');
   assert.match(defaults, /automaticAppUpdates: false/);
+  assert.match(check, /completedCheck = await checkTask/);
+  assert.match(check, /maybeDownloadAutomaticAppUpdate\(deriveAppUpdateState\(\), completedCheck\)/);
   assert.match(automaticDownload, /shouldDownloadAutomaticAppUpdate\(\{\s*automaticAppUpdates: settings\?\.automaticAppUpdates,\s*updateState\s*\}\)/);
-  assert.match(automaticDownload, /return downloadAndPrepareAppUpdate\(\)/);
+  assert.match(automaticDownload, /return downloadAndPrepareAppUpdate\(\{ completedCheck \}\)/);
   assert.doesNotMatch(automaticDownload, /installDownloadedAppUpdate/);
 });
 

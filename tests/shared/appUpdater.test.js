@@ -19,6 +19,7 @@ const {
   parseTag,
   providerUpdateCheckAvailability,
   RELEASES_LATEST_URL,
+  resolveProviderUpdateCheck,
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
@@ -718,6 +719,51 @@ test('providerUpdateCheckAvailability accepts eligible updates and current metad
   assert.equal(current.clearLatest, false);
 });
 
+test('resolveProviderUpdateCheck reuses a completed packaged check without another request', async () => {
+  let calls = 0;
+  const latest = { version: '0.40.0', tag: 'v0.40.0' };
+  const result = await resolveProviderUpdateCheck({
+    completedCheck: {
+      ok: true,
+      providerReady: true,
+      newer: true,
+      latest,
+      clearLatest: false
+    },
+    currentVersion: '0.39.0',
+    checkForUpdates: async () => {
+      calls += 1;
+      throw new Error('should not run');
+    }
+  });
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    reused: true,
+    availability: { valid: true, newer: true, latest, clearLatest: false }
+  });
+});
+
+test('resolveProviderUpdateCheck refreshes cached download attempts', async () => {
+  let calls = 0;
+  const result = await resolveProviderUpdateCheck({
+    currentVersion: '0.39.0',
+    checkForUpdates: async () => {
+      calls += 1;
+      return {
+        isUpdateAvailable: true,
+        updateInfo: { version: '0.40.0' }
+      };
+    }
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.reused, false);
+  assert.equal(result.availability.valid, true);
+  assert.equal(result.availability.newer, true);
+  assert.equal(result.availability.latest.version, '0.40.0');
+});
+
 test('classifyAppUpdateError separates actionable failures including nested causes', () => {
   assert.equal(classifyAppUpdateError(Object.assign(new Error('rate limit exceeded'), { status: 429 })).kind, 'rateLimited');
   assert.equal(classifyAppUpdateError(Object.assign(new Error('aborted'), { name: 'AbortError' })).kind, 'timeout');
@@ -745,6 +791,7 @@ test('background update failures preserve a visible manual error until a success
     errorKind: 'timeout'
   };
 
+  assert.equal(resolveAppUpdateCheckError(null, backgroundFailure, { force: false }), null);
   let visibleError = resolveAppUpdateCheckError(null, manualFailure, { force: true });
   assert.deepEqual(visibleError, { kind: 'network', message: 'Unable to connect' });
   visibleError = resolveAppUpdateCheckError(visibleError, backgroundFailure, { force: false });
