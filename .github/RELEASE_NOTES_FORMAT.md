@@ -1,10 +1,11 @@
 # Release Notes Format
 
-This file documents the stable Markdown shape of a GitHub release body. The
-live per-release content is `.github/RELEASE_TEMPLATE.md`, which the release
-workflow publishes through `body_path`. Release-writing, versioning, and
-verification rules belong to the release-flow skill rather than this format
-contract.
+`.github/RELEASE_TEMPLATE.md` is the live, per-release GitHub release body used
+by `.github/workflows/release.yml` through `body_path`. Replace its
+release-specific sections for each tag; do not treat it as a permanent
+placeholder template.
+
+This file documents the stable Markdown shape of that release body.
 
 ## Structure
 

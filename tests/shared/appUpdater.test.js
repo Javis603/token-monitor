@@ -387,6 +387,13 @@ test('release template exposes marked summaries for every bundled locale', () =>
     notes.ja.map((group) => group.title),
     notes.en.map((group) => japaneseCategoryPairs.get(group.title))
   );
+  for (const locale of ['zh', 'zh-TW', 'ko', 'ja']) {
+    assert.deepEqual(
+      notes[locale].map((group) => group.items.length),
+      notes.en.map((group) => group.items.length),
+      `${locale} notes should keep the English item counts per category`
+    );
+  }
   assert.ok(notes.en.every((group) => categoryPairs.has(group.title)));
   assert.ok(notes.en.every((group) => group.items.length > 0));
   assert.ok(notes.zh.every((group) => group.items.length > 0));
