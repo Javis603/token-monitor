@@ -4591,6 +4591,27 @@ function ollamaSettingsAccountTitle(account, index) {
   return String(account?.accountEmail || account?.accountLabel || '').trim() || `Account ${index + 1}`;
 }
 
+function renderOllamaAccountGroup(label, providers, color) {
+  const row = document.createElement('div');
+  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+  const groupProvider = { provider: 'ollama', status: 'ok', windows: [], accountGroup: true };
+  const head = renderLimitProviderHead('ollama', label, groupProvider, color, {
+    planText: t('settings.ollama.nAccounts', { count: providers.length }),
+    hideMeta: true
+  });
+  const accountList = document.createElement('div');
+  accountList.className = 'limit-account-list';
+  providers.forEach((provider, index) => {
+    accountList.append(renderLimitProviderRow('ollama', limitAccountTitle('ollama', provider, index, providers), provider, color, {
+      accountRow: true,
+      accountTitle: true,
+      showIcon: false
+    }));
+  });
+  row.append(head, accountList);
+  return row;
+}
+
 function renderMimoAccountGroup(label, providers, color) {
   const row = document.createElement('div');
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
@@ -4755,6 +4776,10 @@ function renderLimits() {
     }
     if (id === 'thirdparty' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderThirdPartyAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'ollama' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderOllamaAccountGroup(label, visibleProviders, color));
       continue;
     }
     if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
