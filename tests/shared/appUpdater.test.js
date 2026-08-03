@@ -476,6 +476,23 @@ test('release-note text preserves literal, encoded, unclosed, and inline-code le
   ]);
 });
 
+test('release-note text ignores false closing tags in comments and quoted markup', () => {
+  const notes = extractReleaseNotes(`
+<!-- app-update-notes:en:start -->
+### Fixed
+- Compare x <a and later > here.
+- Compare x<a and later > here <!-- </a> -->
+- Compare x<a and later > here <span title="</a>">label</span>.
+<!-- app-update-notes:en:end -->
+`);
+
+  assert.deepEqual(notes.en[0].items, [
+    'Compare x <a and later > here.',
+    'Compare x<a and later > here',
+    'Compare x<a and later > here label.'
+  ]);
+});
+
 test('extractUpdaterReleaseNotes selects the matching full-changelog entry', () => {
   const matching = '<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>Matching release.</li></ul>';
   const older = '<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>Older release.</li></ul>';

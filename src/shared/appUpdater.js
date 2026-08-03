@@ -91,11 +91,6 @@ function isAsciiAlphaNumericAt(value, index) {
     || (code >= 48 && code <= 57);
 }
 
-function isUnicodeLetterOrNumberAt(value, index) {
-  if (index < 0) return false;
-  return /[\p{L}\p{N}]$/u.test(value.slice(Math.max(0, index - 1), index + 1));
-}
-
 function isAsciiHtmlWhitespaceAt(value, index) {
   return value[index] === '\t'
     || value[index] === '\n'
@@ -129,12 +124,34 @@ function containsNestedHtmlMarkup(value, index, end) {
 function hasMatchingHtmlClosingTag(value, index, tagName) {
   const lower = value.toLowerCase();
   const prefix = `</${tagName}`;
-  let closingIndex = lower.indexOf(prefix, index);
-  while (closingIndex >= 0) {
-    let cursor = closingIndex + prefix.length;
-    while (isAsciiHtmlWhitespaceAt(value, cursor)) cursor += 1;
-    if (value[cursor] === '>') return true;
-    closingIndex = lower.indexOf(prefix, closingIndex + prefix.length);
+  let cursor = index;
+  while (cursor < value.length) {
+    const markupStart = value.indexOf('<', cursor);
+    if (markupStart < 0) return false;
+    if (value.startsWith('<!--', markupStart)) {
+      const commentEnd = value.indexOf('-->', markupStart + 4);
+      if (commentEnd < 0) return false;
+      cursor = commentEnd + 3;
+      continue;
+    }
+
+    if (lower.startsWith(prefix, markupStart)) {
+      let closingEnd = markupStart + prefix.length;
+      while (isAsciiHtmlWhitespaceAt(value, closingEnd)) closingEnd += 1;
+      if (value[closingEnd] === '>') return true;
+    }
+
+    const tagLike = isAsciiLetterAt(value, markupStart + 1)
+      || (value[markupStart + 1] === '/' && isAsciiLetterAt(value, markupStart + 2))
+      || value[markupStart + 1] === '!'
+      || value[markupStart + 1] === '?';
+    if (!tagLike) {
+      cursor = markupStart + 1;
+      continue;
+    }
+    const markupEnd = htmlMarkupEnd(value, markupStart);
+    if (markupEnd < 0) return false;
+    cursor = markupEnd + 1;
   }
   return false;
 }
@@ -159,8 +176,7 @@ function startsHtmlMarkup(value, index) {
   if (!RELEASE_NOTE_HTML_TAGS.has(tagName) && !RELEASE_NOTE_VOID_HTML_TAGS.has(tagName)) {
     return containsNestedHtmlMarkup(value, index, end);
   }
-  if (closing || !isUnicodeLetterOrNumberAt(value, index - 1)) return true;
-
+  if (closing) return true;
   if (RELEASE_NOTE_VOID_HTML_TAGS.has(tagName)) return true;
   return hasMatchingHtmlClosingTag(value, end + 1, tagName);
 }
