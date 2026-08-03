@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -117,7 +117,16 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     saveCookie: (cookie) => ipcRenderer.invoke('claude:saveCookie', cookie)
   },
   ollama: {
-    validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
+    validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie),
+    accounts: () => ipcRenderer.invoke('ollama:accounts'),
+    addAccount: (cookie) => ipcRenderer.invoke('ollama:addAccount', cookie),
+    removeAccount: (id) => ipcRenderer.invoke('ollama:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('ollama:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('ollama:accounts', handler);
+      return () => ipcRenderer.removeListener('ollama:accounts', handler);
+    }
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),

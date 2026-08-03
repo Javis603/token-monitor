@@ -3437,6 +3437,11 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
       ? (options.mimoManagedAccounts || deps.mimoManagedAccounts)
       : [];
     jobs = options.limitRefreshScope?.provider === 'mimo' ? 1 : Math.max(1, managed.length);
+  } else if (provider === 'ollama') {
+    const managed = Array.isArray(options.ollamaManagedAccounts || deps.ollamaManagedAccounts)
+      ? (options.ollamaManagedAccounts || deps.ollamaManagedAccounts)
+      : [];
+    jobs = Math.max(1, managed.filter((a) => a.enabled !== false).length);
   }
   return base * jobs;
 }

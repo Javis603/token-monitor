@@ -1176,39 +1176,19 @@ test('settings provider status waits for stats and refreshes when stats arrive',
 
 test('saving Ollama credentials enables its provider and always settles validation', () => {
   const app = readRendererFile('app.js');
-  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
   const selection = functionBody(app, 'limitProviderSelectionIncluding', 'missingLimitProviderStatus');
   const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
   const ollamaSetup = setup.slice(
-    setup.indexOf("document.getElementById('ollamaCookieSubmit')"),
+    setup.indexOf("document.getElementById('ollamaSaveAccountButton')"),
     setup.indexOf('const kimiToggle')
   );
   assert.match(selection, /selected\.add\(providerName\)/);
   assert.match(selection, /\.filter\(\(id\) => selected\.has\(id\)\)/);
-  assert.match(ollamaSetup, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
-  assert.match(ollamaSetup, /limitsEnabled: true/);
-  assert.match(ollamaSetup, /await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\)/);
-  assert.match(ollamaSetup, /if \(!validation\?\.ok\)/);
-  assert.doesNotMatch(ollamaSetup, /await refreshStats\(\{ force: true \}\);/);
-  assert.match(ollamaSetup, /clearExternalProviderCheckPending\('ollama'\);/);
-  assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
-  assert.match(
-    renderExternalStatus,
-    /providerName === 'ollama' && wasPending && !pending && linked[\s\S]*?setExternalAccountExpanded\('ollama', false\)/,
-    'Ollama should collapse only after a fresh provider confirms the account is linked'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'a successful save must stay pending until the collector publishes a fresh provider'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'the setup panel must remain open while validation is pending'
-  );
-  assert.match(ollamaSetup, /catch \(err\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?renderExternalProviderStatus\('ollama'\);/);
-  assert.match(ollamaSetup, /ollamaValidationError\(validation\)/);
+  // Multi-account: uses addAccount, not validateCookie
+  assert.match(ollamaSetup, /window\.tokenMonitor\.ollama\.addAccount\(input\.value\)/);
+  assert.match(ollamaSetup, /window\.tokenMonitor\.ollama\.accounts\(\)/);
+  assert.doesNotMatch(ollamaSetup, /validateCookie/);
+  assert.doesNotMatch(ollamaSetup, /ollamaCookie: input\.value/);
 });
 
 test('account validation reads the local device raw limits, not the collapsed aggregate', () => {

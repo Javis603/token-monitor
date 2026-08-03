@@ -46,7 +46,7 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
-const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
+const { fetchOllamaLimits, rememberOllamaValidation, normalizeOllamaManagedAccounts, createOllamaManagedAccount } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
   codexAuthIdentity,
@@ -398,6 +398,7 @@ function defaultSettings() {
     ollamaCookie: '',
     codexManagedAccounts: [],
     mimoManagedAccounts: [],
+    ollamaManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -494,7 +495,8 @@ function electronLimitsConfig() {
     env: process.env,
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
-    mimoManagedAccounts: mimoManagedAccountsForCollector()
+    mimoManagedAccounts: mimoManagedAccountsForCollector(),
+    ollamaManagedAccounts: ollamaManagedAccountsForCollector()
   });
 }
 
@@ -989,6 +991,128 @@ function setMimoManagedAccountEnabled(id, enabled) {
     refresh: account.enabled
   });
   return { ok: true, accounts: mimoAccountsForRenderer() };
+}
+
+function ollamaAccountsForRenderer() {
+  return normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map(({
+    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
+  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
+}
+
+function ollamaManagedAccountsForCollector() {
+  return normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map((account) => ({
+    ...account,
+    cookieHeader: readOllamaCredential(account.id)
+  })).filter((account) => account.cookieHeader);
+}
+
+function writeOllamaCredential(id, value) {
+  const cookieHeader = String(value || '').trim();
+  if (!cookieHeader) return false;
+  try {
+    return ensureCredentialStore().writeOllamaCredential(id, cookieHeader);
+  } catch (_) {
+    return false;
+  }
+}
+
+function readOllamaCredential(id) {
+  try {
+    return String(ensureCredentialStore().readOllamaCredential(id) || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function removeOllamaCredential(id) {
+  try {
+    return ensureCredentialStore().removeOllamaCredential(id);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function addOllamaManagedAccount(cookieValue) {
+  const accounts = normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts);
+  const result = createOllamaManagedAccount(cookieValue, accounts);
+  if (!result.ok) return result;
+  const [validation] = await fetchOllamaLimits({ ollamaManagedAccounts: [result.account] });
+  if (validation?.status !== 'ok') {
+    const errorCode = validation?.status === 'unauthorized'
+      ? 'invalidCookie'
+      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
+    return { ok: false, errorCode };
+  }
+  result.account.accountEmail = String(validation.accountEmail || '').trim().slice(0, 254);
+  result.account.accountLabel = String(validation.accountLabel || '').trim();
+  const previousCookie = readOllamaCredential(result.account.id);
+  const credentialStored = writeOllamaCredential(result.account.id, result.account.cookieHeader);
+  delete result.account.cookieHeader;
+  if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  settings.ollamaManagedAccounts = normalizeOllamaManagedAccounts([
+    ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
+    result.account
+  ]);
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCookie) writeOllamaCredential(result.account.id, previousCookie);
+    else removeOllamaCredential(result.account.id);
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
+  pushSettingsToRenderer();
+  sendOllamaAccountsPush();
+  void queueLimitInvalidation({
+    provider: 'ollama',
+    accountId: result.account.id,
+    accountKey: result.account.accountKey
+  }, 'account-added');
+  return { ok: true, accounts: ollamaAccountsForRenderer() };
+}
+
+async function removeOllamaManagedAccount(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeOllamaManagedAccounts(settings.ollamaManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  const previousCookie = readOllamaCredential(accountId);
+  if (!removeOllamaCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
+  settings.ollamaManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCookie) writeOllamaCredential(accountId, previousCookie);
+    return { ok: false, error: 'Could not persist account removal' };
+  }
+  pushSettingsToRenderer();
+  sendOllamaAccountsPush();
+  void queueLimitInvalidation({ provider: 'ollama', accountId, accountKey: account.accountKey }, 'account-removed', {
+    clear: true,
+    refresh: false
+  });
+  return { ok: true, accounts: ollamaAccountsForRenderer() };
+}
+
+function setOllamaManagedAccountEnabled(id, enabled) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeOllamaManagedAccounts(settings.ollamaManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  account.enabled = Boolean(enabled);
+  account.updatedAt = new Date().toISOString();
+  settings.ollamaManagedAccounts = accounts;
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    return { ok: false, error: 'Could not persist account state' };
+  }
+  pushSettingsToRenderer();
+  sendOllamaAccountsPush();
+  void queueLimitInvalidation({ provider: 'ollama', accountId, accountKey: account.accountKey }, 'account-state', {
+    clear: !account.enabled,
+    refresh: account.enabled
+  });
+  return { ok: true, accounts: ollamaAccountsForRenderer() };
 }
 
 function codexManagedRoot() {
@@ -3558,6 +3682,7 @@ function settingsForRenderer() {
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
+    ollamaManagedAccounts: ollamaAccountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
@@ -3605,6 +3730,11 @@ function pushSettingsToRenderer() {
 function sendMimoAccountsPush() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
+}
+
+function sendOllamaAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('ollama:accounts', ollamaAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -5302,6 +5432,10 @@ app.whenReady().then(() => {
     .catch((error) => ({ ok: false, error: error.message })));
   ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
   ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
+  ipcMain.handle('ollama:addAccount', async (_event, raw) => addOllamaManagedAccount(raw));
+  ipcMain.handle('ollama:removeAccount', async (_event, id) => removeOllamaManagedAccount(id));
+  ipcMain.handle('ollama:setAccountEnabled', (_event, id, enabled) => setOllamaManagedAccountEnabled(id, enabled));
+  ipcMain.handle('ollama:accounts', () => ollamaAccountsForRenderer());
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());

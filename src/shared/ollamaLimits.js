@@ -1,11 +1,13 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 
 const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
 const VALIDATION_CACHE_MS = 30 * 1000;
+const OLLAMA_ACCOUNT_TIMEOUT_MS = 15_000;
 let validationCache = null;
 const OLLAMA_SESSION_COOKIE_NAMES = new Set([
   'session',
@@ -16,6 +18,10 @@ const OLLAMA_SESSION_COOKIE_NAMES = new Set([
   '__Secure-next-auth.session-token',
   'next-auth.session-token'
 ]);
+
+// In-memory usage-delta tracker: accountKey → { sessionPercent, weeklyPercent, lastChangedAt }
+// Used to detect which account is actively sending tokens between polls.
+const usageDeltaTracker = new Map();
 
 function cleanSecret(value) {
   if (typeof value !== 'string') return '';
@@ -219,7 +225,230 @@ async function requestSettings(fetchFn, cookieHeader, controller) {
   throw errorWithStatus('unavailable', 'Ollama returned too many redirects');
 }
 
+
+
+function errorWithStatus(status, message) {
+  const error = new Error(message || status);
+  error.status = status;
+  return error;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-account management helpers
+// ---------------------------------------------------------------------------
+
+function normalizeOllamaManagedAccounts(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const accounts = [];
+  for (const account of value) {
+    if (!account || typeof account !== 'object') continue;
+    const id = String(account.id || '').trim();
+    const accountKey = String(account.accountKey || '').trim();
+    if (!id || !accountKey) continue;
+    if (seen.has(accountKey)) continue;
+    seen.add(accountKey);
+    accounts.push({
+      id,
+      accountKey,
+      accountEmail: String(account.accountEmail || '').trim().slice(0, 254),
+      accountLabel: String(account.accountLabel || '').trim(),
+      addedAt: account.addedAt || new Date().toISOString(),
+      updatedAt: account.updatedAt || account.addedAt || new Date().toISOString(),
+      enabled: account.enabled !== false,
+      // cookieHeader is ephemeral — loaded from credentialStore at runtime.
+      // Pass it through if already resolved so fetchOllamaAccountWithTimeout
+      // can use it without a second store lookup.
+      ...(account.cookieHeader ? { cookieHeader: account.cookieHeader } : {})
+    });
+  }
+  return accounts;
+}
+
+function createOllamaManagedAccount(cookieValue, existing = []) {
+  const cookieHeader = normalizeOllamaCookieHeader(cookieValue);
+  if (!cookieHeader) return { ok: false, errorCode: 'missingRequiredCookies' };
+  // Derive a stable accountKey from the session cookie value so duplicate
+  // cookies from the same account are detected before a round-trip.
+  const identity = cookieHeader;
+  const accountKey = hashKey('ollama', identity);
+  const existingAccount = normalizeOllamaManagedAccounts(existing).find(
+    (account) => account.accountKey === accountKey
+  );
+  const id = existingAccount?.id || crypto.randomUUID();
+  return {
+    ok: true,
+    account: {
+      id,
+      accountKey,
+      accountEmail: '',
+      accountLabel: '',
+      cookieHeader,
+      addedAt: existingAccount?.addedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      enabled: true
+    }
+  };
+}
+
+function scopedOllamaManagedAccounts(value, scope = {}) {
+  const accounts = normalizeOllamaManagedAccounts(value);
+  if (!scope || typeof scope !== 'object') return accounts;
+  const accountKey = String(scope.accountKey || '').trim();
+  const accountEmail = String(scope.accountEmail || scope.email || '').trim().toLowerCase();
+  const accountLabel = String(scope.accountLabel || scope.accountName || '').trim();
+  if (!accountKey && !accountEmail && !accountLabel) return accounts;
+  return accounts.filter((a) => {
+    if (accountKey && a.accountKey === accountKey) return true;
+    if (accountEmail && a.accountEmail.toLowerCase() === accountEmail) return true;
+    if (accountLabel && a.accountLabel === accountLabel) return true;
+    return false;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Active account detection via usage delta
+// ---------------------------------------------------------------------------
+
+function detectActiveOllamaAccount(results) {
+  const now = Date.now();
+  let activeCandidateKey = null;
+  let activeCandidateAt = 0;
+
+  // First pass: detect which account's usage increased since the last poll.
+  for (const provider of results) {
+    if (provider.status !== 'ok' || !provider.accountKey) continue;
+    const sessionWindow = (provider.windows || []).find((w) => w.kind === 'session');
+    const weeklyWindow = (provider.windows || []).find((w) => w.kind === 'weekly');
+    const sessionPct = sessionWindow?.usedPercent ?? null;
+    const weeklyPct = weeklyWindow?.usedPercent ?? null;
+
+    const previous = usageDeltaTracker.get(provider.accountKey);
+    const hadDelta = previous && (
+      (sessionPct !== null && previous.sessionPercent !== null && sessionPct > previous.sessionPercent) ||
+      (weeklyPct !== null && previous.weeklyPercent !== null && weeklyPct > previous.weeklyPercent)
+    );
+
+    // Update tracker
+    usageDeltaTracker.set(provider.accountKey, {
+      sessionPercent: sessionPct,
+      weeklyPercent: weeklyPct,
+      lastChangedAt: hadDelta ? now : (previous?.lastChangedAt || 0)
+    });
+
+    if (hadDelta && (previous?.lastChangedAt || 0) >= activeCandidateAt) {
+      activeCandidateKey = provider.accountKey;
+      activeCandidateAt = now;
+    }
+  }
+
+  // If no delta found on this poll, fall back to the most recently changed account.
+  if (!activeCandidateKey) {
+    let bestAt = 0;
+    for (const provider of results) {
+      if (provider.status !== 'ok' || !provider.accountKey) continue;
+      const entry = usageDeltaTracker.get(provider.accountKey);
+      const changedAt = entry?.lastChangedAt || 0;
+      if (changedAt > bestAt) {
+        bestAt = changedAt;
+        activeCandidateKey = provider.accountKey;
+      }
+    }
+  }
+
+  // Tag the winner with activeAccount: true.
+  for (const provider of results) {
+    provider.activeAccount = Boolean(activeCandidateKey && provider.accountKey === activeCandidateKey);
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Per-account fetch with timeout (for managed-accounts fan-out)
+// ---------------------------------------------------------------------------
+
+async function fetchOllamaAccountWithTimeout(account, deps = {}) {
+  const timeoutMs = Number(deps.accountTimeoutMs || OLLAMA_ACCOUNT_TIMEOUT_MS);
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const now = (deps.now || Date.now)();
+    const updatedAt = new Date(now).toISOString();
+    const cookieHeader = account.cookieHeader;
+    if (!cookieHeader) {
+      return normalizeLimitProvider({
+        provider: 'ollama',
+        source: 'web',
+        status: 'notConfigured',
+        updatedAt,
+        windows: []
+      });
+    }
+    const fetchFn = deps.fetch || fetch;
+    const response = await requestSettings(fetchFn, cookieHeader, controller);
+    if (response.status === 401 || response.status === 403) {
+      throw errorWithStatus('unauthorized', `Ollama settings returned ${response.status}`);
+    }
+    if (response.status === 429) throw errorWithStatus('sourceRateLimited', 'Ollama settings returned 429');
+    if (!response.ok) throw errorWithStatus('unavailable', `Ollama settings returned ${response.status}`);
+    const html = await response.text();
+    const parsed = parseOllamaUsageHtml(html);
+    if (parsed.windows.length === 0) {
+      throw errorWithStatus(
+        looksSignedOut(html) ? 'unauthorized' : 'unavailable',
+        'Ollama settings page had no usage meters'
+      );
+    }
+    const email = parsed.accountEmail || account.accountEmail || '';
+    const resolvedAccountKey = account.accountKey ||
+      hashKey('ollama', email || cookiePairs(cookieHeader)
+        .filter((pair) => isRecognizedSessionCookieName(pair.name))
+        .map((pair) => `${pair.name}=${pair.value}`).join(';'));
+    return normalizeLimitProvider({
+      provider: 'ollama',
+      accountKey: resolvedAccountKey,
+      accountEmail: email,
+      accountLabel: parsed.planName || account.accountLabel || '',
+      source: 'web',
+      status: 'ok',
+      updatedAt,
+      activeAccount: false,
+      windows: parsed.windows
+    });
+  } catch (error) {
+    const now = (deps.now || Date.now)();
+    return normalizeLimitProvider({
+      provider: 'ollama',
+      accountKey: account.accountKey,
+      source: 'web',
+      status: error?.name === 'AbortError' ? 'unavailable' : (error?.status || 'unavailable'),
+      updatedAt: new Date(now).toISOString(),
+      windows: []
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Updated fetchOllamaLimits — fans out when ollamaManagedAccounts is set
+// ---------------------------------------------------------------------------
+
 async function fetchOllamaLimits(options = {}, deps = {}) {
+  // --- Multi-account path ---
+  const rawManaged = options.ollamaManagedAccounts || deps.ollamaManagedAccounts;
+  const managedAccounts = normalizeOllamaManagedAccounts(rawManaged);
+  const enabledAccounts = managedAccounts.filter((a) => a.enabled !== false);
+  if (enabledAccounts.length > 0) {
+    const scope = options.limitRefreshScope;
+    const scoped = scope?.provider === 'ollama' && scopedOllamaManagedAccounts(enabledAccounts, scope);
+    const targets = (scoped && scoped.length > 0) ? scoped : enabledAccounts;
+    const results = await Promise.all(targets.map((account) => fetchOllamaAccountWithTimeout(account, deps)));
+    return detectActiveOllamaAccount(results);
+  }
+
+  // --- Legacy single-cookie path (unchanged) ---
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
@@ -275,12 +504,6 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
   }
 }
 
-function errorWithStatus(status, message) {
-  const error = new Error(message || status);
-  error.status = status;
-  return error;
-}
-
 module.exports = {
   OLLAMA_SETTINGS_URL,
   OLLAMA_SESSION_COOKIE_NAMES,
@@ -288,5 +511,8 @@ module.exports = {
   ollamaSessionCookie,
   rememberOllamaValidation,
   parseOllamaUsageHtml,
-  fetchOllamaLimits
+  fetchOllamaLimits,
+  normalizeOllamaManagedAccounts,
+  createOllamaManagedAccount,
+  scopedOllamaManagedAccounts
 };

@@ -592,8 +592,8 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(html, /<div id="zaiAccountGroup"[\s\S]*?<select id="zaiApiRegionInput">[\s\S]*?<input id="zaiApiKeyInput" type="password"[\s\S]*?<button id="zaiApiKeySubmit"[\s\S]*data-i18n="settings\.zai\.saveApiKey">/);
   assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">API key \/ Access key ID[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="ark-\.\.\. or AKLT\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
   assert.match(html, /<div id="qoderAccountGroup"[\s\S]*?<select id="qoderSiteInput">[\s\S]*?<textarea id="qoderCookieInput"[\s\S]*?<button id="qoderCookieSubmit"[\s\S]*data-i18n="settings\.qoder\.saveCookie">/);
-  assert.match(html, /<div id="ollamaAccountGroup"[\s\S]*?<textarea id="ollamaCookieInput"[\s\S]*?<button id="ollamaCookieSubmit"[\s\S]*data-i18n="settings\.ollama\.saveCookie">/);
-  const ollamaDetails = html.match(/<div id="ollamaSettingsDetails"[\s\S]*?<div id="ollamaErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(html, /<div id="ollamaAccountGroup"[\s\S]*?<div id="ollamaAccountList"[\s\S]*?<textarea id="ollamaCookieInput"[\s\S]*?<button id="ollamaSaveAccountButton"/);
+  const ollamaDetails = html.match(/<div id="ollamaSettingsDetails"[\s\S]*?<div id="ollamaAccountErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
   assert.match(ollamaDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.ollama\.step1">/);
   assert.match(ollamaDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.ollama\.step2">/);
   assert.match(ollamaDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.ollama\.step3">/);
@@ -621,26 +621,21 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(zaiPlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(volcenginePlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(qoderPlatformUrl\(\)\)/);
-  assert.match(setupBody, /ollamaCookie: input\.value/);
-  assert.match(setupBody, /const validation = await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\);/);
-  assert.match(setupBody, /if \(!validation\?\.ok\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?ollamaValidationError\(validation\);[\s\S]*?return;/);
-  assert.match(setupBody, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
-  assert.match(setupBody, /limitsEnabled: true/);
-  assert.match(setupBody, /clearExternalProviderCheckPending\('ollama'\);/);
+  assert.match(setupBody, /window\.tokenMonitor\.ollama\.addAccount\(input\.value\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.ollama\.accounts\(\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(ollamaPlatformUrl\(\)\)/);
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
-  assert.match(preload, /validateCookie: \(cookie\) => ipcRenderer\.invoke\('ollama:validateCookie', cookie\)/);
+  assert.match(preload, /addAccount: \(cookie\) => ipcRenderer\.invoke\('ollama:addAccount', cookie\)/);
+  assert.match(preload, /removeAccount: \(id\) => ipcRenderer\.invoke\('ollama:removeAccount', id\)/);
+  assert.match(preload, /setAccountEnabled: \(id, enabled\) => ipcRenderer\.invoke\('ollama:setAccountEnabled', id, enabled\)/);
+  assert.match(preload, /accounts: \(\) => ipcRenderer\.invoke\('ollama:accounts'\)/);
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const validationHandler = main.slice(
-    main.indexOf("ipcMain.handle('ollama:validateCookie'"),
-    main.indexOf("ipcMain.handle('opencode:saveCookie'")
-  );
-  assert.match(validationHandler, /const cookie = normalizeOllamaCookie\(raw\);/);
-  assert.match(validationHandler, /await fetchOllamaLimits\(\{ ollamaCookie: cookie \}, \{ bypassValidationCache: true \}\)/);
-  assert.match(validationHandler, /rememberOllamaValidation\(cookie, provider\);/);
-  assert.match(validationHandler, /return \{ ok: provider\.status === 'ok', status: provider\.status \};/);
+  assert.match(main, /ipcMain\.handle\('ollama:addAccount'/);
+  assert.match(main, /ipcMain\.handle\('ollama:removeAccount'/);
+  assert.match(main, /ipcMain\.handle\('ollama:setAccountEnabled'/);
+  assert.match(main, /ipcMain\.handle\('ollama:accounts'/);
 
   const qoderSiteBody = functionBody(app, 'selectedQoderSite', 'qoderUsagePagePath');
   assert.match(qoderSiteBody, /document\.getElementById\('qoderSiteInput'\)\?\.value/);

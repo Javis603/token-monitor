@@ -4587,6 +4587,10 @@ function mimoSettingsAccountTitle(account, index) {
   return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
+function ollamaSettingsAccountTitle(account, index) {
+  return String(account?.accountEmail || account?.accountLabel || '').trim() || `Account ${index + 1}`;
+}
+
 function renderMimoAccountGroup(label, providers, color) {
   const row = document.createElement('div');
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
@@ -11275,6 +11279,10 @@ function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
 }
 
+function setOllamaAccountExpanded(expanded) {
+  setAccountGroupExpanded('ollama', expanded, 'ollamaAccountExpanded');
+}
+
 function setCopilotAccountExpanded(expanded) {
   setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
 }
@@ -11601,6 +11609,102 @@ function renderMimoStatus() {
   renderSettingsSummaries();
 }
 
+function renderOllamaStatus() {
+  const statusEl = document.getElementById('ollamaAccountStatus');
+  const listEl = document.getElementById('ollamaAccountList');
+  const emptyEl = document.getElementById('ollamaAccountEmpty');
+  const errorEl = document.getElementById('ollamaAccountErrorMessage');
+  if (!statusEl || !listEl || !emptyEl || !errorEl) return;
+  const accounts = state.settings?.ollamaManagedAccounts || [];
+  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
+  const statusText = accounts.length === 0
+    ? t('settings.ollama.notConfigured')
+    : t('settings.ollama.connected', { linked: enabledCount, total: accounts.length });
+  setCursorStatusText(statusEl, statusText);
+  errorEl.textContent = state.ollamaAccountError || '';
+  errorEl.classList.toggle('hidden', !state.ollamaAccountError);
+  emptyEl.classList.toggle('hidden', accounts.length > 0);
+
+  listEl.replaceChildren();
+  if (accounts.length > 0) {
+    for (const [index, account] of accounts.entries()) {
+      const enabled = account.enabled !== false;
+      const accountName = ollamaSettingsAccountTitle(account, index);
+      const row = document.createElement('div');
+      row.className = 'managed-account-row';
+      row.classList.toggle('disabled', !enabled);
+
+      const input = document.createElement('input');
+      input.className = 'managed-account-checkbox';
+      input.type = 'checkbox';
+      input.checked = enabled;
+      input.setAttribute('aria-label', t('settings.ollama.toggleAccount', {
+        account: accountName
+      }));
+      input.addEventListener('change', async () => {
+        input.disabled = true;
+        const result = await window.tokenMonitor.ollama.setAccountEnabled(account.id, input.checked);
+        if (!result?.ok) {
+          state.ollamaAccountError = result?.error || t('settings.ollama.toggleFailed');
+        } else {
+          state.ollamaAccountError = '';
+          state.settings.ollamaManagedAccounts = result.accounts || [];
+        }
+        renderOllamaStatus();
+        renderSettingsSummaries();
+      });
+
+      const main = document.createElement('div');
+      main.className = 'managed-account-main';
+      const label = document.createElement('div');
+      label.className = 'managed-account-email';
+      label.textContent = accountName;
+      main.append(label);
+
+      const right = document.createElement('span');
+      right.className = 'managed-account-right';
+      const info = document.createElement('span');
+      info.className = 'managed-account-info';
+      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.ollama.disabled');
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'managed-account-remove';
+      remove.textContent = '✕';
+      remove.title = t('settings.ollama.remove');
+      let confirmingRemove = false;
+      remove.addEventListener('click', async () => {
+        if (!confirmingRemove) {
+          confirmingRemove = true;
+          remove.classList.add('confirming');
+          remove.textContent = '✓';
+          remove.title = t('settings.ollama.removeConfirm', {
+            account: accountName
+          });
+          return;
+        }
+        const result = await window.tokenMonitor.ollama.removeAccount(account.id);
+        if (result?.ok) {
+          state.ollamaAccountError = '';
+          state.settings.ollamaManagedAccounts = result.accounts || [];
+          renderOllamaStatus();
+          renderSettingsSummaries();
+          refreshStats({ force: true }).catch(() => {});
+          return;
+        }
+        state.ollamaAccountError = result?.error || t('settings.ollama.removeFailed');
+        renderOllamaStatus();
+        renderSettingsSummaries();
+      });
+
+      right.append(info, remove);
+      row.append(input, main, right);
+      listEl.append(row);
+    }
+  }
+  renderSettingsSummaries();
+}
+
 function minimaxProviderStatus() {
   return localProviderStatus('minimax');
 }
@@ -11872,14 +11976,6 @@ function kimiPlatformUrl() {
 
 function ollamaPlatformUrl() {
   return 'https://ollama.com/settings';
-}
-
-function ollamaValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.ollama.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.ollama.validationRateLimited');
-  }
-  return t('settings.ollama.validationUnavailable');
 }
 
 function renderExternalProviderStatus(providerName) {
@@ -13551,63 +13647,71 @@ function setupCursorAccountUI() {
 
   const ollamaToggle = document.getElementById('ollamaSettingsToggle');
   if (ollamaToggle) {
-    ollamaToggle.addEventListener('click', () => setExternalAccountExpanded('ollama', !state.ollamaAccountExpanded));
-    setExternalAccountExpanded('ollama', false);
-    renderExternalProviderStatus('ollama');
+    ollamaToggle.addEventListener('click', () => setOllamaAccountExpanded(!state.ollamaAccountExpanded));
+
+    const addToggle = document.getElementById('ollamaAddToggle');
+    const addDetails = document.getElementById('ollamaAddDetails');
+    function setOllamaAddExpanded(expanded) {
+      const next = Boolean(expanded);
+      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
+      addDetails?.classList.toggle('hidden', !next);
+      document.getElementById('ollamaManualPanel')?.classList.toggle('expanded', next);
+    }
+    addToggle?.addEventListener('click', () => setOllamaAddExpanded(addDetails?.classList.contains('hidden')));
+    setOllamaAccountExpanded(false);
+    renderOllamaStatus();
+
+    window.tokenMonitor.ollama.onAccounts((accounts) => {
+      state.settings.ollamaManagedAccounts = accounts || [];
+      renderOllamaStatus();
+    });
+
+    window.tokenMonitor.ollama.accounts().then((accounts) => {
+      state.settings.ollamaManagedAccounts = accounts || [];
+      renderOllamaStatus();
+    }).catch(() => {});
 
     document.getElementById('ollamaOpenBrowser').addEventListener('click', () => {
       window.tokenMonitor.openExternal(ollamaPlatformUrl());
     });
-    document.getElementById('ollamaLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ ollamaCookie: '' });
-      clearExternalProviderCheckPending('ollama');
-      clearExternalProviderPendingStatus('ollama');
-      renderExternalProviderStatus('ollama');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaCookieSubmit').addEventListener('click', async () => {
+
+    document.getElementById('ollamaSaveAccountButton').addEventListener('click', async () => {
       const input = document.getElementById('ollamaCookieInput');
-      const errorEl = document.getElementById('ollamaErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.ollama.statusNotSet');
-        errorEl.classList.remove('hidden');
+      const saveButton = document.getElementById('ollamaSaveAccountButton');
+      saveButton.disabled = true;
+      saveButton.textContent = t('settings.ollama.checking');
+      let result;
+      try {
+        result = await window.tokenMonitor.ollama.addAccount(input.value);
+      } catch (_) {
+        result = { ok: false, errorCode: 'validationUnavailable' };
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = t('settings.ollama.saveAccount');
+      }
+      if (!result?.ok) {
+        if (result?.errorCode === 'missingRequiredCookies') {
+          state.ollamaAccountError = t('settings.ollama.missingCookies', { cookies: (result.missingCookies || []).join(', ') });
+        } else if (result?.errorCode === 'invalidCookie') {
+          state.ollamaAccountError = t('settings.ollama.invalidCookie');
+        } else if (result?.errorCode === 'validationRateLimited') {
+          state.ollamaAccountError = t('settings.ollama.validationRateLimited');
+        } else if (result?.errorCode === 'validationUnavailable') {
+          state.ollamaAccountError = t('settings.ollama.validationUnavailable');
+        } else if (result?.errorCode === 'credentialStorageUnavailable') {
+          state.ollamaAccountError = t('settings.ollama.credentialStorageUnavailable');
+        } else {
+          state.ollamaAccountError = result?.error || t('settings.ollama.addFailed');
+        }
+        renderOllamaStatus();
         return;
       }
-      try {
-        markExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        const validation = await window.tokenMonitor.ollama.validateCookie(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = ollamaValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({
-          ollamaCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('ollama'),
-          limitsEnabled: true
-        });
-        if (!state.settings?.ollamaCookieConfigured) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = t('settings.ollama.validationInvalid');
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        input.value = '';
-        renderExternalProviderStatus('ollama');
-      } catch (err) {
-        clearExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
+      input.value = '';
+      state.ollamaAccountError = '';
+      state.settings.ollamaManagedAccounts = await window.tokenMonitor.ollama.accounts();
+      renderOllamaStatus();
+      setOllamaAddExpanded(false);
+      await refreshStats({ force: true });
     });
   }
 

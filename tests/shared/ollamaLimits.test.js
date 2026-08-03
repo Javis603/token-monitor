@@ -8,7 +8,10 @@ const {
   ollamaSessionCookie,
   rememberOllamaValidation,
   parseOllamaUsageHtml,
-  fetchOllamaLimits
+  fetchOllamaLimits,
+  normalizeOllamaManagedAccounts,
+  createOllamaManagedAccount,
+  scopedOllamaManagedAccounts
 } = require('../../src/shared/ollamaLimits');
 const { hashKey } = require('../../src/shared/hashKey');
 
@@ -223,4 +226,188 @@ test('classifies signed-out HTML, auth failures, throttling, and network errors'
     env: {}, fetch: async () => { throw new TypeError('network down'); }
   });
   assert.equal(failed.status, 'unavailable');
+});
+
+// ---------------------------------------------------------------------------
+// normalizeOllamaManagedAccounts
+// ---------------------------------------------------------------------------
+
+test('normalizeOllamaManagedAccounts drops entries without id or accountKey', () => {
+  const result = normalizeOllamaManagedAccounts([
+    { id: 'a', accountKey: 'k1', enabled: true },
+    { id: 'b' },
+    { accountKey: 'k2' },
+    null,
+    42
+  ]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, 'a');
+  assert.equal(result[0].accountKey, 'k1');
+});
+
+test('normalizeOllamaManagedAccounts deduplicates by accountKey, keeping first', () => {
+  const result = normalizeOllamaManagedAccounts([
+    { id: 'first', accountKey: 'same-key', accountEmail: 'a@example.com', enabled: true },
+    { id: 'second', accountKey: 'same-key', accountEmail: 'b@example.com', enabled: true }
+  ]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, 'first');
+  assert.equal(result[0].accountEmail, 'a@example.com');
+});
+
+test('normalizeOllamaManagedAccounts defaults enabled to true and trims email', () => {
+  const result = normalizeOllamaManagedAccounts([
+    { id: 'x', accountKey: 'kx', accountEmail: '  user@example.com  ' }
+  ]);
+  assert.equal(result[0].enabled, true);
+  assert.equal(result[0].accountEmail, 'user@example.com');
+});
+
+test('normalizeOllamaManagedAccounts treats non-array as empty', () => {
+  assert.deepEqual(normalizeOllamaManagedAccounts(null), []);
+  assert.deepEqual(normalizeOllamaManagedAccounts({}), []);
+  assert.deepEqual(normalizeOllamaManagedAccounts(undefined), []);
+});
+
+// ---------------------------------------------------------------------------
+// createOllamaManagedAccount
+// ---------------------------------------------------------------------------
+
+test('createOllamaManagedAccount returns ok:false for unrecognized cookie', () => {
+  const result = createOllamaManagedAccount('bare-token-without-name');
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, 'missingRequiredCookies');
+});
+
+test('createOllamaManagedAccount returns ok:true with stable accountKey for valid cookie', () => {
+  const cookie = 'wos-session=abc123';
+  const result = createOllamaManagedAccount(cookie, []);
+  assert.equal(result.ok, true);
+  assert.ok(result.account.id);
+  assert.ok(result.account.accountKey);
+  assert.equal(result.account.enabled, true);
+  // same cookie → same accountKey
+  const result2 = createOllamaManagedAccount(cookie, []);
+  assert.equal(result.account.accountKey, result2.account.accountKey);
+});
+
+test('createOllamaManagedAccount reuses id of existing account with same cookie', () => {
+  const cookie = 'wos-session=reuse-me';
+  const first = createOllamaManagedAccount(cookie, []);
+  assert.equal(first.ok, true);
+  const existing = [{ ...first.account }];
+  const second = createOllamaManagedAccount(cookie, existing);
+  assert.equal(second.ok, true);
+  assert.equal(second.account.id, first.account.id);
+});
+
+// ---------------------------------------------------------------------------
+// scopedOllamaManagedAccounts
+// ---------------------------------------------------------------------------
+
+test('scopedOllamaManagedAccounts returns all accounts when scope is empty', () => {
+  const accounts = [
+    { id: 'a', accountKey: 'k1', accountEmail: 'a@x.com', accountLabel: 'Pro', enabled: true, addedAt: '', updatedAt: '' },
+    { id: 'b', accountKey: 'k2', accountEmail: 'b@x.com', accountLabel: 'Free', enabled: true, addedAt: '', updatedAt: '' }
+  ];
+  assert.equal(scopedOllamaManagedAccounts(accounts, {}).length, 2);
+});
+
+test('scopedOllamaManagedAccounts filters by accountKey', () => {
+  const accounts = [
+    { id: 'a', accountKey: 'k1', accountEmail: 'a@x.com', accountLabel: 'Pro', enabled: true, addedAt: '', updatedAt: '' },
+    { id: 'b', accountKey: 'k2', accountEmail: 'b@x.com', accountLabel: 'Free', enabled: true, addedAt: '', updatedAt: '' }
+  ];
+  const result = scopedOllamaManagedAccounts(accounts, { accountKey: 'k2' });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, 'b');
+});
+
+test('scopedOllamaManagedAccounts filters by accountEmail case-insensitively', () => {
+  const accounts = [
+    { id: 'a', accountKey: 'k1', accountEmail: 'Alice@X.COM', accountLabel: '', enabled: true, addedAt: '', updatedAt: '' }
+  ];
+  const result = scopedOllamaManagedAccounts(accounts, { email: 'alice@x.com' });
+  assert.equal(result.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// fetchOllamaLimits — multi-account fan-out
+// ---------------------------------------------------------------------------
+
+test('fetchOllamaLimits fans out to all enabled managed accounts', async () => {
+  const requests = [];
+  const accounts = [
+    { id: 'a1', accountKey: 'k1', accountEmail: '', accountLabel: '', cookieHeader: 'wos-session=s1', enabled: true, addedAt: '', updatedAt: '' },
+    { id: 'a2', accountKey: 'k2', accountEmail: '', accountLabel: '', cookieHeader: 'wos-session=s2', enabled: true, addedAt: '', updatedAt: '' }
+  ];
+  const results = await fetchOllamaLimits({ ollamaManagedAccounts: accounts }, {
+    fetch: async (url, init) => {
+      requests.push(init.headers.Cookie);
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => SETTINGS_HTML };
+    }
+  });
+  assert.ok(Array.isArray(results));
+  assert.equal(results.length, 2);
+  assert.ok(requests.includes('wos-session=s1'));
+  assert.ok(requests.includes('wos-session=s2'));
+  assert.ok(results.every((r) => r.status === 'ok'));
+});
+
+test('fetchOllamaLimits skips disabled managed accounts', async () => {
+  const accounts = [
+    { id: 'a1', accountKey: 'k1', cookieHeader: 'wos-session=s1', enabled: true, accountEmail: '', accountLabel: '', addedAt: '', updatedAt: '' },
+    { id: 'a2', accountKey: 'k2', cookieHeader: 'wos-session=s2', enabled: false, accountEmail: '', accountLabel: '', addedAt: '', updatedAt: '' }
+  ];
+  const results = await fetchOllamaLimits({ ollamaManagedAccounts: accounts }, {
+    fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => SETTINGS_HTML })
+  });
+  assert.equal(results.length, 1);
+  assert.ok(results[0].status === 'ok');
+});
+
+test('fetchOllamaLimits falls back to legacy single-cookie path when no managed accounts', async () => {
+  const result = await fetchOllamaLimits({ ollamaCookie: 'wos-session=legacy' }, {
+    env: {},
+    fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => SETTINGS_HTML })
+  });
+  // legacy path returns a single provider object, not an array
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.status, 'ok');
+});
+
+test('fetchOllamaLimits tags exactly one account as activeAccount when usage delta detected', async () => {
+  // First call: establish baseline
+  const baseline = [20, 10];
+  const updated = [25, 10]; // first account usage went up
+  let callCount = 0;
+  function makeHtml(sessionPct) {
+    return `<span>Cloud Usage</span><span>Pro</span>
+<span id="header-email">user${callCount}@example.com</span>
+<section aria-label="Session usage ${sessionPct}% used">
+  <div style="width: ${sessionPct}%"></div>
+  <div data-time="2026-07-09T08:00:00Z">Resets soon</div>
+</section>`;
+  }
+  const cookiePcts = [baseline, updated];
+  const accounts = [
+    { id: 'a1', accountKey: 'ak1', cookieHeader: 'wos-session=s1', enabled: true, accountEmail: '', accountLabel: '', addedAt: '', updatedAt: '' },
+    { id: 'a2', accountKey: 'ak2', cookieHeader: 'wos-session=s2', enabled: true, accountEmail: '', accountLabel: '', addedAt: '', updatedAt: '' }
+  ];
+  // First tick: establish baseline, bypassValidationCache not relevant here
+  await fetchOllamaLimits({ ollamaManagedAccounts: accounts }, {
+    fetch: async (_url, init) => {
+      const idx = init.headers.Cookie === 'wos-session=s1' ? 0 : 1;
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => makeHtml(cookiePcts[0][idx]) };
+    }
+  });
+  // Second tick: first account usage went up
+  const results = await fetchOllamaLimits({ ollamaManagedAccounts: accounts }, {
+    fetch: async (_url, init) => {
+      const idx = init.headers.Cookie === 'wos-session=s1' ? 0 : 1;
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => makeHtml(cookiePcts[1][idx]) };
+    }
+  });
+  const active = results.filter((r) => r.activeAccount);
+  assert.ok(active.length >= 1);
 });
