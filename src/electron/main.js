@@ -4174,6 +4174,14 @@ function rememberLatestAppUpdate(latest, checkedAt = new Date().toISOString()) {
   return merged;
 }
 
+function rememberSuccessfulAppUpdateCheck(latest, checkedAt = new Date().toISOString()) {
+  const remembered = rememberLatestAppUpdate(latest, checkedAt);
+  if (!remembered) return null;
+  appUpdateLastAttemptAt = checkedAt;
+  appUpdateLastError = null;
+  return remembered;
+}
+
 function setNativeAppUpdateState(patch = {}) {
   appUpdateNativeState = { ...appUpdateNativeState, ...patch };
   sendAppUpdatePush();
@@ -4315,11 +4323,11 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
     try {
       result = await checkAppUpdateProvider();
       appUpdateLastAttemptAt = result.checkedAt || appUpdateLastAttemptAt;
-      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, result, { force });
       if (result.ok) {
-        rememberLatestAppUpdate(result.latest, result.checkedAt);
+        rememberSuccessfulAppUpdateCheck(result.latest, result.checkedAt);
         if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
       } else {
+        appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, result, { force });
         if (!force) console.warn('App update check failed:', result.error);
       }
     } catch (error) {
@@ -4403,7 +4411,8 @@ async function downloadAndPrepareAppUpdate() {
   try {
     const result = await autoUpdater.checkForUpdates();
     const info = result?.updateInfo || null;
-    const latestFromCheck = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
+    const checkedAt = new Date().toISOString();
+    const latestFromCheck = rememberSuccessfulAppUpdateCheck(latestFromUpdaterInfo(info), checkedAt);
     const version = latestFromCheck?.version || null;
     if (!version || !semver.gt(version, app.getVersion())) {
       appUpdateNativeBusy = false;

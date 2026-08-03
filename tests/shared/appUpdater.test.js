@@ -421,6 +421,26 @@ test('extractUpdaterReleaseNotes preserves literal and encoded greater-than sign
   assert.equal(notes.en[0].items[0], 'Cost comparison 5 > 2 remains stable -> ready.');
 });
 
+test('extractUpdaterReleaseNotes recognizes closing tags with ASCII whitespace', () => {
+  const notes = extractUpdaterReleaseNotes([
+    '<h1>English</h1>',
+    '<h2>Changes</h2>',
+    '<h3>Fixed</h3>',
+    '<ul>',
+    '<li>Adjacent<strong>space</strong > remains.</li>',
+    '<li>Adjacent<strong>tab</strong\t> remains.</li>',
+    '<li>Adjacent<strong>newline</strong\n> remains.</li>',
+    '</ul>',
+    '<h2>Download</h2>'
+  ].join(''), '0.40.0');
+
+  assert.deepEqual(notes.en[0].items, [
+    'Adjacentspace remains.',
+    'Adjacenttab remains.',
+    'Adjacentnewline remains.'
+  ]);
+});
+
 test('release-note text preserves literal, encoded, unclosed, and inline-code less-than signs', () => {
   const notes = extractReleaseNotes(`
 <!-- app-update-notes:en:start -->

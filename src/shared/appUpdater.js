@@ -96,6 +96,14 @@ function isUnicodeLetterOrNumberAt(value, index) {
   return /[\p{L}\p{N}]$/u.test(value.slice(Math.max(0, index - 1), index + 1));
 }
 
+function isAsciiHtmlWhitespaceAt(value, index) {
+  return value[index] === '\t'
+    || value[index] === '\n'
+    || value[index] === '\f'
+    || value[index] === '\r'
+    || value[index] === ' ';
+}
+
 function htmlMarkupEnd(value, index) {
   let quote = '';
   const limit = Math.min(value.length, index + MAX_RELEASE_NOTE_HTML_MARKUP_CHARS);
@@ -114,6 +122,19 @@ function htmlMarkupEnd(value, index) {
 function containsNestedHtmlMarkup(value, index, end) {
   for (let cursor = index + 1; cursor < end; cursor += 1) {
     if (value[cursor] === '<' && startsHtmlMarkup(value, cursor)) return true;
+  }
+  return false;
+}
+
+function hasMatchingHtmlClosingTag(value, index, tagName) {
+  const lower = value.toLowerCase();
+  const prefix = `</${tagName}`;
+  let closingIndex = lower.indexOf(prefix, index);
+  while (closingIndex >= 0) {
+    let cursor = closingIndex + prefix.length;
+    while (isAsciiHtmlWhitespaceAt(value, cursor)) cursor += 1;
+    if (value[cursor] === '>') return true;
+    closingIndex = lower.indexOf(prefix, closingIndex + prefix.length);
   }
   return false;
 }
@@ -141,7 +162,7 @@ function startsHtmlMarkup(value, index) {
   if (closing || !isUnicodeLetterOrNumberAt(value, index - 1)) return true;
 
   if (RELEASE_NOTE_VOID_HTML_TAGS.has(tagName)) return true;
-  return value.toLowerCase().indexOf(`</${tagName}>`, end + 1) >= 0;
+  return hasMatchingHtmlClosingTag(value, end + 1, tagName);
 }
 
 function textOutsideHtmlMarkup(value) {

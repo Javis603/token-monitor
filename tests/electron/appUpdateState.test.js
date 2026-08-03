@@ -57,7 +57,21 @@ test('starting a user-requested download restores its dismissed notification', (
   const download = sourceBetween('async function downloadAndPrepareAppUpdate', 'function installDownloadedAppUpdate');
   assert.match(download, /if \(appUpdateCheckPromise\) await appUpdateCheckPromise/);
   assert.match(download, /restoreDismissedAppUpdate\(latest\?\.version\)/);
-  assert.match(download, /rememberLatestAppUpdate\(latestFromUpdaterInfo\(info\)\)/);
+  assert.match(download, /rememberSuccessfulAppUpdateCheck\(latestFromUpdaterInfo\(info\), checkedAt\)/);
+});
+
+test('successful checks share one state transition that clears stale errors', () => {
+  const success = sourceBetween('function rememberSuccessfulAppUpdateCheck', 'function setNativeAppUpdateState');
+  const check = sourceBetween('async function runAppUpdateCheck', 'function maybeRunBackgroundUpdateCheck');
+  const download = sourceBetween('async function downloadAndPrepareAppUpdate', 'function installDownloadedAppUpdate');
+
+  assert.match(success, /const remembered = rememberLatestAppUpdate\(latest, checkedAt\)/);
+  assert.match(success, /if \(!remembered\) return null/);
+  assert.match(success, /appUpdateLastAttemptAt = checkedAt/);
+  assert.match(success, /appUpdateLastError = null/);
+  assert.match(check, /rememberSuccessfulAppUpdateCheck\(result\.latest, result\.checkedAt\)/);
+  assert.match(download, /const checkedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(download, /rememberSuccessfulAppUpdateCheck\(latestFromUpdaterInfo\(info\), checkedAt\)/);
 });
 
 test('automatic updates are opt-in and download without installing', () => {
