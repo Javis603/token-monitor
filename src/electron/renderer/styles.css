@@ -315,6 +315,20 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   color: var(--text);
   opacity: 0.82;
 }
+.shell.title-collapsed .token-rate-reveal.boosting,
+.shell.title-icon-only .token-rate-reveal.boosting {
+  max-width: 18ch;
+  color: var(--accent);
+  opacity: 0.96;
+  text-shadow: 0 0 8px rgba(var(--accent-rgb), 0.35);
+}
+.shell.title-collapsed .token-rate-reveal.settling,
+.shell.title-icon-only .token-rate-reveal.settling {
+  max-width: 18ch;
+  color: var(--text);
+  opacity: 0.82;
+  text-shadow: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .token-rate-reveal { transition: none; }
 }
@@ -3904,6 +3918,15 @@ html.is-windows .limit-live-badge {
 .subscription-add-body .subscription-pair-row > select {
   flex: 1 1 0;
 }
+/* Amount, cadence, and dates are separate settings rows inside one field
+   wrapper. Give that wrapper its own rhythm; the outer add-form gap does not
+   reach these descendants, which previously made the rows touch. */
+.subscription-add-body .subscription-kind-fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
 .subscription-field-note {
   margin-top: -2px;
 }
@@ -3920,7 +3943,6 @@ html.is-windows .limit-live-badge {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
 }
 .subscription-topup-heading {
   flex: 1 1 auto;
@@ -3982,9 +4004,6 @@ html.is-windows .limit-live-badge {
 }
 /* No label: the two fields are the entry, and the button says what happens to
    them. Dropping the label column also buys the date field the width it needs. */
-.subscription-topup-add-row {
-  margin-top: 6px;
-}
 .subscription-add-body .subscription-topup-add-row > input[type="date"] {
   flex: 1 1 0;
   min-width: 0;
@@ -4063,8 +4082,18 @@ html.is-windows .limit-live-badge {
   border-radius: 6px;
   background: rgba(var(--sunken-rgb), 0.36);
 }
+.subscription-row.is-editing {
+  border-color: rgba(var(--accent-rgb), 0.42);
+  background: rgba(var(--accent-rgb), 0.055);
+}
 .subscription-row + .subscription-row {
   margin-top: 6px;
+}
+/* The editor itself becomes a list child while editing. Its top margin is part
+   of the accordion transition, while the bottom margin preserves the row rhythm
+   for the subscriptions that follow it. */
+#subscriptionList > #subscriptionAddDetails {
+  margin: 6px 0;
 }
 /* The icon column only exists when there is an icon: a row without one keeps the
    two-column template, so the title still starts against the padding edge rather
@@ -4136,6 +4165,11 @@ html.is-windows .limit-live-badge {
 .subscription-row .subscription-row-actions button:focus-visible {
   opacity: 1;
   color: var(--text);
+}
+.subscription-row.is-editing .subscription-row-edit {
+  opacity: 1;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
 }
 .subscription-row .subscription-row-delete.is-armed {
   opacity: 1;

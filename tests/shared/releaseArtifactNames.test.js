@@ -61,9 +61,18 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
   const releaseTemplate = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'), 'utf8');
   const intelBullets = releaseTemplate.split('\n').filter((line) => line.startsWith('- **macOS Intel**'));
   const intelDmg = `Token-Monitor-${rootPackage.version}-x64.dmg`;
-  assert.equal(intelBullets.length, 2);
+  assert.equal(intelBullets.length, 5);
   assert.ok(intelBullets.every((line) => line.split(intelDmg).length === 3));
   assert.ok(intelBullets.every((line) => line.includes(`/download/v${rootPackage.version}/`)));
+  const fullChangelogLines = releaseTemplate.split('\n').filter((line) => line.startsWith('**Full Changelog:**'));
+  assert.equal(fullChangelogLines.length, 1);
+  assert.match(fullChangelogLines[0], /\[v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+\]/);
+  assert.match(fullChangelogLines[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
+  assert.ok(fullChangelogLines[0].includes(`v${rootPackage.version}`));
+  assert.match(
+    releaseTemplate,
+    /---\s*\*\*Full Changelog:\*\*[\s\S]*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
+  );
 });
 
 test('release icons use source assets without the legacy generator', () => {

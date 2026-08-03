@@ -55,10 +55,10 @@
     return 1;
   }
 
-  function formatCompactTokens(value, unitSystem = 'western', locale = 'en', options = {}) {
+  function formatCompactValue(value, unitSystem = 'western', locale = 'en', options = {}) {
     const requested = normalizeCompactTokenUnits(unitSystem);
     const effective = effectiveCompactTokenUnits(requested, locale);
-    const num = Math.round(Number(value || 0));
+    const num = Number(value || 0);
     const abs = Math.abs(num);
     const units = unitsFor(effective, locale);
     let unitIndex = -1;
@@ -87,6 +87,10 @@
     return `${display}${units[unitIndex].suffix}`;
   }
 
+  function formatCompactTokens(value, unitSystem = 'western', locale = 'en', options = {}) {
+    return formatCompactValue(Math.round(Number(value || 0)), unitSystem, locale, options);
+  }
+
   function compactTokenUnitThreshold(unitSystem, locale) {
     return effectiveCompactTokenUnits(unitSystem, locale) === 'localized' ? 1e4 : 1e3;
   }
@@ -95,6 +99,7 @@
     compactTokenUnitThreshold,
     effectiveCompactTokenUnits,
     formatCompactTokens,
+    formatCompactValue,
     normalizeCompactTokenUnits,
     supportsLocalizedCompactTokenUnits
   };

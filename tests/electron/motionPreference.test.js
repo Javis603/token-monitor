@@ -43,6 +43,7 @@ test('appearance exposes and persists the three-state motion control', () => {
 
 test('enabling reduced motion settles active row counters immediately', () => {
   const app = read('app.js');
+  assert.match(app, /function settleMotionAnimations\(\) \{[\s\S]*?cancelTokenRateBoost\(undefined, \{ suppressClick: false \}\)/);
   assert.match(app, /const rowNumberAnimations = new Map\(\)/);
   assert.match(app, /for \(const \[el, motion\] of rowNumberAnimations\)[\s\S]*?cancelAnimationFrame\(motion\.handle\)[\s\S]*?rowNumberAnimations\.clear\(\)/);
   assert.match(app, /rowBarAnimations\.clear\(\)/);

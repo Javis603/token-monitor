@@ -1921,12 +1921,551 @@ test('subscription form controls stay shrinkable so a long option cannot overflo
   assert.doesNotMatch(styles, /\.subscription-add-body > \.settings-row/);
 });
 
+test('subscription field groups keep their rows separated', () => {
+  const styles = readRendererFile('styles.css');
+  const fields = cssBlock(styles, '.subscription-add-body .subscription-kind-fields');
+  assert.match(fields, /display: flex;/);
+  assert.match(fields, /flex-direction: column;/);
+  assert.match(fields, /gap: 8px;/);
+  assert.doesNotMatch(cssBlock(styles, '.subscription-topup-heading-row'), /margin-bottom/);
+  assert.doesNotMatch(styles, /\.subscription-topup-add-row\s*\{\s*margin-top/);
+});
+
+test('subscription validation errors stay inside the active editor', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /id="subscriptionErrorMessage" class="settings-note error subscription-form-error hidden" role="alert"/);
+  assert.match(html, /subscriptionErrorMessage[\s\S]*subscriptionSubmit/);
+  assert.doesNotMatch(html, /subscriptionTotalRow[\s\S]*subscriptionErrorMessage/);
+});
+
+test('the add action switches directly from editing to a new editor', () => {
+  const app = readRendererFile('app.js');
+  const beginAdd = functionBody(app, 'beginSubscriptionAdd', 'beginSubscriptionEdit');
+
+  assert.match(beginAdd, /resetSubscriptionForm\(\);/);
+  assert.match(beginAdd, /renderSubscriptionRows\(\);/);
+  assert.match(beginAdd, /openSubscriptionAddEditor\(\);/);
+  assert.match(app, /if \(state\.subscriptionEditingId\) \{\s*closeSubscriptionEditor\(\{ onClosed: openSubscriptionAddEditor \}\);/);
+});
+
+test('subscription editor captures its version before the opening animation', () => {
+  const app = readRendererFile('app.js');
+  const open = functionBody(app, 'openSubscriptionEditor', 'closeSubscriptionEditor');
+  const setOpen = functionBody(app, 'setSubscriptionFormOpen', 'seedSubscriptionPlanName');
+  const frames = [];
+  const details = {
+    classList: { add() {} },
+    getBoundingClientRect() {}
+  };
+  const state = {
+    settings: { subscriptionsHub: 'hub-a', subscriptionsUpdatedAt: 'version-a' },
+    subscriptionEditorTransitionId: 0,
+    subscriptionFormBase: null
+  };
+  const els = { subscriptionAddDetails: details };
+  const subscriptionSettingsVersion = () => ({
+    hub: state.settings.subscriptionsHub,
+    updatedAt: state.settings.subscriptionsUpdatedAt
+  });
+
+  vm.runInNewContext(
+    `${open}\nopenSubscriptionEditor();`,
+    {
+      cancelSubscriptionEditorClose() {},
+      els,
+      requestAnimationFrame: (callback) => frames.push(callback),
+      setSubscriptionFormOpen(open, formBase) {
+        state.subscriptionFormBase = formBase;
+      },
+      state,
+      subscriptionSettingsVersion
+    }
+  );
+
+  state.settings.subscriptionsUpdatedAt = 'version-b';
+  frames[0]();
+  assert.deepEqual(state.subscriptionFormBase, { hub: 'hub-a', updatedAt: 'version-a' });
+  assert.doesNotMatch(setOpen, /formBase \|\| state\.subscriptionFormBase/);
+});
+
+test('closing the subscription editor restores focus to the rebuilt row action', () => {
+  const app = readRendererFile('app.js');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const input = {};
+  const oldEdit = { focus() {} };
+  const newEdit = { focused: false, focus() { this.focused = true; } };
+  const finalEdit = { focused: false, focus() { this.focused = true; } };
+  const rowFor = (edit) => ({
+    dataset: { subscriptionId: 'subscription-1' },
+    querySelector: (selector) => selector === '.subscription-row-edit' ? edit : null
+  });
+  const dom = { rows: [rowFor(oldEdit)] };
+  let finish;
+  const list = { querySelectorAll: () => dom.rows };
+  const details = {
+    classList: { contains: () => false },
+    contains: (node) => node === input,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: 'subscription-1', subscriptionEditorTransitionId: 0 };
+  const context = vm.createContext({
+    document: { activeElement: oldEdit },
+    els: { subscriptionAddDetails: details, subscriptionList: list },
+    state,
+    dom,
+    rowFor,
+    finalEdit,
+    cancelSubscriptionEditorClose() {},
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() { state.subscriptionEditingId = ''; },
+    renderSubscriptionRows() { dom.rows = [rowFor(newEdit)]; },
+    clearTimeout() {},
+    setTimeout(callback) { finish = callback; return 1; }
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\n${close}\ncloseSubscriptionEditor({ onClosed: () => { dom.rows = [rowFor(finalEdit)]; } });`,
+    context
+  );
+  assert.equal(finalEdit.focused, false);
+  finish();
+
+  assert.equal(newEdit.focused, false);
+  assert.equal(finalEdit.focused, true);
+});
+
+test('closing the subscription editor does not steal focus moved to another control', () => {
+  const app = readRendererFile('app.js');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const oldEdit = { focus() {} };
+  const otherControl = {};
+  const finalEdit = { focused: false, focus() { this.focused = true; } };
+  const rowFor = (edit) => ({
+    dataset: { subscriptionId: 'subscription-1' },
+    querySelector: (selector) => selector === '.subscription-row-edit' ? edit : null
+  });
+  const dom = { rows: [rowFor(oldEdit)] };
+  const documentState = { activeElement: oldEdit, body: {} };
+  let finish;
+  const list = { querySelectorAll: () => dom.rows };
+  const details = {
+    classList: { contains: () => false },
+    contains: () => false,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: 'subscription-1', subscriptionEditorTransitionId: 0 };
+  const context = vm.createContext({
+    document: documentState,
+    els: { subscriptionAddDetails: details, subscriptionList: list },
+    state,
+    dom,
+    rowFor,
+    finalEdit,
+    cancelSubscriptionEditorClose() {},
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() { state.subscriptionEditingId = ''; },
+    renderSubscriptionRows() { dom.rows = [rowFor(finalEdit)]; },
+    clearTimeout() {},
+    setTimeout(callback) { finish = callback; return 1; }
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\n${close}\ncloseSubscriptionEditor();`,
+    context
+  );
+  documentState.activeElement = otherControl;
+  finish();
+
+  assert.equal(documentState.activeElement, otherControl);
+  assert.equal(finalEdit.focused, false);
+});
+
+test('closing a new subscription editor restores focus to the Add action', () => {
+  const app = readRendererFile('app.js');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const input = {};
+  const addToggle = { focused: false, focus() { this.focused = true; } };
+  const documentState = { activeElement: input, body: {} };
+  const details = {
+    classList: { contains: () => false },
+    contains: (node) => node === input,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: '', subscriptionEditorTransitionId: 0 };
+  let finish;
+  const context = vm.createContext({
+    document: documentState,
+    els: { subscriptionAddDetails: details, subscriptionAddToggle: addToggle },
+    state,
+    cancelSubscriptionEditorClose() {},
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() {},
+    renderSubscriptionRows() {},
+    clearTimeout() {},
+    setTimeout(callback) { finish = callback; return 1; }
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\n${close}\ncloseSubscriptionEditor();`,
+    context
+  );
+  finish();
+
+  assert.equal(addToggle.focused, true);
+});
+
+test('canceling a close settles its deferred render exactly once', () => {
+  const app = readRendererFile('app.js');
+  const cancel = functionBody(app, 'cancelSubscriptionEditorClose', 'openSubscriptionEditor');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const details = {
+    classList: { contains: () => false },
+    contains: () => false,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: '', subscriptionEditorTransitionId: 0 };
+  const context = vm.createContext({
+    document: { activeElement: null, body: {} },
+    els: { subscriptionAddDetails: details },
+    state,
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() {},
+    renderSubscriptionRows() {},
+    clearTimeout() {},
+    setTimeout() { return 1; },
+    renderCount: 0
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\nlet subscriptionEditorCloseOnCanceled = null;\n${cancel}\n${close}\ncloseSubscriptionEditor({ onCanceled: () => { renderCount += 1; } });`,
+    context
+  );
+  assert.equal(context.renderCount, 0);
+  vm.runInContext('cancelSubscriptionEditorClose();', context);
+
+  assert.equal(context.renderCount, 1);
+});
+
+test('canceling an edit-to-add close does not run its stale onClosed callback', () => {
+  const app = readRendererFile('app.js');
+  const cancel = functionBody(app, 'cancelSubscriptionEditorClose', 'openSubscriptionEditor');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const details = {
+    classList: { contains: () => false },
+    contains: () => false,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const state = { subscriptionEditingId: 'subscription-a', subscriptionEditorTransitionId: 0 };
+  const context = vm.createContext({
+    document: { activeElement: null, body: {} },
+    els: { subscriptionAddDetails: details },
+    state,
+    cancelSubscriptionEditorClose() {},
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() {},
+    renderSubscriptionRows() {},
+    clearTimeout() {},
+    setTimeout() { return 1; },
+    staleCallbackCalls: 0,
+    canceledCallbackCalls: 0
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\nlet subscriptionEditorCloseOnCanceled = null;\n${cancel}\n${close}\ncloseSubscriptionEditor({ onClosed: () => { staleCallbackCalls += 1; }, onCanceled: () => { canceledCallbackCalls += 1; } });`,
+    context
+  );
+  vm.runInContext('cancelSubscriptionEditorClose();', context);
+
+  assert.equal(context.staleCallbackCalls, 0);
+  assert.equal(context.canceledCallbackCalls, 1);
+});
+
+test('switching to another edit preserves its form values during a canceled close', () => {
+  const app = readRendererFile('app.js');
+  const cancel = functionBody(app, 'cancelSubscriptionEditorClose', 'openSubscriptionEditor');
+  const close = functionBody(app, 'closeSubscriptionEditor', 'setSubscriptionDateBound');
+  const beginEdit = functionBody(app, 'beginSubscriptionEdit', 'submitSubscription');
+  const details = {
+    classList: { contains: () => false },
+    contains: () => false,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const fields = {
+    provider: { value: '' },
+    account: { value: '' },
+    kind: '',
+    plan: { value: '' },
+    amount: { value: '' },
+    currency: { value: '' },
+    intervalCount: { value: '' },
+    interval: { value: '' },
+    startDate: { value: '' },
+    nextRenewal: { value: '' },
+    autoRenew: { checked: false },
+    submit: { textContent: '' },
+    cancel: { classList: { add() {}, remove() {} } }
+  };
+  const kindInputs = [
+    { value: 'subscription', checked: false },
+    { value: 'topup', checked: false }
+  ];
+  const account = { provider: 'codex', accountKey: 'acct-b', accountName: 'B' };
+  const records = [
+    { id: 'subscription-a', provider: 'codex', kind: 'subscription', planName: 'A plan', amountMinor: 1000, currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-01-01', autoRenew: true, nextRenewalOverride: '', endDate: null, topUps: [] },
+    { id: 'subscription-b', provider: 'codex', kind: 'topup', planName: 'B plan', amountMinor: 2000, currency: 'HKD', intervalCount: 1, interval: 'month', startDate: '2026-02-01', autoRenew: true, nextRenewalOverride: '2026-03-01', endDate: null, topUps: [{ id: 'topup-b', date: '2026-02-01', amountMinor: 2000 }] }
+  ];
+  const state = { subscriptionEditingId: 'subscription-a', subscriptionEditorTransitionId: 0, subscriptionTopUps: [] };
+  const context = vm.createContext({
+    document: { activeElement: null, body: {} },
+    els: {
+      subscriptionAddDetails: details,
+      subscriptionList: { querySelectorAll: () => [] },
+      subscriptionProviderInput: fields.provider,
+      subscriptionAccountInput: fields.account,
+      subscriptionPlanNameInput: fields.plan,
+      subscriptionAmountInput: fields.amount,
+      subscriptionCurrencyInput: fields.currency,
+      subscriptionIntervalCountInput: fields.intervalCount,
+      subscriptionIntervalInput: fields.interval,
+      subscriptionStartDateInput: fields.startDate,
+      subscriptionNextRenewalInput: fields.nextRenewal,
+      subscriptionAutoRenewInput: fields.autoRenew,
+      subscriptionSubmit: fields.submit,
+      subscriptionCancelEdit: fields.cancel,
+      subscriptionKindInputs: kindInputs
+    },
+    fields,
+    kindInputs,
+    state,
+    subscriptionList: () => records,
+    subscriptionApi: {
+      matchProviderAccount: () => account,
+      amountUnits: (subscription) => subscription.amountMinor / 100
+    },
+    limitProvidersForSubscriptions: () => [],
+    subscriptionAccountValue: () => 'acct-b',
+    renderSubscriptionPickers() {},
+    setSubscriptionFormMode: () => {},
+    syncSubscriptionDateBounds: () => {},
+    positionSubscriptionEditor: () => {},
+    setSubscriptionError: () => {},
+    t: () => 'Update subscription',
+    setSubscriptionFormOpen() {},
+    resetSubscriptionForm() {},
+    renderSubscriptionRows() {},
+    clearTimeout() {},
+    setTimeout() { return 1; },
+    staleCallbackCalls: 0
+  });
+
+  vm.runInContext(
+    `const SUBSCRIPTION_EDITOR_TRANSITION_MS = 250;\nlet subscriptionEditorCloseCleanup = null;\nlet subscriptionEditorCloseOnCanceled = null;\n${cancel}\n${close}\nfunction openSubscriptionEditor() { cancelSubscriptionEditorClose(); }\n${beginEdit}\ncloseSubscriptionEditor({ onClosed: () => { staleCallbackCalls += 1; fields.plan.value = 'Add default'; kindInputs[0].checked = true; kindInputs[1].checked = false; } });\nbeginSubscriptionEdit('subscription-b');`,
+    context
+  );
+
+  assert.equal(context.staleCallbackCalls, 0);
+  assert.equal(context.fields.plan.value, 'B plan');
+  assert.equal(context.kindInputs[0].checked, false);
+  assert.equal(context.kindInputs[1].checked, true);
+  assert.equal(context.fields.amount.value, '20');
+});
+
+test('a successful subscription save defers the full render until close completes', async () => {
+  const app = readRendererFile('app.js');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  const account = { provider: 'codex', accountKey: 'acct-1', accountName: 'acct' };
+  const list = [{
+    id: 'subscription-1',
+    provider: 'codex',
+    binding: { accountKey: 'acct-1', accountEmail: 'acct@example.com' },
+    planName: 'Old plan',
+    amountMinor: 1000,
+    currency: 'USD',
+    interval: 'month',
+    intervalCount: 1,
+    startDate: '2026-01-01',
+    topUps: [],
+    autoRenew: true,
+    nextRenewalOverride: null,
+    endDate: null
+  }];
+  const els = {
+    subscriptionProviderInput: { value: 'codex' },
+    subscriptionAccountInput: { value: 'acct-1' },
+    subscriptionAmountInput: { value: '10' },
+    subscriptionStartDateInput: { value: '2026-01-01' },
+    subscriptionAutoRenewInput: { checked: true },
+    subscriptionNextRenewalInput: { value: '' },
+    subscriptionPlanNameInput: { value: 'Updated plan' },
+    subscriptionCurrencyInput: { value: 'USD' },
+    subscriptionIntervalInput: { value: 'month' },
+    subscriptionIntervalCountInput: { value: '1' }
+  };
+  const state = { subscriptionEditingId: 'subscription-1', subscriptionFormBase: { updatedAt: 'v1' } };
+  const context = vm.createContext({
+    els,
+    state,
+    subscriptionApi: {
+      todayString: () => '2026-02-01',
+      bindingFromAccount: () => ({ accountKey: 'acct-1' }),
+      normalizeSubscription: (value) => value
+    },
+    currencyApi: {},
+    subscriptionFormTopUps: () => [],
+    subscriptionFormIsTopUp: () => false,
+    subscriptionAccountChoices: () => [{ value: 'acct-1', provider: account }],
+    subscriptionList: () => list,
+    subscriptionForAccountValue: () => false,
+    saveCompleted: false,
+    saveOptions: null,
+    closeOptions: null,
+    renderCount: 0,
+    saveSubscriptions: async (updated, base, options) => {
+      context.saveOptions = options;
+      context.saveCompleted = true;
+      return true;
+    },
+    closeSubscriptionEditor: (options) => {
+      assert.equal(context.saveCompleted, true);
+      context.closeOptions = options;
+    },
+    renderSubscriptionSettings() { context.renderCount += 1; },
+    setSubscriptionError() {},
+    Promise
+  });
+
+  await vm.runInContext(`async ${submit}\nsubmitSubscription();`, context);
+
+  assert.equal(context.saveOptions?.render, false);
+  assert.equal(context.renderCount, 0);
+  assert.equal(typeof context.closeOptions?.onClosed, 'function');
+  context.closeOptions.onClosed();
+  assert.equal(context.renderCount, 1);
+});
+
+test('subscription row rerenders keep the live editor node attached', () => {
+  const app = readRendererFile('app.js');
+  const clear = functionBody(app, 'clearSubscriptionListChildren', 'positionSubscriptionEditor');
+  const editor = { removed: false, remove() { this.removed = true; } };
+  const row = { removed: false, remove() { this.removed = true; } };
+  const empty = { removed: false, remove() { this.removed = true; } };
+  const list = { children: [row, editor, empty] };
+
+  vm.runInNewContext(
+    `${clear}\nclearSubscriptionListChildren(list, editor);`,
+    { list, editor }
+  );
+
+  assert.equal(row.removed, true);
+  assert.equal(empty.removed, true);
+  assert.equal(editor.removed, false);
+});
+
+test('the add control is a disclosure only in add mode', () => {
+  const app = readRendererFile('app.js');
+  const control = functionBody(app, 'syncSubscriptionAddControl', 'clearSubscriptionListChildren');
+  const attrs = new Map();
+  const toggle = {
+    removeAttribute(name) { attrs.delete(name); },
+    setAttribute(name, value) { attrs.set(name, value); }
+  };
+  const form = {
+    classList: {
+      expanded: false,
+      remove(name) { if (name === 'expanded') this.expanded = false; },
+      toggle(name, value) { if (name === 'expanded') this.expanded = value; }
+    }
+  };
+  const details = { classList: { contains: () => false } };
+  const state = { subscriptionEditingId: 'subscription-1' };
+  const els = { subscriptionAddToggle: toggle, subscriptionAddForm: form, subscriptionAddDetails: details };
+
+  vm.runInNewContext(`${control}\nsyncSubscriptionAddControl();`, { els, state });
+  assert.equal(attrs.has('aria-expanded'), false);
+  assert.equal(attrs.has('aria-controls'), false);
+  assert.equal(form.classList.expanded, false);
+
+  state.subscriptionEditingId = '';
+  vm.runInNewContext(`${control}\nsyncSubscriptionAddControl();`, { els, state });
+  assert.equal(attrs.get('aria-expanded'), 'true');
+  assert.equal(attrs.get('aria-controls'), 'subscriptionAddDetails');
+  assert.equal(form.classList.expanded, true);
+});
+
 test('subscription rows carry the glyph actions the profile rows above them use', () => {
   const app = readRendererFile('app.js');
   const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
-  assert.match(rows, /edit\.textContent = '✎';/);
+  assert.match(rows, /edit\.textContent = editOpen \? '×' : '✎';/);
+  assert.match(rows, /edit\.setAttribute\('aria-expanded', editOpen \? 'true' : 'false'\);/);
   assert.match(rows, /remove\.textContent = '✕';/);
   assert.match(rows, /remove\.textContent = '✓';/);
+});
+
+test('deleting a subscription preserves the settings scroll position and renders once', () => {
+  const app = readRendererFile('app.js');
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+  const preserve = functionBody(app, 'preserveSettingsPanelScroll', 'saveSettings');
+
+  assert.match(rows, /subscriptionSettingsVersion\(\),\s*\{ render: false \}\s*\)\)/);
+  assert.match(rows, /preserveSettingsPanelScroll\(renderSubscriptionSettings\);/);
+  assert.match(settingsPush, /preserveSettingsPanelScroll\(syncSettingsForm\);/);
+
+  const frames = [];
+  const panel = {
+    scrollTop: 240,
+    scrollLeft: 0,
+    classList: { contains: () => false }
+  };
+  const context = vm.createContext({
+    els: { settingsPanel: panel },
+    panel,
+    settingsScrollInteractionRevision: 0,
+    requestAnimationFrame(callback) {
+      frames.push(callback);
+    }
+  });
+
+  vm.runInContext(
+    `${preserve}\npreserveSettingsPanelScroll(() => { panel.scrollTop = 0; });`,
+    context
+  );
+  assert.equal(panel.scrollTop, 240);
+  panel.scrollTop = 0;
+  frames[0]();
+  assert.equal(panel.scrollTop, 240);
+});
+
+test('editing a subscription moves only the editor beneath its row', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
+  const beginEdit = functionBody(app, 'beginSubscriptionEdit', 'submitSubscription');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  const reset = functionBody(app, 'resetSubscriptionForm', 'beginSubscriptionEdit');
+
+  assert.match(rows, /row\.dataset\.subscriptionId = subscription\.id;/);
+  assert.match(rows, /positionSubscriptionEditor\(\);/);
+  assert.match(beginEdit, /positionSubscriptionEditor\(\);\s*openSubscriptionEditor\(\);/);
+  assert.match(reset, /positionSubscriptionEditor\(\);/);
+  assert.match(app, /editingRow\.after\(details\);/);
+  assert.match(app, /else form\.append\(details\);/);
+  assert.doesNotMatch(app, /editingRow\.after\(form\)/);
+  assert.match(app, /details\.getBoundingClientRect\(\);/);
+  assert.match(app, /setSubscriptionFormOpen\(false\);[\s\S]*resetSubscriptionForm\(\);/);
+  assert.match(app, /state\.subscriptionEditingId === subscription\.id[\s\S]*closeSubscriptionEditor\(\);/);
+  assert.match(app, /els\.subscriptionCancelEdit\?\.addEventListener\('click', \(\) => closeSubscriptionEditor\(\)\);/);
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase, \{ render: false \}\)/);
+  assert.match(submit, /closeSubscriptionEditor\(\{\s*onClosed: renderSubscriptionSettings,\s*onCanceled: renderSubscriptionSettings\s*\}\);/);
+  assert.match(cssBlock(styles, '.subscription-row.is-editing'), /border-color/);
+  assert.match(styles, /\.subscription-row\.is-editing \.subscription-row-edit/);
+  assert.match(styles, /#subscriptionList > #subscriptionAddDetails/);
 });
 
 test('the plan-name seed never runs from a render, so it cannot wipe what is being typed', () => {
@@ -2532,7 +3071,7 @@ test('subscriptions are written through the hub-aware channel, never as a settin
   assert.match(preload, /saveSubscriptions: \(subscriptions, base\) => ipcRenderer\.invoke\('subscriptions:save', subscriptions, base\)/);
   // An edit says what it was made on, and that is what the form was opened with —
   // not whatever a push has left in state.settings since.
-  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase\)/);
+  assert.match(submit, /saveSubscriptions\(updated, state\.subscriptionFormBase(?:, \{ render: false \})?\)/);
   // A row action has no form, so it reads the list and what it was taken from
   // together at the click rather than reusing the list the row was drawn with.
   assert.doesNotMatch(rows, /saveSubscriptions\(list\.filter/);
@@ -3488,6 +4027,7 @@ test('an edit is saved against the version its form was opened on', async () => 
       }
     },
     renderSubscriptionSettings: () => {},
+    syncSubscriptionAddControl: () => {},
     resetSubscriptionForm: () => { context.formReset = true; },
     Promise
   });

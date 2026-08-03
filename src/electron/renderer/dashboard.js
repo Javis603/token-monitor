@@ -4,6 +4,7 @@ const charts = window.TokenMonitorUsageCharts;
 const themePresetsApi = window.TokenMonitorThemePresets;
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
+const compactMoneyApi = window.TokenMonitorCompactMoney;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -235,9 +236,6 @@ function applyVendorColorOverrides(overrides) {
 function formatCompact(value) {
   return compactTokenApi.formatCompactTokens(value, effectiveCompactTokenUnits(), state.locale);
 }
-function formatCompactNumber(value) {
-  return compactTokenApi.formatCompactTokens(value, 'western', state.locale);
-}
 function formatDurationCompact(ms) {
   const totalMinutes = Math.max(0, Math.round(Number(ms || 0) / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -248,9 +246,12 @@ function formatDurationCompact(ms) {
 }
 function formatCost(usd) { return currencyApi.formatCurrencyFromUsd(usd, currencyApi.normalizeCurrency(state.currency)); }
 function formatCostCompact(usd) {
-  const code = currencyApi.normalizeCurrency(state.currency);
-  const sym = (currencyApi.CURRENCY_RATES[code] || {}).symbol || '$';
-  return `${sym}${formatCompactNumber(currencyApi.convertUsd(usd, code))}`;
+  return compactMoneyApi.formatCompactCurrencyFromUsd(
+    usd,
+    state.currency,
+    effectiveCompactTokenUnits(),
+    state.locale
+  );
 }
 function shortDate(key) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key)); return m ? `${Number(m[2])}/${Number(m[3])}` : String(key); }
 function axisEvery(list) { return Math.max(1, Math.ceil(list.length / 9)); }
