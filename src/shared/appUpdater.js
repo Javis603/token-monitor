@@ -69,12 +69,40 @@ function decodeHtmlEntities(value) {
   });
 }
 
+function textOutsideHtmlMarkup(value) {
+  const input = decodeHtmlEntities(value);
+  let output = '';
+  let mode = 'text';
+  for (let index = 0; index < input.length; index += 1) {
+    if (mode === 'comment') {
+      if (input[index] === '-' && input[index + 1] === '-' && input[index + 2] === '>') {
+        mode = 'text';
+        index += 2;
+      }
+      continue;
+    }
+    if (mode === 'tag') {
+      if (input[index] === '>') mode = 'text';
+      continue;
+    }
+    if (input[index] === '<') {
+      if (input[index + 1] === '!' && input[index + 2] === '-' && input[index + 3] === '-') {
+        mode = 'comment';
+        index += 3;
+      } else {
+        mode = 'tag';
+      }
+      continue;
+    }
+    if (input[index] !== '>') output += input[index];
+  }
+  return output;
+}
+
 function plainReleaseNoteText(value, maxChars = MAX_RELEASE_NOTE_ITEM_CHARS) {
-  const text = decodeHtmlEntities(value)
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const text = textOutsideHtmlMarkup(value)
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/<\/?[^>]+>/g, '')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')
@@ -284,7 +312,8 @@ function classifyAppUpdateError(error) {
   if (statuses.some((status) => status >= 500) || /github responded 5\d\d/.test(haystack)) {
     return { kind: 'githubUnavailable', message };
   }
-  if (/err_updater_(?:channel_file_not_found|invalid_release_feed|latest_version_not_found|no_published_versions)|payload missing|metadata missing|invalid payload/.test(haystack)) {
+  if (details.some((detail) => detail.name === 'SyntaxError')
+    || /err_updater_(?:channel_file_not_found|invalid_release_feed|latest_version_not_found|no_published_versions)|payload missing|metadata missing|invalid payload/.test(haystack)) {
     return { kind: 'metadata', message };
   }
   return { kind: 'unknown', message };
@@ -369,6 +398,8 @@ async function checkLatestRelease(currentVersion) {
       const response = await fetch(RELEASES_LATEST_URL, {
         signal,
         headers: {
+          // GitHub's public web route returns release JSON through content negotiation.
+          // electron-updater uses the same route so public checks avoid api.github.com quotas.
           'accept': 'application/json',
           'user-agent': `token-monitor/${currentVersion || '0.0.0'}`
         }

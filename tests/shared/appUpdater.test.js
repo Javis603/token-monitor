@@ -400,6 +400,20 @@ test('extractUpdaterReleaseNotes reads every locale from GitHub Atom HTML withou
   });
 });
 
+test('extractUpdaterReleaseNotes cannot emit nested HTML or comment markup', () => {
+  const notes = extractUpdaterReleaseNotes([
+    '<h1>English</h1>',
+    '<h2>Changes</h2>',
+    '<h3>Fixed</h3>',
+    '<ul><li>Safe <scr<script>ipt>alert(1)</script> text <!-- <script>hidden()</script> --></li></ul>',
+    '<h2>Download</h2>'
+  ].join(''), '0.40.0');
+
+  assert.equal(notes.en[0].title, 'Fixed');
+  assert.doesNotMatch(notes.en[0].items[0], /[<>]/);
+  assert.doesNotMatch(notes.en[0].items[0], /hidden/);
+});
+
 test('extractUpdaterReleaseNotes selects the matching full-changelog entry', () => {
   const matching = '<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>Matching release.</li></ul>';
   const older = '<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>Older release.</li></ul>';
@@ -594,6 +608,7 @@ test('classifyAppUpdateError separates actionable failures including nested caus
   assert.equal(classifyAppUpdateError(Object.assign(new Error('getaddrinfo ENOTFOUND github.com'), { code: 'ENOTFOUND' })).kind, 'network');
   assert.equal(classifyAppUpdateError(new Error('net::ERR_PROXY_CONNECTION_FAILED')).kind, 'network');
   assert.equal(classifyAppUpdateError(Object.assign(new Error('GitHub responded 503'), { status: 503 })).kind, 'githubUnavailable');
+  assert.equal(classifyAppUpdateError(new SyntaxError('Unexpected token < in JSON')).kind, 'metadata');
   assert.equal(classifyAppUpdateError(Object.assign(new Error('Cannot find latest.yml'), { code: 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND' })).kind, 'metadata');
   assert.equal(classifyAppUpdateError(Object.assign(new Error('fetch failed'), {
     cause: Object.assign(new Error('getaddrinfo ENOTFOUND github.com'), { code: 'ENOTFOUND' })
