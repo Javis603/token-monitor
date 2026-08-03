@@ -5,6 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+const {
+  releaseNoteGroupsForLocale
+} = require('../../src/electron/renderer/appUpdatePresentation');
+
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
 function read(name) {
@@ -110,26 +114,43 @@ test('footer pill only exposes dialog semantics when release notes are available
   assert.doesNotMatch(renderer, /mode !== 'install' && releaseNoteGroupsForCurrentLocale/);
 });
 
-test('localized Chinese release notes prefer their locale-specific sections', () => {
+test('renderer delegates release-note locale selection to the shared presentation helper', () => {
   const app = read('app.js');
   const renderer = app.slice(
     app.indexOf('function releaseNoteGroupsForCurrentLocale'),
     app.indexOf('function buildAppUpdateNoteGroupNodes')
   );
-  assert.match(renderer, /const locale = currentLocale\(\);/);
-  assert.match(renderer, /locale === 'zh-TW'[\s\S]*notes\['zh-TW'\]/);
-  assert.match(renderer, /locale === 'zh-CN'[\s\S]*notes\.zh/);
-  assert.match(renderer, /locale === 'zh-TW' && Array\.isArray\(notes\.zh\)/);
+  assert.match(renderer, /return appUpdatePresentationApi\.releaseNoteGroupsForLocale\(latest\?\.releaseNotes, currentLocale\(\)\)/);
 });
 
-test('Korean and Japanese release notes prefer their locale-specific sections', () => {
-  const app = read('app.js');
-  const renderer = app.slice(
-    app.indexOf('function releaseNoteGroupsForCurrentLocale'),
-    app.indexOf('function buildAppUpdateNoteGroupNodes')
-  );
-  assert.match(renderer, /locale === 'ko'[\s\S]*notes\.ko/);
-  assert.match(renderer, /locale === 'ja'[\s\S]*notes\.ja/);
+test('release-note locale selection follows the complete fallback matrix', () => {
+  const groups = {
+    en: [{ title: 'English', items: ['en'] }],
+    zh: [{ title: '简体中文', items: ['zh'] }],
+    traditional: [{ title: '繁體中文', items: ['zh-TW'] }],
+    ko: [{ title: '한국어', items: ['ko'] }],
+    ja: [{ title: '日本語', items: ['ja'] }]
+  };
+  const cases = [
+    ['zh-TW prefers Traditional Chinese', 'zh-TW', { 'zh-TW': groups.traditional, zh: groups.zh, en: groups.en }, groups.traditional],
+    ['zh-TW falls back to Simplified Chinese', 'zh-TW', { 'zh-TW': [], zh: groups.zh, en: groups.en }, groups.zh],
+    ['zh-TW skips invalid and empty sections before English', 'zh-TW', { 'zh-TW': 'invalid', zh: null, en: groups.en }, groups.en],
+    ['zh-CN prefers Simplified Chinese', 'zh-CN', { zh: groups.zh, en: groups.en }, groups.zh],
+    ['zh-CN falls back to English', 'zh-CN', { zh: [], en: groups.en }, groups.en],
+    ['Korean prefers Korean', 'ko', { ko: groups.ko, en: groups.en, zh: groups.zh }, groups.ko],
+    ['Korean falls back through English', 'ko', { ko: [], en: groups.en, zh: groups.zh }, groups.en],
+    ['Korean falls back to Simplified Chinese', 'ko', { ko: [], en: [], zh: groups.zh }, groups.zh],
+    ['Japanese prefers Japanese', 'ja', { ja: groups.ja, en: groups.en, zh: groups.zh }, groups.ja],
+    ['Japanese falls back through English', 'ja', { ja: {}, en: groups.en, zh: groups.zh }, groups.en],
+    ['Japanese falls back to Simplified Chinese', 'ja', { ja: [], en: [], zh: groups.zh }, groups.zh],
+    ['English and unknown locales prefer English', 'en', { en: groups.en, zh: groups.zh }, groups.en],
+    ['Unknown locales fall back to Simplified Chinese', 'fr', { en: [], zh: groups.zh }, groups.zh],
+    ['invalid release metadata returns no groups', 'ja', null, []]
+  ];
+
+  for (const [name, locale, notes, expected] of cases) {
+    assert.deepEqual(releaseNoteGroupsForLocale(notes, locale), expected, name);
+  }
 });
 
 test('release-note disclosure has keyboard focus and compact reading styles', () => {

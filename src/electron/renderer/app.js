@@ -964,19 +964,7 @@ function renderAppUpdatePill() {
   }
 }
 function releaseNoteGroupsForCurrentLocale(latest) {
-  const notes = latest?.releaseNotes;
-  if (!notes || typeof notes !== 'object') return [];
-  const locale = currentLocale();
-  let preferred;
-  if (locale === 'zh-TW') preferred = notes['zh-TW'];
-  else if (locale === 'zh-CN') preferred = notes.zh;
-  else if (locale === 'ko') preferred = notes.ko;
-  else if (locale === 'ja') preferred = notes.ja;
-  else preferred = notes.en;
-  if (Array.isArray(preferred) && preferred.length > 0) return preferred;
-  if (locale === 'zh-TW' && Array.isArray(notes.zh) && notes.zh.length > 0) return notes.zh;
-  if (Array.isArray(notes.en) && notes.en.length > 0) return notes.en;
-  return Array.isArray(notes.zh) ? notes.zh : [];
+  return appUpdatePresentationApi.releaseNoteGroupsForLocale(latest?.releaseNotes, currentLocale());
 }
 function buildAppUpdateNoteGroupNodes(groups) {
   return groups.map((group) => {

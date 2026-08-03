@@ -17,6 +17,8 @@ const {
   shouldSkipAppUpdateCheck
 } = require('../../src/shared/appUpdater');
 
+const trailingPullRequestReference = /(?:\(\s*#\d+(?:\s*,\s*#\d+)*\s*\)|（\s*#\d+(?:\s*[、，,]\s*#\d+)*\s*）)$/;
+
 test('parseTag strips a leading v from valid semver tags', () => {
   assert.equal(parseTag('v1.2.3'), '1.2.3');
   assert.equal(parseTag('V0.1.0'), '0.1.0');
@@ -236,6 +238,16 @@ test('extractReleaseNotes hides trailing PR references from App summaries', () =
 - 專案檢視可按工作區追蹤用量。（#122、#138、#144）
 - 問題 #150 是句子內容的一部分，應該保留。
 <!-- app-update-notes:zh-TW:end -->
+<!-- app-update-notes:ko:start -->
+### 추가
+- 프로젝트 보기에서 작업 공간별 사용량을 추적합니다. (#122, #138, #144)
+- 문장 안의 Issue #150은 그대로 보존해야 합니다.
+<!-- app-update-notes:ko:end -->
+<!-- app-update-notes:ja:start -->
+### 追加
+- プロジェクトビューでワークスペース別に使用量を追跡します。（#122、#138、#144）
+- 文中の Issue #150 はそのまま残す必要があります。
+<!-- app-update-notes:ja:end -->
 `;
 
   assert.deepEqual(extractReleaseNotes(body), {
@@ -258,6 +270,20 @@ test('extractReleaseNotes hides trailing PR references from App summaries', () =
       items: [
         '專案檢視可按工作區追蹤用量。',
         '問題 #150 是句子內容的一部分，應該保留。'
+      ]
+    }],
+    ko: [{
+      title: '추가',
+      items: [
+        '프로젝트 보기에서 작업 공간별 사용량을 추적합니다.',
+        '문장 안의 Issue #150은 그대로 보존해야 합니다.'
+      ]
+    }],
+    ja: [{
+      title: '追加',
+      items: [
+        'プロジェクトビューでワークスペース別に使用量を追跡します。',
+        '文中の Issue #150 はそのまま残す必要があります。'
       ]
     }]
   });
@@ -367,11 +393,12 @@ test('release template exposes marked summaries for every bundled locale', () =>
   assert.ok(notes['zh-TW'].every((group) => group.items.length > 0));
   assert.ok(notes.ko.every((group) => group.items.length > 0));
   assert.ok(notes.ja.every((group) => group.items.length > 0));
-  assert.ok(notes.en.every((group) => group.items.every((item) => !/\(#\d/.test(item))));
-  assert.ok(notes.zh.every((group) => group.items.every((item) => !/（#\d/.test(item))));
-  assert.ok(notes['zh-TW'].every((group) => group.items.every((item) => !/（#\d/.test(item))));
-  assert.ok(notes.ko.every((group) => group.items.every((item) => !/#\d/.test(item))));
-  assert.ok(notes.ja.every((group) => group.items.every((item) => !/#\d/.test(item))));
+  for (const locale of ['en', 'zh', 'zh-TW', 'ko', 'ja']) {
+    assert.ok(
+      notes[locale].every((group) => group.items.every((item) => !trailingPullRequestReference.test(item))),
+      `${locale} notes should not end with a PR reference`
+    );
+  }
   assert.match(
     template,
     /<details>\s*<summary><strong>繁體中文<\/strong><\/summary>\s*## 繁體中文[\s\S]*<!-- app-update-notes:zh-TW:start -->[\s\S]*<!-- app-update-notes:zh-TW:end -->[\s\S]*<\/details>/

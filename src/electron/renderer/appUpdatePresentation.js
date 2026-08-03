@@ -33,5 +33,20 @@
     };
   }
 
-  return { automaticAppUpdateControlState };
+  function releaseNoteGroupsForLocale(notes, locale) {
+    if (!notes || typeof notes !== 'object') return [];
+    const fallbackKeys = {
+      'zh-TW': ['zh-TW', 'zh', 'en'],
+      'zh-CN': ['zh', 'en'],
+      ko: ['ko', 'en', 'zh'],
+      ja: ['ja', 'en', 'zh']
+    }[locale] || ['en', 'zh'];
+
+    for (const key of fallbackKeys) {
+      if (Array.isArray(notes[key]) && notes[key].length > 0) return notes[key];
+    }
+    return [];
+  }
+
+  return { automaticAppUpdateControlState, releaseNoteGroupsForLocale };
 });
