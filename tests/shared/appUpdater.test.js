@@ -167,7 +167,7 @@ test('deriveAppUpdateAvailability always surfaces a downloaded matching update',
   });
 });
 
-test('extractReleaseNotes reads marked bilingual summaries as plain text', () => {
+test('extractReleaseNotes reads marked localized summaries as plain text', () => {
   const body = `
 ## What's changed
 <!-- app-update-notes:en:start -->
@@ -182,6 +182,21 @@ test('extractReleaseNotes reads marked bilingual summaries as plain text', () =>
 ### 新增
 - **项目视图：** 按工作区追踪用量。
 <!-- app-update-notes:zh:end -->
+
+<!-- app-update-notes:zh-TW:start -->
+### 新增
+- **專案檢視：** 按工作區追蹤用量。
+<!-- app-update-notes:zh-TW:end -->
+
+<!-- app-update-notes:ko:start -->
+### 추가
+- **프로젝트 보기:** 작업 공간별 사용량을 추적합니다.
+<!-- app-update-notes:ko:end -->
+
+<!-- app-update-notes:ja:start -->
+### 追加
+- **プロジェクトビュー：** ワークスペース別に使用量を追跡します。
+<!-- app-update-notes:ja:end -->
 `;
 
   assert.deepEqual(extractReleaseNotes(body), {
@@ -191,6 +206,15 @@ test('extractReleaseNotes reads marked bilingual summaries as plain text', () =>
     ],
     zh: [
       { title: '新增', items: ['项目视图：按工作区追踪用量。'] }
+    ],
+    'zh-TW': [
+      { title: '新增', items: ['專案檢視：按工作區追蹤用量。'] }
+    ],
+    ko: [
+      { title: '추가', items: ['프로젝트 보기: 작업 공간별 사용량을 추적합니다.'] }
+    ],
+    ja: [
+      { title: '追加', items: ['プロジェクトビュー：ワークスペース別に使用量を追跡します。'] }
     ]
   });
 });
@@ -207,6 +231,11 @@ test('extractReleaseNotes hides trailing PR references from App summaries', () =
 - 项目视图可按工作区追踪用量。（#122、#138、#144）
 - 问题 #150 是句子内容的一部分，应该保留。
 <!-- app-update-notes:zh:end -->
+<!-- app-update-notes:zh-TW:start -->
+### 新增
+- 專案檢視可按工作區追蹤用量。（#122、#138、#144）
+- 問題 #150 是句子內容的一部分，應該保留。
+<!-- app-update-notes:zh-TW:end -->
 `;
 
   assert.deepEqual(extractReleaseNotes(body), {
@@ -222,6 +251,13 @@ test('extractReleaseNotes hides trailing PR references from App summaries', () =
       items: [
         '项目视图可按工作区追踪用量。',
         '问题 #150 是句子内容的一部分，应该保留。'
+      ]
+    }],
+    'zh-TW': [{
+      title: '新增',
+      items: [
+        '專案檢視可按工作區追蹤用量。',
+        '問題 #150 是句子內容的一部分，應該保留。'
       ]
     }]
   });
@@ -281,7 +317,7 @@ ${added}
   assert.match(notes.en[0].items[0], /…$/);
 });
 
-test('release template exposes marked English and Chinese app summaries', () => {
+test('release template exposes marked summaries for every bundled locale', () => {
   const template = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'), 'utf8');
   const notes = extractReleaseNotes(template);
   const categoryPairs = new Map([
@@ -290,16 +326,72 @@ test('release template exposes marked English and Chinese app summaries', () => 
     ['Improved', '改进'],
     ['Fixed', '修复']
   ]);
+  const traditionalCategoryPairs = new Map([
+    ['Added', '新增'],
+    ['Changed', '變更'],
+    ['Improved', '改進'],
+    ['Fixed', '修復']
+  ]);
+  const koreanCategoryPairs = new Map([
+    ['Added', '추가'],
+    ['Changed', '변경'],
+    ['Improved', '개선'],
+    ['Fixed', '수정']
+  ]);
+  const japaneseCategoryPairs = new Map([
+    ['Added', '追加'],
+    ['Changed', '変更'],
+    ['Improved', '改善'],
+    ['Fixed', '修正']
+  ]);
   assert.ok(notes.en.length > 0);
   assert.deepEqual(
     notes.zh.map((group) => group.title),
     notes.en.map((group) => categoryPairs.get(group.title))
   );
+  assert.deepEqual(
+    notes['zh-TW'].map((group) => group.title),
+    notes.en.map((group) => traditionalCategoryPairs.get(group.title))
+  );
+  assert.deepEqual(
+    notes.ko.map((group) => group.title),
+    notes.en.map((group) => koreanCategoryPairs.get(group.title))
+  );
+  assert.deepEqual(
+    notes.ja.map((group) => group.title),
+    notes.en.map((group) => japaneseCategoryPairs.get(group.title))
+  );
   assert.ok(notes.en.every((group) => categoryPairs.has(group.title)));
   assert.ok(notes.en.every((group) => group.items.length > 0));
   assert.ok(notes.zh.every((group) => group.items.length > 0));
+  assert.ok(notes['zh-TW'].every((group) => group.items.length > 0));
+  assert.ok(notes.ko.every((group) => group.items.length > 0));
+  assert.ok(notes.ja.every((group) => group.items.length > 0));
   assert.ok(notes.en.every((group) => group.items.every((item) => !/\(#\d/.test(item))));
   assert.ok(notes.zh.every((group) => group.items.every((item) => !/（#\d/.test(item))));
+  assert.ok(notes['zh-TW'].every((group) => group.items.every((item) => !/（#\d/.test(item))));
+  assert.ok(notes.ko.every((group) => group.items.every((item) => !/#\d/.test(item))));
+  assert.ok(notes.ja.every((group) => group.items.every((item) => !/#\d/.test(item))));
+  assert.match(
+    template,
+    /<details>\s*<summary><strong>繁體中文<\/strong><\/summary>\s*## 繁體中文[\s\S]*<!-- app-update-notes:zh-TW:start -->[\s\S]*<!-- app-update-notes:zh-TW:end -->[\s\S]*<\/details>/
+  );
+  assert.match(
+    template,
+    /<details>\s*<summary><strong>한국어<\/strong><\/summary>\s*## 한국어[\s\S]*<!-- app-update-notes:ko:start -->[\s\S]*<!-- app-update-notes:ko:end -->[\s\S]*<\/details>/
+  );
+  assert.match(
+    template,
+    /<details>\s*<summary><strong>日本語<\/strong><\/summary>\s*## 日本語[\s\S]*<!-- app-update-notes:ja:start -->[\s\S]*<!-- app-update-notes:ja:end -->[\s\S]*<\/details>/
+  );
+  assert.match(
+    template,
+    /<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>[\s\S]*<details>\s*<summary><strong>繁體中文<\/strong><\/summary>[\s\S]*<details>\s*<summary><strong>한국어<\/strong><\/summary>[\s\S]*<details>\s*<summary><strong>日本語<\/strong><\/summary>/
+  );
+  assert.doesNotMatch(template, /其他語言|user-content-release-notes-/);
+  assert.match(template, /## 繁體中文[\s\S]*## 下載/);
+  assert.match(template, /## 한국어[\s\S]*## 다운로드/);
+  assert.match(template, /## 日本語[\s\S]*## ダウンロード/);
   assert.match(template, /\(#\d+(?:, #\d+)*\)/);
   assert.match(template, /（#\d+(?:、#\d+)*）/);
 });

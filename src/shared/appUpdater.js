@@ -106,7 +106,7 @@ function extractReleaseNotes(value) {
   if (typeof value !== 'string' || !value.trim()) return {};
   const body = value.slice(0, MAX_RELEASE_BODY_CHARS);
   const notes = {};
-  for (const locale of ['en', 'zh']) {
+  for (const locale of ['en', 'zh', 'zh-TW', 'ko', 'ja']) {
     const section = markedReleaseNoteSection(body, locale);
     const groups = section ? parseReleaseNoteGroups(section) : [];
     if (groups.length > 0) notes[locale] = groups;

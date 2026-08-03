@@ -110,6 +110,28 @@ test('footer pill only exposes dialog semantics when release notes are available
   assert.doesNotMatch(renderer, /mode !== 'install' && releaseNoteGroupsForCurrentLocale/);
 });
 
+test('localized Chinese release notes prefer their locale-specific sections', () => {
+  const app = read('app.js');
+  const renderer = app.slice(
+    app.indexOf('function releaseNoteGroupsForCurrentLocale'),
+    app.indexOf('function buildAppUpdateNoteGroupNodes')
+  );
+  assert.match(renderer, /const locale = currentLocale\(\);/);
+  assert.match(renderer, /locale === 'zh-TW'[\s\S]*notes\['zh-TW'\]/);
+  assert.match(renderer, /locale === 'zh-CN'[\s\S]*notes\.zh/);
+  assert.match(renderer, /locale === 'zh-TW' && Array\.isArray\(notes\.zh\)/);
+});
+
+test('Korean and Japanese release notes prefer their locale-specific sections', () => {
+  const app = read('app.js');
+  const renderer = app.slice(
+    app.indexOf('function releaseNoteGroupsForCurrentLocale'),
+    app.indexOf('function buildAppUpdateNoteGroupNodes')
+  );
+  assert.match(renderer, /locale === 'ko'[\s\S]*notes\.ko/);
+  assert.match(renderer, /locale === 'ja'[\s\S]*notes\.ja/);
+});
+
 test('release-note disclosure has keyboard focus and compact reading styles', () => {
   const html = read('index.html');
   const css = read('styles.css');
