@@ -1000,10 +1000,22 @@ function ollamaAccountsForRenderer() {
 }
 
 function ollamaManagedAccountsForCollector() {
-  return normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map((account) => ({
+  const guiAccounts = normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map((account) => ({
     ...account,
     cookieHeader: readOllamaCredential(account.id)
   })).filter((account) => account.cookieHeader);
+
+  // If a cookie was configured via env / ollamaCookie setting, inject it as a
+  // synthetic read-only account so it is not silently dropped when GUI accounts
+  // also exist (the multi-account path in fetchOllamaLimits only fans out over
+  // managed accounts and never falls back to the single-cookie path when the
+  // managed list is non-empty).
+  const envCookie = ollamaSessionCookie(process.env, { ollamaCookie: settings?.ollamaCookie || '' });
+  if (envCookie && !guiAccounts.some((a) => a.cookieHeader === envCookie)) {
+    guiAccounts.unshift({ id: '__env__', accountKey: '', cookieHeader: envCookie, enabled: true, readOnly: true });
+  }
+
+  return guiAccounts;
 }
 
 function writeOllamaCredential(id, value) {

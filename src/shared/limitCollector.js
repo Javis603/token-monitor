@@ -3441,7 +3441,7 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
     const managed = Array.isArray(options.ollamaManagedAccounts || deps.ollamaManagedAccounts)
       ? (options.ollamaManagedAccounts || deps.ollamaManagedAccounts)
       : [];
-    jobs = Math.max(1, managed.filter((a) => a.enabled !== false).length);
+    jobs = Math.max(1, ollamaLimits.normalizeOllamaManagedAccounts(managed).filter((a) => a.enabled !== false).length);
   }
   return base * jobs;
 }

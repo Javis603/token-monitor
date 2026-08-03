@@ -13736,6 +13736,12 @@ function setupCursorAccountUI() {
       state.settings.ollamaManagedAccounts = await window.tokenMonitor.ollama.accounts();
       renderOllamaStatus();
       setOllamaAddExpanded(false);
+      // Ensure Ollama is in the active provider list and limits are on,
+      // matching the behaviour of the old single-cookie save path.
+      await saveSettings({
+        limitProviders: limitProviderSelectionIncluding('ollama'),
+        limitsEnabled: true
+      });
       await refreshStats({ force: true });
     });
   }

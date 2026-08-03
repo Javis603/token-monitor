@@ -268,9 +268,14 @@ function normalizeOllamaManagedAccounts(value) {
 function createOllamaManagedAccount(cookieValue, existing = []) {
   const cookieHeader = normalizeOllamaCookieHeader(cookieValue);
   if (!cookieHeader) return { ok: false, errorCode: 'missingRequiredCookies' };
-  // Derive a stable accountKey from the session cookie value so duplicate
-  // cookies from the same account are detected before a round-trip.
-  const identity = cookieHeader;
+  // Derive a stable identity from the recognized session cookie pairs only,
+  // sorted so that reordering or changing ancillary cookies does not change
+  // the key (preventing the same session from being added multiple times).
+  const identity = cookiePairs(cookieHeader)
+    .filter((pair) => isRecognizedSessionCookieName(pair.name))
+    .map((pair) => `${pair.name}=${pair.value}`)
+    .sort()
+    .join(';');
   const accountKey = hashKey('ollama', identity);
   const existingAccount = normalizeOllamaManagedAccounts(existing).find(
     (account) => account.accountKey === accountKey
@@ -336,9 +341,12 @@ function detectActiveOllamaAccount(results) {
       lastChangedAt: hadDelta ? now : (previous?.lastChangedAt || 0)
     });
 
-    if (hadDelta && (previous?.lastChangedAt || 0) >= activeCandidateAt) {
-      activeCandidateKey = provider.accountKey;
-      activeCandidateAt = now;
+    if (hadDelta) {
+      const changedAt = usageDeltaTracker.get(provider.accountKey)?.lastChangedAt || 0;
+      if (changedAt > activeCandidateAt) {
+        activeCandidateKey = provider.accountKey;
+        activeCandidateAt = changedAt;
+      }
     }
   }
 

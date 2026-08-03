@@ -409,5 +409,7 @@ test('fetchOllamaLimits tags exactly one account as activeAccount when usage del
     }
   });
   const active = results.filter((r) => r.activeAccount);
-  assert.ok(active.length >= 1);
+  assert.equal(active.length, 1);
+  assert.equal(results.find((r) => r.accountKey === 'ak1')?.activeAccount, true);
+  assert.equal(results.find((r) => r.accountKey === 'ak2')?.activeAccount, false);
 });

@@ -40,7 +40,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
   qoder: ['qoderCookie', 'qoderSite'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
-  ollama: ['ollamaCookie'],
+  ollama: ['ollamaCookie', 'ollamaManagedAccounts'],
   codex: ['codexManagedAccounts'],
   mimo: ['mimoManagedAccounts'],
   thirdparty: ['thirdPartyProfiles']
@@ -117,6 +117,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     ollamaCookie: settings.ollamaCookie || '',
     codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
     mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? [],
+    ollamaManagedAccounts: context.ollamaManagedAccounts ?? settings.ollamaManagedAccounts ?? [],
     thirdPartyProfiles: settings.thirdPartyProfiles || {}
   };
 }
