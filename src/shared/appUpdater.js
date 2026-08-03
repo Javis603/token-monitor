@@ -11,7 +11,18 @@ const MAX_RELEASE_BODY_CHARS = 128 * 1024;
 const MAX_RELEASE_NOTE_GROUPS = 4;
 const MAX_RELEASE_NOTE_ITEMS = 12;
 const MAX_RELEASE_NOTE_ITEM_CHARS = 600;
+const MAX_RELEASE_NOTE_HTML_MARKUP_CHARS = 1024;
 const TRAILING_PULL_REQUEST_REFERENCES_RE = /\s*(?:\(\s*#\d+(?:\s*,\s*#\d+)*\s*\)|（\s*#\d+(?:\s*[、，,]\s*#\d+)*\s*）)\s*$/;
+const RELEASE_NOTE_HTML_TAGS = new Set([
+  'a', 'abbr', 'article', 'aside', 'b', 'blockquote', 'br', 'caption', 'cite', 'code',
+  'col', 'colgroup', 'dd', 'del', 'details', 'div', 'dl', 'dt', 'em', 'figcaption',
+  'figure', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'i',
+  'img', 'ins', 'kbd', 'li', 'main', 'mark', 'ol', 'p', 'picture', 'pre', 'q',
+  's', 'samp', 'script', 'section', 'small', 'source', 'span', 'strong', 'style',
+  'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'time',
+  'tr', 'u', 'ul', 'var'
+]);
+const RELEASE_NOTE_VOID_HTML_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 
 function appUpdateInstallSupport({
   isPackaged = false,
@@ -74,11 +85,63 @@ function isAsciiLetterAt(value, index) {
   return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 }
 
+function isAsciiAlphaNumericAt(value, index) {
+  const code = value.charCodeAt(index);
+  return isAsciiLetterAt(value, index)
+    || (code >= 48 && code <= 57);
+}
+
+function isUnicodeLetterOrNumberAt(value, index) {
+  if (index < 0) return false;
+  return /[\p{L}\p{N}]$/u.test(value.slice(Math.max(0, index - 1), index + 1));
+}
+
+function htmlMarkupEnd(value, index) {
+  let quote = '';
+  const limit = Math.min(value.length, index + MAX_RELEASE_NOTE_HTML_MARKUP_CHARS);
+  for (let cursor = index + 1; cursor < limit; cursor += 1) {
+    if (quote) {
+      if (value[cursor] === quote) quote = '';
+    } else if (value[cursor] === '"' || value[cursor] === "'") {
+      quote = value[cursor];
+    } else if (value[cursor] === '>') {
+      return cursor;
+    }
+  }
+  return -1;
+}
+
+function containsNestedHtmlMarkup(value, index, end) {
+  for (let cursor = index + 1; cursor < end; cursor += 1) {
+    if (value[cursor] === '<' && startsHtmlMarkup(value, cursor)) return true;
+  }
+  return false;
+}
+
 function startsHtmlMarkup(value, index) {
   if (value[index] !== '<') return false;
-  if (isAsciiLetterAt(value, index + 1)) return true;
-  if (value[index + 1] === '/') return isAsciiLetterAt(value, index + 2);
-  return value[index + 1] === '!' || value[index + 1] === '?';
+  if (value.startsWith('<!--', index)) {
+    const commentEnd = value.indexOf('-->', index + 4);
+    return commentEnd >= 0 && commentEnd - index < MAX_RELEASE_NOTE_HTML_MARKUP_CHARS;
+  }
+
+  const end = htmlMarkupEnd(value, index);
+  if (end < 0) return false;
+  if (value[index + 1] === '!' || value[index + 1] === '?') return true;
+
+  const closing = value[index + 1] === '/';
+  const nameStart = index + (closing ? 2 : 1);
+  if (!isAsciiLetterAt(value, nameStart)) return false;
+  let nameEnd = nameStart + 1;
+  while (isAsciiAlphaNumericAt(value, nameEnd) || value[nameEnd] === '-') nameEnd += 1;
+  const tagName = value.slice(nameStart, nameEnd).toLowerCase();
+  if (!RELEASE_NOTE_HTML_TAGS.has(tagName) && !RELEASE_NOTE_VOID_HTML_TAGS.has(tagName)) {
+    return containsNestedHtmlMarkup(value, index, end);
+  }
+  if (closing || !isUnicodeLetterOrNumberAt(value, index - 1)) return true;
+
+  if (RELEASE_NOTE_VOID_HTML_TAGS.has(tagName)) return true;
+  return value.toLowerCase().indexOf(`</${tagName}>`, end + 1) >= 0;
 }
 
 function textOutsideHtmlMarkup(value) {

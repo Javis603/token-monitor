@@ -427,6 +427,14 @@ test('release-note text preserves literal, encoded, unclosed, and inline-code le
 ### Fixed
 - Cost comparison 5 < 10 remains correct.
 - Supports <5 requests without truncation.
+- Works when value<limit and no space is used.
+- Match a<b has later > here.
+- 值<limit 時仍保留完整內容。
+- 値<limit の場合も保持します。
+- 값이 value<limit인 경우도 유지합니다.
+- 值<a has later > 的比較內容仍保留。
+- Generic <limit> placeholder remains.
+- Adjacent<strong>markup</strong> is still stripped.
 - Encoded &lt; text remains visible.
 - Inline \`x < y\` comparison remains visible.
 <!-- app-update-notes:en:end -->
@@ -435,6 +443,14 @@ test('release-note text preserves literal, encoded, unclosed, and inline-code le
   assert.deepEqual(notes.en[0].items, [
     'Cost comparison 5 < 10 remains correct.',
     'Supports <5 requests without truncation.',
+    'Works when value<limit and no space is used.',
+    'Match a<b has later > here.',
+    '值<limit 時仍保留完整內容。',
+    '値<limit の場合も保持します。',
+    '값이 value<limit인 경우도 유지합니다.',
+    '值<a has later > 的比較內容仍保留。',
+    'Generic <limit> placeholder remains.',
+    'Adjacentmarkup is still stripped.',
     'Encoded < text remains visible.',
     'Inline x < y comparison remains visible.'
   ]);
