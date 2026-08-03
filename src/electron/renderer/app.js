@@ -1049,10 +1049,12 @@ function renderSettingsAppUpdateRow() {
     return;
   }
   els.appUpdateInstalled.textContent = `v${s.currentVersion}`;
-  const displayVersion = s.latest?.version || s.installVersion || '';
+  const presentation = appUpdatePresentationApi.appUpdateStatusPresentation(s);
+  const displayVersion = presentation.displayVersion;
   if (displayVersion) {
-    els.appUpdateLatest.textContent = !s.hasUpdate && semverLikeEqual(displayVersion, s.currentVersion)
-      ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status: t('settings.appUpdate.upToDateShort') })
+    const status = presentation.latestStatusKey ? t(presentation.latestStatusKey) : '';
+    els.appUpdateLatest.textContent = status
+      ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status })
       : `v${displayVersion}`;
     const actionMode = appUpdateActionMode(s);
     els.appUpdateViewReleaseButton.classList.toggle('hidden', !actionMode);
@@ -1063,7 +1065,11 @@ function renderSettingsAppUpdateRow() {
         ? t('settings.appUpdate.download')
         : t('settings.appUpdate.viewRelease');
   } else {
-    els.appUpdateLatest.textContent = s.lastCheckedAt ? t('settings.appUpdate.upToDate') : t('settings.common.notChecked');
+    els.appUpdateLatest.textContent = s.lastError
+      ? t('settings.appUpdate.unavailable')
+      : s.lastCheckedAt
+        ? t('settings.appUpdate.upToDate')
+        : t('settings.common.notChecked');
     els.appUpdateViewReleaseButton.classList.add('hidden');
   }
   els.appUpdateCheckButton.disabled = Boolean(s.checking || s.installBusy);
@@ -1080,7 +1086,11 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateMessage.textContent = t('settings.appUpdate.installError');
     els.appUpdateMessage.classList.add('error');
   } else if (s.lastError) {
-    els.appUpdateMessage.textContent = t('settings.appUpdate.githubError');
+    const error = t(presentation.errorKey);
+    const age = compactAge(presentation.lastSuccessfulCheckAt);
+    els.appUpdateMessage.textContent = age
+      ? t('settings.appUpdate.errorWithLastSuccess', { error, age })
+      : error;
     els.appUpdateMessage.classList.add('error');
   } else {
     els.appUpdateMessage.textContent = '';
@@ -1102,9 +1112,6 @@ function renderAutomaticAppUpdateControl() {
   }
 }
 
-function semverLikeEqual(a, b) {
-  return typeof a === 'string' && typeof b === 'string' && a === b;
-}
 function compactAge(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return '';

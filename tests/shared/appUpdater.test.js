@@ -7,17 +7,56 @@ const test = require('node:test');
 
 const {
   appUpdateInstallSupport,
+  checkLatestRelease,
+  classifyAppUpdateError,
   deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
   extractReleaseNotes,
+  extractUpdaterReleaseNotes,
+  latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
   parseLatestReleasePayload,
   parseTag,
+  RELEASES_LATEST_URL,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
 } = require('../../src/shared/appUpdater');
 
 const trailingPullRequestReference = /(?:\(\s*#\d+(?:\s*,\s*#\d+)*\s*\)|（\s*#\d+(?:\s*[、，,]\s*#\d+)*\s*）)$/;
+
+test('source-mode release checks use the public GitHub page instead of the REST API', () => {
+  assert.equal(RELEASES_LATEST_URL, 'https://github.com/Javis603/token-monitor/releases/latest');
+});
+
+test('source-mode release checks negotiate public release JSON without authentication', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url, options) => {
+    assert.equal(url, RELEASES_LATEST_URL);
+    assert.equal(options.headers.accept, 'application/json');
+    assert.equal(Object.hasOwn(options.headers, 'authorization'), false);
+    return { ok: true, json: async () => ({ tag_name: 'v0.40.0' }) };
+  };
+  try {
+    const result = await checkLatestRelease('0.39.0');
+    assert.equal(result.ok, true);
+    assert.equal(result.newer, true);
+    assert.equal(result.latest.version, '0.40.0');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('source-mode release checks classify public endpoint throttling', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: false, status: 429 });
+  try {
+    const result = await checkLatestRelease('0.39.0');
+    assert.equal(result.ok, false);
+    assert.equal(result.errorKind, 'rateLimited');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
 
 test('parseTag strips a leading v from valid semver tags', () => {
   assert.equal(parseTag('v1.2.3'), '1.2.3');
@@ -343,6 +382,35 @@ ${added}
   assert.match(notes.en[0].items[0], /…$/);
 });
 
+test('extractUpdaterReleaseNotes reads every locale from GitHub Atom HTML without downloads', () => {
+  const html = `
+<h1>English</h1><h2>What's changed</h2><h3>Security</h3><ul><li>Uses the public provider. (<a href="https://example.com">#183</a>)</li></ul><h2>Download</h2><ul><li>Installer</li></ul>
+<h1>中文</h1><h2>更新内容</h2><h3>修复</h3><ul><li>使用公开 provider。（<a href="https://example.com">#183</a>）</li></ul><h2>下载</h2><ul><li>安装包</li></ul>
+<h1>繁體中文</h1><h2>更新內容</h2><h3>修復</h3><ul><li>使用公開 provider。（<a href="https://example.com">#183</a>）</li></ul><h2>下載</h2><ul><li>安裝程式</li></ul>
+<h1>한국어</h1><h2>업데이트 내용</h2><h3>수정</h3><ul><li>공개 provider를 사용합니다. (<a href="https://example.com">#183</a>)</li></ul><h2>다운로드</h2><ul><li>설치 프로그램</li></ul>
+<h1>日本語</h1><h2>更新内容</h2><h3>修正</h3><ul><li>公開 provider を使用します。（<a href="https://example.com">#183</a>）</li></ul><h2>ダウンロード</h2><ul><li>インストーラー</li></ul>
+`;
+
+  assert.deepEqual(extractUpdaterReleaseNotes(html, '0.40.0'), {
+    en: [{ title: 'Security', items: ['Uses the public provider.'] }],
+    zh: [{ title: '修复', items: ['使用公开 provider。'] }],
+    'zh-TW': [{ title: '修復', items: ['使用公開 provider。'] }],
+    ko: [{ title: '수정', items: ['공개 provider를 사용합니다.'] }],
+    ja: [{ title: '修正', items: ['公開 provider を使用します。'] }]
+  });
+});
+
+test('extractUpdaterReleaseNotes selects the matching full-changelog entry', () => {
+  const matching = '<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>Matching release.</li></ul>';
+  const older = '<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>Older release.</li></ul>';
+  assert.deepEqual(extractUpdaterReleaseNotes([
+    { version: '0.39.0', note: older },
+    { version: 'v0.40.0', note: matching }
+  ], '0.40.0'), {
+    en: [{ title: 'Fixed', items: ['Matching release.'] }]
+  });
+});
+
 test('release template exposes marked summaries for every bundled locale', () => {
   const template = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'), 'utf8');
   const notes = extractReleaseNotes(template);
@@ -492,12 +560,43 @@ test('parseLatestReleasePayload returns null for invalid or missing tag', () => 
   assert.equal(parseLatestReleasePayload('not an object'), null);
 });
 
-test('parseLatestReleasePayload rejects payloads without an https html_url', () => {
+test('parseLatestReleasePayload builds a trusted release URL from the validated tag', () => {
   assert.equal(parseLatestReleasePayload({
     tag_name: 'v0.1.3',
     html_url: 'http://example.com'
-  }), null);
+  }).htmlUrl, 'https://github.com/Javis603/token-monitor/releases/tag/v0.1.3');
   assert.equal(parseLatestReleasePayload({
     tag_name: 'v0.1.3'
-  }), null);
+  }).htmlUrl, 'https://github.com/Javis603/token-monitor/releases/tag/v0.1.3');
+});
+
+test('latestFromUpdaterInfo normalizes provider metadata and release notes', () => {
+  assert.deepEqual(latestFromUpdaterInfo({
+    version: '0.40.0',
+    tag: 'v0.40.0',
+    releaseName: 'Token Monitor 0.40.0',
+    releaseDate: '2026-08-03T08:00:00Z',
+    releaseNotes: '<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>Updater fix. (<a href="https://example.com">#183</a>)</li></ul>'
+  }), {
+    version: '0.40.0',
+    tag: 'v0.40.0',
+    name: 'Token Monitor 0.40.0',
+    htmlUrl: 'https://github.com/Javis603/token-monitor/releases/tag/v0.40.0',
+    publishedAt: '2026-08-03T08:00:00Z',
+    releaseNotes: { en: [{ title: 'Fixed', items: ['Updater fix.'] }] }
+  });
+});
+
+test('classifyAppUpdateError separates actionable failures including nested causes', () => {
+  assert.equal(classifyAppUpdateError(Object.assign(new Error('rate limit exceeded'), { status: 429 })).kind, 'rateLimited');
+  assert.equal(classifyAppUpdateError(Object.assign(new Error('aborted'), { name: 'AbortError' })).kind, 'timeout');
+  assert.equal(classifyAppUpdateError(new Error('net::ERR_TIMED_OUT')).kind, 'timeout');
+  assert.equal(classifyAppUpdateError(Object.assign(new Error('getaddrinfo ENOTFOUND github.com'), { code: 'ENOTFOUND' })).kind, 'network');
+  assert.equal(classifyAppUpdateError(new Error('net::ERR_PROXY_CONNECTION_FAILED')).kind, 'network');
+  assert.equal(classifyAppUpdateError(Object.assign(new Error('GitHub responded 503'), { status: 503 })).kind, 'githubUnavailable');
+  assert.equal(classifyAppUpdateError(Object.assign(new Error('Cannot find latest.yml'), { code: 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND' })).kind, 'metadata');
+  assert.equal(classifyAppUpdateError(Object.assign(new Error('fetch failed'), {
+    cause: Object.assign(new Error('getaddrinfo ENOTFOUND github.com'), { code: 'ENOTFOUND' })
+  })).kind, 'network');
+  assert.equal(classifyAppUpdateError(new Error('unexpected')).kind, 'unknown');
 });

@@ -35,6 +35,11 @@ const SAMPLE_YAML = [
   `path: ${INSTALLER}`,
   'sha512: unsigned-hash==',
   "releaseDate: '2026-07-18T00:00:00.000Z'",
+  'releaseNotes: |',
+  '  <!-- app-update-notes:en:start -->',
+  '  ### Fixed',
+  '  - Signed updater notes survive metadata processing.',
+  '  <!-- app-update-notes:en:end -->',
   ''
 ].join('\n');
 
@@ -449,6 +454,7 @@ test('applySignedWindowsArtifacts replaces both exes and repairs installer updat
 
   const patchedYaml = fs.readFileSync(path.join(fixture.distDir, 'latest.yml'), 'utf8');
   assert.match(patchedYaml, new RegExp(`sha512: ${result.sha512.replace(/[+/=]/g, '\\$&')}`));
+  assert.match(patchedYaml, /Signed updater notes survive metadata processing/);
   assert.doesNotMatch(patchedYaml, /blockMapSize/);
   assert.doesNotMatch(patchedYaml, new RegExp(PORTABLE.replaceAll('.', '\\.')));
 });

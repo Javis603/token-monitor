@@ -13,6 +13,7 @@ const {
   verifyUpdaterArtifactNames
 } = require('../../scripts/verify-updater-artifact-names');
 const { mergeMacUpdaterMetadata } = require('../../scripts/merge-mac-updater-metadata');
+const { extractReleaseNotes } = require('../../src/shared/appUpdater');
 
 function macUpdaterMetadata(version, arch) {
   return [
@@ -27,6 +28,11 @@ function macUpdaterMetadata(version, arch) {
     `path: Token-Monitor-${version}-${arch}.zip`,
     `sha512: ${arch}-zip-hash`,
     "releaseDate: '2026-07-21T00:00:00.000Z'",
+    'releaseNotes: |',
+    '  <!-- app-update-notes:en:start -->',
+    '  ### Fixed',
+    `  - ${arch} release notes survive metadata processing.`,
+    '  <!-- app-update-notes:en:end -->',
     ''
   ].join('\n');
 }
@@ -45,6 +51,20 @@ test('release artifact templates use GitHub-safe names', () => {
     'Token-Monitor-${version}.${ext}'
   ]);
   for (const pattern of patterns) assert.doesNotMatch(pattern, /\s/);
+});
+
+test('updater metadata embeds every localized release-note section', () => {
+  assert.equal(rootPackage.build.releaseInfo?.releaseNotesFile, '.github/RELEASE_TEMPLATE.md');
+  const releaseTemplate = fs.readFileSync(
+    path.join(__dirname, '..', '..', rootPackage.build.releaseInfo.releaseNotesFile),
+    'utf8'
+  );
+  const notes = extractReleaseNotes(releaseTemplate);
+  assert.deepEqual(Object.keys(notes), ['en', 'zh', 'zh-TW', 'ko', 'ja']);
+  for (const locale of Object.keys(notes)) {
+    assert.ok(notes[locale].length > 0, `${locale} has no release-note groups`);
+    assert.ok(notes[locale].every((group) => group.items.length > 0), `${locale} has an empty release-note group`);
+  }
 });
 
 test('mac release scripts build native Apple Silicon and Intel artifacts', () => {
@@ -137,6 +157,8 @@ test('merges arm64 and x64 mac updater files into one architecture-aware feed', 
     `Token-Monitor-${version}-x64.dmg`
   ]);
   assert.match(merged, new RegExp(`^path: Token-Monitor-${version}-arm64\\.zip$`, 'm'));
+  assert.match(merged, /arm64 release notes survive metadata processing/);
+  assert.doesNotMatch(merged, /x64 release notes survive metadata processing/);
 
   const files = referencedArtifactNames(merged).map((fileName) => ({
     url: new URL(`https://release.invalid/${fileName}`),

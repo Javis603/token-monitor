@@ -98,6 +98,9 @@
     "portable": {
       "artifactName": "Token-Monitor-${version}.${ext}"
     },
+    "releaseInfo": {
+      "releaseNotesFile": ".github/RELEASE_TEMPLATE.md"
+    },
     "publish": [
       {
         "provider": "github",

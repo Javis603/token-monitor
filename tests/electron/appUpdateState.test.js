@@ -26,13 +26,32 @@ test('manual checks preserve feedback when reusing an in-flight background check
   const check = sourceBetween('async function runAppUpdateCheck', 'function maybeRunBackgroundUpdateCheck');
   assert.match(check, /if \(force\) sendAppUpdatePush\(\);\s*const activeResult = await appUpdateCheckPromise/);
   assert.match(check, /if \(activeResult\.newer\) restoreDismissedAppUpdate\(activeResult\.latest\?\.version\)/);
-  assert.match(check, /appUpdateLastError = activeResult\?\.error \|\| 'Update check failed'/);
-  assert.match(check, /return \{ ok: false, newer: false, latest: null, error: message \}/);
+  assert.match(check, /kind: activeResult\?\.errorKind \|\| 'unknown'/);
+  assert.match(check, /message: activeResult\?\.error \|\| 'Update check failed'/);
+  assert.match(check, /error: classified\.message,[\s\S]*errorKind: classified\.kind/);
+});
+
+test('packaged update checks use electron-updater while source runs use the public fallback', () => {
+  const check = sourceBetween('async function checkAppUpdateProvider', 'function deriveAppUpdateState');
+  assert.match(check, /if \(!app\.isPackaged\) return checkLatestRelease\(app\.getVersion\(\)\)/);
+  assert.match(check, /configureNativeAppUpdater\(\)/);
+  assert.match(check, /await autoUpdater\.checkForUpdates\(\)/);
+  assert.match(check, /latestFromUpdaterInfo\(result\?\.updateInfo\)/);
+});
+
+test('update state separates the last successful check from the latest attempt error', () => {
+  const derive = sourceBetween('function deriveAppUpdateState', 'function restoreDismissedAppUpdate');
+  assert.match(derive, /lastCheckedAt: block\.lastCheckedAt \|\| null/);
+  assert.match(derive, /lastAttemptAt: appUpdateLastAttemptAt/);
+  assert.match(derive, /lastError: appUpdateLastError\?\.message \|\| null/);
+  assert.match(derive, /lastErrorKind: appUpdateLastError\?\.kind \|\| null/);
 });
 
 test('starting a user-requested download restores its dismissed notification', () => {
   const download = sourceBetween('async function downloadAndPrepareAppUpdate', 'function installDownloadedAppUpdate');
+  assert.match(download, /if \(appUpdateCheckPromise\) await appUpdateCheckPromise/);
   assert.match(download, /restoreDismissedAppUpdate\(latest\?\.version\)/);
+  assert.match(download, /rememberLatestAppUpdate\(latestFromUpdaterInfo\(info\)\)/);
 });
 
 test('automatic updates are opt-in and download without installing', () => {

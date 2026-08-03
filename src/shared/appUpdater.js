@@ -3,7 +3,7 @@
 const semver = require('semver');
 
 const GITHUB_REPO = 'Javis603/token-monitor';
-const RELEASES_LATEST_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+const RELEASES_LATEST_URL = `https://github.com/${GITHUB_REPO}/releases/latest`;
 const REQUEST_TIMEOUT_MS = 10 * 1000;
 const APP_UPDATE_BACKGROUND_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const APP_UPDATE_OUTDATED_COOLDOWN_MS = 60 * 60 * 1000;
@@ -45,8 +45,32 @@ function truncateReleaseNoteText(value, maxChars) {
   return `${characters.slice(0, maxChars - 1).join('').trimEnd()}…`;
 }
 
+function decodeHtmlEntities(value) {
+  const named = {
+    amp: '&',
+    apos: "'",
+    gt: '>',
+    lt: '<',
+    nbsp: ' ',
+    quot: '"'
+  };
+  return String(value || '').replace(/&(#x[0-9a-f]+|#\d+|amp|apos|gt|lt|nbsp|quot);/gi, (match, entity) => {
+    const lower = entity.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(named, lower)) return named[lower];
+    const codePoint = lower.startsWith('#x')
+      ? Number.parseInt(lower.slice(2), 16)
+      : Number.parseInt(lower.slice(1), 10);
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10FFFF) return match;
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch (_) {
+      return match;
+    }
+  });
+}
+
 function plainReleaseNoteText(value, maxChars = MAX_RELEASE_NOTE_ITEM_CHARS) {
-  const text = String(value || '')
+  const text = decodeHtmlEntities(value)
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -114,6 +138,73 @@ function extractReleaseNotes(value) {
   return notes;
 }
 
+function parseHtmlReleaseNoteGroups(section) {
+  const groups = [];
+  let itemCount = 0;
+  const headings = Array.from(section.matchAll(/<h3\b[^>]*>([\s\S]*?)<\/h3>/gi));
+  for (let index = 0; index < headings.length && groups.length < MAX_RELEASE_NOTE_GROUPS; index += 1) {
+    const heading = headings[index];
+    const title = plainReleaseNoteText(heading[1], 80);
+    if (!title) continue;
+    const contentStart = (heading.index || 0) + heading[0].length;
+    const contentEnd = index + 1 < headings.length ? headings[index + 1].index : section.length;
+    const items = [];
+    for (const match of section.slice(contentStart, contentEnd).matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
+      if (itemCount >= MAX_RELEASE_NOTE_ITEMS) break;
+      const text = plainReleaseNoteText(match[1]);
+      if (!text) continue;
+      items.push(text);
+      itemCount += 1;
+    }
+    if (items.length > 0) groups.push({ title, items });
+  }
+  return groups;
+}
+
+function extractHtmlReleaseNotes(value) {
+  if (typeof value !== 'string' || !value.trim()) return {};
+  const body = value.slice(0, MAX_RELEASE_BODY_CHARS);
+  const headings = Array.from(body.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi));
+  const localeByHeading = new Map([
+    ['english', 'en'],
+    ['中文', 'zh'],
+    ['繁體中文', 'zh-TW'],
+    ['한국어', 'ko'],
+    ['日本語', 'ja']
+  ]);
+  const notes = {};
+  for (let index = 0; index < headings.length; index += 1) {
+    const heading = headings[index];
+    const title = plainReleaseNoteText(heading[1], 40).toLowerCase();
+    const locale = localeByHeading.get(title);
+    if (!locale) continue;
+    const contentStart = (heading.index || 0) + heading[0].length;
+    const contentEnd = index + 1 < headings.length ? headings[index + 1].index : body.length;
+    const localeSection = body.slice(contentStart, contentEnd);
+    // GitHub strips Markdown comment markers from Atom content. The first h2
+    // after each language heading is the app summary; the next h2 begins its
+    // download section. Category h3 names deliberately remain unrestricted.
+    const sectionHeadings = Array.from(localeSection.matchAll(/<h2\b[^>]*>[\s\S]*?<\/h2>/gi));
+    if (sectionHeadings.length === 0) continue;
+    const summaryStart = (sectionHeadings[0].index || 0) + sectionHeadings[0][0].length;
+    const summaryEnd = sectionHeadings[1]?.index ?? localeSection.length;
+    const groups = parseHtmlReleaseNoteGroups(localeSection.slice(summaryStart, summaryEnd));
+    if (groups.length > 0) notes[locale] = groups;
+  }
+  return notes;
+}
+
+function extractUpdaterReleaseNotes(value, version) {
+  let note = value;
+  if (Array.isArray(value)) {
+    const matching = value.find((entry) => parseTag(entry?.version) === parseTag(version));
+    note = matching?.note ?? value[0]?.note;
+  }
+  if (typeof note !== 'string') return {};
+  const marked = extractReleaseNotes(note);
+  return Object.keys(marked).length > 0 ? marked : extractHtmlReleaseNotes(note);
+}
+
 function mergeLatestReleaseMetadata(existing, incoming) {
   if (!incoming || typeof incoming !== 'object') return null;
   if (!existing || existing.version !== incoming.version) return incoming;
@@ -130,8 +221,7 @@ function parseLatestReleasePayload(payload) {
   const tag = typeof payload.tag_name === 'string' ? payload.tag_name : '';
   const version = parseTag(tag);
   if (!version) return null;
-  const htmlUrl = typeof payload.html_url === 'string' ? payload.html_url : '';
-  if (!htmlUrl.startsWith('https://')) return null;
+  const htmlUrl = `https://github.com/${GITHUB_REPO}/releases/tag/${encodeURIComponent(tag)}`;
   const releaseNotes = extractReleaseNotes(payload.body);
   return {
     version,
@@ -141,6 +231,63 @@ function parseLatestReleasePayload(payload) {
     publishedAt: typeof payload.published_at === 'string' ? payload.published_at : '',
     ...(Object.keys(releaseNotes).length > 0 ? { releaseNotes } : {})
   };
+}
+
+function latestFromUpdaterInfo(info) {
+  if (!info || typeof info !== 'object') return null;
+  const version = parseTag(info.version);
+  if (!version) return null;
+  const infoTag = typeof info.tag === 'string' && parseTag(info.tag) === version ? info.tag : '';
+  const tag = infoTag || `v${version}`;
+  const releaseNotes = extractUpdaterReleaseNotes(info.releaseNotes, version);
+  return {
+    version,
+    tag,
+    name: (typeof info.releaseName === 'string' && info.releaseName.trim()) ? info.releaseName : tag,
+    htmlUrl: `https://github.com/${GITHUB_REPO}/releases/tag/${encodeURIComponent(tag)}`,
+    publishedAt: typeof info.releaseDate === 'string' ? info.releaseDate : '',
+    ...(Object.keys(releaseNotes).length > 0 ? { releaseNotes } : {})
+  };
+}
+
+function errorDetails(error) {
+  const details = [];
+  const seen = new Set();
+  let current = error;
+  while (current && !seen.has(current) && details.length < 4) {
+    seen.add(current);
+    details.push({
+      name: String(current.name || ''),
+      code: String(current.code || ''),
+      status: Number(current.status || current.statusCode || 0),
+      message: current.message || String(current)
+    });
+    current = current.cause;
+  }
+  return details;
+}
+
+function classifyAppUpdateError(error) {
+  const details = errorDetails(error);
+  const message = details[0]?.message || 'Update check failed';
+  const haystack = details.map((detail) => `${detail.name} ${detail.code} ${detail.message}`).join(' ').toLowerCase();
+  const statuses = details.map((detail) => detail.status);
+  if (statuses.includes(429) || (statuses.includes(403) && /rate.?limit/.test(haystack)) || /rate.?limit/.test(haystack)) {
+    return { kind: 'rateLimited', message };
+  }
+  if (/abort|timed?[\s_]?out|etimedout/.test(haystack)) {
+    return { kind: 'timeout', message };
+  }
+  if (/enotfound|eai_again|econnrefused|econnreset|fetch failed|network|socket hang up|err_(?:address_unreachable|connection_closed|connection_refused|connection_reset|internet_disconnected|name_not_resolved|network_changed|proxy_connection_failed)/.test(haystack)) {
+    return { kind: 'network', message };
+  }
+  if (statuses.some((status) => status >= 500) || /github responded 5\d\d/.test(haystack)) {
+    return { kind: 'githubUnavailable', message };
+  }
+  if (/err_updater_(?:channel_file_not_found|invalid_release_feed|latest_version_not_found|no_published_versions)|payload missing|metadata missing|invalid payload/.test(haystack)) {
+    return { kind: 'metadata', message };
+  }
+  return { kind: 'unknown', message };
 }
 
 function shouldSkipAppUpdateCheck({
@@ -222,23 +369,27 @@ async function checkLatestRelease(currentVersion) {
       const response = await fetch(RELEASES_LATEST_URL, {
         signal,
         headers: {
-          'accept': 'application/vnd.github+json',
-          'user-agent': `token-monitor/${currentVersion || '0.0.0'}`,
-          'x-github-api-version': '2022-11-28'
+          'accept': 'application/json',
+          'user-agent': `token-monitor/${currentVersion || '0.0.0'}`
         }
       });
-      if (!response.ok) throw new Error(`GitHub responded ${response.status}`);
+      if (!response.ok) {
+        const responseError = new Error(`GitHub responded ${response.status}`);
+        responseError.status = response.status;
+        throw responseError;
+      }
       return response.json();
     });
     const latest = parseLatestReleasePayload(payload);
     if (!latest) {
-      return { ok: false, newer: false, latest: null, error: 'Release payload missing or invalid', checkedAt };
+      return { ok: false, newer: false, latest: null, error: 'Release payload missing or invalid', errorKind: 'metadata', checkedAt };
     }
     const current = semver.valid(currentVersion) ? currentVersion : '0.0.0';
     const newer = semver.gt(latest.version, current);
-    return { ok: true, newer, latest, error: null, checkedAt };
+    return { ok: true, newer, latest, error: null, errorKind: null, checkedAt };
   } catch (error) {
-    return { ok: false, newer: false, latest: null, error: error.message || String(error), checkedAt };
+    const classified = classifyAppUpdateError(error);
+    return { ok: false, newer: false, latest: null, error: classified.message, errorKind: classified.kind, checkedAt };
   }
 }
 
@@ -246,11 +397,14 @@ module.exports = {
   appUpdateInstallSupport,
   parseTag,
   parseLatestReleasePayload,
+  latestFromUpdaterInfo,
+  classifyAppUpdateError,
   shouldSkipAppUpdateCheck,
   downloadedAppUpdateMatchesLatest,
   shouldDownloadAutomaticAppUpdate,
   deriveAppUpdateAvailability,
   extractReleaseNotes,
+  extractUpdaterReleaseNotes,
   mergeLatestReleaseMetadata,
   checkLatestRelease,
   RELEASES_LATEST_URL,
