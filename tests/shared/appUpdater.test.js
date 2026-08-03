@@ -410,8 +410,20 @@ test('extractUpdaterReleaseNotes cannot emit nested HTML or comment markup', () 
   ].join(''), '0.40.0');
 
   assert.equal(notes.en[0].title, 'Fixed');
-  assert.doesNotMatch(notes.en[0].items[0], /[<>]/);
+  assert.doesNotMatch(notes.en[0].items[0], /</);
   assert.doesNotMatch(notes.en[0].items[0], /hidden/);
+});
+
+test('extractUpdaterReleaseNotes preserves literal and encoded greater-than signs', () => {
+  const notes = extractUpdaterReleaseNotes([
+    '<h1>English</h1>',
+    '<h2>Changes</h2>',
+    '<h3>Fixed</h3>',
+    '<ul><li>Cost comparison 5 &gt; 2 remains stable -> ready.</li></ul>',
+    '<h2>Download</h2>'
+  ].join(''), '0.40.0');
+
+  assert.equal(notes.en[0].items[0], 'Cost comparison 5 > 2 remains stable -> ready.');
 });
 
 test('extractUpdaterReleaseNotes selects the matching full-changelog entry', () => {

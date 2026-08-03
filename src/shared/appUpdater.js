@@ -94,7 +94,7 @@ function textOutsideHtmlMarkup(value) {
       }
       continue;
     }
-    if (input[index] !== '>') output += input[index];
+    output += input[index];
   }
   return output;
 }
