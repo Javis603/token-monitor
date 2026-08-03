@@ -1010,9 +1010,14 @@ function ollamaManagedAccountsForCollector() {
   // also exist (the multi-account path in fetchOllamaLimits only fans out over
   // managed accounts and never falls back to the single-cookie path when the
   // managed list is non-empty).
+  // Use createOllamaManagedAccount to derive a proper accountKey — an empty key
+  // would be dropped by normalizeOllamaManagedAccounts before the fetch.
   const envCookie = ollamaSessionCookie(process.env, { ollamaCookie: settings?.ollamaCookie || '' });
   if (envCookie && !guiAccounts.some((a) => a.cookieHeader === envCookie)) {
-    guiAccounts.unshift({ id: '__env__', accountKey: '', cookieHeader: envCookie, enabled: true, readOnly: true });
+    const envResult = createOllamaManagedAccount(envCookie, guiAccounts);
+    if (envResult.ok) {
+      guiAccounts.unshift({ ...envResult.account, id: '__env__', readOnly: true });
+    }
   }
 
   return guiAccounts;
