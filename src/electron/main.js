@@ -1045,6 +1045,147 @@ function setMimoManagedAccountEnabled(id, enabled) {
   return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
+
+function ollamaAccountsForRenderer() {
+  return normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map(({
+    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
+  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
+}
+
+function ollamaManagedAccountsForCollector() {
+  const guiAccounts = normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map((account) => ({
+    ...account,
+    cookieHeader: readOllamaCredential(account.id)
+  })).filter((account) => account.cookieHeader);
+
+  // If a cookie was configured via env / ollamaCookie setting, inject it as a
+  // synthetic read-only account so it is not silently dropped when GUI accounts
+  // also exist (the multi-account path in fetchOllamaLimits only fans out over
+  // managed accounts and never falls back to the single-cookie path when the
+  // managed list is non-empty).
+  // Use createOllamaManagedAccount to derive a proper accountKey — an empty key
+  // would be dropped by normalizeOllamaManagedAccounts before the fetch.
+  const envCookie = ollamaSessionCookie(process.env, { ollamaCookie: settings?.ollamaCookie || '' });
+  if (envCookie && !guiAccounts.some((a) => a.cookieHeader === envCookie)) {
+    const envResult = createOllamaManagedAccount(envCookie, guiAccounts);
+    if (envResult.ok) {
+      guiAccounts.unshift({ ...envResult.account, id: '__env__', readOnly: true });
+    }
+  }
+
+  return guiAccounts;
+}
+
+function writeOllamaCredential(id, value) {
+  const cookieHeader = String(value || '').trim();
+  if (!cookieHeader) return false;
+  try {
+    return ensureCredentialStore().writeOllamaCredential(id, cookieHeader);
+  } catch (_) {
+    return false;
+  }
+}
+
+function readOllamaCredential(id) {
+  try {
+    return String(ensureCredentialStore().readOllamaCredential(id) || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function removeOllamaCredential(id) {
+  try {
+    return ensureCredentialStore().removeOllamaCredential(id);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function addOllamaManagedAccount(cookieValue) {
+  const accounts = normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts);
+  const result = createOllamaManagedAccount(cookieValue, accounts);
+  if (!result.ok) return result;
+  const [validation] = await fetchOllamaLimits({ ollamaManagedAccounts: [result.account] });
+  if (validation?.status !== 'ok') {
+    const errorCode = validation?.status === 'unauthorized'
+      ? 'invalidCookie'
+      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
+    return { ok: false, errorCode };
+  }
+  result.account.accountEmail = String(validation.accountEmail || '').trim().slice(0, 254);
+  result.account.accountLabel = String(validation.accountLabel || '').trim();
+  const previousCookie = readOllamaCredential(result.account.id);
+  const credentialStored = writeOllamaCredential(result.account.id, result.account.cookieHeader);
+  delete result.account.cookieHeader;
+  if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  settings.ollamaManagedAccounts = normalizeOllamaManagedAccounts([
+    ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
+    result.account
+  ]);
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCookie) writeOllamaCredential(result.account.id, previousCookie);
+    else removeOllamaCredential(result.account.id);
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
+  pushSettingsToRenderer();
+  sendOllamaAccountsPush();
+  void queueLimitInvalidation({
+    provider: 'ollama',
+    accountId: result.account.id,
+    accountKey: result.account.accountKey
+  }, 'account-added');
+  return { ok: true, accounts: ollamaAccountsForRenderer() };
+}
+
+async function removeOllamaManagedAccount(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeOllamaManagedAccounts(settings.ollamaManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  const previousCookie = readOllamaCredential(accountId);
+  if (!removeOllamaCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
+  settings.ollamaManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCookie) writeOllamaCredential(accountId, previousCookie);
+    return { ok: false, error: 'Could not persist account removal' };
+  }
+  pushSettingsToRenderer();
+  sendOllamaAccountsPush();
+  void queueLimitInvalidation({ provider: 'ollama', accountId, accountKey: account.accountKey }, 'account-removed', {
+    clear: true,
+    refresh: false
+  });
+  return { ok: true, accounts: ollamaAccountsForRenderer() };
+}
+
+function setOllamaManagedAccountEnabled(id, enabled) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeOllamaManagedAccounts(settings.ollamaManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  account.enabled = Boolean(enabled);
+  account.updatedAt = new Date().toISOString();
+  settings.ollamaManagedAccounts = accounts;
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    return { ok: false, error: 'Could not persist account state' };
+  }
+  pushSettingsToRenderer();
+  sendOllamaAccountsPush();
+  void queueLimitInvalidation({ provider: 'ollama', accountId, accountKey: account.accountKey }, 'account-state', {
+    clear: !account.enabled,
+    refresh: account.enabled
+  });
+  return { ok: true, accounts: ollamaAccountsForRenderer() };
+}
+
+
 function codexManagedRoot() {
   return path.join(app.getPath('userData'), 'managed-codex-homes');
 }
