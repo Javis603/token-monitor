@@ -908,6 +908,12 @@ async function collectUsageOnce(options) {
     options.onAnchorComputed({ windowsPeriods, todayPartitions, wslBundle, wslStatus });
   }
 
+  // One filesystem probe per tick, shared by the legacy status and the health
+  // record below. Probing twice cost a second pass over every client's roots —
+  // including the per-workspace walk Copilot needs — and let one snapshot report
+  // a directory as both present and absent when it appeared between the two.
+  const sourceChecks = clientSourceChecks(normalizedClients, { wslDetected: wslStatus?.detected });
+
   const summary = {
     deviceId,
     hostname: os.hostname(),
@@ -919,7 +925,7 @@ async function collectUsageOnce(options) {
     ...(agentRuntime ? { agentRuntime } : {}),
     projectsEnabled,
     trackedClients: normalizedClients ? normalizedClients.split(',') : [],
-    clientStatus: deriveClientStatus(normalizedClients, allTime),
+    clientStatus: deriveClientStatus(normalizedClients, allTime, { sourceChecks }),
     wslStatus,
     periodWindows: computePeriodWindows(collectedAt),
     today,
@@ -947,6 +953,7 @@ async function collectUsageOnce(options) {
   // After history, so `lastActivityDay` can come from the daily buckets this
   // scan already produced rather than from a second source of truth.
   const clientHealth = deriveClientHealth(normalizedClients, allTime, {
+    sourceChecks,
     wslStatus,
     lastActivityDays: mergeClientActivityDays(options.lastActivityDays, summary.history)
   });
@@ -1276,7 +1283,7 @@ function watchIgnoreMatcher(clientsCsv) {
 // check id with same-kind paths collapsed by OR. clientDataDirPresence() is
 // derived from this rather than computed beside it, so the presence dot in the
 // UI and the health record can never disagree about what was found.
-function clientSourceChecks(clientsCsv) {
+function clientSourceChecks(clientsCsv, options = {}) {
   const checks = {};
   const push = (client, id, exists) => {
     const list = checks[client] || (checks[client] = []);
@@ -1305,13 +1312,24 @@ function clientSourceChecks(clientsCsv) {
     push('antigravity', 'antigravity-ide-source', antigravityDataPresent(os.homedir()));
     push('antigravity', 'antigravity-cli-data', dirExists(antigravityCliDataDir()));
   }
+  // A client installed only inside WSL has no host directory, but its usage is
+  // merged into the same periods — so without this its source reads `missing`
+  // while the very same snapshot counts its tokens. The WSL marker is a source
+  // that exists; it just lives in a filesystem this process reaches through
+  // `wsl.exe` rather than through `fs`.
+  for (const client of options.wslDetected || []) {
+    if (Object.prototype.hasOwnProperty.call(checks, client)) push(client, 'wsl-home', true);
+  }
   return checks;
 }
 
-// Whether each tracked client has at least one data directory on disk.
-function clientDataDirPresence(clientsCsv) {
+// Whether each tracked client has at least one data directory on disk. Takes
+// pre-computed checks when the caller already has them: a tick derives the
+// legacy status and the health record from one probe, so the two cannot
+// disagree about a directory created between two scans of the same snapshot.
+function clientDataDirPresence(clientsCsv, options = {}) {
   const presence = {};
-  for (const [client, checks] of Object.entries(clientSourceChecks(clientsCsv))) {
+  for (const [client, checks] of Object.entries(options.sourceChecks || clientSourceChecks(clientsCsv, options))) {
     presence[client] = checks.some((check) => check.exists);
   }
   return presence;
@@ -1331,9 +1349,9 @@ function statusFromSignals(clients, presence, usageClients) {
   return status;
 }
 
-function deriveClientStatus(clientsCsv, allTimePeriod) {
+function deriveClientStatus(clientsCsv, allTimePeriod, options = {}) {
   const clients = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
-  return statusFromSignals(clients, clientDataDirPresence(clientsCsv), allTimePeriod?.clients || {});
+  return statusFromSignals(clients, clientDataDirPresence(clientsCsv, options), allTimePeriod?.clients || {});
 }
 
 // The most recent day each client has recorded usage on, read out of the daily
@@ -1359,11 +1377,14 @@ function clientActivityDaysFromHistory(history) {
 }
 
 // A history refresh runs on its own slower cadence than a usage tick, so a tick
-// that skipped it keeps the caller's previous map rather than blanking the field
-// until the next one.
+// that skipped it keeps the caller's previous map rather than blanking the
+// field. Merged per client rather than swapped wholesale: collectHistoryOnce()
+// deliberately survives one source failing while another succeeds, so a refresh
+// that returns only Proma's days must not erase what the last one knew about
+// Codex. A day only ever moves forward, so the fresh value wins where both hold
+// one.
 function mergeClientActivityDays(previous, history) {
-  const fresh = clientActivityDaysFromHistory(history);
-  return Object.keys(fresh).length > 0 ? fresh : { ...(previous || {}) };
+  return { ...(previous || {}), ...clientActivityDaysFromHistory(history) };
 }
 
 // Per-client diagnostics. Every input is a filesystem or subprocess observation
@@ -1413,8 +1434,12 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
         entry.source.checks = checks.map(({ id, exists }) => ({ id, exists }));
       }
       const diagnostics = [];
+      // Only "nothing at all" is a fault. A client's roots are alternatives, not
+      // dependencies — Antigravity's IDE cache, native sources and CLI data are
+      // three ways to have it installed, and so are Kiro's three — so a partial
+      // set is the normal shape of a normal install. `checks` still ships as
+      // neutral evidence of which ones were found.
       if (checks.length > 0 && detected.length === 0) diagnostics.push('source-missing');
-      else if (detected.length < checks.length) diagnostics.push('source-partial');
       if (sync?.failureCode) diagnostics.push(sync.failureCode);
       if (detected.length > 0 && liveTokens <= 0) diagnostics.push('no-usage-observed');
       // States a fact, not a cause: a marker without usage can equally mean the
@@ -2071,6 +2096,7 @@ module.exports = {
   configFingerprint,
   deriveClientHealth,
   deriveClientStatus,
+  mergeClientActivityDays,
   wslPeriodsForPreview,
   statusFromSignals,
   decideResolver,

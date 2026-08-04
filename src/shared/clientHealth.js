@@ -41,9 +41,15 @@ const CLIENT_SOURCE_STATES = Object.freeze(['detected', 'missing', 'unknown']);
 
 // `direct` is the common case: tokscale parses the client's own files and there
 // is no fetch step to succeed or fail. Only the self-synced clients
-// (cursor / antigravity) ever report the other four.
+// (cursor / antigravity) ever report `idle` / `pending` / `ok` / `failed`.
+//
+// `unknown` is never produced — it is where an unrecognised value lands. It must
+// exist as its own state precisely because `direct` is a positive claim: a
+// future producer reporting something like `blocked` would, if collapsed to
+// `direct`, tell an older hub there is no fetch step to fail, and a client with
+// tokens from an earlier scan would come back out as `healthy`.
 const CLIENT_COLLECTION_STATES = Object.freeze([
-  'direct', 'idle', 'pending', 'ok', 'failed'
+  'direct', 'idle', 'pending', 'ok', 'failed', 'unknown'
 ]);
 
 // Stable ids for the source roots the collector probes. One id can stand for
@@ -53,6 +59,10 @@ const CLIENT_COLLECTION_STATES = Object.freeze([
 // clientSourceRoots() in collector.js is where they are assigned;
 // tests/shared/clientHealth.test.js fails if the two lists drift apart.
 const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
+  // Not a host path: a marker found inside a running WSL distro. A client
+  // installed only there has no host directory, and its usage is merged into the
+  // same periods, so it has to count as a source that exists.
+  'wsl-home',
   'antigravity-cli-data',
   'antigravity-ide-source',
   'claude-projects',
@@ -90,9 +100,13 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
 // Observations worth surfacing that the core three fields cannot state on their
 // own. Sent only when they apply, capped, and closed: a renderer maps each to a
 // translated sentence, so an unrecognised code has nothing to render.
+// There is deliberately no "some roots present, others absent" code. A client's
+// roots are alternatives, not dependencies — Antigravity's IDE cache, native
+// sources and CLI data are three ways to have it installed — so a partial set is
+// what a perfectly normal install looks like. `source.checks` still reports
+// which ones were found, as neutral evidence rather than a fault.
 const CLIENT_HEALTH_DIAGNOSTIC_CODES = Object.freeze([
-  'source-missing',        // no source root found on disk
-  'source-partial',        // some source roots found, others absent
+  'source-missing',        // no source root found at all
   'sync-failed',           // self-sync failed for an unclassified reason
   'sync-timeout',          // self-sync was killed after its deadline
   'sync-spawn-failed',     // the self-sync subprocess could not be started
@@ -108,6 +122,9 @@ const MAX_TRACKED_CLIENTS = 64;
 const MAX_CHECKS_PER_CLIENT = 12;
 const MAX_DIAGNOSTICS_PER_CLIENT = 4;
 const MAX_TIMESTAMP_LENGTH = 32;
+// Capping the number of clients is not enough on its own: one key just under the
+// ingest body limit would still reach storage.
+const MAX_CLIENT_ID_LENGTH = 40;
 
 const OVERALL_SET = new Set(CLIENT_HEALTH_OVERALL_STATES);
 const SOURCE_STATE_SET = new Set(CLIENT_SOURCE_STATES);
@@ -116,6 +133,12 @@ const CHECK_ID_SET = new Set(CLIENT_SOURCE_CHECK_IDS);
 const DIAGNOSTIC_CODE_SET = new Set(CLIENT_HEALTH_DIAGNOSTIC_CODES);
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+// Rejected as client ids rather than merely made safe to assign. The map below
+// is null-prototype, so these cannot pollute it — but it is serialized to
+// storage and parsed back as an ordinary object, and spread into device records
+// on the way to renderers, so the key must not survive that round trip at all.
+const PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function defaultClientId(value) {
   return String(value || '').trim().toLowerCase();
@@ -139,9 +162,14 @@ function normalizeTimestamp(value) {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : '';
 }
 
+// Shape alone would accept 2026-99-99, which then renders as the newest day this
+// client was active. Round-tripping through UTC is what rejects a date the
+// calendar does not have.
 function normalizeDay(value) {
   const raw = String(value || '').trim().slice(0, 10);
-  return DAY_PATTERN.test(raw) ? raw : '';
+  if (!DAY_PATTERN.test(raw)) return '';
+  const parsed = new Date(`${raw}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === raw ? raw : '';
 }
 
 // The one place `overall` is decided. The hub recomputes it from the core rather
@@ -156,7 +184,10 @@ function normalizeDay(value) {
 function deriveClientOverall(health) {
   const sourceState = health?.source?.state;
   const collectionState = health?.collection?.state;
+  // An unrecognised input on either axis makes every downstream branch a guess,
+  // so it stops here rather than resolving to a state that reads as fine.
   if (!SOURCE_STATE_SET.has(sourceState) || sourceState === 'unknown') return 'unknown';
+  if (!COLLECTION_STATE_SET.has(collectionState) || collectionState === 'unknown') return 'unknown';
   if (collectionState === 'failed') return 'attention';
   if (sourceState === 'missing') return 'unavailable';
   if (boundedTokens(health?.data?.liveTokens) > 0) return 'healthy';
@@ -187,30 +218,50 @@ function normalizeChecks(value) {
   return checks;
 }
 
-function normalizeDiagnostics(value) {
+// A diagnostic that the rest of the record does not support is dropped rather
+// than carried: the hub is a trust boundary, so what it stores has to be
+// internally consistent, not merely field-by-field in range. `sync-*` describes
+// a collection that failed, `source-missing` a source that is absent, and
+// `no-usage-observed` a client with nothing counted.
+function diagnosticAgreesWithEntry(code, entry) {
+  if (code.startsWith('sync-')) return entry.collection.state === 'failed';
+  if (code === 'source-missing') return entry.source.state === 'missing';
+  if (code === 'no-usage-observed') return entry.data.liveTokens === 0;
+  return true;
+}
+
+function normalizeDiagnostics(value, entry) {
   if (!Array.isArray(value)) return [];
   const codes = [];
-  for (const entry of value) {
+  for (const item of value) {
     if (codes.length >= MAX_DIAGNOSTICS_PER_CLIENT) break;
-    const code = String(entry || '').trim();
+    const code = String(item || '').trim();
     if (!DIAGNOSTIC_CODE_SET.has(code) || codes.includes(code)) continue;
+    if (!diagnosticAgreesWithEntry(code, entry)) continue;
     codes.push(code);
   }
   return codes;
 }
 
-// One client's record: the fixed core always, detail only where it was sent.
+// One client's record, canonicalized: the fixed core always, detail only where
+// it was sent, and nothing that contradicts anything else in the same entry.
+//
+// `source.state` is derived from the counts rather than read, which is what
+// makes a claim like `missing` alongside three detected roots impossible to
+// store. The counts are clamped against each other first, so the derivation has
+// something coherent to read.
 function normalizeClientHealthEntry(value) {
-  const sourceState = String(value?.source?.state || '').trim();
   const collectionState = String(value?.collection?.state || '').trim();
+  const checkedCount = boundedCount(value?.source?.checkedCount);
+  const detectedCount = Math.min(boundedCount(value?.source?.detectedCount), checkedCount);
   const entry = {
     source: {
-      state: SOURCE_STATE_SET.has(sourceState) ? sourceState : 'unknown',
-      detectedCount: boundedCount(value?.source?.detectedCount),
-      checkedCount: boundedCount(value?.source?.checkedCount)
+      state: checkedCount === 0 ? 'unknown' : (detectedCount > 0 ? 'detected' : 'missing'),
+      detectedCount,
+      checkedCount
     },
     collection: {
-      state: COLLECTION_STATE_SET.has(collectionState) ? collectionState : 'direct'
+      state: COLLECTION_STATE_SET.has(collectionState) ? collectionState : 'unknown'
     },
     data: {
       liveTokens: boundedTokens(value?.data?.liveTokens)
@@ -224,7 +275,7 @@ function normalizeClientHealthEntry(value) {
   if (lastSuccessAt) entry.collection.lastSuccessAt = lastSuccessAt;
   const lastActivityDay = normalizeDay(value?.data?.lastActivityDay);
   if (lastActivityDay) entry.data.lastActivityDay = lastActivityDay;
-  const diagnostics = normalizeDiagnostics(value?.diagnostics);
+  const diagnostics = normalizeDiagnostics(value?.diagnostics, entry);
   if (diagnostics.length > 0) entry.diagnostics = diagnostics;
   // Recomputed, never copied — see deriveClientOverall.
   entry.overall = deriveClientOverall(entry);
@@ -239,16 +290,23 @@ function normalizeClientHealthEntry(value) {
 // lives in usage.js, which imports this module; taking it as an argument keeps
 // the dependency pointing one way.
 function normalizeClientHealth(value, normalizeClientId = defaultClientId) {
-  if (!value || typeof value !== 'object') return null;
-  const source = value.clients && typeof value.clients === 'object' ? value.clients : null;
-  if (!source) return null;
-  const clients = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value.clients;
+  // An array passes `typeof === 'object'`, and its indices would be stored as
+  // client ids — `clients: [{…}]` becoming a client called "0".
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  // Null-prototype: a client id of `__proto__` would otherwise reassign the
+  // map's prototype instead of adding an enumerable entry, leaving a health
+  // record that is retained but empty.
+  const clients = Object.create(null);
   let count = 0;
   for (const [rawId, entry] of Object.entries(source)) {
     if (count >= MAX_TRACKED_CLIENTS) break;
+    if (String(rawId).length > MAX_CLIENT_ID_LENGTH || PROTOTYPE_KEYS.has(rawId)) continue;
     const id = normalizeClientId(rawId);
-    if (!id || Object.prototype.hasOwnProperty.call(clients, id)) continue;
-    if (!entry || typeof entry !== 'object') continue;
+    if (!id || id.length > MAX_CLIENT_ID_LENGTH || PROTOTYPE_KEYS.has(id)) continue;
+    if (Object.prototype.hasOwnProperty.call(clients, id)) continue;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
     clients[id] = normalizeClientHealthEntry(entry);
     count += 1;
   }

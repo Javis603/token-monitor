@@ -20,11 +20,13 @@ const {
   clientSourceChecks,
   clientSourceRoots,
   clientWatchCandidates,
-  deriveClientHealth
+  deriveClientHealth,
+  deriveClientStatus,
+  mergeClientActivityDays
 } = require('../../src/shared/collector');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
-const { aggregateDevices, normalizeDeviceRecord } = require('../../src/shared/usage');
+const { aggregateDevices, mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
 
 const core = (overrides = {}) => ({
   source: { state: 'detected', detectedCount: 1, checkedCount: 1 },
@@ -86,15 +88,98 @@ test('normalizeClientHealth downgrades every value it does not recognise', () =>
 
   const claude = health.clients.claude;
   assert.equal(health.version, CLIENT_HEALTH_VERSION);
-  assert.equal(claude.source.state, 'unknown');
-  assert.equal(claude.collection.state, 'direct');
+  // The counts decide the source state, so the invented one is simply not read.
+  assert.equal(claude.source.state, 'detected');
+  assert.equal(claude.collection.state, 'unknown');
   assert.equal(Object.hasOwn(claude.collection, 'lastAttemptAt'), false);
   assert.equal(claude.collection.lastSuccessAt, '2026-08-01T10:00:00.000Z');
   assert.equal(Object.hasOwn(claude.data, 'lastActivityDay'), false);
   assert.deepEqual(claude.source.checks, [{ id: 'claude-projects', exists: true }]);
-  assert.deepEqual(claude.diagnostics, ['source-missing']);
-  // The producer claimed healthy; an unknown source cannot support that.
+  // `source-missing` contradicts a detected source and goes with the made-up code.
+  assert.equal(Object.hasOwn(claude, 'diagnostics'), false);
+  // The producer claimed healthy on a collection state this build cannot read.
   assert.equal(claude.overall, 'unknown');
+});
+
+// `direct` is a positive claim — "there is no fetch step here to fail". A future
+// producer's `blocked` collapsed onto it would tell an older hub that a client
+// whose sync is wedged is fine, and any earlier tokens would carry it to
+// `healthy`.
+test('an unrecognised collection state never resolves to a working one', () => {
+  const health = normalizeClientHealth({
+    clients: {
+      cursor: { ...core({ collection: { state: 'blocked' }, data: { liveTokens: 900_000 } }), overall: 'healthy' }
+    }
+  });
+  assert.equal(health.clients.cursor.collection.state, 'unknown');
+  assert.equal(health.clients.cursor.overall, 'unknown');
+});
+
+test('normalizeClientHealth canonicalizes a record instead of clamping it field by field', () => {
+  // Counts that contradict each other, and a source state that contradicts both.
+  const clamped = normalizeClientHealth({
+    clients: { codex: { ...core({ source: { state: 'missing', detectedCount: 9, checkedCount: 1 } }) } }
+  });
+  assert.equal(clamped.clients.codex.source.detectedCount, 1);
+  assert.equal(clamped.clients.codex.source.checkedCount, 1);
+  assert.equal(clamped.clients.codex.source.state, 'detected');
+
+  // Nothing probed at all is `unknown`, not `missing`.
+  const nothing = normalizeClientHealth({
+    clients: { codex: { ...core({ source: { state: 'detected', detectedCount: 0, checkedCount: 0 } }) } }
+  });
+  assert.equal(nothing.clients.codex.source.state, 'unknown');
+  assert.equal(nothing.clients.codex.overall, 'unknown');
+
+  // A calendar that has no such day.
+  const dated = normalizeClientHealth({
+    clients: { codex: { ...core({ data: { liveTokens: 1, lastActivityDay: '2026-99-99' } }) } }
+  });
+  assert.equal(Object.hasOwn(dated.clients.codex.data, 'lastActivityDay'), false);
+  const real = normalizeClientHealth({
+    clients: { codex: { ...core({ data: { liveTokens: 1, lastActivityDay: '2026-02-29' } }) } }
+  });
+  assert.equal(Object.hasOwn(real.clients.codex.data, 'lastActivityDay'), false, '2026 is not a leap year');
+  const valid = normalizeClientHealth({
+    clients: { codex: { ...core({ data: { liveTokens: 1, lastActivityDay: '2026-08-04' } }) } }
+  });
+  assert.equal(valid.clients.codex.data.lastActivityDay, '2026-08-04');
+});
+
+test('normalizeClientHealth refuses shapes that would be stored as clients', () => {
+  // An array passes `typeof === 'object'`; its indices would become client ids.
+  assert.equal(normalizeClientHealth({ clients: [core()] }), null);
+  assert.equal(normalizeClientHealth([{ clients: { codex: core() } }]), null);
+  assert.equal(normalizeClientHealth({ clients: { codex: [core()] } }), null);
+  // A `__proto__` key would reassign the map's prototype rather than add an
+  // entry, leaving a record that is retained and empty.
+  const polluted = normalizeClientHealth({ clients: JSON.parse('{"__proto__": {"source": {"state": "detected", "detectedCount": 1, "checkedCount": 1}}}') });
+  assert.equal(polluted, null);
+  assert.equal({}.source, undefined, 'Object.prototype must be untouched');
+  // One key just under the ingest body limit still reaches storage without a cap.
+  assert.equal(normalizeClientHealth({ clients: { ['x'.repeat(500)]: core() } }), null);
+});
+
+// A diagnostic the rest of the entry does not support is dropped: the hub stores
+// a record that is internally consistent, not one that merely passes per-field
+// range checks.
+test('normalizeClientHealth drops diagnostics its own record contradicts', () => {
+  const health = normalizeClientHealth({
+    clients: {
+      codex: {
+        ...core({ data: { liveTokens: 4000 } }),
+        diagnostics: ['sync-timeout', 'source-missing', 'no-usage-observed']
+      }
+    }
+  });
+  assert.equal(Object.hasOwn(health.clients.codex, 'diagnostics'), false);
+  assert.equal(health.clients.codex.overall, 'healthy');
+
+  const failing = normalizeClientHealth({
+    clients: { cursor: { ...core({ collection: { state: 'failed' } }), diagnostics: ['sync-timeout'] } }
+  });
+  assert.deepEqual(failing.clients.cursor.diagnostics, ['sync-timeout']);
+  assert.equal(failing.clients.cursor.overall, 'attention');
 });
 
 test('normalizeClientHealth recomputes overall instead of trusting the producer', () => {
@@ -127,10 +212,13 @@ test('normalizeClientHealth caps every list a hostile ingest could grow', () => 
   const inflated = normalizeClientHealth({ clients: { codex: { ...core(), source: { state: 'detected', detectedCount: 9e9, checkedCount: 9e9 } } } });
   assert.equal(inflated.clients.codex.source.detectedCount, MAX_CHECKS_PER_CLIENT);
 
-  const diagnostics = ['source-missing', 'source-partial', 'sync-failed', 'sync-timeout', 'sync-exit-error', 'no-usage-observed'];
+  // All five agree with a failed collection, so the cap is what trims them.
+  const diagnostics = ['sync-failed', 'sync-timeout', 'sync-spawn-failed', 'sync-exit-error', 'no-usage-observed'];
   assert.ok(diagnostics.length > MAX_DIAGNOSTICS_PER_CLIENT);
-  const trimmed = normalizeClientHealth({ clients: { codex: { ...core(), diagnostics } } });
-  assert.equal(trimmed.clients.codex.diagnostics.length, MAX_DIAGNOSTICS_PER_CLIENT);
+  const trimmed = normalizeClientHealth({
+    clients: { cursor: { ...core({ collection: { state: 'failed' } }), diagnostics } }
+  });
+  assert.equal(trimmed.clients.cursor.diagnostics.length, MAX_DIAGNOSTICS_PER_CLIENT);
 });
 
 test('normalizeClientHealth folds tokscale aliases onto the client id they belong to', () => {
@@ -177,10 +265,10 @@ test('every source-root id the collector emits is in the allowlist', () => {
   for (const id of ['antigravity-ide-source', 'antigravity-cli-data']) {
     assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(id));
   }
-  // And nothing in the allowlist is dead weight. `hermes-profile` is exempt
-  // because its roots come from profiles discovered on disk, so a machine with
-  // no Hermes profiles legitimately never emits it.
-  const discoveryDependent = new Set(['hermes-profile']);
+  // And nothing in the allowlist is dead weight. Two ids are exempt because they
+  // are discovered rather than constructed: `hermes-profile` comes from profiles
+  // found on disk, and `wsl-home` only appears on Windows with a running distro.
+  const discoveryDependent = new Set(['hermes-profile', 'wsl-home']);
   const checked = new Set([...emitted, 'antigravity-ide-source', 'antigravity-cli-data']);
   for (const id of CLIENT_SOURCE_CHECK_IDS) {
     if (discoveryDependent.has(id)) continue;
@@ -244,9 +332,11 @@ test('deriveClientHealth reports every tracked client within the declared shape'
   assert.equal(health.clients.claude.overall, 'healthy');
   assert.equal(Object.hasOwn(health.clients.claude.source, 'checks'), false);
   assert.equal(Object.hasOwn(health.clients.claude, 'diagnostics'), false);
-  // Antigravity has the same partial source and no usage, so it gets both.
+  // Antigravity has the same partial source and no usage. Its roots are
+  // alternatives rather than dependencies, so a missing one is evidence in
+  // `checks`, never a fault of its own.
   assert.deepEqual(health.clients.antigravity.source.checks, SOURCE_CHECKS.antigravity);
-  assert.deepEqual(health.clients.antigravity.diagnostics, ['source-partial', 'no-usage-observed']);
+  assert.deepEqual(health.clients.antigravity.diagnostics, ['no-usage-observed']);
   assert.equal(health.clients.cursor.overall, 'unavailable');
   assert.deepEqual(health.clients.cursor.diagnostics, ['source-missing']);
   // The two self-synced clients report their sync lane; everyone else is direct.
@@ -335,6 +425,55 @@ test('a throttled sync that never runs leaves the success stamp alone', () => {
   assert.equal(throttle.syncStatus('cursor').state, 'ok');
 });
 
+// A client installed only inside WSL has no host directory, but its usage is
+// merged into the same periods before either derivation runs — so reading the
+// host filesystem alone produced a record saying `unavailable` about a client
+// the very same snapshot counted half a million tokens for.
+test('a WSL-only client is a client with a source, not a missing one', () => {
+  const hostOnly = { hermes: [{ id: 'hermes-home', exists: false }] };
+  const wslStatus = { state: 'active', detected: ['hermes'], withData: ['hermes'] };
+
+  const withoutWsl = deriveClientHealth('hermes', { clients: { hermes: 500_000 } }, { sourceChecks: hostOnly });
+  assert.equal(withoutWsl.clients.hermes.overall, 'unavailable', 'the shape this test exists to prevent');
+
+  const checks = clientSourceChecks('hermes', { wslDetected: wslStatus.detected });
+  assert.ok(checks.hermes.some((check) => check.id === 'wsl-home' && check.exists));
+
+  const withWsl = deriveClientHealth('hermes', { clients: { hermes: 500_000 } }, {
+    sourceChecks: { hermes: [...hostOnly.hermes, { id: 'wsl-home', exists: true }] },
+    wslStatus
+  });
+  assert.equal(withWsl.clients.hermes.source.state, 'detected');
+  assert.equal(withWsl.clients.hermes.overall, 'healthy');
+  assert.equal(Object.hasOwn(withWsl.clients.hermes, 'diagnostics'), false);
+  // And it agrees with the legacy field derived from the same signals.
+  assert.equal(deriveLegacyClientStatus(withWsl.clients.hermes), 'active');
+});
+
+test('a WSL marker with no usage waits rather than reading as absent', () => {
+  const health = deriveClientHealth('hermes', { clients: {} }, {
+    sourceChecks: { hermes: [{ id: 'hermes-home', exists: false }, { id: 'wsl-home', exists: true }] },
+    wslStatus: { state: 'active', detected: ['hermes'], withData: [] }
+  });
+  assert.equal(health.clients.hermes.source.state, 'detected');
+  assert.equal(health.clients.hermes.overall, 'waiting');
+  assert.deepEqual(health.clients.hermes.diagnostics, ['no-usage-observed', 'wsl-detected-no-data']);
+  assert.equal(deriveLegacyClientStatus(health.clients.hermes), 'waiting');
+});
+
+// One probe per tick feeds both derivations. Two probes cost a second pass over
+// every client's roots and let one snapshot call a directory both present and
+// absent when it appeared between them.
+test('the legacy status and the health record read the same source checks', () => {
+  const sourceChecks = { codex: [{ id: 'codex-sessions', exists: true }], cursor: [{ id: 'tokscale-cursor-cache', exists: false }] };
+  const status = deriveClientStatus('codex,cursor', { clients: { codex: 12 } }, { sourceChecks });
+  const health = deriveClientHealth('codex,cursor', { clients: { codex: 12 } }, { sourceChecks });
+  assert.deepEqual(status, { codex: 'active', cursor: 'missing' });
+  for (const client of ['codex', 'cursor']) {
+    assert.equal(deriveLegacyClientStatus(health.clients[client]), status[client], client);
+  }
+});
+
 test('clientActivityDaysFromHistory takes the newest day with usage per client', () => {
   const days = clientActivityDaysFromHistory({
     daily: [
@@ -350,6 +489,26 @@ test('clientActivityDaysFromHistory takes the newest day with usage per client',
   assert.deepEqual(clientActivityDaysFromHistory(null), {});
 });
 
+// collectHistoryOnce() survives one source failing while another succeeds, so a
+// refresh can legitimately come back holding only Proma's days. Swapping the map
+// wholesale on any non-empty result made a *successful* refresh report less than
+// the one before it.
+test('a partial history refresh updates the days it knows and keeps the rest', () => {
+  const previous = { codex: '2026-08-01', claude: '2026-07-30' };
+  const partial = { daily: [{ date: '2026-08-04', perClient: { proma: { tokens: 12 } } }] };
+  assert.deepEqual(mergeClientActivityDays(previous, partial), {
+    codex: '2026-08-01',
+    claude: '2026-07-30',
+    proma: '2026-08-04'
+  });
+  // A tick that collected no history at all keeps everything.
+  assert.deepEqual(mergeClientActivityDays(previous, null), previous);
+  // And a client present in both moves forward.
+  assert.equal(mergeClientActivityDays(previous, {
+    daily: [{ date: '2026-08-04', perClient: { codex: { tokens: 9 } } }]
+  }).codex, '2026-08-04');
+});
+
 test('the hub keeps a valid health record and drops an unusable one', () => {
   const now = new Date().toISOString();
   const base = { deviceId: 'macbook', updatedAt: now, receivedAt: now };
@@ -360,6 +519,44 @@ test('the hub keeps a valid health record and drops an unusable one', () => {
   assert.equal(kept.clientHealth.clients.codex.overall, 'healthy');
   assert.equal(Object.hasOwn(normalizeDeviceRecord({ ...base, clientHealth: { clients: {} } }), 'clientHealth'), false);
   assert.equal(Object.hasOwn(normalizeDeviceRecord(base), 'clientHealth'), false);
+});
+
+// A limits-only ingest carries the previous usage forward, so the fields that
+// describe where that usage came from have to travel with it — otherwise the
+// diagnosis blinks out on every limits refresh and comes back on the next full
+// upload. Deliberately scoped to that branch: a *full* update from an agent too
+// old to send these fields is stating it has none, and preserving them there
+// would strand a permanently stale diagnosis on a reused device id.
+test('a limits-only ingest keeps the attribution describing the usage it carries', () => {
+  const now = new Date().toISOString();
+  const existing = {
+    deviceId: 'macbook',
+    updatedAt: now,
+    receivedAt: now,
+    clientStatus: { codex: 'active' },
+    wslStatus: { state: 'active', detected: ['codex'], withData: ['codex'] },
+    clientHealth: { clients: { codex: core({ data: { liveTokens: 5 } }) } },
+    today: { totalTokens: 5, clients: { codex: 5 } }
+  };
+
+  const limitsOnly = mergeDeviceRecord(existing, {
+    deviceId: 'macbook', updatedAt: now, limitsOnly: true, limits: { updatedAt: now, providers: [] }
+  });
+  assert.equal(limitsOnly.clientHealth.clients.codex.overall, 'healthy');
+  assert.deepEqual(limitsOnly.clientStatus, { codex: 'active' });
+  assert.deepEqual(limitsOnly.wslStatus.withData, ['codex']);
+
+  // A full update that simply does not carry the fields drops them, as before.
+  const full = mergeDeviceRecord(existing, { deviceId: 'macbook', updatedAt: now, today: { totalTokens: 5 } });
+  assert.equal(Object.hasOwn(full, 'clientHealth'), false);
+  // And an incoming health record still wins over the stored one.
+  const replaced = mergeDeviceRecord(existing, {
+    deviceId: 'macbook',
+    updatedAt: now,
+    limitsOnly: true,
+    clientHealth: { clients: { codex: core({ source: { state: 'missing', detectedCount: 0, checkedCount: 1 } }) } }
+  });
+  assert.equal(replaced.clientHealth.clients.codex.overall, 'unavailable');
 });
 
 test('aggregateDevices carries health per device and never rolls it up', () => {

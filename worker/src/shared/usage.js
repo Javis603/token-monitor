@@ -900,6 +900,14 @@ function mergeDeviceRecord(existing, incoming) {
   const normalizedExisting = normalizeDeviceRecord(existing);
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
+    // The three attribution fields describe the usage this branch is carrying
+    // forward, so they have to travel with it. Scoped to `limitsOnly` on
+    // purpose: a full update from an agent too old to send them is stating that
+    // it has no such data, and preserving them there would strand a permanently
+    // stale diagnosis on a device that changed hands.
+    if (hasOwn(normalizedExisting, 'clientStatus') && !hasOwn(normalizedIncoming, 'clientStatus')) normalizedIncoming.clientStatus = normalizedExisting.clientStatus;
+    if (hasOwn(normalizedExisting, 'clientHealth') && !hasOwn(normalizedIncoming, 'clientHealth')) normalizedIncoming.clientHealth = normalizedExisting.clientHealth;
+    if (hasOwn(normalizedExisting, 'wslStatus') && !hasOwn(normalizedIncoming, 'wslStatus')) normalizedIncoming.wslStatus = normalizedExisting.wslStatus;
     if (hasOwn(normalizedExisting, 'periodWindows')) normalizedIncoming.periodWindows = normalizedExisting.periodWindows;
     if (hasOwn(normalizedExisting, 'projectsEnabled')) normalizedIncoming.projectsEnabled = normalizedExisting.projectsEnabled;
     if (hasOwn(normalizedExisting, 'allTimeProjectsOmitted')) normalizedIncoming.allTimeProjectsOmitted = normalizedExisting.allTimeProjectsOmitted;
