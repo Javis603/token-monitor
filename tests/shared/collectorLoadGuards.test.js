@@ -416,6 +416,109 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
   }
 });
 
+test('a manual refresh satisfies a deferred source sync instead of adding one', async () => {
+  // The user reaches for refresh precisely when the number looks stale, which is
+  // when a source event is most likely to still be sitting inside the floor. The
+  // forced sync re-reads the IDE from scratch, so the deferred catch-up would be
+  // a second full `antigravity sync` for a change already picked up.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => { syncCalls += 1; },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1);
+
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1, 'the source event is deferred, not run');
+
+    await handle.tick('manual', { forceSelfSync: true });
+    assert.equal(syncCalls, 2, 'the manual refresh syncs immediately');
+
+    // Well past the floor: a still-pending catch-up would fire straight away.
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 3;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(syncCalls, 2, 'the deferred sync was satisfied, not queued behind the manual one');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('an unusable watch debounce cannot turn the catch-up retry into a spin', () => {
+  // setTimeout rewrites a non-finite or oversized delay to 1ms, so an env-set
+  // TOKEN_MONITOR_WATCH_DEBOUNCE_MS of Infinity would make the mid-tick retry
+  // fire hundreds of times per second for the length of the tick.
+  const { clampTimerDelayMs } = freshCollector();
+  assert.equal(clampTimerDelayMs(Infinity, 1000), 1000);
+  assert.equal(clampTimerDelayMs(-Infinity, 1000), 1000);
+  assert.equal(clampTimerDelayMs(NaN, 1000), 1000);
+  assert.equal(clampTimerDelayMs(undefined, 1000), 1000);
+  assert.equal(clampTimerDelayMs(0, 1000), 1000);
+  assert.equal(clampTimerDelayMs(-5, 1000), 1000);
+  assert.equal(clampTimerDelayMs(2 ** 32, 1000), 2 ** 31 - 1);
+  assert.equal(clampTimerDelayMs(1500, 1000), 1500);
+  delete require.cache[collectorPath];
+});
+
 test('an Antigravity CLI event rescans without paying for an IDE sync', async () => {
   // Both roots share the umbrella client id, so the scan target is the same for
   // either. Only the IDE roots feed `antigravity sync`; the CLI writes

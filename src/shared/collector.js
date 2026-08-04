@@ -534,6 +534,17 @@ function syncDue(kind, nowMs = Date.now(), minIntervalMs = SYNC_MIN_INTERVAL_MS)
 // instead would strand the change until the fallback interval, which is the
 // latency the watcher exists to remove. Same rollback handling as syncDue — a
 // stamp from a clock that no longer exists is not something to wait out.
+// setTimeout stores its delay in a 32-bit signed int and silently rewrites
+// anything larger — or non-finite — to 1ms, turning a "wait a while" into a
+// spin. Every delay derived from configuration goes through here.
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+
+function clampTimerDelayMs(value, fallbackMs) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallbackMs;
+  return Math.min(MAX_TIMER_DELAY_MS, Math.max(1, parsed));
+}
+
 function msUntilSyncDue(kind, minIntervalMs, nowMs = Date.now()) {
   const elapsed = nowMs - lastSyncAt[kind];
   if (elapsed < 0) return 0;
@@ -1473,9 +1484,8 @@ function startCollector(options) {
   let sourceSyncCatchUpTimer = null;
   // How long a catch-up waits when it comes due mid-tick. Mirrors the watch
   // debounce so the retry lands after the tick that displaced it, with a beat to
-  // fall back on when no debounce was configured (setTimeout would otherwise
-  // treat a non-numeric delay as 0 and spin for the length of the tick).
-  const SOURCE_SYNC_RETRY_MS = Math.max(1, Number(watchDebounceMs) || 1000);
+  // fall back on when the configured value is unusable.
+  const SOURCE_SYNC_RETRY_MS = clampTimerDelayMs(watchDebounceMs, 1000);
   const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => SELF_SYNCED_CLIENTS.has(client));
   let activityRevision = 0;
   let collectedActivityRevision = 0;
@@ -1686,6 +1696,7 @@ function startCollector(options) {
     }
     tickInFlight = true;
     try {
+      acknowledgeSourceSync(effectiveTickOptions.forceSelfSync);
       await performTick(reason, effectiveTickOptions);
       while (tickPending && !stopped) {
         const forceHistory = pendingForceHistory;
@@ -1699,6 +1710,7 @@ function startCollector(options) {
         pendingSourceSelfSync = null;
         pendingTodayOnly = null;
         pendingActivityRevision = null;
+        acknowledgeSourceSync(forceSelfSync);
         await performTick('coalesced', {
           forceHistory,
           forceSelfSync,
@@ -1767,7 +1779,25 @@ function startCollector(options) {
       // The tick that carried this event already scanned against the stale
       // cache, so the catch-up has to rescan the same clients behind the sync.
       runTick('source-sync', { todayOnly: true, targetClients: sourceSelfSync, sourceSelfSync });
-    }, Math.max(1, delayMs));
+    }, clampTimerDelayMs(delayMs, SOURCE_SYNC_RETRY_MS));
+  }
+
+  // A forced sync satisfies any source event already waiting on the same client:
+  // it re-reads the IDE from scratch, so leaving the client pending would spend a
+  // second full sync ~one floor later on a change the forced run just picked up —
+  // and a manual refresh is exactly what a user reaches for when the number looks
+  // stale. Cleared where the tick actually starts rather than where it is queued,
+  // since a forced tick waiting behind another has not synced anything yet; an
+  // event arriving mid-tick re-enters through the watcher.
+  function acknowledgeSourceSync(selection) {
+    if (!selection || scheduledSourceSyncClients.size === 0) return;
+    for (const client of [...scheduledSourceSyncClients]) {
+      if (selfSyncSelected(selection, client)) scheduledSourceSyncClients.delete(client);
+    }
+    if (scheduledSourceSyncClients.size === 0 && sourceSyncCatchUpTimer) {
+      clearTimeout(sourceSyncCatchUpTimer);
+      sourceSyncCatchUpTimer = null;
+    }
   }
 
   function scheduleTick(reason, eventClients) {
@@ -1939,6 +1969,7 @@ module.exports = {
   projectPathFromJsonl,
   collectHistoryOnce,
   collectUsageOnce,
+  clampTimerDelayMs,
   clientDataDirPresence,
   clientWatchCandidates,
   computePeriodWindows,
