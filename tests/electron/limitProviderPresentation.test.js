@@ -1396,7 +1396,7 @@ test('background provider rerenders preserve settings scroll without a focused c
     {
       cancelAnimationFrame: () => {},
       els,
-      limitProviderDrag: null,
+      limitProviderRowDrag: { deferRender: () => false },
       renderLimitProviderCheckboxesNow,
       requestAnimationFrame: (callback) => frames.push(callback)
     }
@@ -1454,7 +1454,7 @@ renderLimitProviderCheckboxes();`,
       cancelAnimationFrame: () => {},
       document: { querySelectorAll: () => [] },
       els,
-      limitProviderDrag: null,
+      limitProviderRowDrag: { deferRender: () => false },
       renderLimitProviderCheckboxesNow,
       requestAnimationFrame: (callback) => frames.push(callback)
     }
