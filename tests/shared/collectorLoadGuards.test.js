@@ -391,20 +391,27 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
     assert.equal(syncCalls, 1);
 
     // A source event inside the floor, so the sync is deferred rather than run.
-    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300;
+    // The remaining floor becomes the catch-up's real timer delay, so it doubles
+    // as the deadline the hold below has to outlive.
+    const catchUpDelayMs = 400;
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - catchUpDelayMs;
     watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    const armedAt = performance.now();
     await waitForCondition(() => updates.length === 2);
     assert.equal(syncCalls, 1);
 
     // Hold a tokscale child open so the tick is provably still in flight when the
-    // catch-up comes due — a latch rather than a delay race, so the test cannot
-    // pass by having the tick finish first and take the ordinary drain path.
+    // catch-up comes due. Both halves matter: the latch keeps the tick running so
+    // the ordinary drain path is unreachable, and the hold outlives the armed
+    // deadline by construction — mocking Date.now does not move a real
+    // setTimeout, so releasing early would assert against a callback that had not
+    // run yet and prove nothing about the re-arm.
     let releaseInFlight = null;
     holdNextSpawn = new Promise((resolve) => { releaseInFlight = resolve; });
     const inFlight = handle.tick('manual');
     await waitForCondition(() => heldSpawns === 1);
     clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await waitForCondition(() => performance.now() - armedAt > catchUpDelayMs + 150, 4000);
     assert.equal(syncCalls, 1, 'the catch-up waits rather than folding into the in-flight tick');
 
     releaseInFlight();
@@ -615,6 +622,61 @@ test('a failed forced sync hands the source event back instead of eating it', as
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a misbehaving sync child reports failure exactly once', async () => {
+  // A child reports more than once: a SIGTERM'd timeout still emits close, and
+  // error is normally followed by close. That was harmless while every path only
+  // resolved a promise, but onFailure re-arms the catch-up — and a late duplicate
+  // could land after a later catch-up already succeeded, putting the same source
+  // event back into a set with nothing left to collect.
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-sync-once-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  let emitAfterError = false;
+  childProcess.spawn = (_bin, args) => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    const isSync = args.includes('sync');
+    setImmediate(() => {
+      if (!isSync) {
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+        child.emit('close', 0);
+        return;
+      }
+      if (emitAfterError) child.emit('error', new Error('spawn failed'));
+      child.emit('close', 1);
+    });
+    return child;
+  };
+
+  try {
+    const { collectUsageOnce } = freshCollector();
+    for (const withError of [false, true]) {
+      emitAfterError = withError;
+      const failures = [];
+      await collectUsageOnce({
+        clients: 'antigravity',
+        allTimeSince: '2024-01-01',
+        commandTimeoutMs: 1000,
+        deviceId: 'usage-only',
+        historyEnabled: false,
+        homeDir: home,
+        forceSelfSync: true,
+        onSelfSyncFailed: (kind) => failures.push(kind)
+      });
+      assert.deepEqual(failures, ['antigravity'], withError ? 'error then close' : 'non-zero close');
+    }
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

@@ -628,15 +628,29 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   await new Promise((resolve) => {
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
     let stderr = '';
-    const fail = () => { options.onFailure?.('antigravity'); resolve(); };
-    const timer = setTimeout(() => { child.kill('SIGTERM'); fail(); }, 30000);
+    // One outcome per spawn. A child reports more than once — a SIGTERM'd
+    // timeout still emits close afterwards, and error is usually followed by
+    // close — which was harmless while every path only resolved a promise, but
+    // onFailure has a side effect: re-arming the catch-up. A late duplicate could
+    // land after a subsequent catch-up already succeeded and put the same source
+    // event back into a set that no longer has anything to collect.
+    let settled = false;
+    let timer = null;
+    const settle = (failed) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (failed) options.onFailure?.('antigravity');
+      resolve();
+    };
+    timer = setTimeout(() => { child.kill('SIGTERM'); settle(true); }, 30000);
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', () => { clearTimeout(timer); fail(); });
+    child.on('error', () => settle(true));
     child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) { resolve(); return; }
-      if (typeof logger === 'function') logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
-      fail();
+      if (code !== 0 && !settled && typeof logger === 'function') {
+        logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
+      }
+      settle(code !== 0);
     });
     child.stdin?.end();
   });
