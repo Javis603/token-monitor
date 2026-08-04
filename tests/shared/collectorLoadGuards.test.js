@@ -625,6 +625,102 @@ test('a failed forced sync hands the source event back instead of eating it', as
   }
 });
 
+test('a source event that keeps failing backs off to the idle cadence', async (t) => {
+  // Restoring a consumed event on failure is what stops a change being stranded,
+  // but the restore must not re-enter the ten-second floor: a sync that keeps
+  // failing would then drive its own next attempt for as long as the process
+  // lives. The first retry is fast, and a failure drops the client back to the
+  // idle cadence — which is exactly where it sat before any of this existed.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => {
+        syncCalls += 1;
+        throw new Error('language server unreachable');
+      },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1, 'the startup sync failed');
+
+    // Mocked before the event, not after: the restore arms a real timer, and
+    // enabling the mock afterwards would leave that timer outside its control —
+    // the assertion would then pass because nothing could fire, proving nothing.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    t.mock.timers.tick(50);
+    await waitForCondition(() => syncCalls === 2, 4000);
+
+    // Nothing further happens: no new events, just time. Advancing past the
+    // source floor must not produce another attempt — the restored event is
+    // parked on the idle cadence, so only a far larger jump would reach it.
+    clockOffsetMs += SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    t.mock.timers.tick(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000);
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.reset();
+    assert.equal(syncCalls, 2, 'a failing sync does not drive its own next attempt');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('a misbehaving sync child reports failure exactly once', async () => {
   // A child reports more than once: a SIGTERM'd timeout still emits close, and
   // error is normally followed by close. That was harmless while every path only

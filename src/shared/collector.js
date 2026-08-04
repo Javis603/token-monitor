@@ -1859,7 +1859,15 @@ function startCollector(options) {
   function restoreConsumedSourceSync(consumed, kind) {
     if (!consumed.includes(kind) || stopped) return;
     scheduledSourceSyncClients.add(kind);
-    armSourceSyncCatchUp(msUntilSyncDue(kind, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS));
+    // Deliberately the idle cadence, not the source floor the event came in on.
+    // The restored event drives the next attempt, so re-arming on the fast floor
+    // would let a sync that keeps failing schedule its own retry every ten
+    // seconds for the life of the process — with a targeted scan behind each one
+    // — and nothing upstream distinguishes a transient failure from a permanent
+    // one. Backing off to the cadence the client had before any of this existed
+    // is the honest degraded state, and it needs no retry counter to bound it. A
+    // new source event or a manual refresh still gets the fast path.
+    armSourceSyncCatchUp(msUntilSyncDue(kind, SYNC_MIN_INTERVAL_MS));
   }
 
   function scheduleTick(reason, eventClients) {
