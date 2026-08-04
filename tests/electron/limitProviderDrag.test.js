@@ -68,9 +68,9 @@ function createDragHarness(config = {}) {
       classList: { add: (value) => classes.add(value), remove: (value) => classes.delete(value) },
       getBoundingClientRect: () => ({ top, height: 40, bottom: top + 40 }),
       contains: () => true,
-      addEventListener: (type) => rowListeners.push(type),
-      removeEventListener: (type) => {
-        const index = rowListeners.indexOf(type);
+      addEventListener: (type, listener) => rowListeners.push({ type, listener }),
+      removeEventListener: (type, listener) => {
+        const index = rowListeners.findIndex((entry) => entry.type === type && entry.listener === listener);
         if (index >= 0) rowListeners.splice(index, 1);
       },
       setPointerCapture: (pointerId) => captured.add(pointerId),
@@ -115,9 +115,20 @@ function createDragHarness(config = {}) {
       currentTarget: rows[0],
       target: { closest: () => null }
     }, 'a'),
+    // Only pointer events carry an id. A window blur has none, and that is
+    // exactly what the abort guard's `pointerId != null` branch exists for, so
+    // handing blur a synthetic id would test the wrong branch.
     dispatch: (type, event = {}) => {
-      const payload = { pointerId: 1, preventDefault() {}, ...event };
+      const payload = { preventDefault() {}, ...event };
+      if (/pointer/.test(type) && payload.pointerId == null) payload.pointerId = 1;
       for (const listener of [...(listeners.get(type) || [])]) listener(payload);
+    },
+    // `lostpointercapture` is registered on the row, not the window.
+    dispatchRow: (type, event = {}) => {
+      const payload = { pointerId: 1, preventDefault() {}, ...event };
+      for (const entry of [...rows[0].rowListeners]) {
+        if (entry.type === type) entry.listener(payload);
+      }
     }
   };
 }
@@ -440,10 +451,17 @@ test('the controller reorders on a drag and stays a click under the threshold', 
 });
 
 // Cleanup is the part an extraction is most likely to drop, and every abort
-// route lands in the same teardown: Escape, pointercancel, a window blur, and
-// the lostpointercapture that a reparented row fires.
-for (const abort of ['keydown', 'pointercancel', 'blur']) {
-  test(`a drag cancelled by ${abort} restores the row and writes nothing`, () => {
+// route lands in the same teardown.
+const ABORT_ROUTES = [
+  { name: 'Escape', abort: (harness) => harness.dispatch('keydown', { key: 'Escape' }) },
+  { name: 'pointercancel', abort: (harness) => harness.dispatch('pointercancel') },
+  // No pointerId, like the real event.
+  { name: 'a window blur', abort: (harness) => harness.dispatch('blur') },
+  { name: 'lostpointercapture', abort: (harness) => harness.dispatchRow('lostpointercapture') }
+];
+
+for (const route of ABORT_ROUTES) {
+  test(`a drag cancelled by ${route.name} restores the row and writes nothing`, () => {
     const applied = [];
     const mirrored = [];
     const persisted = [];
@@ -463,7 +481,7 @@ for (const abort of ['keydown', 'pointercancel', 'blur']) {
     assert.ok(harness.rows[0].styles.has('--drag-y'), 'the dragged row is offset');
     assert.equal(harness.controller.deferRender(), true);
 
-    harness.dispatch(abort, abort === 'keydown' ? { key: 'Escape' } : {});
+    route.abort(harness);
 
     assert.deepEqual(applied, [], 'a cancelled drag never reorders');
     assert.deepEqual(mirrored, []);
@@ -475,7 +493,7 @@ for (const abort of ['keydown', 'pointercancel', 'blur']) {
     for (const row of harness.rows) {
       assert.equal(row.styles.size, 0, 'drag offsets are cleared');
       assert.equal(row.classes.has('dragging'), false);
-      assert.deepEqual(row.rowListeners, [], 'the lostpointercapture listener is removed');
+      assert.deepEqual(row.rowListeners.map((entry) => entry.type), [], 'the lostpointercapture listener is removed');
     }
     assert.deepEqual(renders, ['render'], 'the held repaint still flushes exactly once');
     assert.equal(harness.controller.isDragging(), false);
