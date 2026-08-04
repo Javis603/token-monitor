@@ -1377,7 +1377,10 @@ function mergeClientActivityDays(previous, history) {
 function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
   const clients = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
   if (clients.length === 0) return null;
-  const checksByClient = clientSourceChecks(clientsCsv);
+  // Injectable so a test can state the filesystem instead of depending on one:
+  // every `overall` below turns on whether a directory exists, which makes the
+  // developer's machine and a CI runner disagree about the same input.
+  const checksByClient = options.sourceChecks || clientSourceChecks(clientsCsv);
   const usageClients = allTimePeriod?.clients || {};
   const wslDetected = new Set(options.wslStatus?.detected || []);
   const wslWithData = new Set(options.wslStatus?.withData || []);

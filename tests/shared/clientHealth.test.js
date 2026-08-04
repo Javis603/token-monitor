@@ -214,8 +214,22 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   }
 });
 
+// Every `overall` turns on whether a directory exists, so the filesystem is
+// stated rather than depended on: a developer machine with Claude installed and
+// a CI runner without it must not disagree about the same input.
+const SOURCE_CHECKS = {
+  claude: [{ id: 'claude-projects', exists: true }, { id: 'claude-transcripts', exists: false }],
+  codex: [{ id: 'codex-sessions', exists: true }],
+  cursor: [{ id: 'tokscale-cursor-cache', exists: false }],
+  antigravity: [
+    { id: 'tokscale-antigravity-cache', exists: true },
+    { id: 'antigravity-ide-source', exists: true },
+    { id: 'antigravity-cli-data', exists: false }
+  ]
+};
+
 test('deriveClientHealth reports every tracked client within the declared shape', () => {
-  const health = deriveClientHealth('claude,codex,cursor,antigravity', { clients: { claude: 1234 } });
+  const health = deriveClientHealth('claude,codex,cursor,antigravity', { clients: { claude: 1234 } }, { sourceChecks: SOURCE_CHECKS });
   assert.equal(health.version, CLIENT_HEALTH_VERSION);
   assert.deepEqual(Object.keys(health.clients), ['claude', 'codex', 'cursor', 'antigravity']);
   for (const [client, entry] of Object.entries(health.clients)) {
@@ -224,14 +238,17 @@ test('deriveClientHealth reports every tracked client within the declared shape'
     for (const check of entry.source.checks || []) {
       assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(check.id), `${client} emitted ${check.id}`);
     }
-    // Detail is attached only where something is wrong.
-    if (entry.overall === 'healthy') {
-      assert.equal(Object.hasOwn(entry, 'diagnostics'), false, `${client} healthy but carries diagnostics`);
-      assert.equal(Object.hasOwn(entry.source, 'checks'), false, `${client} healthy but carries checks`);
-    }
   }
+  // Claude's second root is absent, but it has usage — so no detail is attached.
   assert.equal(health.clients.claude.data.liveTokens, 1234);
   assert.equal(health.clients.claude.overall, 'healthy');
+  assert.equal(Object.hasOwn(health.clients.claude.source, 'checks'), false);
+  assert.equal(Object.hasOwn(health.clients.claude, 'diagnostics'), false);
+  // Antigravity has the same partial source and no usage, so it gets both.
+  assert.deepEqual(health.clients.antigravity.source.checks, SOURCE_CHECKS.antigravity);
+  assert.deepEqual(health.clients.antigravity.diagnostics, ['source-partial', 'no-usage-observed']);
+  assert.equal(health.clients.cursor.overall, 'unavailable');
+  assert.deepEqual(health.clients.cursor.diagnostics, ['source-missing']);
   // The two self-synced clients report their sync lane; everyone else is direct.
   assert.equal(health.clients.claude.collection.state, 'direct');
   assert.equal(health.clients.codex.collection.state, 'direct');
@@ -239,10 +256,31 @@ test('deriveClientHealth reports every tracked client within the declared shape'
   assert.equal(deriveClientHealth('', {}), null);
 });
 
+// The same shape rules, against whatever this machine actually has. Asserts only
+// what holds on any filesystem — the test above pins the values.
+test('deriveClientHealth holds its own invariants against a real machine', () => {
+  const health = deriveClientHealth(KNOWN_CLIENTS, { clients: {} });
+  const checks = clientSourceChecks(KNOWN_CLIENTS);
+  for (const [client, entry] of Object.entries(health.clients)) {
+    assert.equal(entry.overall, deriveClientOverall(entry), `${client} overall must follow its own core`);
+    assert.equal(entry.source.checkedCount, (checks[client] || []).length);
+    for (const check of entry.source.checks || []) {
+      assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(check.id), `${client} emitted ${check.id}`);
+    }
+    if (entry.overall === 'healthy') {
+      assert.equal(Object.hasOwn(entry, 'diagnostics'), false, `${client} healthy but carries diagnostics`);
+      assert.equal(Object.hasOwn(entry.source, 'checks'), false, `${client} healthy but carries checks`);
+    }
+  }
+});
+
 test('deriveClientHealth carries the self-sync lane into the record', () => {
   const clock = { now: 1_700_000_000_000 };
   const throttle = createSelfSyncThrottle({ now: () => clock.now });
-  const options = { selfSyncThrottle: throttle };
+  const options = {
+    selfSyncThrottle: throttle,
+    sourceChecks: { cursor: [{ id: 'tokscale-cursor-cache', exists: true }] }
+  };
 
   assert.equal(deriveClientHealth('cursor', {}, options).clients.cursor.collection.state, 'idle');
 
