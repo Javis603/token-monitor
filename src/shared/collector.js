@@ -504,25 +504,29 @@ function applySessionTimestamps(periods, home, deps = {}) {
   }
 }
 
-// The process-wide rationing for cursor/antigravity syncs. One instance, because
-// the tokscale cache these guard is a single directory on disk: a collector
-// rebuilt by a settings change must not hand itself a fresh allowance. Tests
-// reach it through the export to pin a floor without driving a whole tick.
+// The process-wide rationing for cursor/antigravity syncs. Deliberately a single
+// module-scoped instance with no per-call override: the tokscale cache it guards
+// is one directory on disk, so a collector rebuilt by a settings change must not
+// hand itself a fresh allowance — and a second instance would split the state
+// that decides a sync from the state that schedules the catch-up waiting on it,
+// which is the divergence this whole path keeps being bitten by. Tests read it
+// through the export to pin a floor without driving a whole tick; a test wanting
+// isolation builds its own with createSelfSyncThrottle() and drives that
+// directly, rather than threading one back in here.
 const selfSyncThrottle = createSelfSyncThrottle();
 
 async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!enabled.has('cursor')) return;
   if (!cursorAuth.readActiveAccount()) return;
-  const throttle = options.throttle || selfSyncThrottle;
-  if (!throttle.claim('cursor', options.minIntervalMs)) return;
-  const attempt = throttle.beginAttempt('cursor');
+  if (!selfSyncThrottle.claim('cursor', options.minIntervalMs)) return;
+  const attempt = selfSyncThrottle.beginAttempt('cursor');
   try {
     await cursorAuth.runCursorSync();
-    throttle.completeAttempt('cursor', attempt, false);
+    selfSyncThrottle.completeAttempt('cursor', attempt, false);
   } catch (err) {
     if (typeof logger === 'function') logger(`cursor sync failed: ${err.message}`);
-    throttle.completeAttempt('cursor', attempt, true);
+    selfSyncThrottle.completeAttempt('cursor', attempt, true);
     options.onFailure?.('cursor');
   }
 }
@@ -543,16 +547,15 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!enabled.has('antigravity')) return;
   if (!antigravityDataPresent(home)) return;
-  const throttle = options.throttle || selfSyncThrottle;
-  if (!throttle.claim('antigravity', options.minIntervalMs)) return;
-  const attempt = throttle.beginAttempt('antigravity');
+  if (!selfSyncThrottle.claim('antigravity', options.minIntervalMs)) return;
+  const attempt = selfSyncThrottle.beginAttempt('antigravity');
   if (typeof options.run === 'function') {
     try {
       await options.run();
-      throttle.completeAttempt('antigravity', attempt, false);
+      selfSyncThrottle.completeAttempt('antigravity', attempt, false);
     } catch (err) {
       if (typeof logger === 'function') logger(`antigravity sync failed: ${err.message}`);
-      throttle.completeAttempt('antigravity', attempt, true);
+      selfSyncThrottle.completeAttempt('antigravity', attempt, true);
       options.onFailure?.('antigravity');
     }
     return;
@@ -578,7 +581,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      throttle.completeAttempt('antigravity', attempt, failed);
+      selfSyncThrottle.completeAttempt('antigravity', attempt, failed);
       if (failed) options.onFailure?.('antigravity');
       resolve();
     };
@@ -704,15 +707,12 @@ async function collectUsageOnce(options) {
   let promaPricing = null;
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
-    const throttle = options.selfSyncThrottle || selfSyncThrottle;
     await maybeSyncCursor(syncClients, options.logger, {
-      throttle,
-      minIntervalMs: throttle.minIntervalForTick(options, 'cursor'),
+      minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
       onFailure: options.onSelfSyncFailed
     });
     await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
-      throttle,
-      minIntervalMs: throttle.minIntervalForTick(options, 'antigravity'),
+      minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
       run: options.runAntigravitySync,
       onFailure: options.onSelfSyncFailed
     });
