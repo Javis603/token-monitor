@@ -1471,6 +1471,11 @@ function startCollector(options) {
   // and not the second.
   const scheduledSourceSyncClients = new Set();
   let sourceSyncCatchUpTimer = null;
+  // How long a catch-up waits when it comes due mid-tick. Mirrors the watch
+  // debounce so the retry lands after the tick that displaced it, with a beat to
+  // fall back on when no debounce was configured (setTimeout would otherwise
+  // treat a non-numeric delay as 0 and spin for the length of the tick).
+  const SOURCE_SYNC_RETRY_MS = Math.max(1, Number(watchDebounceMs) || 1000);
   const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => SELF_SYNCED_CLIENTS.has(client));
   let activityRevision = 0;
   let collectedActivityRevision = 0;
@@ -1751,6 +1756,12 @@ function startCollector(options) {
     sourceSyncCatchUpTimer = setTimeout(() => {
       sourceSyncCatchUpTimer = null;
       if (stopped) return;
+      // Re-arm instead of queueing, and check before draining: runTick's coalesce
+      // state carries the sync selections but not targetClients, so folding into
+      // an in-flight tick would widen this into an all-client scan — the cost the
+      // targeting exists to avoid, and it could drag an unrelated Cursor sync in
+      // with it. Same reason scheduleTick re-arms.
+      if (tickInFlight) { armSourceSyncCatchUp(SOURCE_SYNC_RETRY_MS); return; }
       const sourceSelfSync = takeSourceSyncClients();
       if (!sourceSelfSync) return;
       // The tick that carried this event already scanned against the stale

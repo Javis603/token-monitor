@@ -311,6 +311,111 @@ test('Antigravity source events target its umbrella client without watching sync
   }
 });
 
+test('a catch-up that comes due mid-tick keeps its targeted scan scope', async () => {
+  // runTick's coalesce state carries the sync selections but not targetClients,
+  // so folding the catch-up into an in-flight tick would silently widen it from
+  // one client's --today partition to every tracked client's. Two clients here
+  // precisely so a widened scan is distinguishable from a targeted one.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  let spawnDelayMs = 0;
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setTimeout(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    }, spawnDelayMs);
+    return child;
+  };
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => { syncCalls += 1; },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1);
+
+    // A source event inside the floor, so the sync is deferred rather than run.
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1);
+
+    // Occupy the collector so the catch-up deadline lands mid-tick.
+    spawnDelayMs = 250;
+    const inFlight = handle.tick('manual');
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    await inFlight;
+
+    await waitForCondition(() => syncCalls === 2, 4000);
+    const caughtUp = calls[calls.length - 1];
+    const scanned = caughtUp[caughtUp.indexOf('--client') + 1];
+    assert.equal(scanned, 'antigravity,antigravity-cli', 'the catch-up stays targeted');
+    assert.equal(scanned.includes('claude'), false, 'and never widens to every tracked client');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('an Antigravity CLI event rescans without paying for an IDE sync', async () => {
   // Both roots share the umbrella client id, so the scan target is the same for
   // either. Only the IDE roots feed `antigravity sync`; the CLI writes
