@@ -7963,10 +7963,10 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   setExpanded: setLimitProviderSettingsExpanded,
   applyOrder: (order) => applyPreferenceOrder('provider', order),
   preserveScroll: preserveSettingsPanelScroll,
-  mirrorOrder: (value) => { state.settings = { ...state.settings, limitProviderOrder: value }; },
+  mirrorOrder: (order) => { state.settings = { ...state.settings, limitProviderOrder: order.join(',') }; },
   // Saved directly rather than through `onPreferenceOrderCommit`, whose no-op
   // guard compares against the value `mirrorOrder` just wrote and would drop it.
-  persistOrder: (value) => void saveSettings({ limitProviderOrder: value }),
+  persistOrder: (order) => void saveSettings({ limitProviderOrder: order.join(',') }),
   requestRender: () => renderLimitProviderCheckboxes()
 });
 

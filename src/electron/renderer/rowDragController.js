@@ -195,10 +195,10 @@
       }
       // Mirror the new order locally before anything can repaint. A stats update
       // held back during the drag is flushed on drop, and every repaint sorts from
-      // `state.settings` — which the deferred save has not written yet, so without
-      // this the list rebuilds into the old order and flips again a frame later.
-      const value = order.join(',');
-      mirrorOrder(value);
+      // the caller's settings — which the deferred save has not written yet, so
+      // without this the list rebuilds into the old order and flips a frame later.
+      // The order is handed over as ids; how a list serializes them is its own.
+      mirrorOrder(order);
       finishRowDrag(true);
       // The drop itself is already in the DOM. Persisting re-renders the whole
       // settings form, which on a populated install is a long task — run it only
@@ -206,7 +206,7 @@
       // and the drop reads as a freeze. rAF fires before paint, so the timeout
       // inside it is what lands after.
       requestAnimationFrame(() => {
-        setTimeout(() => persistOrder(value), 0);
+        setTimeout(() => persistOrder(order), 0);
       });
     }
 

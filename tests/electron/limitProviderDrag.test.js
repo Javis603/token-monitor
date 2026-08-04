@@ -49,22 +49,45 @@ function createDragHarness(config = {}) {
     setTimeout: (callback) => timers.push(callback)
   });
 
-  const makeRow = (id, top) => ({
-    dataset: { provider: id },
-    style: { setProperty() {}, removeProperty() {} },
-    classList: { add() {}, remove() {} },
-    getBoundingClientRect: () => ({ top, height: 40, bottom: top + 40 }),
-    contains: () => true,
-    addEventListener() {},
-    removeEventListener() {},
-    setPointerCapture() {},
-    hasPointerCapture: () => false,
-    releasePointerCapture() {}
-  });
+  // Pointer capture is stateful so the release path in finishRowDrag is actually
+  // reached: a fake whose hasPointerCapture always answers false skips it.
+  const captured = new Set();
+  const makeRow = (id, top) => {
+    const classes = new Set();
+    const styles = new Map();
+    const rowListeners = [];
+    return {
+      dataset: { provider: id },
+      classes,
+      styles,
+      rowListeners,
+      style: {
+        setProperty: (key, value) => styles.set(key, value),
+        removeProperty: (key) => styles.delete(key)
+      },
+      classList: { add: (value) => classes.add(value), remove: (value) => classes.delete(value) },
+      getBoundingClientRect: () => ({ top, height: 40, bottom: top + 40 }),
+      contains: () => true,
+      addEventListener: (type) => rowListeners.push(type),
+      removeEventListener: (type) => {
+        const index = rowListeners.indexOf(type);
+        if (index >= 0) rowListeners.splice(index, 1);
+      },
+      setPointerCapture: (pointerId) => captured.add(pointerId),
+      hasPointerCapture: (pointerId) => captured.has(pointerId),
+      releasePointerCapture: (pointerId) => captured.delete(pointerId)
+    };
+  };
   const rows = [makeRow('a', 0), makeRow('b', 40), makeRow('c', 80)];
   const panel = { scrollTop: 0, getBoundingClientRect: () => ({ top: 0, bottom: 500 }) };
-  const list = { classList: { add() {}, remove() {} }, querySelectorAll: () => rows };
+  const listClasses = new Set();
+  const list = {
+    classes: listClasses,
+    classList: { add: (value) => listClasses.add(value), remove: (value) => listClasses.delete(value) },
+    querySelectorAll: () => rows
+  };
 
+  let expanded = config.initialExpanded || '';
   const controller = api.createRowDragController({
     dragSort: verticalDragSort,
     getList: () => list,
@@ -72,6 +95,8 @@ function createDragHarness(config = {}) {
     rowSelector: '.row',
     idKey: 'provider',
     dragExcluded: '.excluded',
+    getExpanded: () => expanded,
+    setExpanded: (value) => { expanded = value; },
     ...config
   });
 
@@ -79,6 +104,10 @@ function createDragHarness(config = {}) {
     controller,
     frames,
     timers,
+    rows,
+    list,
+    captured,
+    expandedNow: () => expanded,
     press: (clientY) => controller.startRowDrag({
       button: 0,
       pointerId: 1,
@@ -86,9 +115,9 @@ function createDragHarness(config = {}) {
       currentTarget: rows[0],
       target: { closest: () => null }
     }, 'a'),
-    dispatch: (type, clientY) => {
-      const event = { pointerId: 1, clientY, preventDefault() {} };
-      for (const listener of [...(listeners.get(type) || [])]) listener(event);
+    dispatch: (type, event = {}) => {
+      const payload = { pointerId: 1, preventDefault() {}, ...event };
+      for (const listener of [...(listeners.get(type) || [])]) listener(payload);
     }
   };
 }
@@ -201,9 +230,9 @@ test('the drop mirrors the new order locally before anything can repaint', () =>
   const end = controller.indexOf('function onDragAbort(', start);
   assert.ok(start !== -1 && end > start);
   const body = controller.slice(start, end);
-  const mirror = body.indexOf('mirrorOrder(value)');
+  const mirror = body.indexOf('mirrorOrder(order)');
   const finish = body.indexOf('finishRowDrag(true);', mirror);
-  const persist = body.indexOf('persistOrder(value)', finish);
+  const persist = body.indexOf('persistOrder(order)', finish);
   assert.ok(mirror !== -1, 'the new order should be mirrored before the drag finishes');
   assert.ok(finish > mirror, 'the mirror must land before the drag is finished and repaints flush');
   assert.ok(persist > finish, 'persisting happens after the landed row has painted');
@@ -213,9 +242,13 @@ test('the drop mirrors the new order locally before anything can repaint', () =>
   // would treat the write as a no-op.
   const app = readRendererFile('app.js');
   const wiring = app.slice(app.indexOf('const limitProviderRowDrag = '), app.indexOf('function renderViewPreferences('));
-  assert.match(wiring, /mirrorOrder: \(value\) => \{ state\.settings = \{ \.\.\.state\.settings, limitProviderOrder: value \}; \}/);
-  assert.match(wiring, /persistOrder: \(value\) => void saveSettings\(\{ limitProviderOrder: value \}\)/);
+  // The controller hands over ids; the comma-joined setting is this list's own
+  // storage format and stays in the wiring.
+  assert.match(wiring, /mirrorOrder: \(order\) => \{ state\.settings = \{ \.\.\.state\.settings, limitProviderOrder: order\.join\(','\) \}; \}/);
+  assert.match(wiring, /persistOrder: \(order\) => void saveSettings\(\{ limitProviderOrder: order\.join\(','\) \}\)/);
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
+  const controllerSource = readRendererFile('rowDragController.js');
+  assert.doesNotMatch(controllerSource, /join\(','\)/, 'serialization belongs to the caller');
 });
 
 // Below the 4px threshold a press is a click; above it the drag swallows the
@@ -377,29 +410,77 @@ test('the controller reorders on a drag and stays a click under the threshold', 
     persistOrder: (value) => persisted.push(value)
   });
 
-  // A 2px press stays under the 4px threshold: no drag, no write.
+  // A 2px press stays under the 4px threshold: no drag, no capture, no write.
   harness.press(10);
   assert.equal(harness.controller.isDragging(), true, 'the press arms the gesture');
-  harness.dispatch('pointermove', 12);
-  harness.dispatch('pointerup', 12);
+  harness.dispatch('pointermove', { clientY: 12 });
+  assert.equal(harness.captured.size, 0, 'a press under the threshold never captures');
+  harness.dispatch('pointerup', { clientY: 12 });
   assert.deepEqual(applied, []);
   assert.deepEqual(mirrored, []);
   assert.equal(harness.controller.isDragging(), false);
 
   // Dragging the first row past the last one commits the new order.
   harness.press(10);
-  harness.dispatch('pointermove', 100);
-  harness.dispatch('pointerup', 100);
+  harness.dispatch('pointermove', { clientY: 100 });
+  assert.equal(harness.captured.size, 1, 'crossing the threshold captures the pointer');
+  harness.dispatch('pointerup', { clientY: 100 });
+  assert.equal(harness.captured.size, 0, 'the drop releases the capture');
   // Joined rather than compared as arrays: the order is built inside the vm
   // realm, so its Array prototype is not this realm's.
   assert.deepEqual(applied.map((order) => order.join(',')), ['b,c,a']);
-  assert.deepEqual(mirrored, ['b,c,a']);
+  assert.deepEqual(mirrored.map((order) => order.join(',')), ['b,c,a']);
   // Persisting waits for the landed paint: one rAF, then one timeout.
   assert.deepEqual(persisted, []);
   harness.frames.at(-1)();
   harness.timers.at(-1)();
-  assert.deepEqual(persisted, ['b,c,a']);
+  assert.deepEqual(persisted.map((order) => order.join(',')), ['b,c,a']);
+  // The row is handed ids, not a serialized setting: joining is the list's call.
+  assert.ok(Array.isArray(mirrored[0]) && Array.isArray(persisted[0]));
 });
+
+// Cleanup is the part an extraction is most likely to drop, and every abort
+// route lands in the same teardown: Escape, pointercancel, a window blur, and
+// the lostpointercapture that a reparented row fires.
+for (const abort of ['keydown', 'pointercancel', 'blur']) {
+  test(`a drag cancelled by ${abort} restores the row and writes nothing`, () => {
+    const applied = [];
+    const mirrored = [];
+    const persisted = [];
+    const renders = [];
+    const harness = createDragHarness({
+      initialExpanded: 'c',
+      applyOrder: (order) => applied.push(order),
+      mirrorOrder: (order) => mirrored.push(order),
+      persistOrder: (order) => persisted.push(order),
+      requestRender: () => renders.push('render')
+    });
+
+    harness.press(10);
+    harness.dispatch('pointermove', { clientY: 100 });
+    assert.equal(harness.expandedNow(), '', 'the accordion collapses for the drag');
+    assert.equal(harness.list.classes.has('drag-active'), true);
+    assert.ok(harness.rows[0].styles.has('--drag-y'), 'the dragged row is offset');
+    assert.equal(harness.controller.deferRender(), true);
+
+    harness.dispatch(abort, abort === 'keydown' ? { key: 'Escape' } : {});
+
+    assert.deepEqual(applied, [], 'a cancelled drag never reorders');
+    assert.deepEqual(mirrored, []);
+    assert.deepEqual(persisted, []);
+    assert.equal(harness.expandedNow(), 'c', 'the expanded row comes back');
+    assert.equal(harness.captured.size, 0, 'the capture is released');
+    assert.equal(harness.list.classes.has('drag-active'), false);
+    assert.equal(harness.list.classes.has('is-reordering'), false);
+    for (const row of harness.rows) {
+      assert.equal(row.styles.size, 0, 'drag offsets are cleared');
+      assert.equal(row.classes.has('dragging'), false);
+      assert.deepEqual(row.rowListeners, [], 'the lostpointercapture listener is removed');
+    }
+    assert.deepEqual(renders, ['render'], 'the held repaint still flushes exactly once');
+    assert.equal(harness.controller.isDragging(), false);
+  });
+}
 
 test('a repaint requested mid-drag is deferred and flushed once on drop', () => {
   const renders = [];
@@ -409,11 +490,11 @@ test('a repaint requested mid-drag is deferred and flushed once on drop', () => 
   assert.equal(harness.controller.deferRender(), false);
 
   harness.press(10);
-  harness.dispatch('pointermove', 100);
+  harness.dispatch('pointermove', { clientY: 100 });
   assert.equal(harness.controller.deferRender(), true, 'a repaint mid-drag is held back');
   assert.equal(harness.controller.deferRender(), true);
   assert.deepEqual(renders, [], 'nothing repaints while the pointer is down');
 
-  harness.dispatch('pointerup', 100);
+  harness.dispatch('pointerup', { clientY: 100 });
   assert.deepEqual(renders, ['render'], 'the held repaint flushes exactly once on drop');
 });
