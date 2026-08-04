@@ -3099,16 +3099,17 @@ function startHostStats() {
 }
 
 // Detection status is about this machine's local files, so stamp the freshly
-// collected local clientStatus AND wslStatus onto the local device in whatever
-// stats we hand the renderer. This keeps the 采集 tags + WSL panel correct in
-// sync/host mode without depending on the hub (or a remote Worker) being
-// redeployed to preserve these fields.
+// collected local clientStatus, clientHealth AND wslStatus onto the local device
+// in whatever stats we hand the renderer. This keeps the 采集 tags + WSL panel
+// correct in sync/host mode without depending on the hub (or a remote Worker)
+// being redeployed to preserve these fields.
 function injectLocalDeviceStatus(stats) {
   if (!stats || !Array.isArray(stats.devices)) return stats;
   if (lastCollectedDevice) {
     const device = stats.devices.find((entry) => entry.deviceId === lastCollectedDevice.deviceId);
     if (device) {
       if (lastCollectedDevice.clientStatus) device.clientStatus = lastCollectedDevice.clientStatus;
+      if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
   }
