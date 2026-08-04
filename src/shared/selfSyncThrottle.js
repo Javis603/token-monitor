@@ -35,6 +35,12 @@ const SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
 // unguarded even though its self-trigger half is structurally gone.
 const SYNC_SOURCE_EVENT_MIN_INTERVAL_MS = 10 * 1000;
 
+// What a failed sync is allowed to say about itself. A stable code rather than
+// the subprocess's stderr: the outcome is reported to a hub and rendered in a
+// UI, and tokscale's stderr is neither translatable nor guaranteed free of the
+// user's paths. Anything unrecognised collapses to the generic code.
+const SELF_SYNC_FAILURE_CODES = new Set(['sync-failed', 'sync-timeout', 'sync-spawn-failed', 'sync-exit-error']);
+
 // setTimeout stores its delay in a 32-bit signed int and silently rewrites
 // anything larger — or non-finite — to 1ms, turning a "wait a while" into a
 // spin. Every delay this module arms goes through here, as does every interval
@@ -89,10 +95,24 @@ function createSelfSyncThrottle(options = {}) {
   // only writes the flag while it is still the newest attempt for its kind.
   // (lastSyncAt is deliberately left alone; an old stamp only rate-limits.)
   const attemptSeq = {};
+  // Reporting state, kept apart from the three fields above because those decide
+  // behaviour and these only describe it. `lastSyncAt` in particular is the
+  // rate-limit anchor — `claim()` moves it, and a completion deliberately does
+  // not — so it answers "when may the next sync run", never "when did one last
+  // work". A diagnostic that reads it as the latter is the mistake this exists
+  // to prevent.
+  const lastAttemptAt = {};
+  const lastSuccessAt = {};
+  const lastFailureCode = {};
+  const completedSeq = {};
   for (const kind of SELF_SYNC_KINDS) {
     lastSyncAt[kind] = 0;
     lastSyncFailed[kind] = false;
     attemptSeq[kind] = 0;
+    lastAttemptAt[kind] = 0;
+    lastSuccessAt[kind] = 0;
+    lastFailureCode[kind] = '';
+    completedSeq[kind] = 0;
   }
 
   // Claims the right to sync `kind` now, stamping the clock when it grants one.
@@ -125,12 +145,39 @@ function createSelfSyncThrottle(options = {}) {
 
   function beginAttempt(kind) {
     attemptSeq[kind] += 1;
+    lastAttemptAt[kind] = now();
     return attemptSeq[kind];
   }
 
-  function completeAttempt(kind, attempt, failed) {
+  function completeAttempt(kind, attempt, failed, code = '') {
     if (attempt !== attemptSeq[kind]) return;
+    completedSeq[kind] = attempt;
     lastSyncFailed[kind] = failed;
+    if (!failed) {
+      lastSuccessAt[kind] = now();
+      lastFailureCode[kind] = '';
+      return;
+    }
+    lastFailureCode[kind] = SELF_SYNC_FAILURE_CODES.has(code) ? code : 'sync-failed';
+  }
+
+  // A read-only view for diagnostics. `pending` is reachable rather than
+  // theoretical: stop() cannot cancel a sync already in flight, so a collector
+  // rebuilt by a settings change can be asked for a snapshot while the previous
+  // one's subprocess is still running.
+  function syncStatus(kind) {
+    const started = attemptSeq[kind] || 0;
+    let state = 'idle';
+    if (started > 0) {
+      if (completedSeq[kind] !== started) state = 'pending';
+      else state = lastSyncFailed[kind] ? 'failed' : 'ok';
+    }
+    return {
+      state,
+      lastAttemptAt: lastAttemptAt[kind] || 0,
+      lastSuccessAt: lastSuccessAt[kind] || 0,
+      failureCode: lastFailureCode[kind] || ''
+    };
   }
 
   function sourceFloorMs(kind) {
@@ -147,7 +194,7 @@ function createSelfSyncThrottle(options = {}) {
     return SYNC_MIN_INTERVAL_MS;
   }
 
-  return { claim, msUntilDue, beginAttempt, completeAttempt, sourceFloorMs, minIntervalForTick };
+  return { claim, msUntilDue, beginAttempt, completeAttempt, sourceFloorMs, minIntervalForTick, syncStatus };
 }
 
 // The per-collector half: which clients saw a source event that has not been
@@ -305,6 +352,7 @@ module.exports = {
   mergeSelfSyncSelection,
   selfSyncSelected,
   MAX_TIMER_DELAY_MS,
+  SELF_SYNC_FAILURE_CODES,
   SELF_SYNC_KINDS,
   SYNC_MIN_INTERVAL_MS,
   SYNC_SOURCE_EVENT_MIN_INTERVAL_MS

@@ -5,6 +5,7 @@
 
 const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
+const { normalizeClientHealth } = require('./clientHealth');
 const { coerceHistory, mergeHistories } = require('./history');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
@@ -728,6 +729,13 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'osVersion')) normalized.osVersion = normalizeDeviceOsVersion(record.osVersion);
   if (hasOwn(record, 'trackedClients')) normalized.trackedClients = normalizeTrackedClients(record.trackedClients);
   if (hasOwn(record, 'clientStatus')) normalized.clientStatus = normalizeClientStatus(record.clientStatus);
+  if (hasOwn(record, 'clientHealth')) {
+    // Validated, capped, and with `overall` recomputed from the core rather than
+    // trusted — see clientHealth.js. Left off the record entirely when the field
+    // is unusable, so a consumer's `hasOwn` check stays meaningful.
+    const health = normalizeClientHealth(record.clientHealth, normalizeClientName);
+    if (health) normalized.clientHealth = health;
+  }
   if (hasOwn(record, 'wslStatus')) normalized.wslStatus = normalizeWslStatus(record.wslStatus);
   if (hasOwn(record, 'projectsEnabled')) normalized.projectsEnabled = record.projectsEnabled !== false;
   if (hasOwn(record, 'allTimeProjectsOmitted')) normalized.allTimeProjectsOmitted = record.allTimeProjectsOmitted === true;
@@ -1043,6 +1051,11 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       stale,
       ...(hasOwn(normalized, 'trackedClients') ? { trackedClients: normalized.trackedClients } : {}),
       ...(hasOwn(normalized, 'clientStatus') ? { clientStatus: normalized.clientStatus } : {}),
+      // Per device only. There is deliberately no cross-device rollup of this
+      // field: `/api/public/stats` drops `devices` wholesale and spreads the rest
+      // of getStats(), so a top-level summary is the one shape that would put
+      // diagnostics on the unauthenticated surface.
+      ...(hasOwn(normalized, 'clientHealth') ? { clientHealth: normalized.clientHealth } : {}),
       ...(hasOwn(normalized, 'wslStatus') ? { wslStatus: normalized.wslStatus } : {}),
       ...(hasOwn(normalized, 'projectsEnabled') ? { projectsEnabled: normalized.projectsEnabled } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),

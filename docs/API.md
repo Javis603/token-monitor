@@ -212,6 +212,56 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 
 `periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). The hub uses it to expire a device's `today`/`month` from the aggregate once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
 
+`clientHealth` is optional per-client diagnostics: why a tracked tool shows the number it shows. It sits alongside the older `clientStatus` map (`active` / `waiting` / `missing` per client), which agents continue to send unchanged.
+
+```json
+{
+  "clientHealth": {
+    "version": 1,
+    "clients": {
+      "claude": {
+        "source": { "state": "detected", "detectedCount": 1, "checkedCount": 2 },
+        "collection": { "state": "direct" },
+        "data": { "liveTokens": 481230, "lastActivityDay": "2026-08-04" },
+        "overall": "healthy"
+      },
+      "antigravity": {
+        "source": {
+          "state": "detected",
+          "detectedCount": 1,
+          "checkedCount": 3,
+          "checks": [
+            { "id": "tokscale-antigravity-cache", "exists": true },
+            { "id": "antigravity-ide-source", "exists": false },
+            { "id": "antigravity-cli-data", "exists": false }
+          ]
+        },
+        "collection": {
+          "state": "failed",
+          "lastAttemptAt": "2026-08-04T09:12:00.000Z",
+          "lastSuccessAt": "2026-08-04T08:40:00.000Z"
+        },
+        "data": { "liveTokens": 0, "lastActivityDay": "2026-08-03" },
+        "diagnostics": ["source-partial", "sync-timeout"],
+        "overall": "attention"
+      }
+    }
+  }
+}
+```
+
+Every tracked client sends the same fixed core — `source.state`, `source.detectedCount`, `source.checkedCount`, `collection.state`, `data.liveTokens`, and `overall` — because the hub recomputes `overall` from those inputs rather than storing what the producer claimed. Detail beyond the core is sparse: `source.checks` and `diagnostics` are sent only for a client that is not `healthy`, and a client with nothing to report sends neither.
+
+`overall` is `healthy` (usage was observed), `waiting` (sources present, nothing counted yet), `attention` (something we do on the user's behalf is failing), `unavailable` (no source directory on disk), or `unknown`. `source.state` is `detected`, `missing`, or `unknown`. `collection.state` is `direct` for the clients whose files are parsed in place — the common case, with no fetch step to succeed or fail — and `idle` / `pending` / `ok` / `failed` for the self-synced clients (Cursor, Antigravity) whose usage is refreshed by a subprocess.
+
+`source.checks[].id` is a stable identifier for a *kind* of source root, never a filesystem path: one id can stand for several platform variants (a VS Code workspace-storage root has one per platform), and an absolute path contains the user's home directory. Ids outside the recognized set are dropped on ingest. A failed self-sync likewise reports a stable code in `diagnostics` (`sync-failed`, `sync-timeout`, `sync-spawn-failed`, `sync-exit-error`) and never the subprocess's stderr. The other diagnostic codes are `source-missing`, `source-partial`, `no-usage-observed`, and `wsl-detected-no-data`; the last one states that a WSL marker was found and the scan returned nothing, which can equally mean the tool is installed in that distro and unused.
+
+`data.lastActivityDay` is the most recent day the collector holds usage for this client, taken from the daily history buckets. It is deliberately not "last used": tokscale exposes no per-turn timestamps, and the field is omitted entirely when history is unavailable.
+
+Every value is a closed enum and every list is capped. A hub that does not recognize a value downgrades it (to `unknown` for `source.state`, `direct` for `collection.state`) rather than storing it, so an older hub in front of a newer agent degrades instead of passing unvalidated data to renderers.
+
+`clientHealth` rides on the device record and is returned by the authenticated `GET /api/stats` inside `devices[]`. It is **never** aggregated across devices and never appears on `GET /api/public/stats`, which drops `devices` wholesale — a cross-device rollup is the one shape that would place these diagnostics on the unauthenticated surface.
+
 `limits` is optional. Agents and widgets include it when AI Tool Limits detection is enabled. Raw OAuth credentials, access tokens, refresh tokens, and provider response bodies must never be sent.
 
 `limits.providers[].provider` is one of `claude`, `codex`, `cursor`, `antigravity`, `opencode`, `openrouter`, `deepseek`, `minimax`, `mimo`, `grok`, `copilot`, `kiro`, `zai`, `zaiteam`, `volcengine`, `qoder`, `kimi`, `ollama`, or `thirdparty`.

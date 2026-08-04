@@ -9,6 +9,11 @@ const semver = require('semver');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
+const {
+  CLIENT_HEALTH_VERSION,
+  MAX_DIAGNOSTICS_PER_CLIENT,
+  deriveClientOverall
+} = require('./clientHealth');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { customPricingPath } = require('./tokscaleConfig');
 const {
@@ -17,6 +22,7 @@ const {
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   mergePeriods,
+  normalizeClientName,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -577,22 +583,25 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     // event back into a set that no longer has anything to collect.
     let settled = false;
     let timer = null;
-    const settle = (failed) => {
+    // The failure code reaches the health record; stderr only ever reaches the
+    // local log, since it is neither translatable nor reliably free of the
+    // user's paths.
+    const settle = (failed, code = '') => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      selfSyncThrottle.completeAttempt('antigravity', attempt, failed);
+      selfSyncThrottle.completeAttempt('antigravity', attempt, failed, code);
       if (failed) options.onFailure?.('antigravity');
       resolve();
     };
-    timer = setTimeout(() => { child.kill('SIGTERM'); settle(true); }, 30000);
+    timer = setTimeout(() => { child.kill('SIGTERM'); settle(true, 'sync-timeout'); }, 30000);
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', () => settle(true));
+    child.on('error', () => settle(true, 'sync-spawn-failed'));
     child.on('close', (code) => {
       if (code !== 0 && !settled && typeof logger === 'function') {
         logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
       }
-      settle(code !== 0);
+      settle(code !== 0, 'sync-exit-error');
     });
     child.stdin?.end();
   });
@@ -935,6 +944,13 @@ async function collectUsageOnce(options) {
     });
     if (history) summary.history = history;
   }
+  // After history, so `lastActivityDay` can come from the daily buckets this
+  // scan already produced rather than from a second source of truth.
+  const clientHealth = deriveClientHealth(normalizedClients, allTime, {
+    wslStatus,
+    lastActivityDays: mergeClientActivityDays(options.lastActivityDays, summary.history)
+  });
+  if (clientHealth) summary.clientHealth = clientHealth;
   return summary;
 }
 
@@ -954,22 +970,31 @@ function hasCopilotChatSessions(workspaceRoot) {
 // Per-client data-dir candidates, keyed by client. Drives the detection-status
 // derivation and (minus the self-synced clients below) the chokidar watch list;
 // Antigravity's read-only source roots are added back explicitly below.
-function clientWatchCandidates(clientsCsv) {
+// The watched roots, each tagged with a stable id for its *kind*. One id may
+// cover several paths: Copilot's workspaceStorage has a variant per platform and
+// Kiro's IDE globalStorage has four, but "the VS Code workspace storage is
+// missing" is the useful statement, not which spelling was probed. Absolute
+// paths contain the user's home directory and never leave this process, so a
+// health record carries the id instead — CLIENT_SOURCE_CHECK_IDS in
+// clientHealth.js is the allowlist every id here must appear in.
+function clientSourceRoots(clientsCsv) {
   const home = os.homedir();
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const byClient = {};
-  const add = (client, ...dirs) => { if (enabled.has(client)) byClient[client] = dirs; };
-  add('claude', path.join(home, '.claude', 'projects'), path.join(home, '.claude', 'transcripts'));
-  add('codex', path.join(home, '.codex', 'sessions'));
+  const add = (client, ...roots) => {
+    if (enabled.has(client)) byClient[client] = roots.map(([id, dir]) => ({ id, dir }));
+  };
+  add('claude', ['claude-projects', path.join(home, '.claude', 'projects')], ['claude-transcripts', path.join(home, '.claude', 'transcripts')]);
+  add('codex', ['codex-sessions', path.join(home, '.codex', 'sessions')]);
   const hermesHome = resolveHermesHome({ env: process.env, homeDir: home });
-  add('hermes', hermesHome, ...hermesProfileWatchDirs(hermesHome));
-  add('opencode', path.join(home, '.local', 'share', 'opencode'));
-  add('openclaw', path.join(home, '.openclaw', 'agents'));
-  add('cursor', path.join(home, '.config', 'tokscale', 'cursor-cache'));
-  add('antigravity', path.join(home, '.config', 'tokscale', 'antigravity-cache'));
-  add('kimi', path.join(home, '.kimi', 'sessions'), path.join(process.env.KIMI_CODE_HOME || path.join(home, '.kimi-code'), 'sessions'));
-  add('qwen', path.join(home, '.qwen', 'projects'));
-  add('grok', path.join(process.env.GROK_HOME || path.join(home, '.grok'), 'sessions'));
+  add('hermes', ['hermes-home', hermesHome], ...hermesProfileWatchDirs(hermesHome).map((dir) => ['hermes-profile', dir]));
+  add('opencode', ['opencode-data', path.join(home, '.local', 'share', 'opencode')]);
+  add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
+  add('cursor', ['tokscale-cursor-cache', path.join(home, '.config', 'tokscale', 'cursor-cache')]);
+  add('antigravity', ['tokscale-antigravity-cache', path.join(home, '.config', 'tokscale', 'antigravity-cache')]);
+  add('kimi', ['kimi-sessions', path.join(home, '.kimi', 'sessions')], ['kimi-code-sessions', path.join(process.env.KIMI_CODE_HOME || path.join(home, '.kimi-code'), 'sessions')]);
+  add('qwen', ['qwen-projects', path.join(home, '.qwen', 'projects')]);
+  add('grok', ['grok-sessions', path.join(process.env.GROK_HOME || path.join(home, '.grok'), 'sessions')]);
   // Tokscale 4.5.2 also parses VS Code Copilot Chat JSONL under each
   // workspaceStorage/*/chatSessions directory. Watch the workspaceStorage roots
   // so newly created workspaces are picked up; watchIgnoreMatcher prunes every
@@ -982,17 +1007,21 @@ function clientWatchCandidates(clientsCsv) {
       : []),
     path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage')
   ];
-  add('copilot', path.join(home, '.copilot', 'otel'), ...new Set(copilotWorkspaceRoots));
-  add('pi', path.join(home, '.pi', 'agent', 'sessions'), path.join(home, '.omp', 'agent', 'sessions'));
+  add(
+    'copilot',
+    ['copilot-otel', path.join(home, '.copilot', 'otel')],
+    ...[...new Set(copilotWorkspaceRoots)].map((dir) => ['vscode-workspace-storage', dir])
+  );
+  add('pi', ['pi-sessions', path.join(home, '.pi', 'agent', 'sessions')], ['omp-sessions', path.join(home, '.omp', 'agent', 'sessions')]);
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
   // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get
   // seconds-level refresh and a correct waiting/missing status.
   add(
     'zed',
-    path.join(home, '.local', 'share', 'zed', 'threads'),
-    path.join(home, 'Library', 'Application Support', 'Zed', 'threads'),
-    path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')
+    ['zed-threads', path.join(home, '.local', 'share', 'zed', 'threads')],
+    ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
+    ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
   // Kilo Code (VS Code ext): tokscale 3.1.3 only scans the Linux .config root and
   // the .vscode-server (remote) root for KiloCode — unlike Cline, it does NOT scan
@@ -1001,8 +1030,8 @@ function clientWatchCandidates(clientsCsv) {
   // tokscale reads. (Native mac/win support pending upstream tokscale.)
   add(
     'kilocode',
-    path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
-    path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')
+    ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
+    ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
   // MiMo Code: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
   // copy (scanner.rs `discover_micode_dbs_in_dirs`), and that copy can hold
@@ -1011,10 +1040,10 @@ function clientWatchCandidates(clientsCsv) {
   // missing dir is dropped by watchClientRootsForClients.
   add(
     'micode',
-    path.join(home, '.local', 'share', 'mimocode'),
-    path.join(home, 'Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data')
+    ['mimocode-data', path.join(home, '.local', 'share', 'mimocode')],
+    ['mimocode-orca-data', path.join(home, 'Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data')]
   );
-  add('zcode', path.join(home, '.zcode', 'projects'));
+  add('zcode', ['zcode-projects', path.join(home, '.zcode', 'projects')]);
   // CodeBuddy (Tencent): tokscale reads the home-relative CLI/WebUI JSONL dir on
   // every platform, plus the IDE / VS Code extension logs under a platform-
   // specific CodeBuddyExtension/Logs root (scanner.rs). Watch both so CLI and
@@ -1026,16 +1055,16 @@ function clientWatchCandidates(clientsCsv) {
     : process.platform === 'darwin'
       ? path.join(home, 'Library', 'Application Support', 'CodeBuddyExtension', 'Logs')
       : path.join(home, '.local', 'share', 'CodeBuddyExtension', 'Logs');
-  add('codebuddy', path.join(home, '.codebuddy', 'projects'), codebuddyExtLogs);
+  add('codebuddy', ['codebuddy-projects', path.join(home, '.codebuddy', 'projects')], ['codebuddy-extension-logs', codebuddyExtLogs]);
   // WorkBuddy (Tencent): watch only the detailed session dir (projects/*.jsonl,
   // the preferred source) — not the whole ~/.workbuddy app home, whose config /
   // auth churn would add polling load and spurious ticks with no usage change.
   // A legacy install with only ~/.workbuddy/workbuddy.db (no projects/) still
   // refreshes via the periodic full tick; the WSL marker stays the broader
   // `.workbuddy` so a db-only WSL home is still scanned.
-  add('workbuddy', path.join(home, '.workbuddy', 'projects'));
+  add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
-  add('proma', path.join(home, '.proma', 'agent-sessions'));
+  add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
@@ -1060,21 +1089,31 @@ function clientWatchCandidates(clientsCsv) {
   // (APPDATA || home AppData\Roaming mirrors how cline resolves the Windows root.)
   add(
     'kiro',
-    path.join(home, '.kiro', 'sessions'),
-    path.join(home, 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent'),
-    path.join(home, '.config', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent'),
-    path.join(home, '.config', 'kiro', 'User', 'globalStorage', 'kiro.kiroagent'),
-    path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent'),
-    path.join(home, '.local', 'share', 'kiro-cli'),
-    path.join(home, 'Library', 'Application Support', 'kiro-cli')
+    ['kiro-sessions', path.join(home, '.kiro', 'sessions')],
+    ['kiro-ide-globalstorage', path.join(home, 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
+    ['kiro-ide-globalstorage', path.join(home, '.config', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
+    ['kiro-ide-globalstorage', path.join(home, '.config', 'kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
+    ['kiro-ide-globalstorage', path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
+    ['kiro-cli-data', path.join(home, '.local', 'share', 'kiro-cli')],
+    ['kiro-cli-data', path.join(home, 'Library', 'Application Support', 'kiro-cli')]
   );
   add(
     'cline',
-    path.join(home, '.config', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks'),
-    path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks'),
-    path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks'),
-    path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')
+    ['cline-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
+    ['cline-tasks', path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
+    ['cline-tasks', path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
+    ['cline-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')]
   );
+  return byClient;
+}
+
+// The watcher only ever wants paths, so it keeps its original shape rather than
+// learning about check ids it would immediately discard.
+function clientWatchCandidates(clientsCsv) {
+  const byClient = {};
+  for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv))) {
+    byClient[client] = roots.map((root) => root.dir);
+  }
   return byClient;
 }
 
@@ -1233,30 +1272,47 @@ function watchIgnoreMatcher(clientsCsv) {
   };
 }
 
+// Which source roots each tracked client actually has on disk, one entry per
+// check id with same-kind paths collapsed by OR. clientDataDirPresence() is
+// derived from this rather than computed beside it, so the presence dot in the
+// UI and the health record can never disagree about what was found.
+function clientSourceChecks(clientsCsv) {
+  const checks = {};
+  const push = (client, id, exists) => {
+    const list = checks[client] || (checks[client] = []);
+    const found = list.find((entry) => entry.id === id);
+    if (found) found.exists = found.exists || exists;
+    else list.push({ id, exists });
+  };
+  for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv))) {
+    checks[client] = checks[client] || [];
+    for (const { id, dir } of roots) {
+      // workspaceStorage is shared by every VS Code extension. Count it as
+      // Copilot presence only when at least one workspace contains the
+      // chatSessions source Tokscale actually parses; the broader root is
+      // watched solely to catch a new workspace appearing after startup.
+      push(client, id, id === 'vscode-workspace-storage' ? hasCopilotChatSessions(dir) : dirExists(dir));
+    }
+  }
+  // antigravity's watch candidate is only the IDE sync cache, which our own sync
+  // writes. Its two real sources are separate checks so a health record can say
+  // "the IDE is installed but the cache was never written" rather than collapse
+  // all three into one boolean. A source-only or CLI-only install with no
+  // countable usage yet must read `waiting`, not `missing`; the sync cache stays
+  // a valid presence signal for snapshots taken before either of the others
+  // existed.
+  if (Object.prototype.hasOwnProperty.call(checks, 'antigravity')) {
+    push('antigravity', 'antigravity-ide-source', antigravityDataPresent(os.homedir()));
+    push('antigravity', 'antigravity-cli-data', dirExists(antigravityCliDataDir()));
+  }
+  return checks;
+}
+
 // Whether each tracked client has at least one data directory on disk.
 function clientDataDirPresence(clientsCsv) {
   const presence = {};
-  const candidates = clientWatchCandidates(clientsCsv);
-  for (const [client, dirs] of Object.entries(candidates)) {
-    presence[client] = dirs.some(dirExists);
-  }
-  // workspaceStorage is shared by every VS Code extension. Count it as Copilot
-  // presence only when at least one workspace contains the chatSessions source
-  // Tokscale actually parses; the broader root is watched solely to catch a new
-  // workspace appearing after startup.
-  if (Object.prototype.hasOwnProperty.call(presence, 'copilot')) {
-    presence.copilot = (candidates.copilot || []).some((dir) => (
-      path.basename(dir) === 'workspaceStorage' ? hasCopilotChatSessions(dir) : dirExists(dir)
-    ));
-  }
-  // antigravity's watch candidate is only the IDE sync cache, so fold the native
-  // IDE roots and the separate CLI data dir into the umbrella presence too. A
-  // source-only or CLI-only install with no countable usage yet must read
-  // `waiting`, not `missing`; the sync cache stays a valid presence signal for
-  // snapshots taken before either of the others existed.
-  if (Object.prototype.hasOwnProperty.call(presence, 'antigravity')
-    && (dirExists(antigravityCliDataDir()) || antigravityDataPresent(os.homedir()))) {
-    presence.antigravity = true;
+  for (const [client, checks] of Object.entries(clientSourceChecks(clientsCsv))) {
+    presence[client] = checks.some((check) => check.exists);
   }
   return presence;
 }
@@ -1278,6 +1334,95 @@ function statusFromSignals(clients, presence, usageClients) {
 function deriveClientStatus(clientsCsv, allTimePeriod) {
   const clients = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
   return statusFromSignals(clients, clientDataDirPresence(clientsCsv), allTimePeriod?.clients || {});
+}
+
+// The most recent day each client has recorded usage on, read out of the daily
+// history buckets this scan already produced. Deliberately not called "last
+// used": it is the newest day the collector *holds data for*, which is the
+// honest answer to "is this tool quiet, or are we failing to read it". Per-turn
+// timestamps would be the stronger signal and tokscale does not expose them.
+function clientActivityDaysFromHistory(history) {
+  const days = {};
+  for (const bucket of history?.daily || []) {
+    const key = String(bucket?.date || '').slice(0, 10);
+    if (!key) continue;
+    for (const [rawClient, usage] of Object.entries(bucket?.perClient || {})) {
+      if (Number(usage?.tokens || 0) <= 0) continue;
+      // Folds tokscale's aliases onto the umbrella id, so an antigravity-cli day
+      // counts as an antigravity day — the same id the health record is keyed on.
+      const client = normalizeClientName(rawClient);
+      if (!client) continue;
+      if (!days[client] || key > days[client]) days[client] = key;
+    }
+  }
+  return days;
+}
+
+// A history refresh runs on its own slower cadence than a usage tick, so a tick
+// that skipped it keeps the caller's previous map rather than blanking the field
+// until the next one.
+function mergeClientActivityDays(previous, history) {
+  const fresh = clientActivityDaysFromHistory(history);
+  return Object.keys(fresh).length > 0 ? fresh : { ...(previous || {}) };
+}
+
+// Per-client diagnostics. Every input is a filesystem or subprocess observation
+// that only this process can make, which is why the record is built here;
+// clientHealth.js owns the shape, the enums and the validation the hub re-runs.
+//
+// Detail is attached only to clients that are not healthy. A working client is
+// fully described by the fixed core, and this record is per client per device on
+// a document the hub keeps — so "which of Copilot's two roots is missing" is
+// worth its bytes exactly when something is wrong.
+function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
+  const clients = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (clients.length === 0) return null;
+  const checksByClient = clientSourceChecks(clientsCsv);
+  const usageClients = allTimePeriod?.clients || {};
+  const wslDetected = new Set(options.wslStatus?.detected || []);
+  const wslWithData = new Set(options.wslStatus?.withData || []);
+  const activityDays = options.lastActivityDays || {};
+  const throttle = options.selfSyncThrottle || selfSyncThrottle;
+  const result = {};
+  for (const client of clients) {
+    const checks = checksByClient[client] || [];
+    const detected = checks.filter((check) => check.exists);
+    const liveTokens = Number(usageClients[client] || 0);
+    const sync = SELF_SYNCED_CLIENTS.has(client) ? throttle.syncStatus(client) : null;
+    const entry = {
+      source: {
+        state: checks.length === 0 ? 'unknown' : (detected.length > 0 ? 'detected' : 'missing'),
+        detectedCount: detected.length,
+        checkedCount: checks.length
+      },
+      collection: { state: sync ? sync.state : 'direct' },
+      data: { liveTokens: liveTokens > 0 ? liveTokens : 0 }
+    };
+    // Kept even for a healthy self-synced client: "last synced two minutes ago"
+    // is the answer to "why is today still 0", not a fault report.
+    if (sync?.lastAttemptAt) entry.collection.lastAttemptAt = new Date(sync.lastAttemptAt).toISOString();
+    if (sync?.lastSuccessAt) entry.collection.lastSuccessAt = new Date(sync.lastSuccessAt).toISOString();
+    const activityDay = activityDays[client];
+    if (activityDay) entry.data.lastActivityDay = activityDay;
+    const overall = deriveClientOverall(entry);
+    if (overall !== 'healthy') {
+      if (checks.length > 0 && detected.length < checks.length) {
+        entry.source.checks = checks.map(({ id, exists }) => ({ id, exists }));
+      }
+      const diagnostics = [];
+      if (checks.length > 0 && detected.length === 0) diagnostics.push('source-missing');
+      else if (detected.length < checks.length) diagnostics.push('source-partial');
+      if (sync?.failureCode) diagnostics.push(sync.failureCode);
+      if (detected.length > 0 && liveTokens <= 0) diagnostics.push('no-usage-observed');
+      // States a fact, not a cause: a marker without usage can equally mean the
+      // tool is installed in that distro and simply unused.
+      if (wslDetected.has(client) && !wslWithData.has(client)) diagnostics.push('wsl-detected-no-data');
+      if (diagnostics.length > 0) entry.diagnostics = diagnostics.slice(0, MAX_DIAGNOSTICS_PER_CLIENT);
+    }
+    entry.overall = overall;
+    result[client] = entry;
+  }
+  return { version: CLIENT_HEALTH_VERSION, clients: result };
 }
 
 // The frozen wslAnchor is only valid to merge into a preview period when it was
@@ -1447,6 +1592,11 @@ function startCollector(options) {
   let anchor = null;
   let wslAnchor = null;
   let wslStatusAnchor = null;
+  // The last-activity days a history refresh produced, carried across the ticks
+  // that skip history. Read back out of the record this collector just published
+  // rather than kept as a second copy, so the two cannot drift; a restart simply
+  // relearns them from the first tick, which always includes history.
+  let activityDaysAnchor = {};
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
@@ -1563,6 +1713,7 @@ function startCollector(options) {
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
+        lastActivityDays: activityDaysAnchor,
         refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
@@ -1612,6 +1763,9 @@ function startCollector(options) {
         }
       });
       if (stopped) return;
+      for (const [client, entry] of Object.entries(summary.clientHealth?.clients || {})) {
+        if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
+      }
       if (!anchored && captured) {
         anchor = {
           dateKey: todayKey,
@@ -1905,10 +2059,14 @@ module.exports = {
   projectPathFromJsonl,
   collectHistoryOnce,
   collectUsageOnce,
+  clientActivityDaysFromHistory,
   clientDataDirPresence,
+  clientSourceChecks,
+  clientSourceRoots,
   clientWatchCandidates,
   computePeriodWindows,
   configFingerprint,
+  deriveClientHealth,
   deriveClientStatus,
   wslPeriodsForPreview,
   statusFromSignals,
