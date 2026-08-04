@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   applyClientDisplayPreferences,
+  clientDisplayOrderCommit,
   defaultClientDisplayPreferences,
   hasClientDisplayPreferences,
   moveClientDisplayOrder,
@@ -165,6 +166,56 @@ test('hasClientDisplayPreferences detects custom order or hidden clients', () =>
   assert.equal(hasClientDisplayPreferences('', 'opencode', clients), true);
   assert.equal(hasClientDisplayPreferences('', '', clients, 'unknown'), false);
   assert.equal(hasClientDisplayPreferences('', '', clients, 'codex'), true);
+});
+
+// Pins are a shortcut for "these few first, everything else as it comes". A drop
+// that only permutes them keeps that shape; a drop that disturbs anything else
+// cannot be said with pins, so it takes the list over outright.
+test('clientDisplayOrderCommit keeps a drop inside the pinned block as a pin change', () => {
+  assert.deepEqual(
+    clientDisplayOrderCommit(['codex', 'hermes', 'claude', 'opencode'], clients, '', 'hermes,codex', 'codex'),
+    { pinnedClients: 'codex,hermes' }
+  );
+});
+
+test('clientDisplayOrderCommit takes the list over when a drop leaves the pinned block', () => {
+  // The dragged pin fell past the unpinned rows, so the head is no longer pins.
+  assert.deepEqual(
+    clientDisplayOrderCommit(['codex', 'claude', 'hermes', 'opencode'], clients, '', 'hermes,codex', 'hermes'),
+    { clientDisplayOrder: 'codex,claude,hermes,opencode', pinnedClients: '' }
+  );
+  // An unpinned row moved. The pinned head is untouched, which is exactly the
+  // case that would silently discard the move if the dragged id were ignored.
+  assert.deepEqual(
+    clientDisplayOrderCommit(['hermes', 'codex', 'opencode', 'claude'], clients, '', 'hermes,codex', 'opencode'),
+    { clientDisplayOrder: 'hermes,codex,opencode,claude', pinnedClients: '' }
+  );
+});
+
+test('clientDisplayOrderCommit writes a plain order once one already exists', () => {
+  assert.deepEqual(
+    clientDisplayOrderCommit(['codex', 'hermes', 'claude', 'opencode'], clients, 'hermes,codex,claude,opencode', 'hermes,codex', 'codex'),
+    { clientDisplayOrder: 'codex,hermes,claude,opencode', pinnedClients: '' }
+  );
+  assert.deepEqual(
+    clientDisplayOrderCommit(['codex', 'claude', 'hermes', 'opencode'], clients, '', '', 'codex'),
+    { clientDisplayOrder: 'codex,claude,hermes,opencode', pinnedClients: '' }
+  );
+});
+
+// The drop is mirrored into the settings this reads before the save runs, so
+// re-deriving from the mirrored state must reach the same patch.
+test('clientDisplayOrderCommit survives being applied to its own result', () => {
+  const cases = [
+    { order: ['codex', 'hermes', 'claude', 'opencode'], pinned: 'hermes,codex', id: 'codex' },
+    { order: ['hermes', 'codex', 'opencode', 'claude'], pinned: 'hermes,codex', id: 'opencode' },
+    { order: ['opencode', 'claude', 'codex', 'hermes'], pinned: '', id: 'opencode' }
+  ];
+  for (const { order, pinned, id } of cases) {
+    const first = clientDisplayOrderCommit(order, clients, '', pinned, id);
+    const settings = { clientDisplayOrder: '', pinnedClients: pinned, ...first };
+    assert.deepEqual(clientDisplayOrderCommit(order, clients, settings.clientDisplayOrder, settings.pinnedClients, id), first);
+  }
 });
 
 test('defaultClientDisplayPreferences clears custom display state', () => {

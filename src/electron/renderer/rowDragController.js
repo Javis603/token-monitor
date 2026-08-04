@@ -188,7 +188,7 @@
 
     function onPointerUp(event) {
       if (!drag || drag.pointerId !== event.pointerId) return;
-      const { started, changed, order } = drag;
+      const { id, started, changed, order } = drag;
       if (!started || !changed || !order?.length) {
         finishRowDrag(true);
         return;
@@ -198,7 +198,10 @@
       // the caller's settings — which the deferred save has not written yet, so
       // without this the list rebuilds into the old order and flips a frame later.
       // The order is handed over as ids; how a list serializes them is its own.
-      mirrorOrder(order);
+      // Whatever the mirror returns comes back to the save untouched, so a list
+      // whose setting depends on the state the mirror overwrites decides once
+      // instead of asking the same question of two different worlds.
+      const mirrored = mirrorOrder(order, id);
       finishRowDrag(true);
       // The drop itself is already in the DOM. Persisting re-renders the whole
       // settings form, which on a populated install is a long task — run it only
@@ -206,7 +209,7 @@
       // and the drop reads as a freeze. rAF fires before paint, so the timeout
       // inside it is what lands after.
       requestAnimationFrame(() => {
-        setTimeout(() => persistOrder(order), 0);
+        setTimeout(() => persistOrder(order, id, mirrored), 0);
       });
     }
 

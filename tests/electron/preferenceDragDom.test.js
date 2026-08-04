@@ -45,14 +45,13 @@ test('preference drag only selects sortable rows, not nested controls', () => {
 });
 
 // The handle-based lists still reorder by moving DOM nodes as the pointer
-// travels, with no transform animation. The AI Tool Limits list moved to the
-// transform model and carries its own guards in limitProviderDrag.test.js.
+// travels, with no transform animation. The two whole-row lists moved to the
+// transform model and carry their own guards in limitProviderDrag.test.js.
 test('handle-based preference drag does not animate row transforms during pointer movement', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   assert.doesNotMatch(app, /animatePreferenceOrderChange/);
   assert.doesNotMatch(app, /translateY\(/);
-  assert.doesNotMatch(cssRule(css, '.tool-preference-row'), /transform/);
   assert.doesNotMatch(cssRule(css, '.view-preference-row'), /transform/);
   assert.doesNotMatch(cssRule(css, '.preference-order-handle'), /transition:\s*transform/);
 });
@@ -74,7 +73,8 @@ test('tool preference controls place compact actions beside the note without dup
   const css = readRendererFile('styles.css');
   assert.match(cssRule(css, '.settings-note-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
   assert.match(cssRule(css, '.settings-note-row'), /align-items:\s*center/);
-  assert.match(cssRule(css, '.tool-preference-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) repeat\(4,\s*22px\)/);
+  // Three action cells since the drag handle left: track, visibility, pin.
+  assert.match(cssRule(css, '.tool-preference-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) repeat\(3,\s*22px\)/);
   assert.match(cssRule(css, '.tool-preference-actions'), /display:\s*contents/);
   assert.doesNotMatch(css, /\.tool-preference-head/);
   assert.doesNotMatch(css, /\.tool-preference-legend-/);
@@ -86,6 +86,77 @@ test('tool preference rows include compact per-tool pin controls', () => {
   assert.match(body, /settings\.tools\.pinClient/);
   assert.match(body, /settings\.tools\.unpinClient/);
   assert.match(body, /onClientPinnedToggle/);
+});
+
+test('tool preference rows drag from the row itself, not a handle', () => {
+  const app = readRendererFile('app.js');
+  const body = functionBody(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
+  assert.doesNotMatch(body, /createPreferenceOrderHandle/);
+  // The row the controller is told to look for is the row this builds.
+  assert.match(body, /row\.className = 'tool-preference-row';/);
+  assert.match(body, /row\.dataset\.client = id;/);
+  assert.match(body, /row\.addEventListener\('pointerdown', \(event\) => clientPreferenceRowDrag\.startRowDrag\(event, id\)\);/);
+  // The keyboard reorder entry point moves onto the track checkbox, keys unchanged.
+  assert.match(body, /trackInput\.setAttribute\('aria-keyshortcuts', 'ArrowUp ArrowDown Home End'\);/);
+  assert.match(body, /trackInput\.addEventListener\('keydown', \(event\) => onPreferenceOrderKeydown\(event, 'client', id\)\);/);
+
+  // The handle was the only affordance, so the section note has to say it.
+  const html = readRendererFile('index.html');
+  assert.match(html, /data-i18n="settings\.tools\.note">[^<]*Drag a row to reorder\./);
+  const i18n = readRendererFile('i18n.js');
+  assert.doesNotMatch(i18n, /'settings\.tools\.reorderClient':/);
+});
+
+// The rows are rebuilt on every stats tick. replaceChildren() would take the row
+// under the pointer with it, and later the expanded panel too.
+test('the tool list repaints without destroying its live rows', () => {
+  const app = readRendererFile('app.js');
+  const defer = functionBody(app, 'renderToolPreferences', 'renderToolPreferencesNow');
+  assert.match(defer, /if \(clientPreferenceRowDrag\.deferRender\(\)\) return;/);
+  assert.match(defer, /return preserveSettingsPanelScroll\(renderToolPreferencesNow\);/);
+
+  const body = functionBody(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
+  assert.doesNotMatch(body, /replaceChildren/);
+  const snapshot = body.indexOf('const previousRows = Array.from(els.clientDisplayList.children);');
+  const append = body.indexOf('els.clientDisplayList.appendChild(row);');
+  const drop = body.indexOf('for (const row of previousRows) row.remove();');
+  assert.ok(snapshot !== -1, 'the existing rows should be captured before the rebuild');
+  assert.ok(append > snapshot, 'new rows are appended alongside the old ones');
+  assert.ok(drop > append, 'the old rows are dropped only once the new ones exist');
+  // Focus does not survive the swap on its own, and the checkbox now owns the
+  // keyboard reorder, so a second arrow press needs it back.
+  assert.match(body, /document\.getElementById\(focusedId\)\?\.focus\(\{ preventScroll: true \}\)/);
+});
+
+test('the tool preference row carries the drag transform contract', () => {
+  const css = readRendererFile('styles.css');
+  const row = cssRule(css, '.tool-preference-row');
+  assert.match(row, /position: relative;/);
+  assert.match(row, /touch-action: pan-y;/);
+  assert.match(row, /transform: translateY\(calc\(var\(--drag-y, 0px\) \+ var\(--drag-shift, 0px\)\)\);/);
+  assert.match(row, /transform 170ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/);
+  assert.doesNotMatch(cssRule(css, '.tool-preference-row.dragging'), /transform \d/);
+  assert.match(css, /\.tool-preference-list\.drag-active \.tool-preference-row:not\(\.dragging\) \{ opacity: 0\.78; \}/);
+});
+
+test('a press on the tool row own controls never arms a drag', () => {
+  const app = readRendererFile('app.js');
+  // The checkbox sits inside a label, which is a hit target of its own.
+  assert.match(app, /const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button, input, select, textarea, a, label, \.accordion-animated-container';/);
+  const wiring = app.slice(app.indexOf('const clientPreferenceRowDrag = '), app.indexOf('function renderToolPreferences('));
+  assert.match(wiring, /dragExcluded: CLIENT_PREFERENCE_DRAG_EXCLUDED,/);
+  assert.match(wiring, /rowSelector: '\.tool-preference-row\[data-client\]',/);
+  assert.match(wiring, /idKey: 'client',/);
+  assert.match(wiring, /preserveScroll: preserveSettingsPanelScroll,/);
+  assert.match(wiring, /applyOrder: \(order\) => applyPreferenceOrder\('client', order\),/);
+  assert.match(wiring, /requestRender: \(\) => renderToolPreferences\(\)/);
+  // The pin/order decision is made once, by the shared module, and travels from
+  // the mirror to the save; onPreferenceOrderCommit would compare against the
+  // value the mirror just wrote and drop it.
+  assert.match(wiring, /clientDisplayPreferencesApi\.clientDisplayOrderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
+  assert.match(wiring, /persistOrder: \(_order, _id, patch\) => void saveSettings\(patch\)/);
+  assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
+  assert.doesNotMatch(functionBody(app, 'onPreferenceOrderCommit', 'onPreferenceOrderKeydown'), /clientDisplayOrder|pinnedClients/);
 });
 
 test('view preferences place compact actions beside the note without duplicate headers', () => {

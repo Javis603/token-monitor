@@ -1662,8 +1662,9 @@ span.settings-note.settings-item-desc {
   gap: 6px;
 }
 .tool-preference-row {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(4, 22px);
+  grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
   align-items: center;
   column-gap: 5px;
   margin: 0 -2px;
@@ -1671,8 +1672,37 @@ span.settings-note.settings-item-desc {
   border-radius: 6px;
   min-width: 0;
   flex-wrap: nowrap;
-  transition: background 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  touch-action: pan-y;
+  transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
+  transition:
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
 }
+/* The dragged row must track the pointer with zero latency, so it opts out of
+   the transform transition its neighbours use to slide out of the way. */
+.tool-preference-row.dragging {
+  z-index: 2;
+  background: rgba(var(--panel-rgb), 0.96);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.62);
+  cursor: grabbing;
+  scale: 1.02;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+  will-change: transform;
+}
+/* The final DOM positions and the drag transforms encode the same move, so the
+   transition stays off through the first landed paint. */
+.tool-preference-list.is-landing .tool-preference-row {
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+.tool-preference-list.drag-active .tool-preference-row:not(.dragging) { opacity: 0.78; }
 .view-preference-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) repeat(2, 22px);
@@ -2088,7 +2118,6 @@ span.settings-note.settings-item-desc {
   opacity: 0.34;
   cursor: default;
 }
-.tool-preference-row.is-dragging,
 .view-preference-row.is-dragging,
 .home-module-preference-row.is-dragging,
 .home-limit-provider-row.is-dragging {
@@ -6121,4 +6150,5 @@ html.is-windows .limit-live-badge {
 @media (prefers-reduced-motion: reduce) {
   .tray-composer-item { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
+  .tool-preference-row { transition: none; }
 }

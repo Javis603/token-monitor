@@ -144,6 +144,24 @@
     return pinned.join(',');
   }
 
+  // A whole-row drag hands back the list exactly as it was dropped; this turns
+  // that into the settings patch it means. While no explicit display order
+  // exists the pinned block is the only thing shaping the list, so a drop that
+  // merely reshuffles that block stays a pin change and leaves everything below
+  // it on the default order. Any other drop is the user taking the order over,
+  // which pins cannot express, so it becomes an explicit order and clears them.
+  function clientDisplayOrderCommit(order, clients, orderValue, pinnedValue, clientId) {
+    const next = normalizeClientDisplayOrder(order, clients);
+    const pinned = pinnedClientIds(pinnedValue, clients);
+    const pinnedSet = new Set(pinned);
+    const head = next.slice(0, pinned.length);
+    const withinPinnedBlock = pinnedSet.has(normalizeId(clientId))
+      && head.length === pinned.length
+      && head.every((id) => pinnedSet.has(id));
+    if (!hasCustomDisplayOrder(orderValue) && withinPinnedBlock) return { pinnedClients: head.join(',') };
+    return { clientDisplayOrder: next.join(','), pinnedClients: '' };
+  }
+
   function applyClientDisplayPreferences(rows, orderValue, hiddenValue, clients, pinnedValue) {
     const hidden = new Set(normalizeHiddenClients(hiddenValue, clients).split(',').filter(Boolean));
     const visible = (rows || []).filter((row) => !hidden.has(normalizeId(row?.key)));
@@ -183,6 +201,7 @@
 
   return {
     applyClientDisplayPreferences,
+    clientDisplayOrderCommit,
     defaultClientDisplayPreferences,
     hasClientDisplayPreferences,
     hasCustomDisplayOrder,

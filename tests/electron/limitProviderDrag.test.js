@@ -169,19 +169,19 @@ test('the reordering list dims its other rows and freezes the accordion', () => 
   assert.match(css, /\.limit-provider-list\.is-reordering \.accordion-animated-container \{ transition: none; \}/);
 });
 
-test('the limit provider row no longer shares the handle drag highlight', () => {
+test('the whole-row lists no longer share the handle drag highlight', () => {
   const css = readRendererFile('styles.css');
   assert.doesNotMatch(css, /\.settings-panel \.limit-provider-row\.is-dragging/);
-  // The other five lists keep it.
-  assert.match(css, /\.tool-preference-row\.is-dragging/);
+  assert.doesNotMatch(css, /\.tool-preference-row\.is-dragging/);
+  // The three handle-based lists keep it.
   assert.match(css, /\.view-preference-row\.is-dragging/);
   assert.match(css, /\.home-module-preference-row\.is-dragging/);
   assert.match(css, /\.home-limit-provider-row\.is-dragging/);
 });
 
-test('reduced motion drops the limit provider row transition', () => {
+test('reduced motion drops the transition on both whole-row lists', () => {
   const css = readRendererFile('styles.css');
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.tray-composer-item \{ transition: none; \}\s*\.settings-panel \.limit-provider-row \{ transition: none; \}\s*\}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.tray-composer-item \{ transition: none; \}\s*\.settings-panel \.limit-provider-row \{ transition: none; \}\s*\.tool-preference-row \{ transition: none; \}\s*\}/);
 });
 
 // The grab handle was the only hint that the rows could be reordered, so
@@ -219,11 +219,11 @@ test('limit provider rows drag from the row itself, not a handle', () => {
   assert.match(body, /cb\.addEventListener\('keydown', \(event\) => onPreferenceOrderKeydown\(event, 'provider', id\)\);/);
 });
 
-test('the other five preference lists keep the drag handle', () => {
+test('the other four preference lists keep the drag handle', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function createPreferenceOrderHandle\(\{ kind, id, label, count \}\)/);
   const handleCalls = app.match(/createPreferenceOrderHandle\(\{/g) || [];
-  assert.equal(handleCalls.length, 6, 'one definition plus five remaining call sites');
+  assert.equal(handleCalls.length, 5, 'one definition plus four remaining call sites');
 });
 
 test('a stats repaint mid-drag is deferred instead of replacing the rows', () => {
@@ -241,12 +241,15 @@ test('the drop mirrors the new order locally before anything can repaint', () =>
   const end = controller.indexOf('function onDragAbort(', start);
   assert.ok(start !== -1 && end > start);
   const body = controller.slice(start, end);
-  const mirror = body.indexOf('mirrorOrder(order)');
+  const mirror = body.indexOf('mirrorOrder(order, id)');
   const finish = body.indexOf('finishRowDrag(true);', mirror);
-  const persist = body.indexOf('persistOrder(order)', finish);
+  const persist = body.indexOf('persistOrder(order, id, mirrored)', finish);
   assert.ok(mirror !== -1, 'the new order should be mirrored before the drag finishes');
   assert.ok(finish > mirror, 'the mirror must land before the drag is finished and repaints flush');
   assert.ok(persist > finish, 'persisting happens after the landed row has painted');
+  // A list whose setting depends on the state the mirror overwrites cannot
+  // derive it twice, so the mirror's answer is what the save receives.
+  assert.match(body, /const mirrored = mirrorOrder\(order, id\);/);
 
   // The limits list mirrors into state.settings and saves directly:
   // onPreferenceOrderCommit compares against the value just mirrored, so it
@@ -448,6 +451,26 @@ test('the controller reorders on a drag and stays a click under the threshold', 
   assert.deepEqual(persisted.map((order) => order.join(',')), ['b,c,a']);
   // The row is handed ids, not a serialized setting: joining is the list's call.
   assert.ok(Array.isArray(mirrored[0]) && Array.isArray(persisted[0]));
+});
+
+// The tracked-tools list turns one drop into either a pin change or an explicit
+// display order, and that decision reads the settings the mirror overwrites. So
+// the mirror's answer travels to the save instead of being derived a second
+// time against a world the mirror already changed.
+test('the drop hands the save the id it moved and whatever the mirror decided', () => {
+  const persisted = [];
+  const harness = createDragHarness({
+    mirrorOrder: (order, id) => ({ decided: `${id}:${order.join(',')}` }),
+    persistOrder: (order, id, mirrored) => persisted.push({ order: order.join(','), id, mirrored })
+  });
+
+  harness.press(10);
+  harness.dispatch('pointermove', { clientY: 100 });
+  harness.dispatch('pointerup', { clientY: 100 });
+  harness.frames.at(-1)();
+  harness.timers.at(-1)();
+
+  assert.deepEqual(persisted, [{ order: 'b,c,a', id: 'a', mirrored: { decided: 'a:b,c,a' } }]);
 });
 
 // Cleanup is the part an extraction is most likely to drop, and every abort
