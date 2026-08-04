@@ -13,6 +13,9 @@ const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 
 const { emptyPeriod } = require('../../src/shared/usage');
+const {
+  clampTimerDelayMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
+} = require('../../src/shared/selfSyncThrottle');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
@@ -244,7 +247,7 @@ test('Antigravity source events target its umbrella client without watching sync
   let handle = null;
   let syncCalls = 0;
   try {
-    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const { startCollector } = freshCollector();
     const updates = [];
     handle = startCollector({
       clients: 'antigravity',
@@ -367,7 +370,7 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
   let handle = null;
   let syncCalls = 0;
   try {
-    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const { startCollector } = freshCollector();
     const updates = [];
     handle = startCollector({
       clients: 'claude,antigravity',
@@ -473,7 +476,7 @@ test('a manual refresh satisfies a deferred source sync instead of adding one', 
   let handle = null;
   let syncCalls = 0;
   try {
-    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const { startCollector } = freshCollector();
     const updates = [];
     handle = startCollector({
       clients: 'antigravity',
@@ -562,7 +565,7 @@ test('a failed forced sync hands the source event back instead of eating it', as
   let syncCalls = 0;
   let failNextSync = false;
   try {
-    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS, SYNC_MIN_INTERVAL_MS } = freshCollector();
+    const { startCollector } = freshCollector();
     const updates = [];
     handle = startCollector({
       clients: 'antigravity',
@@ -665,7 +668,7 @@ test('a source event that keeps failing backs off to the idle cadence', async (t
   let handle = null;
   let syncCalls = 0;
   try {
-    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const { startCollector } = freshCollector();
     const updates = [];
     handle = startCollector({
       clients: 'antigravity',
@@ -765,7 +768,7 @@ test('an unrelated client event does not bypass a source-sync backoff', async ()
   let handle = null;
   let syncCalls = 0;
   try {
-    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const { startCollector } = freshCollector();
     const updates = [];
     handle = startCollector({
       clients: 'claude,antigravity',
@@ -825,9 +828,8 @@ test('a failed sync moves the client off the fast source floor', async () => {
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
 
   try {
-    const {
-      collectUsageOnce, sourceSyncFloorMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
-    } = freshCollector();
+    const { collectUsageOnce, selfSyncThrottle } = freshCollector();
+    const sourceSyncFloorMs = (kind) => selfSyncThrottle.sourceFloorMs(kind);
     const options = {
       clients: 'antigravity',
       allTimeSince: '2024-01-01',
@@ -873,9 +875,8 @@ test('a superseded sync attempt cannot rewrite the current backoff', async () =>
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
 
   try {
-    const {
-      collectUsageOnce, sourceSyncFloorMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
-    } = freshCollector();
+    const { collectUsageOnce, selfSyncThrottle } = freshCollector();
+    const sourceSyncFloorMs = (kind) => selfSyncThrottle.sourceFloorMs(kind);
     const options = {
       clients: 'antigravity',
       allTimeSince: '2024-01-01',
@@ -1006,7 +1007,6 @@ test('an unusable watch debounce cannot turn the catch-up retry into a spin', ()
   // setTimeout rewrites a non-finite or oversized delay to 1ms, so an env-set
   // TOKEN_MONITOR_WATCH_DEBOUNCE_MS of Infinity would make the mid-tick retry
   // fire hundreds of times per second for the length of the tick.
-  const { clampTimerDelayMs } = freshCollector();
   assert.equal(clampTimerDelayMs(Infinity, 1000), 1000);
   assert.equal(clampTimerDelayMs(-Infinity, 1000), 1000);
   assert.equal(clampTimerDelayMs(NaN, 1000), 1000);
@@ -1015,7 +1015,6 @@ test('an unusable watch debounce cannot turn the catch-up retry into a spin', ()
   assert.equal(clampTimerDelayMs(-5, 1000), 1000);
   assert.equal(clampTimerDelayMs(2 ** 32, 1000), 2 ** 31 - 1);
   assert.equal(clampTimerDelayMs(1500, 1000), 1500);
-  delete require.cache[collectorPath];
 });
 
 test('an Antigravity CLI event rescans without paying for an IDE sync', async () => {

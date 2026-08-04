@@ -30,6 +30,12 @@ const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require(
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 const {
+  clampTimerDelayMs,
+  createSelfSyncThrottle,
+  createSourceSyncQueue,
+  mergeSelfSyncSelection
+} = require('./selfSyncThrottle');
+const {
   LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
@@ -498,130 +504,25 @@ function applySessionTimestamps(periods, home, deps = {}) {
   }
 }
 
-// Cursor/antigravity usage only changes when these syncs run, so re-running them
-// on every ordinary tick is pure overhead — each one spawns a subprocess and
-// rewrites the tokscale cache (issue #15). Keep them on their own slow cadence.
-const SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
-// A watch event on an Antigravity IDE source root means the cache is now stale,
-// so waiting out the idle cadence would throw away the seconds-level refresh the
-// watcher exists for. It gets a shorter floor rather than no floor: `tokscale
-// antigravity sync` re-fetches over RPC and rewrites *every* known session
-// artifact on every run (upstream keeps `artifactHash`/`lastModifiedMs` in the
-// manifest but never short-circuits on them), on top of a `ps` over the whole
-// process table and an `lsof` per candidate — so its cost grows with the user's
-// session count, and the hot source file is a SQLite WAL that churns for the
-// whole turn. Removing the floor entirely would leave issue #15's load half
-// unguarded even though its self-trigger half is structurally gone.
-const SYNC_SOURCE_EVENT_MIN_INTERVAL_MS = 10 * 1000;
-const lastSyncAt = { cursor: 0, antigravity: 0 };
-
-function syncDue(kind, nowMs = Date.now(), minIntervalMs = SYNC_MIN_INTERVAL_MS) {
-  const elapsed = nowMs - lastSyncAt[kind];
-  // A backwards clock step (an NTP correction, a VM resume) leaves a stamp in
-  // the future, and a negative elapsed compares below every floor — including
-  // the zero floor, which would refuse the manual refresh outright. The stamp is
-  // meaningless once the clock it came from is gone, so treat it as due and
-  // re-anchor. Deliberately Date.now rather than a monotonic source: every other
-  // deadline in this file is wall-clock too, and one hybrid would be worse than
-  // this guard.
-  if (elapsed >= 0 && elapsed < minIntervalMs) return false;
-  lastSyncAt[kind] = nowMs;
-  return true;
-}
-
-// 0 when this kind may sync now, otherwise the milliseconds left on its floor.
-// A floor that refuses a sync has to hand back a deadline: dropping the request
-// instead would strand the change until the fallback interval, which is the
-// latency the watcher exists to remove. Same rollback handling as syncDue — a
-// stamp from a clock that no longer exists is not something to wait out.
-// setTimeout stores its delay in a 32-bit signed int and silently rewrites
-// anything larger — or non-finite — to 1ms, turning a "wait a while" into a
-// spin. Every delay derived from configuration goes through here.
-const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
-
-function clampTimerDelayMs(value, fallbackMs) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallbackMs;
-  return Math.min(MAX_TIMER_DELAY_MS, Math.max(1, parsed));
-}
-
-function msUntilSyncDue(kind, minIntervalMs, nowMs = Date.now()) {
-  const elapsed = nowMs - lastSyncAt[kind];
-  if (elapsed < 0) return 0;
-  return Math.max(0, minIntervalMs - elapsed);
-}
-
-// Whether a self-synced client is named by one of the tick's sync selections.
-// `true` means all of them (the manual refresh button, where the user is
-// explicitly asking for fresh numbers); an array means only those. The
-// distinction matters because each sync is its own subprocess: a Cursor sign-in
-// has no reason to pay for `tokscale antigravity sync`, and issue #15 is exactly
-// what happens when these spawns stop being rationed.
-function selfSyncSelected(selection, kind) {
-  if (selection === true) return true;
-  return Array.isArray(selection) && selection.includes(kind);
-}
-
-// Whether the last attempt for this kind failed. The short source floor is a
-// reward for a sync that works: once one fails there is nothing upstream to say
-// whether the cause is transient, so the client drops to the idle cadence until
-// an attempt succeeds. Expressed as the floor itself rather than as a longer
-// timer, because the floor is read from three places — the drain, the catch-up
-// arm, and the sync decision — and a backoff that only moved the timer still let
-// an unrelated client's watch event drain the failed one straight back out.
-const lastSyncFailed = { cursor: false, antigravity: false };
-// stop() cannot cancel a sync already in flight — a spawned `antigravity sync`
-// runs up to 30s — so a collector rebuilt by a settings change can have the
-// previous one's attempt land after its own. Latest attempt wins: a completion
-// only writes the flag while it is still the newest attempt for its kind.
-// (lastSyncAt is deliberately left alone; an old stamp only rate-limits.)
-const syncAttemptSeq = { cursor: 0, antigravity: 0 };
-
-function beginSyncAttempt(kind) {
-  syncAttemptSeq[kind] += 1;
-  return syncAttemptSeq[kind];
-}
-
-function completeSyncAttempt(kind, attempt, failed) {
-  if (attempt !== syncAttemptSeq[kind]) return;
-  lastSyncFailed[kind] = failed;
-}
-
-function sourceSyncFloorMs(kind) {
-  return lastSyncFailed[kind] ? SYNC_MIN_INTERVAL_MS : SYNC_SOURCE_EVENT_MIN_INTERVAL_MS;
-}
-
-// How long this kind must have been idle before the tick may sync it. An
-// explicit user action waits for nothing; a watch event on a raw source root
-// waits out the short floor; everything else keeps the idle cadence.
-function selfSyncMinIntervalMs(options, kind) {
-  // A manual refresh is the user overriding the backoff on purpose.
-  if (selfSyncSelected(options.forceSelfSync, kind)) return 0;
-  if (selfSyncSelected(options.sourceSelfSync, kind)) return sourceSyncFloorMs(kind);
-  return SYNC_MIN_INTERVAL_MS;
-}
-
-function mergeSelfSyncSelection(left, right) {
-  if (left === true || right === true) return true;
-  const merged = [
-    ...(Array.isArray(left) ? left : []),
-    ...(Array.isArray(right) ? right : [])
-  ];
-  return merged.length ? [...new Set(merged)] : null;
-}
+// The process-wide rationing for cursor/antigravity syncs. One instance, because
+// the tokscale cache these guard is a single directory on disk: a collector
+// rebuilt by a settings change must not hand itself a fresh allowance. Tests
+// reach it through the export to pin a floor without driving a whole tick.
+const selfSyncThrottle = createSelfSyncThrottle();
 
 async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!enabled.has('cursor')) return;
   if (!cursorAuth.readActiveAccount()) return;
-  if (!syncDue('cursor', Date.now(), options.minIntervalMs)) return;
-  const attempt = beginSyncAttempt('cursor');
+  const throttle = options.throttle || selfSyncThrottle;
+  if (!throttle.claim('cursor', options.minIntervalMs)) return;
+  const attempt = throttle.beginAttempt('cursor');
   try {
     await cursorAuth.runCursorSync();
-    completeSyncAttempt('cursor', attempt, false);
+    throttle.completeAttempt('cursor', attempt, false);
   } catch (err) {
     if (typeof logger === 'function') logger(`cursor sync failed: ${err.message}`);
-    completeSyncAttempt('cursor', attempt, true);
+    throttle.completeAttempt('cursor', attempt, true);
     options.onFailure?.('cursor');
   }
 }
@@ -642,15 +543,16 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!enabled.has('antigravity')) return;
   if (!antigravityDataPresent(home)) return;
-  if (!syncDue('antigravity', Date.now(), options.minIntervalMs)) return;
-  const attempt = beginSyncAttempt('antigravity');
+  const throttle = options.throttle || selfSyncThrottle;
+  if (!throttle.claim('antigravity', options.minIntervalMs)) return;
+  const attempt = throttle.beginAttempt('antigravity');
   if (typeof options.run === 'function') {
     try {
       await options.run();
-      completeSyncAttempt('antigravity', attempt, false);
+      throttle.completeAttempt('antigravity', attempt, false);
     } catch (err) {
       if (typeof logger === 'function') logger(`antigravity sync failed: ${err.message}`);
-      completeSyncAttempt('antigravity', attempt, true);
+      throttle.completeAttempt('antigravity', attempt, true);
       options.onFailure?.('antigravity');
     }
     return;
@@ -676,7 +578,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      completeSyncAttempt('antigravity', attempt, failed);
+      throttle.completeAttempt('antigravity', attempt, failed);
       if (failed) options.onFailure?.('antigravity');
       resolve();
     };
@@ -802,12 +704,15 @@ async function collectUsageOnce(options) {
   let promaPricing = null;
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
+    const throttle = options.selfSyncThrottle || selfSyncThrottle;
     await maybeSyncCursor(syncClients, options.logger, {
-      minIntervalMs: selfSyncMinIntervalMs(options, 'cursor'),
+      throttle,
+      minIntervalMs: throttle.minIntervalForTick(options, 'cursor'),
       onFailure: options.onSelfSyncFailed
     });
     await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
-      minIntervalMs: selfSyncMinIntervalMs(options, 'antigravity'),
+      throttle,
+      minIntervalMs: throttle.minIntervalForTick(options, 'antigravity'),
       run: options.runAntigravitySync,
       onFailure: options.onSelfSyncFailed
     });
@@ -1549,16 +1454,23 @@ function startCollector(options) {
   let stopped = false;
   const scheduledWatchClients = new Set();
   let scheduledWatchNeedsFullScan = false;
-  // Clients whose raw self-sync source saw an event since the last tick. Kept
-  // apart from scheduledWatchClients because the two answer different questions:
-  // that set decides which partitions to rescan, this one decides which sync may
-  // skip ahead of the idle cadence. An antigravity-cli write lands in the first
-  // and not the second.
-  const scheduledSourceSyncClients = new Set();
-  let sourceSyncCatchUpTimer = null;
-  // How long a catch-up waits when it comes due mid-tick. Mirrors the watch
-  // debounce so the retry lands after the tick that displaced it.
-  const SOURCE_SYNC_RETRY_MS = watchDebounceMs;
+  // Source events waiting on the shared throttle, and the timer that comes back
+  // for them. Built here rather than at module scope because its timer has to
+  // die with this collector; the throttle it reads deadlines from is shared, so
+  // a rebuild inherits the floors it must not reset. `retryMs` mirrors the watch
+  // debounce so a catch-up displaced by an in-flight tick lands just after it.
+  const sourceSyncQueue = createSourceSyncQueue({
+    throttle: selfSyncThrottle,
+    retryMs: watchDebounceMs,
+    isBusy: () => tickInFlight,
+    // The tick that carried this event already scanned against the stale cache,
+    // so the catch-up has to rescan the same clients behind the sync.
+    onDue: (sourceSelfSync) => runTick('source-sync', {
+      todayOnly: true,
+      targetClients: sourceSelfSync,
+      sourceSelfSync
+    })
+  });
   const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => SELF_SYNCED_CLIENTS.has(client));
   let activityRevision = 0;
   let collectedActivityRevision = 0;
@@ -1641,9 +1553,9 @@ function startCollector(options) {
         forceSelfSync: tickOptions.forceSelfSync ?? null,
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
         // Both selections name clients whose pending source event this tick has
-        // already consumed — the drain in takeSourceSyncClients for one, the
-        // acknowledgement for the other — so either is a legitimate restore.
-        onSelfSyncFailed: (kind) => restoreConsumedSourceSync(
+        // already consumed — the queue's drain for one, its acknowledgement for
+        // the other — so either is a legitimate restore.
+        onSelfSyncFailed: (kind) => sourceSyncQueue.restore(
           mergeSelfSyncSelection(tickOptions.sourceSelfSync, tickOptions.acknowledgedSourceSync) || [],
           kind
         ),
@@ -1778,7 +1690,7 @@ function startCollector(options) {
     try {
       await performTick(reason, {
         ...effectiveTickOptions,
-        acknowledgedSourceSync: acknowledgeSourceSync(effectiveTickOptions.forceSelfSync)
+        acknowledgedSourceSync: sourceSyncQueue.acknowledge(effectiveTickOptions.forceSelfSync)
       });
       while (tickPending && !stopped) {
         const forceHistory = pendingForceHistory;
@@ -1792,7 +1704,7 @@ function startCollector(options) {
         pendingSourceSelfSync = null;
         pendingTodayOnly = null;
         pendingActivityRevision = null;
-        const acknowledgedSourceSync = acknowledgeSourceSync(forceSelfSync);
+        const acknowledgedSourceSync = sourceSyncQueue.acknowledge(forceSelfSync);
         await performTick('coalesced', {
           forceHistory,
           forceSelfSync,
@@ -1824,103 +1736,6 @@ function startCollector(options) {
     return targetClients;
   }
 
-  // Drains only the clients whose floor has elapsed. One left behind arms a
-  // catch-up for the moment it clears: a source event is a statement that the
-  // cache is stale, and that stays true whether or not another event follows, so
-  // the floor has to defer the sync rather than discard it. Without this a turn
-  // ending inside the floor — two quick turns, or one right after startup —
-  // would sit on stale numbers until the fallback interval.
-  function takeSourceSyncClients() {
-    const due = [];
-    for (const client of scheduledSourceSyncClients) {
-      // sourceSyncFloorMs, not the source floor directly: scheduleTick calls this
-      // for every watcher event, so an unrelated client's write would otherwise
-      // drain a backed-off client here while selfSyncMinIntervalMs still refuses
-      // to sync it — consuming the pending event for a sync that never runs, and
-      // losing the change until the fallback interval.
-      if (msUntilSyncDue(client, sourceSyncFloorMs(client)) === 0) due.push(client);
-    }
-    for (const client of due) scheduledSourceSyncClients.delete(client);
-    rearmSourceSyncCatchUp();
-    return due.length > 0 ? due : null;
-  }
-
-  // The one place the catch-up deadline is decided. Everything that changes the
-  // pending set calls this and passes nothing: the deadline is always the
-  // earliest across whatever is pending now. Handing a single client's delay in
-  // is what would let one client's backoff overwrite another's nearer deadline —
-  // unreachable while antigravity is the only source-sync client, but the same
-  // shape of divergence that has already cost this state machine a bug.
-  function rearmSourceSyncCatchUp() {
-    if (sourceSyncCatchUpTimer) {
-      clearTimeout(sourceSyncCatchUpTimer);
-      sourceSyncCatchUpTimer = null;
-    }
-    if (stopped || scheduledSourceSyncClients.size === 0) return;
-    let soonestWaitMs = null;
-    for (const client of scheduledSourceSyncClients) {
-      const waitMs = msUntilSyncDue(client, sourceSyncFloorMs(client));
-      soonestWaitMs = soonestWaitMs === null ? waitMs : Math.min(soonestWaitMs, waitMs);
-    }
-    sourceSyncCatchUpTimer = setTimeout(() => {
-      sourceSyncCatchUpTimer = null;
-      if (stopped) return;
-      // Re-arm instead of queueing, and check before draining: runTick's coalesce
-      // state carries the sync selections but not targetClients, so folding into
-      // an in-flight tick would widen this into an all-client scan — the cost the
-      // targeting exists to avoid, and it could drag an unrelated Cursor sync in
-      // with it. Same reason scheduleTick re-arms.
-      if (tickInFlight) {
-        sourceSyncCatchUpTimer = setTimeout(() => {
-          sourceSyncCatchUpTimer = null;
-          rearmSourceSyncCatchUp();
-        }, SOURCE_SYNC_RETRY_MS);
-        return;
-      }
-      const sourceSelfSync = takeSourceSyncClients();
-      if (!sourceSelfSync) return;
-      // The tick that carried this event already scanned against the stale
-      // cache, so the catch-up has to rescan the same clients behind the sync.
-      runTick('source-sync', { todayOnly: true, targetClients: sourceSelfSync, sourceSelfSync });
-    }, clampTimerDelayMs(Math.max(1, soonestWaitMs), SOURCE_SYNC_RETRY_MS));
-  }
-
-  // A forced sync satisfies any source event already waiting on the same client:
-  // it re-reads the IDE from scratch, so leaving the client pending would spend a
-  // second full sync ~one floor later on a change the forced run just picked up —
-  // and a manual refresh is exactly what a user reaches for when the number looks
-  // stale. Cleared where the tick actually starts rather than where it is queued,
-  // since a forced tick waiting behind another has not synced anything yet; an
-  // event arriving mid-tick re-enters through the watcher.
-  function acknowledgeSourceSync(selection) {
-    if (!selection || scheduledSourceSyncClients.size === 0) return [];
-    const acknowledged = [];
-    for (const client of [...scheduledSourceSyncClients]) {
-      if (!selfSyncSelected(selection, client)) continue;
-      scheduledSourceSyncClients.delete(client);
-      acknowledged.push(client);
-    }
-    // Recomputed rather than merely cancelled when the set empties: removing one
-    // client can leave another pending whose deadline still has to stand.
-    if (acknowledged.length > 0) rearmSourceSyncCatchUp();
-    return acknowledged;
-  }
-
-  // A sync that reported failure did not refresh the cache, so the source event
-  // this tick consumed on its behalf is still outstanding. Restoring it lets the
-  // catch-up retry after the floor instead of leaving the change for the fallback
-  // interval. Only ever restores what this tick actually consumed: an unprompted
-  // cadence sync failing against a wedged IDE must not invent a pending event and
-  // turn the idle cadence into a ten-second retry loop.
-  function restoreConsumedSourceSync(consumed, kind) {
-    if (!consumed.includes(kind) || stopped) return;
-    scheduledSourceSyncClients.add(kind);
-    // The failure already moved this kind's floor to the idle cadence, so the
-    // shared re-arm backs the retry off on its own — no separate backoff
-    // constant, and no way for the arm and the drain to disagree.
-    rearmSourceSyncCatchUp();
-  }
-
   function scheduleTick(reason, eventClients) {
     if (stopped) return;
     recordWatchClients(eventClients);
@@ -1937,7 +1752,7 @@ function startCollector(options) {
       runTick(reason, {
         todayOnly: true,
         targetClients: takeWatchClients(),
-        sourceSelfSync: takeSourceSyncClients()
+        sourceSelfSync: sourceSyncQueue.takeDue()
       });
     }, watchDebounceMs);
   }
@@ -2001,7 +1816,7 @@ function startCollector(options) {
         }
         const eventClients = clientsForWatchPath(filePath, rootsByClient);
         for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient)) {
-          scheduledSourceSyncClients.add(client);
+          sourceSyncQueue.record(client);
         }
         if (watchTriggersCollection) {
           scheduleTick(
@@ -2041,7 +1856,7 @@ function startCollector(options) {
     // lastFullScanAt === 0 means no valid timestamp exists (cold start,
     // unparseable, or future timestamp) — force a full scan immediately.
     const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
-    const sourceSelfSync = intervalRequiresActivity ? takeSourceSyncClients() : null;
+    const sourceSelfSync = intervalRequiresActivity ? sourceSyncQueue.takeDue() : null;
     const targetClients = intervalRequiresActivity ? takeWatchClients(selfSyncedClients) : [];
     runTick('interval', {
       ...(anchorToday ? { todayOnly: true, refreshWsl: true, targetClients } : {}),
@@ -2058,7 +1873,7 @@ function startCollector(options) {
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
-    if (sourceSyncCatchUpTimer) { clearTimeout(sourceSyncCatchUpTimer); sourceSyncCatchUpTimer = null; }
+    sourceSyncQueue.stop();
     closeWatchers();
     watchedDirectoryKey = null;
   }
@@ -2090,7 +1905,6 @@ module.exports = {
   projectPathFromJsonl,
   collectHistoryOnce,
   collectUsageOnce,
-  clampTimerDelayMs,
   clientDataDirPresence,
   clientWatchCandidates,
   computePeriodWindows,
@@ -2116,10 +1930,11 @@ module.exports = {
   resetPromaPricingCache,
   resolveWatchUsePolling,
   selfSyncSourceRootsForClients,
+  // The process-wide sync throttle this module drives. Exported so a test can
+  // read or pin a client's floor directly instead of inferring it from tick
+  // timings; the collector never takes a second instance.
+  selfSyncThrottle,
   shouldIncludeHistory,
-  sourceSyncFloorMs,
-  SYNC_MIN_INTERVAL_MS,
-  SYNC_SOURCE_EVENT_MIN_INTERVAL_MS,
   startCollector,
   tokscaleCommand,
   tokscaleClientFilter,
