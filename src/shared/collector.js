@@ -570,6 +570,22 @@ function selfSyncSelected(selection, kind) {
 // arm, and the sync decision — and a backoff that only moved the timer still let
 // an unrelated client's watch event drain the failed one straight back out.
 const lastSyncFailed = { cursor: false, antigravity: false };
+// stop() cannot cancel a sync already in flight — a spawned `antigravity sync`
+// runs up to 30s — so a collector rebuilt by a settings change can have the
+// previous one's attempt land after its own. Latest attempt wins: a completion
+// only writes the flag while it is still the newest attempt for its kind.
+// (lastSyncAt is deliberately left alone; an old stamp only rate-limits.)
+const syncAttemptSeq = { cursor: 0, antigravity: 0 };
+
+function beginSyncAttempt(kind) {
+  syncAttemptSeq[kind] += 1;
+  return syncAttemptSeq[kind];
+}
+
+function completeSyncAttempt(kind, attempt, failed) {
+  if (attempt !== syncAttemptSeq[kind]) return;
+  lastSyncFailed[kind] = failed;
+}
 
 function sourceSyncFloorMs(kind) {
   return lastSyncFailed[kind] ? SYNC_MIN_INTERVAL_MS : SYNC_SOURCE_EVENT_MIN_INTERVAL_MS;
@@ -599,12 +615,13 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   if (!enabled.has('cursor')) return;
   if (!cursorAuth.readActiveAccount()) return;
   if (!syncDue('cursor', Date.now(), options.minIntervalMs)) return;
+  const attempt = beginSyncAttempt('cursor');
   try {
     await cursorAuth.runCursorSync();
-    lastSyncFailed.cursor = false;
+    completeSyncAttempt('cursor', attempt, false);
   } catch (err) {
     if (typeof logger === 'function') logger(`cursor sync failed: ${err.message}`);
-    lastSyncFailed.cursor = true;
+    completeSyncAttempt('cursor', attempt, true);
     options.onFailure?.('cursor');
   }
 }
@@ -626,13 +643,14 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   if (!enabled.has('antigravity')) return;
   if (!antigravityDataPresent(home)) return;
   if (!syncDue('antigravity', Date.now(), options.minIntervalMs)) return;
+  const attempt = beginSyncAttempt('antigravity');
   if (typeof options.run === 'function') {
     try {
       await options.run();
-      lastSyncFailed.antigravity = false;
+      completeSyncAttempt('antigravity', attempt, false);
     } catch (err) {
       if (typeof logger === 'function') logger(`antigravity sync failed: ${err.message}`);
-      lastSyncFailed.antigravity = true;
+      completeSyncAttempt('antigravity', attempt, true);
       options.onFailure?.('antigravity');
     }
     return;
@@ -658,7 +676,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      lastSyncFailed.antigravity = failed;
+      completeSyncAttempt('antigravity', attempt, failed);
       if (failed) options.onFailure?.('antigravity');
       resolve();
     };
@@ -1814,27 +1832,36 @@ function startCollector(options) {
   // would sit on stale numbers until the fallback interval.
   function takeSourceSyncClients() {
     const due = [];
-    let soonestWaitMs = null;
     for (const client of scheduledSourceSyncClients) {
       // sourceSyncFloorMs, not the source floor directly: scheduleTick calls this
       // for every watcher event, so an unrelated client's write would otherwise
       // drain a backed-off client here while selfSyncMinIntervalMs still refuses
       // to sync it — consuming the pending event for a sync that never runs, and
       // losing the change until the fallback interval.
-      const waitMs = msUntilSyncDue(client, sourceSyncFloorMs(client));
-      if (waitMs === 0) due.push(client);
-      else soonestWaitMs = soonestWaitMs === null ? waitMs : Math.min(soonestWaitMs, waitMs);
+      if (msUntilSyncDue(client, sourceSyncFloorMs(client)) === 0) due.push(client);
     }
     for (const client of due) scheduledSourceSyncClients.delete(client);
-    // Recomputed across the whole pending set on every call, so re-arming with
-    // it unconditionally always leaves the earliest deadline standing.
-    if (soonestWaitMs !== null) armSourceSyncCatchUp(soonestWaitMs);
+    rearmSourceSyncCatchUp();
     return due.length > 0 ? due : null;
   }
 
-  function armSourceSyncCatchUp(delayMs) {
-    if (stopped) return;
-    if (sourceSyncCatchUpTimer) clearTimeout(sourceSyncCatchUpTimer);
+  // The one place the catch-up deadline is decided. Everything that changes the
+  // pending set calls this and passes nothing: the deadline is always the
+  // earliest across whatever is pending now. Handing a single client's delay in
+  // is what would let one client's backoff overwrite another's nearer deadline —
+  // unreachable while antigravity is the only source-sync client, but the same
+  // shape of divergence that has already cost this state machine a bug.
+  function rearmSourceSyncCatchUp() {
+    if (sourceSyncCatchUpTimer) {
+      clearTimeout(sourceSyncCatchUpTimer);
+      sourceSyncCatchUpTimer = null;
+    }
+    if (stopped || scheduledSourceSyncClients.size === 0) return;
+    let soonestWaitMs = null;
+    for (const client of scheduledSourceSyncClients) {
+      const waitMs = msUntilSyncDue(client, sourceSyncFloorMs(client));
+      soonestWaitMs = soonestWaitMs === null ? waitMs : Math.min(soonestWaitMs, waitMs);
+    }
     sourceSyncCatchUpTimer = setTimeout(() => {
       sourceSyncCatchUpTimer = null;
       if (stopped) return;
@@ -1843,13 +1870,19 @@ function startCollector(options) {
       // an in-flight tick would widen this into an all-client scan — the cost the
       // targeting exists to avoid, and it could drag an unrelated Cursor sync in
       // with it. Same reason scheduleTick re-arms.
-      if (tickInFlight) { armSourceSyncCatchUp(SOURCE_SYNC_RETRY_MS); return; }
+      if (tickInFlight) {
+        sourceSyncCatchUpTimer = setTimeout(() => {
+          sourceSyncCatchUpTimer = null;
+          rearmSourceSyncCatchUp();
+        }, SOURCE_SYNC_RETRY_MS);
+        return;
+      }
       const sourceSelfSync = takeSourceSyncClients();
       if (!sourceSelfSync) return;
       // The tick that carried this event already scanned against the stale
       // cache, so the catch-up has to rescan the same clients behind the sync.
       runTick('source-sync', { todayOnly: true, targetClients: sourceSelfSync, sourceSelfSync });
-    }, clampTimerDelayMs(delayMs, SOURCE_SYNC_RETRY_MS));
+    }, clampTimerDelayMs(Math.max(1, soonestWaitMs), SOURCE_SYNC_RETRY_MS));
   }
 
   // A forced sync satisfies any source event already waiting on the same client:
@@ -1867,10 +1900,9 @@ function startCollector(options) {
       scheduledSourceSyncClients.delete(client);
       acknowledged.push(client);
     }
-    if (scheduledSourceSyncClients.size === 0 && sourceSyncCatchUpTimer) {
-      clearTimeout(sourceSyncCatchUpTimer);
-      sourceSyncCatchUpTimer = null;
-    }
+    // Recomputed rather than merely cancelled when the set empties: removing one
+    // client can leave another pending whose deadline still has to stand.
+    if (acknowledged.length > 0) rearmSourceSyncCatchUp();
     return acknowledged;
   }
 
@@ -1883,10 +1915,10 @@ function startCollector(options) {
   function restoreConsumedSourceSync(consumed, kind) {
     if (!consumed.includes(kind) || stopped) return;
     scheduledSourceSyncClients.add(kind);
-    // The failure just moved this kind's floor to the idle cadence, so asking for
-    // it here is what backs the retry off — no separate backoff constant, and no
-    // way for the arm and the drain to disagree about when it is due again.
-    armSourceSyncCatchUp(msUntilSyncDue(kind, sourceSyncFloorMs(kind)));
+    // The failure already moved this kind's floor to the idle cadence, so the
+    // shared re-arm backs the retry off on its own — no separate backoff
+    // constant, and no way for the arm and the drain to disagree.
+    rearmSourceSyncCatchUp();
   }
 
   function scheduleTick(reason, eventClients) {

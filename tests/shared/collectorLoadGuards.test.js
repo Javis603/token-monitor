@@ -765,7 +765,6 @@ test('an unrelated client event does not bypass a source-sync backoff', async ()
 
   let handle = null;
   let syncCalls = 0;
-  let syncSucceeds = false;
   try {
     const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
     const updates = [];
@@ -785,7 +784,7 @@ test('an unrelated client event does not bypass a source-sync backoff', async ()
       anchorPersistenceEnabled: false,
       runAntigravitySync: async () => {
         syncCalls += 1;
-        if (syncCalls > 1 && !syncSucceeds) throw new Error('language server unreachable');
+        if (syncCalls > 1) throw new Error('language server unreachable');
       },
       onUpdate: (summary, reason) => updates.push({ summary, reason })
     });
@@ -803,7 +802,6 @@ test('an unrelated client event does not bypass a source-sync backoff', async ()
     watchHandler('change', path.join(tmp, '.claude', 'projects', 'a', 'session.jsonl'));
     await waitForCondition(() => updates.length > updatesBefore, 4000);
     assert.equal(syncCalls, 2, 'the unrelated event did not retry the backed-off sync');
-    assert.equal(syncSucceeds, false);
   } finally {
     Date.now = originalNow;
     if (handle) handle.stop();
@@ -859,6 +857,61 @@ test('a failed sync moves the client off the fast source floor', async () => {
       sourceSyncFloorMs('antigravity'),
       SYNC_SOURCE_EVENT_MIN_INTERVAL_MS,
       'and a working sync earns the fast floor back'
+    );
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a superseded sync attempt cannot rewrite the current backoff', async () => {
+  // stop() cannot cancel a sync already in flight, so a collector rebuilt by a
+  // settings change can have the previous one's attempt land after its own.
+  // Whichever attempt started last owns the flag — otherwise a stale failure
+  // parks a healthy client on the five-minute cadence, and a stale success
+  // clears a backoff the live collector still needs.
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-supersede-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+
+  try {
+    const {
+      collectUsageOnce, sourceSyncFloorMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
+    } = freshCollector();
+    const options = {
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'usage-only',
+      historyEnabled: false,
+      homeDir: home,
+      forceSelfSync: true,
+      runTokscale: async () => ({ entries: [] })
+    };
+
+    // The old attempt is still running when the new one starts and succeeds.
+    let releaseStale = null;
+    const staleStarted = new Promise((resolve) => {
+      const stale = collectUsageOnce({
+        ...options,
+        runAntigravitySync: () => new Promise((_, reject) => {
+          releaseStale = () => reject(new Error('language server went away'));
+          resolve();
+        })
+      });
+      stale.catch(() => {});
+    });
+    await staleStarted;
+
+    await collectUsageOnce({ ...options, runAntigravitySync: async () => {} });
+    assert.equal(sourceSyncFloorMs('antigravity'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
+
+    // Now the old one fails. It must not drag the live client into a backoff.
+    releaseStale();
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.notEqual(
+      sourceSyncFloorMs('antigravity'),
+      SYNC_MIN_INTERVAL_MS,
+      'the superseded failure was ignored'
     );
   } finally {
     delete require.cache[collectorPath];
