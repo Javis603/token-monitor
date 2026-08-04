@@ -231,11 +231,15 @@ test('Antigravity source events target its umbrella client without watching sync
     return child;
   };
 
-  // Advancing a shared offset rather than freezing the clock: every other
-  // deadline in the collector stays monotonic, only further ahead.
+  // Pinned to a captured instant, not `originalNow() + offset`: the floor is
+  // measured from the startup sync, so letting real time leak into the elapsed
+  // would make "inside the floor" depend on how long the startup tick took —
+  // flaky on a loaded CI host. waitForCondition runs off performance.now, so
+  // freezing Date.now does not stall the polling.
   const originalNow = Date.now;
+  const baseNow = originalNow();
   let clockOffsetMs = 0;
-  Date.now = () => originalNow() + clockOffsetMs;
+  Date.now = () => baseNow + clockOffsetMs;
 
   let handle = null;
   let syncCalls = 0;
@@ -276,6 +280,8 @@ test('Antigravity source events target its umbrella client without watching sync
     // re-fetches over RPC and rewrites every known session artifact on every run,
     // and the per-turn source file is a SQLite WAL that churns for the whole
     // turn, so an unrationed sync would spawn one of those per quiet gap.
+    assert.ok(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS < 60 * 1000);
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300;
     watchHandler('change', path.join(tmp, sourceRoot, 'annotations', 'session-a.pbtxt'));
     await waitForCondition(() => updates.length === 2);
     assert.equal(syncCalls, 1, 'a source event inside the floor reuses the fresh cache');
@@ -283,13 +289,15 @@ test('Antigravity source events target its umbrella client without watching sync
     assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli');
     assert.ok(targeted.includes('--today'));
 
-    // Past the floor but nowhere near the five-minute idle cadence: this is the
-    // window the watcher exists to serve.
-    assert.ok(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS < 60 * 1000);
+    // The floor defers that sync, it does not drop it. No second event follows —
+    // a turn that ends inside the floor must not sit on stale numbers until the
+    // fallback interval, so the catch-up has to fire on its own.
     clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
-    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => syncCalls === 2);
     await waitForCondition(() => updates.length === 3);
-    assert.equal(syncCalls, 2, 'a source event past the floor refreshes the cache');
+    const caughtUp = calls[calls.length - 1];
+    assert.equal(caughtUp[caughtUp.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.ok(caughtUp.includes('--today'), 'the catch-up rescans behind the sync it waited for');
   } finally {
     Date.now = originalNow;
     if (handle) handle.stop();

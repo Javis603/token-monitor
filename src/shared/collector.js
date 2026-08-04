@@ -529,6 +529,17 @@ function syncDue(kind, nowMs = Date.now(), minIntervalMs = SYNC_MIN_INTERVAL_MS)
   return true;
 }
 
+// 0 when this kind may sync now, otherwise the milliseconds left on its floor.
+// A floor that refuses a sync has to hand back a deadline: dropping the request
+// instead would strand the change until the fallback interval, which is the
+// latency the watcher exists to remove. Same rollback handling as syncDue — a
+// stamp from a clock that no longer exists is not something to wait out.
+function msUntilSyncDue(kind, minIntervalMs, nowMs = Date.now()) {
+  const elapsed = nowMs - lastSyncAt[kind];
+  if (elapsed < 0) return 0;
+  return Math.max(0, minIntervalMs - elapsed);
+}
+
 // Whether a self-synced client is named by one of the tick's sync selections.
 // `true` means all of them (the manual refresh button, where the user is
 // explicitly asking for fresh numbers); an array means only those. The
@@ -1459,6 +1470,7 @@ function startCollector(options) {
   // skip ahead of the idle cadence. An antigravity-cli write lands in the first
   // and not the second.
   const scheduledSourceSyncClients = new Set();
+  let sourceSyncCatchUpTimer = null;
   const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => SELF_SYNCED_CLIENTS.has(client));
   let activityRevision = 0;
   let collectedActivityRevision = 0;
@@ -1712,10 +1724,39 @@ function startCollector(options) {
     return targetClients;
   }
 
+  // Drains only the clients whose floor has elapsed. One left behind arms a
+  // catch-up for the moment it clears: a source event is a statement that the
+  // cache is stale, and that stays true whether or not another event follows, so
+  // the floor has to defer the sync rather than discard it. Without this a turn
+  // ending inside the floor — two quick turns, or one right after startup —
+  // would sit on stale numbers until the fallback interval.
   function takeSourceSyncClients() {
-    const clientIds = [...scheduledSourceSyncClients];
-    scheduledSourceSyncClients.clear();
-    return clientIds.length > 0 ? clientIds : null;
+    const due = [];
+    let soonestWaitMs = null;
+    for (const client of scheduledSourceSyncClients) {
+      const waitMs = msUntilSyncDue(client, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
+      if (waitMs === 0) due.push(client);
+      else soonestWaitMs = soonestWaitMs === null ? waitMs : Math.min(soonestWaitMs, waitMs);
+    }
+    for (const client of due) scheduledSourceSyncClients.delete(client);
+    // Recomputed across the whole pending set on every call, so re-arming with
+    // it unconditionally always leaves the earliest deadline standing.
+    if (soonestWaitMs !== null) armSourceSyncCatchUp(soonestWaitMs);
+    return due.length > 0 ? due : null;
+  }
+
+  function armSourceSyncCatchUp(delayMs) {
+    if (stopped) return;
+    if (sourceSyncCatchUpTimer) clearTimeout(sourceSyncCatchUpTimer);
+    sourceSyncCatchUpTimer = setTimeout(() => {
+      sourceSyncCatchUpTimer = null;
+      if (stopped) return;
+      const sourceSelfSync = takeSourceSyncClients();
+      if (!sourceSelfSync) return;
+      // The tick that carried this event already scanned against the stale
+      // cache, so the catch-up has to rescan the same clients behind the sync.
+      runTick('source-sync', { todayOnly: true, targetClients: sourceSelfSync, sourceSelfSync });
+    }, Math.max(1, delayMs));
   }
 
   function scheduleTick(reason, eventClients) {
@@ -1855,6 +1896,7 @@ function startCollector(options) {
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
+    if (sourceSyncCatchUpTimer) { clearTimeout(sourceSyncCatchUpTimer); sourceSyncCatchUpTimer = null; }
     closeWatchers();
     watchedDirectoryKey = null;
   }
