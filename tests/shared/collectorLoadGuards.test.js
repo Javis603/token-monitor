@@ -440,7 +440,7 @@ test('a manual refresh satisfies a deferred source sync instead of adding one', 
   // forced sync re-reads the IDE from scratch, so the deferred catch-up would be
   // a second full `antigravity sync` for a change already picked up.
   const sourceRoot = path.join('.gemini', 'antigravity');
-  const tmp = withTmpHome([path.join(sourceRoot, 'conversations')]);
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations'), path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   os.homedir = () => tmp;
@@ -562,7 +562,7 @@ test('a failed forced sync hands the source event back instead of eating it', as
   let syncCalls = 0;
   let failNextSync = false;
   try {
-    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS, SYNC_MIN_INTERVAL_MS } = freshCollector();
     const updates = [];
     handle = startCollector({
       clients: 'antigravity',
@@ -604,10 +604,11 @@ test('a failed forced sync hands the source event back instead of eating it', as
     await handle.tick('manual', { forceSelfSync: true });
     assert.equal(syncCalls, 2, 'the forced sync was attempted');
 
-    // The change is still uncollected, so the catch-up has to come back for it.
+    // The change is still uncollected, so the catch-up has to come back for it —
+    // on the idle cadence, because the attempt that consumed it failed.
     failNextSync = false;
-    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 3;
-    t.mock.timers.tick(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000);
+    clockOffsetMs = SYNC_MIN_INTERVAL_MS * 2;
+    t.mock.timers.tick(SYNC_MIN_INTERVAL_MS + 1000);
     t.mock.timers.reset();
     await waitForCondition(() => syncCalls === 3, 4000);
     const retried = calls[calls.length - 1];
@@ -683,13 +684,15 @@ test('a source event that keeps failing backs off to the idle cadence', async (t
       anchorPersistenceEnabled: false,
       runAntigravitySync: async () => {
         syncCalls += 1;
-        throw new Error('language server unreachable');
+        // The startup sync succeeds: the client has to be on the fast floor for
+        // the source event below to be the thing that trips the backoff.
+        if (syncCalls > 1) throw new Error('language server unreachable');
       },
       onUpdate: (summary, reason) => updates.push({ summary, reason })
     });
 
     await waitForCondition(() => updates.length === 1);
-    assert.equal(syncCalls, 1, 'the startup sync failed');
+    assert.equal(syncCalls, 1, 'the startup sync succeeded');
 
     // Mocked before the event, not after: the restore arms a real timer, and
     // enabling the mock afterwards would leave that timer outside its control —
@@ -718,6 +721,148 @@ test('a source event that keeps failing backs off to the idle cadence', async (t
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('an unrelated client event does not bypass a source-sync backoff', async () => {
+  // scheduleTick drains the pending source set on *every* watcher event, so the
+  // backoff cannot live in the catch-up timer alone: a client the user happens to
+  // be working in would drain the failed one straight back out and retry it on
+  // the fast floor — the same retry loop, driven by someone else's activity.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([
+    path.join(sourceRoot, 'conversations'),
+    path.join('.claude', 'projects')
+  ]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  let syncSucceeds = false;
+  try {
+    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => {
+        syncCalls += 1;
+        if (syncCalls > 1 && !syncSucceeds) throw new Error('language server unreachable');
+      },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1, 'the startup sync succeeded');
+
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => syncCalls === 2, 4000);
+
+    // Far past the source floor, so only the backoff can hold it back now.
+    clockOffsetMs += SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 4;
+    const updatesBefore = updates.length;
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'a', 'session.jsonl'));
+    await waitForCondition(() => updates.length > updatesBefore, 4000);
+    assert.equal(syncCalls, 2, 'the unrelated event did not retry the backed-off sync');
+    assert.equal(syncSucceeds, false);
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a failed sync moves the client off the fast source floor', async () => {
+  // The backoff is one decision, read by all three schedulers — the drain, the
+  // catch-up arm and the sync itself. Pinning the decision rather than each
+  // caller is what stops them disagreeing: an earlier version backed off only
+  // the timer, and an unrelated client's watch event still drained the failed
+  // client on the fast floor, consuming a pending event for a sync that would
+  // then be refused.
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-floor-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+
+  try {
+    const {
+      collectUsageOnce, sourceSyncFloorMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
+    } = freshCollector();
+    const options = {
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'usage-only',
+      historyEnabled: false,
+      homeDir: home,
+      runTokscale: async () => ({ entries: [] })
+    };
+
+    assert.equal(sourceSyncFloorMs('antigravity'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
+
+    await collectUsageOnce({
+      ...options,
+      forceSelfSync: true,
+      runAntigravitySync: async () => { throw new Error('language server unreachable'); }
+    });
+    assert.equal(sourceSyncFloorMs('antigravity'), SYNC_MIN_INTERVAL_MS, 'a failure backs the client off');
+
+    await collectUsageOnce({
+      ...options,
+      forceSelfSync: true,
+      runAntigravitySync: async () => {}
+    });
+    assert.equal(
+      sourceSyncFloorMs('antigravity'),
+      SYNC_SOURCE_EVENT_MIN_INTERVAL_MS,
+      'and a working sync earns the fast floor back'
+    );
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

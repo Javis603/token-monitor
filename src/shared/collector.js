@@ -562,12 +562,26 @@ function selfSyncSelected(selection, kind) {
   return Array.isArray(selection) && selection.includes(kind);
 }
 
+// Whether the last attempt for this kind failed. The short source floor is a
+// reward for a sync that works: once one fails there is nothing upstream to say
+// whether the cause is transient, so the client drops to the idle cadence until
+// an attempt succeeds. Expressed as the floor itself rather than as a longer
+// timer, because the floor is read from three places — the drain, the catch-up
+// arm, and the sync decision — and a backoff that only moved the timer still let
+// an unrelated client's watch event drain the failed one straight back out.
+const lastSyncFailed = { cursor: false, antigravity: false };
+
+function sourceSyncFloorMs(kind) {
+  return lastSyncFailed[kind] ? SYNC_MIN_INTERVAL_MS : SYNC_SOURCE_EVENT_MIN_INTERVAL_MS;
+}
+
 // How long this kind must have been idle before the tick may sync it. An
 // explicit user action waits for nothing; a watch event on a raw source root
 // waits out the short floor; everything else keeps the idle cadence.
 function selfSyncMinIntervalMs(options, kind) {
+  // A manual refresh is the user overriding the backoff on purpose.
   if (selfSyncSelected(options.forceSelfSync, kind)) return 0;
-  if (selfSyncSelected(options.sourceSelfSync, kind)) return SYNC_SOURCE_EVENT_MIN_INTERVAL_MS;
+  if (selfSyncSelected(options.sourceSelfSync, kind)) return sourceSyncFloorMs(kind);
   return SYNC_MIN_INTERVAL_MS;
 }
 
@@ -587,8 +601,10 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   if (!syncDue('cursor', Date.now(), options.minIntervalMs)) return;
   try {
     await cursorAuth.runCursorSync();
+    lastSyncFailed.cursor = false;
   } catch (err) {
     if (typeof logger === 'function') logger(`cursor sync failed: ${err.message}`);
+    lastSyncFailed.cursor = true;
     options.onFailure?.('cursor');
   }
 }
@@ -613,8 +629,10 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   if (typeof options.run === 'function') {
     try {
       await options.run();
+      lastSyncFailed.antigravity = false;
     } catch (err) {
       if (typeof logger === 'function') logger(`antigravity sync failed: ${err.message}`);
+      lastSyncFailed.antigravity = true;
       options.onFailure?.('antigravity');
     }
     return;
@@ -640,6 +658,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      lastSyncFailed.antigravity = failed;
       if (failed) options.onFailure?.('antigravity');
       resolve();
     };
@@ -1797,7 +1816,12 @@ function startCollector(options) {
     const due = [];
     let soonestWaitMs = null;
     for (const client of scheduledSourceSyncClients) {
-      const waitMs = msUntilSyncDue(client, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
+      // sourceSyncFloorMs, not the source floor directly: scheduleTick calls this
+      // for every watcher event, so an unrelated client's write would otherwise
+      // drain a backed-off client here while selfSyncMinIntervalMs still refuses
+      // to sync it — consuming the pending event for a sync that never runs, and
+      // losing the change until the fallback interval.
+      const waitMs = msUntilSyncDue(client, sourceSyncFloorMs(client));
       if (waitMs === 0) due.push(client);
       else soonestWaitMs = soonestWaitMs === null ? waitMs : Math.min(soonestWaitMs, waitMs);
     }
@@ -1859,15 +1883,10 @@ function startCollector(options) {
   function restoreConsumedSourceSync(consumed, kind) {
     if (!consumed.includes(kind) || stopped) return;
     scheduledSourceSyncClients.add(kind);
-    // Deliberately the idle cadence, not the source floor the event came in on.
-    // The restored event drives the next attempt, so re-arming on the fast floor
-    // would let a sync that keeps failing schedule its own retry every ten
-    // seconds for the life of the process — with a targeted scan behind each one
-    // — and nothing upstream distinguishes a transient failure from a permanent
-    // one. Backing off to the cadence the client had before any of this existed
-    // is the honest degraded state, and it needs no retry counter to bound it. A
-    // new source event or a manual refresh still gets the fast path.
-    armSourceSyncCatchUp(msUntilSyncDue(kind, SYNC_MIN_INTERVAL_MS));
+    // The failure just moved this kind's floor to the idle cadence, so asking for
+    // it here is what backs the retry off — no separate backoff constant, and no
+    // way for the arm and the drain to disagree about when it is due again.
+    armSourceSyncCatchUp(msUntilSyncDue(kind, sourceSyncFloorMs(kind)));
   }
 
   function scheduleTick(reason, eventClients) {
@@ -2066,6 +2085,8 @@ module.exports = {
   resolveWatchUsePolling,
   selfSyncSourceRootsForClients,
   shouldIncludeHistory,
+  sourceSyncFloorMs,
+  SYNC_MIN_INTERVAL_MS,
   SYNC_SOURCE_EVENT_MIN_INTERVAL_MS,
   startCollector,
   tokscaleCommand,
