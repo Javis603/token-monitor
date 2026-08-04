@@ -26,6 +26,7 @@ const {
 } = require('../../src/shared/collector');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
+const { applySessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
 const { aggregateDevices, mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
 
 const core = (overrides = {}) => ({
@@ -602,6 +603,39 @@ test('a limits-only ingest keeps the attribution describing the usage it carries
     clientHealth: { clients: { codex: core({ source: { state: 'missing', detectedCount: 0, checkedCount: 1 } }) } }
   });
   assert.equal(replaced.clientHealth.clients.codex.overall, 'unavailable');
+});
+
+// `liveTokens` is what the collector scanned; the record's periods can hold more
+// by the time it ships. Two restorations run afterwards, in the widget and the
+// agent — and the session one, unlike the untracked-client one, does not filter
+// by tracked client. This test exists because the subtraction looks like a way
+// to derive archived usage and is not one.
+test('liveTokens is a lower bound on the shipped period, not a copy of it', () => {
+  const now = new Date('2026-08-04T12:00:00.000Z');
+  const summary = {
+    allTime: { totalTokens: 0, clients: {}, clientCosts: {}, models: {}, modelCosts: {}, sessions: {} }
+  };
+  const health = deriveClientHealth('codex', summary.allTime, {
+    sourceChecks: { codex: [{ id: 'codex-sessions', exists: true }] }
+  });
+  assert.equal(health.clients.codex.data.liveTokens, 0);
+  assert.equal(health.clients.codex.overall, 'waiting');
+
+  const restored = applySessionUsageArchive(summary, {
+    version: 1,
+    sessions: {
+      'codex:gone': {
+        client: 'codex',
+        sessionId: 'gone',
+        capturedAt: now.toISOString(),
+        periods: { allTime: { client: 'codex', sessionId: 'gone', totalTokens: 100, models: { 'gpt-5': 100 } } }
+      }
+    }
+  }, { now });
+
+  // A tracked client with a health entry, whose shipped total exceeds it.
+  assert.equal(restored.allTime.clients.codex, 100);
+  assert.ok(restored.allTime.clients.codex > health.clients.codex.data.liveTokens);
 });
 
 test('aggregateDevices carries health per device and never rolls it up', () => {
