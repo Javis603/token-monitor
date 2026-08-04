@@ -655,8 +655,7 @@ test('a source event that keeps failing backs off to the idle cadence', async (t
 
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
-  const calls = [];
-  childProcess.spawn = recordingSpawn(calls);
+  childProcess.spawn = recordingSpawn([]);
 
   const originalNow = Date.now;
   const baseNow = originalNow();
@@ -912,6 +911,35 @@ test('a superseded sync attempt cannot rewrite the current backoff', async () =>
       sourceSyncFloorMs('antigravity'),
       SYNC_MIN_INTERVAL_MS,
       'the superseded failure was ignored'
+    );
+
+    // And the same in the other direction, which is the more dangerous one: a
+    // stale success must not clear a backoff the live client still needs.
+    let releaseStaleOk = null;
+    const staleOkStarted = new Promise((resolve) => {
+      const staleOk = collectUsageOnce({
+        ...options,
+        runAntigravitySync: () => new Promise((fulfil) => {
+          releaseStaleOk = () => fulfil();
+          resolve();
+        })
+      });
+      staleOk.catch(() => {});
+    });
+    await staleOkStarted;
+
+    await collectUsageOnce({
+      ...options,
+      runAntigravitySync: async () => { throw new Error('language server went away'); }
+    });
+    assert.equal(sourceSyncFloorMs('antigravity'), SYNC_MIN_INTERVAL_MS);
+
+    releaseStaleOk();
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      sourceSyncFloorMs('antigravity'),
+      SYNC_MIN_INTERVAL_MS,
+      'the superseded success did not clear the live backoff'
     );
   } finally {
     delete require.cache[collectorPath];
