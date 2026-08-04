@@ -955,6 +955,7 @@ async function collectUsageOnce(options) {
   const clientHealth = deriveClientHealth(normalizedClients, allTime, {
     sourceChecks,
     wslStatus,
+    observedAt: collectedAt,
     lastActivityDays: mergeClientActivityDays(options.lastActivityDays, summary.history)
   });
   if (clientHealth) summary.clientHealth = clientHealth;
@@ -1384,7 +1385,14 @@ function clientActivityDaysFromHistory(history) {
 // Codex. A day only ever moves forward, so the fresh value wins where both hold
 // one.
 function mergeClientActivityDays(previous, history) {
-  return { ...(previous || {}), ...clientActivityDaysFromHistory(history) };
+  const merged = { ...(previous || {}) };
+  for (const [client, day] of Object.entries(clientActivityDaysFromHistory(history))) {
+    // Per client, newest wins. A plain spread would let a fresh-but-older value
+    // push a known day backwards — history is a rolling window and a refresh can
+    // legitimately return a shorter one, so "fresh" does not imply "later".
+    if (!merged[client] || day > merged[client]) merged[client] = day;
+  }
+  return merged;
 }
 
 // Per-client diagnostics. Every input is a filesystem or subprocess observation
@@ -1433,24 +1441,34 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
       if (checks.length > 0 && detected.length < checks.length) {
         entry.source.checks = checks.map(({ id, exists }) => ({ id, exists }));
       }
-      const diagnostics = [];
+      const codes = [];
       // Only "nothing at all" is a fault. A client's roots are alternatives, not
       // dependencies — Antigravity's IDE cache, native sources and CLI data are
       // three ways to have it installed, and so are Kiro's three — so a partial
       // set is the normal shape of a normal install. `checks` still ships as
       // neutral evidence of which ones were found.
-      if (checks.length > 0 && detected.length === 0) diagnostics.push('source-missing');
-      if (sync?.failureCode) diagnostics.push(sync.failureCode);
-      if (detected.length > 0 && liveTokens <= 0) diagnostics.push('no-usage-observed');
+      if (checks.length > 0 && detected.length === 0) codes.push('source-missing');
+      if (sync?.failureCode) codes.push(sync.failureCode);
+      if (detected.length > 0 && liveTokens <= 0) codes.push('no-usage-observed');
       // States a fact, not a cause: a marker without usage can equally mean the
       // tool is installed in that distro and simply unused.
-      if (wslDetected.has(client) && !wslWithData.has(client)) diagnostics.push('wsl-detected-no-data');
-      if (diagnostics.length > 0) entry.diagnostics = diagnostics.slice(0, MAX_DIAGNOSTICS_PER_CLIENT);
+      if (wslDetected.has(client) && !wslWithData.has(client)) codes.push('wsl-detected-no-data');
+      // An object per diagnostic even though `code` is the only field today: the
+      // extension point is inside the entry, and every diagnostics format worth
+      // copying (LSP, ESLint, SARIF, RFC 9457) is shaped this way. Growing an
+      // object stays compatible; turning `string[]` into `object[]` would not.
+      // Severity is deliberately absent — it depends on which client the code
+      // lands on, which only the renderer knows.
+      if (codes.length > 0) {
+        entry.diagnostics = codes.slice(0, MAX_DIAGNOSTICS_PER_CLIENT).map((code) => ({ code }));
+      }
     }
     entry.overall = overall;
     result[client] = entry;
   }
-  return { version: CLIENT_HEALTH_VERSION, clients: result };
+  const health = { version: CLIENT_HEALTH_VERSION, clients: result };
+  if (options.observedAt) health.observedAt = new Date(options.observedAt).toISOString();
+  return health;
 }
 
 // The frozen wslAnchor is only valid to merge into a preview period when it was

@@ -218,6 +218,7 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 {
   "clientHealth": {
     "version": 1,
+    "observedAt": "2026-08-04T09:15:00.000Z",
     "clients": {
       "claude": {
         "source": { "state": "detected", "detectedCount": 1, "checkedCount": 2 },
@@ -242,7 +243,7 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
           "lastSuccessAt": "2026-08-04T08:40:00.000Z"
         },
         "data": { "liveTokens": 0, "lastActivityDay": "2026-08-03" },
-        "diagnostics": ["sync-timeout"],
+        "diagnostics": [{ "code": "sync-timeout" }],
         "overall": "attention"
       }
     }
@@ -258,9 +259,13 @@ A client installed only inside a running WSL distro has no host directory, and i
 
 `source.checks[].id` is a stable identifier for a *kind* of source root, never a filesystem path: one id can stand for several platform variants (a VS Code workspace-storage root has one per platform), and an absolute path contains the user's home directory. Ids outside the recognized set are dropped on ingest. A failed self-sync likewise reports a stable code in `diagnostics` (`sync-failed`, `sync-timeout`, `sync-spawn-failed`, `sync-exit-error`) and never the subprocess's stderr. The other diagnostic codes are `source-missing`, `no-usage-observed`, and `wsl-detected-no-data`; the last one states that a WSL marker was found and the scan returned nothing, which can equally mean the tool is installed in that distro and unused.
 
+`diagnostics` entries are objects carrying a `code`, not bare strings, even though `code` is the only field today: the extension point belongs inside the entry, matching how LSP, ESLint, SARIF, and RFC 9457 all shape a diagnostic. Adding a field to the object stays backward compatible; turning `string[]` into `object[]` would not. Severity is deliberately **not** on the wire — the same code means different things on different clients, so it is a renderer decision rather than something a collector can know. Observation time is likewise recorded once, as `clientHealth.observedAt`, rather than per diagnostic: every entry comes from the same scan. It is its own field because a limits-only ingest carries health forward while the record's `updatedAt` moves on, so `updatedAt` cannot be read as the time the diagnosis was made.
+
 There is deliberately no code for "some roots found, others absent". A client's roots are alternatives rather than dependencies — Antigravity's IDE cache, native sources, and CLI data are three ways to have it installed — so a partial set is what a normal install looks like. `source.checks` reports which ones were found as neutral evidence; only finding nothing at all is `source-missing`.
 
-A diagnostic the rest of the entry does not support is dropped on ingest rather than stored: `sync-*` requires a failed collection, `source-missing` a missing source, and `no-usage-observed` a client with nothing counted. The hub stores a record that is internally consistent, not one that merely passes per-field range checks.
+A diagnostic the rest of the entry does not support is dropped on ingest rather than stored: `sync-*` requires a failed collection, `source-missing` a missing source, and `no-usage-observed` a *detected* source with nothing counted — "we can read this client and found nothing" is a different statement from "there is nothing to read". `source.checks` is held to the same standard: it is evidence for `detectedCount`/`checkedCount`, so an array whose length or found-count disagrees with them is dropped whole rather than allowed to overwrite the core. The hub stores a record that is internally consistent, not one that merely passes per-field range checks.
+
+`data.liveTokens` is the collector's per-client all-time usage as scanned. It is **not** the same as the device record's `allTime.clients[<id>]`: the widget restores archived usage for clients the user has since untracked, after the health record is built. The two differ only for clients that have no health entry at all, so the difference is not a way to derive archived contribution. ClientHealth v1 deliberately describes neither archived usage nor presentation-layer data origins.
 
 `data.lastActivityDay` is the most recent day the collector holds usage for this client, taken from the daily history buckets. It is deliberately not "last used": tokscale exposes no per-turn timestamps, and the field is omitted entirely when history is unavailable.
 

@@ -80,7 +80,7 @@ test('normalizeClientHealth downgrades every value it does not recognise', () =>
         source: { state: 'brand-new-state', detectedCount: 1, checkedCount: 2, checks: [{ id: 'made-up-root', exists: true }, { id: 'claude-projects', exists: true }] },
         collection: { state: 'quantum', lastAttemptAt: 'not a date', lastSuccessAt: '2026-08-01T10:00:00.000Z' },
         data: { liveTokens: 5, lastActivityDay: '01/08/2026' },
-        diagnostics: ['source-missing', 'invented-code'],
+        diagnostics: [{ code: 'source-missing' }, { code: 'invented-code' }],
         overall: 'healthy'
       }
     }
@@ -94,7 +94,10 @@ test('normalizeClientHealth downgrades every value it does not recognise', () =>
   assert.equal(Object.hasOwn(claude.collection, 'lastAttemptAt'), false);
   assert.equal(claude.collection.lastSuccessAt, '2026-08-01T10:00:00.000Z');
   assert.equal(Object.hasOwn(claude.data, 'lastActivityDay'), false);
-  assert.deepEqual(claude.source.checks, [{ id: 'claude-projects', exists: true }]);
+  // One check was dropped by the allowlist, so the array no longer describes the
+  // counts the hub recomputes `overall` from — the whole array goes rather than
+  // leaving a renderer holding two numbers that disagree.
+  assert.equal(Object.hasOwn(claude.source, 'checks'), false);
   // `source-missing` contradicts a detected source and goes with the made-up code.
   assert.equal(Object.hasOwn(claude, 'diagnostics'), false);
   // The producer claimed healthy on a collection state this build cannot read.
@@ -146,6 +149,46 @@ test('normalizeClientHealth canonicalizes a record instead of clamping it field 
   assert.equal(valid.clients.codex.data.lastActivityDay, '2026-08-04');
 });
 
+// The counts are the core; `checks` is evidence for them. Evidence that
+// contradicts the thing it supports is worse than none, because a renderer has
+// no way to tell which half to believe.
+test('normalizeClientHealth keeps source checks only while they match the counts', () => {
+  const withChecks = (source) => normalizeClientHealth({ clients: { antigravity: { ...core(), source } } }).clients.antigravity.source;
+
+  const agreeing = withChecks({
+    state: 'detected',
+    detectedCount: 1,
+    checkedCount: 2,
+    checks: [{ id: 'antigravity-cli-data', exists: true }, { id: 'antigravity-ide-source', exists: false }]
+  });
+  assert.equal(agreeing.checks.length, 2);
+
+  // Same array, but the counts claim two roots were found.
+  const disagreeing = withChecks({
+    state: 'detected',
+    detectedCount: 2,
+    checkedCount: 2,
+    checks: [{ id: 'antigravity-cli-data', exists: true }, { id: 'antigravity-ide-source', exists: false }]
+  });
+  assert.equal(Object.hasOwn(disagreeing, 'checks'), false);
+  assert.equal(disagreeing.detectedCount, 2, 'the core survives; the evidence is what goes');
+});
+
+// Health can be carried across a limits-only ingest, which moves `updatedAt`
+// without re-observing anything — so the record has to carry its own age.
+test('clientHealth stamps one observation time for the whole record', () => {
+  const observedAt = '2026-08-04T13:43:02.000Z';
+  const health = normalizeClientHealth({ observedAt, clients: { codex: core() } });
+  assert.equal(health.observedAt, observedAt);
+  assert.equal(Object.hasOwn(normalizeClientHealth({ observedAt: 'yesterday', clients: { codex: core() } }), 'observedAt'), false);
+  // The producer stamps it from the scan it belongs to.
+  const produced = deriveClientHealth('codex', { clients: {} }, {
+    sourceChecks: { codex: [{ id: 'codex-sessions', exists: true }] },
+    observedAt: new Date(observedAt)
+  });
+  assert.equal(produced.observedAt, observedAt);
+});
+
 test('normalizeClientHealth refuses shapes that would be stored as clients', () => {
   // An array passes `typeof === 'object'`; its indices would become client ids.
   assert.equal(normalizeClientHealth({ clients: [core()] }), null);
@@ -168,7 +211,7 @@ test('normalizeClientHealth drops diagnostics its own record contradicts', () =>
     clients: {
       codex: {
         ...core({ data: { liveTokens: 4000 } }),
-        diagnostics: ['sync-timeout', 'source-missing', 'no-usage-observed']
+        diagnostics: [{ code: 'sync-timeout' }, { code: 'source-missing' }, { code: 'no-usage-observed' }]
       }
     }
   });
@@ -176,9 +219,9 @@ test('normalizeClientHealth drops diagnostics its own record contradicts', () =>
   assert.equal(health.clients.codex.overall, 'healthy');
 
   const failing = normalizeClientHealth({
-    clients: { cursor: { ...core({ collection: { state: 'failed' } }), diagnostics: ['sync-timeout'] } }
+    clients: { cursor: { ...core({ collection: { state: 'failed' } }), diagnostics: [{ code: 'sync-timeout' }] } }
   });
-  assert.deepEqual(failing.clients.cursor.diagnostics, ['sync-timeout']);
+  assert.deepEqual(failing.clients.cursor.diagnostics, [{ code: 'sync-timeout' }]);
   assert.equal(failing.clients.cursor.overall, 'attention');
 });
 
@@ -206,14 +249,16 @@ test('normalizeClientHealth caps every list a hostile ingest could grow', () => 
 
   const checks = CLIENT_SOURCE_CHECK_IDS.map((id) => ({ id, exists: true }));
   assert.ok(checks.length > MAX_CHECKS_PER_CLIENT, 'the allowlist must be able to overflow the per-client cap');
-  const capped = normalizeClientHealth({ clients: { codex: { ...core(), source: { state: 'detected', detectedCount: 1, checkedCount: 1, checks } } } });
+  const capped = normalizeClientHealth({
+    clients: { codex: { ...core(), source: { state: 'detected', detectedCount: MAX_CHECKS_PER_CLIENT, checkedCount: MAX_CHECKS_PER_CLIENT, checks } } }
+  });
   assert.equal(capped.clients.codex.source.checks.length, MAX_CHECKS_PER_CLIENT);
   // Counts are bounded too — they are what a renderer draws a ratio from.
   const inflated = normalizeClientHealth({ clients: { codex: { ...core(), source: { state: 'detected', detectedCount: 9e9, checkedCount: 9e9 } } } });
   assert.equal(inflated.clients.codex.source.detectedCount, MAX_CHECKS_PER_CLIENT);
 
   // All five agree with a failed collection, so the cap is what trims them.
-  const diagnostics = ['sync-failed', 'sync-timeout', 'sync-spawn-failed', 'sync-exit-error', 'no-usage-observed'];
+  const diagnostics = ['sync-failed', 'sync-timeout', 'sync-spawn-failed', 'sync-exit-error', 'no-usage-observed'].map((code) => ({ code }));
   assert.ok(diagnostics.length > MAX_DIAGNOSTICS_PER_CLIENT);
   const trimmed = normalizeClientHealth({
     clients: { cursor: { ...core({ collection: { state: 'failed' } }), diagnostics } }
@@ -336,9 +381,9 @@ test('deriveClientHealth reports every tracked client within the declared shape'
   // alternatives rather than dependencies, so a missing one is evidence in
   // `checks`, never a fault of its own.
   assert.deepEqual(health.clients.antigravity.source.checks, SOURCE_CHECKS.antigravity);
-  assert.deepEqual(health.clients.antigravity.diagnostics, ['no-usage-observed']);
+  assert.deepEqual(health.clients.antigravity.diagnostics, [{ code: 'no-usage-observed' }]);
   assert.equal(health.clients.cursor.overall, 'unavailable');
-  assert.deepEqual(health.clients.cursor.diagnostics, ['source-missing']);
+  assert.deepEqual(health.clients.cursor.diagnostics, [{ code: 'source-missing' }]);
   // The two self-synced clients report their sync lane; everyone else is direct.
   assert.equal(health.clients.claude.collection.state, 'direct');
   assert.equal(health.clients.codex.collection.state, 'direct');
@@ -385,7 +430,7 @@ test('deriveClientHealth carries the self-sync lane into the record', () => {
   const failed = deriveClientHealth('cursor', { clients: { cursor: 500 } }, options).clients.cursor;
   assert.equal(failed.collection.state, 'failed');
   assert.equal(failed.overall, 'attention');
-  assert.ok(failed.diagnostics.includes('sync-timeout'));
+  assert.deepEqual(failed.diagnostics, [{ code: 'sync-timeout' }]);
 
   clock.now += 5000;
   const second = throttle.beginAttempt('cursor');
@@ -457,7 +502,7 @@ test('a WSL marker with no usage waits rather than reading as absent', () => {
   });
   assert.equal(health.clients.hermes.source.state, 'detected');
   assert.equal(health.clients.hermes.overall, 'waiting');
-  assert.deepEqual(health.clients.hermes.diagnostics, ['no-usage-observed', 'wsl-detected-no-data']);
+  assert.deepEqual(health.clients.hermes.diagnostics, [{ code: 'no-usage-observed' }, { code: 'wsl-detected-no-data' }]);
   assert.equal(deriveLegacyClientStatus(health.clients.hermes), 'waiting');
 });
 

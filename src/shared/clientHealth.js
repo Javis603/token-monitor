@@ -226,21 +226,25 @@ function normalizeChecks(value) {
 function diagnosticAgreesWithEntry(code, entry) {
   if (code.startsWith('sync-')) return entry.collection.state === 'failed';
   if (code === 'source-missing') return entry.source.state === 'missing';
-  if (code === 'no-usage-observed') return entry.data.liveTokens === 0;
+  // Both halves: "we can read this client and found nothing" is a different
+  // statement from "there is nothing to read", and only the first is this code.
+  if (code === 'no-usage-observed') return entry.source.state === 'detected' && entry.data.liveTokens === 0;
   return true;
 }
 
 function normalizeDiagnostics(value, entry) {
   if (!Array.isArray(value)) return [];
-  const codes = [];
+  const diagnostics = [];
+  const seen = new Set();
   for (const item of value) {
-    if (codes.length >= MAX_DIAGNOSTICS_PER_CLIENT) break;
-    const code = String(item || '').trim();
-    if (!DIAGNOSTIC_CODE_SET.has(code) || codes.includes(code)) continue;
+    if (diagnostics.length >= MAX_DIAGNOSTICS_PER_CLIENT) break;
+    const code = String(item?.code || '').trim();
+    if (!DIAGNOSTIC_CODE_SET.has(code) || seen.has(code)) continue;
     if (!diagnosticAgreesWithEntry(code, entry)) continue;
-    codes.push(code);
+    seen.add(code);
+    diagnostics.push({ code });
   }
-  return codes;
+  return diagnostics;
 }
 
 // One client's record, canonicalized: the fixed core always, detail only where
@@ -267,8 +271,13 @@ function normalizeClientHealthEntry(value) {
       liveTokens: boundedTokens(value?.data?.liveTokens)
     }
   };
+  // The counts are the core the hub recomputes `overall` from, so `checks` has to
+  // agree with them or go. Dropping the evidence is the safe direction: a
+  // renderer with no checks shows a ratio, while one holding checks that
+  // contradict the ratio has no way to know which half to believe.
   const checks = normalizeChecks(value?.source?.checks);
-  if (checks.length > 0) entry.source.checks = checks;
+  const checksAgree = checks.length === checkedCount && checks.filter((check) => check.exists).length === detectedCount;
+  if (checks.length > 0 && checksAgree) entry.source.checks = checks;
   const lastAttemptAt = normalizeTimestamp(value?.collection?.lastAttemptAt);
   if (lastAttemptAt) entry.collection.lastAttemptAt = lastAttemptAt;
   const lastSuccessAt = normalizeTimestamp(value?.collection?.lastSuccessAt);
@@ -311,7 +320,15 @@ function normalizeClientHealth(value, normalizeClientId = defaultClientId) {
     count += 1;
   }
   if (count === 0) return null;
-  return { version: CLIENT_HEALTH_VERSION, clients };
+  const health = { version: CLIENT_HEALTH_VERSION, clients };
+  // One observation time for the whole record, not one per diagnostic: every
+  // entry comes from the same scan, and SARIF-style formats put the stamp on the
+  // run for exactly that reason. It matters because a limits-only ingest carries
+  // health forward while `updatedAt` moves on, so the record's own age is the
+  // only thing left that can say how old the diagnosis is.
+  const observedAt = normalizeTimestamp(value.observedAt);
+  if (observedAt) health.observedAt = observedAt;
+  return health;
 }
 
 // Tally by headline state, for a one-line summary above the list.
