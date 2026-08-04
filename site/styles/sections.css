@@ -418,6 +418,7 @@ html[data-platform="linux"] [data-platform-option="linux"] { display: none; }
 }
 .hero-dashboard {
   --hero-dashboard-total-size: clamp(30px, 10.5vw, 42px);
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -743,16 +744,80 @@ html[data-platform="linux"] [data-platform-option="linux"] { display: none; }
   width: 381px;
   height: 81px;
 }
-.hero-dashboard-heatmap i {
+.hero-dashboard-heatmap .hero-dashboard-heat-cell {
+  position: relative;
   display: block;
+  width: 9px;
+  height: 9px;
+  padding: 0;
   min-width: 0;
+  border: 0;
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  transition: transform 130ms cubic-bezier(.16, 1, .3, 1), outline-color 130ms ease;
+}
+.hero-dashboard-heatmap .hero-dashboard-heat-cell:hover,
+.hero-dashboard-heatmap .hero-dashboard-heat-cell:focus-visible {
+  z-index: 2;
+  outline: 1px solid rgba(224, 242, 255, 0.86);
+  outline-offset: 0;
+  transform: scale(1.28);
 }
 .hero-dashboard-heatmap .level-1 { background: rgba(90, 170, 255, 0.18); }
 .hero-dashboard-heatmap .level-2 { background: rgba(120, 190, 255, 0.45); }
 .hero-dashboard-heatmap .level-3 { background: rgba(150, 210, 255, 0.8); }
 .hero-dashboard-heatmap .level-4 { background: #b4e6ff; box-shadow: 0 0 6px rgba(142, 211, 255, 0.32); }
+.hero-dashboard-heat-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 72px;
+  padding: 6px 9px;
+  border: 1px solid rgba(226, 239, 253, 0.16);
+  border-radius: 8px;
+  background: rgba(10, 17, 27, 0.97);
+  color: #f4f8ff;
+  font-size: 10px;
+  line-height: 1.1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-9999px, -9999px);
+  transition: opacity 130ms ease;
+  white-space: nowrap;
+  box-shadow: 0 6px 8px rgba(0, 0, 0, 0.32);
+}
+.hero-dashboard-heat-tooltip[data-visible="true"] {
+  opacity: 1;
+  transform: translateX(-50%);
+}
+.hero-dashboard-heat-tooltip-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-weight: 700;
+}
+.hero-dashboard-heat-tooltip strong {
+  font-variant-numeric: tabular-nums;
+}
+.hero-dashboard-heat-tooltip-row > span,
+.hero-dashboard-heat-tooltip-date {
+  color: rgba(212, 225, 239, 0.62);
+  font-weight: 500;
+}
+.hero-dashboard-heat-tooltip-date {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-dashboard-heatmap .hero-dashboard-heat-cell { transition: none; }
+}
 .hero-dashboard-months {
   display: flex;
   justify-content: space-between;
