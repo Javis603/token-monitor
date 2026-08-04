@@ -340,7 +340,8 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  let spawnDelayMs = 0;
+  let holdNextSpawn = null;
+  let heldSpawns = 0;
   childProcess.spawn = (_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
@@ -348,10 +349,13 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
     child.stderr = new EventEmitter();
     child.stdin = { end: () => {} };
     child.kill = () => {};
-    setTimeout(() => {
+    const hold = holdNextSpawn;
+    holdNextSpawn = null;
+    if (hold) heldSpawns += 1;
+    Promise.resolve(hold).then(() => {
       child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
       child.emit('close', 0);
-    }, spawnDelayMs);
+    });
     return child;
   };
 
@@ -392,12 +396,19 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
     await waitForCondition(() => updates.length === 2);
     assert.equal(syncCalls, 1);
 
-    // Occupy the collector so the catch-up deadline lands mid-tick.
-    spawnDelayMs = 250;
+    // Hold a tokscale child open so the tick is provably still in flight when the
+    // catch-up comes due — a latch rather than a delay race, so the test cannot
+    // pass by having the tick finish first and take the ordinary drain path.
+    let releaseInFlight = null;
+    holdNextSpawn = new Promise((resolve) => { releaseInFlight = resolve; });
     const inFlight = handle.tick('manual');
+    await waitForCondition(() => heldSpawns === 1);
     clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
-    await inFlight;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(syncCalls, 1, 'the catch-up waits rather than folding into the in-flight tick');
 
+    releaseInFlight();
+    await inFlight;
     await waitForCondition(() => syncCalls === 2, 4000);
     const caughtUp = calls[calls.length - 1];
     const scanned = caughtUp[caughtUp.indexOf('--client') + 1];
@@ -490,6 +501,110 @@ test('a manual refresh satisfies a deferred source sync instead of adding one', 
     clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 3;
     await new Promise((resolve) => setTimeout(resolve, 400));
     assert.equal(syncCalls, 2, 'the deferred sync was satisfied, not queued behind the manual one');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a failed forced sync hands the source event back instead of eating it', async (t) => {
+  // maybeSyncAntigravity resolves on every outcome so a stuck sync cannot hold
+  // the tick open, which means a timeout or non-zero exit is indistinguishable
+  // from success unless it reports. It has to: the tick already consumed the
+  // source event on its behalf, and swallowing the failure would put the refresh
+  // back on the fallback interval — the latency this path exists to remove.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  let failNextSync = false;
+  try {
+    const { startCollector, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => {
+        syncCalls += 1;
+        if (failNextSync) throw new Error('language server went away');
+      },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1);
+
+    // A source event still inside the floor, so its sync is deferred.
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1);
+
+    // The manual refresh claims that pending event, then fails. The restored
+    // catch-up is armed a full floor out — the failed attempt still stamped the
+    // rate limit, deliberately, so a wedged language server cannot be retried in
+    // a loop — so the timer is mocked rather than waited on. waitForCondition
+    // runs off setInterval and stays real.
+    failNextSync = true;
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    await handle.tick('manual', { forceSelfSync: true });
+    assert.equal(syncCalls, 2, 'the forced sync was attempted');
+
+    // The change is still uncollected, so the catch-up has to come back for it.
+    failNextSync = false;
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 3;
+    t.mock.timers.tick(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000);
+    t.mock.timers.reset();
+    await waitForCondition(() => syncCalls === 3, 4000);
+    const retried = calls[calls.length - 1];
+    assert.equal(retried[retried.indexOf('--client') + 1], 'antigravity,antigravity-cli');
   } finally {
     Date.now = originalNow;
     if (handle) handle.stop();

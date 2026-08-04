@@ -589,6 +589,7 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
     await cursorAuth.runCursorSync();
   } catch (err) {
     if (typeof logger === 'function') logger(`cursor sync failed: ${err.message}`);
+    options.onFailure?.('cursor');
   }
 }
 
@@ -610,20 +611,32 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   if (!antigravityDataPresent(home)) return;
   if (!syncDue('antigravity', Date.now(), options.minIntervalMs)) return;
   if (typeof options.run === 'function') {
-    await options.run();
+    try {
+      await options.run();
+    } catch (err) {
+      if (typeof logger === 'function') logger(`antigravity sync failed: ${err.message}`);
+      options.onFailure?.('antigravity');
+    }
     return;
   }
   const { bin, prefixArgs, env } = tokscaleCommand();
+  // Every outcome resolves — a stuck sync must not hold the tick open — so a
+  // failure is only visible through onFailure. The caller needs it: the tick has
+  // already consumed the source event that asked for this sync, and silently
+  // scanning the unchanged cache would put the refresh back on the fallback
+  // interval, which is the latency this whole path exists to remove.
   await new Promise((resolve) => {
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
     let stderr = '';
-    const timer = setTimeout(() => { child.kill('SIGTERM'); resolve(); }, 30000);
+    const fail = () => { options.onFailure?.('antigravity'); resolve(); };
+    const timer = setTimeout(() => { child.kill('SIGTERM'); fail(); }, 30000);
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', () => { clearTimeout(timer); resolve(); });
+    child.on('error', () => { clearTimeout(timer); fail(); });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code !== 0 && typeof logger === 'function') logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
-      resolve();
+      if (code === 0) { resolve(); return; }
+      if (typeof logger === 'function') logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
+      fail();
     });
     child.stdin?.end();
   });
@@ -739,11 +752,13 @@ async function collectUsageOnce(options) {
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
     await maybeSyncCursor(syncClients, options.logger, {
-      minIntervalMs: selfSyncMinIntervalMs(options, 'cursor')
+      minIntervalMs: selfSyncMinIntervalMs(options, 'cursor'),
+      onFailure: options.onSelfSyncFailed
     });
     await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
       minIntervalMs: selfSyncMinIntervalMs(options, 'antigravity'),
-      run: options.runAntigravitySync
+      run: options.runAntigravitySync,
+      onFailure: options.onSelfSyncFailed
     });
     if (includesProma && (!targetRequested || targetClients.includes('proma'))) {
       try {
@@ -1439,10 +1454,18 @@ function watcherOptions(usePolling, ignored) {
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
-    intervalMs, historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled, watchDebounceMs,
+    historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled,
     watchTriggersCollection = true, intervalRequiresActivity = false,
     onUpdate, onPreview, onError, logger
   } = options;
+  // Normalized once, at the edge. These arrive straight from CLI flags and env
+  // vars (TOKEN_MONITOR_WATCH_DEBOUNCE_MS, TOKEN_MONITOR_INTERVAL_MS) by way of
+  // a bare Number(), so Infinity and past-32-bit values reach us intact — and
+  // setTimeout rewrites those to 1ms, turning the debounce's mid-tick re-arm and
+  // the interval loop into spins. Clamping here means no timer below can
+  // reintroduce that by forgetting.
+  const watchDebounceMs = clampTimerDelayMs(options.watchDebounceMs, 1500);
+  const intervalMs = clampTimerDelayMs(options.intervalMs, 5 * 60 * 1000);
   const watchUsePolling = resolveWatchUsePolling(options.watchUsePolling);
   const watchNativeForced = watchPollingEnvOverride() === false;
   const deviceOsInfo = options.osInfo === undefined
@@ -1483,9 +1506,8 @@ function startCollector(options) {
   const scheduledSourceSyncClients = new Set();
   let sourceSyncCatchUpTimer = null;
   // How long a catch-up waits when it comes due mid-tick. Mirrors the watch
-  // debounce so the retry lands after the tick that displaced it, with a beat to
-  // fall back on when the configured value is unusable.
-  const SOURCE_SYNC_RETRY_MS = clampTimerDelayMs(watchDebounceMs, 1000);
+  // debounce so the retry lands after the tick that displaced it.
+  const SOURCE_SYNC_RETRY_MS = watchDebounceMs;
   const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => SELF_SYNCED_CLIENTS.has(client));
   let activityRevision = 0;
   let collectedActivityRevision = 0;
@@ -1567,6 +1589,13 @@ function startCollector(options) {
         includeHistory,
         forceSelfSync: tickOptions.forceSelfSync ?? null,
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
+        // Both selections name clients whose pending source event this tick has
+        // already consumed — the drain in takeSourceSyncClients for one, the
+        // acknowledgement for the other — so either is a legitimate restore.
+        onSelfSyncFailed: (kind) => restoreConsumedSourceSync(
+          mergeSelfSyncSelection(tickOptions.sourceSelfSync, tickOptions.acknowledgedSourceSync) || [],
+          kind
+        ),
         targetClients: anchored && targetAnchorReady ? requestedTargetClients : [],
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
@@ -1696,8 +1725,10 @@ function startCollector(options) {
     }
     tickInFlight = true;
     try {
-      acknowledgeSourceSync(effectiveTickOptions.forceSelfSync);
-      await performTick(reason, effectiveTickOptions);
+      await performTick(reason, {
+        ...effectiveTickOptions,
+        acknowledgedSourceSync: acknowledgeSourceSync(effectiveTickOptions.forceSelfSync)
+      });
       while (tickPending && !stopped) {
         const forceHistory = pendingForceHistory;
         const forceSelfSync = pendingForceSelfSync;
@@ -1710,11 +1741,12 @@ function startCollector(options) {
         pendingSourceSelfSync = null;
         pendingTodayOnly = null;
         pendingActivityRevision = null;
-        acknowledgeSourceSync(forceSelfSync);
+        const acknowledgedSourceSync = acknowledgeSourceSync(forceSelfSync);
         await performTick('coalesced', {
           forceHistory,
           forceSelfSync,
           sourceSelfSync,
+          acknowledgedSourceSync,
           todayOnly,
           ...(activityRevision === null ? {} : { activityRevision })
         });
@@ -1790,14 +1822,30 @@ function startCollector(options) {
   // since a forced tick waiting behind another has not synced anything yet; an
   // event arriving mid-tick re-enters through the watcher.
   function acknowledgeSourceSync(selection) {
-    if (!selection || scheduledSourceSyncClients.size === 0) return;
+    if (!selection || scheduledSourceSyncClients.size === 0) return [];
+    const acknowledged = [];
     for (const client of [...scheduledSourceSyncClients]) {
-      if (selfSyncSelected(selection, client)) scheduledSourceSyncClients.delete(client);
+      if (!selfSyncSelected(selection, client)) continue;
+      scheduledSourceSyncClients.delete(client);
+      acknowledged.push(client);
     }
     if (scheduledSourceSyncClients.size === 0 && sourceSyncCatchUpTimer) {
       clearTimeout(sourceSyncCatchUpTimer);
       sourceSyncCatchUpTimer = null;
     }
+    return acknowledged;
+  }
+
+  // A sync that reported failure did not refresh the cache, so the source event
+  // this tick consumed on its behalf is still outstanding. Restoring it lets the
+  // catch-up retry after the floor instead of leaving the change for the fallback
+  // interval. Only ever restores what this tick actually consumed: an unprompted
+  // cadence sync failing against a wedged IDE must not invent a pending event and
+  // turn the idle cadence into a ten-second retry loop.
+  function restoreConsumedSourceSync(consumed, kind) {
+    if (!consumed.includes(kind) || stopped) return;
+    scheduledSourceSyncClients.add(kind);
+    armSourceSyncCatchUp(msUntilSyncDue(kind, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS));
   }
 
   function scheduleTick(reason, eventClients) {
