@@ -14,6 +14,19 @@ function createDeviceRuntime(options = {}, deps = {}) {
   const sink = options.sink || null;
   let active = true;
 
+  function forwardDiagnosticEvent(event) {
+    if (!active) return;
+    try {
+      options.onDiagnosticEvent?.(event);
+    } catch (error) {
+      try {
+        options.onError?.(error, 'diagnostic');
+      } catch {
+        // Diagnostic observers must never block usage or limits delivery.
+      }
+    }
+  }
+
   const deviceState = makeDeviceState({
     epoch,
     envelope: options.envelope,
@@ -47,6 +60,14 @@ function createDeviceRuntime(options = {}, deps = {}) {
         ? options.transformUsage(summary, reason, { preview: false })
         : summary;
       deviceState.updateUsage(transformed, reason, { epoch, preview: false });
+    },
+    onDiagnosticEvent(event) {
+      try {
+        options.usageOptions?.onDiagnosticEvent?.(event);
+      } catch (error) {
+        try { options.onError?.(error, 'usage-diagnostic'); } catch (_) {}
+      }
+      forwardDiagnosticEvent(event);
     }
   };
   if (options.progressive === true) {
@@ -72,6 +93,20 @@ function createDeviceRuntime(options = {}, deps = {}) {
     onUpdate(summary) {
       if (!active) return;
       deviceState.updateLimits(summary, 'limits', { epoch });
+    },
+    onEvent(event) {
+      try {
+        deps.limitsDeps?.onEvent?.(event);
+      } catch (error) {
+        try { options.onError?.(error, 'limits-diagnostic'); } catch (_) {}
+      }
+      if (event?.type === 'retry-scheduled') {
+        forwardDiagnosticEvent({
+          subsystem: 'limits',
+          code: 'limits-retry-scheduled',
+          provider: event.provider
+        });
+      }
     }
   };
 
@@ -90,6 +125,10 @@ function createDeviceRuntime(options = {}, deps = {}) {
   return {
     clearLimits: (scope, reason) => limitsRuntime.clear(scope, reason),
     flush: () => sink?.flush?.() || Promise.resolve(),
+    getDiagnostics: () => ({
+      usage: usageRuntime?.getDiagnostics?.() ?? null,
+      limits: limitsRuntime?.getDiagnostics?.() ?? null
+    }),
     getSnapshot: () => deviceState.getSnapshot(),
     reconfigureLimits: (next) => limitsRuntime.reconfigure(next),
     refreshClient: (clientId, refreshOptions) => usageRuntime.refreshClient(clientId, refreshOptions),

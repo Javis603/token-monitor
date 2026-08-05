@@ -10,12 +10,14 @@ function harness(options = {}) {
   let limitsDeps;
   const calls = [];
   const usageHandle = {
+    getDiagnostics: () => ({ state: 'idle', lastTickSuccessAt: 'usage-time' }),
     refreshClient: (...args) => { calls.push(['refreshClient', ...args]); return 'client'; },
     stop: () => calls.push(['usageStop']),
     tick: (...args) => { calls.push(['tick', ...args]); return 'tick'; }
   };
   const limitsHandle = {
     clear: (...args) => { calls.push(['clear', ...args]); return 'clear'; },
+    getDiagnostics: () => ({ enabled: true, providers: [] }),
     reconfigure: (...args) => { calls.push(['reconfigure', ...args]); return 'reconfigure'; },
     refresh: (...args) => { calls.push(['refresh', ...args]); return 'refresh'; },
     stop: () => calls.push(['limitsStop'])
@@ -136,5 +138,14 @@ test('runtime control methods delegate to the precise producer', () => {
     ['reconfigure', { limitsRefreshMs: 60000 }],
     ['clear', { provider: 'kimi' }, 'logout']
   ]);
+  runtime.stop();
+});
+
+test('runtime diagnostics proxy keeps usage and limits ownership separate', () => {
+  const { runtime } = harness();
+  assert.deepEqual(runtime.getDiagnostics(), {
+    usage: { state: 'idle', lastTickSuccessAt: 'usage-time' },
+    limits: { enabled: true, providers: [] }
+  });
   runtime.stop();
 });
