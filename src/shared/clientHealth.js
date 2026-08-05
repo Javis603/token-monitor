@@ -191,6 +191,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'openclaw-agents',
   'pi-sessions',
   'proma-sessions',
+  'qodercn-db',
   'qwen-projects',
   'tokscale-antigravity-cache',
   'tokscale-cursor-cache',

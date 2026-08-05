@@ -1392,7 +1392,7 @@ function clientSourceRoots(clientsCsv) {
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderPaths = qoderDataPaths({ homeDir: home, platform: process.platform, env: process.env });
-  add('qodercn', ...qoderPaths.dbPaths.map((dbPath) => path.dirname(dbPath)));
+  add('qodercn', ...qoderPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath)]));
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
@@ -2509,13 +2509,6 @@ function startCollector(options) {
       if (stopped) return;
       for (const [client, entry] of Object.entries(summary.clientHealth?.clients || {})) {
         if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
-      }
-      if (qoderReadState.periodFailed && anchor && !qoderReadState.fallbackUsed) {
-        // Do not replace a known-good snapshot with a full scan that omitted
-        // Qoder data. The next interval/full reconciliation will retry it.
-        scheduledWatchNeedsFullScan = true;
-        log('collector tick skipped: preserving the last snapshot after a Qoder CN read failure');
-        return false;
       }
       if (!anchored && captured) {
         anchor = {
