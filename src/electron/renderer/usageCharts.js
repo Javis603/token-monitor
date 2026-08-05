@@ -342,7 +342,9 @@
   // row or make the empty days disappear from the chart.
   const TREND_WINDOW_DAYS = 7;
   function patchTodayBar(points, todayTotal, todayDate = localDayKey()) {
-    if (!Array.isArray(points) || points.length === 0) return Array.isArray(points) ? points : [];
+    if (!Array.isArray(points)) return [];
+    const liveTotal = n(todayTotal);
+    if (points.length === 0 && liveTotal === 0) return [];
     const date = String(todayDate || localDayKey()).slice(0, 10);
     const byDate = new Map();
     for (const point of points) {
@@ -354,8 +356,8 @@
       const key = addDaysUTC(date, offset);
       const point = byDate.get(key);
       result.push(point
-        ? Object.assign({}, point, { tokens: key === date ? n(todayTotal) : n(point.tokens) })
-        : { date: key, tokens: key === date ? n(todayTotal) : 0 });
+        ? Object.assign({}, point, { tokens: key === date ? liveTotal : n(point.tokens) })
+        : { date: key, tokens: key === date ? liveTotal : 0 });
     }
     return result;
   }

@@ -343,7 +343,19 @@ test('patchTodayBar updates the local today row without mutating history', () =>
   ]);
   assert.deepEqual(out[6], { date: '2026-06-08', tokens: 99 });
   assert.equal(points[1].tokens, 2);          // original not mutated
-  assert.deepEqual(patchTodayBar([], 99), []); // empty safe
+});
+
+test('patchTodayBar builds a calendar window from empty history when live usage exists', () => {
+  const out = patchTodayBar([], 99, '2026-06-08');
+
+  assert.deepEqual(out.map((point) => point.date), [
+    '2026-06-02', '2026-06-03', '2026-06-04', '2026-06-05', '2026-06-06', '2026-06-07', '2026-06-08'
+  ]);
+  assert.deepEqual(out.map((point) => point.tokens), [0, 0, 0, 0, 0, 0, 99]);
+});
+
+test('patchTodayBar keeps empty state when history and live usage are both empty', () => {
+  assert.deepEqual(patchTodayBar([], 0, '2026-06-08'), []);
 });
 
 test('patchTodayBar fills missing calendar days in a sparse history', () => {
