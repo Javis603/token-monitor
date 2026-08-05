@@ -2357,7 +2357,10 @@ function refreshUsageClient(clientId, options = {}) {
 function bestEffortTrackedUsageRefresh(clientId, options = {}) {
   const client = String(clientId || '').trim().toLowerCase();
   const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-  if (!tracked.has(client)) return;
+  if (
+    !tracked.has(client)
+    || !canRefreshUsageRuntime(mode, isExternalAgentActive)
+  ) return;
   try {
     void refreshUsageClient(client, options).catch((error) => {
       console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
@@ -2373,7 +2376,8 @@ function drainPendingUsageClientRefreshes(runtime) {
     runtime,
     (error) => {
       console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
-    }
+    },
+    { enabled: canRefreshUsageRuntime(mode, isExternalAgentActive) }
   );
 }
 

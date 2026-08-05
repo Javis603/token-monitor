@@ -8852,39 +8852,7 @@ function relativeDayLabel(day) {
   return day;
 }
 
-// A paste-ready block for a bug report. Deliberately built from check ids and
-// not the paths behind them: the point is that someone can drop this into an
-// issue without leaking their home directory, and it saves the round trips that
-// gathering OS, versions and screenshots by hand currently costs.
-function clientHealthReport(detail, clientId) {
-  const info = state.appInfo || {};
-  const device = localDevice() || {};
-  const lines = [
-    // agentVersion first: it is the app's own version from package.json, while
-    // app.getVersion() reports Electron's in an unpackaged run — and a bug report
-    // naming the wrong version is worse than one naming none.
-    `Token Monitor ${device.agentVersion || info.version || '?'} · ${device.osName || info.platform || '?'} ${device.osVersion || ''} · ${device.platform || ''}`.trim(),
-    `${clientId}  ${detail.overall}`
-  ];
-  for (const row of detail.rows) {
-    if (row.kind === 'usage') {
-      lines.push(`  usage  ${row.periods.map((p) => `${p.period} ${Math.round(p.tokens)}`).join(' · ')}`);
-    } else if (row.kind === 'sources') {
-      const checks = row.checks.map((c) => `${c.exists ? '+' : '-'}${c.id}`).join(' ');
-      lines.push(`  source ${row.detectedCount}/${row.checkedCount}${checks ? `  ${checks}` : ''}`);
-    } else if (row.kind === 'sync') {
-      lines.push(`  sync   ${row.state}${row.lastSuccessAt ? ` · ok ${row.lastSuccessAt}` : ''}${row.lastAttemptAt ? ` · tried ${row.lastAttemptAt}` : ''}`);
-    } else if (row.kind === 'day') {
-      lines.push(`  last   ${row.day}`);
-    }
-  }
-  for (const note of detail.notes) lines.push(`  note   ${note.code}`);
-  const observedAt = localClientHealth()?.observedAt;
-  if (observedAt) lines.push(`  scan   ${observedAt}`);
-  return lines.join('\n');
-}
-
-function clientHealthActions(detail, clientId) {
+function clientHealthActions(clientId) {
   const actions = document.createElement('div');
   actions.className = 'tool-health-actions';
   const button = (labelKey, onClick) => {
@@ -8896,11 +8864,6 @@ function clientHealthActions(detail, clientId) {
     actions.append(control);
     return control;
   };
-  const copy = button('settings.tools.health.copy', async () => {
-    await window.tokenMonitor?.copyText?.(clientHealthReport(detail, clientId));
-    copy.textContent = t('settings.tools.health.copied');
-    setTimeout(() => { copy.textContent = t('settings.tools.health.copy'); }, 1600);
-  });
   // The detail is already bound to the exact local device. Renderer mode is a
   // transport state (`local`/`sync`), not topology, so host and client collectors
   // expose the same targeted capability through preload.
@@ -8940,7 +8903,7 @@ function clientHealthPanel(detail, clientId) {
     line.textContent = t(`settings.tools.health.code.${note.code}`);
     box.append(line);
   }
-  box.append(clientHealthActions(detail, clientId));
+  box.append(clientHealthActions(clientId));
   return inner;
 }
 

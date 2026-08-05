@@ -27,7 +27,14 @@ test('targeted rescans stay strict while Cursor credential refresh is best effor
     (main.match(/bestEffortTrackedUsageRefresh\('cursor', \{ forceSync: true \}\)/g) || []).length,
     2
   );
-  assert.match(main, /function bestEffortTrackedUsageRefresh[\s\S]*if \(!tracked\.has\(client\)\) return/);
+  assert.match(
+    main,
+    /function bestEffortTrackedUsageRefresh[\s\S]*!canRefreshUsageRuntime\(mode, isExternalAgentActive\)/
+  );
+  assert.match(
+    main,
+    /function drainPendingUsageClientRefreshes[\s\S]*enabled: canRefreshUsageRuntime\(mode, isExternalAgentActive\)/
+  );
 });
 
 for (const mode of ['local', 'client', 'host']) {
@@ -105,6 +112,23 @@ test('pending usage refreshes isolate synchronous failures', async () => {
     ['claude', {}]
   ]);
   assert.deepEqual(errors, ['cursor no longer tracked']);
+});
+
+test('pending usage refreshes are discarded when ownership is lost', async () => {
+  const pending = new Map([
+    ['cursor', { clientId: 'cursor', options: { forceSync: true } }]
+  ]);
+  let calls = 0;
+  drainPendingUsageClientRefreshes(
+    pending,
+    { refreshClient: () => { calls += 1; } },
+    () => {},
+    { enabled: false }
+  );
+
+  await Promise.resolve();
+  assert.equal(pending.size, 0);
+  assert.equal(calls, 0);
 });
 
 test('only an opted-in manual refresh forces the self-synced clients', async () => {
