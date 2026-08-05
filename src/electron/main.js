@@ -3327,7 +3327,13 @@ function primeLocalStatsFromAnchor() {
   lastCollectedDevice = deviceRecord;
   localDevice = deviceRecord;
   localStats = withHistoryPreview(aggregateDevices([deviceRecord], 0), [deviceRecord]);
-  sendPush({ event: 'stats', data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt } });
+  // sendPush goes through mainWindow.webContents.send, which silently drops the
+  // IPC message when the renderer hasn't yet registered its onStatsPush
+  // listener (cold launch runs prime while createWindow's loadFile is still in
+  // flight). Defer the push to did-finish-load so the hydrated numbers actually
+  // arrive at the renderer instead of disappearing into the void.
+  const pushPayload = { event: 'stats', data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt } };
+  sendMainWindowEvent('stats:push', pushPayload);
 }
 
 function startLocalCollector() {
