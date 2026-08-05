@@ -301,6 +301,7 @@ state.clientRescans = clientRescanStateApi.createClientRescanState({
 });
 state.toolPreferenceRenderSignature = '';
 state.toolPreferenceDetailSignature = '';
+state.toolPreferenceSourceSignature = '';
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -8687,9 +8688,14 @@ function clientSourcesIdentity(clientId) {
 }
 
 function localClientSources(clientId) {
-  const sources = clientSourceCacheApi.readClientSources(
+  const identity = clientSourcesIdentity(clientId);
+  const exactSources = clientSourceCacheApi.readClientSources(
     state.clientSources,
-    clientSourcesIdentity(clientId)
+    identity
+  );
+  const sources = exactSources ?? clientSourceCacheApi.readLatestClientSources(
+    state.clientSources,
+    identity
   );
   const detectedInWsl = localDevice()?.wslStatus?.detected?.includes(clientId);
   if (!detectedInWsl) return sources;
@@ -9093,7 +9099,7 @@ function toolPreferenceRenderSignature() {
   const device = localDevice();
   return JSON.stringify({
     settings: [
-      state.settings?.trackedClients || '',
+      [...enabledClientSet()].sort(),
       state.settings?.hiddenClients || '',
       state.settings?.pinnedClients || '',
       state.settings?.clientDisplayOrder || '',
@@ -9113,21 +9119,34 @@ function toolPreferenceRenderSignature() {
 
 function renderToolPreferencesNow() {
   const renderSignature = toolPreferenceRenderSignature();
-  const healthSignature = JSON.stringify([localClientHealth(), localDevice()]);
+  const detailSignature = JSON.stringify([
+    localClientHealth(),
+    localDevice(),
+    state.settings?.currencyRatesEffective || null
+  ]);
+  const sourceSignature = clientSourceCacheApi.clientSourceRequestKey(
+    clientSourcesIdentity(state.clientHealthExpanded)
+  );
   if (
     state.toolPreferenceRenderSignature
     && state.toolPreferenceRenderSignature === renderSignature
     && els.clientDisplayList.children.length === KNOWN_CLIENTS.length
   ) {
-    if (state.toolPreferenceDetailSignature !== healthSignature) {
-      state.toolPreferenceDetailSignature = healthSignature;
-      const sourceRefreshPending = loadClientSources(state.clientHealthExpanded);
-      if (!sourceRefreshPending) refillOpenClientHealthPanel();
+    if (state.toolPreferenceDetailSignature !== detailSignature) {
+      state.toolPreferenceDetailSignature = detailSignature;
+      if (state.toolPreferenceSourceSignature !== sourceSignature) {
+        state.toolPreferenceSourceSignature = sourceSignature;
+        const sourceRefreshPending = loadClientSources(state.clientHealthExpanded);
+        if (!sourceRefreshPending) refillOpenClientHealthPanel();
+      } else {
+        refillOpenClientHealthPanel();
+      }
     }
     return;
   }
   state.toolPreferenceRenderSignature = renderSignature;
-  state.toolPreferenceDetailSignature = healthSignature;
+  state.toolPreferenceDetailSignature = detailSignature;
+  state.toolPreferenceSourceSignature = sourceSignature;
   const previousRows = Array.from(els.clientDisplayList.children);
   const focusedId = document.activeElement?.id || '';
   const enabled = enabledClientSet();

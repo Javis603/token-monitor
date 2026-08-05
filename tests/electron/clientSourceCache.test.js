@@ -8,6 +8,7 @@ const {
   createClientSourceCache,
   deleteClientSources,
   readClientSources,
+  readLatestClientSources,
   writeClientSources
 } = require('../../src/electron/renderer/clientSourceCache');
 
@@ -27,6 +28,20 @@ test('client source cache keeps one observation per device and client', () => {
   assert.deepEqual(readClientSources(cache, identity('codex', 'observation-99')), [
     { id: 'codex-sessions', index: 99 }
   ]);
+});
+
+test('latest client sources are display-only within the same device and client', () => {
+  const cache = createClientSourceCache();
+  const sources = [{ id: 'codex-sessions', dir: '/old/path', exists: true }];
+  writeClientSources(cache, identity('codex', 'old'), sources);
+
+  assert.equal(readClientSources(cache, identity('codex', 'new')), null);
+  assert.deepEqual(readLatestClientSources(cache, identity('codex', 'new')), sources);
+  assert.equal(readLatestClientSources(cache, identity('claude', 'new')), null);
+  assert.equal(
+    readLatestClientSources(cache, identity('codex', 'new', 'device-b')),
+    null
+  );
 });
 
 test('client source cache keeps a bounded slot for each client', () => {

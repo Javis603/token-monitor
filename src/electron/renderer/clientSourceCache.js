@@ -35,6 +35,15 @@
     return entry?.observedAt === value.observedAt ? entry.sources : null;
   }
 
+  // A new health observation may arrive before its on-demand path probe does.
+  // This is display-only evidence from the previous observation: exact reads and
+  // request deduplication still require the current observedAt.
+  function readLatestClientSources(cache, identity) {
+    const value = normalizedIdentity(identity);
+    if (!value.deviceId || !value.clientId || cache?.deviceId !== value.deviceId) return null;
+    return cache.entries.get(value.clientId)?.sources ?? null;
+  }
+
   function writeClientSources(cache, identity, sources) {
     const value = normalizedIdentity(identity);
     if (!hasCompleteIdentity(value)) return;
@@ -60,6 +69,7 @@
     createClientSourceCache,
     deleteClientSources,
     readClientSources,
+    readLatestClientSources,
     writeClientSources
   };
 });

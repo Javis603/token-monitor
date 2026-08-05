@@ -171,6 +171,8 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(defer, /return preserveSettingsPanelScroll\(renderToolPreferencesNow\);/);
 
   const signature = functionBody(app, 'toolPreferenceRenderSignature', 'renderToolPreferencesNow');
+  assert.match(signature, /\[\.\.\.enabledClientSet\(\)\]\.sort\(\)/);
+  assert.doesNotMatch(signature, /trackedClients/);
   assert.match(signature, /healthRows: KNOWN_CLIENTS\.map/);
   assert.match(signature, /health\?\.clients\?\.\[id\]\?\.overall/);
   assert.doesNotMatch(signature, /periods/);
@@ -178,13 +180,20 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   const body = functionBody(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
   const fill = functionBody(app, 'fillClientHealthPanel', 'clientHealthGroup');
   assert.match(body, /state\.toolPreferenceRenderSignature === renderSignature/);
-  assert.match(body, /state\.toolPreferenceDetailSignature !== healthSignature/);
+  assert.match(body, /state\.toolPreferenceDetailSignature !== detailSignature/);
+  assert.match(body, /state\.settings\?\.currencyRatesEffective \|\| null/);
+  assert.match(body, /state\.toolPreferenceSourceSignature !== sourceSignature/);
   assert.match(body, /const sourceRefreshPending = loadClientSources\(state\.clientHealthExpanded\)/);
   assert.match(body, /if \(!sourceRefreshPending\) refillOpenClientHealthPanel\(\);/);
+  assert.match(body, /else \{\s*refillOpenClientHealthPanel\(\);\s*\}/);
   assert.match(body, /return;/);
   assert.doesNotMatch(body, /replaceChildren/);
   assert.match(fill, /patchRenderedNode\(current, next\)/);
   assert.match(fill, /else container\.replaceChildren\(next\)/);
+
+  const localSources = functionBody(app, 'localClientSources', 'loadClientSources');
+  assert.match(localSources, /readClientSources\(/);
+  assert.match(localSources, /exactSources \?\? clientSourceCacheApi\.readLatestClientSources\(/);
 });
 
 test('the tool preference row carries the drag transform contract', () => {
