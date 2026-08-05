@@ -1296,6 +1296,35 @@
           </div>
         </div>
 
+        <div class="settings-group settings-collapsible-group settings-limits-group">
+          <button class="settings-section-toggle" type="button" data-settings-section="routing" aria-expanded="false" aria-controls="routingSettingsDetails">
+            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-limits" aria-hidden="true"></span><span>FreeLLM Routing</span></span>
+            <span class="settings-section-meta"><span id="routingSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
+          </button>
+          <div id="routingSettingsDetails" class="settings-section-details hidden">
+            <div class="settings-subgroup">
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title">Enable local Ollama routing</span><span class="settings-note settings-item-desc">Runs only while Token Monitor is open. Keys rotate using the linked Ollama account’s monitored quota.</span></span><input id="freeLlmEnabledInput" type="checkbox" /></label>
+              <div class="settings-item"><span class="settings-item-text"><span class="settings-item-title">OpenAI-compatible endpoint</span><span id="freeLlmEndpoint" class="settings-note settings-item-desc">Not running</span></span><button id="freeLlmCopyEndpoint" type="button">Copy</button></div>
+            </div>
+            <div class="settings-subgroup">
+              <div class="settings-group-header"><span>Ollama API keys</span></div>
+              <div id="freeLlmKeyList" class="managed-account-list"></div>
+              <p id="freeLlmKeyEmpty" class="settings-note">Add a key for each monitored Ollama account you want to route through.</p>
+              <div class="opencode-add-form expanded">
+                <div class="opencode-add-details">
+                  <div class="opencode-add-body">
+                    <label class="settings-field"><span>Label (optional)</span><input id="freeLlmKeyLabel" type="text" maxlength="80" autocomplete="off" placeholder="Personal Ollama" /></label>
+                    <label class="settings-field"><span>Monitored Ollama account</span><select id="freeLlmAccountSelect"></select></label>
+                    <label class="settings-field"><span>Ollama API key</span><input id="freeLlmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste API key" /></label>
+                    <div class="settings-actions"><button id="freeLlmAddKey" type="button">Add API key</button></div>
+                  </div>
+                </div>
+              </div>
+              <p id="freeLlmError" class="settings-note error hidden" role="alert"></p>
+            </div>
+          </div>
+        </div>
+
         <div class="settings-group settings-collapsible-group settings-sync-group">
           <button class="settings-section-toggle" type="button" data-settings-section="sync" aria-expanded="false" aria-controls="syncSettingsDetails">
             <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-sync" aria-hidden="true"></span><span data-i18n="settings.sync.title">Multi-device Sync</span></span>

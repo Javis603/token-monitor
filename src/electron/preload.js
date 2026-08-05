@@ -123,6 +123,13 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   ollama: {
     validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
   },
+  freellm: {
+    status: () => ipcRenderer.invoke('freellm:status'),
+    setEnabled: (enabled) => ipcRenderer.invoke('freellm:setEnabled', enabled),
+    addKey: (input) => ipcRenderer.invoke('freellm:addKey', input),
+    removeKey: (id) => ipcRenderer.invoke('freellm:removeKey', id),
+    setKeyEnabled: (id, enabled) => ipcRenderer.invoke('freellm:setKeyEnabled', id, enabled)
+  },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),
     logout: () => ipcRenderer.invoke('opencode:logout'),

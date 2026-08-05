@@ -303,3 +303,14 @@ test('stores, migrates, and removes MiMo account cookies in the unified store', 
   assert.equal(store.readMimoCredential('account-1'), '');
   assert.equal(store.writeMimoCredential('__proto__', 'serviceToken=unsafe'), false);
 });
+
+test('stores FreeLLM routing API keys outside settings metadata', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  assert.equal(store.writeFreeLlmRoutingKey('key-1', 'ollama-api-secret'), true);
+  assert.equal(store.readFreeLlmRoutingKey('key-1'), 'ollama-api-secret');
+  const document = store.readDocument();
+  assert.equal(document.credentials.providers.freellmRouting.keys['key-1'].apiKey, 'ollama-api-secret');
+  assert.equal(store.removeFreeLlmRoutingKey('key-1'), true);
+  assert.equal(store.readFreeLlmRoutingKey('key-1'), '');
+  assert.equal(store.writeFreeLlmRoutingKey('constructor', 'unsafe'), false);
+});

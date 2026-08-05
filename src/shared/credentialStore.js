@@ -120,34 +120,11 @@ function readRegularFileNoFollow(filePath, options = {}) {
     descriptor = fsApi.openSync(filePath, constants.O_RDONLY | noFollow);
     const descriptorStat = fsApi.fstatSync(descriptor);
     if (!descriptorStat.isFile()) throw new Error(`${description} must be a regular file`);
-    const maxBytes = Number.isFinite(options.maxBytes)
-      ? Math.max(0, Math.floor(options.maxBytes))
-      : null;
-    if (maxBytes !== null && descriptorStat.size > maxBytes) {
-      throw new Error(`${description} exceeds ${maxBytes} bytes`);
-    }
     if (pathStat && (pathStat.dev !== descriptorStat.dev || pathStat.ino !== descriptorStat.ino)) {
       throw new Error(`${description} changed while it was being opened`);
     }
     if (options.mode !== undefined && process.platform !== 'win32') {
       fsApi.fchmodSync(descriptor, options.mode);
-    }
-    if (maxBytes !== null) {
-      const buffer = Buffer.allocUnsafe(maxBytes + 1);
-      let bytesRead = 0;
-      while (bytesRead < buffer.length) {
-        const count = fsApi.readSync(
-          descriptor,
-          buffer,
-          bytesRead,
-          buffer.length - bytesRead,
-          null
-        );
-        if (count === 0) break;
-        bytesRead += count;
-      }
-      if (bytesRead > maxBytes) throw new Error(`${description} exceeds ${maxBytes} bytes`);
-      return buffer.subarray(0, bytesRead).toString(options.encoding || 'utf8');
     }
     return fsApi.readFileSync(descriptor, options.encoding || 'utf8');
   } catch (error) {
@@ -354,6 +331,57 @@ class CredentialStore {
     deleteValueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId]);
     this.writeDocument(document);
     return !this.readMimoCredential(accountId);
+  }
+
+  readOllamaCredential(id, document = this.readDocument()) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return '';
+    const value = valueAt(document.credentials, ['providers', 'ollama', 'accounts', accountId, 'cookieHeader']);
+    return typeof value === 'string' ? value : '';
+  }
+
+  writeOllamaCredential(id, cookieHeader) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId || !credentialValuePresent(cookieHeader)) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['providers', 'ollama', 'accounts', accountId, 'cookieHeader'], cookieHeader);
+    this.writeDocument(document);
+    return true;
+  }
+
+  removeOllamaCredential(id) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['providers', 'ollama', 'accounts', accountId]);
+    this.writeDocument(document);
+    return !this.readOllamaCredential(accountId);
+  }
+
+  readFreeLlmRoutingKey(id, document = this.readDocument()) {
+    const keyId = safeDynamicKey(id);
+    if (!keyId) return '';
+    const value = valueAt(document.credentials, ['providers', 'freellmRouting', 'keys', keyId, 'apiKey']);
+    return typeof value === 'string' ? value : '';
+  }
+
+  writeFreeLlmRoutingKey(id, apiKey) {
+    const keyId = safeDynamicKey(id);
+    const value = typeof apiKey === 'string' ? apiKey.trim() : '';
+    if (!keyId || !value) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['providers', 'freellmRouting', 'keys', keyId, 'apiKey'], value);
+    this.writeDocument(document);
+    return true;
+  }
+
+  removeFreeLlmRoutingKey(id) {
+    const keyId = safeDynamicKey(id);
+    if (!keyId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['providers', 'freellmRouting', 'keys', keyId]);
+    this.writeDocument(document);
+    return !this.readFreeLlmRoutingKey(keyId);
   }
 
   migrateLegacyMimoCredentials(entries) {

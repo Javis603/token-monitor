@@ -2,11 +2,10 @@
 
 const fs = require('node:fs');
 const crypto = require('node:crypto');
-const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
+const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
 const {
   CredentialStore,
   credentialSettingsForRenderer,
@@ -41,18 +40,14 @@ const {
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
-const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
-const { sendWhenRendererReady } = require('./deferredWindowSend');
+const { lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
-const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
-const { createDiagnosticReportGenerator } = require('./diagnostics');
-const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
-const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
+const { fetchOllamaLimits, rememberOllamaValidation, normalizeOllamaManagedAccounts, createOllamaManagedAccount } = require('../shared/ollamaLimits');
+const { DEFAULT_PORT: FREELLM_DEFAULT_PORT, DEFAULT_THRESHOLD_PERCENT: FREELLM_DEFAULT_THRESHOLD_PERCENT, createFreeLlmRouter, normalizePort: normalizeFreeLlmPort, clampThreshold: normalizeFreeLlmThreshold } = require('../shared/freellmRouter');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
   codexAuthIdentity,
@@ -99,18 +94,13 @@ const {
 } = require('../shared/tokscaleUpdater');
 const {
   appUpdateInstallSupport,
-  classifyAppUpdateError,
   checkLatestRelease,
   deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
-  installFailureErrorKind,
-  latestFromUpdaterInfo,
+  GITHUB_REPO,
   mergeLatestReleaseMetadata,
-  providerUpdateCheckAvailability,
-  resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
-  shouldSkipAppUpdateCheck,
-  updateInstallQuitPolicy
+  shouldSkipAppUpdateCheck
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
@@ -118,6 +108,7 @@ const opencodeWeb = require('../shared/opencodeWeb');
 const openrouterLimits = require('../shared/openrouterLimits');
 const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
+const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
@@ -133,7 +124,6 @@ const {
   clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
-  sessionUsageArchivePath,
   sessionUsageArchiveDate,
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
@@ -148,29 +138,8 @@ const {
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
 const { historyPreview, historyRevision } = require('../shared/history');
-const { completeHistorySource, resolveCompleteHistory } = require('./historySource');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
-const {
-  commitMacWidgetSnapshot,
-  discardMacWidgetSnapshot,
-  prepareMacWidgetSnapshotUpdate,
-  resolveMacWidgetSnapshotPath,
-  syncMacWidgetSnapshotDirectory
-} = require('./macWidgetBridge');
-const { createMacWidgetSnapshotController } = require('./macWidgetSnapshotController');
-const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
-const {
-  macWidgetHistoryCachePath,
-  readMacWidgetHistoryCache,
-  writeMacWidgetHistoryCache
-} = require('./macWidgetHistoryStore');
-const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
-const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
-const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
-const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
-const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
-const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
 const linuxAutostart = require('./linuxAutostart');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
@@ -193,20 +162,16 @@ const {
   trayToggleAction
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
-const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const {
   classifySettingsChange,
-  diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
-  canRefreshUsageRuntime,
-  drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
   runLimitInvalidation,
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
@@ -288,17 +253,12 @@ let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
+let freeLlmRouter = null;
+let freeLlmRouterQueue = Promise.resolve();
 let sessionUsageArchive = null;
-let lastSessionUsageArchiveUpdate = {
-  at: null,
-  durationMs: null,
-  failureCode: null
-};
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
-const diagnosticJournal = createDiagnosticJournal();
-const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServicesRecovery();
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
@@ -314,16 +274,6 @@ function normalizeHomeLimitAccountCount(value) {
   if (!Number.isFinite(count)) return HOME_LIMIT_ACCOUNT_COUNT_DEFAULT;
   return Math.max(1, Math.min(HOME_LIMIT_ACCOUNT_COUNT_MAX, count));
 }
-
-let pendingMacWidgetOpen = null;
-app.on('open-url', (event, url) => {
-  const urlScheme = macWidgetConfiguration()?.urlScheme || 'token-monitor';
-  const destination = parseMacWidgetDeepLink(url, urlScheme);
-  if (!destination) return;
-  event.preventDefault();
-  pendingMacWidgetOpen = destination;
-  if (app.isReady()) setImmediate(openMainWindowFromWidget);
-});
 
 function defaultSettings() {
   const envHubUrl = process.env.TOKEN_MONITOR_HUB_URL || '';
@@ -402,7 +352,6 @@ function defaultSettings() {
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
-    opencodeLocalLimitsEnabled: false,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     // Manual subscription metadata. Plain preferences, not credentials, so they
     // live in settings.json and cross to the renderer unredacted.
@@ -452,6 +401,11 @@ function defaultSettings() {
     ollamaCookie: '',
     codexManagedAccounts: [],
     mimoManagedAccounts: [],
+    ollamaManagedAccounts: [],
+    freeLlmRoutingEnabled: false,
+    freeLlmRoutingPort: FREELLM_DEFAULT_PORT,
+    freeLlmRoutingThresholdPercent: FREELLM_DEFAULT_THRESHOLD_PERCENT,
+    freeLlmRoutingKeys: [],
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -548,7 +502,8 @@ function electronLimitsConfig() {
     env: process.env,
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
-    mimoManagedAccounts: mimoManagedAccountsForCollector()
+    mimoManagedAccounts: mimoManagedAccountsForCollector(),
+    ollamaManagedAccounts: ollamaManagedAccountsForCollector()
   });
 }
 
@@ -1045,7 +1000,6 @@ function setMimoManagedAccountEnabled(id, enabled) {
   return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
-
 function ollamaAccountsForRenderer() {
   return normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map(({
     id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
@@ -1100,6 +1054,142 @@ function removeOllamaCredential(id) {
   } catch (_) {
     return false;
   }
+}
+
+function normalizeFreeLlmRoutingKeys(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.flatMap((entry) => {
+    const id = String(entry?.id || '').trim();
+    const ollamaAccountId = String(entry?.ollamaAccountId || '').trim();
+    if (!id || !ollamaAccountId || seen.has(id)) return [];
+    seen.add(id);
+    return [{
+      id,
+      ollamaAccountId,
+      label: String(entry?.label || '').trim().slice(0, 80),
+      enabled: entry?.enabled !== false,
+      addedAt: entry?.addedAt || new Date().toISOString(),
+      updatedAt: entry?.updatedAt || entry?.addedAt || new Date().toISOString()
+    }];
+  });
+}
+
+function readFreeLlmRoutingKey(id) {
+  try { return ensureCredentialStore().readFreeLlmRoutingKey(id); } catch (_) { return ''; }
+}
+
+function writeFreeLlmRoutingKey(id, apiKey) {
+  try { return ensureCredentialStore().writeFreeLlmRoutingKey(id, apiKey); } catch (_) { return false; }
+}
+
+function removeFreeLlmRoutingKey(id) {
+  try { return ensureCredentialStore().removeFreeLlmRoutingKey(id); } catch (_) { return false; }
+}
+
+function freeLlmRoutingKeysForRenderer() {
+  return normalizeFreeLlmRoutingKeys(settings?.freeLlmRoutingKeys).map((key) => ({ ...key }));
+}
+
+function freeLlmRoutingKeysForRuntime() {
+  const accounts = new Map(normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map((account) => [account.id, account]));
+  return normalizeFreeLlmRoutingKeys(settings?.freeLlmRoutingKeys).flatMap((key) => {
+    const account = accounts.get(key.ollamaAccountId);
+    const apiKey = readFreeLlmRoutingKey(key.id);
+    return account?.enabled !== false && apiKey ? [{ ...key, apiKey, accountKey: account.accountKey }] : [];
+  });
+}
+
+function freeLlmQuotaSnapshot() {
+  const providers = deviceRuntimeHandle?.getSnapshot?.()?.limits?.providers || [];
+  const accountIds = new Map(normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map((account) => [account.accountKey, account.id]));
+  return providers.filter((provider) => provider?.provider === 'ollama').flatMap((provider) => {
+    const accountId = accountIds.get(String(provider.accountKey || '').trim());
+    return accountId ? [{ ...provider, accountId }] : [];
+  });
+}
+
+function freeLlmRoutingConfig() {
+  return {
+    port: normalizeFreeLlmPort(settings?.freeLlmRoutingPort),
+    thresholdPercent: normalizeFreeLlmThreshold(settings?.freeLlmRoutingThresholdPercent)
+  };
+}
+
+function freeLlmRouterStatus() {
+  return freeLlmRouter?.getStatus?.() || { running: false, port: null, error: '', activeKeyId: '', blockedKeyIds: [] };
+}
+
+function reconcileFreeLlmRouter() {
+  freeLlmRouterQueue = freeLlmRouterQueue.then(async () => {
+    if (freeLlmRouter) {
+      await freeLlmRouter.stop();
+      freeLlmRouter = null;
+    }
+    if (!settings?.freeLlmRoutingEnabled) return freeLlmRouterStatus();
+    freeLlmRouter = createFreeLlmRouter({
+      getConfig: freeLlmRoutingConfig,
+      getKeys: freeLlmRoutingKeysForRuntime,
+      getQuotas: freeLlmQuotaSnapshot
+    });
+    try {
+      return await freeLlmRouter.start();
+    } catch (error) {
+      console.warn(`[freellm] Router could not start: ${error.message}`);
+      return freeLlmRouterStatus();
+    } finally {
+      pushSettingsToRenderer();
+    }
+  }).catch((error) => {
+    console.warn(`[freellm] Router reconciliation failed: ${error.message}`);
+    return freeLlmRouterStatus();
+  });
+  return freeLlmRouterQueue;
+}
+
+async function addFreeLlmRoutingKey(input) {
+  const apiKey = String(input?.apiKey || '').trim();
+  const ollamaAccountId = String(input?.ollamaAccountId || '').trim();
+  if (!apiKey) return { ok: false, error: 'Enter an Ollama API key.' };
+  const account = normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).find((entry) => entry.id === ollamaAccountId);
+  if (!account || account.enabled === false) return { ok: false, error: 'Choose an enabled monitored Ollama account.' };
+  const record = { id: crypto.randomUUID(), ollamaAccountId, label: String(input?.label || '').trim().slice(0, 80), enabled: true, addedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  if (!writeFreeLlmRoutingKey(record.id, apiKey)) return { ok: false, error: 'Could not securely save the API key.' };
+  settings.freeLlmRoutingKeys = [...normalizeFreeLlmRoutingKeys(settings.freeLlmRoutingKeys), record];
+  try { saveSettings({ throwOnError: true }); } catch (_) {
+    removeFreeLlmRoutingKey(record.id);
+    return { ok: false, error: 'Could not save the routing key configuration.' };
+  }
+  await reconcileFreeLlmRouter();
+  void queueLimitInvalidation({ provider: 'ollama' }, 'freellm-routing', { refresh: true });
+  return { ok: true, keys: freeLlmRoutingKeysForRenderer(), status: freeLlmRouterStatus() };
+}
+
+async function removeFreeLlmRoutingKeyRecord(id) {
+  const keyId = String(id || '').trim();
+  const keys = normalizeFreeLlmRoutingKeys(settings?.freeLlmRoutingKeys);
+  if (!keys.some((key) => key.id === keyId)) return { ok: false, error: 'Routing key not found.' };
+  const apiKey = readFreeLlmRoutingKey(keyId);
+  if (!removeFreeLlmRoutingKey(keyId)) return { ok: false, error: 'Could not remove the API key.' };
+  settings.freeLlmRoutingKeys = keys.filter((key) => key.id !== keyId);
+  try { saveSettings({ throwOnError: true }); } catch (_) {
+    if (apiKey) writeFreeLlmRoutingKey(keyId, apiKey);
+    return { ok: false, error: 'Could not save the routing key configuration.' };
+  }
+  await reconcileFreeLlmRouter();
+  return { ok: true, keys: freeLlmRoutingKeysForRenderer(), status: freeLlmRouterStatus() };
+}
+
+async function setFreeLlmRoutingKeyEnabled(id, enabled) {
+  const keys = normalizeFreeLlmRoutingKeys(settings?.freeLlmRoutingKeys);
+  const key = keys.find((entry) => entry.id === String(id || '').trim());
+  if (!key) return { ok: false, error: 'Routing key not found.' };
+  key.enabled = Boolean(enabled);
+  key.updatedAt = new Date().toISOString();
+  settings.freeLlmRoutingKeys = keys;
+  try { saveSettings({ throwOnError: true }); } catch (_) { return { ok: false, error: 'Could not save the routing key configuration.' }; }
+  await reconcileFreeLlmRouter();
+  return { ok: true, keys: freeLlmRoutingKeysForRenderer(), status: freeLlmRouterStatus() };
 }
 
 async function addOllamaManagedAccount(cookieValue) {
@@ -1184,7 +1274,6 @@ function setOllamaManagedAccountEnabled(id, enabled) {
   });
   return { ok: true, accounts: ollamaAccountsForRenderer() };
 }
-
 
 function codexManagedRoot() {
   return path.join(app.getPath('userData'), 'managed-codex-homes');
@@ -2148,7 +2237,6 @@ function readSettings() {
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
-    merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
@@ -2189,6 +2277,10 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
+    merged.freeLlmRoutingEnabled = parseBoolean(merged.freeLlmRoutingEnabled, false);
+    merged.freeLlmRoutingPort = normalizeFreeLlmPort(merged.freeLlmRoutingPort);
+    merged.freeLlmRoutingThresholdPercent = normalizeFreeLlmThreshold(merged.freeLlmRoutingThresholdPercent);
+    merged.freeLlmRoutingKeys = normalizeFreeLlmRoutingKeys(merged.freeLlmRoutingKeys);
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -2289,14 +2381,10 @@ function removedTrackedClients(previousClients, nextClients) {
 }
 
 function localArchiveSourceDevice() {
-  return selectLocalDeviceRecord({
-    deviceId: settings?.deviceId || defaultDeviceId(),
-    externalAgentActive: isExternalAgentActive(),
-    lastCollectedDevice,
-    localDevice,
-    latestHubStats: currentHubStatsCache(),
-    latestStats
-  });
+  const deviceId = settings?.deviceId || defaultDeviceId();
+  if (lastCollectedDevice?.deviceId === deviceId) return lastCollectedDevice;
+  if (localDevice?.deviceId === deviceId) return localDevice;
+  return (latestStats?.devices || []).find((device) => device?.deviceId === deviceId) || null;
 }
 
 function updateArchivedClientUsage(previousClients, nextClients) {
@@ -2320,56 +2408,36 @@ function ensureSessionUsageArchiveLoaded() {
 }
 
 function updateSessionUsageArchive(summary, now) {
-  const startedAt = Date.now();
-  const finish = (failureCode = null) => {
-    lastSessionUsageArchiveUpdate = {
-      at: new Date().toISOString(),
-      durationMs: Math.max(0, Date.now() - startedAt),
-      failureCode
-    };
-  };
   const previous = ensureSessionUsageArchiveLoaded();
   const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) === JSON.stringify(previous)) {
-    finish();
-    return previous;
-  }
+  if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
   try {
     writeSessionUsageArchive(next);
     sessionUsageArchive = next;
   } catch (error) {
-    finish('archive-write-failed');
-    diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' });
     console.log(`[session-archive] write failed: ${error.message}`);
-    return next;
   }
-  finish();
   return next;
-}
-
-// Read-only projection of both archives onto a summary. Un-tracked clients and
-// retained sessions add to the period totals, not just to the breakdowns, so
-// anything rendered without this reads low. Takes the session archive as an
-// argument because capturing into it is a separate decision, see below.
-function summaryWithArchivesApplied(summary, sessionArchive, now) {
-  const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
-    activeClients: settings?.clients,
-    now
-  });
-  const visibleSummary = settings?.sessionUsageArchiveEnabled === false
-    ? withArchivedClients
-    : applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
-  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
 }
 
 function summaryWithArchivedClientUsage(summary) {
   const now = sessionUsageArchiveDate(summary);
-  if (settings?.sessionUsageArchiveEnabled === false) return summaryWithArchivesApplied(summary, null, now);
+  const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
+    activeClients: settings?.clients,
+    now
+  });
+  let visibleSummary = withArchivedClients;
+  if (settings?.sessionUsageArchiveEnabled === false) {
+    return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+  }
   if (isExternalAgentActive()) {
     sessionUsageArchive = null;
-    return summaryWithArchivesApplied(summary, ensureSessionUsageArchiveLoaded(), now);
+    visibleSummary = applySessionUsageArchive(withArchivedClients, ensureSessionUsageArchiveLoaded(), { now });
+  } else {
+    const sessionArchive = updateSessionUsageArchive(summary, now);
+    visibleSummary = applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
   }
-  return summaryWithArchivesApplied(summary, updateSessionUsageArchive(summary, now), now);
+  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
 }
 
 function applyMacActivationPolicy(state = {}) {
@@ -2475,28 +2543,11 @@ let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
-let latestHubStatsReceivedAt = null;
-let latestHubStatsSource = 'none';
-let latestHubStatsGeneration = null;
-let latestHubStatsIdentity = null;
-let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
-let macWidgetSnapshotController = null;
-let macWidgetDemand = null;
-let macWidgetPublicationReady = false;
-let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
-
-function electronPresentationStats(stats) {
-  return projectLimitStatsForDisplay(stats, {
-    localDeviceId: settings?.deviceId,
-    syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
-    opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
-  });
-}
 let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
@@ -2526,121 +2577,6 @@ let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
 const pendingLimitInvalidations = new Map();
 const pendingUsageClientRefreshes = new Map();
-
-function hubModeRequestIsCurrent(generation, expectedMode, expectedIdentity = null) {
-  return generation === hubModeGeneration
-    && settings?.hubMode === expectedMode
-    && (expectedIdentity === null || currentHubStatsIdentity(expectedMode) === expectedIdentity);
-}
-
-function currentHubStatsIdentity(expectedMode = settings?.hubMode) {
-  const { url } = effectiveHubConfig();
-  return `${String(expectedMode || 'none')}|${String(url || 'none').replace(/\/$/, '')}`;
-}
-
-function currentHubStatsCache() {
-  const hubMode = settings?.hubMode || 'local';
-  const expectedSource = hubMode === 'host'
-    ? 'host'
-    : hubMode === 'client'
-      ? 'client'
-      : 'none';
-  if (!latestHubStats
-    || latestHubStatsSource !== expectedSource
-    || latestHubStatsGeneration !== hubModeGeneration
-    || latestHubStatsIdentity !== currentHubStatsIdentity(hubMode)) {
-    return null;
-  }
-  return latestHubStats;
-}
-
-function clearLatestHubStatsCache() {
-  latestHubStats = null;
-  latestHubStatsReceivedAt = null;
-  latestHubStatsSource = 'none';
-  latestHubStatsGeneration = null;
-  latestHubStatsIdentity = null;
-}
-
-function setLatestHubStatsCache(stats, source, generation, identity) {
-  latestHubStats = stats;
-  latestHubStatsReceivedAt = new Date().toISOString();
-  latestHubStatsSource = source;
-  latestHubStatsGeneration = generation;
-  latestHubStatsIdentity = identity;
-}
-
-const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
-  getSettings: () => settings,
-  getMode: () => mode,
-  getEffectiveHubConfig: effectiveHubConfig,
-  getExternalAgentActive: isExternalAgentActive,
-  getDeviceRuntime: () => deviceRuntimeHandle,
-  getEmbeddedHub: () => embeddedHub,
-  getStreamState: () => ({ connected: streamConnected, failure: streamFailure }),
-  getLatestHubStats: () => latestHubStats,
-  getLatestHubStatsReceivedAt: () => latestHubStatsReceivedAt,
-  getLatestHubStatsSource: () => latestHubStatsSource,
-  getLatestHubStatsGeneration: () => latestHubStatsGeneration,
-  getLatestHubStatsIdentity: () => latestHubStatsIdentity,
-  getHubModeGeneration: () => hubModeGeneration,
-  getCurrentHubStatsIdentity: (hubMode) => currentHubStatsIdentity(hubMode),
-  getLocalRecord: localArchiveSourceDevice,
-  getTokscaleStatus,
-  getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
-    usage: {
-      agentVersion: appVersion(),
-      agentRuntime: 'electron-widget',
-      commandTimeoutMs: 120 * 1000,
-      defaultDeviceId: defaultDeviceId(),
-      intervalMs: collectorIntervalMs(),
-      historyIntervalMs: normalizeHistoryIntervalMs(settings?.historyIntervalMs)
-    },
-    limits: {
-      env: process.env,
-      defaultLimitProviders: defaultLimitProviders()
-    },
-    syncUploadIntervalMs: syncUploadIntervalMs()
-  }),
-  getJournalSnapshot: () => diagnosticJournal.getSnapshot(),
-  getArchiveState: () => {
-    const enabled = settings?.sessionUsageArchiveEnabled !== false;
-    const loaded = sessionUsageArchive !== null;
-    return {
-      enabled,
-      loaded,
-      sessionCount: loaded ? Object.keys(sessionUsageArchive?.sessions || {}).length : null,
-      countSource: loaded ? 'loaded-memory' : enabled ? 'not-loaded' : 'not-enabled',
-      lastUpdate: lastSessionUsageArchiveUpdate
-    };
-  },
-  getAppVersion: appVersion,
-  getDefaultDeviceId: defaultDeviceId,
-  canRefreshUsageRuntime,
-  getAppState: () => ({
-    packaged: app.isPackaged,
-    preferredLanguages: typeof app.getPreferredSystemLanguages === 'function'
-      ? app.getPreferredSystemLanguages()
-      : [app.getLocale?.() || 'en'],
-    locale: app.getLocale?.() || 'en'
-  })
-});
-
-const diagnosticReportGenerator = createDiagnosticReportGenerator({
-  getAppMetrics: () => app.getAppMetrics(),
-  getSystemMemory: () => ({ total: os.totalmem(), free: os.freemem() }),
-  privateMemorySupported: process.platform === 'win32',
-  getSnapshot: ({ generatedAt }) => diagnosticSnapshotBuilder.build(generatedAt),
-  getArchiveFileStat: async () => {
-    if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
-    try {
-      const stat = await fs.promises.stat(sessionUsageArchivePath());
-      return { ok: true, stat };
-    } catch (error) {
-      return { ok: false, code: error?.code === 'ENOENT' ? 'archive-not-present' : 'archive-stat-failed' };
-    }
-  }
-});
 
 function limitInvalidationKey(scope) {
   const provider = String(scope?.provider || '').trim().toLowerCase();
@@ -2691,10 +2627,6 @@ function drainPendingLimitInvalidations(runtime) {
 
 function refreshUsageClient(clientId, options = {}) {
   const client = String(clientId || '').trim().toLowerCase();
-  const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-  if (!client || !KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) {
-    throw new TypeError(`Unsupported targeted usage client: ${client || '(empty)'}`);
-  }
   if (!deviceRuntimeHandle) {
     pendingUsageClientRefreshes.set(client, { clientId: client, options: { ...options } });
     return Promise.resolve({ queued: true });
@@ -2702,31 +2634,14 @@ function refreshUsageClient(clientId, options = {}) {
   return Promise.resolve(deviceRuntimeHandle.refreshClient(client, options));
 }
 
-function bestEffortTrackedUsageRefresh(clientId, options = {}) {
-  const client = String(clientId || '').trim().toLowerCase();
-  const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-  if (
-    !tracked.has(client)
-    || !canRefreshUsageRuntime(mode, isExternalAgentActive)
-  ) return;
-  try {
-    void refreshUsageClient(client, options).catch((error) => {
-      console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
-    });
-  } catch (error) {
-    console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
-  }
-}
-
 function drainPendingUsageClientRefreshes(runtime) {
-  drainPendingUsageClientRefreshQueue(
-    pendingUsageClientRefreshes,
-    runtime,
-    (error) => {
+  const pending = [...pendingUsageClientRefreshes.values()];
+  pendingUsageClientRefreshes.clear();
+  for (const entry of pending) {
+    void Promise.resolve(runtime.refreshClient(entry.clientId, entry.options)).catch((error) => {
       console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
-    },
-    { enabled: canRefreshUsageRuntime(mode, isExternalAgentActive) }
-  );
+    });
+  }
 }
 
 function drainPendingRuntimeActions(runtime) {
@@ -2816,13 +2731,6 @@ function isExternalAgentActive() {
     process.kill(pid, 0);
     return true;
   } catch (_) { return false; }
-}
-
-function ownsUsageRuntime() {
-  return Boolean(
-    deviceRuntimeHandle
-    && canRefreshUsageRuntime(mode, isExternalAgentActive)
-  );
 }
 
 async function deleteDeviceFromHub(deviceId) {
@@ -3364,17 +3272,14 @@ async function saveSubscriptions(list, base) {
   return settingsForRenderer();
 }
 
-// `options` is forwarded verbatim to the runtime; the quit path passes
-// `skipCloseWatchers` (see stopAll).
-function stopSyncCollector(options = {}) {
-  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
+function stopSyncCollector() {
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
   deviceRuntimeHandle = null;
 }
 
 function startSyncCollector() {
   stopSyncCollector();
   if (!effectiveHubConfig().url) return;
-  const widgetProducerOwner = captureMacWidgetProducerOwner();
   const syncUploadScheduler = createSyncUploadScheduler({
     intervalMs: syncUploadIntervalMs(),
     upload: postToHub,
@@ -3391,7 +3296,7 @@ function startSyncCollector() {
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
         updateDiscordRpcDisplay(displayStats);
-        sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } }, { widgetProducerOwner });
+        sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
       }
       await syncUploadScheduler.enqueue(visibleSummary, revision);
     },
@@ -3405,7 +3310,6 @@ function startSyncCollector() {
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('sync-collector'),
     sink,
-    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3450,7 +3354,6 @@ function startHostCollector() {
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('host-collector'),
     sink,
-    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3466,19 +3369,14 @@ function stopHostStats() {
 function startHostStats() {
   stopHostStats();
   if (!embeddedHub) return;
-  const generation = hubModeGeneration;
-  const widgetProducerOwner = captureMacWidgetProducerOwner();
-  const cacheIdentity = currentHubStatsIdentity('host');
   // Host mode presents the same multi-device hub aggregate as connecting to a
   // remote hub, so it reuses the renderer's 'sync' status path (Live / synced
   // data). The in-process vs loopback distinction is internal to fetchStats.
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
-    if (!hubModeRequestIsCurrent(generation, 'host', cacheIdentity)) return;
-    setLatestHubStatsCache(stats, 'host', generation, cacheIdentity);
     updateDiscordRpcDisplay(stats);
-    sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } }, { widgetProducerOwner });
+    sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
   };
   embeddedHubUnsub = embeddedHub.hub.onStats((stats, reason) => emit(stats, reason || 'hub'));
   // Prime the renderer with the current snapshot so it isn't blank until the
@@ -3487,17 +3385,16 @@ function startHostStats() {
 }
 
 // Detection status is about this machine's local files, so stamp the freshly
-// collected local clientStatus, clientHealth AND wslStatus onto the local device
-// in whatever stats we hand the renderer. This keeps the 采集 tags + WSL panel
-// correct in sync/host mode without depending on the hub (or a remote Worker)
-// being redeployed to preserve these fields.
+// collected local clientStatus AND wslStatus onto the local device in whatever
+// stats we hand the renderer. This keeps the 采集 tags + WSL panel correct in
+// sync/host mode without depending on the hub (or a remote Worker) being
+// redeployed to preserve these fields.
 function injectLocalDeviceStatus(stats) {
   if (!stats || !Array.isArray(stats.devices)) return stats;
   if (lastCollectedDevice) {
     const device = stats.devices.find((entry) => entry.deviceId === lastCollectedDevice.deviceId);
     if (device) {
       if (lastCollectedDevice.clientStatus) device.clientStatus = lastCollectedDevice.clientStatus;
-      if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
   }
@@ -3517,244 +3414,21 @@ function injectLocalDeviceStatus(stats) {
   return stats;
 }
 
-function macWidgetConfiguration() {
-  if (process.platform !== 'darwin') return null;
-  if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
-
-  let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
-  let urlScheme = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || 'token-monitor').trim();
-  let snapshotFileName = 'snapshot.json';
-  let widgetKind = DEFAULT_WIDGET_KIND;
-  const configCandidates = [
-    path.join(process.resourcesPath, 'token-monitor-widget.json'),
-    path.resolve(__dirname, '..', '..', 'build', 'macos-widget', 'widget-config.json')
-  ];
-  if (!appGroup) {
-    for (const configPath of configCandidates) {
-      try {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        appGroup = String(config.appGroup || '').trim();
-        urlScheme = String(config.urlScheme || urlScheme).trim();
-        widgetKind = String(config.widgetKind || widgetKind).trim();
-        snapshotFileName = String(config.snapshotFileName || snapshotFileName).trim();
-        if (appGroup) break;
-      } catch (_) {}
-    }
-  }
-  const snapshotPath = resolveMacWidgetSnapshotPath({
-    appGroup,
-    home: app.getPath('home'),
-    snapshotFileName
-  });
-  if (!snapshotPath) {
-    cachedMacWidgetConfiguration = null;
-    return cachedMacWidgetConfiguration;
-  }
-  cachedMacWidgetConfiguration = {
-    appGroup,
-    snapshotPath,
-    widgetKind,
-    urlScheme: (() => {
-      try { return normalizeWidgetURLScheme(urlScheme); } catch (_) { return 'token-monitor'; }
-    })()
-  };
-  return cachedMacWidgetConfiguration;
-}
-
-function historyResolverOptions() {
-  const { url: hubUrl, secret } = effectiveHubConfig();
-  return {
-    aggregateHistory,
-    embeddedHub,
-    historyEnabled: settings?.historyEnabled !== false,
-    hubMode: settings?.hubMode,
-    hubUrl,
-    localDevice,
-    mode,
-    secret
-  };
-}
-
-function getCompleteHistory() {
-  return resolveCompleteHistory(historyResolverOptions());
-}
-
-function macWidgetPresentation() {
-  return Object.freeze({
-    currencyCode: settings?.currency,
-    currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
-    compactNumbers: settings?.showCompactTotalTokens !== false,
-    compactTokenUnits: settings?.compactTokenUnits,
-    showCost: true,
-    locale: settings?.language,
-    theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
-  });
-}
-
-function ensureMacWidgetDemand() {
-  if (process.platform !== 'darwin') return null;
-  if (macWidgetDemand) return macWidgetDemand;
-  const widget = macWidgetConfiguration();
-  if (!widget) return null;
-  // The demand leases live beside the snapshot in the app group container. The
-  // widget extension touches the full marker on every timeline() request and
-  // the short provisional marker on a non-gallery snapshot() (the add flow),
-  // so a fresh marker here means "a Widget is on screen or being placed". The
-  // watcher arms immediately so a first placement primes the initial snapshot
-  // within moments; the reconcile poll catches anything the watcher missed.
-  const markerDirectory = path.dirname(widget.snapshotPath);
-  macWidgetDemand = createMacWidgetDemandState({
-    markerPath: path.join(markerDirectory, WIDGET_DEMAND_MARKER),
-    provisionalMarkerPath: path.join(markerDirectory, WIDGET_DEMAND_PROVISIONAL_MARKER),
-    onActivation: () => {
-      const visibleStats = electronPresentationStats(latestStats);
-      scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
-    },
-    logger: (message) => console.warn(message)
-  });
-  macWidgetDemand.start();
-  return macWidgetDemand;
-}
-
-function captureMacWidgetWork({ stats, owner }) {
-  const widget = macWidgetConfiguration();
-  if (!widget) return null;
-  // No Widget on screen means no WidgetKit render loop is asking for data, so
-  // the whole snapshot pipeline (history resolution, serialization, fsync and
-  // the reload helper spawn) can be skipped. Only a confirmed missing or stale
-  // demand marker closes this gate; an unarmed state must not starve someone
-  // who does have a Widget.
-  if (macWidgetDemand && !macWidgetDemand.isInstalled()) return null;
-  const resolverConfig = Object.freeze({ ...historyResolverOptions() });
-  const sourceKey = macWidgetHistorySourceKey(resolverConfig);
-  return {
-    stats,
-    owner: Object.freeze({
-      epoch: owner.epoch,
-      sourceKey
-    }),
-    resolverConfig,
-    historyCachePath: completeHistorySource(resolverConfig) === 'remote'
-      ? macWidgetHistoryCachePath(app.getPath('userData'), sourceKey)
-      : null,
-    presentation: macWidgetPresentation(),
-    snapshotPath: widget.snapshotPath,
-    widgetKind: widget.widgetKind
-  };
-}
-
-function ensureMacWidgetSnapshotController() {
-  if (process.platform !== 'darwin') return null;
-  if (macWidgetSnapshotController) return macWidgetSnapshotController;
-  macWidgetSnapshotController = createMacWidgetSnapshotController({
-    startPaused: !macWidgetPublicationReady,
-    captureWork: captureMacWidgetWork,
-    resolveHistory: (work) => resolveMacWidgetHistory({
-      generation: work.owner.epoch,
-      sourceKey: work.owner.sourceKey,
-      revision: work.stats?.historyRevision,
-      fetchHistory: () => resolveCompleteHistory(work.resolverConfig),
-      ...(work.historyCachePath ? {
-        loadCachedHistory: () => readMacWidgetHistoryCache(
-          work.historyCachePath,
-          work.owner.sourceKey,
-          { logger: (message) => console.warn(message) }
-        ),
-        saveCachedHistory: (history) => writeMacWidgetHistoryCache(
-          work.historyCachePath,
-          work.owner.sourceKey,
-          history,
-          { logger: (message) => console.warn(message) }
-        )
-      } : {}),
-      minIntervalMs: completeHistorySource(work.resolverConfig) === 'remote' ? undefined : 0,
-      logger: (message) => console.warn(message)
-    }),
-    prepareSnapshot: (work, history) => prepareMacWidgetSnapshotUpdate(work.stats, {
-      snapshotPath: work.snapshotPath,
-      snapshotOptions: {
-        presentation: work.presentation,
-        history
-      },
-      logger: (message) => console.warn(message)
-    }),
-    commitSnapshot: (prepared, options) => commitMacWidgetSnapshot(prepared, {
-      isCurrent: options.isCurrent,
-      logger: (message) => console.warn(message)
-    }),
-    syncSnapshot: (_work, committed, prepared) => syncMacWidgetSnapshotDirectory({
-      ...committed,
-      fs: prepared?.fs
-    }),
-    discardSnapshot: discardMacWidgetSnapshot,
-    reloadSnapshot: (work, options) => requestMacWidgetReload({
-      widgetKind: work.widgetKind,
-      isCurrent: options.isCurrent,
-      logger: (message) => console.warn(message)
-    }),
-    logger: (message) => console.warn(message)
-  });
-  return macWidgetSnapshotController;
-}
-
-function captureMacWidgetProducerOwner() {
-  return ensureMacWidgetSnapshotController()?.captureProducerOwner() || null;
-}
-
-function advanceMacWidgetProducerAndSourceEpoch() {
-  ensureMacWidgetSnapshotController()?.advanceProducerAndSourceEpoch();
-}
-
-function advanceMacWidgetSourceEpoch() {
-  ensureMacWidgetSnapshotController()?.advanceSourceEpoch();
-}
-
-function refreshMacWidgetHistorySource() {
-  advanceMacWidgetSourceEpoch();
-  const visibleStats = electronPresentationStats(latestStats);
-  scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
-}
-
-function scheduleMacWidgetSnapshot(stats, producerOwner) {
-  if (process.platform !== 'darwin' || !stats) return false;
-  return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
-}
-
-// Two options, both for the cold-start seed and neither for live stats.
-// `skipExport` keeps a republished snapshot from spending the auto-export
-// interval that this run's first real scan needs. `deferToRenderer` waits for
-// the renderer to finish loading, and is deliberately not the default: a live
-// push that lands mid-load is already covered by the refreshStats() the renderer
-// runs on init, so deferring every one of them would only queue a listener per
-// frame against a slow load and then replay a burst of superseded stats.
-function sendPush(payload, options = {}) {
+function sendPush(payload) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
-  let rendererPayload = payload;
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
-    const visibleStats = electronPresentationStats(latestStats);
-    rendererPayload = {
-      ...payload,
-      data: { ...payload.data, stats: visibleStats }
-    };
-    scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
-    if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
+    if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
       writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
         .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
     }
   }
-  if (options.deferToRenderer) {
-    // Only while it is still the newest thing published. A slow load can outlast
-    // the first real collection, and delivering the queued snapshot then would
-    // walk the numbers backwards until the next push.
-    const deferred = payload?.data?.stats;
-    sendMainWindowEvent('stats:push', rendererPayload, () => !deferred || latestStats === deferred);
-  } else if (mainWindow && !mainWindow.isDestroyed()) {
-    try { mainWindow.webContents.send('stats:push', rendererPayload); } catch (_) {}
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
   }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
@@ -3824,11 +3498,10 @@ function updateDiscordRpcDisplay(stats) {
 
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
-  const visibleStats = electronPresentationStats(latestStats);
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);
   const compactOptions = compactTokenDisplayOptions();
-  const limitText = formatTrayText(visibleStats, mode, currency, {
+  const limitText = formatTrayText(latestStats, mode, currency, {
     limitProviderOrder: settings?.limitProviderOrder,
     limitProviders: settings?.limitProviders,
     showLimitUsed: settings?.showLimitUsed,
@@ -3843,115 +3516,42 @@ function updateTrayDisplay() {
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
-  const tip = formatTrayText(visibleStats, 'both', currency, compactOptions);
+  const tip = formatTrayText(latestStats, 'both', currency, compactOptions);
   tray.setToolTip(`Token Monitor - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
   if (barsImageMode || trayImageMode || customImageMode) {
     icon = providerTrayIcons[mode];
   } else {
-    const usageIconId = pickUsageTrayIconId(visibleStats, mode, Object.keys(providerTrayIcons));
+    const usageIconId = pickUsageTrayIconId(latestStats, mode, Object.keys(providerTrayIcons));
     if (usageIconId) icon = providerTrayIcons[usageIconId];
   }
   tray.setImage(icon || getDefaultTrayIcon());
 }
 
-function recordDiagnosticEvent(event) {
-  diagnosticJournal.record({
-    ...event,
-    modeAtEvent: settings?.hubMode || 'local'
-  });
-}
-
 function sendStatus(connected, extra) {
-  const previous = streamConnected;
   streamConnected = Boolean(connected);
   streamFailure = streamConnected ? null : ((extra && extra.reason) ? { reason: extra.reason, detail: extra.detail ?? null } : streamFailure);
-  if (mode === 'sync') {
-    if (streamConnected && !previous) {
-      recordDiagnosticEvent({ subsystem: 'stream', code: 'stream-reconnected' });
-    } else if (!streamConnected && (previous || extra?.reason)) {
-      recordDiagnosticEvent({
-        subsystem: 'stream',
-        code: 'stream-disconnected',
-        detailCode: diagnosticStreamDetailCode(extra || streamFailure || {})
-      });
-    }
-  }
   sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
 }
 
-// `options` is forwarded verbatim to the runtime; the quit path passes
-// `skipCloseWatchers` (see stopAll).
-function stopLocalCollector(options = {}) {
-  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
+function stopLocalCollector() {
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
   deviceRuntimeHandle = null;
   localDevice = null;
   localStats = null;
 }
 
-// Show the last full scan's totals while the first one of this run is still
-// going, instead of zeros for the tens of seconds it takes. deviceRecordFromAnchor
-// owns the trust rules; anything it rejects leaves the renderer on its normal
-// wait-for-real-data path.
-function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
-  // Cold start only. startMode() re-enters here on structural settings changes
-  // as well, and there the numbers already collected are newer than any anchor.
-  if (lastCollectedDevice) return;
-  const deviceRecord = deviceRecordFromAnchor(
-    readJson(path.join(sharedDataDir(), 'collector-anchor.json'), null),
-    {
-      envelope: electronDeviceEnvelope(),
-      clients: usageOptions.clients,
-      allTimeSince: usageOptions.allTimeSince,
-      projectsEnabled: usageOptions.projectsEnabled,
-      wslScanEnabled: usageOptions.wslScanEnabled,
-      wslSupported: process.platform === 'win32',
-      hostname: os.hostname(),
-      platform: `${process.platform}-${process.arch}`
-    }
-  );
-  if (!deviceRecord) return;
-  // The anchor holds raw collector output, while everything the renderer is ever
-  // shown has been through the archives first. Project the same way or the seed
-  // reads low for anyone with an un-tracked client or retained sessions, and then
-  // jumps when the first scan lands. Read-only on purpose: the capture step
-  // records a fresh observation, and an anchor from hours ago is not one.
-  const visible = summaryWithArchivesApplied(
-    deviceRecord,
-    settings?.sessionUsageArchiveEnabled === false ? null : ensureSessionUsageArchiveLoaded(),
-    sessionUsageArchiveDate(deviceRecord)
-  );
-  localDevice = visible;
-  localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
-  // Through the normal publisher, not straight to the renderer: the tray reads
-  // what sendPush sets, and in tray mode the window is hidden, so a seed that
-  // only reached the renderer would leave the one visible surface on zero.
-  // This one waits for the renderer: it is the only stats push whose whole point
-  // is to be on screen before the first scan, so it cannot be left to the
-  // refreshStats() that covers the rest. It must also not spend the export
-  // interval this run's first live scan needs on a snapshot it is republishing.
-  sendPush({
-    event: 'stats',
-    data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
-  }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
-}
-
 function startLocalCollector() {
   stopLocalCollector();
-  const widgetProducerOwner = captureMacWidgetProducerOwner();
   mode = 'local';
   sendStatus(false, { reason: 'collecting' });
-  // One config object for both, so the fingerprint the seed validates against
-  // cannot drift from the one the collector will compute.
-  const usageOptions = electronUsageConfig('collector');
-  primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions,
+    usageOptions: electronUsageConfig('collector'),
     progressive: true,
     onRecord: (summary, meta) => {
       const reason = meta.reason;
@@ -3960,10 +3560,9 @@ function startLocalCollector() {
       lastCollectedDevice = localDevice;
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
       updateDiscordRpcDisplay(localStats);
-      sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } }, { widgetProducerOwner });
+      sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
     },
-    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3996,13 +3595,7 @@ function parseSseChunk(chunk) {
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
-  const generation = hubModeGeneration;
-  const widgetProducerOwner = captureMacWidgetProducerOwner();
-  if (settings?.hubMode !== 'client') return;
-  const cacheIdentity = currentHubStatsIdentity('client');
-  if (options.resetSnapshot) {
-    clearLatestHubStatsCache();
-  }
+  if (options.resetSnapshot) latestHubStats = null;
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   mode = 'sync';
@@ -4014,7 +3607,6 @@ async function startStatsStream(options = {}) {
       headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
       signal: controller.signal
     });
-    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     if (!response.ok || !response.body) {
       sendStatus(false, classifyStreamFailure({ status: response.status }));
       scheduleStreamRetry();
@@ -4025,9 +3617,7 @@ async function startStatsStream(options = {}) {
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
-      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
-      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let idx;
@@ -4037,20 +3627,19 @@ async function startStatsStream(options = {}) {
         let parsed = parseSseChunk(chunk);
         if (parsed) {
           if (parsed.event === 'stats' && parsed.data?.stats) {
-            setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
+            latestHubStats = parsed.data.stats;
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
             updateDiscordRpcDisplay(displayStats);
           }
-          sendPush(parsed, { widgetProducerOwner });
+          sendPush(parsed);
         }
       }
     }
-    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ eof: true }));
     scheduleStreamRetry();
   } catch (error) {
-    if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    if (controller.signal.aborted) return;
     sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
   }
@@ -4070,37 +3659,6 @@ function showPopover() {
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
   setTimeout(() => { suppressNextBlurHide = false; }, 250);
-}
-
-function openMainWindowFromWidget() {
-  if (!app.isReady()) return;
-  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
-  pendingMacWidgetOpen = null;
-  updateRendererViewState({ breakdown: destination.view });
-  applyMacActivationPolicy({ mainWindowVisible: true });
-  // Closing the window with the tray icon off destroys it while macOS keeps the
-  // app alive, so a widget click has to be able to build one again — the same
-  // recovery focusExistingWindow() performs for the dock and the shortcut.
-  // Bailing out instead consumed the open-url event and left the widget dead
-  // for the rest of the session, since nothing else reads pendingMacWidgetOpen.
-  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const sendDestination = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (destination.settings) mainWindow.webContents.send('settings:open');
-    else mainWindow.webContents.send('view:open', destination.view);
-  };
-  if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendDestination);
-  else sendDestination();
-  if (settings?.trayMode && tray) {
-    showPopover();
-    return;
-  }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  applyMacSpaceBehavior(false);
-  // A collapsed bubble would otherwise swallow the navigation we just sent.
-  if (floatingBubbleState.collapsed) expandFloatingBubble();
-  else mainWindow.show();
 }
 
 function hidePopover() {
@@ -4288,6 +3846,9 @@ function settingsForRenderer() {
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
+    ollamaManagedAccounts: ollamaAccountsForRenderer(),
+    freeLlmRoutingKeys: freeLlmRoutingKeysForRenderer(),
+    freeLlmRoutingStatus: freeLlmRouterStatus(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
@@ -4332,24 +3893,14 @@ function pushSettingsToRenderer() {
   }
 }
 
-function refreshLimitStatsPresentation() {
-  if (!latestStats) return;
-  const visibleStats = electronPresentationStats(latestStats);
-  scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
-  updateTrayDisplay();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    try {
-      mainWindow.webContents.send('stats:push', {
-        event: 'stats',
-        data: { type: 'stats', reason: 'presentation', mode, stats: visibleStats }
-      });
-    } catch (_) {}
-  }
-}
-
 function sendMimoAccountsPush() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
+}
+
+function sendOllamaAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('ollama:accounts', ollamaAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -4387,16 +3938,18 @@ function trayMenuLocale() {
   return resolveLocale(settings?.language || 'auto', preferredLanguages);
 }
 
-// `isStillCurrent`, when given, is re-checked after the wait: see
-// deferredWindowSend.js.
-function sendMainWindowEvent(channel, payload, isStillCurrent) {
+function sendMainWindowEvent(channel, payload) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  sendWhenRendererReady(mainWindow.webContents, channel, payload, isStillCurrent);
+  const send = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try { mainWindow.webContents.send(channel, payload); } catch (_) {}
+  };
+  if (mainWindow.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', send);
+  else send();
 }
 
 async function refreshFromTray() {
   if (trayRefreshInFlight) return;
-  const widgetProducerOwner = captureMacWidgetProducerOwner();
   trayRefreshInFlight = true;
   try {
     const stats = await fetchStats({ force: true });
@@ -4404,7 +3957,7 @@ async function refreshFromTray() {
     // result when fetchStats returned a different object (for example, a remote hub
     // fetch while an external headless agent owns collection).
     if (stats && stats !== latestStats) {
-      sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } }, { widgetProducerOwner });
+      sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } });
     }
   } catch (error) {
     console.warn(`[tray] refresh failed: ${error.message}`);
@@ -4638,9 +4191,6 @@ function exitTrayMode() {
 }
 
 function startMode() {
-  hubModeGeneration += 1;
-  advanceMacWidgetProducerAndSourceEpoch();
-  clearLatestHubStatsCache();
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued.
   stopLocalCollector();
@@ -4719,30 +4269,12 @@ function restartDeviceRuntimeForMode() {
   else startLocalCollector();
 }
 
-// Quit-path teardown. Every step here must be synchronous, because performQuit
-// exits on the next line and anything awaited in between is a chance to never
-// get there. `skipCloseWatchers` is what buys that: chokidar's close() returns a
-// promise, but not before an O(N) synchronous pass over every watched entry, and
-// on a tree the size of ~/.claude/projects that pass alone blocks the main
-// thread long enough to look like a hang. The descriptors go with the process.
-// Mode switches deliberately do NOT come through here: they keep the default
-// stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
-// really gone before a new one starts on the same paths.
 function stopAll() {
   stopPersistBoundsTimer();
-  stopLocalCollector({ skipCloseWatchers: true });
+  stopLocalCollector();
   stopStatsStream();
   stopHostStats();
-  stopSyncCollector({ skipCloseWatchers: true });
-  macWidgetSnapshotController?.stop();
-  if (macWidgetDemand) {
-    macWidgetDemand.stop();
-    macWidgetDemand = null;
-  }
-  // Fire-and-forget on purpose. server.close() does not complete until every
-  // in-flight request does, so awaiting it hands a remote device on the embedded
-  // hub the power to hold our own exit open. The listening socket closes with
-  // the process, and a graceful hub close buys nothing on the way out.
+  stopSyncCollector();
   void stopEmbeddedHub();
   stopDiscordRpc();
   if (tray && !tray.isDestroyed()) tray.destroy();
@@ -4750,64 +4282,12 @@ function stopAll() {
 }
 
 let quitRequested = false;
-let quitInProgress = false;
-// Owned by the update-install guard below and by nothing else: electron-updater
-// restarts the process itself, so the exit has to stand down or the install
-// never runs.
-let skipForcedQuit = false;
-
-// An install request stands the forced exit down, and quitAndInstall() never
-// reports back whether the installer actually took over. The guard owns that
-// unconfirmed window; these two flags are all it touches here. See
-// updateInstallQuit.js for why the claim expires and what promotes it.
-// Set once the hand-off listener is actually attached; see the guard's watchdog.
-let updateHandoffObserved = false;
-
-const updateInstallQuit = createUpdateInstallQuitGuard({
-  ...updateInstallQuitPolicy(),
-  watchdogEnabled: () => updateHandoffObserved,
-  claim: () => { quitRequested = true; skipForcedQuit = true; },
-  release: () => { quitRequested = false; skipForcedQuit = false; },
-  onStalled: () => {
-    // The bound is far enough out that reaching it means the install genuinely
-    // stalled, which is exactly what the user is looking at: they pressed Install
-    // and the app neither restarted nor complained. What to do about it depends on
-    // whether the attempt survived: where the guard handed it back the update is
-    // still one press away, and only where it did not is a restart the way out.
-    setNativeAppUpdateState({
-      phase: 'error',
-      progress: null,
-      error: 'Update installer did not start',
-      errorKind: installFailureErrorKind({ spent: updateInstallQuit.isSpent(), stalled: true })
-    });
-  },
-  onHandoff: (afterStalledReport) => {
-    // The bound is a decision to stop waiting, not proof the installer is dead, so
-    // a hand-off that turns up later withdraws the report rather than leaving the
-    // app advising a restart it is about to perform itself.
-    if (!afterStalledReport) return;
-    setNativeAppUpdateState({ phase: 'downloaded', progress: 100, error: null });
-  }
-});
-
-// The single quit path. Teardown above is what used to hang, so it runs
-// synchronously and cheaply, and then app.exit() ends the process without
-// another trip through Electron's shutdown events.
-function performQuit() {
-  if (quitInProgress) return;
-  quitInProgress = true;
-  try {
-    stopAll();
-  } catch (error) {
-    console.log(`[quit] stopAll failed: ${error?.message || error}`);
-  }
-  app.exit(0);
-}
-
 function requestAppQuit() {
   if (quitRequested) return;
   quitRequested = true;
-  performQuit();
+  stopAll();
+  if (app.isReady()) app.quit();
+  else app.exit(0);
 }
 
 // Write the export file set (JSON + CSVs) into `dir`, atomically (temp + rename)
@@ -4860,15 +4340,14 @@ async function writeExportTo(dir, periods, options = {}) {
 }
 
 async function fetchStats(options = {}) {
-  const requestGeneration = hubModeGeneration;
-  const requestHubIdentity = currentHubStatsIdentity('client');
   const force = Boolean(options?.force);
   // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
   // settings, account sign-ins and limits actions all refresh with { force: true },
   // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
   // and Antigravity sync subprocesses — on every one of them. Only the manual
   // refresh button opts in.
-  if (force && ownsUsageRuntime()) {
+  const canRefreshRuntime = mode === 'local' || !isExternalAgentActive();
+  if (force && deviceRuntimeHandle && canRefreshRuntime) {
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
@@ -4887,22 +4366,8 @@ async function fetchStats(options = {}) {
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  const stats = await response.json();
-  if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
-    // The response belongs to a mode that is no longer active. Wait for the
-    // queued mode reconciliation before re-reading: Client -> Host may still
-    // be binding the embedded hub, and an immediate retry would hit its
-    // loopback URL before it is listening.
-    await modeQueue;
-    return fetchStats({
-      ...options,
-      force: false,
-      forceHistory: false,
-      forceSelfSync: false
-    });
-  }
-  setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
-  return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
+  latestHubStats = await response.json();
+  return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
 }
 
 function managedPricingSidecarPath() {
@@ -4922,7 +4387,7 @@ function regenerateTokscalePricing() {
 
 async function refreshAfterPricingChange() {
   try {
-    if (ownsUsageRuntime()) {
+    if (deviceRuntimeHandle && (mode === 'local' || !isExternalAgentActive())) {
       await deviceRuntimeHandle.tick('manual', {});
     }
   } catch (error) {
@@ -4980,7 +4445,6 @@ async function downloadTokscaleFromNpm() {
 let appUpdateCheckInFlight = false;
 let appUpdateCheckPromise = null;
 let appUpdateLastError = null;
-let appUpdateLastAttemptAt = null;
 let appUpdateBackgroundTimer = null;
 let appUpdateNativeBusy = false;
 let appUpdateNativeConfigured = false;
@@ -4988,33 +4452,36 @@ let appUpdateNativeState = {
   phase: 'idle',
   version: null,
   progress: null,
-  error: null,
-  errorKind: null
+  error: null
 };
 
-function rememberSuccessfulAppUpdateCheck(latest, checkedAt = new Date().toISOString(), { clearLatest = false } = {}) {
-  if (!latest && !clearLatest) return null;
-  const remembered = latest
-    ? mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest)
-    : null;
+function latestFromUpdaterInfo(info) {
+  if (!info || typeof info !== 'object') return null;
+  const version = semver.valid(info.version);
+  if (!version) return null;
+  return {
+    version,
+    tag: `v${version}`,
+    name: (typeof info.releaseName === 'string' && info.releaseName.trim()) ? info.releaseName : `v${version}`,
+    htmlUrl: `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`,
+    publishedAt: typeof info.releaseDate === 'string' ? info.releaseDate : ''
+  };
+}
+
+function rememberLatestAppUpdate(latest, checkedAt = new Date().toISOString()) {
+  if (!latest) return null;
+  const merged = mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest);
   settings.appUpdate = {
     ...(settings.appUpdate || {}),
     lastCheckedAt: checkedAt,
-    lastKnownLatest: remembered
+    lastKnownLatest: merged
   };
   saveSettings();
-  appUpdateLastAttemptAt = checkedAt;
-  appUpdateLastError = null;
-  return remembered;
+  return merged;
 }
 
 function setNativeAppUpdateState(patch = {}) {
-  const next = { ...appUpdateNativeState, ...patch };
-  // A kind belongs to the error it arrived with and must never outlive it, so any
-  // patch that touches `error` without naming one clears it. That keeps the
-  // ordinary updater failures generic without every call site restating it.
-  if ('error' in patch && !('errorKind' in patch)) next.errorKind = null;
-  appUpdateNativeState = next;
+  appUpdateNativeState = { ...appUpdateNativeState, ...patch };
   sendAppUpdatePush();
 }
 
@@ -5024,6 +4491,18 @@ function configureNativeAppUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.logger = console;
+  autoUpdater.on('checking-for-update', () => {
+    setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
+  });
+  autoUpdater.on('update-available', (info) => {
+    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
+    setNativeAppUpdateState({ phase: 'available', version: latest?.version || info?.version || null, progress: null, error: null });
+  });
+  autoUpdater.on('update-not-available', (info) => {
+    appUpdateNativeBusy = false;
+    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
+    setNativeAppUpdateState({ phase: 'idle', version: latest?.version || null, progress: null, error: null });
+  });
   autoUpdater.on('download-progress', (progress) => {
     setNativeAppUpdateState({
       phase: 'downloading',
@@ -5036,74 +4515,10 @@ function configureNativeAppUpdater() {
     const latest = latestFromUpdaterInfo(info);
     setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
   });
-  // The hand-off is emitted on Electron's own autoUpdater, not electron-updater's:
-  // BaseUpdater re-emits it there to mimic what Squirrel does natively. Losing it
-  // is not merely losing a confirmation, so the flag records a verified
-  // registration and nothing weaker: without the listener nothing could re-claim
-  // the flags after the grace period, and the guard would expire into a state a
-  // late hand-off could not recover from. It stops arming the watchdog instead.
-  try {
-    updateHandoffObserved = observeUpdateInstallHandoff(
-      require('electron').autoUpdater,
-      () => updateInstallQuit.noteHandoff()
-    );
-  } catch (error) {
-    updateHandoffObserved = false;
-    console.log(`[update] cannot observe the install hand-off: ${error?.message || error}`);
-  }
-  if (!updateHandoffObserved) console.log('[update] no install hand-off signal; quit recovery disabled');
   autoUpdater.on('error', (error) => {
-    // Released before the busy guard below, deliberately: update-downloaded has
-    // already cleared appUpdateNativeBusy by the time an install can fail, so a
-    // rollback behind that guard would never run and the quit flags would stay
-    // stuck for the rest of the session.
-    const wasInstalling = updateInstallQuit.abort();
-    // Availability checks use the same provider but report through
-    // appUpdateLastError. Only a real download or install attempt owns installError.
-    if (!appUpdateNativeBusy && !wasInstalling) return;
     appUpdateNativeBusy = false;
-    setNativeAppUpdateState({
-      phase: 'error',
-      progress: null,
-      error: error?.message || String(error || 'Update failed'),
-      // Where the attempt was single-use, a failed install also closed the in-app
-      // path: the controls below now offer the release page instead of a retry, and
-      // a generic "couldn't install" leaves that looking like the end of the road.
-      // A restart is what brings the retry back, so the message has to say so.
-      // `wasInstalling` is the part the helper cannot know: without it a check
-      // failure arriving after an earlier spent attempt borrows its explanation.
-      errorKind: wasInstalling
-        ? installFailureErrorKind({ spent: updateInstallQuit.isSpent() })
-        : null
-    });
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
   });
-}
-
-async function checkAppUpdateProvider() {
-  if (!app.isPackaged) return checkLatestRelease(app.getVersion());
-  const checkedAt = new Date().toISOString();
-  configureNativeAppUpdater();
-  const result = await autoUpdater.checkForUpdates();
-  const availability = providerUpdateCheckAvailability(result, app.getVersion());
-  if (!availability.valid) {
-    return {
-      ok: false,
-      newer: false,
-      latest: null,
-      error: 'Update metadata missing or invalid',
-      errorKind: 'metadata',
-      checkedAt
-    };
-  }
-  return {
-    ok: true,
-    newer: availability.newer,
-    latest: availability.latest,
-    clearLatest: availability.clearLatest,
-    error: null,
-    errorKind: null,
-    checkedAt
-  };
 }
 
 function deriveAppUpdateState() {
@@ -5126,32 +4541,16 @@ function deriveAppUpdateState() {
     showUpdateNotice: availability.showUpdateNotice,
     dismissedVersion,
     lastCheckedAt: block.lastCheckedAt || null,
-    lastAttemptAt: appUpdateLastAttemptAt,
     checking: appUpdateCheckInFlight,
-    lastError: appUpdateLastError?.message || null,
-    lastErrorKind: appUpdateLastError?.kind || null,
+    lastError: appUpdateLastError,
     installSupported: installSupport.supported,
     installSupportReason: installSupport.reason,
     installPhase: appUpdateNativeState.phase,
     installProgress: appUpdateNativeState.progress,
     installVersion: appUpdateNativeState.version,
     installError: appUpdateNativeState.error,
-    installErrorKind: appUpdateNativeState.errorKind || null,
     downloaded: availability.downloaded,
-    // The hand-off window, straight from the state machine rather than inferred
-    // from a pair of booleans downstream: between the press and the installer
-    // taking over there is nothing else to tell the user.
-    installStarting: updateInstallQuit.isInstalling(),
-    // No further attempt is possible until a restart, so the action policy and the
-    // automatic downloader both have to stop offering one.
-    installRetryBlocked: updateInstallQuit.isSpent(),
-    // An install the guard is still trying to complete counts as busy: on macOS
-    // Squirrel can take tens of seconds, and leaving the control live for that long
-    // invites a second press the guard can only refuse.
-    installBusy: appUpdateNativeBusy
-      || updateInstallQuit.isInstalling()
-      || appUpdateNativeState.phase === 'checking'
-      || appUpdateNativeState.phase === 'downloading'
+    installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
   };
 }
 
@@ -5172,31 +4571,15 @@ function sendAppUpdatePush() {
 }
 
 async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {}) {
-  // An outstanding install owns the updater until the guard is idle again.
-  // electron-updater reports a failed check by emitting on the same global 'error'
-  // event an install failure arrives on -- checkForUpdates() emits there and
-  // rethrows -- and the handler below has nothing to tell them apart. Treating a
-  // check's failure as the install's would tear down the install, which is what the
-  // hourly check made an ordinary overlap on macOS, where an install is outstanding
-  // for as long as minutes.
-  //
-  // `isOutstanding` rather than `isInstalling`, so this covers a spent attempt too.
-  // Spent is not terminal: the bound is only where we stopped waiting, and a late
-  // hand-off still promotes it back to `handoff` and re-claims the flags. A check
-  // allowed to start in the meantime would then be in flight during a genuine
-  // hand-off, and its failure would release `skipForcedQuit` with the installer
-  // owning the exit -- the one outcome this whole path exists to prevent. Checking
-  // is worth less than that: after a spent attempt it can only find a version this
-  // process is already refusing to download.
-  if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
   if (appUpdateCheckPromise) {
     if (force) sendAppUpdatePush();
     const activeResult = await appUpdateCheckPromise;
     if (force) {
-      appUpdateLastAttemptAt = activeResult?.checkedAt || new Date().toISOString();
-      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, activeResult, { force: true });
       if (activeResult?.ok) {
         if (activeResult.newer) restoreDismissedAppUpdate(activeResult.latest?.version);
+        appUpdateLastError = null;
+      } else {
+        appUpdateLastError = activeResult?.error || 'Update check failed';
       }
       sendAppUpdatePush();
     }
@@ -5214,35 +4597,24 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
   }
   const checkTask = (async () => {
     appUpdateCheckInFlight = true;
-    appUpdateLastAttemptAt = new Date().toISOString();
+    appUpdateLastError = null;
     if (force) sendAppUpdatePush();
     let result;
     try {
-      result = await checkAppUpdateProvider();
-      appUpdateLastAttemptAt = result.checkedAt || appUpdateLastAttemptAt;
+      result = await checkLatestRelease(app.getVersion());
       if (result.ok) {
-        rememberSuccessfulAppUpdateCheck(result.latest, result.checkedAt, { clearLatest: result.clearLatest });
+        rememberLatestAppUpdate(result.latest, result.checkedAt);
         if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
+        appUpdateLastError = null;
       } else {
-        appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, result, { force });
+        appUpdateLastError = force ? (result.error || 'Update check failed') : null;
         if (!force) console.warn('App update check failed:', result.error);
       }
     } catch (error) {
-      const classified = classifyAppUpdateError(error);
-      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, {
-        ok: false,
-        error: classified.message,
-        errorKind: classified.kind
-      }, { force });
+      const message = error.message || String(error);
+      appUpdateLastError = force ? message : null;
       if (!force) console.warn('App update check threw:', error);
-      return {
-        ok: false,
-        newer: false,
-        latest: null,
-        error: classified.message,
-        errorKind: classified.kind,
-        checkedAt: appUpdateLastAttemptAt
-      };
+      return { ok: false, newer: false, latest: null, error: message };
     } finally {
       appUpdateCheckInFlight = false;
       sendAppUpdatePush();
@@ -5293,18 +4665,6 @@ async function downloadAndPrepareAppUpdate() {
     setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
     return deriveAppUpdateState();
   }
-  // Same ownership rule as the check path, and one more: a spent attempt can never
-  // be installed by this process either, so re-entering the download lifecycle
-  // rebuilds MacUpdater's local proxy while the listener the first quitAndInstall()
-  // attached is still on the native updater. The renderer stops offering this and
-  // the automatic downloader stands down, but neither of those is the boundary --
-  // this is, and an IPC action queued before the attempt ended still arrives here.
-  //
-  // Every entry point uses the same rule, for the same reason (see
-  // runAppUpdateCheck): while the guard holds anything, nothing else drives the
-  // updater.
-  if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
-  if (appUpdateCheckPromise) await appUpdateCheckPromise;
   if (appUpdateNativeBusy) return deriveAppUpdateState();
   const latest = settings?.appUpdate?.lastKnownLatest || null;
   if (downloadedAppUpdateMatchesLatest({
@@ -5312,26 +4672,19 @@ async function downloadAndPrepareAppUpdate() {
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
+  restoreDismissedAppUpdate(latest?.version);
   configureNativeAppUpdater();
   appUpdateNativeBusy = true;
   setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
   try {
     const result = await autoUpdater.checkForUpdates();
-    const availability = providerUpdateCheckAvailability(result, app.getVersion());
-    if (!availability.valid) throw new Error('Update metadata missing or invalid');
-    const checkedAt = new Date().toISOString();
-    const latestFromCheck = rememberSuccessfulAppUpdateCheck(
-      availability.latest,
-      checkedAt,
-      { clearLatest: availability.clearLatest }
-    );
-    const version = latestFromCheck?.version || null;
-    if (!availability.newer || !version) {
+    const info = result?.updateInfo || null;
+    const version = semver.valid(info?.version) || null;
+    if (!version || !semver.gt(version, app.getVersion())) {
       appUpdateNativeBusy = false;
       setNativeAppUpdateState({ phase: 'idle', version, progress: null, error: null });
       return deriveAppUpdateState();
     }
-    restoreDismissedAppUpdate(version);
     setNativeAppUpdateState({ phase: 'downloading', version, progress: 0, error: null });
     await autoUpdater.downloadUpdate();
   } catch (error) {
@@ -5341,52 +4694,17 @@ async function downloadAndPrepareAppUpdate() {
   return deriveAppUpdateState();
 }
 
-async function installDownloadedAppUpdate() {
-  // The other half of the same rule. Refusing new operations during the install
-  // only holds the boundary if nothing was already running when it started, and a
-  // check begun a moment earlier would still be reporting on the shared event.
-  // Waiting rather than refusing, since this one is a button press: the checks
-  // below are read afterwards, when the update it is about to install is settled.
-  if (appUpdateCheckPromise) await appUpdateCheckPromise;
+function installDownloadedAppUpdate() {
   const latest = settings?.appUpdate?.lastKnownLatest || null;
   if (!downloadedAppUpdateMatchesLatest({
     phase: appUpdateNativeState.phase,
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
-  // quitAndInstall goes through before-quit, and electron-updater owns the
-  // restart from there. Stand the forced exit down or the installer never runs.
-  // Refused while an earlier request is still outstanding, and permanently once an
-  // attempt is spent, so a second press can never stack install attempts.
-  if (!updateInstallQuit.request()) {
-    // Say so rather than leave a button that quietly does nothing: a spent attempt
-    // cannot be retried in this process at all.
-    if (updateInstallQuit.phase() === 'spent') {
-      setNativeAppUpdateState({
-        phase: 'error',
-        progress: null,
-        error: 'Update install was already attempted',
-        errorKind: 'attempt-spent'
-      });
-    }
-    return deriveAppUpdateState();
-  }
-  try {
-    // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
-    // (per-user install needs no elevation); isForceRunAfter relaunches the app.
-    autoUpdater.quitAndInstall(true, true);
-  } catch (error) {
-    // The abort above ended the attempt this call had just made, so unlike the
-    // updater's own error handler there is nothing else this failure could belong
-    // to, and the same recovery applies.
-    updateInstallQuit.abort();
-    setNativeAppUpdateState({
-      phase: 'error',
-      progress: null,
-      error: error?.message || String(error || 'Update failed'),
-      errorKind: installFailureErrorKind({ spent: updateInstallQuit.isSpent() })
-    });
-  }
+  quitRequested = true;
+  // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
+  // (per-user install needs no elevation); isForceRunAfter relaunches the app.
+  autoUpdater.quitAndInstall(true, true);
   return deriveAppUpdateState();
 }
 
@@ -5699,7 +5017,35 @@ function createDashboardWindow() {
 }
 
 async function getDashboardHistory() {
-  return getCompleteHistory();
+  if (settings?.historyEnabled === false) return aggregateHistory([]);
+  if (mode === 'local') {
+    // The local collector keeps localDevice.history current (watch + interval
+    // ticks, with carry-forward), so read it directly — exactly as the hub
+    // branch reads /api/history. Forcing a full collection tick here made the
+    // fetch take seconds; on a quick close/reopen the response outlived the
+    // renderer and was dropped, stranding the dashboard on its empty state.
+    return aggregateHistory(localDevice ? [localDevice] : []);
+  }
+  if (settings.hubMode === 'host' && embeddedHub) {
+    // Host mode reads its own hub store in-process, so the dashboard history
+    // doesn't depend on a loopback fetch the local firewall/proxy might block.
+    return embeddedHub.hub.getHistory();
+  }
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  if (!hubUrl) return aggregateHistory([]);
+  const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -5742,17 +5088,6 @@ function rebuildWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
-  const widgetRecoveryAbort = new AbortController();
-  const abortWidgetRecovery = () => widgetRecoveryAbort.abort();
-  app.once('before-quit', abortWidgetRecovery);
-  const widgetRecovery = recoverMacWidgetLaunchServicesRegistration({
-    platform: process.platform,
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    userDataPath: app.getPath('userData'),
-    signal: widgetRecoveryAbort.signal,
-    logger: (message) => console.warn(message)
-  });
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -5767,18 +5102,10 @@ app.whenReady().then(() => {
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   ensureTray();
-  if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
-  ensureMacWidgetDemand();
   startMode();
-  void widgetRecovery.finally(() => {
-    app.removeListener('before-quit', abortWidgetRecovery);
-    if (!widgetRecoveryAbort.signal.aborted) {
-      macWidgetPublicationReady = true;
-      macWidgetSnapshotController?.resume();
-    }
-  });
+  void reconcileFreeLlmRouter();
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
@@ -5843,7 +5170,6 @@ app.whenReady().then(() => {
     const previousTrayCustomLayout = JSON.stringify(settings.trayCustomLayout || {});
     const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
-    const previousOpenCodeLocalLimitsEnabled = settings.opencodeLocalLimitsEnabled === true;
     const previousCurrency = settings.currency;
     const previousCompactTokenUnits = settings.compactTokenUnits;
     const previousLanguage = settings.language;
@@ -5964,7 +5290,6 @@ app.whenReady().then(() => {
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
-      opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
       windowMaximized: parseBoolean(settings.windowMaximized, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
@@ -6049,10 +5374,6 @@ app.whenReady().then(() => {
       applyNativeMaterial();
     }
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
-    const widgetHistorySourceChanged = previousRuntimeSettings.historyEnabled !== settings.historyEnabled;
-    if (widgetHistorySourceChanged && !runtimeChange.modeStructural) {
-      refreshMacWidgetHistorySource();
-    }
     const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
     if (runtimeChange.modeStructural) {
       for (const { scope, reason, options } of limitInvalidations) {
@@ -6097,11 +5418,6 @@ app.whenReady().then(() => {
       updateTrayDisplay();
       if (settings.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
       refreshExchangeRates();              // async: fetch if stale, then re-push
-    }
-    if ((settings.opencodeLocalLimitsEnabled === true) !== previousOpenCodeLocalLimitsEnabled) {
-      // Re-project the cached aggregate immediately. The Hub can be offline and
-      // therefore may not send another frame after this local-only setting changes.
-      refreshLimitStatsPresentation();
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
@@ -6217,7 +5533,7 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    return electronPresentationStats(stats);
+    return stats;
   });
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
@@ -6261,87 +5577,10 @@ app.whenReady().then(() => {
     osRelease: require('os').release(),
     isPackaged: app.isPackaged,
     userData: app.getPath('userData'),
-    // So the diagnostics panel can print ~/… instead of the user's account name.
-    homeDir: require('os').homedir(),
     sharedDataDir: sharedDataDir(),
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState()
   }));
-  ipcMain.handle('diagnostics:generate', async () => {
-    const report = await diagnosticReportGenerator.generate();
-    return {
-      generatedAt: report.generatedAt,
-      completeness: report.completeness,
-      text: report.text,
-      bytes: report.bytes,
-      truncated: report.truncated,
-      includedClientCount: report.includedClientCount,
-      omittedClientCount: report.omittedClientCount,
-      includedLimitProviderCount: report.includedLimitProviderCount,
-      omittedLimitProviderCount: report.omittedLimitProviderCount,
-      includedRemoteGroupCount: report.includedRemoteGroupCount,
-      omittedRemoteGroupCount: report.omittedRemoteGroupCount,
-      includedJournalEventCount: report.includedJournalEventCount,
-      journalOmittedCount: report.journalOmittedCount
-    };
-  });
-  // Where each tracked tool's data is read from on THIS machine. The absolute
-  // paths stay local by design — they carry the user's home directory and never
-  // go on the wire — so the renderer asks the main process for them instead.
-  //
-  // Probe only the client whose detail panel is open. The renderer caches the
-  // result for the current health snapshot, avoiding both eager filesystem work
-  // and path flicker when a stats tick rebuilds the panel.
-  ipcMain.handle('usage:clientSources', (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
-    try {
-      const seen = new Set();
-      const all = (visibleDiagnosticRoots(client)[client] || [])
-        .filter((root) => {
-          const key = `${root.id}\0${root.dir}`;
-          return !seen.has(key) && seen.add(key);
-        })
-        .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
-      const sources = all.slice(0, 32);
-      return { sources, omittedCount: all.length - sources.length };
-    } catch (_) {
-      return null;
-    }
-  });
-  // Reveals one of those paths. The renderer sends a client id, never a path:
-  // anything it could send would otherwise become an arbitrary filesystem open.
-  ipcMain.handle('usage:revealClientSource', async (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return false;
-    try {
-      const roots = clientDiagnosticRoots(client)[client] || [];
-      const target = roots.find((root) => root.exists);
-      if (!target) return false;
-      // An exact-file source would otherwise be handed to openPath, which opens
-      // the file in whatever app claims .db/.jsonl. Select it in its folder
-      // instead — the user asked where the data lives, not to open it.
-      if (target.sourcePath) {
-        shell.showItemInFolder(target.sourcePath);
-        return true;
-      }
-      return await shell.openPath(target.dir) === '';
-    } catch (_) {
-      return false;
-    }
-  });
-  ipcMain.handle('usage:rescanClient', async (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    if (!client || !ownsUsageRuntime()) return false;
-    try {
-      return await refreshUsageClient(client, { forceSync: true }) === true;
-    } catch (error) {
-      console.log(`[usage-runtime] rescan failed: ${error.message}`);
-      return false;
-    }
-  });
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;
@@ -6360,6 +5599,21 @@ app.whenReady().then(() => {
     .catch((error) => ({ ok: false, error: error.message })));
   ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
   ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
+  ipcMain.handle('ollama:addAccount', async (_event, raw) => addOllamaManagedAccount(raw));
+  ipcMain.handle('ollama:removeAccount', async (_event, id) => removeOllamaManagedAccount(id));
+  ipcMain.handle('ollama:setAccountEnabled', (_event, id, enabled) => setOllamaManagedAccountEnabled(id, enabled));
+  ipcMain.handle('ollama:accounts', () => ollamaAccountsForRenderer());
+  ipcMain.handle('freellm:status', () => freeLlmRouterStatus());
+  ipcMain.handle('freellm:setEnabled', async (_event, enabled) => {
+    settings.freeLlmRoutingEnabled = Boolean(enabled);
+    try { saveSettings({ throwOnError: true }); } catch (_) { return { ok: false, error: 'Could not save routing settings.' }; }
+    if (settings.freeLlmRoutingEnabled) void queueLimitInvalidation({ provider: 'ollama' }, 'freellm-routing', { refresh: true });
+    const status = await reconcileFreeLlmRouter();
+    return { ok: Boolean(!settings.freeLlmRoutingEnabled || status.running), status };
+  });
+  ipcMain.handle('freellm:addKey', async (_event, input) => addFreeLlmRoutingKey(input));
+  ipcMain.handle('freellm:removeKey', async (_event, id) => removeFreeLlmRoutingKeyRecord(id));
+  ipcMain.handle('freellm:setKeyEnabled', async (_event, id, enabled) => setFreeLlmRoutingKeyEnabled(id, enabled));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());
@@ -6383,7 +5637,7 @@ app.whenReady().then(() => {
       await cursorAuth.runCursorLogin(token);
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
-      bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
+      void refreshUsageClient('cursor', { forceSync: true });
       return { ok: true, email: probeResult.user.email };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -6494,7 +5748,7 @@ app.whenReady().then(() => {
       await cursorAuth.runCursorLogout();
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'logout', { clear: true });
-      bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
+      void refreshUsageClient('cursor', { forceSync: true });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -7059,19 +6313,7 @@ app.whenReady().then(() => {
 
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-// Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
-// performQuit is synchronous through to the exit, so there is nothing to wait
-// for and deliberately no preventDefault: taking the quit over would cancel an
-// OS-initiated logout or restart on macOS.
-app.on('before-quit', () => {
-  quitRequested = true;
-  resetMacWidgetReloadThrottle();
-  if (rateRefreshTimer) clearInterval(rateRefreshTimer);
-  if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
-  unregisterWindowToggleShortcut();
-  if (skipForcedQuit) return;
-  performQuit();
-});
+app.on('before-quit', () => { quitRequested = true; if (rateRefreshTimer) clearInterval(rateRefreshTimer); if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer); unregisterWindowToggleShortcut(); stopAll(); });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.once(signal, requestAppQuit);
 }
