@@ -299,6 +299,8 @@ state.clientRescans = clientRescanStateApi.createClientRescanState({
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
   }
 });
+state.toolPreferenceRenderSignature = '';
+state.toolPreferenceDetailSignature = '';
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -8741,10 +8743,52 @@ function clientHealthDetailFor(clientId) {
   });
 }
 
+function sameRenderedNode(current, next) {
+  if (current.nodeType !== next.nodeType) return false;
+  if (current.nodeType !== Node.ELEMENT_NODE) return true;
+  if (current.tagName !== next.tagName || current.className !== next.className) return false;
+  const currentAction = current.dataset?.healthAction || '';
+  const nextAction = next.dataset?.healthAction || '';
+  return currentAction === nextAction;
+}
+
+function patchRenderedNode(current, next) {
+  if (current.nodeType === Node.TEXT_NODE) {
+    if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+    return;
+  }
+  for (const name of current.getAttributeNames()) {
+    if (!next.hasAttribute(name)) current.removeAttribute(name);
+  }
+  for (const name of next.getAttributeNames()) {
+    const value = next.getAttribute(name);
+    if (current.getAttribute(name) !== value) current.setAttribute(name, value);
+  }
+  const currentChildren = Array.from(current.childNodes);
+  const nextChildren = Array.from(next.childNodes);
+  for (let index = 0; index < nextChildren.length; index += 1) {
+    const currentChild = currentChildren[index];
+    const nextChild = nextChildren[index];
+    if (!currentChild) {
+      current.append(nextChild);
+    } else if (sameRenderedNode(currentChild, nextChild)) {
+      patchRenderedNode(currentChild, nextChild);
+    } else {
+      currentChild.replaceWith(nextChild);
+    }
+  }
+  for (let index = nextChildren.length; index < currentChildren.length; index += 1) {
+    currentChildren[index].remove();
+  }
+}
+
 function fillClientHealthPanel(container, clientId) {
   const detail = clientHealthDetailFor(clientId);
   if (!detail) return;
-  container.replaceChildren(clientHealthPanel(detail, clientId));
+  const next = clientHealthPanel(detail, clientId);
+  const current = container.firstElementChild;
+  if (current && sameRenderedNode(current, next)) patchRenderedNode(current, next);
+  else container.replaceChildren(next);
 }
 
 // Home-relative so the panel does not print the user's account name back at
@@ -8892,6 +8936,7 @@ function clientHealthActions(clientId) {
     const rescanState = state.clientRescans.snapshot(clientId);
     const feedback = document.createElement('span');
     feedback.className = 'tool-health-action-feedback';
+    feedback.dataset.healthAction = 'rescan-feedback';
     feedback.setAttribute('role', 'status');
     feedback.setAttribute('aria-live', 'polite');
     feedback.textContent = rescanState.failed ? t('settings.tools.health.rescanFailed') : '';
@@ -8907,13 +8952,15 @@ function clientHealthActions(clientId) {
         state.clientRescans.finish(clientId, requestId, succeeded);
       }
     });
+    rescan.dataset.healthAction = 'rescan';
     rescan.disabled = rescanState.pending;
     actions.append(feedback);
   }
   // Only where something was actually found: the button opens the first existing
   // root, and offering it for a tool with none would open nothing.
   if ((localClientSources(clientId) || []).some((source) => source.dir && source.exists)) {
-    button('settings.tools.health.reveal', () => { void window.tokenMonitor?.revealClientSource?.(clientId); });
+    const reveal = button('settings.tools.health.reveal', () => { void window.tokenMonitor?.revealClientSource?.(clientId); });
+    reveal.dataset.healthAction = 'reveal';
   }
   return actions;
 }
@@ -9041,7 +9088,46 @@ function renderToolPreferences() {
   return preserveSettingsPanelScroll(renderToolPreferencesNow);
 }
 
+function toolPreferenceRenderSignature() {
+  const clientStatus = localClientStatus();
+  const health = localClientHealth();
+  const device = localDevice();
+  return JSON.stringify({
+    settings: [
+      state.settings?.trackedClients || '',
+      state.settings?.hiddenClients || '',
+      state.settings?.pinnedClients || '',
+      state.settings?.clientDisplayOrder || '',
+      state.settings?.locale || state.settings?.language || '',
+      state.settings?.currency || '',
+      state.settings?.compactTokenUnits || ''
+    ],
+    deviceId: device?.deviceId || '',
+    clientStatus,
+    healthRows: KNOWN_CLIENTS.map(({ id }) => [
+      id,
+      health?.clients?.[id]?.overall || '',
+      Boolean(health?.clients?.[id])
+    ])
+  });
+}
+
 function renderToolPreferencesNow() {
+  const renderSignature = toolPreferenceRenderSignature();
+  const healthSignature = JSON.stringify([localClientHealth(), localDevice()]);
+  if (
+    state.toolPreferenceRenderSignature
+    && state.toolPreferenceRenderSignature === renderSignature
+    && els.clientDisplayList.children.length === KNOWN_CLIENTS.length
+  ) {
+    if (state.toolPreferenceDetailSignature !== healthSignature) {
+      state.toolPreferenceDetailSignature = healthSignature;
+      refillOpenClientHealthPanel();
+    }
+    return;
+  }
+  state.toolPreferenceRenderSignature = renderSignature;
+  state.toolPreferenceDetailSignature = healthSignature;
   const previousRows = Array.from(els.clientDisplayList.children);
   const focusedId = document.activeElement?.id || '';
   const enabled = enabledClientSet();

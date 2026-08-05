@@ -161,25 +161,28 @@ test('tool preference rows drag from the row itself, not a handle', () => {
   assert.doesNotMatch(i18n, /'settings\.tools\.reorderClient':/);
 });
 
-// The rows are rebuilt on every stats tick. replaceChildren() would take the row
-// under the pointer with it, and later the expanded panel too.
-test('the tool list repaints without destroying its live rows', () => {
+// Token-only stats pushes keep the live rows and expanded panel in place; health
+// changes refill only the open panel instead of rebuilding the whole tool list.
+test('the tool list skips unchanged row renders and refreshes only open health details', () => {
   const app = readRendererFile('app.js');
-  const defer = functionBody(app, 'renderToolPreferences', 'renderToolPreferencesNow');
+  const defer = functionBody(app, 'renderToolPreferences', 'toolPreferenceRenderSignature');
   assert.match(defer, /if \(clientPreferenceRowDrag\.deferRender\(\)\) return;/);
   assert.match(defer, /return preserveSettingsPanelScroll\(renderToolPreferencesNow\);/);
 
+  const signature = functionBody(app, 'toolPreferenceRenderSignature', 'renderToolPreferencesNow');
+  assert.match(signature, /healthRows: KNOWN_CLIENTS\.map/);
+  assert.match(signature, /health\?\.clients\?\.\[id\]\?\.overall/);
+  assert.doesNotMatch(signature, /periods/);
+
   const body = functionBody(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
+  const fill = functionBody(app, 'fillClientHealthPanel', 'clientHealthGroup');
+  assert.match(body, /state\.toolPreferenceRenderSignature === renderSignature/);
+  assert.match(body, /state\.toolPreferenceDetailSignature !== healthSignature/);
+  assert.match(body, /refillOpenClientHealthPanel\(\);/);
+  assert.match(body, /return;/);
   assert.doesNotMatch(body, /replaceChildren/);
-  const snapshot = body.indexOf('const previousRows = Array.from(els.clientDisplayList.children);');
-  const append = body.indexOf('els.clientDisplayList.appendChild(row);');
-  const drop = body.indexOf('for (const row of previousRows) row.remove();');
-  assert.ok(snapshot !== -1, 'the existing rows should be captured before the rebuild');
-  assert.ok(append > snapshot, 'new rows are appended alongside the old ones');
-  assert.ok(drop > append, 'the old rows are dropped only once the new ones exist');
-  // Focus does not survive the swap on its own, and the checkbox now owns the
-  // keyboard reorder, so a second arrow press needs it back.
-  assert.match(body, /document\.getElementById\(focusedId\)\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(fill, /patchRenderedNode\(current, next\)/);
+  assert.match(fill, /else container\.replaceChildren\(next\)/);
 });
 
 test('the tool preference row carries the drag transform contract', () => {
