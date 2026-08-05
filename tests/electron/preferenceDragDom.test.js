@@ -57,6 +57,8 @@ test('handle-based preference drag does not animate row transforms during pointe
 });
 
 test('tool preference controls place compact actions beside the note without duplicate headers', () => {
+  const app = readRendererFile('app.js');
+  const body = functionBody(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
   const html = readRendererFile('index.html');
   const group = html.match(/<div class="settings-subgroup settings-tools-subgroup">[\s\S]*?<div id="clientDisplayList"/)?.[0] || '';
   assert.match(html, /<div class="settings-group settings-collapsible-group settings-tools-group"/);
@@ -73,9 +75,12 @@ test('tool preference controls place compact actions beside the note without dup
   const css = readRendererFile('styles.css');
   assert.match(cssRule(css, '.settings-note-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
   assert.match(cssRule(css, '.settings-note-row'), /align-items:\s*center/);
-  // Three action cells since the drag handle left: track, visibility, pin.
-  assert.match(cssRule(css, '.tool-preference-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) repeat\(3,\s*22px\)/);
+  // The track checkbox gets its own leading cell; visibility and pin stay on the right.
+  assert.match(cssRule(css, '.tool-preference-row'), /grid-template-columns:\s*22px minmax\(0,\s*1fr\) repeat\(2,\s*22px\)/);
   assert.match(cssRule(css, '.tool-preference-actions'), /display:\s*contents/);
+  assert.match(body, /actions\.append\(visibility, pin\);/);
+  assert.match(body, /row\.append\(track, labelGroup, actions(?:, panel)?\);/);
+  assert.doesNotMatch(body, /actions\.append\(track/);
   assert.doesNotMatch(css, /\.tool-preference-head/);
   assert.doesNotMatch(css, /\.tool-preference-legend-/);
 });
@@ -142,7 +147,7 @@ test('the tool preference row carries the drag transform contract', () => {
 test('a press on the tool row own controls never arms a drag', () => {
   const app = readRendererFile('app.js');
   // The checkbox sits inside a label, which is a hit target of its own.
-  assert.match(app, /const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button, input, select, textarea, a, label, \.accordion-animated-container';/);
+  assert.match(app, /const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.tool-preference-main\), input, select, textarea, a, label, \.accordion-animated-container';/);
   const wiring = app.slice(app.indexOf('const clientPreferenceRowDrag = '), app.indexOf('function renderToolPreferences('));
   assert.match(wiring, /dragExcluded: CLIENT_PREFERENCE_DRAG_EXCLUDED,/);
   assert.match(wiring, /rowSelector: '\.tool-preference-row\[data-client\]',/);

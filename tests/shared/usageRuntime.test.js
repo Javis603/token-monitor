@@ -276,7 +276,10 @@ test('a coalesced manual refresh stays a full scan', async () => {
   }
 });
 
-test('refreshClient rejects unsupported targeted usage clients', async () => {
+// The guard used to name cursor because a Cursor sign-in was the only caller,
+// while everything underneath was already per-client. The contract is now the
+// one the machinery always had: any named client, targeted at its own partition.
+test('refreshClient targets whichever client it is given', async () => {
   const runtime = startCollector({
     clients: '',
     allTimeSince: '2024-01-01',
@@ -289,7 +292,11 @@ test('refreshClient rejects unsupported targeted usage clients', async () => {
   });
 
   try {
-    assert.throws(() => runtime.refreshClient('claude'), /Unsupported targeted usage client/);
+    assert.throws(() => runtime.refreshClient(''), /Unsupported targeted usage client/);
+    assert.throws(() => runtime.refreshClient(null), /Unsupported targeted usage client/);
+    // Any named client is accepted; the tick itself is what narrows the scan.
+    assert.doesNotThrow(() => { void runtime.refreshClient('claude'); });
+    assert.doesNotThrow(() => { void runtime.refreshClient('cursor', { forceSync: true }); });
   } finally {
     runtime.stop();
   }

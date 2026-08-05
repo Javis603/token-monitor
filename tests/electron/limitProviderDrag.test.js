@@ -181,7 +181,7 @@ test('the whole-row lists no longer share the handle drag highlight', () => {
 
 test('reduced motion drops the transition on both whole-row lists', () => {
   const css = readRendererFile('styles.css');
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.tray-composer-item \{ transition: none; \}\s*\.settings-panel \.limit-provider-row \{ transition: none; \}\s*\.tool-preference-row \{ transition: none; \}\s*\}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.tray-composer-item \{ transition: none; \}\s*\.settings-panel \.limit-provider-row \{ transition: none; \}\s*\.tool-preference-row \{ transition: none; \}\s*\.tool-preference-main \.cursor-disclosure-icon \{ transition: none; \}\s*\}/);
 });
 
 // The grab handle was the only hint that the rows could be reordered, so

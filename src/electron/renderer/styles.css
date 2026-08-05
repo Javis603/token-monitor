@@ -1664,7 +1664,7 @@ span.settings-note.settings-item-desc {
 .tool-preference-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
+  grid-template-columns: 22px minmax(0, 1fr) repeat(2, 22px);
   align-items: center;
   column-gap: 5px;
   margin: 0 -2px;
@@ -1760,6 +1760,10 @@ span.settings-note.settings-item-desc {
   color: var(--muted);
   opacity: 0.72;
 }
+.tool-status-tag-warn {
+  border-color: rgba(244, 160, 115, 0.42);
+  color: var(--orange);
+}
 .tool-status-tag-setup {
   border-color: rgba(244, 160, 115, 0.32);
   color: var(--orange);
@@ -1781,6 +1785,159 @@ span.settings-note.settings-item-desc {
 .view-preference-row.is-disabled .preference-order-handle:hover:not(:disabled) {
   opacity: 0.72;
 }
+/* The detail panel is a child of the row, not a sibling: the whole row is the
+   drag surface, and a sibling would be left behind when the row moves. Vertical
+   space comes from the container's own margin, which the accordion zeroes while
+   hidden — a grid row-gap cannot animate away and would keep the row taller. */
+.settings-panel .tool-preference-row {
+  row-gap: 0;
+}
+.settings-panel .tool-preference-row > .accordion-animated-container {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  cursor: default;
+}
+/* Collapsing must land instantly so the drag snapshot measures settled geometry
+   rather than a mid-animation height. */
+.tool-preference-list.is-reordering .accordion-animated-container { transition: none; }
+/* The disclosure sits with the row's other controls, so it is sized like them. */
+.tool-preference-row.has-health {
+  grid-template-columns: 22px minmax(0, 1fr) repeat(3, 22px);
+}
+.tool-preference-main {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.tool-preference-row.expanded .tool-preference-main .cursor-disclosure-icon {
+  transform: rotate(-180deg);
+}
+.tool-health-inner {
+  display: grid;
+  gap: 5px;
+  padding: 7px 8px 6px;
+  border-radius: 6px;
+  background: rgba(var(--line-rgb), 0.05);
+}
+.tool-health-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.35;
+}
+.tool-health-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.tool-health-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.tool-health-usage {
+  gap: 0;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.1);
+}
+.tool-health-usage-cell {
+  flex: 1 1 0;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.tool-health-usage-cell + .tool-health-usage-cell { text-align: right; }
+.tool-health-usage-label {
+  color: var(--muted);
+  font-size: 9px;
+}
+.tool-health-usage-value {
+  color: var(--fg);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tool-health-usage-cost {
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.tool-health-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 1px;
+}
+.tool-health-action {
+  padding: 2px 7px;
+  border: 1px solid rgba(var(--line-rgb), 0.16);
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 9px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.tool-health-action:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.42);
+  color: var(--fg);
+}
+.tool-health-action:disabled { cursor: default; opacity: 0.55; }
+.tool-health-note {
+  flex: 0 0 100%;
+  color: var(--muted);
+  opacity: 0.82;
+}
+/* One per line, because these carry paths: a row of them side by side either
+   overflows the panel or truncates the only part that answers "is it looking
+   where I installed it". Check ids stand in where there is no local path, and
+   are shown verbatim — a user pasting one into an issue is the point, so they
+   must not be translated or prettified. */
+.tool-health-checks {
+  flex: 0 0 100%;
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+}
+.tool-health-check {
+  max-width: 100%;
+  padding: 1px 4px;
+  border: 1px solid rgba(var(--line-rgb), 0.14);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.3;
+  opacity: 0.72;
+  overflow-wrap: anywhere;
+  text-decoration: line-through;
+}
+.tool-health-check.found {
+  border-color: rgba(var(--success-rgb), 0.28);
+  color: var(--success);
+  opacity: 1;
+  text-decoration: none;
+}
+.tool-health-note-line {
+  font-size: 10px;
+  line-height: 1.4;
+}
+.tool-health-note-line.tone-warn { color: var(--orange); }
+.tool-health-note-line.tone-neutral { color: var(--fg); opacity: 0.86; }
+.tool-health-note-line.tone-muted { color: var(--muted); }
+
 .tool-preference-actions {
   display: contents;
 }
@@ -6151,4 +6308,5 @@ html.is-windows .limit-live-badge {
   .tray-composer-item { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
+  .tool-preference-main .cursor-disclosure-icon { transition: none; }
 }

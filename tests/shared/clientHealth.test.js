@@ -17,6 +17,7 @@ const {
 } = require('../../src/shared/clientHealth');
 const {
   clientActivityDaysFromHistory,
+  clientDiagnosticRoots,
   clientSourceChecks,
   clientSourceRoots,
   clientWatchCandidates,
@@ -346,6 +347,31 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   for (const list of Object.values(checks)) {
     for (const check of list) assert.equal(typeof check.exists, 'boolean');
   }
+});
+
+test('diagnostic roots expose antigravity native sources without treating them as watch roots', () => {
+  const diagnostics = clientDiagnosticRoots('antigravity').antigravity;
+  assert.deepEqual(diagnostics.map(({ id }) => id), [
+    'antigravity-ide-source',
+    'antigravity-ide-source',
+    'antigravity-ide-source',
+    'antigravity-cli-data',
+    'tokscale-antigravity-cache'
+  ]);
+  assert.deepEqual(
+    diagnostics.slice(0, 3).map(({ dir }) => dir.split(/[\\/]/).at(-1)),
+    ['antigravity', 'antigravity-ide', 'antigravity-backup']
+  );
+  assert.equal(diagnostics[3].dir.split(/[\\/]/).at(-1), 'conversations');
+  for (const root of diagnostics) {
+    assert.equal(typeof root.dir, 'string');
+    assert.equal(typeof root.exists, 'boolean');
+  }
+  assert.deepEqual(
+    clientWatchCandidates('antigravity').antigravity,
+    clientSourceRoots('antigravity').antigravity.map(({ dir }) => dir),
+    'the native source roots add diagnostics, not duplicate watches'
+  );
 });
 
 // Every `overall` turns on whether a directory exists, so the filesystem is

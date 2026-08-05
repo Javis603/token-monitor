@@ -40,7 +40,7 @@ const {
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
+const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
@@ -5313,10 +5313,64 @@ app.whenReady().then(() => {
     osRelease: require('os').release(),
     isPackaged: app.isPackaged,
     userData: app.getPath('userData'),
+    // So the diagnostics panel can print ~/… instead of the user's account name.
+    homeDir: require('os').homedir(),
     sharedDataDir: sharedDataDir(),
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState()
   }));
+  // Where each tracked tool's data is read from on THIS machine. The absolute
+  // paths stay local by design — they carry the user's home directory and never
+  // go on the wire — so the renderer asks the main process for them instead.
+  //
+  // Answers for the whole list in one call rather than one call per open panel:
+  // the renderer caches the result and rebuilds a panel on every stats tick, and
+  // a per-panel fetch made the paths flicker back to bare ids on each rebuild.
+  ipcMain.handle('usage:clientSources', (_event, clientIds) => {
+    const requested = Array.isArray(clientIds) ? clientIds : String(clientIds || '').split(',');
+    const csv = requested.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean).join(',');
+    if (!csv) return {};
+    try {
+      const byClient = {};
+      for (const [client, roots] of Object.entries(clientDiagnosticRoots(csv))) {
+        // Several roots can share one check id (zed reads three, Copilot one per
+        // VS Code workspace root), so the list is deduped by directory: the panel
+        // shows one chip per place we look, not one per kind of place.
+        const seen = new Set();
+        byClient[client] = roots.filter((root) => !seen.has(root.dir) && seen.add(root.dir))
+          .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
+      }
+      return byClient;
+    } catch (_) {
+      return {};
+    }
+  });
+  // Reveals one of those paths. The renderer sends a client id, never a path:
+  // anything it could send would otherwise become an arbitrary filesystem open.
+  ipcMain.handle('usage:revealClientSource', (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    if (!client) return false;
+    try {
+      const roots = clientDiagnosticRoots(client)[client] || [];
+      const target = roots.find((root) => root.exists);
+      if (!target) return false;
+      shell.openPath(target.dir);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
+  ipcMain.handle('usage:rescanClient', async (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    if (!client) return false;
+    try {
+      await refreshUsageClient(client, { forceSync: true });
+      return true;
+    } catch (error) {
+      console.log(`[usage-runtime] rescan failed: ${error.message}`);
+      return false;
+    }
+  });
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;
