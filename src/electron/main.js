@@ -2341,6 +2341,10 @@ function drainPendingLimitInvalidations(runtime) {
 
 function refreshUsageClient(clientId, options = {}) {
   const client = String(clientId || '').trim().toLowerCase();
+  const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+  if (!client || !KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) {
+    throw new TypeError(`Unsupported targeted usage client: ${client || '(empty)'}`);
+  }
   if (!deviceRuntimeHandle) {
     pendingUsageClientRefreshes.set(client, { clientId: client, options: { ...options } });
     return Promise.resolve({ queued: true });
@@ -5323,39 +5327,35 @@ app.whenReady().then(() => {
   // paths stay local by design — they carry the user's home directory and never
   // go on the wire — so the renderer asks the main process for them instead.
   //
-  // Answers for the whole list in one call rather than one call per open panel:
-  // the renderer caches the result and rebuilds a panel on every stats tick, and
-  // a per-panel fetch made the paths flicker back to bare ids on each rebuild.
-  ipcMain.handle('usage:clientSources', (_event, clientIds) => {
-    const requested = Array.isArray(clientIds) ? clientIds : String(clientIds || '').split(',');
-    const csv = requested.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean).join(',');
-    if (!csv) return {};
+  // Probe only the client whose detail panel is open. The renderer caches the
+  // result for the current health snapshot, avoiding both eager filesystem work
+  // and path flicker when a stats tick rebuilds the panel.
+  ipcMain.handle('usage:clientSources', (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
     try {
-      const byClient = {};
-      for (const [client, roots] of Object.entries(clientDiagnosticRoots(csv))) {
-        // Several roots can share one check id (zed reads three, Copilot one per
-        // VS Code workspace root), so the list is deduped by directory: the panel
-        // shows one chip per place we look, not one per kind of place.
-        const seen = new Set();
-        byClient[client] = roots.filter((root) => !seen.has(root.dir) && seen.add(root.dir))
-          .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
-      }
-      return byClient;
+      const seen = new Set();
+      const all = (clientDiagnosticRoots(client)[client] || [])
+        .filter((root) => !seen.has(root.dir) && seen.add(root.dir))
+        .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
+      const sources = all.slice(0, 32);
+      return { sources, omittedCount: all.length - sources.length };
     } catch (_) {
-      return {};
+      return null;
     }
   });
   // Reveals one of those paths. The renderer sends a client id, never a path:
   // anything it could send would otherwise become an arbitrary filesystem open.
-  ipcMain.handle('usage:revealClientSource', (_event, clientId) => {
+  ipcMain.handle('usage:revealClientSource', async (_event, clientId) => {
     const client = String(clientId || '').trim().toLowerCase();
-    if (!client) return false;
+    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return false;
     try {
       const roots = clientDiagnosticRoots(client)[client] || [];
       const target = roots.find((root) => root.exists);
       if (!target) return false;
-      shell.openPath(target.dir);
-      return true;
+      return await shell.openPath(target.dir) === '';
     } catch (_) {
       return false;
     }

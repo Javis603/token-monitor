@@ -65,7 +65,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
-  clientSources: (clientIds) => ipcRenderer.invoke('usage:clientSources', clientIds),
+  clientSources: (clientId) => ipcRenderer.invoke('usage:clientSources', clientId),
   revealClientSource: (clientId) => ipcRenderer.invoke('usage:revealClientSource', clientId),
   rescanClient: (clientId) => ipcRenderer.invoke('usage:rescanClient', clientId),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),

@@ -7,6 +7,9 @@ const {
   clientHealthDetail,
   clientHealthNotes,
   clientHealthRows,
+  clientPeriodUsage,
+  exactDevice,
+  friendlyPath,
   hasClientHealth
 } = require('../../src/electron/renderer/clientHealthPresentation');
 
@@ -49,17 +52,20 @@ test('rows carry the values the renderer draws, not formatted text', () => {
   assert.deepEqual(Object.keys(byKind), ['sources', 'sync', 'day', 'tokens']);
   assert.equal(byKind.sources.detectedCount, 2);
   assert.equal(byKind.sources.checkedCount, 3);
-  assert.deepEqual(byKind.sources.checks, [{ id: 'antigravity-cli-data', dir: '', exists: false }]);
+  assert.deepEqual(byKind.sources.checks, [{ id: 'antigravity-cli-data', exists: false, paths: [] }]);
   assert.equal(byKind.sync.lastSuccessAt, '2026-08-04T08:40:00.000Z');
   assert.equal(byKind.day.day, '2026-08-04');
   assert.equal(byKind.tokens.tokens, 69_600_000);
 });
 
-// The record carries check ids; only the machine that probed them has the paths,
-// and only the paths answer "is it looking where I installed it".
-test('local paths replace the ids and pull the row onto a healthy client', () => {
-  const healthy = entry({ overall: 'healthy', data: { liveTokens: 42 } });
-  assert.equal(clientHealthRows(healthy).some((row) => row.kind === 'sources'), false, 'no probe, nothing to say');
+// Physical roots explain one logical check; they never replace its canonical
+// state or turn platform alternatives into extra checked dependencies.
+test('local paths augment canonical checks without changing their counts', () => {
+  const healthy = entry({
+    source: { state: 'detected', detectedCount: 1, checkedCount: 1, checks: [{ id: 'zed-threads', exists: true }] },
+    overall: 'healthy',
+    data: { liveTokens: 42 }
+  });
   const rows = clientHealthRows(healthy, {
     sources: [
       { id: 'zed-threads', dir: '/Users/x/.local/share/zed/threads', exists: false },
@@ -67,12 +73,14 @@ test('local paths replace the ids and pull the row onto a healthy client', () =>
     ]
   });
   const sources = rows.find((row) => row.kind === 'sources');
-  // Both directories, though the record collapses the shared id into one check —
-  // "found it in the second place I looked" is the answer being shown.
-  assert.equal(sources.checks.length, 2);
-  assert.equal(sources.checks[1].dir, '/Users/x/Library/Application Support/Zed/threads');
+  assert.equal(sources.checks.length, 1);
+  assert.equal(sources.checks[0].exists, true);
+  assert.deepEqual(sources.checks[0].paths.map((path) => path.dir), [
+    '/Users/x/.local/share/zed/threads',
+    '/Users/x/Library/Application Support/Zed/threads'
+  ]);
   assert.equal(sources.detectedCount, 1);
-  assert.equal(sources.checkedCount, 2);
+  assert.equal(sources.checkedCount, 1);
 });
 
 // `wsl-home` is reached through wsl.exe and antigravity's source checks are not
@@ -83,9 +91,9 @@ test('checks the local probe cannot see survive the merge', () => {
     source: { state: 'detected', detectedCount: 1, checkedCount: 2, checks: [{ id: 'wsl-home', exists: true }, { id: 'antigravity-cli-data', exists: false }] }
   }), { sources: [{ id: 'tokscale-antigravity-cache', dir: '/Users/x/.config/tokscale/antigravity-cache', exists: false }] });
   const sources = rows.find((row) => row.kind === 'sources');
-  assert.deepEqual(sources.checks.map((check) => check.id), ['tokscale-antigravity-cache', 'wsl-home', 'antigravity-cli-data']);
+  assert.deepEqual(sources.checks.map((check) => check.id), ['wsl-home', 'antigravity-cli-data', 'tokscale-antigravity-cache']);
   assert.equal(sources.detectedCount, 1);
-  assert.equal(sources.checkedCount, 3);
+  assert.equal(sources.checkedCount, 2);
 });
 
 // A ratio with no checks behind it asks a question it cannot answer: "2 of 3
@@ -133,6 +141,32 @@ test('a failing sync stays loud even on a client with no usage yet', () => {
     { code: 'sync-timeout', tone: 'warn' },
     { code: 'no-usage-observed', tone: 'muted' }
   ]);
+});
+
+test('diagnostics select only the exact local device and its own usage', () => {
+  const local = {
+    deviceId: 'local',
+    periods: {
+      today: { clients: { codex: 3 }, clientCosts: { codex: 0.03 } },
+      month: { clients: { codex: 7 }, clientCosts: {} },
+      allTime: { clients: { codex: 11 }, clientCosts: {} }
+    }
+  };
+  const remote = { deviceId: 'remote', periods: { today: { clients: { codex: 100 } } } };
+  assert.equal(exactDevice({ devices: [remote] }, 'local'), null);
+  assert.equal(exactDevice({ devices: [remote, local] }, 'local'), local);
+  assert.deepEqual(clientPeriodUsage(local, 'codex'), {
+    today: { tokens: 3, cost: 0.03 },
+    month: { tokens: 7, cost: 0 },
+    allTime: { tokens: 11, cost: 0 }
+  });
+});
+
+test('friendlyPath abbreviates only the home itself or a real descendant', () => {
+  assert.equal(friendlyPath('/Users/alice', '/Users/alice', 'darwin'), '~');
+  assert.equal(friendlyPath('/Users/alice/.config/tool', '/Users/alice', 'darwin'), '~/.config/tool');
+  assert.equal(friendlyPath('/Users/alice2/tool', '/Users/alice', 'darwin'), '/Users/alice2/tool');
+  assert.equal(friendlyPath('C:\\Users\\Alice\\tool', 'c:\\users\\alice', 'win32'), '~\\tool');
 });
 
 test('an unrecognised diagnostic code renders nothing rather than raw text', () => {

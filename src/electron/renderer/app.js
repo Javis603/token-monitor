@@ -8610,10 +8610,7 @@ function renderServiceProviderList() {
 }
 
 function localDevice() {
-  const devices = state.stats?.devices || [];
-  const localId = state.settings?.deviceId || '';
-  return (localId && devices.find((device) => device.deviceId === localId))
-    || (devices.length === 1 ? devices[0] : null);
+  return clientHealthPresentationApi.exactDevice(state.stats, state.settings?.deviceId);
 }
 
 function localClientStatus() {
@@ -8639,7 +8636,10 @@ function setClientHealthExpanded(clientId) {
     // building all of them cost 219 of the list's 552 nodes — 40% of its DOM,
     // rebuilt every stats tick — to render nothing. A panel already filled is
     // left alone so a collapse still has something to animate.
-    if (open && container.childElementCount === 0) fillClientHealthPanel(container, row.dataset.client);
+    if (open && container.childElementCount === 0) {
+      fillClientHealthPanel(container, row.dataset.client);
+      loadClientSources(row.dataset.client);
+    }
     disclosure.setAttribute('aria-expanded', String(open));
     row.classList.toggle('expanded', open);
     container.classList.toggle('hidden', !open);
@@ -8650,39 +8650,36 @@ function setClientHealthExpanded(clientId) {
 // already renders everywhere else. No new wire field and no new collection —
 // the panel just puts them side by side, which is the whole point.
 function clientPeriodUsage(clientId) {
-  const usage = {};
-  for (const period of ['today', 'month', 'allTime']) {
-    const values = state.stats?.periods?.[period];
-    usage[period] = {
-      tokens: Number(values?.clients?.[clientId] || 0),
-      cost: Number(values?.clientCosts?.[clientId] || 0)
-    };
-  }
-  return usage;
+  return clientHealthPresentationApi.clientPeriodUsage(localDevice(), clientId);
 }
 
 // Where this machine looks for each tool's data. A check id answers "which kind
 // of root", but "did I install it somewhere else" needs the path itself — and a
 // path only exists on the machine that probed it, so it comes over IPC rather
-// than the wire. Fetched for the whole list at once and cached: a panel is
-// rebuilt on every stats tick, and fetching per open made the paths flicker back
-// to bare ids each time. The health envelope's observedAt changes only when a
-// full source probe completes, so it refreshes path existence once per snapshot
-// without spending IPC on progressive previews that carry the old envelope.
-function loadClientSources(clientIds, options = {}) {
-  const ids = [...clientIds];
+// than the wire. Probe only the open client and cache it for this health
+// snapshot: a panel is rebuilt on every stats tick, and refetching made the
+// paths flicker back to bare ids. The health envelope's observedAt changes
+// only when a full source probe completes, so it refreshes path existence once
+// per snapshot without spending IPC on progressive previews that carry the old
+// envelope.
+function loadClientSources(clientId, options = {}) {
+  const id = String(clientId || '');
+  const deviceId = String(localDevice()?.deviceId || '');
   const observedAt = String(localClientHealth()?.observedAt || '');
-  const key = `${ids.join(',')}|${observedAt}`;
+  if (!id || !deviceId) return;
+  const key = `${deviceId}|${id}|${observedAt}`;
   if (!options.force && state.clientSourcesKey === key) return;
-  state.clientSourceIds = ids;
+  state.clientSourceIds = [id];
   state.clientSourcesKey = key;
   const request = ++state.clientSourcesRequest;
-  void window.tokenMonitor?.clientSources?.(ids).then((sources) => {
-    if (!sources || typeof sources !== 'object') return;
-    if (state.clientSourcesRequest !== request) return;
-    state.clientSources = sources;
+  void window.tokenMonitor?.clientSources?.(id).then((result) => {
+    if (!result || typeof result !== 'object') throw new TypeError('Invalid client source result');
+    if (state.clientSourcesRequest !== request || state.clientSourcesKey !== key) return;
+    state.clientSources = { ...(state.clientSources || {}), [id]: Array.isArray(result.sources) ? result.sources : [] };
     refillOpenClientHealthPanel();
-  }).catch(() => {});
+  }).catch(() => {
+    if (state.clientSourcesRequest === request && state.clientSourcesKey === key) state.clientSourcesKey = '';
+  });
 }
 
 function refillOpenClientHealthPanel() {
@@ -8711,8 +8708,7 @@ function fillClientHealthPanel(container, clientId) {
 // Home-relative so the panel does not print the user's account name back at
 // them; the copy-diagnostics block uses the check id and never this.
 function friendlyPath(dir) {
-  const home = state.appInfo?.homeDir || '';
-  return home && dir.startsWith(home) ? `~${dir.slice(home.length)}` : dir;
+  return clientHealthPresentationApi.friendlyPath(dir, state.appInfo?.homeDir, state.appInfo?.platform);
 }
 
 // One row of the expanded panel. Values are formatted here and nowhere else —
@@ -8732,16 +8728,16 @@ function clientHealthDetailRow(row) {
       const list = document.createElement('div');
       list.className = 'tool-health-checks';
       for (const check of row.checks) {
-        const chip = document.createElement('code');
-        chip.className = `tool-health-check${check.exists ? ' found' : ''}`;
-        // The path when this machine has one — that is the row's whole job, and
-        // "is it looking in the right place" cannot be answered by an id. Where
-        // there is none (another device's row, or a source we reach through
-        // wsl.exe) the check id stands in, verbatim and untranslated: it is an
-        // identifier, not prose, and a user pasting one into an issue is the point.
-        chip.textContent = check.dir ? friendlyPath(check.dir) : check.id;
-        if (check.dir) chip.title = check.dir;
-        list.append(chip);
+        const paths = check.paths?.length ? check.paths : [{ dir: '', exists: check.exists }];
+        for (const pathInfo of paths) {
+          const chip = document.createElement('code');
+          chip.className = `tool-health-check${pathInfo.exists ? ' found' : ''}`;
+          // Host paths are optional evidence beneath the canonical logical check.
+          // WSL and remote checks legitimately have only their stable id.
+          chip.textContent = pathInfo.dir ? friendlyPath(pathInfo.dir) : check.id;
+          if (pathInfo.dir) chip.title = pathInfo.dir;
+          list.append(chip);
+        }
       }
       line.append(list);
     }
@@ -8874,18 +8870,18 @@ function clientHealthActions(detail, clientId) {
     copy.textContent = t('settings.tools.health.copied');
     setTimeout(() => { copy.textContent = t('settings.tools.health.copy'); }, 1600);
   });
-  // Only offered in local mode: a rescan runs on this machine, and offering it
-  // while looking at another device's row would promise something it cannot do.
-  if (state.mode === 'local' || state.mode === 'host') {
+  // The detail is already bound to the exact local device. Renderer mode is a
+  // transport state (`local`/`sync`), not topology, so host and client collectors
+  // expose the same targeted capability through preload.
+  if (localDevice() && typeof window.tokenMonitor?.rescanClient === 'function') {
     const rescan = button('settings.tools.health.rescan', async () => {
       rescan.disabled = true;
-      await window.tokenMonitor?.rescanClient?.(clientId);
-      // Refresh immediately even if the rescan's stats repaint happened before
-      // its IPC promise settled. A scan can create the directory this panel
-      // reported missing, and waiting for another stats tick would leave both
-      // the chip and Reveal action stale.
-      loadClientSources(state.clientSourceIds, { force: true });
-      rescan.disabled = false;
+      try {
+        await window.tokenMonitor.rescanClient(clientId);
+        loadClientSources(clientId, { force: true });
+      } finally {
+        rescan.disabled = false;
+      }
     });
   }
   // Only where something was actually found: the button opens the first existing
@@ -9027,9 +9023,6 @@ function renderToolPreferencesNow() {
   const clientStatus = localClientStatus();
   const health = localClientHealth();
   const clients = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
-  // Only once the device reports health at all — without it no row gets a panel,
-  // and the probe would be spent on something nothing can display.
-  if (health) loadClientSources(clients.map((client) => client.id));
   const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
   const hasPinnedClients = pinned.size > 0;
   const hasHiddenClients = hidden.size > 0;
@@ -9126,7 +9119,10 @@ function renderToolPreferencesNow() {
       panel.id = `toolHealthPanel-${id}`;
       panel.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
       main.setAttribute('aria-controls', panel.id);
-      if (expanded) panel.append(clientHealthPanel(clientHealthDetailFor(id) || detail, id));
+      if (expanded) {
+        panel.append(clientHealthPanel(clientHealthDetailFor(id) || detail, id));
+        loadClientSources(id);
+      }
       main.addEventListener('click', () => setClientHealthExpanded(state.clientHealthExpanded === id ? '' : id));
       // Last of the row's controls, where the eye and the pin already are —
       // the label stays plain text, exactly as it reads without this feature.

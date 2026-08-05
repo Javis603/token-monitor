@@ -191,20 +191,22 @@ test('refreshClient cursor runs one targeted today scan without rebuilding the r
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   const flags = [];
+  const scannedClients = [];
   let syncCalls = 0;
   cursorAuth.readActiveAccount = () => ({ accountId: 'cursor-test' });
   cursorAuth.runCursorSync = async () => { syncCalls += 1; };
   const updates = [];
 
   const runtime = startCollector({
-    clients: 'cursor',
+    clients: 'cursor,claude',
     allTimeSince: '2024-01-01',
     commandTimeoutMs: 1000,
     deviceId: 'usage-runtime',
     intervalMs: 60000,
     watchEnabled: false,
     historyEnabled: false,
-    runTokscale: async ({ flags: scanFlags }) => {
+    runTokscale: async ({ clients, flags: scanFlags }) => {
+      scannedClients.push(clients);
       flags.push(scanFlags);
       return emptyTokscaleResult();
     },
@@ -217,6 +219,7 @@ test('refreshClient cursor runs one targeted today scan without rebuilding the r
     await runtime.refreshClient('cursor', { forceSync: true });
     assert.equal(flags.length, callsAfterStartup + 1);
     assert.deepEqual(flags.at(-1), ['--today']);
+    assert.equal(scannedClients.at(-1), 'cursor');
     assert.equal(updates.at(-1).reason, 'client:cursor');
     assert.ok(syncCalls >= 1);
   } finally {
@@ -276,25 +279,71 @@ test('a coalesced manual refresh stays a full scan', async () => {
   }
 });
 
-// The guard used to name cursor because a Cursor sign-in was the only caller,
-// while everything underneath was already per-client. The contract is now the
-// one the machinery always had: any named client, targeted at its own partition.
-test('refreshClient targets whichever client it is given', async () => {
+test('coalesced targeted refreshes preserve the union of their clients', async () => {
+  const scans = [];
+  const updates = [];
+  let gate = null;
   const runtime = startCollector({
-    clients: '',
+    clients: 'claude,cursor',
     allTimeSince: '2024-01-01',
     commandTimeoutMs: 1000,
     deviceId: 'usage-runtime',
     intervalMs: 60000,
     watchEnabled: false,
     historyEnabled: false,
-    onUpdate: () => {}
+    runTokscale: async ({ clients, flags }) => {
+      scans.push({ clients, flags });
+      if (gate) await gate.promise;
+      return emptyTokscaleResult();
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
   });
 
   try {
+    await waitFor(() => updates.length >= 1);
+    let release;
+    gate = { promise: new Promise((resolve) => { release = resolve; }) };
+    const held = runtime.tick('held', { todayOnly: true, targetClients: ['claude'] });
+    await waitFor(() => scans.at(-1)?.flags?.[0] === '--today');
+    const cursor = runtime.refreshClient('cursor');
+    const claude = runtime.refreshClient('claude');
+    gate = null;
+    release();
+    await Promise.all([held, cursor, claude]);
+
+    assert.deepEqual(scans.at(-1), { clients: 'cursor,claude', flags: ['--today'] });
+    assert.equal(updates.at(-1).reason, 'coalesced');
+  } finally {
+    runtime.stop();
+  }
+});
+
+// Targeted refresh is a control-plane API: it accepts only exact clients this
+// collector is configured to track, so bad input can never widen into all-client
+// work after collectUsageOnce filters it.
+test('refreshClient rejects empty, unknown, and untracked clients before scanning', async () => {
+  let scans = 0;
+  let updates = 0;
+  const runtime = startCollector({
+    clients: 'claude,cursor',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-runtime',
+    intervalMs: 60000,
+    watchEnabled: false,
+    historyEnabled: false,
+    runTokscale: async () => { scans += 1; return emptyTokscaleResult(); },
+    onUpdate: () => { updates += 1; }
+  });
+
+  try {
+    await waitFor(() => updates >= 1);
+    const startupScans = scans;
     assert.throws(() => runtime.refreshClient(''), /Unsupported targeted usage client/);
     assert.throws(() => runtime.refreshClient(null), /Unsupported targeted usage client/);
-    // Any named client is accepted; the tick itself is what narrows the scan.
+    assert.throws(() => runtime.refreshClient('codex'), /Unsupported targeted usage client: codex/);
+    assert.throws(() => runtime.refreshClient('not-a-client'), /Unsupported targeted usage client: not-a-client/);
+    assert.equal(scans, startupScans);
     assert.doesNotThrow(() => { void runtime.refreshClient('claude'); });
     assert.doesNotThrow(() => { void runtime.refreshClient('cursor', { forceSync: true }); });
   } finally {

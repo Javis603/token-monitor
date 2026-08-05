@@ -49,31 +49,63 @@
     return String(value || '').trim().toLowerCase();
   }
 
+  function exactDevice(stats, deviceId) {
+    const id = String(deviceId || '');
+    if (!id) return null;
+    const devices = Array.isArray(stats?.devices) ? stats.devices : [];
+    return devices.find((device) => device?.deviceId === id) || null;
+  }
+
+  function clientPeriodUsage(device, clientId) {
+    const usage = {};
+    for (const period of ['today', 'month', 'allTime']) {
+      const values = device?.periods?.[period] || device?.[period];
+      usage[period] = {
+        tokens: Number(values?.clients?.[clientId] || 0),
+        cost: Number(values?.clientCosts?.[clientId] || 0)
+      };
+    }
+    return usage;
+  }
+
+  function friendlyPath(dir, home, platform = '') {
+    const candidate = String(dir || '');
+    const root = String(home || '').replace(/[\\/]+$/, '');
+    if (!candidate || !root) return candidate;
+    const windows = platform === 'win32';
+    const comparedCandidate = windows ? candidate.toLowerCase() : candidate;
+    const comparedRoot = windows ? root.toLowerCase() : root;
+    if (comparedCandidate === comparedRoot) return '~';
+    if (!comparedCandidate.startsWith(comparedRoot)) return candidate;
+    const boundary = candidate.charAt(root.length);
+    return boundary === '/' || boundary === '\\' ? `~${candidate.slice(root.length)}` : candidate;
+  }
+
   function healthFor(health, clientId) {
     const clients = health?.clients;
     if (!clients || typeof clients !== 'object') return null;
     return clients[normalizeId(clientId)] || null;
   }
 
-  // The wire carries check *ids*; the directories behind them exist only on the
-  // machine that probed them, so the renderer passes them in separately. Merged
-  // rather than swapped, in both directions: a record can carry checks the local
-  // probe knows nothing about (`wsl-home` lives in a filesystem reached through
-  // wsl.exe, antigravity's two source checks are not watch roots), while the
-  // probe can list several directories sharing one check id — which the record
-  // collapses into a single boolean.
+  // Canonical checks and counts come from the device record. Local filesystem
+  // paths only explain where those logical checks looked; several alternative
+  // paths with one id remain one check, and pathless evidence such as wsl-home is
+  // retained rather than being replaced by this machine's host roots.
   function mergeSourceChecks(checks, sources) {
-    const merged = sources.map((source) => ({
-      id: String(source?.id || ''),
-      dir: String(source?.dir || ''),
-      exists: source?.exists === true
-    })).filter((source) => source.id);
-    const known = new Set(merged.map((source) => source.id));
+    const groups = new Map();
     for (const check of checks) {
-      if (known.has(check.id)) continue;
-      merged.push({ id: check.id, dir: '', exists: check.exists === true });
+      const id = String(check?.id || '');
+      if (!id || groups.has(id)) continue;
+      groups.set(id, { id, exists: check?.exists === true, paths: [] });
     }
-    return merged;
+    for (const source of sources) {
+      const id = String(source?.id || '');
+      const dir = String(source?.dir || '');
+      if (!id) continue;
+      if (!groups.has(id)) groups.set(id, { id, exists: source?.exists === true, paths: [], supplemental: true });
+      if (dir) groups.get(id).paths.push({ dir, exists: source?.exists === true });
+    }
+    return [...groups.values()];
   }
 
   // The rows of the expanded panel, in the order they read best: what we found,
@@ -100,14 +132,10 @@
         }))
       });
     }
-    const wireChecks = (Array.isArray(entry.source?.checks) ? entry.source.checks : [])
-      .map((check) => ({ id: check.id, dir: '', exists: check.exists === true }));
-    const checks = sources ? mergeSourceChecks(wireChecks, sources) : wireChecks;
-    // Counts follow whatever the row actually lists, so the ratio and the chips
-    // under it can never disagree. Only the record's own counts survive a device
-    // with no local probe — a remote row in a synced fleet.
-    const detectedCount = sources ? checks.filter((check) => check.exists).length : (entry.source?.detectedCount || 0);
-    const checkedCount = sources ? checks.length : (entry.source?.checkedCount || 0);
+    const wireChecks = Array.isArray(entry.source?.checks) ? entry.source.checks : [];
+    const checks = mergeSourceChecks(wireChecks, sources || []);
+    const detectedCount = Number(entry.source?.detectedCount || 0);
+    const checkedCount = Number(entry.source?.checkedCount || 0);
     // A bare ratio with no checks behind it asks a question it cannot answer:
     // "2 of 3 found" reads as a problem, and the one that is missing has no
     // name. On this machine the paths themselves are the answer, so the row
@@ -185,6 +213,9 @@
     clientHealthDetail,
     clientHealthNotes,
     clientHealthRows,
+    clientPeriodUsage,
+    exactDevice,
+    friendlyPath,
     hasClientHealth
   };
 });
