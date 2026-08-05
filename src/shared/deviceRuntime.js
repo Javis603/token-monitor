@@ -78,13 +78,16 @@ function createDeviceRuntime(options = {}, deps = {}) {
   const usageRuntime = makeUsageRuntime(usageOptions, deps.usageDeps || {});
   const limitsRuntime = makeLimitsRuntime(limitsOptions, limitsDeps);
 
-  function stop() {
+  // 停止运行时：active=false 立即置位以阻断所有下游回调（onRecord/onUpdate 等
+  // 均先检查 active），保持同步阻断语义。options 透传给各子 stop（退出路径传
+  // skipCloseWatchers 让 collector 跳过 watcher.close 的同步遍历）。
+  function stop(options = {}) {
     if (!active) return;
     active = false;
     deviceState.stop();
-    usageRuntime?.stop?.();
-    limitsRuntime?.stop?.();
-    sink?.stop?.();
+    usageRuntime?.stop?.(options);
+    limitsRuntime?.stop?.(options);
+    sink?.stop?.(options);
   }
 
   return {

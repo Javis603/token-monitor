@@ -2026,6 +2026,10 @@ function startCollector(options) {
     }, watchDebounceMs);
   }
 
+  // 同步关闭所有 chokidar watcher。chokidar v4 的 watcher.close() 内部会同步遍历
+  // _watched 集合并对每个 dirent 调 dispose，监听大型文件树（成千上万 JSONL）时
+  // 是 O(n) 同步阻塞——这就是退出卡死的根因之一。退出场景靠 stop({ skipCloseWatchers })
+  // 完全跳过此函数，让 OS 回收句柄；模式切换等必须关闭旧 watcher 的场景仍走这里。
   function closeWatchers() {
     for (const watcher of watchers) {
       try { watcher.close(); } catch (_) {}
@@ -2137,13 +2141,20 @@ function startCollector(options) {
     });
   }
 
-  function stop() {
+  // 停止采集：同步执行置 stopped、清定时器、停 sourceSyncQueue 以阻断后续回调。
+  // 不返回 Promise——startMode() 等调用方依赖 stop() 立即阻断旧 collector。
+  // skipCloseWatchers=true 用于退出路径，跳过 closeWatchers 的同步遍历（见上）。
+  function stop(options = {}) {
     if (stopped) return;
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     sourceSyncQueue.stop();
-    closeWatchers();
+    // skipCloseWatchers=true 用于退出路径：跳过 chokidar watcher.close()，
+    // 其内部同步遍历 _watched 集合在监听大型文件树（成千上万 JSONL）时会
+    // 长时间阻塞主线程，让 SIGKILL 兜底也来不及触发。退出时进程立即终止，
+    // OS 回收底层 FSEvents stream / kqueue 句柄，无需进程内清理。
+    if (!options.skipCloseWatchers) closeWatchers();
     watchedDirectoryKey = null;
   }
 
