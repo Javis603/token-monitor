@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('./usage');
+const { hasSummaryPeriod } = require('./archivePeriods');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 
 function numberValue(value) {
@@ -154,11 +155,6 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
   return archive;
 }
 
-function hasPeriod(summary, periodName) {
-  const container = summary.periods && typeof summary.periods === 'object' ? summary.periods : summary;
-  return Object.prototype.hasOwnProperty.call(container, periodName);
-}
-
 function targetPeriod(summary, periodName) {
   if (summary.periods && typeof summary.periods === 'object') {
     summary.periods[periodName] = normalizePeriod(summary.periods[periodName]);
@@ -274,7 +270,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       // not have. A progressive preview is marked partial by the periods it
       // omits, and a partial that looks complete loses the attribution fields
       // deviceState would otherwise carry forward.
-      if (!hasPeriod(next, periodName)) continue;
+      if (!hasSummaryPeriod(next, periodName)) continue;
       addArchivedSession(targetFor(periodName), session);
     }
   }
