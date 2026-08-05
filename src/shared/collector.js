@@ -1212,6 +1212,14 @@ function clientsForWatchPath(filePath, rootsByClient) {
 // never recurses into an ignored dir (so the runaway poll is gone), yet a
 // newly created state.db-wal is still seen on the next top-level readdir.
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
+// MiMo Code keeps a multi-gigabyte log/ tree alongside its SQLite state file.
+// A plain recursive watch of ~/.local/share/mimocode storms the watcher (every
+// SQLite WAL/SHM transaction is a chokidar event, the log dir holds thousands
+// of rotated files). Tokscale only reads the db sidecar files for real usage,
+// so — like Hermes above — keep watching the home dir but ignore everything
+// except the db family. The home root itself stays watched so a freshly
+// created mimocode.db-wal still surfaces on the next top-level readdir.
+const MICODE_DB_FILES = new Set(['mimocode.db', 'mimocode.db-wal', 'mimocode.db-shm']);
 // Which parts of an Antigravity IDE home are worth an event. Not "what tokscale
 // parses" — tokscale gets the token data over RPC from the running language
 // server and only reads `brain/`+`conversations/` to enumerate session ids.
@@ -1247,7 +1255,9 @@ function watchIgnoreMatcher(clientsCsv) {
     ? antigravityDataRoots().map((dir) => path.resolve(canonicalWatchPath(dir)))
     : [];
   const antigravityRootSet = new Set(antigravityRoots);
-  if (hermesRoots.length === 0 && copilotRoots.length === 0 && antigravityRoots.length === 0) return undefined;
+  const micodeRoots = (candidates.micode || []).map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const micodeRootSet = new Set(micodeRoots);
+  if (hermesRoots.length === 0 && copilotRoots.length === 0 && antigravityRoots.length === 0 && micodeRoots.length === 0) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
     // Every explicit watch root stays watched — the home dir AND each profile
@@ -1281,7 +1291,16 @@ function watchIgnoreMatcher(clientsCsv) {
       if (ANTIGRAVITY_SHALLOW_SOURCE_DIRS.has(firstChild)) return parts.length > 2;
       return false;
     }
-    return false; // paths outside the bounded Hermes/Copilot/Antigravity roots are never ignored
+    if (micodeRootSet.has(resolved)) return false;
+    for (const root of micodeRoots) {
+      // The MiMo Code home has a multi-GB log/ tree and the SQLite db family.
+      // The db family is what actually surfaces session changes — log/* would
+      // fire chokidar events on every transaction and stall the collector.
+      // The home root itself stays watched (basename isn't a db file, so
+      // existing comparison would incorrectly ignore it).
+      if (resolved.startsWith(root + path.sep)) return !MICODE_DB_FILES.has(path.basename(resolved));
+    }
+    return false; // paths outside the bounded Hermes/Copilot/Antigravity/MiCode roots are never ignored
   };
 }
 
