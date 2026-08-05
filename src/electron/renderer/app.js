@@ -8652,10 +8652,10 @@ function setClientHealthExpanded(clientId) {
     // rebuilt every stats tick — to render nothing. A panel already filled is
     // left alone so a collapse still has something to animate.
     if (open) {
+      loadClientSources(row.dataset.client);
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
       }
-      loadClientSources(row.dataset.client);
     }
     disclosure.setAttribute('aria-expanded', String(open));
     row.classList.toggle('expanded', open);
@@ -8687,15 +8687,21 @@ function clientSourcesIdentity(clientId) {
   };
 }
 
+function exactLocalClientSources(clientId) {
+  return clientSourceCacheApi.readClientSources(
+    state.clientSources,
+    clientSourcesIdentity(clientId)
+  );
+}
+
 function localClientSources(clientId) {
   const identity = clientSourcesIdentity(clientId);
-  const exactSources = clientSourceCacheApi.readClientSources(
-    state.clientSources,
-    identity
-  );
-  const sources = exactSources ?? clientSourceCacheApi.readLatestClientSources(
-    state.clientSources,
-    identity
+  const exactSources = exactLocalClientSources(clientId);
+  const key = clientSourceCacheApi.clientSourceRequestKey(identity);
+  const sources = exactSources ?? (
+    key && state.clientSourcesKey === key
+      ? clientSourceCacheApi.readLatestClientSources(state.clientSources, identity)
+      : null
   );
   const detectedInWsl = localDevice()?.wslStatus?.detected?.includes(clientId);
   if (!detectedInWsl) return sources;
@@ -8712,7 +8718,6 @@ function loadClientSources(clientId, options = {}) {
     !options.force
     && clientSourceCacheApi.readClientSources(state.clientSources, identity) !== null
   ) return false;
-  clientSourceCacheApi.deleteClientSources(state.clientSources, identity);
   state.clientSourcesKey = key;
   const request = ++state.clientSourcesRequest;
   void window.tokenMonitor?.clientSources?.(id).then((result) => {
@@ -8726,7 +8731,9 @@ function loadClientSources(clientId, options = {}) {
     state.clientSourcesKey = '';
     refillOpenClientHealthPanel();
   }).catch(() => {
-    if (state.clientSourcesRequest === request && state.clientSourcesKey === key) state.clientSourcesKey = '';
+    if (state.clientSourcesRequest !== request || state.clientSourcesKey !== key) return;
+    state.clientSourcesKey = '';
+    refillOpenClientHealthPanel();
   });
   return true;
 }
@@ -8958,14 +8965,16 @@ function clientHealthActions(clientId) {
       }
     });
     rescan.dataset.healthAction = 'rescan';
+    rescan.id = `toolHealthRescan-${clientId}`;
     rescan.disabled = rescanState.pending;
     actions.append(feedback);
   }
   // Only where something was actually found: the button opens the first existing
   // root, and offering it for a tool with none would open nothing.
-  if ((localClientSources(clientId) || []).some((source) => source.dir && source.exists)) {
+  if ((exactLocalClientSources(clientId) || []).some((source) => source.dir && source.exists)) {
     const reveal = button('settings.tools.health.reveal', () => { void window.tokenMonitor?.revealClientSource?.(clientId); });
     reveal.dataset.healthAction = 'reveal';
+    reveal.id = `toolHealthReveal-${clientId}`;
   }
   return actions;
 }
@@ -9136,8 +9145,8 @@ function renderToolPreferencesNow() {
       state.toolPreferenceDetailSignature = detailSignature;
       if (state.toolPreferenceSourceSignature !== sourceSignature) {
         state.toolPreferenceSourceSignature = sourceSignature;
-        const sourceRefreshPending = loadClientSources(state.clientHealthExpanded);
-        if (!sourceRefreshPending) refillOpenClientHealthPanel();
+        loadClientSources(state.clientHealthExpanded);
+        refillOpenClientHealthPanel();
       } else {
         refillOpenClientHealthPanel();
       }
@@ -9252,8 +9261,8 @@ function renderToolPreferencesNow() {
       panel.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
       main.setAttribute('aria-controls', panel.id);
       if (expanded) {
-        panel.append(clientHealthPanel(clientHealthDetailFor(id) || detail, id));
         loadClientSources(id);
+        panel.append(clientHealthPanel(clientHealthDetailFor(id) || detail, id));
       }
       main.addEventListener('click', () => setClientHealthExpanded(state.clientHealthExpanded === id ? '' : id));
       // Last of the row's controls, where the eye and the pin already are —

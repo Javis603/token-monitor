@@ -52,20 +52,27 @@ test('tool diagnostics summarize complete health and render three semantic group
 
 test('tool diagnostics bind source values to the full health snapshot key', () => {
   const app = readRendererFile('app.js');
-  const identity = functionBody(app, 'clientSourcesIdentity', 'localClientSources');
+  const identity = functionBody(app, 'clientSourcesIdentity', 'exactLocalClientSources');
+  const exactReader = functionBody(app, 'exactLocalClientSources', 'localClientSources');
   const reader = functionBody(app, 'localClientSources', 'loadClientSources');
   const loader = functionBody(app, 'loadClientSources', 'refillOpenClientHealthPanel');
   const expand = functionBody(app, 'setClientHealthExpanded', 'clientPeriodUsage');
   const actions = functionBody(app, 'clientHealthActions', 'clientHealthPanel');
 
   assert.match(identity, /deviceId[\s\S]*clientId[\s\S]*observedAt/);
-  assert.match(reader, /clientSourceCacheApi\.readClientSources/);
+  assert.match(exactReader, /clientSourceCacheApi\.readClientSources/);
+  assert.match(reader, /state\.clientSourcesKey === key[\s\S]*readLatestClientSources/);
   assert.match(loader, /clientSourceCacheApi\.clientSourceRequestKey\(identity\)/);
+  assert.doesNotMatch(loader, /deleteClientSources/);
   assert.match(loader, /clientSourceCacheApi\.writeClientSources/);
+  assert.match(loader, /catch[\s\S]*state\.clientSourcesKey = ''[\s\S]*refillOpenClientHealthPanel\(\)/);
   assert.match(loader, /return true;/);
   assert.match(expand, /if \(open\)[\s\S]*loadClientSources\(row\.dataset\.client\)/);
   assert.match(actions, /succeeded = await window\.tokenMonitor\.rescanClient\(clientId\) === true/);
   assert.match(actions, /if \(succeeded\) loadClientSources/);
+  assert.match(actions, /rescan\.id = `toolHealthRescan-\$\{clientId\}`/);
+  assert.match(actions, /reveal\.id = `toolHealthReveal-\$\{clientId\}`/);
+  assert.match(actions, /exactLocalClientSources\(clientId\)/);
   assert.doesNotMatch(app, /clientSourceIds/);
 });
 
@@ -183,8 +190,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /state\.toolPreferenceDetailSignature !== detailSignature/);
   assert.match(body, /state\.settings\?\.currencyRatesEffective \|\| null/);
   assert.match(body, /state\.toolPreferenceSourceSignature !== sourceSignature/);
-  assert.match(body, /const sourceRefreshPending = loadClientSources\(state\.clientHealthExpanded\)/);
-  assert.match(body, /if \(!sourceRefreshPending\) refillOpenClientHealthPanel\(\);/);
+  assert.match(body, /loadClientSources\(state\.clientHealthExpanded\);\s*refillOpenClientHealthPanel\(\);/);
   assert.match(body, /else \{\s*refillOpenClientHealthPanel\(\);\s*\}/);
   assert.match(body, /return;/);
   assert.doesNotMatch(body, /replaceChildren/);
@@ -192,8 +198,9 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(fill, /else container\.replaceChildren\(next\)/);
 
   const localSources = functionBody(app, 'localClientSources', 'loadClientSources');
-  assert.match(localSources, /readClientSources\(/);
-  assert.match(localSources, /exactSources \?\? clientSourceCacheApi\.readLatestClientSources\(/);
+  assert.match(localSources, /exactLocalClientSources\(clientId\)/);
+  assert.match(localSources, /state\.clientSourcesKey === key/);
+  assert.match(localSources, /readLatestClientSources\(/);
 });
 
 test('the tool preference row carries the drag transform contract', () => {

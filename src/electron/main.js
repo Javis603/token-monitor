@@ -5362,7 +5362,10 @@ app.whenReady().then(() => {
     try {
       const seen = new Set();
       const all = (clientDiagnosticRoots(client)[client] || [])
-        .filter((root) => !seen.has(root.dir) && seen.add(root.dir))
+        .filter((root) => {
+          const key = `${root.id}\0${root.dir}`;
+          return !seen.has(key) && seen.add(key);
+        })
         .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
       const sources = all.slice(0, 32);
       return { sources, omittedCount: all.length - sources.length };

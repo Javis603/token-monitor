@@ -6,7 +6,6 @@ const test = require('node:test');
 const {
   clientSourceRequestKey,
   createClientSourceCache,
-  deleteClientSources,
   readClientSources,
   readLatestClientSources,
   writeClientSources
@@ -38,6 +37,7 @@ test('latest client sources are display-only within the same device and client',
   assert.equal(readClientSources(cache, identity('codex', 'new')), null);
   assert.deepEqual(readLatestClientSources(cache, identity('codex', 'new')), sources);
   assert.equal(readLatestClientSources(cache, identity('claude', 'new')), null);
+  assert.equal(readLatestClientSources(cache, identity('codex', '')), null);
   assert.equal(
     readLatestClientSources(cache, identity('codex', 'new', 'device-b')),
     null
@@ -66,17 +66,6 @@ test('client source cache clears slots when the local device changes', () => {
   assert.deepEqual(readClientSources(cache, identity('claude', 'b', 'device-b')), [{ id: 'new' }]);
 });
 
-test('client source cache deletes only the matching observation', () => {
-  const cache = createClientSourceCache();
-  writeClientSources(cache, identity('codex', 'new'), [{ id: 'source' }]);
-
-  deleteClientSources(cache, identity('codex', 'old'));
-  assert.deepEqual(readClientSources(cache, identity('codex', 'new')), [{ id: 'source' }]);
-
-  deleteClientSources(cache, identity('codex', 'new'));
-  assert.equal(readClientSources(cache, identity('codex', 'new')), null);
-});
-
 test('client source request key includes the full health snapshot identity', () => {
   assert.equal(
     clientSourceRequestKey(identity('codex', 'observed-at')),
@@ -94,6 +83,5 @@ test('client source cache refuses observations without a version stamp', () => {
 
   assert.equal(cache.entries.size, 0);
   assert.equal(readClientSources(cache, unstamped), null);
-  deleteClientSources(cache, unstamped);
   assert.equal(cache.entries.size, 0);
 });

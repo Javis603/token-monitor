@@ -40,7 +40,7 @@
   // request deduplication still require the current observedAt.
   function readLatestClientSources(cache, identity) {
     const value = normalizedIdentity(identity);
-    if (!value.deviceId || !value.clientId || cache?.deviceId !== value.deviceId) return null;
+    if (!hasCompleteIdentity(value) || cache?.deviceId !== value.deviceId) return null;
     return cache.entries.get(value.clientId)?.sources ?? null;
   }
 
@@ -57,17 +57,9 @@
     });
   }
 
-  function deleteClientSources(cache, identity) {
-    const value = normalizedIdentity(identity);
-    if (!hasCompleteIdentity(value) || cache?.deviceId !== value.deviceId) return;
-    const entry = cache.entries.get(value.clientId);
-    if (entry?.observedAt === value.observedAt) cache.entries.delete(value.clientId);
-  }
-
   return {
     clientSourceRequestKey,
     createClientSourceCache,
-    deleteClientSources,
     readClientSources,
     readLatestClientSources,
     writeClientSources
