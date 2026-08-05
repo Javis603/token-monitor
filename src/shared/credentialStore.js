@@ -358,6 +358,32 @@ class CredentialStore {
     return !this.readOllamaCredential(accountId);
   }
 
+  readFreeLlmRoutingKey(id, document = this.readDocument()) {
+    const keyId = safeDynamicKey(id);
+    if (!keyId) return '';
+    const value = valueAt(document.credentials, ['providers', 'freellmRouting', 'keys', keyId, 'apiKey']);
+    return typeof value === 'string' ? value : '';
+  }
+
+  writeFreeLlmRoutingKey(id, apiKey) {
+    const keyId = safeDynamicKey(id);
+    const value = typeof apiKey === 'string' ? apiKey.trim() : '';
+    if (!keyId || !value) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['providers', 'freellmRouting', 'keys', keyId, 'apiKey'], value);
+    this.writeDocument(document);
+    return true;
+  }
+
+  removeFreeLlmRoutingKey(id) {
+    const keyId = safeDynamicKey(id);
+    if (!keyId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['providers', 'freellmRouting', 'keys', keyId]);
+    this.writeDocument(document);
+    return !this.readFreeLlmRoutingKey(keyId);
+  }
+
   migrateLegacyMimoCredentials(entries) {
     const document = this.readDocument();
     if (Number(document.migrations.mimoFiles || 0) >= MIMO_MIGRATION_VERSION) {

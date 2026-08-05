@@ -277,7 +277,7 @@ const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/cho
 const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
-const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
+const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'routing', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
@@ -656,6 +656,11 @@ function settingsSectionSummary(section) {
       count: active.length,
       total: formatCost(subscriptionApi.monthlyTotalUsd(active, currencyApi))
     });
+  }
+  if (section === 'routing') {
+    const status = state.settings.freeLlmRoutingStatus || {};
+    if (state.settings.freeLlmRoutingEnabled && status.running) return `Running · :${status.port}`;
+    return state.settings.freeLlmRoutingEnabled ? 'Needs attention' : 'Off';
   }
   if (section === 'main') {
     return viewsSummary();
@@ -7609,6 +7614,7 @@ function renderSessionUsageArchiveStatus() {
 
 function syncSettingsForm() {
   applySettingsTranslations();
+  renderFreeLlmRouting();
   applyInitialBreakdownPreference();
   syncPeriodTabs();
   syncHubModeUi();
@@ -11990,6 +11996,89 @@ function renderOllamaStatus() {
   renderSettingsSummaries();
 }
 
+function freeLlmAccountLabel(account, index) {
+  return String(account?.accountEmail || account?.accountLabel || '').trim() || `Ollama account ${index + 1}`;
+}
+
+function renderFreeLlmRouting() {
+  const enabledInput = document.getElementById('freeLlmEnabledInput');
+  const endpoint = document.getElementById('freeLlmEndpoint');
+  const select = document.getElementById('freeLlmAccountSelect');
+  const list = document.getElementById('freeLlmKeyList');
+  const empty = document.getElementById('freeLlmKeyEmpty');
+  const error = document.getElementById('freeLlmError');
+  if (!enabledInput || !endpoint || !select || !list || !empty || !error) return;
+  const routing = state.settings || {};
+  const status = routing.freeLlmRoutingStatus || {};
+  const accounts = routing.ollamaManagedAccounts || [];
+  const keys = routing.freeLlmRoutingKeys || [];
+  enabledInput.checked = routing.freeLlmRoutingEnabled === true;
+  endpoint.textContent = status.running ? `http://127.0.0.1:${status.port}/v1` : (status.error || 'Not running');
+  error.textContent = state.freeLlmRoutingError || '';
+  error.classList.toggle('hidden', !state.freeLlmRoutingError);
+  select.replaceChildren();
+  for (const [index, account] of accounts.entries()) {
+    const option = document.createElement('option');
+    option.value = account.id;
+    option.textContent = freeLlmAccountLabel(account, index);
+    option.disabled = account.enabled === false;
+    select.append(option);
+  }
+  select.disabled = accounts.length === 0;
+  list.replaceChildren();
+  empty.classList.toggle('hidden', keys.length > 0);
+  for (const key of keys) {
+    const account = accounts.find((entry) => entry.id === key.ollamaAccountId);
+    const row = document.createElement('div');
+    row.className = 'managed-account-row';
+    row.classList.toggle('disabled', key.enabled === false);
+    const checkbox = document.createElement('input');
+    checkbox.className = 'managed-account-checkbox';
+    checkbox.type = 'checkbox';
+    checkbox.checked = key.enabled !== false;
+    checkbox.setAttribute('aria-label', `Route with ${key.label || freeLlmAccountLabel(account, 0)}`);
+    checkbox.addEventListener('change', async () => {
+      checkbox.disabled = true;
+      const result = await window.tokenMonitor.freellm.setKeyEnabled(key.id, checkbox.checked);
+      if (!result?.ok) state.freeLlmRoutingError = result?.error || 'Could not update the routing key.';
+      else {
+        state.freeLlmRoutingError = '';
+        state.settings.freeLlmRoutingKeys = result.keys || [];
+        state.settings.freeLlmRoutingStatus = result.status || {};
+      }
+      renderFreeLlmRouting();
+      renderSettingsSummaries();
+    });
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const label = document.createElement('div');
+    label.className = 'managed-account-email';
+    label.textContent = key.label || freeLlmAccountLabel(account, 0);
+    const detail = document.createElement('div');
+    detail.className = 'managed-account-info';
+    detail.textContent = account ? `Monitors ${freeLlmAccountLabel(account, 0)}` : 'Linked account removed';
+    main.append(label, detail);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.title = 'Remove routing key';
+    remove.addEventListener('click', async () => {
+      const result = await window.tokenMonitor.freellm.removeKey(key.id);
+      if (!result?.ok) state.freeLlmRoutingError = result?.error || 'Could not remove the routing key.';
+      else {
+        state.freeLlmRoutingError = '';
+        state.settings.freeLlmRoutingKeys = result.keys || [];
+        state.settings.freeLlmRoutingStatus = result.status || {};
+      }
+      renderFreeLlmRouting();
+      renderSettingsSummaries();
+    });
+    row.append(checkbox, main, remove);
+    list.append(row);
+  }
+}
+
 function minimaxProviderStatus() {
   return localProviderStatus('minimax');
 }
@@ -14004,6 +14093,44 @@ function setupCursorAccountUI() {
       });
       await refreshStats({ force: true });
     });
+  }
+
+  const freeLlmEnabledInput = document.getElementById('freeLlmEnabledInput');
+  if (freeLlmEnabledInput) {
+    freeLlmEnabledInput.addEventListener('change', async () => {
+      freeLlmEnabledInput.disabled = true;
+      const result = await window.tokenMonitor.freellm.setEnabled(freeLlmEnabledInput.checked);
+      if (!result?.ok) state.freeLlmRoutingError = result?.status?.error || result?.error || 'Could not start FreeLLM routing.';
+      else {
+        state.freeLlmRoutingError = '';
+        state.settings.freeLlmRoutingEnabled = freeLlmEnabledInput.checked;
+        state.settings.freeLlmRoutingStatus = result.status || {};
+      }
+      freeLlmEnabledInput.disabled = false;
+      renderFreeLlmRouting();
+      renderSettingsSummaries();
+    });
+    document.getElementById('freeLlmCopyEndpoint').addEventListener('click', async () => {
+      const status = state.settings?.freeLlmRoutingStatus || {};
+      if (status.running) await window.tokenMonitor.copyText(`http://127.0.0.1:${status.port}/v1`);
+    });
+    document.getElementById('freeLlmAddKey').addEventListener('click', async () => {
+      const label = document.getElementById('freeLlmKeyLabel');
+      const apiKey = document.getElementById('freeLlmApiKey');
+      const account = document.getElementById('freeLlmAccountSelect');
+      const result = await window.tokenMonitor.freellm.addKey({ label: label.value, apiKey: apiKey.value, ollamaAccountId: account.value });
+      if (!result?.ok) state.freeLlmRoutingError = result?.error || 'Could not add the routing key.';
+      else {
+        state.freeLlmRoutingError = '';
+        apiKey.value = '';
+        label.value = '';
+        state.settings.freeLlmRoutingKeys = result.keys || [];
+        state.settings.freeLlmRoutingStatus = result.status || {};
+      }
+      renderFreeLlmRouting();
+      renderSettingsSummaries();
+    });
+    renderFreeLlmRouting();
   }
 
   const kimiToggle = document.getElementById('kimiSettingsToggle');

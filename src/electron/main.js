@@ -47,6 +47,7 @@ const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared
 const { createHub } = require('../hub/server');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation, normalizeOllamaManagedAccounts, createOllamaManagedAccount } = require('../shared/ollamaLimits');
+const { DEFAULT_PORT: FREELLM_DEFAULT_PORT, DEFAULT_THRESHOLD_PERCENT: FREELLM_DEFAULT_THRESHOLD_PERCENT, createFreeLlmRouter, normalizePort: normalizeFreeLlmPort, clampThreshold: normalizeFreeLlmThreshold } = require('../shared/freellmRouter');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
   codexAuthIdentity,
@@ -252,6 +253,8 @@ let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
+let freeLlmRouter = null;
+let freeLlmRouterQueue = Promise.resolve();
 let sessionUsageArchive = null;
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
@@ -399,6 +402,10 @@ function defaultSettings() {
     codexManagedAccounts: [],
     mimoManagedAccounts: [],
     ollamaManagedAccounts: [],
+    freeLlmRoutingEnabled: false,
+    freeLlmRoutingPort: FREELLM_DEFAULT_PORT,
+    freeLlmRoutingThresholdPercent: FREELLM_DEFAULT_THRESHOLD_PERCENT,
+    freeLlmRoutingKeys: [],
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -1047,6 +1054,142 @@ function removeOllamaCredential(id) {
   } catch (_) {
     return false;
   }
+}
+
+function normalizeFreeLlmRoutingKeys(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.flatMap((entry) => {
+    const id = String(entry?.id || '').trim();
+    const ollamaAccountId = String(entry?.ollamaAccountId || '').trim();
+    if (!id || !ollamaAccountId || seen.has(id)) return [];
+    seen.add(id);
+    return [{
+      id,
+      ollamaAccountId,
+      label: String(entry?.label || '').trim().slice(0, 80),
+      enabled: entry?.enabled !== false,
+      addedAt: entry?.addedAt || new Date().toISOString(),
+      updatedAt: entry?.updatedAt || entry?.addedAt || new Date().toISOString()
+    }];
+  });
+}
+
+function readFreeLlmRoutingKey(id) {
+  try { return ensureCredentialStore().readFreeLlmRoutingKey(id); } catch (_) { return ''; }
+}
+
+function writeFreeLlmRoutingKey(id, apiKey) {
+  try { return ensureCredentialStore().writeFreeLlmRoutingKey(id, apiKey); } catch (_) { return false; }
+}
+
+function removeFreeLlmRoutingKey(id) {
+  try { return ensureCredentialStore().removeFreeLlmRoutingKey(id); } catch (_) { return false; }
+}
+
+function freeLlmRoutingKeysForRenderer() {
+  return normalizeFreeLlmRoutingKeys(settings?.freeLlmRoutingKeys).map((key) => ({ ...key }));
+}
+
+function freeLlmRoutingKeysForRuntime() {
+  const accounts = new Map(normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map((account) => [account.id, account]));
+  return normalizeFreeLlmRoutingKeys(settings?.freeLlmRoutingKeys).flatMap((key) => {
+    const account = accounts.get(key.ollamaAccountId);
+    const apiKey = readFreeLlmRoutingKey(key.id);
+    return account?.enabled !== false && apiKey ? [{ ...key, apiKey, accountKey: account.accountKey }] : [];
+  });
+}
+
+function freeLlmQuotaSnapshot() {
+  const providers = deviceRuntimeHandle?.getSnapshot?.()?.limits?.providers || [];
+  const accountIds = new Map(normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).map((account) => [account.accountKey, account.id]));
+  return providers.filter((provider) => provider?.provider === 'ollama').flatMap((provider) => {
+    const accountId = accountIds.get(String(provider.accountKey || '').trim());
+    return accountId ? [{ ...provider, accountId }] : [];
+  });
+}
+
+function freeLlmRoutingConfig() {
+  return {
+    port: normalizeFreeLlmPort(settings?.freeLlmRoutingPort),
+    thresholdPercent: normalizeFreeLlmThreshold(settings?.freeLlmRoutingThresholdPercent)
+  };
+}
+
+function freeLlmRouterStatus() {
+  return freeLlmRouter?.getStatus?.() || { running: false, port: null, error: '', activeKeyId: '', blockedKeyIds: [] };
+}
+
+function reconcileFreeLlmRouter() {
+  freeLlmRouterQueue = freeLlmRouterQueue.then(async () => {
+    if (freeLlmRouter) {
+      await freeLlmRouter.stop();
+      freeLlmRouter = null;
+    }
+    if (!settings?.freeLlmRoutingEnabled) return freeLlmRouterStatus();
+    freeLlmRouter = createFreeLlmRouter({
+      getConfig: freeLlmRoutingConfig,
+      getKeys: freeLlmRoutingKeysForRuntime,
+      getQuotas: freeLlmQuotaSnapshot
+    });
+    try {
+      return await freeLlmRouter.start();
+    } catch (error) {
+      console.warn(`[freellm] Router could not start: ${error.message}`);
+      return freeLlmRouterStatus();
+    } finally {
+      pushSettingsToRenderer();
+    }
+  }).catch((error) => {
+    console.warn(`[freellm] Router reconciliation failed: ${error.message}`);
+    return freeLlmRouterStatus();
+  });
+  return freeLlmRouterQueue;
+}
+
+async function addFreeLlmRoutingKey(input) {
+  const apiKey = String(input?.apiKey || '').trim();
+  const ollamaAccountId = String(input?.ollamaAccountId || '').trim();
+  if (!apiKey) return { ok: false, error: 'Enter an Ollama API key.' };
+  const account = normalizeOllamaManagedAccounts(settings?.ollamaManagedAccounts).find((entry) => entry.id === ollamaAccountId);
+  if (!account || account.enabled === false) return { ok: false, error: 'Choose an enabled monitored Ollama account.' };
+  const record = { id: crypto.randomUUID(), ollamaAccountId, label: String(input?.label || '').trim().slice(0, 80), enabled: true, addedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  if (!writeFreeLlmRoutingKey(record.id, apiKey)) return { ok: false, error: 'Could not securely save the API key.' };
+  settings.freeLlmRoutingKeys = [...normalizeFreeLlmRoutingKeys(settings.freeLlmRoutingKeys), record];
+  try { saveSettings({ throwOnError: true }); } catch (_) {
+    removeFreeLlmRoutingKey(record.id);
+    return { ok: false, error: 'Could not save the routing key configuration.' };
+  }
+  await reconcileFreeLlmRouter();
+  void queueLimitInvalidation({ provider: 'ollama' }, 'freellm-routing', { refresh: true });
+  return { ok: true, keys: freeLlmRoutingKeysForRenderer(), status: freeLlmRouterStatus() };
+}
+
+async function removeFreeLlmRoutingKeyRecord(id) {
+  const keyId = String(id || '').trim();
+  const keys = normalizeFreeLlmRoutingKeys(settings?.freeLlmRoutingKeys);
+  if (!keys.some((key) => key.id === keyId)) return { ok: false, error: 'Routing key not found.' };
+  const apiKey = readFreeLlmRoutingKey(keyId);
+  if (!removeFreeLlmRoutingKey(keyId)) return { ok: false, error: 'Could not remove the API key.' };
+  settings.freeLlmRoutingKeys = keys.filter((key) => key.id !== keyId);
+  try { saveSettings({ throwOnError: true }); } catch (_) {
+    if (apiKey) writeFreeLlmRoutingKey(keyId, apiKey);
+    return { ok: false, error: 'Could not save the routing key configuration.' };
+  }
+  await reconcileFreeLlmRouter();
+  return { ok: true, keys: freeLlmRoutingKeysForRenderer(), status: freeLlmRouterStatus() };
+}
+
+async function setFreeLlmRoutingKeyEnabled(id, enabled) {
+  const keys = normalizeFreeLlmRoutingKeys(settings?.freeLlmRoutingKeys);
+  const key = keys.find((entry) => entry.id === String(id || '').trim());
+  if (!key) return { ok: false, error: 'Routing key not found.' };
+  key.enabled = Boolean(enabled);
+  key.updatedAt = new Date().toISOString();
+  settings.freeLlmRoutingKeys = keys;
+  try { saveSettings({ throwOnError: true }); } catch (_) { return { ok: false, error: 'Could not save the routing key configuration.' }; }
+  await reconcileFreeLlmRouter();
+  return { ok: true, keys: freeLlmRoutingKeysForRenderer(), status: freeLlmRouterStatus() };
 }
 
 async function addOllamaManagedAccount(cookieValue) {
@@ -2134,6 +2277,10 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
+    merged.freeLlmRoutingEnabled = parseBoolean(merged.freeLlmRoutingEnabled, false);
+    merged.freeLlmRoutingPort = normalizeFreeLlmPort(merged.freeLlmRoutingPort);
+    merged.freeLlmRoutingThresholdPercent = normalizeFreeLlmThreshold(merged.freeLlmRoutingThresholdPercent);
+    merged.freeLlmRoutingKeys = normalizeFreeLlmRoutingKeys(merged.freeLlmRoutingKeys);
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -3700,6 +3847,8 @@ function settingsForRenderer() {
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     ollamaManagedAccounts: ollamaAccountsForRenderer(),
+    freeLlmRoutingKeys: freeLlmRoutingKeysForRenderer(),
+    freeLlmRoutingStatus: freeLlmRouterStatus(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
@@ -4956,6 +5105,7 @@ app.whenReady().then(() => {
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
   startMode();
+  void reconcileFreeLlmRouter();
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
@@ -5453,6 +5603,17 @@ app.whenReady().then(() => {
   ipcMain.handle('ollama:removeAccount', async (_event, id) => removeOllamaManagedAccount(id));
   ipcMain.handle('ollama:setAccountEnabled', (_event, id, enabled) => setOllamaManagedAccountEnabled(id, enabled));
   ipcMain.handle('ollama:accounts', () => ollamaAccountsForRenderer());
+  ipcMain.handle('freellm:status', () => freeLlmRouterStatus());
+  ipcMain.handle('freellm:setEnabled', async (_event, enabled) => {
+    settings.freeLlmRoutingEnabled = Boolean(enabled);
+    try { saveSettings({ throwOnError: true }); } catch (_) { return { ok: false, error: 'Could not save routing settings.' }; }
+    if (settings.freeLlmRoutingEnabled) void queueLimitInvalidation({ provider: 'ollama' }, 'freellm-routing', { refresh: true });
+    const status = await reconcileFreeLlmRouter();
+    return { ok: Boolean(!settings.freeLlmRoutingEnabled || status.running), status };
+  });
+  ipcMain.handle('freellm:addKey', async (_event, input) => addFreeLlmRoutingKey(input));
+  ipcMain.handle('freellm:removeKey', async (_event, id) => removeFreeLlmRoutingKeyRecord(id));
+  ipcMain.handle('freellm:setKeyEnabled', async (_event, id, enabled) => setFreeLlmRoutingKeyEnabled(id, enabled));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());
