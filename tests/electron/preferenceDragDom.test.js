@@ -204,8 +204,8 @@ test('the tool list skips unchanged row renders and refreshes only open health d
 
   const localSources = functionBody(app, 'localClientSources', 'loadClientSources');
   assert.match(localSources, /exactLocalClientSources\(clientId\)/);
-  assert.match(localSources, /state\.clientSourcesKey === key/);
-  assert.match(localSources, /readLatestClientSources\(/);
+  assert.match(localSources, /const pendingSources = key && state\.clientSourcesKey === key/);
+  assert.match(localSources, /exactSources \?\? clientSourceCacheApi\.readLatestClientSources/);
   assert.match(localSources, /exists: false, pending: true/);
 });
 

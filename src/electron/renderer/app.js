@@ -8698,9 +8698,9 @@ function localClientSources(clientId) {
   const identity = clientSourcesIdentity(clientId);
   const exactSources = exactLocalClientSources(clientId);
   const key = clientSourceCacheApi.clientSourceRequestKey(identity);
-  const pendingSources = exactSources === null && key && state.clientSourcesKey === key;
+  const pendingSources = key && state.clientSourcesKey === key;
   const sources = pendingSources
-    ? (clientSourceCacheApi.readLatestClientSources(state.clientSources, identity) || [])
+    ? (exactSources ?? clientSourceCacheApi.readLatestClientSources(state.clientSources, identity) ?? [])
       .map((source) => ({ ...source, exists: false, pending: true }))
     : exactSources;
   const detectedInWsl = localDevice()?.wslStatus?.detected?.includes(clientId);
