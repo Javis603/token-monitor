@@ -3,9 +3,10 @@
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
+const os = require('node:os');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
+const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
   CredentialStore,
   credentialSettingsForRenderer,
@@ -3287,10 +3288,61 @@ function stopLocalCollector() {
   localStats = null;
 }
 
+function localDayKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// 从 collector-anchor.json 预填 localStats。anchor 已经在 collector 加载时
+// 验证过 dateKey === localTodayKey() 和 configFingerprint 匹配；这里只把
+// 它包装成 device record + aggregate result，立刻 push 给 renderer，让用户
+// 在 cold launch 时几毫秒内看到上次累计的数字。full scan 完成后用真实数据覆盖。
+function primeLocalStatsFromAnchor() {
+  const anchorPath = path.join(sharedDataDir(), 'collector-anchor.json');
+  const saved = readJson(anchorPath, null);
+  if (!saved || !saved.dateKey || saved.dateKey !== localDayKey()) return;
+  if (!saved.today || !saved.month || !saved.allTime) return;
+  const deviceId = settings?.deviceId || defaultDeviceId();
+  const deviceRecord = {
+    deviceId,
+    hostname: os.hostname(),
+    platform: `${process.platform}-${process.arch}`,
+    updatedAt: saved.fullScanAt || new Date().toISOString(),
+    receivedAt: saved.fullScanAt || new Date().toISOString(),
+    trackedClients: (settings?.clients || '').split(',').filter(Boolean),
+    periods: {
+      today: saved.today,
+      month: saved.month,
+      allTime: saved.allTime
+    },
+    clientStatus: {},
+    wslStatus: {},
+    // A starting-from-anchor render is by definition not "stale" — the device
+    // was alive moments ago. Without this flag aggregateDevices would grey the
+    // card for the few seconds until the first full tick lands.
+    stale: false
+  };
+  lastCollectedDevice = deviceRecord;
+  localDevice = deviceRecord;
+  localStats = withHistoryPreview(aggregateDevices([deviceRecord], 0), [deviceRecord]);
+  sendPush({ event: 'stats', data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt } });
+}
+
 function startLocalCollector() {
   stopLocalCollector();
   mode = 'local';
   sendStatus(false, { reason: 'collecting' });
+  // The first full scan takes long enough (today + month + `--since allTimeSince`
+  // scanned serially to avoid the 500% CPU spike from issue #15) that the
+  // renderer would sit at zero for tens of seconds on a cold launch. Hydrate
+  // localStats/lastCollectedDevice from the last anchor — anchored to today's
+  // local date and a matching config fingerprint, so cross-day or
+  // settings-changing restarts still get an empty renderer. The first full tick
+  // then supersedes this with real numbers; onRecord reuses lastCollectedDevice
+  // for next-tick continuity either way.
+  primeLocalStatsFromAnchor();
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
