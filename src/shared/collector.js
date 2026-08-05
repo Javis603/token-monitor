@@ -1324,6 +1324,36 @@ function clientSourceChecks(clientsCsv, options = {}) {
   return checks;
 }
 
+// Every directory a tracked client's usage can come from on this machine, keyed
+// by client as {id, dir, exists} — the path-level table behind
+// clientSourceChecks(), before same-id roots are collapsed into one boolean.
+//
+// Only the diagnostics panel wants this shape: a user asking "is it looking
+// where I installed it" needs the paths, and a check id cannot answer that. The
+// self-synced clients are why it is not simply clientSourceRoots(): that table
+// holds antigravity's *sync cache*, which is ours and says nothing about which
+// Antigravity is installed — the IDE session roots and the CLI's own data dir
+// are the ones that answer it, and they are checks without being watch roots.
+function clientDiagnosticRoots(clientsCsv) {
+  const byClient = {};
+  for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv))) {
+    byClient[client] = roots.map(({ id, dir }) => ({
+      id,
+      dir,
+      // workspaceStorage itself belongs to VS Code, not Copilot. Match the
+      // health probe by requiring a chatSessions source beneath it.
+      exists: id === 'vscode-workspace-storage' ? hasCopilotChatSessions(dir) : dirExists(dir)
+    }));
+  }
+  if (byClient.antigravity) {
+    byClient.antigravity.unshift(
+      ...antigravityDataRoots().map((dir) => ({ id: 'antigravity-ide-source', dir, exists: dirExists(dir) })),
+      { id: 'antigravity-cli-data', dir: antigravityCliDataDir(), exists: dirExists(antigravityCliDataDir()) }
+    );
+  }
+  return byClient;
+}
+
 // Whether each tracked client has at least one data directory on disk. Takes
 // pre-computed checks when the caller already has them: a tick derives the
 // legacy status and the health record from one probe, so the two cannot
@@ -1795,11 +1825,6 @@ function startCollector(options) {
                   ? mergePeriods(partial.allTime, wslAnchor.allTime)
                   : partial.allTime;
               }
-              // Only derive clientStatus when allTime is available; warm
-              // scans carry the previous status forward in main.js.
-              if (partial.allTime) {
-                preview.clientStatus = deriveClientStatus(clients, partial.allTime);
-              }
               onPreview(preview);
             }
           } catch (_) {
@@ -2081,14 +2106,19 @@ function startCollector(options) {
   setupWatchers();
   loop();
 
+  // A rescan of one tool. Was cursor-only because a Cursor sign-in was the only
+  // caller; the machinery underneath was always per-client, so the guard was a
+  // narrower contract than the implementation. `targetClients` keeps the scan to
+  // the partition being asked about instead of every client's today.
   function refreshClient(clientId, refreshOptions = {}) {
     const normalized = String(clientId || '').trim().toLowerCase();
-    if (normalized !== 'cursor') {
-      throw new TypeError(`Unsupported targeted usage client: ${normalized || '(empty)'}`);
-    }
+    if (!normalized) throw new TypeError('Unsupported targeted usage client: (empty)');
     return runTick(`client:${normalized}`, {
       todayOnly: true,
-      forceSelfSync: refreshOptions.forceSync === true ? [normalized] : null
+      targetClients: [normalized],
+      // Only the self-synced clients have a sync to force; naming any other here
+      // would be read by nothing.
+      forceSelfSync: refreshOptions.forceSync === true && SELF_SYNCED_CLIENTS.has(normalized) ? [normalized] : null
     });
   }
 
@@ -2107,6 +2137,7 @@ module.exports = {
   collectUsageOnce,
   clientActivityDaysFromHistory,
   clientDataDirPresence,
+  clientDiagnosticRoots,
   clientSourceChecks,
   clientSourceRoots,
   clientWatchCandidates,

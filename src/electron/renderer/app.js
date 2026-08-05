@@ -156,6 +156,7 @@ const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentatio
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
+const clientHealthPresentationApi = window.TokenMonitorClientHealthPresentation;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
@@ -290,7 +291,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: null, clientSourceIds: [], clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -8619,6 +8620,303 @@ function localClientStatus() {
   return localDevice()?.clientStatus || {};
 }
 
+function localClientHealth() {
+  return localDevice()?.clientHealth || null;
+}
+
+// Single entry point for the tracked-tool detail accordion, mirroring the limits
+// list: the drag gesture collapses and restores it too, so the class and aria
+// bookkeeping cannot live inside the disclosure's own click handler.
+function setClientHealthExpanded(clientId) {
+  state.clientHealthExpanded = clientId || '';
+  const rows = els.clientDisplayList?.querySelectorAll('.tool-preference-row[data-client]') || [];
+  for (const row of rows) {
+    const disclosure = row.querySelector('.tool-preference-main');
+    const container = row.querySelector(':scope > .accordion-animated-container');
+    if (!disclosure || !container) continue;
+    const open = row.dataset.client === state.clientHealthExpanded;
+    // Filled here rather than during the repaint. Only one row can be open, so
+    // building all of them cost 219 of the list's 552 nodes — 40% of its DOM,
+    // rebuilt every stats tick — to render nothing. A panel already filled is
+    // left alone so a collapse still has something to animate.
+    if (open && container.childElementCount === 0) fillClientHealthPanel(container, row.dataset.client);
+    disclosure.setAttribute('aria-expanded', String(open));
+    row.classList.toggle('expanded', open);
+    container.classList.toggle('hidden', !open);
+  }
+}
+
+// This client's numbers across the three periods, straight off the stats the app
+// already renders everywhere else. No new wire field and no new collection —
+// the panel just puts them side by side, which is the whole point.
+function clientPeriodUsage(clientId) {
+  const usage = {};
+  for (const period of ['today', 'month', 'allTime']) {
+    const values = state.stats?.periods?.[period];
+    usage[period] = {
+      tokens: Number(values?.clients?.[clientId] || 0),
+      cost: Number(values?.clientCosts?.[clientId] || 0)
+    };
+  }
+  return usage;
+}
+
+// Where this machine looks for each tool's data. A check id answers "which kind
+// of root", but "did I install it somewhere else" needs the path itself — and a
+// path only exists on the machine that probed it, so it comes over IPC rather
+// than the wire. Fetched for the whole list at once and cached: a panel is
+// rebuilt on every stats tick, and fetching per open made the paths flicker back
+// to bare ids each time. The health envelope's observedAt changes only when a
+// full source probe completes, so it refreshes path existence once per snapshot
+// without spending IPC on progressive previews that carry the old envelope.
+function loadClientSources(clientIds, options = {}) {
+  const ids = [...clientIds];
+  const observedAt = String(localClientHealth()?.observedAt || '');
+  const key = `${ids.join(',')}|${observedAt}`;
+  if (!options.force && state.clientSourcesKey === key) return;
+  state.clientSourceIds = ids;
+  state.clientSourcesKey = key;
+  const request = ++state.clientSourcesRequest;
+  void window.tokenMonitor?.clientSources?.(ids).then((sources) => {
+    if (!sources || typeof sources !== 'object') return;
+    if (state.clientSourcesRequest !== request) return;
+    state.clientSources = sources;
+    refillOpenClientHealthPanel();
+  }).catch(() => {});
+}
+
+function refillOpenClientHealthPanel() {
+  const clientId = state.clientHealthExpanded;
+  if (!clientId) return;
+  const row = els.clientDisplayList?.querySelector(`.tool-preference-row[data-client="${CSS.escape(clientId)}"]`);
+  const container = row?.querySelector(':scope > .accordion-animated-container');
+  if (container) fillClientHealthPanel(container, clientId);
+}
+
+// Everything the panel draws beyond the health record itself: the numbers the
+// app already renders elsewhere, and this machine's own paths.
+function clientHealthDetailFor(clientId) {
+  return clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, {
+    usage: clientPeriodUsage(clientId),
+    sources: state.clientSources?.[clientId]?.length ? state.clientSources[clientId] : null
+  });
+}
+
+function fillClientHealthPanel(container, clientId) {
+  const detail = clientHealthDetailFor(clientId);
+  if (!detail) return;
+  container.replaceChildren(clientHealthPanel(detail, clientId));
+}
+
+// Home-relative so the panel does not print the user's account name back at
+// them; the copy-diagnostics block uses the check id and never this.
+function friendlyPath(dir) {
+  const home = state.appInfo?.homeDir || '';
+  return home && dir.startsWith(home) ? `~${dir.slice(home.length)}` : dir;
+}
+
+// One row of the expanded panel. Values are formatted here and nowhere else —
+// clientHealthPresentation.js deliberately hands back raw numbers and i18n keys.
+function clientHealthDetailRow(row) {
+  const line = document.createElement('div');
+  line.className = 'tool-health-line';
+  const label = document.createElement('span');
+  label.className = 'tool-health-label';
+  label.textContent = t(row.key);
+  const value = document.createElement('span');
+  value.className = 'tool-health-value';
+  if (row.kind === 'sources') {
+    value.textContent = `${row.detectedCount} / ${row.checkedCount}`;
+    line.append(label, value);
+    if (row.checks.length > 0) {
+      const list = document.createElement('div');
+      list.className = 'tool-health-checks';
+      for (const check of row.checks) {
+        const chip = document.createElement('code');
+        chip.className = `tool-health-check${check.exists ? ' found' : ''}`;
+        // The path when this machine has one — that is the row's whole job, and
+        // "is it looking in the right place" cannot be answered by an id. Where
+        // there is none (another device's row, or a source we reach through
+        // wsl.exe) the check id stands in, verbatim and untranslated: it is an
+        // identifier, not prose, and a user pasting one into an issue is the point.
+        chip.textContent = check.dir ? friendlyPath(check.dir) : check.id;
+        if (check.dir) chip.title = check.dir;
+        list.append(chip);
+      }
+      line.append(list);
+    }
+    return line;
+  }
+  if (row.kind === 'sync') {
+    value.textContent = t(`settings.tools.health.sync.${row.state}`);
+    line.append(label, value);
+    const stamp = row.lastSuccessAt || row.lastAttemptAt;
+    if (stamp) {
+      const note = document.createElement('span');
+      note.className = 'tool-health-note';
+      // Reuses the localized "n minutes ago" buckets the service-status rows
+      // already use, so the panel does not invent a second time vocabulary.
+      const elapsed = Math.max(0, Date.now() - (Date.parse(stamp) || Date.now()));
+      note.textContent = t(row.lastSuccessAt ? 'settings.tools.health.lastSuccess' : 'settings.tools.health.lastAttempt', {
+        time: formatAgo(elapsed)
+      });
+      line.append(note);
+    }
+    return line;
+  }
+  if (row.kind === 'usage') {
+    line.classList.add('tool-health-usage');
+    line.replaceChildren();
+    for (const entry of row.periods) {
+      const cell = document.createElement('div');
+      cell.className = 'tool-health-usage-cell';
+      const head = document.createElement('span');
+      head.className = 'tool-health-usage-label';
+      head.textContent = t(`trayComposer.period.${entry.period}`);
+      const amount = document.createElement('span');
+      amount.className = 'tool-health-usage-value';
+      amount.textContent = formatCompact(entry.tokens);
+      cell.append(head, amount);
+      if (entry.cost > 0) {
+        const cost = document.createElement('span');
+        cost.className = 'tool-health-usage-cost';
+        cost.textContent = formatCost(entry.cost);
+        cell.append(cost);
+      }
+      line.append(cell);
+    }
+    return line;
+  }
+  if (row.kind === 'day') {
+    // Relative first. "2026-08-04" only answers "is this tool idle or is the
+    // collection broken?" for a reader who already knows today's date — and a
+    // tool that is simply closed is the single most common thing this panel has
+    // to explain, since its numbers keep looking healthy while today stays zero.
+    value.textContent = relativeDayLabel(row.day);
+    line.append(label, value);
+    if (relativeDayLabel(row.day) !== row.day) {
+      const note = document.createElement('span');
+      note.className = 'tool-health-note';
+      note.textContent = row.day;
+      line.append(note);
+    }
+    return line;
+  }
+  if (row.kind === 'tokens') value.textContent = formatCompact(row.tokens);
+  line.append(label, value);
+  return line;
+}
+
+function localDayKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// Days come from the daily history buckets, which are local dates — the same
+// boundary computePeriodWindows() rolls "today" over on. A day in the future
+// (a clock that moved) has no honest phrase, so it stays a plain date.
+function relativeDayLabel(day) {
+  const today = localDayKey();
+  if (day === today) return t('settings.tools.health.day.today');
+  const parsed = Date.parse(`${day}T00:00:00`);
+  if (!Number.isFinite(parsed)) return day;
+  const days = Math.round((Date.parse(`${today}T00:00:00`) - parsed) / 86400000);
+  if (days === 1) return t('settings.tools.health.day.yesterday');
+  if (days > 1) return t('settings.tools.health.day.daysAgo', { n: days });
+  return day;
+}
+
+// A paste-ready block for a bug report. Deliberately built from check ids and
+// not the paths behind them: the point is that someone can drop this into an
+// issue without leaking their home directory, and it saves the round trips that
+// gathering OS, versions and screenshots by hand currently costs.
+function clientHealthReport(detail, clientId) {
+  const info = state.appInfo || {};
+  const device = localDevice() || {};
+  const lines = [
+    // agentVersion first: it is the app's own version from package.json, while
+    // app.getVersion() reports Electron's in an unpackaged run — and a bug report
+    // naming the wrong version is worse than one naming none.
+    `Token Monitor ${device.agentVersion || info.version || '?'} · ${device.osName || info.platform || '?'} ${device.osVersion || ''} · ${device.platform || ''}`.trim(),
+    `${clientId}  ${detail.overall}`
+  ];
+  for (const row of detail.rows) {
+    if (row.kind === 'usage') {
+      lines.push(`  usage  ${row.periods.map((p) => `${p.period} ${Math.round(p.tokens)}`).join(' · ')}`);
+    } else if (row.kind === 'sources') {
+      const checks = row.checks.map((c) => `${c.exists ? '+' : '-'}${c.id}`).join(' ');
+      lines.push(`  source ${row.detectedCount}/${row.checkedCount}${checks ? `  ${checks}` : ''}`);
+    } else if (row.kind === 'sync') {
+      lines.push(`  sync   ${row.state}${row.lastSuccessAt ? ` · ok ${row.lastSuccessAt}` : ''}${row.lastAttemptAt ? ` · tried ${row.lastAttemptAt}` : ''}`);
+    } else if (row.kind === 'day') {
+      lines.push(`  last   ${row.day}`);
+    }
+  }
+  for (const note of detail.notes) lines.push(`  note   ${note.code}`);
+  const observedAt = localClientHealth()?.observedAt;
+  if (observedAt) lines.push(`  scan   ${observedAt}`);
+  return lines.join('\n');
+}
+
+function clientHealthActions(detail, clientId) {
+  const actions = document.createElement('div');
+  actions.className = 'tool-health-actions';
+  const button = (labelKey, onClick) => {
+    const control = document.createElement('button');
+    control.type = 'button';
+    control.className = 'tool-health-action';
+    control.textContent = t(labelKey);
+    control.addEventListener('click', onClick);
+    actions.append(control);
+    return control;
+  };
+  const copy = button('settings.tools.health.copy', async () => {
+    await window.tokenMonitor?.copyText?.(clientHealthReport(detail, clientId));
+    copy.textContent = t('settings.tools.health.copied');
+    setTimeout(() => { copy.textContent = t('settings.tools.health.copy'); }, 1600);
+  });
+  // Only offered in local mode: a rescan runs on this machine, and offering it
+  // while looking at another device's row would promise something it cannot do.
+  if (state.mode === 'local' || state.mode === 'host') {
+    const rescan = button('settings.tools.health.rescan', async () => {
+      rescan.disabled = true;
+      await window.tokenMonitor?.rescanClient?.(clientId);
+      // Refresh immediately even if the rescan's stats repaint happened before
+      // its IPC promise settled. A scan can create the directory this panel
+      // reported missing, and waiting for another stats tick would leave both
+      // the chip and Reveal action stale.
+      loadClientSources(state.clientSourceIds, { force: true });
+      rescan.disabled = false;
+    });
+  }
+  // Only where something was actually found: the button opens the first existing
+  // root, and offering it for a tool with none would open nothing.
+  if ((state.clientSources?.[clientId] || []).some((source) => source.exists)) {
+    button('settings.tools.health.reveal', () => { void window.tokenMonitor?.revealClientSource?.(clientId); });
+  }
+  return actions;
+}
+
+function clientHealthPanel(detail, clientId) {
+  const inner = document.createElement('div');
+  inner.className = 'accordion-animation-inner';
+  // The padded, tinted box is a child rather than the animated element itself:
+  // a collapsed accordion is a grid row sized to 0fr, and padding does not
+  // compress — an inner with its own padding stays that many pixels tall and
+  // pads every collapsed row in the list.
+  const box = document.createElement('div');
+  box.className = 'tool-health-inner';
+  inner.append(box);
+  for (const row of detail.rows) box.append(clientHealthDetailRow(row));
+  for (const note of detail.notes) {
+    const line = document.createElement('div');
+    line.className = `tool-health-note-line tone-${note.tone}`;
+    line.textContent = t(`settings.tools.health.code.${note.code}`);
+    box.append(line);
+  }
+  box.append(clientHealthActions(detail, clientId));
+  return inner;
+}
+
 function localWslStatus() {
   return localDevice()?.wslStatus || null;
 }
@@ -8690,7 +8988,7 @@ function renderWslPanel() {
 // `clientDisplayOrderCommit` decides, and the patch it returns is carried from
 // the local mirror to the save rather than derived twice — the mirror writes
 // the very keys that decision reads.
-const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button, input, select, textarea, a, label, .accordion-animated-container';
+const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not(.tool-preference-main), input, select, textarea, a, label, .accordion-animated-container';
 
 const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   dragSort: verticalDragSortApi,
@@ -8699,6 +8997,8 @@ const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   rowSelector: '.tool-preference-row[data-client]',
   idKey: 'client',
   dragExcluded: CLIENT_PREFERENCE_DRAG_EXCLUDED,
+  getExpanded: () => state.clientHealthExpanded,
+  setExpanded: setClientHealthExpanded,
   applyOrder: (order) => applyPreferenceOrder('client', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order, id) => {
@@ -8725,7 +9025,11 @@ function renderToolPreferencesNow() {
   const hidden = hiddenClientSet();
   const pinned = pinnedClientSet();
   const clientStatus = localClientStatus();
+  const health = localClientHealth();
   const clients = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
+  // Only once the device reports health at all — without it no row gets a panel,
+  // and the probe would be spent on something nothing can display.
+  if (health) loadClientSources(clients.map((client) => client.id));
   const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
   const hasPinnedClients = pinned.size > 0;
   const hasHiddenClients = hidden.size > 0;
@@ -8748,7 +9052,15 @@ function renderToolPreferencesNow() {
     if (enabled.has(id)) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
-      const tagInfo = clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
+      //
+      // `attention` overrides it. The legacy status is derived from usage, so a
+      // client whose sync broke this morning still counts yesterday's tokens and
+      // would keep reporting "Tracking" — leaving the one state this whole
+      // feature exists to surface invisible until the row is expanded.
+      const needsAttention = health?.clients?.[id]?.overall === 'attention';
+      const tagInfo = needsAttention
+        ? { key: 'settings.tools.status.attention', tone: 'warn' }
+        : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
       if (tagInfo) {
         const tag = document.createElement('span');
         tag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
@@ -8792,8 +9104,38 @@ function renderToolPreferencesNow() {
     pin.addEventListener('click', () => onClientPinnedToggle(id));
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
-    actions.append(track, visibility, pin);
-    row.append(labelGroup, actions);
+    actions.append(visibility, pin);
+    // A device whose agent predates the health field gets no chevron rather than
+    // one that opens onto an empty panel.
+    const detail = clientHealthPresentationApi.clientHealthDetail(health, id);
+    if (detail) {
+      const expanded = state.clientHealthExpanded === id;
+      row.classList.toggle('expanded', expanded);
+      const main = document.createElement('button');
+      main.type = 'button';
+      main.id = `toolHealthDisclosure-${id}`;
+      main.className = 'tool-preference-main';
+      main.title = t('settings.tools.health.open', { name: label });
+      main.setAttribute('aria-label', main.title);
+      main.setAttribute('aria-expanded', String(expanded));
+      const disclosureIcon = document.createElement('span');
+      disclosureIcon.className = 'cursor-disclosure-icon';
+      disclosureIcon.setAttribute('aria-hidden', 'true');
+      main.append(disclosureIcon);
+      const panel = document.createElement('div');
+      panel.id = `toolHealthPanel-${id}`;
+      panel.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
+      main.setAttribute('aria-controls', panel.id);
+      if (expanded) panel.append(clientHealthPanel(clientHealthDetailFor(id) || detail, id));
+      main.addEventListener('click', () => setClientHealthExpanded(state.clientHealthExpanded === id ? '' : id));
+      // Last of the row's controls, where the eye and the pin already are —
+      // the label stays plain text, exactly as it reads without this feature.
+      actions.append(main);
+      row.classList.add('has-health');
+      row.append(track, labelGroup, actions, panel);
+    } else {
+      row.append(track, labelGroup, actions);
+    }
     row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
     els.clientDisplayList.appendChild(row);
   }
