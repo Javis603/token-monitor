@@ -84,6 +84,7 @@ test('tool health copy stays compact and describes snapshots, not liveness', () 
   assert.equal(translate('zh-TW', 'settings.tools.health.usage'), '用量');
   assert.equal(translate('en', 'settings.tools.health.sync.pending'), 'Sync pending');
   assert.equal(translate('en', 'settings.tools.health.sync.ok'), 'Last sync succeeded');
+  assert.equal(translate('zh-TW', 'settings.tools.health.rescanFailed'), '無法重新掃描，請稍後再試。');
 });
 
 test('every bundled locale defines every English key', () => {

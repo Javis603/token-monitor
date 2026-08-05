@@ -24,6 +24,7 @@ test('tool diagnostics summarize complete health and render three semantic group
   const css = readRendererFile('styles.css');
   const summary = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
   const group = functionBody(app, 'clientHealthGroup', 'localDayKey');
+  const actions = functionBody(app, 'clientHealthActions', 'clientHealthPanel');
   const panel = functionBody(app, 'clientHealthPanel', 'localWslStatus');
   const statsStart = app.indexOf('function renderStatsUpdate(');
   const statsEnd = app.indexOf('const statsRenderScheduler', statsStart);
@@ -36,6 +37,11 @@ test('tool diagnostics summarize complete health and render three semantic group
   assert.match(summary, /return t\('settings\.summary\.tools'/);
   assert.match(group, /group\.id === 'source'/);
   assert.match(group, /group\.id === 'collection'/);
+  assert.match(actions, /role', 'status'/);
+  assert.match(actions, /aria-live', 'polite'/);
+  assert.match(actions, /if \(succeeded\) loadClientSources[\s\S]*else showFailure\(\)/);
+  assert.match(actions, /catch \(_\)[\s\S]*showFailure\(\)/);
+  assert.match(actions, /setTimeout\(\(\) => \{ feedback\.textContent = ''; \}, 3000\)/);
   assert.match(panel, /for \(const group of detail\.groups\)/);
   assert.match(panel, /note\.group === group\.id/);
   assert.match(stats, /renderSettingsSummaries\(\)/);

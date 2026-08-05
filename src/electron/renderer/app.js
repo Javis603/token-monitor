@@ -8883,15 +8883,31 @@ function clientHealthActions(clientId) {
   // transport state (`local`/`sync`), not topology, so host and client collectors
   // expose the same targeted capability through preload.
   if (localDevice() && typeof window.tokenMonitor?.rescanClient === 'function') {
+    const feedback = document.createElement('span');
+    feedback.className = 'tool-health-action-feedback';
+    feedback.setAttribute('role', 'status');
+    feedback.setAttribute('aria-live', 'polite');
+    let feedbackTimer = null;
+    const showFailure = () => {
+      feedback.textContent = t('settings.tools.health.rescanFailed');
+      if (feedbackTimer) clearTimeout(feedbackTimer);
+      feedbackTimer = setTimeout(() => { feedback.textContent = ''; }, 3000);
+    };
     const rescan = button('settings.tools.health.rescan', async () => {
       rescan.disabled = true;
+      feedback.textContent = '';
+      if (feedbackTimer) { clearTimeout(feedbackTimer); feedbackTimer = null; }
       try {
         const succeeded = await window.tokenMonitor.rescanClient(clientId);
         if (succeeded) loadClientSources(clientId, { force: true });
+        else showFailure();
+      } catch (_) {
+        showFailure();
       } finally {
         rescan.disabled = false;
       }
     });
+    actions.append(feedback);
   }
   // Only where something was actually found: the button opens the first existing
   // root, and offering it for a tool with none would open nothing.
