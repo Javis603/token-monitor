@@ -428,8 +428,7 @@
       : '';
     const rects = bars.map((b, i) => {
       const tip = o.showZeroMarkers && b.value === 0 ? '' : titleOf(i);
-      const zeroClass = b.value === 0 ? ' spark-bar--zero' : '';
-      return `<rect x="${svgRound(b.x)}" y="${svgRound(b.y)}" width="${svgRound(b.width)}" height="${svgRound(Math.max(0, b.height))}" rx="${o.radius}" class="spark-bar${zeroClass}${b.last ? ' spark-bar--last' : ''}">${tip}</rect>`;
+      return `<rect x="${svgRound(b.x)}" y="${svgRound(b.y)}" width="${svgRound(b.width)}" height="${svgRound(Math.max(0, b.height))}" rx="${o.radius}" class="spark-bar${b.last ? ' spark-bar--last' : ''}">${tip}</rect>`;
     }).join('');
     return `<svg class="sparkline" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="${model.height}" aria-hidden="true">${zeroMarkers}${rects}</svg>`;
   }

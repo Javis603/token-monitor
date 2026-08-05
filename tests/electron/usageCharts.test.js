@@ -387,6 +387,17 @@ test('sparklineSvg can mark zero-value trend dates without changing bar height',
   assert.doesNotMatch(svg, /spark-zero-marker--last/);
 });
 
+test('sparklineSvg marks a trailing zero-value date as the last marker', () => {
+  const model = sparklinePreview([{ tokens: 2 }, { tokens: 0 }], {
+    width: 20, height: 10, gap: 0, metric: 'tokens'
+  });
+  const svg = sparklineSvg(model, { titles: ['two', 'zero'], showZeroMarkers: true });
+
+  assert.equal(model.bars[1].height, 0);
+  assert.match(svg, /class="spark-zero-marker spark-zero-marker--last"/);
+  assert.match(svg, /<title>zero<\/title>/);
+});
+
 test('sparklineSvg embeds per-bar hover titles when supplied and escapes them', () => {
   const model = sparklinePreview([{ tokens: 1 }, { tokens: 2 }], { width: 20, height: 10, gap: 0, metric: 'tokens' });
   const svg = sparklineSvg(model, { titles: ['6/7 · 1', 'a<b&c'] });
