@@ -45,6 +45,7 @@ const VALID_DETAIL_CODES = new Set([
 ]);
 
 const VALID_SCOPES = new Set(['full', 'history', 'targeted', 'today', 'unknown']);
+const VALID_MODES = new Set(['local', 'client', 'host', 'unknown']);
 
 function clone(value) {
   if (value === null || typeof value !== 'object') return value;
@@ -68,6 +69,11 @@ function safeScope(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (VALID_SCOPES.has(normalized)) return normalized;
   return 'unknown';
+}
+
+function safeMode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return VALID_MODES.has(normalized) ? normalized : 'unknown';
 }
 
 function safeIdentifier(value) {
@@ -96,6 +102,8 @@ function normalizeDiagnosticEvent(event = {}, now = Date.now) {
   if (client) normalized.client = client;
   const provider = safeIdentifier(event.provider);
   if (provider) normalized.provider = provider;
+  const modeAtEvent = safeMode(event.modeAtEvent);
+  if (modeAtEvent !== 'unknown') normalized.modeAtEvent = modeAtEvent;
   if (event.durationMs !== undefined) {
     normalized.durationMs = boundedInteger(event.durationMs, 0, 24 * 60 * 60 * 1000);
   }

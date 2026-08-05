@@ -7,7 +7,8 @@ const {
   deriveDiagnosticFindings,
   formatDiagnosticReport,
   MAX_REPORT_BYTES,
-  projectHubDevices
+  projectHubDevices,
+  projectLimitsDiagnostics
 } = require('../../src/shared/diagnosticReport');
 const { createDiagnosticReportGenerator, processMetricsSnapshot } = require('../../src/electron/diagnostics');
 
@@ -111,6 +112,77 @@ test('findings respect the effective collection interval', () => {
     limits: {}
   }, now);
   assert.deepEqual(findings, []);
+});
+
+test('diagnostic values preserve large token totals and archive sizes', () => {
+  const report = formatDiagnosticReport(baseSnapshot({
+    environment: {
+      platform: 'darwin',
+      languageSetting: 'auto',
+      resolvedLocale: 'zh-TW'
+    },
+    topology: { hubStatsCacheAgeSeconds: 'not-applicable' },
+    hub: { runtime: { hubStatsCacheAgeSeconds: 'not-applicable' }, devices: { notApplicable: true } },
+    collector: { wslStatus: null },
+    clients: {
+      clients: [{
+        client: 'codex',
+        overall: 'healthy',
+        tokens: { today: 2500001, month: 2500002, allTime: 2500003 }
+      }],
+      counts: { healthy: 1 }
+    },
+    workload: {
+      sessionArchiveFileSizeBytes: 2500004,
+      sessionArchiveSessionCount: 2500005
+    }
+  }));
+
+  assert.match(report.text, /todayTokens: 2500001/);
+  assert.match(report.text, /sessionArchiveFileSizeBytes: 2500004/);
+  assert.match(report.text, /hubStatsCacheAgeSeconds: not-applicable/);
+  assert.match(report.text, /wslStatus: not-applicable/);
+  assert.match(report.text, /languageSetting: auto/);
+  assert.match(report.text, /resolvedLocale: zh-TW/);
+  assert.match(report.text, /\[Hub Devices\]\nnotApplicable: true/);
+  assert.equal(report.text.includes('remoteGroups:'), false);
+});
+
+test('not-configured limits are unavailable without raising a failure finding', () => {
+  const limits = projectLimitsDiagnostics({
+    providers: [
+      {
+        provider: 'antigravity',
+        lastFailureCode: 'notConfigured',
+        accountCount: 1
+      },
+      {
+        provider: 'zai',
+        lastFailureCode: 'unavailable',
+        accountCount: 1
+      }
+    ]
+  });
+  assert.deepEqual(limits.providers[0], {
+    provider: 'antigravity',
+    configured: false,
+    state: 'not-configured',
+    accountCount: 1,
+    pendingCount: 0,
+    retryAttempt: 0,
+    retryAt: 'none',
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    failureCode: 'none'
+  });
+  assert.equal(deriveDiagnosticFindings({
+    collector: { detailsAvailable: false },
+    limits: { providers: limits.providers }
+  }).length, 1);
+  assert.deepEqual(deriveDiagnosticFindings({
+    collector: { detailsAvailable: false },
+    limits: { providers: [{ provider: 'zai', lastFailureCode: 'unavailable' }] }
+  }), [{ code: 'limits-provider-failed', provider: 'zai' }]);
 });
 
 test('formatter is allowlisted, UTF-8 bounded, and deterministically truncates variable entries', () => {

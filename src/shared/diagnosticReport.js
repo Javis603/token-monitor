@@ -185,6 +185,7 @@ function projectHubDevices(stats, options = {}) {
     return {
       summarySource: options.summarySource || 'not-applicable',
       summaryAvailable: false,
+      notApplicable: (options.summarySource || 'not-applicable') === 'not-applicable',
       deviceCount: 0,
       remoteDeviceCount: 0,
       includedRemoteGroupCount: 0,
@@ -232,6 +233,7 @@ function projectHubDevices(stats, options = {}) {
   return {
     summarySource: options.summarySource || 'cached-hub-stats',
     summaryAvailable: true,
+    notApplicable: false,
     deviceCount: devices.length,
     remoteDeviceCount: remote.length,
     includedRemoteGroupCount: selectedGroups.length,
@@ -250,21 +252,46 @@ function projectLimitsDiagnostics(diagnostics = {}) {
     queued: integer(diagnostics.queued, 0),
     omittedProviderCount: Math.max(0, providers.length - MAX_LIMIT_PROVIDERS_IN_REPORT),
     providers: providers.slice(0, MAX_LIMIT_PROVIDERS_IN_REPORT).map((provider) => {
-      const failure = text(provider?.lastFailureCode, '', 64);
+      const rawFailure = provider?.lastFailureCode ?? provider?.failureCode;
+      const notConfigured = isNotConfiguredFailure(rawFailure);
+      const failure = notConfigured || isNoFailureCode(rawFailure)
+        ? null
+        : (rawFailure ? identifier(rawFailure, 'unknown') : null);
+      const lastSuccessAt = isoTimestamp(provider?.lastSuccessAt);
       return {
         provider: identifier(provider?.provider),
-        configured: provider?.configured !== false,
-        state: provider?.active ? 'active' : provider?.pending > 0 ? 'pending' : failure ? 'failed' : provider?.lastSuccessAt ? 'ok' : 'unknown',
+        configured: provider?.configured !== false && (!notConfigured || Boolean(lastSuccessAt)),
+        state: provider?.active
+          ? 'active'
+          : provider?.pending > 0
+            ? 'pending'
+            : failure
+              ? 'failed'
+              : lastSuccessAt
+                ? 'ok'
+                : notConfigured
+                  ? 'not-configured'
+                  : 'unknown',
         accountCount: integer(provider?.accountCount, 0),
         pendingCount: integer(provider?.pending, 0),
         retryAttempt: integer(provider?.retryAttempt, 0),
-        retryAt: isoTimestamp(provider?.retryAt),
+        retryAt: isoTimestamp(provider?.retryAt) || 'none',
         lastAttemptAt: isoTimestamp(provider?.lastAttemptAt),
-        lastSuccessAt: isoTimestamp(provider?.lastSuccessAt),
-        failureCode: failure || null
+        lastSuccessAt,
+        failureCode: failure || 'none'
       };
     })
   };
+}
+
+function isNotConfiguredFailure(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'notconfigured' || normalized === 'not-configured';
+}
+
+function isNoFailureCode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return !normalized || normalized === 'none';
 }
 
 function sanitizeFinding(finding) {
@@ -282,6 +309,11 @@ function boundedCount(value, fallback = 0) {
   return count === null ? fallback : Math.max(0, Math.min(count, 1000000));
 }
 
+function boundedLargeInteger(value, fallback = null) {
+  const count = integer(value, fallback);
+  return count === null ? fallback : Math.max(0, Math.min(count, Number.MAX_SAFE_INTEGER));
+}
+
 function boundedNumber(value, fallback = null) {
   const number = finiteNumber(value, fallback);
   return number === null ? fallback : Math.max(0, Math.min(number, 1000000000));
@@ -292,8 +324,9 @@ function safeChoice(value, choices, fallback = 'unknown') {
   return choices.has(choice) ? choice : fallback;
 }
 
-function sanitizeWslStatus(status) {
-  if (!status || typeof status !== 'object') return null;
+function sanitizeWslStatus(status, platform) {
+  if (platform && platform !== 'win32') return 'not-applicable';
+  if (!status || typeof status !== 'object') return 'unknown';
   const detected = Array.isArray(status.detected)
     ? status.detected.map((client) => identifier(client, '')).filter(Boolean).slice(0, MAX_CLIENTS_IN_REPORT)
     : [];
@@ -301,7 +334,7 @@ function sanitizeWslStatus(status) {
     ? status.withData.map((client) => identifier(client, '')).filter(Boolean).slice(0, MAX_CLIENTS_IN_REPORT)
     : [];
   return {
-    state: safeChoice(status.state, new Set(['disabled', 'unavailable', 'active', 'no-data', 'ok'])),
+    state: safeChoice(status.state, new Set(['disabled', 'unavailable', 'active', 'no-data', 'ok', 'not-applicable'])),
     detectedClientCount: detected.length,
     withDataClientCount: withData.length,
     detectedClients: detected,
@@ -310,7 +343,7 @@ function sanitizeWslStatus(status) {
   };
 }
 
-function sanitizeCollector(collector = {}) {
+function sanitizeCollector(collector = {}, platform) {
   const safe = {
     detailsAvailable: collector.detailsAvailable !== false,
     state: safeChoice(collector.state, new Set(['stopped', 'running', 'idle', 'failed', 'stale', 'unavailable'])),
@@ -319,20 +352,20 @@ function sanitizeCollector(collector = {}) {
     watchDebounceMs: boundedNumber(collector.watchDebounceMs),
     watchEnabled: collector.watchEnabled === true,
     watchMode: safeChoice(collector.watchMode, new Set(['native', 'polling', 'disabled'])),
-    watchFallbackCode: collector.watchFallbackCode ? identifier(collector.watchFallbackCode) : null,
-    lastWatchFailureCode: collector.lastWatchFailureCode ? identifier(collector.lastWatchFailureCode) : null,
+    watchFallbackCode: collector.watchFallbackCode ? identifier(collector.watchFallbackCode) : 'none',
+    lastWatchFailureCode: collector.lastWatchFailureCode ? identifier(collector.lastWatchFailureCode) : 'none',
     tickInFlight: collector.tickInFlight === true,
     tickPending: collector.tickPending === true,
     lastTickReasonCode: collector.lastTickReasonCode ? identifier(collector.lastTickReasonCode) : null,
     lastTickScope: collector.lastTickScope ? identifier(collector.lastTickScope) : null,
     lastTickAttemptAt: isoTimestamp(collector.lastTickAttemptAt),
     lastTickSuccessAt: isoTimestamp(collector.lastTickSuccessAt),
-    lastTickFailureAt: isoTimestamp(collector.lastTickFailureAt),
+    lastTickFailureAt: isoTimestamp(collector.lastTickFailureAt) || 'none',
     lastTickDurationMs: boundedNumber(collector.lastTickDurationMs),
     lastFullScanAt: isoTimestamp(collector.lastFullScanAt),
     lastHistoryScanAt: isoTimestamp(collector.lastHistoryScanAt),
-    lastFailureCode: collector.lastFailureCode ? identifier(collector.lastFailureCode) : null,
-    wslStatus: sanitizeWslStatus(collector.wslStatus)
+    lastFailureCode: collector.lastFailureCode ? identifier(collector.lastFailureCode) : 'none',
+    wslStatus: sanitizeWslStatus(collector.wslStatus, platform)
   };
   return safe;
 }
@@ -361,9 +394,9 @@ function sanitizeClient(client = {}) {
     lastActivityDay: text(client.lastActivityDay, 'unknown', 16),
     observedAt: isoTimestamp(client.observedAt),
     tokens: {
-      today: boundedCount(client.tokens?.today),
-      month: boundedCount(client.tokens?.month),
-      allTime: boundedCount(client.tokens?.allTime)
+      today: boundedLargeInteger(client.tokens?.today),
+      month: boundedLargeInteger(client.tokens?.month),
+      allTime: boundedLargeInteger(client.tokens?.allTime)
     },
     diagnosticCodes
   };
@@ -397,6 +430,7 @@ function sanitizeHubDevices(devices = {}) {
   return {
     summarySource: safeChoice(devices.summarySource, new Set(['cached-hub-stats', 'same-process-hub', 'not-applicable'])),
     summaryAvailable: devices.summaryAvailable === true,
+    notApplicable: devices.notApplicable === true || devices.summarySource === 'not-applicable',
     deviceCount: boundedCount(devices.deviceCount),
     remoteDeviceCount: boundedCount(devices.remoteDeviceCount),
     includedRemoteGroupCount: boundedCount(devices.includedRemoteGroupCount, remoteGroups.length),
@@ -417,6 +451,7 @@ function sanitizeJournal(journal = {}) {
         ...(event?.scope ? { scope: identifier(event.scope) } : {}),
         ...(event?.client ? { client: identifier(event.client) } : {}),
         ...(event?.provider ? { provider: identifier(event.provider) } : {}),
+        ...(event?.modeAtEvent ? { modeAtEvent: safeChoice(event.modeAtEvent, new Set(['local', 'client', 'host'])) } : {}),
         ...(event?.durationMs !== undefined ? { durationMs: boundedNumber(event.durationMs) } : {})
       }))
     : [];
@@ -467,8 +502,8 @@ function sanitizeWorkload(workload = {}) {
   return {
     sessionArchiveEnabled: workload.sessionArchiveEnabled !== false,
     sessionArchivePresent: workload.sessionArchivePresent === true,
-    sessionArchiveFileSizeBytes: boundedCount(workload.sessionArchiveFileSizeBytes, null),
-    sessionArchiveSessionCount: boundedCount(workload.sessionArchiveSessionCount, null),
+    sessionArchiveFileSizeBytes: boundedLargeInteger(workload.sessionArchiveFileSizeBytes),
+    sessionArchiveSessionCount: boundedLargeInteger(workload.sessionArchiveSessionCount),
     sessionArchiveCountSource: safeChoice(workload.sessionArchiveCountSource, new Set(['loaded-memory', 'not-loaded', 'not-enabled', 'unavailable'])),
     lastSessionArchiveUpdateDurationMs: boundedNumber(workload.lastSessionArchiveUpdateDurationMs),
     lastSessionArchiveUpdateAt: isoTimestamp(workload.lastSessionArchiveUpdateAt),
@@ -504,14 +539,16 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
   const add = (finding) => findings.push(sanitizeFinding(finding));
 
   if (collector.detailsAvailable !== false) {
-    if (collector.lastFailureCode) add({ code: 'collector-failed' });
+    if (!isNoFailureCode(collector.lastFailureCode)) add({ code: 'collector-failed' });
     const lastSuccessAge = ageSecondsFromValue(collector.lastTickSuccessAt, nowMs);
     const intervalMs = finiteNumber(collector.intervalMs, 0);
     if (!collector.lastTickSuccessAt || (lastSuccessAge !== null && intervalMs > 0 && lastSuccessAge * 1000 > Math.max(intervalMs * 2, 60 * 1000))) {
-      if (!collector.lastFailureCode) add({ code: 'collector-stale' });
+      if (isNoFailureCode(collector.lastFailureCode)) add({ code: 'collector-stale' });
     }
-    if (collector.watchMode === 'polling' && collector.watchFallbackCode) add({ code: 'watcher-polling-fallback', detailCode: collector.watchFallbackCode });
-    if (collector.lastWatchFailureCode) add({ code: 'watcher-rebuild-failed' });
+    if (collector.watchMode === 'polling' && collector.watchFallbackCode && !isNoFailureCode(collector.watchFallbackCode)) {
+      add({ code: 'watcher-polling-fallback', detailCode: collector.watchFallbackCode });
+    }
+    if (collector.lastWatchFailureCode && !isNoFailureCode(collector.lastWatchFailureCode)) add({ code: 'watcher-rebuild-failed' });
   }
   if (topology.streamState === 'disconnected') add({ code: 'stream-disconnected', detailCode: topology.lastStreamFailureCode });
   const usageStaleAfterSeconds = finiteNumber(usage.usageStaleAfterSeconds, 600);
@@ -519,7 +556,10 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
     add({ code: 'external-agent-stale' });
   }
   for (const provider of limits.providers || []) {
-    if (provider.failureCode) add({ code: 'limits-provider-failed', provider: provider.provider });
+    const failureCode = provider.failureCode || provider.lastFailureCode;
+    if (!isNoFailureCode(failureCode) && !isNotConfiguredFailure(failureCode)) {
+      add({ code: 'limits-provider-failed', provider: provider.provider });
+    }
   }
   if (snapshot.storage?.settingsWritable === false || snapshot.storage?.archiveWritable === false) {
     add({ code: 'storage-not-writable' });
@@ -532,7 +572,7 @@ function sanitizeDiagnosticSnapshot(input = {}) {
   const environment = input.environment || {};
   const topology = input.topology || {};
   const usage = input.usage || {};
-  const collector = sanitizeCollector(input.collector || {});
+  const collector = sanitizeCollector(input.collector || {}, environment.platform);
   const clients = input.clients || {};
   const limits = projectLimitsDiagnostics(input.limits || {});
   const journal = sanitizeJournal(input.journal || {});
@@ -566,7 +606,8 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       osName: text(environment.osName),
       osVersion: text(environment.osVersion),
       architecture: text(environment.architecture),
-      locale: text(environment.locale),
+      languageSetting: text(environment.languageSetting ?? environment.locale, 'auto'),
+      resolvedLocale: text(environment.resolvedLocale, 'unknown'),
       appUptimeSeconds: integer(environment.appUptimeSeconds, null)
     },
     topology: {
@@ -579,7 +620,9 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       streamState: text(topology.streamState),
       lastStreamFailureCode: text(topology.lastStreamFailureCode, 'none', 64),
       embeddedHubRunning: topology.embeddedHubRunning === true,
-      hubStatsCacheAgeSeconds: integer(topology.hubStatsCacheAgeSeconds, null)
+      hubStatsCacheAgeSeconds: topology.hubStatsCacheAgeSeconds === 'not-applicable'
+        ? 'not-applicable'
+        : integer(topology.hubStatsCacheAgeSeconds, null)
     },
     hub: {
       runtime: {
@@ -589,7 +632,9 @@ function sanitizeDiagnosticSnapshot(input = {}) {
         hubTarget: text(input.hub?.runtime?.hubTarget),
         hubTransport: text(input.hub?.runtime?.hubTransport),
         streamState: text(input.hub?.runtime?.streamState),
-        hubStatsCacheAgeSeconds: integer(input.hub?.runtime?.hubStatsCacheAgeSeconds, null)
+        hubStatsCacheAgeSeconds: input.hub?.runtime?.hubStatsCacheAgeSeconds === 'not-applicable'
+          ? 'not-applicable'
+          : integer(input.hub?.runtime?.hubStatsCacheAgeSeconds, null)
       },
       devices: sanitizeHubDevices(input.hub?.devices || {})
     },
@@ -748,25 +793,38 @@ function renderReport(snapshot, selected) {
   lines.push(section('Environment', Object.entries(snapshot.environment).map(([key, value]) => line(key, value)).join('\n').split('\n')));
   lines.push(section('Hub Runtime', Object.entries(snapshot.hub.runtime).map(([key, value]) => line(key, value)).join('\n').split('\n')));
   const hubDevices = snapshot.hub.devices;
-  const hubDeviceLines = [
-    line('summarySource', hubDevices.summarySource),
-    line('summaryAvailable', hubDevices.summaryAvailable),
-    line('deviceCount', hubDevices.deviceCount),
-    line('remoteDeviceCount', hubDevices.remoteDeviceCount),
-    line('includedRemoteGroupCount', selected.groups.length),
-    line('omittedRemoteGroupCount', omittedRemoteGroupCount)
-  ];
-  if (hubDevices.localDevice) {
-    hubDeviceLines.push('localDevice:');
-    for (const [key, value] of Object.entries(hubDevices.localDevice)) hubDeviceLines.push(line(key, value, '  '));
-  } else hubDeviceLines.push(line('localDevice', 'unavailable'));
-  hubDeviceLines.push('remoteGroups:');
-  for (const group of selected.groups) hubDeviceLines.push(formatRemoteGroup(group));
+  const hubDeviceLines = hubDevices.notApplicable
+    ? [line('notApplicable', true)]
+    : [
+        line('summarySource', hubDevices.summarySource),
+        line('summaryAvailable', hubDevices.summaryAvailable),
+        line('deviceCount', hubDevices.deviceCount),
+        line('remoteDeviceCount', hubDevices.remoteDeviceCount),
+        line('includedRemoteGroupCount', selected.groups.length),
+        line('omittedRemoteGroupCount', omittedRemoteGroupCount)
+      ];
+  if (!hubDevices.notApplicable) {
+    if (hubDevices.localDevice) {
+      hubDeviceLines.push('localDevice:');
+      for (const [key, value] of Object.entries(hubDevices.localDevice)) hubDeviceLines.push(line(key, value, '  '));
+    } else hubDeviceLines.push(line('localDevice', 'unavailable'));
+    hubDeviceLines.push('remoteGroups:');
+    for (const group of selected.groups) hubDeviceLines.push(formatRemoteGroup(group));
+  }
   lines.push(section('Hub Devices', hubDeviceLines));
 
   const usageLines = Object.entries(snapshot.usage).map(([key, value]) => line(key, value));
   lines.push(section('Usage and Limits Topology', usageLines));
-  lines.push(section('Collector', Object.entries(snapshot.collector).map(([key, value]) => line(key, value)).join('\n').split('\n')));
+  const collectorLines = Object.entries(snapshot.collector)
+    .filter(([key]) => key !== 'wslStatus')
+    .map(([key, value]) => line(key, value));
+  if (snapshot.collector.wslStatus && typeof snapshot.collector.wslStatus === 'object') {
+    collectorLines.push('wslStatus:');
+    for (const [key, value] of Object.entries(snapshot.collector.wslStatus)) collectorLines.push(line(key, value, '  '));
+  } else {
+    collectorLines.push(line('wslStatus', snapshot.collector.wslStatus));
+  }
+  lines.push(section('Collector', collectorLines));
 
   const clientLines = [
     line('available', snapshot.clients.available),
@@ -794,7 +852,7 @@ function renderReport(snapshot, selected) {
   lines.push(section('Findings', findingLines));
 
   const eventLines = selected.events.length > 0
-    ? selected.events.map((event) => `- ${event.at} ${event.subsystem}/${event.code}${event.detailCode ? ` detail=${event.detailCode}` : ''}${event.client ? ` client=${event.client}` : ''}${event.provider ? ` provider=${event.provider}` : ''}`)
+    ? selected.events.map((event) => `- ${event.at} ${event.subsystem}/${event.code}${event.modeAtEvent ? ` mode=${event.modeAtEvent}` : ''}${event.detailCode ? ` detail=${event.detailCode}` : ''}${event.client ? ` client=${event.client}` : ''}${event.provider ? ` provider=${event.provider}` : ''}`)
     : ['- none'];
   lines.push(section('Recent State Transitions', eventLines));
 

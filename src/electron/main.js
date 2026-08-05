@@ -2601,6 +2601,9 @@ function diagnosticRuntimeInfo() {
   const lastStreamFailureCode = streamState === 'disconnected'
     ? diagnosticStreamDetailCode(streamFailure || {})
     : 'none';
+  const hubStatsCacheAgeSeconds = hubMode === 'local'
+    ? 'not-applicable'
+    : diagnosticAgeSeconds(latestHubStatsReceivedAt);
   const hubRuntime = {
     hubKind,
     hubSoftwareVersion,
@@ -2608,7 +2611,7 @@ function diagnosticRuntimeInfo() {
     hubTarget: hubMode === 'local' ? 'none' : diagnosticHubTarget(hubUrl),
     hubTransport: hubMode === 'local' ? 'none' : diagnosticHubTransport(hubUrl),
     streamState,
-    hubStatsCacheAgeSeconds: diagnosticAgeSeconds(latestHubStatsReceivedAt)
+    hubStatsCacheAgeSeconds
   };
   return {
     externalAgentActive,
@@ -2696,7 +2699,8 @@ function buildDiagnosticSnapshot(generatedAt = new Date()) {
       osName: osInfo.name,
       osVersion: osInfo.version,
       architecture: process.arch,
-      locale: settings?.language || app.getLocale?.() || 'unknown',
+      languageSetting: settings?.language || 'auto',
+      resolvedLocale: app.getLocale?.() || 'unknown',
       appUptimeSeconds: Math.round(process.uptime())
     },
     topology: runtime.topology,
@@ -3562,7 +3566,10 @@ function diagnosticStreamDetailCode(failure = {}) {
 }
 
 function recordDiagnosticEvent(event) {
-  diagnosticJournal.record(event);
+  diagnosticJournal.record({
+    ...event,
+    modeAtEvent: settings?.hubMode || 'local'
+  });
 }
 
 function sendStatus(connected, extra) {

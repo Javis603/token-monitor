@@ -53,3 +53,18 @@ test('diagnostic journal drops raw messages, paths, and unallowlisted events', (
   });
   assert.equal(normalizeDiagnosticEvent({ subsystem: 'collector', code: 'raw-error-message' }), null);
 });
+
+test('diagnostic journal keeps the hub mode attached to a transition', () => {
+  const event = normalizeDiagnosticEvent({
+    subsystem: 'stream',
+    code: 'stream-reconnected',
+    modeAtEvent: 'client'
+  }, () => Date.parse('2026-08-05T10:00:00.000Z'));
+
+  assert.equal(event.modeAtEvent, 'client');
+  assert.equal(normalizeDiagnosticEvent({
+    subsystem: 'stream',
+    code: 'stream-reconnected',
+    modeAtEvent: 'private-mode'
+  }).modeAtEvent, undefined);
+});
