@@ -32,6 +32,6 @@
     "url": "https://github.com/Javis603/token-monitor/issues"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.118.0"
   }
 }
