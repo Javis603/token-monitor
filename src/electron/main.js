@@ -173,6 +173,8 @@ const {
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
+  canRefreshUsageRuntime,
+  drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
   runLimitInvalidation,
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
@@ -2366,13 +2368,13 @@ function bestEffortTrackedUsageRefresh(clientId, options = {}) {
 }
 
 function drainPendingUsageClientRefreshes(runtime) {
-  const pending = [...pendingUsageClientRefreshes.values()];
-  pendingUsageClientRefreshes.clear();
-  for (const entry of pending) {
-    void Promise.resolve(runtime.refreshClient(entry.clientId, entry.options)).catch((error) => {
+  drainPendingUsageClientRefreshQueue(
+    pendingUsageClientRefreshes,
+    runtime,
+    (error) => {
       console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
-    });
-  }
+    }
+  );
 }
 
 function drainPendingRuntimeActions(runtime) {
@@ -2462,6 +2464,13 @@ function isExternalAgentActive() {
     process.kill(pid, 0);
     return true;
   } catch (_) { return false; }
+}
+
+function ownsUsageRuntime() {
+  return Boolean(
+    deviceRuntimeHandle
+    && canRefreshUsageRuntime(mode, isExternalAgentActive)
+  );
 }
 
 async function deleteDeviceFromHub(deviceId) {
@@ -4070,8 +4079,7 @@ async function fetchStats(options = {}) {
   // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
   // and Antigravity sync subprocesses — on every one of them. Only the manual
   // refresh button opts in.
-  const canRefreshRuntime = mode === 'local' || !isExternalAgentActive();
-  if (force && deviceRuntimeHandle && canRefreshRuntime) {
+  if (force && ownsUsageRuntime()) {
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
@@ -4111,7 +4119,7 @@ function regenerateTokscalePricing() {
 
 async function refreshAfterPricingChange() {
   try {
-    if (deviceRuntimeHandle && (mode === 'local' || !isExternalAgentActive())) {
+    if (ownsUsageRuntime()) {
       await deviceRuntimeHandle.tick('manual', {});
     }
   } catch (error) {
@@ -5375,7 +5383,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('usage:rescanClient', async (_event, clientId) => {
     const client = String(clientId || '').trim().toLowerCase();
-    if (!client) return false;
+    if (!client || !ownsUsageRuntime()) return false;
     try {
       return await refreshUsageClient(client, { forceSync: true }) === true;
     } catch (error) {

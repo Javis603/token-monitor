@@ -6,6 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  canRefreshUsageRuntime,
+  drainPendingUsageClientRefreshes,
   runLimitInvalidation,
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
@@ -19,6 +21,7 @@ function deferred() {
 
 test('targeted rescans stay strict while Cursor credential refresh is best effort', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /if \(!client \|\| !ownsUsageRuntime\(\)\) return false/);
   assert.match(main, /return await refreshUsageClient\(client, \{ forceSync: true \}\) === true/);
   assert.equal(
     (main.match(/bestEffortTrackedUsageRefresh\('cursor', \{ forceSync: true \}\)/g) || []).length,
@@ -56,6 +59,53 @@ for (const mode of ['local', 'client', 'host']) {
     limits.resolve();
   });
 }
+
+test('usage runtime refresh ownership follows mode and external-agent state', () => {
+  let probes = 0;
+  const active = () => { probes += 1; return true; };
+  const inactive = () => { probes += 1; return false; };
+
+  assert.equal(canRefreshUsageRuntime('local', active), true);
+  assert.equal(probes, 0, 'local mode must not read the external-agent PID');
+  assert.equal(canRefreshUsageRuntime('client', active), false);
+  assert.equal(canRefreshUsageRuntime('host', active), false);
+  assert.equal(canRefreshUsageRuntime('client', inactive), true);
+  assert.equal(canRefreshUsageRuntime('host', inactive), true);
+  assert.equal(probes, 4);
+});
+
+test('pending usage refreshes isolate synchronous failures', async () => {
+  const pending = new Map([
+    ['cursor', { clientId: 'cursor', options: { forceSync: true } }],
+    ['claude', { clientId: 'claude', options: {} }]
+  ]);
+  const calls = [];
+  const errors = [];
+  const runtime = {
+    refreshClient(clientId, options) {
+      calls.push([clientId, options]);
+      if (clientId === 'cursor') throw new TypeError('cursor no longer tracked');
+      return true;
+    }
+  };
+
+  assert.doesNotThrow(() => {
+    drainPendingUsageClientRefreshes(
+      pending,
+      runtime,
+      (error) => errors.push(error.message)
+    );
+  });
+  assert.equal(pending.size, 0);
+
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(calls, [
+    ['cursor', { forceSync: true }],
+    ['claude', {}]
+  ]);
+  assert.deepEqual(errors, ['cursor no longer tracked']);
+});
 
 test('only an opted-in manual refresh forces the self-synced clients', async () => {
   // Every settings toggle and account action refreshes with { force: true }, and

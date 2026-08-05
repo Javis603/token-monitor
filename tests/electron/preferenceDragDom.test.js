@@ -21,13 +21,16 @@ function functionBody(source, name, nextName) {
 
 test('tool diagnostics bind source values to the full health snapshot key', () => {
   const app = readRendererFile('app.js');
-  const loader = functionBody(app, 'clientSourcesKey', 'localClientSources');
+  const identity = functionBody(app, 'clientSourcesIdentity', 'localClientSources');
   const reader = functionBody(app, 'localClientSources', 'loadClientSources');
+  const loader = functionBody(app, 'loadClientSources', 'refillOpenClientHealthPanel');
   const expand = functionBody(app, 'setClientHealthExpanded', 'clientPeriodUsage');
   const actions = functionBody(app, 'clientHealthActions', 'clientHealthPanel');
 
-  assert.match(loader, /deviceId.*id.*observedAt/);
-  assert.match(reader, /state\.clientSources\.get\(clientSourcesKey\(clientId\)\)/);
+  assert.match(identity, /deviceId[\s\S]*clientId[\s\S]*observedAt/);
+  assert.match(reader, /clientSourceCacheApi\.readClientSources/);
+  assert.match(loader, /clientSourceCacheApi\.clientSourceRequestKey\(identity\)/);
+  assert.match(loader, /clientSourceCacheApi\.writeClientSources/);
   assert.match(expand, /if \(open\)[\s\S]*loadClientSources\(row\.dataset\.client\)/);
   assert.match(actions, /const succeeded = await window\.tokenMonitor\.rescanClient/);
   assert.match(actions, /if \(succeeded\) loadClientSources/);
