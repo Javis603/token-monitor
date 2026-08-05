@@ -39,9 +39,10 @@ test('tool diagnostics summarize complete health and render three semantic group
   assert.match(group, /group\.id === 'collection'/);
   assert.match(actions, /role', 'status'/);
   assert.match(actions, /aria-live', 'polite'/);
-  assert.match(actions, /if \(succeeded\) loadClientSources[\s\S]*else showFailure\(\)/);
-  assert.match(actions, /catch \(_\)[\s\S]*showFailure\(\)/);
-  assert.match(actions, /setTimeout\(\(\) => \{ feedback\.textContent = ''; \}, 3000\)/);
+  assert.match(actions, /state\.clientRescans\.snapshot\(clientId\)/);
+  assert.match(actions, /state\.clientRescans\.begin\(clientId\)/);
+  assert.match(actions, /state\.clientRescans\.finish\(clientId, requestId, succeeded\)/);
+  assert.match(actions, /rescan\.disabled = rescanState\.pending/);
   assert.match(panel, /for \(const group of detail\.groups\)/);
   assert.match(panel, /note\.group === group\.id/);
   assert.match(stats, /renderSettingsSummaries\(\)/);
@@ -62,7 +63,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(loader, /clientSourceCacheApi\.clientSourceRequestKey\(identity\)/);
   assert.match(loader, /clientSourceCacheApi\.writeClientSources/);
   assert.match(expand, /if \(open\)[\s\S]*loadClientSources\(row\.dataset\.client\)/);
-  assert.match(actions, /const succeeded = await window\.tokenMonitor\.rescanClient/);
+  assert.match(actions, /succeeded = await window\.tokenMonitor\.rescanClient\(clientId\) === true/);
   assert.match(actions, /if \(succeeded\) loadClientSources/);
   assert.doesNotMatch(app, /clientSourceIds/);
 });
