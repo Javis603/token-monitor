@@ -154,6 +154,11 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
   return archive;
 }
 
+function hasPeriod(summary, periodName) {
+  const container = summary.periods && typeof summary.periods === 'object' ? summary.periods : summary;
+  return Object.prototype.hasOwnProperty.call(container, periodName);
+}
+
 function targetPeriod(summary, periodName) {
   if (summary.periods && typeof summary.periods === 'object') {
     summary.periods[periodName] = normalizePeriod(summary.periods[periodName]);
@@ -265,6 +270,11 @@ function applySessionUsageArchive(summary, archive, options = {}) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
       if (!session || !hasSessionUsage(session) || !shouldApplyPeriod(periodName, entry, now)) continue;
+      // Same rule as the client archive: never create a period the summary does
+      // not have. A progressive preview is marked partial by the periods it
+      // omits, and a partial that looks complete loses the attribution fields
+      // deviceState would otherwise carry forward.
+      if (!hasPeriod(next, periodName)) continue;
       addArchivedSession(targetFor(periodName), session);
     }
   }

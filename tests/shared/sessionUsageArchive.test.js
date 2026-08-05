@@ -425,3 +425,17 @@ test('reapplies a large session archive without repeatedly normalizing growing p
   assert.equal(Object.keys(visible.allTime.sessions).length, 2000);
   assert.ok(elapsedMs < 250, `large archive apply took ${elapsedMs.toFixed(1)}ms`);
 });
+
+// Same invariant as the client archive: the periods a progressive preview omits
+// are what mark it partial, and deviceState carries clientStatus / clientHealth /
+// wslStatus / periodWindows forward on exactly that signal. Materializing a
+// period here made every preview look like a complete record, so those fields
+// vanished from the device for the length of a full scan.
+test('reapplying an archive never invents a period the preview omitted', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const preview = { deviceId: 'macbook', updatedAt: '2026-07-09T08:20:00.000Z', today: summaryAfterOpenCodeDelete().today };
+  const visible = applySessionUsageArchive(preview, archive, { now: new Date('2026-07-09T08:20:00.000Z') });
+  assert.equal('month' in visible, false);
+  assert.equal('allTime' in visible, false);
+  assert.equal(visible.today.sessions['opencode:o1'].archived, true);
+});

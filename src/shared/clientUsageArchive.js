@@ -148,6 +148,18 @@ function cloneSummary(summary) {
   return JSON.parse(JSON.stringify(summary || {}));
 }
 
+// Whether the summary scanned this period at all. A progressive preview carries
+// only the periods it has finished, and the ones it omits are what mark it as
+// partial — the signal deviceState uses to carry attribution (clientStatus,
+// clientHealth, wslStatus, periodWindows) forward from the last complete record.
+// Creating a period here to add archived usage to would answer for a scan that
+// has not happened and, worse, make the record look complete: every one of those
+// fields then vanishes from the device for the length of a full scan.
+function hasPeriod(summary, periodName) {
+  const container = summary.periods && typeof summary.periods === 'object' ? summary.periods : summary;
+  return Object.prototype.hasOwnProperty.call(container, periodName);
+}
+
 function targetPeriod(summary, periodName) {
   if (summary.periods && typeof summary.periods === 'object') {
     summary.periods[periodName] = normalizePeriod(summary.periods[periodName]);
@@ -230,6 +242,7 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
     for (const periodName of PERIODS) {
       const usage = entry.periods?.[periodName];
       if (!hasUsage(usage) || !shouldApplyPeriod(periodName, entry, now)) continue;
+      if (!hasPeriod(next, periodName)) continue;
       addClientUsage(targetPeriod(next, periodName), client, usage);
     }
   }
