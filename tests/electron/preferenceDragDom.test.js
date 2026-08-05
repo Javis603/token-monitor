@@ -62,6 +62,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(reader, /clientSourceCacheApi\.readClientSources/);
   assert.match(loader, /clientSourceCacheApi\.clientSourceRequestKey\(identity\)/);
   assert.match(loader, /clientSourceCacheApi\.writeClientSources/);
+  assert.match(loader, /return true;/);
   assert.match(expand, /if \(open\)[\s\S]*loadClientSources\(row\.dataset\.client\)/);
   assert.match(actions, /succeeded = await window\.tokenMonitor\.rescanClient\(clientId\) === true/);
   assert.match(actions, /if \(succeeded\) loadClientSources/);
@@ -178,7 +179,8 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   const fill = functionBody(app, 'fillClientHealthPanel', 'clientHealthGroup');
   assert.match(body, /state\.toolPreferenceRenderSignature === renderSignature/);
   assert.match(body, /state\.toolPreferenceDetailSignature !== healthSignature/);
-  assert.match(body, /refillOpenClientHealthPanel\(\);/);
+  assert.match(body, /const sourceRefreshPending = loadClientSources\(state\.clientHealthExpanded\)/);
+  assert.match(body, /if \(!sourceRefreshPending\) refillOpenClientHealthPanel\(\);/);
   assert.match(body, /return;/);
   assert.doesNotMatch(body, /replaceChildren/);
   assert.match(fill, /patchRenderedNode\(current, next\)/);

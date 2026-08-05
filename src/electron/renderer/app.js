@@ -8700,14 +8700,12 @@ function loadClientSources(clientId, options = {}) {
   const id = String(clientId || '');
   const identity = clientSourcesIdentity(id);
   const key = clientSourceCacheApi.clientSourceRequestKey(identity);
-  if (!key) return;
+  if (!key) return false;
+  if (!options.force && state.clientSourcesKey === key) return true;
   if (
     !options.force
-    && (
-      state.clientSourcesKey === key
-      || clientSourceCacheApi.readClientSources(state.clientSources, identity) !== null
-    )
-  ) return;
+    && clientSourceCacheApi.readClientSources(state.clientSources, identity) !== null
+  ) return false;
   clientSourceCacheApi.deleteClientSources(state.clientSources, identity);
   state.clientSourcesKey = key;
   const request = ++state.clientSourcesRequest;
@@ -8724,6 +8722,7 @@ function loadClientSources(clientId, options = {}) {
   }).catch(() => {
     if (state.clientSourcesRequest === request && state.clientSourcesKey === key) state.clientSourcesKey = '';
   });
+  return true;
 }
 
 function refillOpenClientHealthPanel() {
@@ -9122,7 +9121,8 @@ function renderToolPreferencesNow() {
   ) {
     if (state.toolPreferenceDetailSignature !== healthSignature) {
       state.toolPreferenceDetailSignature = healthSignature;
-      refillOpenClientHealthPanel();
+      const sourceRefreshPending = loadClientSources(state.clientHealthExpanded);
+      if (!sourceRefreshPending) refillOpenClientHealthPanel();
     }
     return;
   }
