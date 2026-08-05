@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
@@ -42,6 +43,9 @@ const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
+const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
+const { projectClientHealth, projectHubDevices } = require('../shared/diagnosticReport');
+const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
@@ -125,6 +129,7 @@ const {
   clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
+  sessionUsageArchivePath,
   sessionUsageArchiveDate,
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
@@ -257,9 +262,15 @@ let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
 let sessionUsageArchive = null;
+let lastSessionUsageArchiveUpdate = {
+  at: null,
+  durationMs: null,
+  failureCode: null
+};
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
+const diagnosticJournal = createDiagnosticJournal();
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
@@ -2124,15 +2135,30 @@ function ensureSessionUsageArchiveLoaded() {
 }
 
 function updateSessionUsageArchive(summary, now) {
+  const startedAt = Date.now();
+  const finish = (failureCode = null) => {
+    lastSessionUsageArchiveUpdate = {
+      at: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - startedAt),
+      failureCode
+    };
+  };
   const previous = ensureSessionUsageArchiveLoaded();
   const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
+  if (JSON.stringify(next) === JSON.stringify(previous)) {
+    finish();
+    return previous;
+  }
   try {
     writeSessionUsageArchive(next);
     sessionUsageArchive = next;
   } catch (error) {
+    finish('archive-write-failed');
+    diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' });
     console.log(`[session-archive] write failed: ${error.message}`);
+    return next;
   }
+  finish();
   return next;
 }
 
@@ -2259,6 +2285,7 @@ let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
+let latestHubStatsReceivedAt = null;
 let tray = null;
 let latestStats = null;
 let trayRefreshInFlight = false;
@@ -2293,6 +2320,22 @@ let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
 const pendingLimitInvalidations = new Map();
 const pendingUsageClientRefreshes = new Map();
+
+const diagnosticReportGenerator = createDiagnosticReportGenerator({
+  getAppMetrics: () => app.getAppMetrics(),
+  getSystemMemory: () => ({ total: os.totalmem(), free: os.freemem() }),
+  privateMemorySupported: process.platform === 'win32',
+  getSnapshot: ({ generatedAt }) => buildDiagnosticSnapshot(generatedAt),
+  getArchiveFileStat: async () => {
+    if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
+    try {
+      const stat = await fs.promises.stat(sessionUsageArchivePath());
+      return { ok: true, stat };
+    } catch (error) {
+      return { ok: false, code: error?.code === 'ENOENT' ? 'archive-not-present' : 'archive-stat-failed' };
+    }
+  }
+});
 
 function limitInvalidationKey(scope) {
   const provider = String(scope?.provider || '').trim().toLowerCase();
@@ -2468,6 +2511,237 @@ function isExternalAgentActive() {
     process.kill(pid, 0);
     return true;
   } catch (_) { return false; }
+}
+
+function diagnosticAgeSeconds(value, nowMs = Date.now()) {
+  const timestamp = Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp)) return null;
+  return Math.max(0, Math.round((nowMs - timestamp) / 1000));
+}
+
+function diagnosticHubTarget(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return 'none';
+  try {
+    const hostname = new URL(raw).hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '::1' || hostname.startsWith('127.')) return 'loopback';
+    if (hostname === '10.0.0.1' || hostname.startsWith('10.') || hostname.startsWith('192.168.') || hostname.endsWith('.local')) return 'lan';
+    const match = hostname.match(/^172\.(\d+)\./);
+    if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return 'lan';
+    return 'remote';
+  } catch (_) {
+    return 'remote';
+  }
+}
+
+function diagnosticHubTransport(url) {
+  try {
+    const protocol = new URL(String(url || '')).protocol;
+    if (protocol === 'http:' || protocol === 'https:') return protocol.slice(0, -1);
+  } catch (_) {}
+  return 'none';
+}
+
+function diagnosticOsInfo(device) {
+  const name = String(device?.osName || '').trim() || (
+    process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
+  );
+  const version = String(device?.osVersion || '').trim() || os.release();
+  return { name, version };
+}
+
+function diagnosticTokscaleInfo() {
+  try {
+    const status = getTokscaleStatus();
+    return {
+      version: status.current?.version || status.bundled?.version || 'unknown',
+      source: status.current?.source || (status.bundled ? 'bundled' : 'unknown')
+    };
+  } catch (_) {
+    return { version: 'unknown', source: 'unknown' };
+  }
+}
+
+function diagnosticRuntimeInfo() {
+  const hubMode = settings?.hubMode || 'local';
+  const { url: hubUrl } = effectiveHubConfig();
+  const externalAgentActive = isExternalAgentActive();
+  const runtimeDiagnostics = deviceRuntimeHandle?.getDiagnostics?.() || {};
+  const usageDiagnostics = runtimeDiagnostics.usage || null;
+  const limitsDiagnostics = runtimeDiagnostics.limits || null;
+  const usageOwner = externalAgentActive
+    ? 'external-agent'
+    : usageDiagnostics && canRefreshUsageRuntime(mode, () => false)
+      ? 'electron-widget'
+      : 'none';
+  const limitsOwner = limitsDiagnostics ? 'electron-widget' : 'none';
+  const usageCompleteness = externalAgentActive
+    ? 'partial-external-owner'
+    : usageDiagnostics
+      ? 'full'
+      : 'partial-no-runtime';
+  const limitsCompleteness = limitsDiagnostics ? 'full' : 'partial-no-runtime';
+  let hubKind = 'none';
+  let hubSoftwareVersion = 'not-applicable';
+  let hubSoftwareVersionSource = 'not-applicable';
+  if (hubMode === 'host') {
+    hubKind = 'embedded-node';
+    hubSoftwareVersion = appVersion();
+    hubSoftwareVersionSource = 'embedded-app-version';
+  } else if (hubMode === 'client') {
+    hubKind = 'remote-unknown';
+    hubSoftwareVersion = 'unknown';
+    hubSoftwareVersionSource = 'unavailable';
+  }
+  const streamState = hubMode === 'local'
+    ? 'not-applicable'
+    : hubMode === 'host'
+      ? embeddedHub ? 'connected' : 'disconnected'
+      : streamConnected ? 'connected' : 'disconnected';
+  const lastStreamFailureCode = streamState === 'disconnected'
+    ? diagnosticStreamDetailCode(streamFailure || {})
+    : 'none';
+  const hubRuntime = {
+    hubKind,
+    hubSoftwareVersion,
+    hubSoftwareVersionSource,
+    hubTarget: hubMode === 'local' ? 'none' : diagnosticHubTarget(hubUrl),
+    hubTransport: hubMode === 'local' ? 'none' : diagnosticHubTransport(hubUrl),
+    streamState,
+    hubStatsCacheAgeSeconds: diagnosticAgeSeconds(latestHubStatsReceivedAt)
+  };
+  return {
+    externalAgentActive,
+    runtimeDiagnostics,
+    usageDiagnostics,
+    limitsDiagnostics,
+    usageOwner,
+    limitsOwner,
+    usageCompleteness,
+    limitsCompleteness,
+    hubRuntime,
+    topology: {
+      hubMode,
+      hubTarget: hubRuntime.hubTarget,
+      hubTransport: hubRuntime.hubTransport,
+      externalAgentAlive: externalAgentActive,
+      usageOwner,
+      limitsOwner,
+      streamState,
+      lastStreamFailureCode,
+      embeddedHubRunning: Boolean(embeddedHub),
+      hubStatsCacheAgeSeconds: hubRuntime.hubStatsCacheAgeSeconds
+    }
+  };
+}
+
+function buildDiagnosticSnapshot(generatedAt = new Date()) {
+  const nowMs = Date.now();
+  const runtime = diagnosticRuntimeInfo();
+  const localRecord = localArchiveSourceDevice();
+  const osInfo = diagnosticOsInfo(localRecord);
+  const trackedClients = localRecord?.trackedClients || clientsCsvForSetting(settings?.clients).split(',').filter(Boolean);
+  const clientDevice = localRecord || { trackedClients };
+  const clients = projectClientHealth(localRecord?.clientHealth || null, clientDevice);
+  const usageObservationAt = runtime.usageDiagnostics?.lastTickSuccessAt || clients.observedAt;
+  const syncIntervalMs = Number(localRecord?.syncUploadIntervalMs);
+  const usageStaleAfterMs = Math.max(10 * 60 * 1000, Number.isFinite(syncIntervalMs) ? syncIntervalMs * 2 : 0);
+  const localRecordAgeSeconds = diagnosticAgeSeconds(localRecord?.receivedAt || localRecord?.updatedAt, nowMs);
+  let hubStats = null;
+  let hubSummarySource = 'not-applicable';
+  if (settings?.hubMode === 'host' && embeddedHub) {
+    try {
+      hubStats = embeddedHub.hub.getStats();
+      hubSummarySource = 'same-process-hub';
+    } catch (_) {}
+  } else if (settings?.hubMode === 'client') {
+    hubStats = latestHubStats;
+    hubSummarySource = 'cached-hub-stats';
+  }
+  const hubDevices = projectHubDevices(hubStats, {
+    summaryAvailable: Boolean(hubStats && Array.isArray(hubStats.devices)),
+    summarySource: hubSummarySource,
+    localDeviceId: settings?.deviceId || defaultDeviceId(),
+    nowMs
+  });
+  const tokScale = diagnosticTokscaleInfo();
+  const archiveLoaded = sessionUsageArchive !== null;
+  const archiveEnabled = settings?.sessionUsageArchiveEnabled !== false;
+  const reportJournal = diagnosticJournal.getSnapshot();
+  const reportCompleteness = runtime.usageCompleteness === 'full' && runtime.limitsCompleteness === 'full'
+    ? 'full'
+    : runtime.usageCompleteness === 'partial-external-owner'
+      ? 'partial-external-owner'
+      : 'partial-no-runtime';
+  return {
+    report: {
+      generatedAt: generatedAt instanceof Date ? generatedAt.toISOString() : new Date(generatedAt).toISOString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
+      reportCompleteness,
+      usageCompleteness: runtime.usageCompleteness,
+      limitsCompleteness: runtime.limitsCompleteness,
+      journalScope: 'electron-widget',
+      journalStartedAt: reportJournal.startedAt,
+      journalOmittedCount: 0
+    },
+    environment: {
+      appVersion: appVersion(),
+      electronVersion: process.versions.electron,
+      nodeVersion: process.versions.node,
+      chromiumVersion: process.versions.chrome,
+      tokscaleVersion: tokScale.version,
+      tokscaleSource: tokScale.source,
+      packaged: app.isPackaged,
+      platform: process.platform,
+      osName: osInfo.name,
+      osVersion: osInfo.version,
+      architecture: process.arch,
+      locale: settings?.language || app.getLocale?.() || 'unknown',
+      appUptimeSeconds: Math.round(process.uptime())
+    },
+    topology: runtime.topology,
+    hub: {
+      runtime: runtime.hubRuntime,
+      devices: hubDevices
+    },
+    usage: {
+      usageOwner: runtime.usageOwner,
+      localUsageRuntimePresent: Boolean(deviceRuntimeHandle && runtime.usageDiagnostics),
+      usageRefreshAllowed: runtime.usageOwner === 'electron-widget',
+      usageCompleteness: runtime.usageCompleteness,
+      usageJournalAvailable: runtime.usageOwner === 'electron-widget' && Boolean(runtime.usageDiagnostics),
+      localRecordAgeSeconds,
+      usageObservationAgeSeconds: diagnosticAgeSeconds(usageObservationAt, nowMs),
+      usageStaleAfterSeconds: Math.round(usageStaleAfterMs / 1000),
+      limitsOwner: runtime.limitsOwner,
+      limitsCompleteness: runtime.limitsCompleteness
+    },
+    collector: {
+      ...(runtime.usageDiagnostics || { state: 'unavailable' }),
+      detailsAvailable: !runtime.externalAgentActive && Boolean(runtime.usageDiagnostics)
+    },
+    clients,
+    limits: runtime.limitsDiagnostics || { enabled: false, active: 0, maxConcurrency: null, queued: 0, providers: [] },
+    journal: reportJournal,
+    workload: {
+      sessionArchiveEnabled: archiveEnabled,
+      sessionArchivePresent: archiveLoaded,
+      sessionArchiveSessionCount: archiveLoaded ? Object.keys(sessionUsageArchive?.sessions || {}).length : null,
+      sessionArchiveCountSource: archiveLoaded ? 'loaded-memory' : archiveEnabled ? 'not-loaded' : 'not-enabled',
+      lastSessionArchiveUpdateDurationMs: lastSessionUsageArchiveUpdate.durationMs,
+      lastSessionArchiveUpdateAt: lastSessionUsageArchiveUpdate.at,
+      lastSessionArchiveFailureCode: lastSessionUsageArchiveUpdate.failureCode,
+      lastCollectorTickDurationMs: runtime.usageDiagnostics?.lastTickDurationMs || null,
+      lastCollectorTickScope: runtime.usageDiagnostics?.lastTickScope || null,
+      lastHistoryScanDurationMs: null
+    },
+    storage: {
+      settingsReadable: Boolean(settings),
+      settingsWritable: null,
+      archiveReadable: null,
+      archiveWritable: null
+    }
+  };
 }
 
 function ownsUsageRuntime() {
@@ -3054,6 +3328,7 @@ function startSyncCollector() {
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('sync-collector'),
     sink,
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3098,6 +3373,7 @@ function startHostCollector() {
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('host-collector'),
     sink,
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3119,6 +3395,7 @@ function startHostStats() {
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
+    latestHubStatsReceivedAt = new Date().toISOString();
     updateDiscordRpcDisplay(stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
   };
@@ -3274,9 +3551,35 @@ function updateTrayDisplay() {
   tray.setImage(icon || getDefaultTrayIcon());
 }
 
+function diagnosticStreamDetailCode(failure = {}) {
+  const reason = String(failure.reason || '').trim().toLowerCase();
+  if (reason === 'refused') return 'connection-refused';
+  if (reason === 'timeout') return 'timeout';
+  if (reason === 'dns') return 'dns-failed';
+  if (reason === 'unauthorized') return 'unauthorized';
+  if (reason === 'disconnected') return 'eof';
+  return 'unknown';
+}
+
+function recordDiagnosticEvent(event) {
+  diagnosticJournal.record(event);
+}
+
 function sendStatus(connected, extra) {
+  const previous = streamConnected;
   streamConnected = Boolean(connected);
   streamFailure = streamConnected ? null : ((extra && extra.reason) ? { reason: extra.reason, detail: extra.detail ?? null } : streamFailure);
+  if (mode === 'sync') {
+    if (streamConnected && !previous) {
+      recordDiagnosticEvent({ subsystem: 'stream', code: 'stream-reconnected' });
+    } else if (!streamConnected && (previous || extra?.reason)) {
+      recordDiagnosticEvent({
+        subsystem: 'stream',
+        code: 'stream-disconnected',
+        detailCode: diagnosticStreamDetailCode(extra || streamFailure || {})
+      });
+    }
+  }
   sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
 }
 
@@ -3308,6 +3611,7 @@ function startLocalCollector() {
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
     },
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3340,7 +3644,10 @@ function parseSseChunk(chunk) {
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
-  if (options.resetSnapshot) latestHubStats = null;
+  if (options.resetSnapshot) {
+    latestHubStats = null;
+    latestHubStatsReceivedAt = null;
+  }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   mode = 'sync';
@@ -3373,6 +3680,7 @@ async function startStatsStream(options = {}) {
         if (parsed) {
           if (parsed.event === 'stats' && parsed.data?.stats) {
             latestHubStats = parsed.data.stats;
+            latestHubStatsReceivedAt = new Date().toISOString();
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
             updateDiscordRpcDisplay(displayStats);
@@ -4103,6 +4411,7 @@ async function fetchStats(options = {}) {
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   latestHubStats = await response.json();
+  latestHubStatsReceivedAt = new Date().toISOString();
   return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
 }
 
@@ -5348,6 +5657,24 @@ app.whenReady().then(() => {
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState()
   }));
+  ipcMain.handle('diagnostics:generate', async () => {
+    const report = await diagnosticReportGenerator.generate();
+    return {
+      generatedAt: report.generatedAt,
+      completeness: report.completeness,
+      text: report.text,
+      bytes: report.bytes,
+      truncated: report.truncated,
+      includedClientCount: report.includedClientCount,
+      omittedClientCount: report.omittedClientCount,
+      includedLimitProviderCount: report.includedLimitProviderCount,
+      omittedLimitProviderCount: report.omittedLimitProviderCount,
+      includedRemoteGroupCount: report.includedRemoteGroupCount,
+      omittedRemoteGroupCount: report.omittedRemoteGroupCount,
+      includedJournalEventCount: report.includedJournalEventCount,
+      journalOmittedCount: report.journalOmittedCount
+    };
+  });
   // Where each tracked tool's data is read from on THIS machine. The absolute
   // paths stay local by design — they carry the user's home directory and never
   // go on the wire — so the renderer asks the main process for them instead.
