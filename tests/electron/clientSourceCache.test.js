@@ -68,4 +68,17 @@ test('client source request key includes the full health snapshot identity', () 
     'device-a|codex|observed-at'
   );
   assert.equal(clientSourceRequestKey(identity('', 'observed-at')), '');
+  assert.equal(clientSourceRequestKey(identity('codex', '')), '');
+});
+
+test('client source cache refuses observations without a version stamp', () => {
+  const cache = createClientSourceCache();
+  const unstamped = identity('codex', '');
+
+  writeClientSources(cache, unstamped, [{ id: 'stale' }]);
+
+  assert.equal(cache.entries.size, 0);
+  assert.equal(readClientSources(cache, unstamped), null);
+  deleteClientSources(cache, unstamped);
+  assert.equal(cache.entries.size, 0);
 });

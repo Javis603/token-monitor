@@ -581,6 +581,33 @@ test('a partial history refresh updates the days it knows and keeps the rest', (
   }).codex, '2026-08-04');
 });
 
+test('today usage advances activity without waiting for the next history scan', () => {
+  const previous = { codex: '2026-08-04', claude: '2026-08-03' };
+  const days = mergeClientActivityDays(
+    previous,
+    { daily: [{ date: '2026-08-04', perClient: { antigravity: { tokens: 8 } } }] },
+    { clients: { codex: 12, 'antigravity-cli': 9, claude: 0 } },
+    '2026-08-05'
+  );
+  assert.deepEqual(days, {
+    codex: '2026-08-05',
+    claude: '2026-08-03',
+    antigravity: '2026-08-05'
+  });
+});
+
+test('today usage cannot move a known activity day backwards', () => {
+  assert.deepEqual(
+    mergeClientActivityDays(
+      { codex: '2026-08-06' },
+      null,
+      { clients: { codex: 12 } },
+      '2026-08-05'
+    ),
+    { codex: '2026-08-06' }
+  );
+});
+
 test('the hub keeps a valid health record and drops an unusable one', () => {
   const now = new Date().toISOString();
   const base = { deviceId: 'macbook', updatedAt: now, receivedAt: now };

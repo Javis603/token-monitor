@@ -633,6 +633,11 @@ function settingsSectionSummary(section) {
     return t('settings.sync.localOnly');
   }
   if (section === 'tools') {
+    const counts = clientHealthPresentationApi.clientHealthCountsForTracked(
+      localClientHealth(),
+      enabledClientSet()
+    );
+    if (counts) return t('settings.summary.toolsHealth', counts);
     return t('settings.summary.tools', {
       tracked: enabledClientSet().size,
       visible: KNOWN_CLIENTS.length - hiddenClientSet().size,
@@ -8737,101 +8742,111 @@ function fillClientHealthPanel(container, clientId) {
 }
 
 // Home-relative so the panel does not print the user's account name back at
-// them; the copy-diagnostics block uses the check id and never this.
+// them; absolute paths remain local and are never added to the health record.
 function friendlyPath(dir) {
   return clientHealthPresentationApi.friendlyPath(dir, state.appInfo?.homeDir, state.appInfo?.platform);
 }
 
-// One row of the expanded panel. Values are formatted here and nowhere else —
-// clientHealthPresentation.js deliberately hands back raw numbers and i18n keys.
-function clientHealthDetailRow(row) {
-  const line = document.createElement('div');
-  line.className = 'tool-health-line';
-  const label = document.createElement('span');
-  label.className = 'tool-health-label';
-  label.textContent = t(row.key);
-  const value = document.createElement('span');
-  value.className = 'tool-health-value';
-  if (row.kind === 'sources') {
-    value.textContent = `${row.detectedCount} / ${row.checkedCount}`;
-    line.append(label, value);
-    if (row.checks.length > 0) {
+// Values are formatted here and nowhere else — the presentation helper returns
+// three semantic groups containing only raw numbers, timestamps and i18n keys.
+function clientHealthGroup(group, notes) {
+  const section = document.createElement('section');
+  section.className = `tool-health-group tool-health-group-${group.id}`;
+  const heading = document.createElement('h4');
+  heading.className = 'tool-health-group-title';
+  heading.textContent = t(group.key);
+  const body = document.createElement('div');
+  body.className = 'tool-health-group-body';
+
+  if (group.id === 'source') {
+    const summary = document.createElement('div');
+    summary.className = 'tool-health-group-summary';
+    summary.textContent = t(`settings.tools.health.source.${group.state}`, {
+      detected: group.detectedCount,
+      checked: group.checkedCount
+    });
+    body.append(summary);
+    if (group.checks.length > 0) {
       const list = document.createElement('div');
       list.className = 'tool-health-checks';
-      for (const check of row.checks) {
+      for (const check of group.checks) {
         const paths = check.paths?.length ? check.paths : [{ dir: '', exists: check.exists }];
         for (const pathInfo of paths) {
           const chip = document.createElement('code');
           chip.className = `tool-health-check${pathInfo.exists ? ' found' : ''}`;
-          // Host paths are optional evidence beneath the canonical logical check.
-          // WSL and remote checks legitimately have only their stable id.
           chip.textContent = pathInfo.dir ? friendlyPath(pathInfo.dir) : check.id;
           if (pathInfo.dir) chip.title = pathInfo.dir;
           list.append(chip);
         }
       }
-      line.append(list);
+      body.append(list);
     }
-    return line;
-  }
-  if (row.kind === 'sync') {
-    value.textContent = t(`settings.tools.health.sync.${row.state}`);
-    line.append(label, value);
-    const stamp = row.lastSuccessAt || row.lastAttemptAt;
-    if (stamp) {
-      const note = document.createElement('span');
-      note.className = 'tool-health-note';
-      // Reuses the localized "n minutes ago" buckets the service-status rows
-      // already use, so the panel does not invent a second time vocabulary.
+  } else if (group.id === 'collection') {
+    const summary = document.createElement('div');
+    summary.className = 'tool-health-group-summary';
+    summary.textContent = t(`settings.tools.health.sync.${group.state}`);
+    body.append(summary);
+    const stamps = [
+      ['lastAttemptAt', 'settings.tools.health.lastAttempt'],
+      ['lastSuccessAt', 'settings.tools.health.lastSuccess']
+    ];
+    for (const [field, key] of stamps) {
+      const stamp = group[field];
+      if (!stamp) continue;
       const elapsed = Math.max(0, Date.now() - (Date.parse(stamp) || Date.now()));
-      note.textContent = t(row.lastSuccessAt ? 'settings.tools.health.lastSuccess' : 'settings.tools.health.lastAttempt', {
-        time: formatAgo(elapsed)
-      });
-      line.append(note);
+      const meta = document.createElement('div');
+      meta.className = 'tool-health-group-meta';
+      meta.textContent = t(key, { time: formatAgo(elapsed) });
+      body.append(meta);
     }
-    return line;
-  }
-  if (row.kind === 'usage') {
-    line.classList.add('tool-health-usage');
-    line.replaceChildren();
-    for (const entry of row.periods) {
-      const cell = document.createElement('div');
-      cell.className = 'tool-health-usage-cell';
-      const head = document.createElement('span');
-      head.className = 'tool-health-usage-label';
-      head.textContent = t(`trayComposer.period.${entry.period}`);
-      const amount = document.createElement('span');
-      amount.className = 'tool-health-usage-value';
-      amount.textContent = formatCompact(entry.tokens);
-      cell.append(head, amount);
-      if (entry.cost > 0) {
-        const cost = document.createElement('span');
-        cost.className = 'tool-health-usage-cost';
-        cost.textContent = formatCost(entry.cost);
-        cell.append(cost);
+  } else {
+    if (group.periods) {
+      const usage = document.createElement('div');
+      usage.className = 'tool-health-usage';
+      for (const entry of group.periods) {
+        const cell = document.createElement('div');
+        cell.className = 'tool-health-usage-cell';
+        const head = document.createElement('span');
+        head.className = 'tool-health-usage-label';
+        head.textContent = t(`trayComposer.period.${entry.period}`);
+        const amount = document.createElement('span');
+        amount.className = 'tool-health-usage-value';
+        amount.textContent = formatCompact(entry.tokens);
+        cell.append(head, amount);
+        if (entry.cost > 0) {
+          const cost = document.createElement('span');
+          cost.className = 'tool-health-usage-cost';
+          cost.textContent = formatCost(entry.cost);
+          cell.append(cost);
+        }
+        usage.append(cell);
       }
-      line.append(cell);
+      body.append(usage);
+    } else {
+      const tokens = document.createElement('div');
+      tokens.className = 'tool-health-group-summary';
+      tokens.textContent = t('settings.tools.health.tokensValue', { tokens: formatCompact(group.tokens) });
+      body.append(tokens);
     }
-    return line;
-  }
-  if (row.kind === 'day') {
-    // Relative first. "2026-08-04" only answers "is this tool idle or is the
-    // collection broken?" for a reader who already knows today's date — and a
-    // tool that is simply closed is the single most common thing this panel has
-    // to explain, since its numbers keep looking healthy while today stays zero.
-    value.textContent = relativeDayLabel(row.day);
-    line.append(label, value);
-    if (relativeDayLabel(row.day) !== row.day) {
-      const note = document.createElement('span');
-      note.className = 'tool-health-note';
-      note.textContent = row.day;
-      line.append(note);
+    if (group.lastActivityDay) {
+      const activity = document.createElement('div');
+      activity.className = 'tool-health-group-meta';
+      activity.textContent = t('settings.tools.health.lastActivityValue', {
+        relative: relativeDayLabel(group.lastActivityDay),
+        day: group.lastActivityDay
+      });
+      body.append(activity);
     }
-    return line;
   }
-  if (row.kind === 'tokens') value.textContent = formatCompact(row.tokens);
-  line.append(label, value);
-  return line;
+
+  for (const note of notes) {
+    const line = document.createElement('div');
+    line.className = `tool-health-note-line tone-${note.tone}`;
+    line.textContent = t(`settings.tools.health.code.${note.code}`);
+    body.append(line);
+  }
+  section.append(heading, body);
+  return section;
 }
 
 function localDayKey(date = new Date()) {
@@ -8896,14 +8911,15 @@ function clientHealthPanel(detail, clientId) {
   const box = document.createElement('div');
   box.className = 'tool-health-inner';
   inner.append(box);
-  for (const row of detail.rows) box.append(clientHealthDetailRow(row));
-  for (const note of detail.notes) {
-    const line = document.createElement('div');
-    line.className = `tool-health-note-line tone-${note.tone}`;
-    line.textContent = t(`settings.tools.health.code.${note.code}`);
-    box.append(line);
+  const groups = document.createElement('div');
+  groups.className = 'tool-health-groups';
+  for (const group of detail.groups) {
+    groups.append(clientHealthGroup(
+      group,
+      detail.notes.filter((note) => note.group === group.id)
+    ));
   }
-  box.append(clientHealthActions(clientId));
+  box.append(groups, clientHealthActions(clientId));
   return inner;
 }
 
@@ -10383,6 +10399,7 @@ window.tokenMonitor.onTokscalePush?.((payload) => {
 
 function renderStatsUpdate() {
   render();
+  renderSettingsSummaries();
   renderLimitProviderCheckboxes();
   renderToolPreferences();
   renderWslPanel();

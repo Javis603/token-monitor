@@ -17,23 +17,27 @@
     };
   }
 
+  function hasCompleteIdentity(value) {
+    return Boolean(value.deviceId && value.clientId && value.observedAt);
+  }
+
   function clientSourceRequestKey(identity) {
     const value = normalizedIdentity(identity);
-    return value.deviceId && value.clientId
+    return hasCompleteIdentity(value)
       ? `${value.deviceId}|${value.clientId}|${value.observedAt}`
       : '';
   }
 
   function readClientSources(cache, identity) {
     const value = normalizedIdentity(identity);
-    if (!value.deviceId || cache?.deviceId !== value.deviceId) return null;
+    if (!hasCompleteIdentity(value) || cache?.deviceId !== value.deviceId) return null;
     const entry = cache.entries.get(value.clientId);
     return entry?.observedAt === value.observedAt ? entry.sources : null;
   }
 
   function writeClientSources(cache, identity, sources) {
     const value = normalizedIdentity(identity);
-    if (!value.deviceId || !value.clientId) return;
+    if (!hasCompleteIdentity(value)) return;
     if (cache.deviceId !== value.deviceId) {
       cache.deviceId = value.deviceId;
       cache.entries.clear();
@@ -46,7 +50,7 @@
 
   function deleteClientSources(cache, identity) {
     const value = normalizedIdentity(identity);
-    if (!value.deviceId || cache?.deviceId !== value.deviceId) return;
+    if (!hasCompleteIdentity(value) || cache?.deviceId !== value.deviceId) return;
     const entry = cache.entries.get(value.clientId);
     if (entry?.observedAt === value.observedAt) cache.entries.delete(value.clientId);
   }

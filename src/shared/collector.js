@@ -956,7 +956,12 @@ async function collectUsageOnce(options) {
     sourceChecks,
     wslStatus,
     observedAt: collectedAt,
-    lastActivityDays: mergeClientActivityDays(options.lastActivityDays, summary.history)
+    lastActivityDays: mergeClientActivityDays(
+      options.lastActivityDays,
+      summary.history,
+      today,
+      localTodayKey(collectedAt)
+    )
   });
   if (clientHealth) summary.clientHealth = clientHealth;
   return summary;
@@ -1410,11 +1415,23 @@ function clientActivityDaysFromHistory(history) {
 // field. Merged per client rather than swapped wholesale: collectHistoryOnce()
 // deliberately survives one source failing while another succeeds, so a refresh
 // that returns only Proma's days must not erase what the last one knew about
-// Codex. A day only ever moves forward, so the fresh value wins where both hold
-// one.
-function mergeClientActivityDays(previous, history) {
+// Codex. Today's already-collected period is also authoritative for the date: it
+// closes the cadence gap without another graph scan. A day only ever moves
+// forward, so the newest value wins where sources overlap.
+function mergeClientActivityDays(previous, history, todayPeriod, todayKey) {
   const merged = { ...(previous || {}) };
-  for (const [client, day] of Object.entries(clientActivityDaysFromHistory(history))) {
+  const candidates = clientActivityDaysFromHistory(history);
+  const currentDay = String(todayKey || '').slice(0, 10);
+  if (currentDay) {
+    for (const [rawClient, tokens] of Object.entries(todayPeriod?.clients || {})) {
+      if (Number(tokens || 0) <= 0) continue;
+      const client = normalizeClientName(rawClient);
+      if (client && (!candidates[client] || currentDay > candidates[client])) {
+        candidates[client] = currentDay;
+      }
+    }
+  }
+  for (const [client, day] of Object.entries(candidates)) {
     // Per client, newest wins. A plain spread would let a fresh-but-older value
     // push a known day backwards — history is a rolling window and a refresh can
     // legitimately return a shorter one, so "fresh" does not imply "later".

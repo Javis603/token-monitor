@@ -19,6 +19,30 @@ function functionBody(source, name, nextName) {
   return source.slice(start, end);
 }
 
+test('tool diagnostics summarize complete health and render three semantic groups', () => {
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+  const summary = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
+  const group = functionBody(app, 'clientHealthGroup', 'localDayKey');
+  const panel = functionBody(app, 'clientHealthPanel', 'localWslStatus');
+  const statsStart = app.indexOf('function renderStatsUpdate(');
+  const statsEnd = app.indexOf('const statsRenderScheduler', statsStart);
+  assert.notEqual(statsStart, -1);
+  assert.notEqual(statsEnd, -1);
+  const stats = app.slice(statsStart, statsEnd);
+
+  assert.match(summary, /clientHealthCountsForTracked\([\s\S]*localClientHealth\(\)[\s\S]*enabledClientSet\(\)/);
+  assert.match(summary, /if \(counts\) return t\('settings\.summary\.toolsHealth'/);
+  assert.match(summary, /return t\('settings\.summary\.tools'/);
+  assert.match(group, /group\.id === 'source'/);
+  assert.match(group, /group\.id === 'collection'/);
+  assert.match(panel, /for \(const group of detail\.groups\)/);
+  assert.match(panel, /note\.group === group\.id/);
+  assert.match(stats, /renderSettingsSummaries\(\)/);
+  assert.match(cssRule(css, '.tool-health-group'), /grid-template-columns:\s*58px minmax\(0,\s*1fr\)/);
+  assert.match(cssRule(css, '.tool-health-group + .tool-health-group'), /border-top/);
+});
+
 test('tool diagnostics bind source values to the full health snapshot key', () => {
   const app = readRendererFile('app.js');
   const identity = functionBody(app, 'clientSourcesIdentity', 'localClientSources');

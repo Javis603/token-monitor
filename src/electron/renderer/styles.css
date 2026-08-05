@@ -1827,30 +1827,44 @@ span.settings-note.settings-item-desc {
   border-radius: 6px;
   background: rgba(var(--line-rgb), 0.05);
 }
-.tool-health-line {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+.tool-health-groups {
+  display: grid;
+}
+.tool-health-group {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
   min-width: 0;
+  padding: 5px 0;
   font-size: 10px;
   line-height: 1.35;
 }
-.tool-health-label {
-  flex: 0 0 auto;
-  color: var(--muted);
+.tool-health-group + .tool-health-group {
+  border-top: 1px solid rgba(var(--line-rgb), 0.1);
 }
-.tool-health-value {
-  flex: 1 1 auto;
+.tool-health-group-title {
+  margin: 0;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+}
+.tool-health-group-body {
+  display: grid;
+  gap: 3px;
   min-width: 0;
+}
+.tool-health-group-summary {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
-  text-align: right;
+}
+.tool-health-group-meta {
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
 }
 .tool-health-usage {
+  display: flex;
   gap: 0;
-  padding-bottom: 2px;
-  border-bottom: 1px solid rgba(var(--line-rgb), 0.1);
 }
 .tool-health-usage-cell {
   flex: 1 1 0;

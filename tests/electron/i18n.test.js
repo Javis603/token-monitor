@@ -72,6 +72,20 @@ test('automatic app update copy describes background downloads, not update check
   );
 });
 
+test('tool health copy stays compact and describes snapshots, not liveness', () => {
+  assert.equal(
+    translate('zh-TW', 'settings.summary.toolsHealth', {
+      healthy: 7, review: 5, unavailable: 9
+    }),
+    '正常 7 · 待查 5 · 未安裝 9'
+  );
+  assert.equal(translate('zh-TW', 'settings.tools.health.source'), '來源');
+  assert.equal(translate('zh-TW', 'settings.tools.health.sync'), '採集');
+  assert.equal(translate('zh-TW', 'settings.tools.health.usage'), '用量');
+  assert.equal(translate('en', 'settings.tools.health.sync.pending'), 'Sync pending');
+  assert.equal(translate('en', 'settings.tools.health.sync.ok'), 'Last sync succeeded');
+});
+
 test('every bundled locale defines every English key', () => {
   const englishKeys = Object.keys(MESSAGES.en).sort();
   for (const locale of Object.keys(MESSAGES).filter((code) => code !== 'en')) {
