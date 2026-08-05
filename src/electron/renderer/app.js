@@ -2161,7 +2161,7 @@ function subscriptionAccountChoices() {
 }
 
 function subscriptionAccountValue(provider) {
-  return [provider?.provider || '', provider?.accountKey || '', provider?.accountName || ''].join(' ');
+  return [provider?.provider || '', provider?.accountKey || '', provider?.accountName || ''].join('\0');
 }
 
 // The plan the account already reports ("Pro", "Plus") is nearly always what the
