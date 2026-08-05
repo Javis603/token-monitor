@@ -293,7 +293,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, diagnosticsBusy: false, diagnosticsText: '', diagnosticsGeneratedAt: '', diagnosticsPreviewOpen: false, diagnosticsStatusKey: '', diagnosticsStatusTone: '', hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -372,6 +372,14 @@ Object.assign(els, {
   openRepositoryButton: document.getElementById('openRepositoryButton'),
   openWebsiteButton: document.getElementById('openWebsiteButton'),
   reportIssueButton: document.getElementById('reportIssueButton'),
+  copyDiagnosticButton: document.getElementById('copyDiagnosticButton'),
+  previewDiagnosticButton: document.getElementById('previewDiagnosticButton'),
+  diagnosticStatus: document.getElementById('diagnosticStatus'),
+  diagnosticPreview: document.getElementById('diagnosticPreview'),
+  diagnosticGeneratedAt: document.getElementById('diagnosticGeneratedAt'),
+  diagnosticReportText: document.getElementById('diagnosticReportText'),
+  regenerateDiagnosticButton: document.getElementById('regenerateDiagnosticButton'),
+  closeDiagnosticPreviewButton: document.getElementById('closeDiagnosticPreviewButton'),
   appUpdatePill: document.getElementById('appUpdatePill'),
   appUpdatePillAction: document.getElementById('appUpdatePillAction'),
   appUpdatePillLabel: document.getElementById('appUpdatePillLabel'),
@@ -526,6 +534,7 @@ function applySettingsTranslations() {
   i18n.applyTranslations(document, currentLocale());
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
+  renderDiagnosticControls();
 }
 
 function applySettingsSectionDom(id, open) {
@@ -7557,6 +7566,118 @@ async function copyToClipboard(text, button) {
   }
 }
 
+function diagnosticGeneratedTime() {
+  if (!state.diagnosticsGeneratedAt) return '';
+  try {
+    return new Date(state.diagnosticsGeneratedAt).toLocaleTimeString(currentLocale(), {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  } catch (_) {
+    return state.diagnosticsGeneratedAt;
+  }
+}
+
+function diagnosticStatusText() {
+  if (!state.diagnosticsStatusKey) return '';
+  if (state.diagnosticsStatusKey === 'settings.about.diagnostics.generated') {
+    return t(state.diagnosticsStatusKey, { time: diagnosticGeneratedTime() });
+  }
+  return t(state.diagnosticsStatusKey);
+}
+
+function renderDiagnosticControls() {
+  const copy = els.copyDiagnosticButton;
+  const preview = els.previewDiagnosticButton;
+  const regenerate = els.regenerateDiagnosticButton;
+  if (!copy && !preview && !els.diagnosticPreview) return;
+  if (copy) {
+    copy.disabled = state.diagnosticsBusy;
+    copy.textContent = state.diagnosticsBusy
+      ? t('settings.about.diagnostics.generating')
+      : t('settings.about.diagnostics.copy');
+  }
+  if (preview) {
+    preview.disabled = state.diagnosticsBusy;
+    preview.textContent = state.diagnosticsBusy
+      ? t('settings.about.diagnostics.generating')
+      : t('settings.about.diagnostics.preview');
+    preview.setAttribute('aria-expanded', String(state.diagnosticsPreviewOpen));
+  }
+  if (regenerate) regenerate.disabled = state.diagnosticsBusy;
+  if (els.closeDiagnosticPreviewButton) els.closeDiagnosticPreviewButton.disabled = state.diagnosticsBusy;
+  if (els.diagnosticStatus) {
+    els.diagnosticStatus.textContent = diagnosticStatusText();
+    els.diagnosticStatus.className = `diagnostic-status${state.diagnosticsStatusTone ? ` ${state.diagnosticsStatusTone}` : ''}`;
+  }
+  if (els.diagnosticGeneratedAt) {
+    els.diagnosticGeneratedAt.textContent = state.diagnosticsGeneratedAt
+      ? t('settings.about.diagnostics.generated', { time: diagnosticGeneratedTime() })
+      : '';
+  }
+  if (els.diagnosticReportText) els.diagnosticReportText.textContent = state.diagnosticsText;
+  if (els.diagnosticPreview) {
+    els.diagnosticPreview.classList.toggle('hidden', !state.diagnosticsPreviewOpen);
+    els.diagnosticPreview.setAttribute('aria-hidden', String(!state.diagnosticsPreviewOpen));
+  }
+}
+
+async function ensureDiagnosticReport({ force = false, openPreview = false } = {}) {
+  if (state.diagnosticsBusy) return null;
+  if (!force && state.diagnosticsText) {
+    if (openPreview) state.diagnosticsPreviewOpen = true;
+    renderDiagnosticControls();
+    return state.diagnosticsText;
+  }
+  state.diagnosticsBusy = true;
+  state.diagnosticsStatusKey = 'settings.about.diagnostics.generating';
+  state.diagnosticsStatusTone = '';
+  renderDiagnosticControls();
+  try {
+    if (!window.tokenMonitor.generateDiagnosticReport) throw new Error('unsupported');
+    const result = await window.tokenMonitor.generateDiagnosticReport();
+    if (!result?.text) throw new Error('empty');
+    state.diagnosticsText = String(result.text);
+    state.diagnosticsGeneratedAt = String(result.generatedAt || '');
+    state.diagnosticsPreviewOpen = openPreview;
+    state.diagnosticsStatusKey = 'settings.about.diagnostics.generated';
+    state.diagnosticsStatusTone = 'success';
+    return state.diagnosticsText;
+  } catch (_) {
+    state.diagnosticsStatusKey = 'settings.about.diagnostics.error';
+    state.diagnosticsStatusTone = 'error';
+    return null;
+  } finally {
+    state.diagnosticsBusy = false;
+    renderDiagnosticControls();
+  }
+}
+
+async function copyDiagnosticReport() {
+  const text = await ensureDiagnosticReport();
+  if (!text) return;
+  const copied = await copyToClipboard(text, els.copyDiagnosticButton);
+  state.diagnosticsStatusKey = copied
+    ? 'settings.about.diagnostics.copied'
+    : 'settings.about.diagnostics.copyError';
+  state.diagnosticsStatusTone = copied ? 'success' : 'error';
+  renderDiagnosticControls();
+}
+
+async function previewDiagnosticReport() {
+  await ensureDiagnosticReport({ openPreview: true });
+}
+
+async function regenerateDiagnosticReport() {
+  await ensureDiagnosticReport({ force: true, openPreview: true });
+}
+
+function closeDiagnosticPreview() {
+  state.diagnosticsPreviewOpen = false;
+  renderDiagnosticControls();
+}
+
 async function refreshHubInfo() {
   if (!window.tokenMonitor.getHubInfo) return;
   try {
@@ -9915,6 +10036,7 @@ async function init() {
     state.settings.startAtLogin = Boolean(state.appInfo.loginItemOpenAtLogin);
   }
   syncSettingsForm();
+  renderDiagnosticControls();
   publishViewState();
   await refreshHubInfo();
   await refreshTokscaleStatus();
@@ -10352,6 +10474,10 @@ els.openTokscaleLinkButton?.addEventListener('click', () => window.tokenMonitor.
 els.openRepositoryButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL));
 els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WEBSITE_URL));
 els.reportIssueButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_ISSUES_URL));
+els.copyDiagnosticButton?.addEventListener('click', () => { void copyDiagnosticReport(); });
+els.previewDiagnosticButton?.addEventListener('click', () => { void previewDiagnosticReport(); });
+els.regenerateDiagnosticButton?.addEventListener('click', () => { void regenerateDiagnosticReport(); });
+els.closeDiagnosticPreviewButton?.addEventListener('click', closeDiagnosticPreview);
 els.refreshButton.addEventListener('click', () => {
   if (state.breakdown === 'status') refreshStatusViewManually().catch(() => {});
   // Only this button asks for a history rescan and a self-sync: `{ force: true }` is

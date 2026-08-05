@@ -110,3 +110,28 @@ test('About links stay visually secondary and wrap in narrow settings', () => {
   assert.match(css, /\.about-settings-links \{[\s\S]*flex-wrap: wrap;/);
   assert.match(css, /\.about-settings-links \.inline-link \{ font-size: 10px; \}/);
 });
+
+test('About diagnostics stay below support links and use one on-demand report flow', () => {
+  const html = read('index.html');
+  const about = html.match(/<div class="settings-subgroup about-settings">[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/)?.[0] || '';
+
+  assert.match(about, /id="copyDiagnosticButton"[\s\S]*settings\.about\.diagnostics\.copy/);
+  assert.match(about, /id="previewDiagnosticButton"[\s\S]*settings\.about\.diagnostics\.preview/);
+  assert.match(about, /id="diagnosticPreview" class="diagnostic-preview hidden"/);
+  assert.ok(about.indexOf('id="reportIssueButton"') < about.indexOf('id="copyDiagnosticButton"'));
+  assert.match(about, /data-i18n="settings\.about\.diagnostics\.privacy"/);
+
+  const app = read('app.js');
+  assert.match(app, /function ensureDiagnosticReport\([\s\S]*window\.tokenMonitor\.generateDiagnosticReport/);
+  assert.match(app, /state\.diagnosticsBusy = true[\s\S]*renderDiagnosticControls\(\)/);
+  assert.match(app, /function regenerateDiagnosticReport\(\)[\s\S]*force: true/);
+  assert.match(app, /copyDiagnosticButton\?\.addEventListener\('click'/);
+});
+
+test('Diagnostic preview uses compact, scrollable settings styling', () => {
+  const css = read('styles.css');
+
+  assert.match(css, /\.about-settings-diagnostics \{[\s\S]*border-top:/);
+  assert.match(css, /#diagnosticReportText \{[\s\S]*max-height: 260px;[\s\S]*overflow: auto;/);
+  assert.match(css, /\.diagnostic-actions button:disabled[\s\S]*opacity: 0\.45/);
+});
