@@ -309,10 +309,53 @@ test('coalesced targeted refreshes preserve the union of their clients', async (
     const claude = runtime.refreshClient('claude');
     gate = null;
     release();
-    await Promise.all([held, cursor, claude]);
+    const results = await Promise.all([held, cursor, claude]);
 
+    assert.deepEqual(results, [true, true, true]);
     assert.deepEqual(scans.at(-1), { clients: 'cursor,claude', flags: ['--today'] });
     assert.equal(updates.at(-1).reason, 'coalesced');
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('coalesced targeted refresh reports the replay failure', async () => {
+  const scans = [];
+  const updates = [];
+  let gate = null;
+  const runtime = startCollector({
+    clients: 'claude,cursor',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-runtime',
+    intervalMs: 60000,
+    watchEnabled: false,
+    historyEnabled: false,
+    runTokscale: async ({ clients, flags }) => {
+      scans.push({ clients, flags });
+      if (gate) await gate.promise;
+      if (clients === 'cursor') {
+        throw new Error('scan failed');
+      }
+      return emptyTokscaleResult();
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason }),
+    onError: () => {}
+  });
+
+  try {
+    await waitFor(() => updates.length >= 1);
+    let release;
+    gate = { promise: new Promise((resolve) => { release = resolve; }) };
+    const held = runtime.tick('held', { todayOnly: true, targetClients: ['claude'] });
+    await waitFor(() => scans.at(-1)?.flags?.[0] === '--today');
+    const cursor = runtime.refreshClient('cursor');
+    gate = null;
+    release();
+
+    assert.equal(await held, true);
+    assert.equal(await cursor, false);
+    assert.deepEqual(scans.at(-1), { clients: 'cursor', flags: ['--today'] });
   } finally {
     runtime.stop();
   }

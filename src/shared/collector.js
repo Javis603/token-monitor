@@ -1753,10 +1753,8 @@ function startCollector(options) {
     } catch (_) {}
   }
 
-  function resolvePendingWaiters() {
-    const waiters = pendingWaiters;
-    pendingWaiters = [];
-    for (const resolve of waiters) resolve();
+  function resolveWaiters(waiters, result) {
+    for (const resolve of waiters) resolve(result);
   }
 
   async function performTick(reason, tickOptions = {}) {
@@ -1929,7 +1927,7 @@ function startCollector(options) {
     }
     tickInFlight = true;
     try {
-      await performTick(reason, {
+      const initialResult = await performTick(reason, {
         ...effectiveTickOptions,
         acknowledgedSourceSync: sourceSyncQueue.acknowledge(effectiveTickOptions.forceSelfSync)
       });
@@ -1942,6 +1940,8 @@ function startCollector(options) {
           ? [...pendingTargetClients]
           : [];
         const activityRevision = pendingActivityRevision;
+        const waiters = pendingWaiters;
+        pendingWaiters = [];
         tickPending = false;
         pendingForceHistory = false;
         pendingForceSelfSync = null;
@@ -1950,7 +1950,7 @@ function startCollector(options) {
         pendingTargetClients = null;
         pendingActivityRevision = null;
         const acknowledgedSourceSync = sourceSyncQueue.acknowledge(forceSelfSync);
-        await performTick('coalesced', {
+        const result = await performTick('coalesced', {
           forceHistory,
           forceSelfSync,
           sourceSelfSync,
@@ -1959,10 +1959,16 @@ function startCollector(options) {
           targetClients,
           ...(activityRevision === null ? {} : { activityRevision })
         });
+        resolveWaiters(waiters, result === true);
       }
+      return initialResult === true;
     } finally {
       tickInFlight = false;
-      if (stopped || !tickPending) resolvePendingWaiters();
+      if (stopped && pendingWaiters.length > 0) {
+        const waiters = pendingWaiters;
+        pendingWaiters = [];
+        resolveWaiters(waiters, false);
+      }
     }
   }
 

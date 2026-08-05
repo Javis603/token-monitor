@@ -19,6 +19,21 @@ function functionBody(source, name, nextName) {
   return source.slice(start, end);
 }
 
+test('tool diagnostics bind source values to the full health snapshot key', () => {
+  const app = readRendererFile('app.js');
+  const loader = functionBody(app, 'clientSourcesKey', 'localClientSources');
+  const reader = functionBody(app, 'localClientSources', 'loadClientSources');
+  const expand = functionBody(app, 'setClientHealthExpanded', 'clientPeriodUsage');
+  const actions = functionBody(app, 'clientHealthActions', 'clientHealthPanel');
+
+  assert.match(loader, /deviceId.*id.*observedAt/);
+  assert.match(reader, /state\.clientSources\.get\(clientSourcesKey\(clientId\)\)/);
+  assert.match(expand, /if \(open\)[\s\S]*loadClientSources\(row\.dataset\.client\)/);
+  assert.match(actions, /const succeeded = await window\.tokenMonitor\.rescanClient/);
+  assert.match(actions, /if \(succeeded\) loadClientSources/);
+  assert.doesNotMatch(app, /clientSourceIds/);
+});
+
 function cssRule(source, selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));

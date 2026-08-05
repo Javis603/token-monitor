@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -14,6 +16,16 @@ function deferred() {
   const promise = new Promise((done) => { resolve = done; });
   return { promise, resolve };
 }
+
+test('targeted rescans stay strict while Cursor credential refresh is best effort', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /return await refreshUsageClient\(client, \{ forceSync: true \}\) === true/);
+  assert.equal(
+    (main.match(/bestEffortTrackedUsageRefresh\('cursor', \{ forceSync: true \}\)/g) || []).length,
+    2
+  );
+  assert.match(main, /function bestEffortTrackedUsageRefresh[\s\S]*if \(!tracked\.has\(client\)\) return/);
+});
 
 for (const mode of ['local', 'client', 'host']) {
   test(`${mode} manual refresh awaits usage but never waits for limits`, async () => {

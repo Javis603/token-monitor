@@ -62,7 +62,7 @@ test('rows carry the values the renderer draws, not formatted text', () => {
 // state or turn platform alternatives into extra checked dependencies.
 test('local paths augment canonical checks without changing their counts', () => {
   const healthy = entry({
-    source: { state: 'detected', detectedCount: 1, checkedCount: 1, checks: [{ id: 'zed-threads', exists: true }] },
+    source: { state: 'detected', detectedCount: 1, checkedCount: 1 },
     overall: 'healthy',
     data: { liveTokens: 42 }
   });
@@ -81,6 +81,22 @@ test('local paths augment canonical checks without changing their counts', () =>
   ]);
   assert.equal(sources.detectedCount, 1);
   assert.equal(sources.checkedCount, 1);
+});
+
+test('local paths never overwrite a canonical wire check', () => {
+  const rows = clientHealthRows(entry({
+    source: {
+      state: 'detected',
+      detectedCount: 0,
+      checkedCount: 1,
+      checks: [{ id: 'zed-threads', exists: false }]
+    }
+  }), {
+    sources: [{ id: 'zed-threads', dir: '/Users/x/.local/share/zed/threads', exists: true }]
+  });
+  const check = rows.find((row) => row.kind === 'sources').checks[0];
+  assert.equal(check.exists, false);
+  assert.equal(Object.hasOwn(check, 'supplemental'), false);
 });
 
 // `wsl-home` is reached through wsl.exe and antigravity's source checks are not
@@ -167,6 +183,10 @@ test('friendlyPath abbreviates only the home itself or a real descendant', () =>
   assert.equal(friendlyPath('/Users/alice/.config/tool', '/Users/alice', 'darwin'), '~/.config/tool');
   assert.equal(friendlyPath('/Users/alice2/tool', '/Users/alice', 'darwin'), '/Users/alice2/tool');
   assert.equal(friendlyPath('C:\\Users\\Alice\\tool', 'c:\\users\\alice', 'win32'), '~\\tool');
+  assert.equal(friendlyPath('/', '/', 'linux'), '~');
+  assert.equal(friendlyPath('/tmp/tool', '/', 'linux'), '~/tmp/tool');
+  assert.equal(friendlyPath('C:\\', 'c:\\', 'win32'), '~');
+  assert.equal(friendlyPath('C:\\tool', 'c:\\', 'win32'), '~\\tool');
 });
 
 test('an unrecognised diagnostic code renders nothing rather than raw text', () => {

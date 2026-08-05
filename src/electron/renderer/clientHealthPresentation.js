@@ -70,13 +70,16 @@
 
   function friendlyPath(dir, home, platform = '') {
     const candidate = String(dir || '');
-    const root = String(home || '').replace(/[\\/]+$/, '');
-    if (!candidate || !root) return candidate;
+    const rawHome = String(home || '');
     const windows = platform === 'win32';
+    const isRoot = windows ? /^[A-Za-z]:[\\/]$/.test(rawHome) : rawHome === '/';
+    const root = isRoot ? rawHome : rawHome.replace(/[\\/]+$/, '');
+    if (!candidate || !root) return candidate;
     const comparedCandidate = windows ? candidate.toLowerCase() : candidate;
     const comparedRoot = windows ? root.toLowerCase() : root;
     if (comparedCandidate === comparedRoot) return '~';
     if (!comparedCandidate.startsWith(comparedRoot)) return candidate;
+    if (isRoot) return `~${candidate.slice(root.length - 1)}`;
     const boundary = candidate.charAt(root.length);
     return boundary === '/' || boundary === '\\' ? `~${candidate.slice(root.length)}` : candidate;
   }
@@ -93,17 +96,21 @@
   // retained rather than being replaced by this machine's host roots.
   function mergeSourceChecks(checks, sources) {
     const groups = new Map();
+    const canonicalIds = new Set();
     for (const check of checks) {
       const id = String(check?.id || '');
       if (!id || groups.has(id)) continue;
+      canonicalIds.add(id);
       groups.set(id, { id, exists: check?.exists === true, paths: [] });
     }
     for (const source of sources) {
       const id = String(source?.id || '');
       const dir = String(source?.dir || '');
       if (!id) continue;
-      if (!groups.has(id)) groups.set(id, { id, exists: source?.exists === true, paths: [], supplemental: true });
-      if (dir) groups.get(id).paths.push({ dir, exists: source?.exists === true });
+      const exists = source?.exists === true;
+      if (!groups.has(id)) groups.set(id, { id, exists, paths: [] });
+      else if (!canonicalIds.has(id)) groups.get(id).exists ||= exists;
+      if (dir) groups.get(id).paths.push({ dir, exists });
     }
     return [...groups.values()];
   }

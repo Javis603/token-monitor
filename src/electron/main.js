@@ -2352,6 +2352,19 @@ function refreshUsageClient(clientId, options = {}) {
   return Promise.resolve(deviceRuntimeHandle.refreshClient(client, options));
 }
 
+function bestEffortTrackedUsageRefresh(clientId, options = {}) {
+  const client = String(clientId || '').trim().toLowerCase();
+  const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+  if (!tracked.has(client)) return;
+  try {
+    void refreshUsageClient(client, options).catch((error) => {
+      console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
+    });
+  } catch (error) {
+    console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
+  }
+}
+
 function drainPendingUsageClientRefreshes(runtime) {
   const pending = [...pendingUsageClientRefreshes.values()];
   pendingUsageClientRefreshes.clear();
@@ -5364,8 +5377,7 @@ app.whenReady().then(() => {
     const client = String(clientId || '').trim().toLowerCase();
     if (!client) return false;
     try {
-      await refreshUsageClient(client, { forceSync: true });
-      return true;
+      return await refreshUsageClient(client, { forceSync: true }) === true;
     } catch (error) {
       console.log(`[usage-runtime] rescan failed: ${error.message}`);
       return false;
@@ -5412,7 +5424,7 @@ app.whenReady().then(() => {
       await cursorAuth.runCursorLogin(token);
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
-      void refreshUsageClient('cursor', { forceSync: true });
+      bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
       return { ok: true, email: probeResult.user.email };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -5523,7 +5535,7 @@ app.whenReady().then(() => {
       await cursorAuth.runCursorLogout();
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'logout', { clear: true });
-      void refreshUsageClient('cursor', { forceSync: true });
+      bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
