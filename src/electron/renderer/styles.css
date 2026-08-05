@@ -1938,6 +1938,10 @@ span.settings-note.settings-item-desc {
   overflow-wrap: anywhere;
   text-decoration: line-through;
 }
+.tool-health-check.pending {
+  opacity: 0.72;
+  text-decoration: none;
+}
 .tool-health-check.found {
   border-color: rgba(var(--success-rgb), 0.28);
   color: var(--success);

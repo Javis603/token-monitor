@@ -113,9 +113,10 @@
       const dir = String(source?.dir || '');
       if (!id) continue;
       const exists = source?.exists === true;
+      const pending = source?.pending === true;
       if (!groups.has(id)) groups.set(id, { id, exists, paths: [] });
       else if (!canonicalIds.has(id)) groups.get(id).exists ||= exists;
-      if (dir) groups.get(id).paths.push({ dir, exists });
+      if (dir) groups.get(id).paths.push({ dir, exists, pending });
     }
     return [...groups.values()];
   }

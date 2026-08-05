@@ -99,6 +99,19 @@ test('local paths augment canonical checks without changing their truth', () => 
   assert.equal(source.checks[0].paths.length, 2);
 });
 
+test('pending local paths stay neutral without changing canonical truth', () => {
+  const source = clientHealthGroups(entry({
+    source: { state: 'missing', detectedCount: 0, checkedCount: 1, checks: [{ id: 'codex-sessions', exists: false }] }
+  }), {
+    sources: [{ id: 'codex-sessions', dir: '/Users/x/.codex/sessions', exists: false, pending: true }]
+  })[0];
+
+  assert.equal(source.checks[0].exists, false);
+  assert.deepEqual(source.checks[0].paths, [
+    { dir: '/Users/x/.codex/sessions', exists: false, pending: true }
+  ]);
+});
+
 test('pathless and probe-only checks survive the source merge', () => {
   const source = clientHealthGroups(entry({
     source: { state: 'detected', detectedCount: 1, checkedCount: 2, checks: [{ id: 'wsl-home', exists: true }] }

@@ -8698,11 +8698,11 @@ function localClientSources(clientId) {
   const identity = clientSourcesIdentity(clientId);
   const exactSources = exactLocalClientSources(clientId);
   const key = clientSourceCacheApi.clientSourceRequestKey(identity);
-  const sources = exactSources ?? (
-    key && state.clientSourcesKey === key
-      ? clientSourceCacheApi.readLatestClientSources(state.clientSources, identity)
-      : null
-  );
+  const pendingSources = exactSources === null && key && state.clientSourcesKey === key;
+  const sources = pendingSources
+    ? (clientSourceCacheApi.readLatestClientSources(state.clientSources, identity) || [])
+      .map((source) => ({ ...source, exists: false, pending: true }))
+    : exactSources;
   const detectedInWsl = localDevice()?.wslStatus?.detected?.includes(clientId);
   if (!detectedInWsl) return sources;
   return [...(sources || []), { id: 'wsl-home', dir: '', exists: true }];
@@ -8835,7 +8835,7 @@ function clientHealthGroup(group, notes) {
         const paths = check.paths?.length ? check.paths : [{ dir: '', exists: check.exists }];
         for (const pathInfo of paths) {
           const chip = document.createElement('code');
-          chip.className = `tool-health-check${pathInfo.exists ? ' found' : ''}`;
+          chip.className = `tool-health-check${pathInfo.exists ? ' found' : pathInfo.pending ? ' pending' : ''}`;
           chip.textContent = pathInfo.dir ? friendlyPath(pathInfo.dir) : check.id;
           if (pathInfo.dir) chip.title = pathInfo.dir;
           list.append(chip);
@@ -9220,6 +9220,7 @@ function renderToolPreferencesNow() {
     track.append(trackInput);
     const visibility = document.createElement('button');
     visibility.type = 'button';
+    visibility.id = `toolVisibility-${id}`;
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
     visibility.dataset.client = id;
     visibility.title = t(isHidden ? 'settings.tools.showClient' : 'settings.tools.hideClient', { name: label });
@@ -9229,6 +9230,7 @@ function renderToolPreferencesNow() {
     visibility.addEventListener('click', () => onClientVisibilityToggle(id));
     const pin = document.createElement('button');
     pin.type = 'button';
+    pin.id = `toolPin-${id}`;
     pin.className = `tool-pin-button${isPinned ? ' is-pinned' : ''}`;
     pin.dataset.client = id;
     pin.title = t(isPinned ? 'settings.tools.unpinClient' : 'settings.tools.pinClient', { name: label });

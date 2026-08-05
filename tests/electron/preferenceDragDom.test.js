@@ -37,6 +37,7 @@ test('tool diagnostics summarize complete health and render three semantic group
   assert.match(summary, /return t\('settings\.summary\.tools'/);
   assert.match(group, /group\.id === 'source'/);
   assert.match(group, /group\.id === 'collection'/);
+  assert.match(group, /pathInfo\.exists \? ' found' : pathInfo\.pending \? ' pending'/);
   assert.match(actions, /role', 'status'/);
   assert.match(actions, /aria-live', 'polite'/);
   assert.match(actions, /state\.clientRescans\.snapshot\(clientId\)/);
@@ -192,6 +193,10 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /state\.toolPreferenceSourceSignature !== sourceSignature/);
   assert.match(body, /loadClientSources\(state\.clientHealthExpanded\);\s*refillOpenClientHealthPanel\(\);/);
   assert.match(body, /else \{\s*refillOpenClientHealthPanel\(\);\s*\}/);
+  assert.match(body, /visibility\.id = `toolVisibility-\$\{id\}`/);
+  assert.match(body, /pin\.id = `toolPin-\$\{id\}`/);
+  assert.match(body, /const focusedId = document\.activeElement\?\.id \|\| ''/);
+  assert.match(body, /document\.getElementById\(focusedId\)\?\.focus/);
   assert.match(body, /return;/);
   assert.doesNotMatch(body, /replaceChildren/);
   assert.match(fill, /patchRenderedNode\(current, next\)/);
@@ -201,6 +206,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(localSources, /exactLocalClientSources\(clientId\)/);
   assert.match(localSources, /state\.clientSourcesKey === key/);
   assert.match(localSources, /readLatestClientSources\(/);
+  assert.match(localSources, /exists: false, pending: true/);
 });
 
 test('the tool preference row carries the drag transform contract', () => {
