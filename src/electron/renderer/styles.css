@@ -1910,11 +1910,6 @@ span.settings-note.settings-item-desc {
   color: var(--fg);
 }
 .tool-health-action:disabled { cursor: default; opacity: 0.55; }
-.tool-health-note {
-  flex: 0 0 100%;
-  color: var(--muted);
-  opacity: 0.82;
-}
 /* One per line, because these carry paths: a row of them side by side either
    overflows the panel or truncates the only part that answers "is it looking
    where I installed it". Check ids stand in where there is no local path, and
