@@ -243,6 +243,16 @@ test('sparklinePreview builds scaled mini bars and flags the last one', () => {
   assert.equal(s.bars[2].last, true);
 });
 
+test('sparklinePreview keeps zero values at true zero height', () => {
+  const s = sparklinePreview([{ tokens: 0 }, { tokens: 10 }, { tokens: 0 }], {
+    width: 30, height: 10, gap: 0, metric: 'tokens'
+  });
+
+  assert.deepEqual(s.bars.map((bar) => [bar.value, bar.y, bar.height]), [
+    [0, 10, 0], [10, 0, 10], [0, 10, 0]
+  ]);
+});
+
 test('sparklinePreview tolerates empty input', () => {
   const s = sparklinePreview([], {});
   assert.deepEqual(s.bars, []);
@@ -325,12 +335,35 @@ test('selectPreviewSeries maps period to the right points', () => {
   assert.deepEqual(total.points.map((p) => p.month), ['2026-05', '2026-06']);
 });
 
-test('patchTodayBar overwrites the last point tokens with the live total', () => {
-  const points = [{ date: 'a', tokens: 1 }, { date: 'b', tokens: 2 }];
-  const out = patchTodayBar(points, 99);
-  assert.deepEqual(out[1], { date: 'b', tokens: 99 });
+test('patchTodayBar updates the local today row without mutating history', () => {
+  const points = [{ date: '2026-06-07', tokens: 1 }, { date: '2026-06-08', tokens: 2 }];
+  const out = patchTodayBar(points, 99, '2026-06-08');
+  assert.deepEqual(out.map((point) => point.date), [
+    '2026-06-02', '2026-06-03', '2026-06-04', '2026-06-05', '2026-06-06', '2026-06-07', '2026-06-08'
+  ]);
+  assert.deepEqual(out[6], { date: '2026-06-08', tokens: 99 });
   assert.equal(points[1].tokens, 2);          // original not mutated
   assert.deepEqual(patchTodayBar([], 99), []); // empty safe
+});
+
+test('patchTodayBar fills missing calendar days in a sparse history', () => {
+  const points = [{ date: '2026-08-01', tokens: 21000 }];
+  const out = patchTodayBar(points, 0, '2026-08-05');
+
+  assert.deepEqual(out.map((point) => point.date), [
+    '2026-07-30', '2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05'
+  ]);
+  assert.deepEqual(out.map((point) => point.tokens), [0, 0, 21000, 0, 0, 0, 0]);
+  assert.deepEqual(points, [{ date: '2026-08-01', tokens: 21000 }]); // original not mutated
+});
+
+test('patchTodayBar keeps earlier values while replacing an existing today row', () => {
+  const points = [{ date: '2026-08-01', tokens: 21000 }, { date: '2026-08-05', tokens: 2 }];
+  const out = patchTodayBar(points, 0, '2026-08-05');
+
+  assert.equal(out.find((point) => point.date === '2026-08-05').tokens, 0);
+  assert.equal(out.find((point) => point.date === '2026-08-01').tokens, 21000);
+  assert.equal(points[1].tokens, 2);          // original not mutated
 });
 
 test('sparklineSvg renders one rect per bar and marks the last', () => {
@@ -341,6 +374,17 @@ test('sparklineSvg renders one rect per bar and marks the last', () => {
   assert.equal((svg.match(/<rect /g) || []).length, 2);
   assert.match(svg, /spark-bar--last/);
   assert.doesNotMatch(svg, /<title>/); // no titles unless provided
+});
+
+test('sparklineSvg can mark zero-value trend dates without changing bar height', () => {
+  const model = sparklinePreview([{ tokens: 0 }, { tokens: 2 }], {
+    width: 20, height: 10, gap: 0, metric: 'tokens'
+  });
+  const svg = sparklineSvg(model, { titles: ['zero', 'two'], showZeroMarkers: true });
+  assert.match(svg, /class="spark-zero-marker"/);
+  assert.match(svg, /<title>zero<\/title>/);
+  assert.match(svg, /class="spark-bar spark-bar--last"/);
+  assert.doesNotMatch(svg, /spark-zero-marker--last/);
 });
 
 test('sparklineSvg embeds per-bar hover titles when supplied and escapes them', () => {

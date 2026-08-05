@@ -5346,7 +5346,7 @@ function renderTrends() {
 
   const model = charts.sparklinePreview(finalPoints, { width: 300, height: 120, gap: 0.3, metric });
   const titles = finalPoints.map((p) => `${trendShortLabel(p[labelKey], labelKey)} · ${formatCompact(p[metric])}`);
-  const svg = charts.sparklineSvg(model, { titles });
+  const svg = charts.sparklineSvg(model, { titles, showZeroMarkers: state.period === 'today' });
 
   const summary = preview.summary || {};
   const rangeLabel = state.period === 'allTime' ? t('trends.range.year')

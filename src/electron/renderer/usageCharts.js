@@ -337,11 +337,27 @@
     return { points: daily.slice(-7), metric: 'tokens', labelKey: 'date' }; // 'today' -> last 7 days
   }
 
-  function patchTodayBar(points, todayTotal) {
+  // History omits zero-usage days. Build the rolling preview from seven local
+  // calendar dates so sparse history cannot shift today's value onto an older
+  // row or make the empty days disappear from the chart.
+  const TREND_WINDOW_DAYS = 7;
+  function patchTodayBar(points, todayTotal, todayDate = localDayKey()) {
     if (!Array.isArray(points) || points.length === 0) return Array.isArray(points) ? points : [];
-    const copy = points.slice();
-    copy[copy.length - 1] = Object.assign({}, copy[copy.length - 1], { tokens: n(todayTotal) });
-    return copy;
+    const date = String(todayDate || localDayKey()).slice(0, 10);
+    const byDate = new Map();
+    for (const point of points) {
+      const key = String(point?.date || '').slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(key)) byDate.set(key, point);
+    }
+    const result = [];
+    for (let offset = -(TREND_WINDOW_DAYS - 1); offset <= 0; offset += 1) {
+      const key = addDaysUTC(date, offset);
+      const point = byDate.get(key);
+      result.push(point
+        ? Object.assign({}, point, { tokens: key === date ? n(todayTotal) : n(point.tokens) })
+        : { date: key, tokens: key === date ? n(todayTotal) : 0 });
+    }
+    return result;
   }
 
   const clientColors = {
@@ -399,13 +415,23 @@
   }
 
   function sparklineSvg(model, options) {
-    const o = Object.assign({ radius: 1, titles: null }, options || {});
+    const o = Object.assign({ radius: 1, titles: null, showZeroMarkers: false }, options || {});
     const titles = Array.isArray(o.titles) ? o.titles : null;
-    const rects = (model.bars || []).map((b, i) => {
-      const tip = titles && titles[i] ? `<title>${escapeXml(titles[i])}</title>` : '';
-      return `<rect x="${svgRound(b.x)}" y="${svgRound(b.y)}" width="${svgRound(b.width)}" height="${svgRound(Math.max(0, b.height))}" rx="${o.radius}" class="spark-bar${b.last ? ' spark-bar--last' : ''}">${tip}</rect>`;
+    const bars = Array.isArray(model?.bars) ? model.bars : [];
+    const titleOf = (index) => titles && titles[index] ? `<title>${escapeXml(titles[index])}</title>` : '';
+    const zeroMarkers = o.showZeroMarkers
+      ? bars.map((b, i) => {
+        if (b.value !== 0) return '';
+        const y = Math.max(0, model.height - 0.5);
+        return `<line x1="${svgRound(b.x)}" y1="${svgRound(y)}" x2="${svgRound(b.x + b.width)}" y2="${svgRound(y)}" class="spark-zero-marker${b.last ? ' spark-zero-marker--last' : ''}">${titleOf(i)}</line>`;
+      }).join('')
+      : '';
+    const rects = bars.map((b, i) => {
+      const tip = o.showZeroMarkers && b.value === 0 ? '' : titleOf(i);
+      const zeroClass = b.value === 0 ? ' spark-bar--zero' : '';
+      return `<rect x="${svgRound(b.x)}" y="${svgRound(b.y)}" width="${svgRound(b.width)}" height="${svgRound(Math.max(0, b.height))}" rx="${o.radius}" class="spark-bar${zeroClass}${b.last ? ' spark-bar--last' : ''}">${tip}</rect>`;
     }).join('');
-    return `<svg class="sparkline" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="${model.height}" aria-hidden="true">${rects}</svg>`;
+    return `<svg class="sparkline" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="${model.height}" aria-hidden="true">${zeroMarkers}${rects}</svg>`;
   }
 
   function areaLineSvg(model) {

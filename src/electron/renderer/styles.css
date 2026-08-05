@@ -5002,6 +5002,14 @@ html.is-windows .limit-live-badge {
   transform-origin: bottom center;
 }
 .trends-spark .spark-bar--last { opacity: 1; }
+.trends-spark .spark-zero-marker {
+  stroke: #6ab4f0;
+  stroke-width: 1;
+  opacity: 0.24;
+  pointer-events: stroke;
+  vector-effect: non-scaling-stroke;
+}
+.trends-spark .spark-zero-marker--last { opacity: 0.32; }
 .trends-axis { flex: none; display: flex; justify-content: space-between; padding: 0 4px; font-size: 10px; opacity: 0.45; font-variant-numeric: tabular-nums; }
 .trends-stats { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .trends-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(var(--overlay-rgb), 0.04); }
