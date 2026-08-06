@@ -65,6 +65,13 @@ function normalizeDailyHistoryArchive(value) {
     const day = normalizeDay(rawDay, date);
     if (day) normalized.days[day.date] = day;
   }
+  const liveSource = value?.liveDays && typeof value.liveDays === 'object' ? value.liveDays : {};
+  const liveDays = {};
+  for (const [date, rawDay] of Object.entries(liveSource)) {
+    const day = normalizeDay(rawDay, date);
+    if (day) liveDays[day.date] = day;
+  }
+  if (Object.keys(liveDays).length > 0) normalized.liveDays = liveDays;
   return normalized;
 }
 
@@ -151,6 +158,115 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   return archive;
 }
 
+function periodLiveDay(period, date) {
+  if (!period || typeof period !== 'object' || !DAY_KEY_RE.test(date)) return null;
+  const observations = [];
+  const clientModels = period.clientModels && typeof period.clientModels === 'object'
+    ? period.clientModels
+    : {};
+  const clientModelCosts = period.clientModelCosts && typeof period.clientModelCosts === 'object'
+    ? period.clientModelCosts
+    : {};
+  const clients = period.clients && typeof period.clients === 'object' ? period.clients : {};
+  const clientCosts = period.clientCosts && typeof period.clientCosts === 'object' ? period.clientCosts : {};
+  const clientIds = new Set([...Object.keys(clientModels), ...Object.keys(clients), ...Object.keys(clientCosts)]);
+
+  for (const client of clientIds) {
+    const models = clientModels[client] && typeof clientModels[client] === 'object'
+      ? clientModels[client]
+      : {};
+    const modelIds = Object.keys(models);
+    if (modelIds.length > 0) {
+      for (const modelId of modelIds) {
+        observations.push({
+          client,
+          modelId,
+          tokens: models[modelId],
+          cost: clientModelCosts[client]?.[modelId] || 0,
+          messages: 0
+        });
+      }
+      continue;
+    }
+    observations.push({
+      client,
+      modelId: 'unknown',
+      tokens: clients[client] || 0,
+      cost: clientCosts[client] || 0,
+      messages: 0
+    });
+  }
+
+  const totalTokens = Math.max(0, Math.round(num(period.totalTokens)));
+  const totalCost = Math.max(0, num(period.costUsd));
+  const observedTokens = observations.reduce((sum, observation) => sum + Math.max(0, Math.round(num(observation.tokens))), 0);
+  const observedCost = observations.reduce((sum, observation) => sum + Math.max(0, num(observation.cost)), 0);
+  if (totalTokens > observedTokens || totalCost > observedCost) {
+    observations.push({
+      client: 'unknown',
+      modelId: 'unknown',
+      tokens: Math.max(0, totalTokens - observedTokens),
+      cost: Math.max(0, totalCost - observedCost),
+      messages: 0
+    });
+  }
+
+  const day = normalizeDay({ date, activeTimeMs: 0, observations }, date);
+  return day && Object.keys(day.observations).length > 0 ? day : null;
+}
+
+function dayTokens(day) {
+  return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.tokens), 0);
+}
+
+function dayCost(day) {
+  return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.cost), 0);
+}
+
+function liveDayIsGreater(incoming, previous) {
+  const incomingTokens = dayTokens(incoming);
+  const previousTokens = dayTokens(previous);
+  if (incomingTokens !== previousTokens) return incomingTokens > previousTokens;
+  return dayCost(incoming) > dayCost(previous);
+}
+
+function mergeLiveDayMetadata(liveDay, previousDay) {
+  if (!previousDay) return liveDay;
+  const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
+    const previous = previousDay.observations[key];
+    if (!previous) return [key, observation];
+    return [key, {
+      ...observation,
+      messages: Math.max(observation.messages, previous.messages),
+      ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
+        ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
+        : {})
+    }];
+  }));
+  return {
+    ...liveDay,
+    activeTimeMs: Math.max(liveDay.activeTimeMs, previousDay.activeTimeMs),
+    observations
+  };
+}
+
+function captureLiveDailyHistory(existingArchive, period, options = {}) {
+  const archive = normalizeDailyHistoryArchive(existingArchive);
+  const date = String(options.todayKey || '').slice(0, 10);
+  const incoming = periodLiveDay(period, date);
+  if (!incoming) return archive;
+  const previous = archive.liveDays?.[date];
+  if (!previous || liveDayIsGreater(incoming, previous)) {
+    archive.liveDays = { ...(archive.liveDays || {}), [date]: incoming };
+  }
+  if (DAY_KEY_RE.test(date) && archive.liveDays) {
+    for (const liveDate of Object.keys(archive.liveDays)) {
+      if (liveDate > date) delete archive.liveDays[liveDate];
+    }
+  }
+  return archive;
+}
+
 function graphTimeMetrics(graphs, activeTimeMs) {
   const source = graphsArray(graphs)
     .map((graph) => graph.timeMetrics ?? graph.time_metrics)
@@ -174,6 +290,13 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   for (const [date, day] of Object.entries(normalizedArchive.days)) {
     if (hasTodayKey && date > todayKey) continue;
     currentDays.set(date, day);
+  }
+  for (const [date, liveDay] of Object.entries(normalizedArchive.liveDays || {})) {
+    if (hasTodayKey && date > todayKey) continue;
+    const previous = currentDays.get(date);
+    if (!previous || liveDayIsGreater(liveDay, previous)) {
+      currentDays.set(date, mergeLiveDayMetadata(liveDay, previous));
+    }
   }
 
   const contributions = [...currentDays.values()]
@@ -243,15 +366,29 @@ function retainDailyHistory(graphs, options = {}) {
   return graphFromDailyHistoryArchive(graphs, next, options);
 }
 
+function retainLiveDailyHistory(period, options = {}) {
+  const previous = readDailyHistoryArchive(options);
+  const next = captureLiveDailyHistory(previous, period, options);
+  const writeEnabled = typeof options.writeEnabled === 'function'
+    ? options.writeEnabled() !== false
+    : options.writeEnabled !== false;
+  if (writeEnabled && !isDeepStrictEqual(previous, next)) {
+    writeDailyHistoryArchive(next, options);
+  }
+  return next;
+}
+
 module.exports = {
   captureDailyHistoryArchive,
   clearDailyHistoryArchive,
   dailyHistoryArchivePath,
   graphFromDailyHistoryArchive,
+  captureLiveDailyHistory,
   normalizeDailyHistoryArchive,
   observationKey,
   readDailyHistoryArchive,
   retainDailyHistory,
+  retainLiveDailyHistory,
   shouldReplaceObservation,
   writeDailyHistoryArchive
 };

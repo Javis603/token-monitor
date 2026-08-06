@@ -5,10 +5,12 @@ const test = require('node:test');
 
 const {
   captureDailyHistoryArchive,
+  captureLiveDailyHistory,
   clearDailyHistoryArchive,
   graphFromDailyHistoryArchive,
   normalizeDailyHistoryArchive,
-  retainDailyHistory
+  retainDailyHistory,
+  retainLiveDailyHistory
 } = require('../../src/shared/dailyHistoryArchive');
 const { normalizeHistory, parseGraphResult } = require('../../src/shared/history');
 
@@ -32,6 +34,19 @@ function client(clientId, modelId, tokens, cost, messages, extra = {}) {
 
 function historyFrom(graphValue, todayKey = '2026-07-18') {
   return normalizeHistory(parseGraphResult(graphValue), { todayKey, capDays: 370 });
+}
+
+function livePeriod(totalTokens, costUsd = 0) {
+  return {
+    totalTokens,
+    costUsd,
+    clients: { claude: totalTokens },
+    clientCosts: { claude: costUsd },
+    models: { opus: totalTokens },
+    modelCosts: { opus: costUsd },
+    clientModels: { claude: { opus: totalTokens } },
+    clientModelCosts: { claude: { opus: costUsd } }
+  };
 }
 
 test('normalizeDailyHistoryArchive rejects malformed days and observations', () => {
@@ -81,6 +96,45 @@ test('capture replaces the whole observation when usage grows and refreshes equa
   ]), { todayKey: '2026-07-18' });
   const [stored] = Object.values(repriced.days['2026-07-17'].observations);
   assert.deepEqual(stored, { client: 'claude', modelId: 'opus', tokens: 120, cost: 5.2, messages: 6 });
+});
+
+test('live today snapshot wins over a smaller graph value after date rollover', () => {
+  const archive = captureLiveDailyHistory({}, livePeriod(645_957_554, 62.42), {
+    todayKey: '2026-08-05'
+  });
+  const lowerGraph = graph('2026-08-05', [client('claude', 'opus', 507_800_000, 40, 5)]);
+  const restored = historyFrom(graphFromDailyHistoryArchive(lowerGraph, archive, {
+    todayKey: '2026-08-06'
+  }), '2026-08-06');
+
+  assert.equal(restored.daily[0].date, '2026-08-05');
+  assert.equal(restored.daily[0].tokens, 645_957_554);
+  assert.equal(restored.daily[0].perClient.claude.tokens, 645_957_554);
+
+  const lowerLive = captureLiveDailyHistory(archive, livePeriod(507_800_000, 40), {
+    todayKey: '2026-08-05'
+  });
+  assert.equal(dayObservation(lowerLive, '2026-08-05').tokens, 645_957_554);
+});
+
+function dayObservation(archive, date) {
+  return Object.values(archive.liveDays[date].observations)[0];
+}
+
+test('retainLiveDailyHistory persists only a higher live snapshot', () => {
+  let stored = {};
+  let writes = 0;
+  const options = {
+    todayKey: '2026-08-05',
+    readJson: () => stored,
+    writeJsonAtomic: (_path, value) => { stored = value; writes += 1; }
+  };
+
+  retainLiveDailyHistory(livePeriod(645_957_554), options);
+  retainLiveDailyHistory(livePeriod(507_800_000), options);
+
+  assert.equal(writes, 1);
+  assert.equal(dayObservation(stored, '2026-08-05').tokens, 645_957_554);
 });
 
 test('capture keeps all observed past days beyond the presentation window', () => {

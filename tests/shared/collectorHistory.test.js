@@ -39,6 +39,18 @@ const SAMPLE_GRAPH = {
   ]
 };
 
+function usageSnapshot(totalTokens) {
+  return {
+    entries: [{
+      client: 'claude',
+      modelId: 'opus',
+      input: totalTokens,
+      cost: 0,
+      messages: 1
+    }]
+  };
+}
+
 test('collectHistoryOnce normalizes injected graph JSON into a History', async () => {
   const statuses = [];
   const history = await collectHistoryOnce({
@@ -166,6 +178,43 @@ test('collectHistoryOnce stores older days locally while capping daily output', 
   assert.deepEqual(history.daily.map((day) => day.date), ['2026-07-17']);
   assert.deepEqual(history.monthly.map((month) => month.month), ['2025-06', '2026-07']);
   assert.equal(history.summary.totalTokens, 125);
+});
+
+test('collectUsageOnce hands the live day total to history across local rollover', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-live-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const common = {
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    deviceId: 'live-handoff',
+    includeHistory: true,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveWriteEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath },
+    projectsEnabled: false,
+    limitsEnabled: false,
+    wslScanEnabled: false,
+    runGraph: async () => ({ contributions: [{ date: '2026-08-05', clients: [
+      { client: 'claude', modelId: 'opus', tokens: { input: 507_800_000 }, cost: 0, messages: 1 }
+    ] }] })
+  };
+  const collect = (now, todayTotal) => collectUsageOnce({
+    ...common,
+    now,
+    runTokscale: async () => usageSnapshot(todayTotal)
+  });
+
+  const beforeRollover = await collect('2026-08-05T23:55:00+08:00', 645_957_554);
+  assert.equal(beforeRollover.today.totalTokens, 645_957_554);
+  assert.equal(beforeRollover.history.daily[0].tokens, 645_957_554);
+
+  const afterRollover = await collect('2026-08-06T00:05:00+08:00', 11_751_310);
+  const previousDay = afterRollover.history.daily.find((day) => day.date === '2026-08-05');
+  const currentDay = afterRollover.history.daily.find((day) => day.date === '2026-08-06');
+  assert.equal(previousDay.tokens, 645_957_554);
+  assert.equal(currentDay.tokens, 11_751_310);
 });
 
 test('collectHistoryOnce falls back to the current graph when archive persistence fails', async () => {

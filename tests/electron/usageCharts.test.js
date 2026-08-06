@@ -378,6 +378,25 @@ test('patchTodayBar keeps earlier values while replacing an existing today row',
   assert.equal(points[1].tokens, 2);          // original not mutated
 });
 
+test('cross-day live bar keeps the current date and hover title on the same slot', () => {
+  const points = patchTodayBar([
+    { date: '2026-08-04', tokens: 500 },
+    { date: '2026-08-05', tokens: 507_800_000 }
+  ], 11_751_310, '2026-08-06');
+  const model = sparklinePreview(points, { width: 300, height: 120, gap: 0.3, metric: 'tokens' });
+  const titles = points.map((point) => `${point.date} · ${point.tokens}`);
+  const svg = sparklineSvg(model, { titles });
+
+  assert.deepEqual(points.slice(-2), [
+    { date: '2026-08-05', tokens: 507_800_000 },
+    { date: '2026-08-06', tokens: 11_751_310 }
+  ]);
+  assert.deepEqual([...svg.matchAll(/<title>([^<]+)/g)].map((match) => match[1]).slice(-2), [
+    '2026-08-05 · 507800000',
+    '2026-08-06 · 11751310'
+  ]);
+});
+
 test('sparklineSvg renders one rect per bar and marks the last', () => {
   const model = sparklinePreview([{ tokens: 1 }, { tokens: 2 }], { width: 20, height: 10, gap: 0, metric: 'tokens' });
   const svg = sparklineSvg(model);

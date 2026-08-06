@@ -28,7 +28,7 @@ const {
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
 const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
-const { retainDailyHistory } = require('./dailyHistoryArchive');
+const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
@@ -900,6 +900,22 @@ async function collectUsageOnce(options) {
   today = mergePeriods(windowsPeriods.today, wslBundle.today);
   month = mergePeriods(windowsPeriods.month, wslBundle.month);
   allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
+
+  // The renderer intentionally uses the live today period while a day is in
+  // progress. Persist the largest complete live snapshot on full ticks so the
+  // following day's graph/history refresh can hand that value over instead of
+  // revealing a smaller graph-only observation from the previous day.
+  if (options.historyEnabled !== false && options.dailyHistoryArchiveEnabled && !anchorUsed) {
+    try {
+      retainLiveDailyHistory(today, {
+        ...(options.dailyHistoryArchiveOptions || {}),
+        todayKey: localTodayKey(collectedAt),
+        writeEnabled: options.dailyHistoryArchiveWriteEnabled
+      });
+    } catch (error) {
+      if (typeof options.logger === 'function') options.logger(`daily live history archive failed: ${error.message}`);
+    }
+  }
 
   // WSL attribution (Windows only; null elsewhere). detected = markers found,
   // withData = clients whose WSL scan or local parser returned tokens. The gap
