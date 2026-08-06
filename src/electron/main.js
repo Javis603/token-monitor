@@ -4247,9 +4247,11 @@ async function fetchStats(options = {}) {
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   const stats = await response.json();
   if (!hubModeRequestIsCurrent(requestGeneration, 'client')) {
-    // The response belongs to a mode that is no longer active. Re-read the
-    // current mode without repeating an optional manual collector refresh so
-    // callers never receive the superseded Client snapshot.
+    // The response belongs to a mode that is no longer active. Wait for the
+    // queued mode reconciliation before re-reading: Client -> Host may still
+    // be binding the embedded hub, and an immediate retry would hit its
+    // loopback URL before it is listening.
+    await modeQueue;
     return fetchStats({
       ...options,
       force: false,

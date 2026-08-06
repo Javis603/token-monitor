@@ -37,6 +37,6 @@ test('late Hub responses cannot replace the active mode cache', () => {
   );
   assert.match(
     fetchStats[1],
-    /if \(!hubModeRequestIsCurrent\(requestGeneration, 'client'\)\) \{[\s\S]*return fetchStats\(\{[\s\S]*force: false,[\s\S]*forceHistory: false,[\s\S]*forceSelfSync: false/
+    /if \(!hubModeRequestIsCurrent\(requestGeneration, 'client'\)\) \{[\s\S]*await modeQueue;[\s\S]*return fetchStats\(\{[\s\S]*force: false,[\s\S]*forceHistory: false,[\s\S]*forceSelfSync: false/
   );
 });
