@@ -511,7 +511,7 @@ function t(key, params) {
   return i18n.translate(currentLocale(), key, params);
 }
 
-const diagnosticsPanel = window.TokenMonitorDiagnosticsPanel?.create({
+const diagnosticsPanel = window.TokenMonitorDiagnosticsPanel?.createDiagnosticsPanel({
   api: window.tokenMonitor,
   translate: t,
   getLocale: currentLocale

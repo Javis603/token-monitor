@@ -129,7 +129,7 @@ test('About diagnostics open from the support links and separate generate, view 
 
   const app = read('app.js');
   const panel = read('diagnosticsPanel.js');
-  assert.match(app, /const diagnosticsPanel = window\.TokenMonitorDiagnosticsPanel\?\.create\(/);
+  assert.match(app, /const diagnosticsPanel = window\.TokenMonitorDiagnosticsPanel\?\.createDiagnosticsPanel\(/);
   assert.match(app, /diagnosticsPanel\?\.render\(\)/);
   assert.doesNotMatch(app, /state\.diagnostics(?:Busy|DetailsOpen|Text|GeneratedAt|PreviewOpen|StatusKey|StatusTone)/);
   assert.match(panel, /async function requestReport\([\s\S]*generateDiagnosticReport/);
