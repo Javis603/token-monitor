@@ -14,14 +14,8 @@ const VALID_SUBSYSTEMS = new Set([
 ]);
 
 const VALID_CODES = new Set([
-  'agent-became-active',
-  'agent-became-inactive',
   'collector-recovered',
   'collector-tick-failed',
-  'client-sync-failed',
-  'client-sync-recovered',
-  'limits-provider-failed',
-  'limits-recovered',
   'limits-retry-scheduled',
   'storage-archive-update-failed',
   'stream-disconnected',
@@ -40,6 +34,7 @@ const VALID_DETAIL_CODES = new Set([
   'eof',
   'http-error',
   'timeout',
+  'unreachable',
   'unauthorized',
   'unknown'
 ]);

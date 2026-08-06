@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   createDiagnosticSnapshotBuilder,
+  diagnosticHubTarget,
   diagnosticStreamDetailCode
 } = require('../../src/electron/diagnosticSnapshot');
 
@@ -79,6 +80,10 @@ function createBuilder(overrides = {}) {
     getLatestHubStats: () => cachedHubStats,
     getLatestHubStatsReceivedAt: () => new Date(nowMs - 4000).toISOString(),
     getLatestHubStatsSource: () => 'host',
+    getLatestHubStatsGeneration: () => 7,
+    getLatestHubStatsIdentity: () => 'host|http://127.0.0.1:17321',
+    getHubModeGeneration: () => 7,
+    getCurrentHubStatsIdentity: () => 'host|http://127.0.0.1:17321',
     getLocalRecord: () => localRecord,
     getTokscaleStatus: () => ({ current: { version: '4.10.0', source: 'bundled' } }),
     getConfiguration: () => ({ configurationSource: 'effective-normalized', allTimeSince: '2024-01-01' }),
@@ -137,8 +142,55 @@ test('host snapshots ignore a cached client Hub after switching modes', () => {
   assert.equal(snapshot.hub.runtime.hubStatsCacheAgeSeconds, 'not-applicable');
 });
 
+test('host snapshots ignore a cache from an older generation or Hub endpoint', () => {
+  const { builder } = createBuilder({
+    getLatestHubStatsGeneration: () => 6
+  });
+  const snapshot = builder.build(new Date('2026-08-06T10:00:00.000Z'));
+
+  assert.equal(snapshot.hub.devices.summaryAvailable, false);
+  assert.equal(snapshot.hub.runtime.hubStatsCacheAgeSeconds, 'not-applicable');
+
+  const endpointSnapshot = createBuilder({
+    getLatestHubStatsIdentity: () => 'host|http://127.0.0.1:17322'
+  }).builder.build(new Date('2026-08-06T10:00:00.000Z'));
+  assert.equal(endpointSnapshot.hub.devices.summaryAvailable, false);
+});
+
+test('external-agent freshness uses the received local record, not the widget tick', () => {
+  const nowMs = Date.parse('2026-08-06T10:00:00.000Z');
+  const snapshot = createBuilder({
+    getExternalAgentActive: () => true,
+    getDeviceRuntime: () => ({
+      getDiagnostics: () => ({
+        usage: { lastTickSuccessAt: new Date(nowMs - 1000).toISOString() },
+        limits: { enabled: true, providers: [] }
+      })
+    }),
+    getLocalRecord: () => ({
+      deviceId: 'local-device',
+      receivedAt: new Date(nowMs - 3600 * 1000).toISOString(),
+      updatedAt: new Date(nowMs - 3600 * 1000).toISOString(),
+      trackedClients: ['codex'],
+      clientHealth: { observedAt: new Date(nowMs - 3600 * 1000).toISOString(), clients: {} }
+    })
+  }).builder.build(new Date(nowMs));
+
+  assert.equal(snapshot.usage.usageOwner, 'external-agent');
+  assert.equal(snapshot.usage.usageObservationAgeSeconds, 3600);
+});
+
 test('stream diagnostics map HTTP failures to the stable diagnostic code', () => {
   assert.equal(diagnosticStreamDetailCode({ reason: 'server_error' }), 'http-error');
   assert.equal(diagnosticStreamDetailCode({ reason: 'unauthorized' }), 'unauthorized');
+  assert.equal(diagnosticStreamDetailCode({ reason: 'unreachable' }), 'unreachable');
+  assert.equal(diagnosticStreamDetailCode({ reason: 'network', detail: 'ECONNRESET' }), 'connection-reset');
+  assert.equal(diagnosticStreamDetailCode({ reason: 'network', detail: 'EHOSTUNREACH' }), 'unreachable');
   assert.equal(diagnosticStreamDetailCode({ reason: 'unexpected' }), 'unknown');
+});
+
+test('Hub target classification handles IPv6 loopback and local ranges', () => {
+  assert.equal(diagnosticHubTarget('http://[::1]:17321'), 'loopback');
+  assert.equal(diagnosticHubTarget('http://[fd12::1]:17321'), 'lan');
+  assert.equal(diagnosticHubTarget('http://[fe80::1]:17321'), 'lan');
 });

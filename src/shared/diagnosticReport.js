@@ -20,7 +20,7 @@ const FINDING_CODES = new Set([
   'collector-stale',
   'external-agent-stale',
   'limits-provider-failed',
-  'storage-not-writable',
+  'storage-archive-write-failed',
   'stream-disconnected',
   'watcher-polling-fallback',
   'watcher-rebuild-failed'
@@ -28,7 +28,7 @@ const FINDING_CODES = new Set([
 
 function text(value, fallback = 'unknown', maxLength = MAX_TEXT_LENGTH) {
   const raw = String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
-  return raw ? raw.slice(0, maxLength) : fallback;
+  return raw ? Array.from(raw).slice(0, maxLength).join('') : fallback;
 }
 
 function identifier(value, fallback = 'unknown') {
@@ -581,6 +581,7 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
   const topology = snapshot.topology || {};
   const collector = snapshot.collector || {};
   const limits = snapshot.limits || {};
+  const workload = snapshot.workload || {};
   const add = (finding) => findings.push(sanitizeFinding(finding));
 
   if (collector.detailsAvailable !== false) {
@@ -606,8 +607,8 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
       add({ code: 'limits-provider-failed', provider: provider.provider });
     }
   }
-  if (snapshot.storage?.settingsWritable === false || snapshot.storage?.archiveWritable === false) {
-    add({ code: 'storage-not-writable' });
+  if (!isNoFailureCode(workload.lastSessionArchiveFailureCode)) {
+    add({ code: 'storage-archive-write-failed', detailCode: workload.lastSessionArchiveFailureCode });
   }
   return findings;
 }

@@ -2288,6 +2288,8 @@ let lastCollectedDevice = null;
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
 let latestHubStatsSource = 'none';
+let latestHubStatsGeneration = null;
+let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
@@ -2324,8 +2326,31 @@ let modeQueue = Promise.resolve();
 const pendingLimitInvalidations = new Map();
 const pendingUsageClientRefreshes = new Map();
 
-function hubModeRequestIsCurrent(generation, expectedMode) {
-  return generation === hubModeGeneration && settings?.hubMode === expectedMode;
+function hubModeRequestIsCurrent(generation, expectedMode, expectedIdentity = null) {
+  return generation === hubModeGeneration
+    && settings?.hubMode === expectedMode
+    && (expectedIdentity === null || currentHubStatsIdentity(expectedMode) === expectedIdentity);
+}
+
+function currentHubStatsIdentity(expectedMode = settings?.hubMode) {
+  const { url } = effectiveHubConfig();
+  return `${String(expectedMode || 'none')}|${String(url || 'none').replace(/\/$/, '')}`;
+}
+
+function clearLatestHubStatsCache() {
+  latestHubStats = null;
+  latestHubStatsReceivedAt = null;
+  latestHubStatsSource = 'none';
+  latestHubStatsGeneration = null;
+  latestHubStatsIdentity = null;
+}
+
+function setLatestHubStatsCache(stats, source, generation, identity) {
+  latestHubStats = stats;
+  latestHubStatsReceivedAt = new Date().toISOString();
+  latestHubStatsSource = source;
+  latestHubStatsGeneration = generation;
+  latestHubStatsIdentity = identity;
 }
 
 const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
@@ -2339,6 +2364,10 @@ const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
   getLatestHubStats: () => latestHubStats,
   getLatestHubStatsReceivedAt: () => latestHubStatsReceivedAt,
   getLatestHubStatsSource: () => latestHubStatsSource,
+  getLatestHubStatsGeneration: () => latestHubStatsGeneration,
+  getLatestHubStatsIdentity: () => latestHubStatsIdentity,
+  getHubModeGeneration: () => hubModeGeneration,
+  getCurrentHubStatsIdentity: (hubMode) => currentHubStatsIdentity(hubMode),
   getLocalRecord: localArchiveSourceDevice,
   getTokscaleStatus,
   getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
@@ -3218,16 +3247,15 @@ function startHostStats() {
   stopHostStats();
   if (!embeddedHub) return;
   const generation = hubModeGeneration;
+  const cacheIdentity = currentHubStatsIdentity('host');
   // Host mode presents the same multi-device hub aggregate as connecting to a
   // remote hub, so it reuses the renderer's 'sync' status path (Live / synced
   // data). The in-process vs loopback distinction is internal to fetchStats.
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
-    if (!hubModeRequestIsCurrent(generation, 'host')) return;
-    latestHubStats = stats;
-    latestHubStatsReceivedAt = new Date().toISOString();
-    latestHubStatsSource = 'host';
+    if (!hubModeRequestIsCurrent(generation, 'host', cacheIdentity)) return;
+    setLatestHubStatsCache(stats, 'host', generation, cacheIdentity);
     updateDiscordRpcDisplay(stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
   };
@@ -3471,10 +3499,9 @@ async function startStatsStream(options = {}) {
   stopStatsStream();
   const generation = hubModeGeneration;
   if (settings?.hubMode !== 'client') return;
+  const cacheIdentity = currentHubStatsIdentity('client');
   if (options.resetSnapshot) {
-    latestHubStats = null;
-    latestHubStatsReceivedAt = null;
-    latestHubStatsSource = 'none';
+    clearLatestHubStatsCache();
   }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
@@ -3487,7 +3514,7 @@ async function startStatsStream(options = {}) {
       headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
       signal: controller.signal
     });
-    if (!hubModeRequestIsCurrent(generation, 'client')) return;
+    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     if (!response.ok || !response.body) {
       sendStatus(false, classifyStreamFailure({ status: response.status }));
       scheduleStreamRetry();
@@ -3498,9 +3525,9 @@ async function startStatsStream(options = {}) {
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
-      if (!hubModeRequestIsCurrent(generation, 'client')) return;
+      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
-      if (!hubModeRequestIsCurrent(generation, 'client')) return;
+      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let idx;
@@ -3510,9 +3537,7 @@ async function startStatsStream(options = {}) {
         let parsed = parseSseChunk(chunk);
         if (parsed) {
           if (parsed.event === 'stats' && parsed.data?.stats) {
-            latestHubStats = parsed.data.stats;
-            latestHubStatsReceivedAt = new Date().toISOString();
-            latestHubStatsSource = 'client';
+            setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
             updateDiscordRpcDisplay(displayStats);
@@ -3521,11 +3546,11 @@ async function startStatsStream(options = {}) {
         }
       }
     }
-    if (!hubModeRequestIsCurrent(generation, 'client')) return;
+    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ eof: true }));
     scheduleStreamRetry();
   } catch (error) {
-    if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client')) return;
+    if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
   }
@@ -4070,6 +4095,7 @@ function exitTrayMode() {
 
 function startMode() {
   hubModeGeneration += 1;
+  clearLatestHubStatsCache();
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued.
   stopLocalCollector();
@@ -4220,6 +4246,7 @@ async function writeExportTo(dir, periods, options = {}) {
 
 async function fetchStats(options = {}) {
   const requestGeneration = hubModeGeneration;
+  const requestHubIdentity = currentHubStatsIdentity('client');
   const force = Boolean(options?.force);
   // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
   // settings, account sign-ins and limits actions all refresh with { force: true },
@@ -4246,7 +4273,7 @@ async function fetchStats(options = {}) {
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   const stats = await response.json();
-  if (!hubModeRequestIsCurrent(requestGeneration, 'client')) {
+  if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
     // The response belongs to a mode that is no longer active. Wait for the
     // queued mode reconciliation before re-reading: Client -> Host may still
     // be binding the embedded hub, and an immediate retry would hit its
@@ -4259,9 +4286,7 @@ async function fetchStats(options = {}) {
       forceSelfSync: false
     });
   }
-  latestHubStats = stats;
-  latestHubStatsReceivedAt = new Date().toISOString();
-  latestHubStatsSource = 'client';
+  setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
   return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
 }
 

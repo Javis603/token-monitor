@@ -3569,7 +3569,7 @@
       'settings.about.website': '网站',
       'settings.about.diagnostics.toggle': '诊断',
       'settings.about.diagnostics.title': '诊断与支持',
-      'settings.about.diagnostics.description': '建立一份已移除敏感资料的系统诊断，方便回报问题。',
+      'settings.about.diagnostics.description': '生成一份已移除敏感数据的系统诊断，便于反馈问题。',
       'settings.about.diagnostics.generate': '生成报告',
       'settings.about.diagnostics.copy': '复制报告',
       'settings.about.diagnostics.preview': '查看报告',

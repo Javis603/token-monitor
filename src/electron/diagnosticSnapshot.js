@@ -15,11 +15,12 @@ function diagnosticHubTarget(url) {
   const raw = String(url || '').trim();
   if (!raw) return 'none';
   try {
-    const hostname = new URL(raw).hostname.toLowerCase();
+    const hostname = new URL(raw).hostname.toLowerCase().replace(/^\[|\]$/g, '');
     if (hostname === 'localhost' || hostname === '::1' || hostname.startsWith('127.')) return 'loopback';
     if (hostname === '10.0.0.1' || hostname.startsWith('10.') || hostname.startsWith('192.168.') || hostname.endsWith('.local')) return 'lan';
     const match = hostname.match(/^172\.(\d+)\./);
     if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return 'lan';
+    if (hostname.startsWith('fc') || hostname.startsWith('fd') || /^fe[89ab]/.test(hostname)) return 'lan';
     return 'remote';
   } catch (_) {
     return 'remote';
@@ -49,7 +50,16 @@ function diagnosticStreamDetailCode(failure = {}) {
   if (reason === 'dns') return 'dns-failed';
   if (reason === 'unauthorized') return 'unauthorized';
   if (reason === 'disconnected') return 'eof';
+  if (reason === 'unreachable') return 'unreachable';
   if (reason === 'server_error') return 'http-error';
+  if (reason === 'network') {
+    const detail = String(failure.detail || '').trim().toUpperCase();
+    if (detail === 'ECONNREFUSED') return 'connection-refused';
+    if (detail === 'ETIMEDOUT') return 'timeout';
+    if (detail === 'ENOTFOUND' || detail === 'EAI_AGAIN') return 'dns-failed';
+    if (detail === 'EHOSTUNREACH' || detail === 'ENETUNREACH') return 'unreachable';
+    if (detail === 'ECONNRESET') return 'connection-reset';
+  }
   return 'unknown';
 }
 
@@ -76,6 +86,10 @@ function createDiagnosticSnapshotBuilder(options = {}) {
   const getLatestHubStats = options.getLatestHubStats || (() => null);
   const getLatestHubStatsReceivedAt = options.getLatestHubStatsReceivedAt || (() => null);
   const getLatestHubStatsSource = options.getLatestHubStatsSource || null;
+  const getLatestHubStatsGeneration = options.getLatestHubStatsGeneration || null;
+  const getLatestHubStatsIdentity = options.getLatestHubStatsIdentity || null;
+  const getHubModeGeneration = options.getHubModeGeneration || null;
+  const getCurrentHubStatsIdentity = options.getCurrentHubStatsIdentity || null;
   const getLocalRecord = options.getLocalRecord || (() => null);
   const getTokscaleStatus = options.getTokscaleStatus || (() => null);
   const getConfiguration = options.getConfiguration || (() => ({}));
@@ -140,9 +154,15 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       : hubMode === 'client'
         ? 'client'
         : 'none';
-    const hubStatsCacheMatchesMode = typeof getLatestHubStatsSource !== 'function'
-      ? true
-      : String(getLatestHubStatsSource() || 'none') === expectedHubStatsSource;
+    const sourceMatches = typeof getLatestHubStatsSource !== 'function'
+      || String(getLatestHubStatsSource() || 'none') === expectedHubStatsSource;
+    const generationMatches = typeof getLatestHubStatsGeneration !== 'function'
+      || typeof getHubModeGeneration !== 'function'
+      || Object.is(getLatestHubStatsGeneration(), getHubModeGeneration());
+    const identityMatches = typeof getLatestHubStatsIdentity !== 'function'
+      || typeof getCurrentHubStatsIdentity !== 'function'
+      || getLatestHubStatsIdentity() === getCurrentHubStatsIdentity(hubMode);
+    const hubStatsCacheMatchesMode = sourceMatches && generationMatches && identityMatches;
     const hubStatsCacheAgeSeconds = hubMode === 'local'
       ? 'not-applicable'
       : hubStatsCacheMatchesMode
@@ -194,7 +214,9 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       || clientsCsvForSetting(settings.clients).split(',').filter(Boolean);
     const clientDevice = localRecord || { trackedClients };
     const clients = projectClientHealth(localRecord?.clientHealth || null, clientDevice);
-    const usageObservationAt = runtime.usageDiagnostics?.lastTickSuccessAt || clients.observedAt;
+    const usageObservationAt = runtime.usageOwner === 'external-agent'
+      ? localRecord?.receivedAt || localRecord?.updatedAt || clients.observedAt
+      : runtime.usageDiagnostics?.lastTickSuccessAt || clients.observedAt;
     const syncIntervalMs = Number(localRecord?.syncUploadIntervalMs);
     const usageStaleAfterMs = Math.max(10 * 60 * 1000, Number.isFinite(syncIntervalMs) ? syncIntervalMs * 2 : 0);
     const localRecordAgeSeconds = diagnosticAgeSeconds(localRecord?.receivedAt || localRecord?.updatedAt, nowMs);

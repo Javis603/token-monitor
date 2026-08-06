@@ -295,6 +295,16 @@ test('not-configured limits are unavailable without raising a failure finding', 
   }), [{ code: 'limits-provider-failed', provider: 'zai' }]);
 });
 
+test('archive write failures become actionable findings', () => {
+  const now = Date.parse('2026-08-05T10:00:00.000Z');
+  assert.deepEqual(deriveDiagnosticFindings(baseSnapshot({
+    workload: { lastSessionArchiveFailureCode: 'archive-write-failed' }
+  }), now), [{ code: 'storage-archive-write-failed', detailCode: 'archive-write-failed' }]);
+  assert.deepEqual(deriveDiagnosticFindings(baseSnapshot({
+    storage: { settingsWritable: false, archiveWritable: false }
+  }), now), []);
+});
+
 test('formatter is allowlisted, UTF-8 bounded, and deterministically truncates variable entries', () => {
   const clients = Array.from({ length: 100 }, (_, index) => ({
     client: `client-${index}`,
@@ -347,4 +357,23 @@ test('report generator samples CPU on demand and prevents concurrent generation'
   const report = await first;
   assert.match(report.text, /cpuPercent: 4/);
   assert.equal(metricsCalls, 2);
+});
+
+test('report generator carries archive write failures into final findings', async () => {
+  const generator = createDiagnosticReportGenerator({
+    cpuSampleDurationMs: 0,
+    now: () => new Date('2026-08-05T10:00:00.000Z'),
+    getSnapshot: () => baseSnapshot({
+      workload: { lastSessionArchiveFailureCode: 'archive-write-failed' }
+    }),
+    getAppMetrics: () => [],
+    getSystemMemory: () => ({ total: 0, free: 0 }),
+    getArchiveFileStat: async () => ({ ok: false, code: 'archive-stat-failed' }),
+    wait: async () => {}
+  });
+
+  const report = await generator.generate();
+
+  assert.match(report.text, /findingCount: 1/);
+  assert.match(report.text, /storage-archive-write-failed/);
 });

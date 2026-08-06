@@ -68,3 +68,16 @@ test('diagnostic journal keeps the hub mode attached to a transition', () => {
     modeAtEvent: 'private-mode'
   }).modeAtEvent, undefined);
 });
+
+test('diagnostic journal rejects event codes without current emitters', () => {
+  for (const [subsystem, code] of [
+    ['agent', 'agent-became-active'],
+    ['agent', 'agent-became-inactive'],
+    ['client', 'client-sync-failed'],
+    ['client', 'client-sync-recovered'],
+    ['limits', 'limits-provider-failed'],
+    ['limits', 'limits-recovered']
+  ]) {
+    assert.equal(normalizeDiagnosticEvent({ subsystem, code }), null);
+  }
+});
