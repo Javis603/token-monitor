@@ -563,6 +563,7 @@ test('sync detail classification is conservative and emits only closed codes', (
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Failed to write to cache manifest' }), 'cache-write-failed');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Connection refused by Cursor API' }), 'network-failed');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'The request timed out' }), 'network-timeout');
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'HTTPS request timed out' }), 'network-timeout');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'tokscale cursor sync timed out after 30000ms' }), null);
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'ETIMEDOUT while connecting to Cursor API' }), 'network-timeout');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'new upstream wording with no known meaning' }), null);

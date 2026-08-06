@@ -125,7 +125,7 @@ function classifyClientSyncDetailCode({ client = '', text = '' } = {}) {
   if (/session (?:token )?(?:expired|invalid)|invalid (?:api )?token|not authenticated|re-authenticate|unauthorized|forbidden|status\s+(?:401|403)\b/.test(message)) {
     return 'authentication-failed';
   }
-  const hasNetworkTimeoutTerm = /\b(?:etimedout|network|http|request|connect(?:ion)?|socket|tcp|tls|dns)\b/.test(message);
+  const hasNetworkTimeoutTerm = /\b(?:etimedout|network|https?|request|connect(?:ion)?|socket|tcp|tls|dns)\b/.test(message);
   const hasTimeoutTerm = /\b(?:etimedout|timed out|timeout|deadline exceeded|deadline has elapsed)\b/.test(message);
   if (hasNetworkTimeoutTerm && hasTimeoutTerm) {
     return 'network-timeout';
