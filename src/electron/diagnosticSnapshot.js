@@ -22,11 +22,13 @@ function recordFreshnessMs(record) {
 function selectLocalDeviceRecord(options = {}) {
   const deviceId = String(options.deviceId || '').trim();
   if (!deviceId) return null;
-  const hubRecord = (Array.isArray(options.latestStats?.devices) ? options.latestStats.devices : [])
+  const rawHubRecord = (Array.isArray(options.latestHubStats?.devices) ? options.latestHubStats.devices : [])
     .find((device) => device?.deviceId === deviceId) || null;
-  if (options.externalAgentActive === true) return hubRecord;
+  const displayHubRecord = (Array.isArray(options.latestStats?.devices) ? options.latestStats.devices : [])
+    .find((device) => device?.deviceId === deviceId) || null;
+  if (options.externalAgentActive === true) return rawHubRecord;
 
-  const candidates = [options.lastCollectedDevice, options.localDevice, hubRecord]
+  const candidates = [options.lastCollectedDevice, options.localDevice, displayHubRecord, rawHubRecord]
     .filter((device) => device?.deviceId === deviceId);
   let selected = null;
   let selectedAt = null;

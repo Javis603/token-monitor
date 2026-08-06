@@ -2114,6 +2114,7 @@ function localArchiveSourceDevice() {
     externalAgentActive: isExternalAgentActive(),
     lastCollectedDevice,
     localDevice,
+    latestHubStats: currentHubStatsCache(),
     latestStats
   });
 }
@@ -2338,6 +2339,22 @@ function hubModeRequestIsCurrent(generation, expectedMode, expectedIdentity = nu
 function currentHubStatsIdentity(expectedMode = settings?.hubMode) {
   const { url } = effectiveHubConfig();
   return `${String(expectedMode || 'none')}|${String(url || 'none').replace(/\/$/, '')}`;
+}
+
+function currentHubStatsCache() {
+  const hubMode = settings?.hubMode || 'local';
+  const expectedSource = hubMode === 'host'
+    ? 'host'
+    : hubMode === 'client'
+      ? 'client'
+      : 'none';
+  if (!latestHubStats
+    || latestHubStatsSource !== expectedSource
+    || latestHubStatsGeneration !== hubModeGeneration
+    || latestHubStatsIdentity !== currentHubStatsIdentity(hubMode)) {
+    return null;
+  }
+  return latestHubStats;
 }
 
 function clearLatestHubStatsCache() {

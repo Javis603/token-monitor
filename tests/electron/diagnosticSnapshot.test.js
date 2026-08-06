@@ -181,7 +181,7 @@ test('external-agent freshness uses the received local record, not the widget ti
   assert.equal(snapshot.usage.usageObservationAgeSeconds, 3600);
 });
 
-test('external-agent record selection prefers the live Hub record over the old widget record', () => {
+test('external-agent record selection prefers the raw Hub record over a composed widget record', () => {
   const widgetRecord = {
     deviceId: 'local-device',
     agentRuntime: 'electron-widget',
@@ -197,7 +197,8 @@ test('external-agent record selection prefers the live Hub record over the old w
     deviceId: 'local-device',
     externalAgentActive: true,
     lastCollectedDevice: widgetRecord,
-    latestStats: { devices: [agentRecord] }
+    latestHubStats: { devices: [agentRecord] },
+    latestStats: { devices: [widgetRecord] }
   }), agentRecord);
 });
 

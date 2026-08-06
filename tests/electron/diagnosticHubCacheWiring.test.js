@@ -18,6 +18,11 @@ test('late Hub responses cannot replace the active mode cache', () => {
   );
   assert.match(mainSource, /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*clearLatestHubStatsCache\(\);/);
   assert.match(mainSource, /function setLatestHubStatsCache\(stats, source, generation, identity\)/);
+  assert.match(
+    mainSource,
+    /function currentHubStatsCache\(\) \{[\s\S]*latestHubStatsSource !== expectedSource[\s\S]*latestHubStatsGeneration !== hubModeGeneration[\s\S]*latestHubStatsIdentity !== currentHubStatsIdentity\(hubMode\)/
+  );
+  assert.match(mainSource, /latestHubStats: currentHubStatsCache\(\)/);
 
   const fetchStats = mainSource.match(/async function fetchStats\(options = \{\}\) \{([\s\S]*?)\n\}\n\nfunction managedPricingSidecarPath/);
   assert.ok(fetchStats, 'fetchStats exists');
