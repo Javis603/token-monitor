@@ -160,7 +160,24 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
 
 function periodLiveDay(period, date) {
   if (!period || typeof period !== 'object' || !DAY_KEY_RE.test(date)) return null;
-  const observations = [];
+  const observations = new Map();
+  const addObservation = (client, modelId, tokens, cost) => {
+    const observation = {
+      client,
+      modelId,
+      tokens: Math.max(0, Math.round(num(tokens))),
+      cost: Math.max(0, num(cost)),
+      messages: 0
+    };
+    const key = observationKey(observation);
+    const previous = observations.get(key);
+    if (!previous) {
+      observations.set(key, observation);
+      return;
+    }
+    previous.tokens += observation.tokens;
+    previous.cost += observation.cost;
+  };
   const clientModels = period.clientModels && typeof period.clientModels === 'object'
     ? period.clientModels
     : {};
@@ -176,42 +193,39 @@ function periodLiveDay(period, date) {
       ? clientModels[client]
       : {};
     const modelIds = Object.keys(models);
-    if (modelIds.length > 0) {
-      for (const modelId of modelIds) {
-        observations.push({
-          client,
-          modelId,
-          tokens: models[modelId],
-          cost: clientModelCosts[client]?.[modelId] || 0,
-          messages: 0
-        });
-      }
-      continue;
+    let modeledTokens = 0;
+    let modeledCost = 0;
+    for (const modelId of modelIds) {
+      const modelTokens = Math.max(0, Math.round(num(models[modelId])));
+      const modelCost = Math.max(0, num(clientModelCosts[client]?.[modelId]));
+      addObservation(client, modelId, modelTokens, modelCost);
+      modeledTokens += modelTokens;
+      modeledCost += modelCost;
     }
-    observations.push({
-      client,
-      modelId: 'unknown',
-      tokens: clients[client] || 0,
-      cost: clientCosts[client] || 0,
-      messages: 0
-    });
+    const clientTokens = Math.max(0, Math.round(num(clients[client])));
+    const clientCost = Math.max(0, num(clientCosts[client]));
+    const remainderTokens = Math.max(0, clientTokens - modeledTokens);
+    const remainderCost = Math.max(0, clientCost - modeledCost);
+    if (modelIds.length === 0 || remainderTokens > 0 || remainderCost > 0) {
+      addObservation(client, 'unknown', remainderTokens, remainderCost);
+    }
   }
 
   const totalTokens = Math.max(0, Math.round(num(period.totalTokens)));
   const totalCost = Math.max(0, num(period.costUsd));
-  const observedTokens = observations.reduce((sum, observation) => sum + Math.max(0, Math.round(num(observation.tokens))), 0);
-  const observedCost = observations.reduce((sum, observation) => sum + Math.max(0, num(observation.cost)), 0);
+  const observed = [...observations.values()];
+  const observedTokens = observed.reduce((sum, observation) => sum + observation.tokens, 0);
+  const observedCost = observed.reduce((sum, observation) => sum + observation.cost, 0);
   if (totalTokens > observedTokens || totalCost > observedCost) {
-    observations.push({
-      client: 'unknown',
-      modelId: 'unknown',
-      tokens: Math.max(0, totalTokens - observedTokens),
-      cost: Math.max(0, totalCost - observedCost),
-      messages: 0
-    });
+    addObservation(
+      'unknown',
+      'unknown',
+      Math.max(0, totalTokens - observedTokens),
+      Math.max(0, totalCost - observedCost)
+    );
   }
 
-  const day = normalizeDay({ date, activeTimeMs: 0, observations }, date);
+  const day = normalizeDay({ date, activeTimeMs: 0, observations: [...observations.values()] }, date);
   return day && Object.keys(day.observations).length > 0 ? day : null;
 }
 
@@ -352,7 +366,9 @@ function clearDailyHistoryArchive(options = {}) {
 }
 
 function retainDailyHistory(graphs, options = {}) {
-  const previous = readDailyHistoryArchive(options);
+  const previous = options.archive === undefined
+    ? readDailyHistoryArchive(options)
+    : normalizeDailyHistoryArchive(options.archive);
   const next = captureDailyHistoryArchive(previous, graphs, options);
   // Ownership can change while a graph scan is running (for example, a
   // headless agent starts after Electron's collector tick begins). Resolve a

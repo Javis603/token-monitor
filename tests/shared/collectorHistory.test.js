@@ -206,15 +206,42 @@ test('collectUsageOnce hands the live day total to history across local rollover
     runTokscale: async () => usageSnapshot(todayTotal)
   });
 
-  const beforeRollover = await collect('2026-08-05T23:55:00+08:00', 645_957_554);
+  const beforeRollover = await collect(new Date(2026, 7, 5, 23, 55), 645_957_554);
   assert.equal(beforeRollover.today.totalTokens, 645_957_554);
   assert.equal(beforeRollover.history.daily[0].tokens, 645_957_554);
 
-  const afterRollover = await collect('2026-08-06T00:05:00+08:00', 11_751_310);
+  const afterRollover = await collect(new Date(2026, 7, 6, 0, 5), 11_751_310);
   const previousDay = afterRollover.history.daily.find((day) => day.date === '2026-08-05');
   const currentDay = afterRollover.history.daily.find((day) => day.date === '2026-08-06');
   assert.equal(previousDay.tokens, 645_957_554);
   assert.equal(currentDay.tokens, 11_751_310);
+});
+
+test('collectUsageOnce uses the live history snapshot while archive ownership is read-only', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-read-only-live-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const result = await collectUsageOnce({
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    deviceId: 'read-only-live-history',
+    now: new Date(2026, 7, 5, 12),
+    includeHistory: true,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveWriteEnabled: false,
+    dailyHistoryArchiveOptions: { path: archivePath },
+    projectsEnabled: false,
+    limitsEnabled: false,
+    wslScanEnabled: false,
+    runTokscale: async () => usageSnapshot(645_957_554),
+    runGraph: async () => ({ contributions: [{ date: '2026-08-05', clients: [
+      { client: 'claude', modelId: 'opus', tokens: { input: 507_800_000 }, cost: 0, messages: 1 }
+    ] }] })
+  });
+
+  assert.equal(result.history.daily[0].tokens, 645_957_554);
+  assert.equal(fs.existsSync(archivePath), false);
 });
 
 test('collectHistoryOnce falls back to the current graph when archive persistence fails', async () => {

@@ -117,6 +117,31 @@ test('live today snapshot wins over a smaller graph value after date rollover', 
   assert.equal(dayObservation(lowerLive, '2026-08-05').tokens, 645_957_554);
 });
 
+test('live snapshot keeps model-less remainder under its original client', () => {
+  const archive = captureLiveDailyHistory({}, {
+    totalTokens: 150,
+    costUsd: 15,
+    clients: { claude: 150 },
+    clientCosts: { claude: 15 },
+    clientModels: { claude: { opus: 100 } },
+    clientModelCosts: { claude: { opus: 10 } }
+  }, { todayKey: '2026-08-05' });
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-05'
+  }), '2026-08-05');
+
+  assert.equal(restored.daily[0].tokens, 150);
+  assert.equal(restored.daily[0].perClient.claude.tokens, 150);
+  assert.equal(restored.daily[0].perModel.opus.tokens, 100);
+  assert.equal(restored.daily[0].perModel.unknown.tokens, 50);
+  assert.equal(dayObservation(archive, '2026-08-05').tokens, 100);
+  assert.equal(
+    Object.values(archive.liveDays['2026-08-05'].observations)
+      .find((observation) => observation.modelId === 'unknown').tokens,
+    50
+  );
+});
+
 function dayObservation(archive, date) {
   return Object.values(archive.liveDays[date].observations)[0];
 }

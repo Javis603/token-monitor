@@ -658,6 +658,7 @@ async function collectHistoryOnce(options) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
         ...(options.dailyHistoryArchiveOptions || {}),
+        archive: options.dailyHistoryArchive,
         todayKey,
         capDays,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
@@ -728,6 +729,7 @@ async function collectUsageOnce(options) {
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
+  let dailyHistoryArchive;
   let todayPartitions = null;
   const anchor = options.todayOnlyAnchor;
   const anchorUsed = Boolean(
@@ -907,7 +909,7 @@ async function collectUsageOnce(options) {
   // revealing a smaller graph-only observation from the previous day.
   if (options.historyEnabled !== false && options.dailyHistoryArchiveEnabled && !anchorUsed) {
     try {
-      retainLiveDailyHistory(today, {
+      dailyHistoryArchive = retainLiveDailyHistory(today, {
         ...(options.dailyHistoryArchiveOptions || {}),
         todayKey: localTodayKey(collectedAt),
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
@@ -986,6 +988,7 @@ async function collectUsageOnce(options) {
       dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
       dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
+      dailyHistoryArchive,
       onHistoryStatus: options.onHistoryStatus,
       logger: options.logger
     });
