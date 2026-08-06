@@ -248,7 +248,11 @@ test('parseKimiUsage falls back to the top-level usage block when no matching ki
   assert.equal(usage.windows[0].resetsAt, '2026-08-01T00:00:00.000Z');
 });
 
-test('parseKimiUsage skips the top-level usage block once limits[] already covers its kind', () => {
+test('parseKimiUsage prefers the top-level usage detail over a limits[] window of the same kind', () => {
+  // The FEATURE_CODING detail on top-level `usage` is the authoritative weekly
+  // quota (the number the console shows). A compatible proxy that also reports
+  // a 7-day window in limits[] must not displace it — the same precedence rule
+  // fixed for the membership merge in #343, applied inside the parser.
   const usage = parseKimiUsage({
     limits: [
       { detail: { used: 40, limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'DAY' } }
@@ -258,7 +262,28 @@ test('parseKimiUsage skips the top-level usage block once limits[] already cover
 
   assert.equal(usage.windows.length, 1);
   assert.equal(usage.windows[0].kind, 'weekly');
-  assert.equal(usage.windows[0].usedPercent, 20);
+  assert.equal(usage.windows[0].usedPercent, 50);
+});
+
+test('parseKimiUsage keeps the top-level detail for weekly when limits[] carries 5h and 7d windows', () => {
+  // A compatible proxy may flatten two quota windows into limits[] (a 5-hour
+  // rate limit plus a 7-day window) while top-level `usage` still carries the
+  // FEATURE_CODING detail. The detail must win the weekly slot and the 7-day
+  // limit must be dropped, mirroring CodexBar's usage.detail-as-weekly source.
+  const usage = parseKimiUsage({
+    usage: { used: 214, limit: 2048, remaining: 1834, name: 'Weekly quota' },
+    limits: [
+      { detail: { used: 20, limit: 60, remaining: 40 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } },
+      { detail: { used: 40, limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'DAY' } }
+    ]
+  });
+
+  assert.equal(usage.windows.length, 2);
+  const session = usage.windows.find((w) => w.kind === 'session');
+  const weekly = usage.windows.find((w) => w.kind === 'weekly');
+  assert.equal(session.usedPercent, (20 / 60) * 100);
+  assert.equal(weekly.usedPercent, (214 / 2048) * 100);
+  assert.equal(weekly.windowMinutes, 7 * 24 * 60);
 });
 
 test('fetchKimiLimits returns notConfigured without an API key', async () => {
@@ -335,7 +360,13 @@ test('fetchKimiLimits prefers web membership windows when a web token is configu
   assert.equal(requests.some((request) => request.url === KIMI_CODE_USAGES_URL), false);
   assert.equal(requests[0].init.headers.Authorization, 'Bearer web-token');
   assert.equal(requests[0].init.headers.Cookie, 'kimi-auth=web-token');
-  assert.equal(requests[0].init.headers['User-Agent'], BROWSER_USER_AGENT);
+  // Both web endpoints share the browser-presenting headers (the console
+  // rejects undici's default `node` agent); assert on both requests so a future
+  // per-endpoint header divergence is caught, not just the first call.
+  for (const request of requests) {
+    assert.equal(request.init.headers['User-Agent'], BROWSER_USER_AGENT);
+    assert.equal(request.init.headers['r-timezone'], Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }
   assert.equal(provider.source, 'web');
   assert.equal(provider.status, 'ok');
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'billing']);

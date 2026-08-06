@@ -239,6 +239,35 @@ function parseKimiUsage(rawBody) {
   const body = rawBody?.data && typeof rawBody.data === 'object' ? rawBody.data : rawBody;
   const windows = [];
   const seenKinds = new Set();
+
+  // The FEATURE_CODING detail on top-level `usage` is the authoritative weekly
+  // quota on both endpoints — the number the console shows. Add it before the
+  // limits[] entries so a compatible proxy that also reports a 7-day window
+  // cannot displace it: limits[] only backfills kinds the detail does not cover.
+  const usage = body?.usage;
+  if (usage && typeof usage === 'object') {
+    const usedPercent = usedPercentFromDetail(usage);
+    if (usedPercent !== null) {
+      const name = pickString(usage, ['name', 'label', 'title']);
+      const kind = classifyKimiUsageName(name);
+      const resetAt = pickRaw(usage, ['reset_at', 'resetAt', 'resetTime', 'reset_time']);
+      windows.push({
+        kind,
+        label: name.trim() || kindLabel(kind),
+        usedPercent,
+        remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)),
+        // This detail is the FEATURE_CODING weekly quota on both endpoints;
+        // anchor its pace to the canonical 7-day window instead of leaving it
+        // duration-less now that it is the primary weekly source (the members
+        // 7-day ratio it supersedes always carried the 7d duration).
+        windowMinutes: kind === 'weekly' ? KIMI_WEEKLY_WINDOW_MINUTES : undefined,
+        resetsAt: toIso(resetAt),
+        showMeter: true
+      });
+      seenKinds.add(kind);
+    }
+  }
+
   const entries = limitEntries(body);
   const classified = entries.length === 2 ? classifyKimiPair(entries) : entries.map((entry) => ({
     ...entry,
@@ -246,6 +275,7 @@ function parseKimiUsage(rawBody) {
   }));
 
   for (const entry of classified) {
+    if (seenKinds.has(entry.kind)) continue;
     seenKinds.add(entry.kind);
     windows.push({
       kind: entry.kind,
@@ -256,31 +286,6 @@ function parseKimiUsage(rawBody) {
       resetsAt: entry.resetsAt || undefined,
       showMeter: true
     });
-  }
-
-  const usage = body?.usage;
-  if (usage && typeof usage === 'object') {
-    const usedPercent = usedPercentFromDetail(usage);
-    if (usedPercent !== null) {
-      const name = pickString(usage, ['name', 'label', 'title']);
-      const kind = classifyKimiUsageName(name);
-      if (!seenKinds.has(kind)) {
-        const resetAt = pickRaw(usage, ['reset_at', 'resetAt', 'resetTime', 'reset_time']);
-        windows.push({
-          kind,
-          label: name.trim() || kindLabel(kind),
-          usedPercent,
-          remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)),
-          // This detail is the FEATURE_CODING weekly quota on both endpoints;
-          // anchor its pace to the canonical 7-day window instead of leaving it
-          // duration-less now that it is the primary weekly source (the members
-          // 7-day ratio it supersedes always carried the 7d duration).
-          windowMinutes: kind === 'weekly' ? KIMI_WEEKLY_WINDOW_MINUTES : undefined,
-          resetsAt: toIso(resetAt),
-          showMeter: true
-        });
-      }
-    }
   }
 
   return { windows };
