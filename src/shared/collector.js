@@ -1212,14 +1212,16 @@ function clientsForWatchPath(filePath, rootsByClient) {
 // never recurses into an ignored dir (so the runaway poll is gone), yet a
 // newly created state.db-wal is still seen on the next top-level readdir.
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
-// MiMo Code keeps a multi-gigabyte log/ tree alongside its SQLite state file.
+// MiMo Code keeps a multi-gigabyte log/ tree alongside its SQLite state files.
 // A plain recursive watch of ~/.local/share/mimocode storms the watcher (every
 // SQLite WAL/SHM transaction is a chokidar event, the log dir holds thousands
-// of rotated files). Tokscale only reads the db sidecar files for real usage,
-// so — like Hermes above — keep watching the home dir but ignore everything
-// except the db family. The home root itself stays watched so a freshly
-// created mimocode.db-wal still surfaces on the next top-level readdir.
-const MICODE_DB_FILES = new Set(['mimocode.db', 'mimocode.db-wal', 'mimocode.db-shm']);
+// of rotated files). Tokscale discovers mimocode.db and
+// mimocode-<channel>.db directly under each data root; the sidecars are not
+// parsed but must stay watched so a write through WAL/SHM triggers a refresh.
+// Keep the home dir watched but ignore everything except that direct db family.
+// The home root itself stays watched so a freshly created database or sidecar
+// still surfaces on the next top-level readdir.
+const MICODE_DB_WATCH_PATTERN = /^mimocode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|shm))?$/;
 // Which parts of an Antigravity IDE home are worth an event. Not "what tokscale
 // parses" — tokscale gets the token data over RPC from the running language
 // server and only reads `brain/`+`conversations/` to enumerate session ids.
@@ -1293,12 +1295,12 @@ function watchIgnoreMatcher(clientsCsv) {
     }
     if (micodeRootSet.has(resolved)) return false;
     for (const root of micodeRoots) {
-      // The MiMo Code home has a multi-GB log/ tree and the SQLite db family.
-      // The db family is what actually surfaces session changes — log/* would
-      // fire chokidar events on every transaction and stall the collector.
-      // The home root itself stays watched (basename isn't a db file, so
-      // existing comparison would incorrectly ignore it).
-      if (resolved.startsWith(root + path.sep)) return !MICODE_DB_FILES.has(path.basename(resolved));
+      if (!resolved.startsWith(root + path.sep)) continue;
+      // Tokscale reads only direct children of each MiMo root. Keep those
+      // database names and their WAL/SHM sidecars, but prune log/* and every
+      // other recursive subtree before chokidar descends into it.
+      if (path.dirname(resolved) !== root) return true;
+      return !MICODE_DB_WATCH_PATTERN.test(path.basename(resolved));
     }
     return false; // paths outside the bounded Hermes/Copilot/Antigravity/MiCode roots are never ignored
   };

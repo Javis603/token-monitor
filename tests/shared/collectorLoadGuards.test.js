@@ -81,7 +81,7 @@ test('watchPathsForClients excludes the tokscale cache dirs our own syncs write'
 });
 
 test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
-  // tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox copy, and
+  // Tokscale unions the XDG data dir with orca's hook-sandbox copy, and
   // that copy can hold sessions the XDG one is missing. Watching only XDG would
   // leave an orca-driven install without the seconds-level refresh.
   const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
@@ -93,6 +93,40 @@ test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
     const dirs = watchPathsForClients('micode');
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, orcaRoot)));
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but prunes logs', () => {
+  const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
+  const tmp = withTmpHome([path.join('.local', 'share', 'mimocode'), orcaRoot]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('micode');
+    const roots = [
+      path.join(tmp, '.local', 'share', 'mimocode'),
+      path.join(tmp, orcaRoot)
+    ];
+    const dbFamily = [
+      'mimocode.db',
+      'mimocode.db-wal',
+      'mimocode.db-shm',
+      'mimocode-nightly.db',
+      'mimocode-nightly.db-wal',
+      'mimocode-nightly.db-shm'
+    ];
+    for (const root of roots) {
+      assert.equal(ignored(root), false);
+      for (const name of dbFamily) assert.equal(ignored(path.join(root, name)), false);
+      assert.equal(ignored(path.join(root, 'log')), true);
+      assert.equal(ignored(path.join(root, 'log', 'mimocode-nightly.db')), true);
+      assert.equal(ignored(path.join(root, 'other.txt')), true);
+    }
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
