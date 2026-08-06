@@ -122,6 +122,7 @@ test('About diagnostics open from the support links and separate generate, view 
   assert.match(about, /id="copyDiagnosticButton"[^>]*class="hidden"[\s\S]*settings\.about\.diagnostics\.copy/);
   assert.match(about, /id="previewDiagnosticButton"[^>]*class="inline-link hidden"[\s\S]*settings\.about\.diagnostics\.preview/);
   assert.doesNotMatch(about, /id="closeDiagnosticPreviewButton"/);
+  assert.doesNotMatch(about, /id="diagnosticGeneratedAt"/);
   assert.match(about, /id="diagnosticPreview" class="diagnostic-preview hidden"[^>]*aria-hidden="true"[^>]*inert/);
   assert.ok(about.indexOf('id="reportIssueButton"') < about.indexOf('id="diagnosticToggleButton"'));
   assert.match(about, /data-i18n="settings\.about\.diagnostics\.privacy"/);
@@ -143,6 +144,7 @@ test('About diagnostics open from the support links and separate generate, view 
   assert.match(panel, /elements\.generate\?\.addEventListener\('click'/);
   assert.match(panel, /elements\.copy\?\.addEventListener\('click'/);
   assert.doesNotMatch(app, /closeDiagnosticPreviewButton|function closeDiagnosticPreview/);
+  assert.doesNotMatch(panel, /diagnosticGeneratedAt/);
 });
 
 test('Diagnostic disclosure uses the shared accordion transition and compact preview styling', () => {

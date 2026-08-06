@@ -32,7 +32,7 @@ function fakeElement() {
 function fakeElements() {
   return Object.fromEntries([
     'toggle', 'details', 'generate', 'copy', 'previewButton', 'status',
-    'preview', 'generatedAt', 'reportText', 'regenerate'
+    'preview', 'reportText', 'regenerate'
   ].map((key) => [key, fakeElement()]));
 }
 

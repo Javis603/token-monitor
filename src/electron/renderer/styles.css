@@ -1465,7 +1465,6 @@ span.settings-note.settings-item-desc {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-.diagnostic-generated-at { color: var(--muted); font-size: 9px; }
 #diagnosticReportText {
   max-height: 260px;
   margin: 0;

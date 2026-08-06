@@ -13,7 +13,6 @@
     previewButton: 'previewDiagnosticButton',
     status: 'diagnosticStatus',
     preview: 'diagnosticPreview',
-    generatedAt: 'diagnosticGeneratedAt',
     reportText: 'diagnosticReportText',
     regenerate: 'regenerateDiagnosticButton'
   };
@@ -60,7 +59,7 @@
     }
 
     function render() {
-      const { toggle, details, generate, copy, previewButton, status, preview, generatedAt, reportText, regenerate } = elements;
+      const { toggle, details, generate, copy, previewButton, status, preview, reportText, regenerate } = elements;
       const hasReport = Boolean(state.text);
       if (!toggle && !details && !generate && !copy && !previewButton && !preview) return state;
       if (toggle) {
@@ -104,11 +103,6 @@
       if (status) {
         status.textContent = statusText();
         status.className = `diagnostic-status${state.statusTone ? ` ${state.statusTone}` : ''}`;
-      }
-      if (generatedAt) {
-        generatedAt.textContent = state.generatedAt
-          ? translate('settings.about.diagnostics.generated', { time: generatedTime() })
-          : '';
       }
       if (reportText) reportText.textContent = state.text;
       if (preview) {
