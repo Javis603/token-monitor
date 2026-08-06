@@ -199,6 +199,37 @@ test('retainDailyHistory persists only changes and can serve the archive when a 
   assert.equal(restored.daily[0].tokens, 100);
 });
 
+test('retainDailyHistory rebases on archive changes made during the graph scan', () => {
+  const initial = captureDailyHistoryArchive({}, graph('2026-07-17', [
+    client('claude', 'opus', 100, 4, 5)
+  ]), { todayKey: '2026-07-18' });
+  const handedOff = captureDailyHistoryArchive(initial, graph('2026-07-17', [
+    client('codex', 'gpt', 50, 2, 3)
+  ]), { todayKey: '2026-07-18' });
+  let reads = 0;
+  let stored;
+  const retained = retainDailyHistory(graph('2026-07-17', [
+    client('claude', 'opus', 120, 4.8, 6)
+  ]), {
+    todayKey: '2026-07-18',
+    readJson: () => (++reads === 1 ? initial : handedOff),
+    writeJsonAtomic: (_path, value) => { stored = value; }
+  });
+
+  assert.equal(reads, 2);
+  assert.deepEqual(
+    Object.values(stored.days['2026-07-17'].observations).map((item) => item.client).sort(),
+    ['claude', 'codex']
+  );
+  assert.equal(historyFrom(retained).daily[0].tokens, 170);
+});
+
+test('captureLiveDailyHistory prunes future snapshots even when today has no usage', () => {
+  const future = captureLiveDailyHistory({}, livePeriod(100), { todayKey: '2026-08-06' });
+  const pruned = captureLiveDailyHistory(future, { totalTokens: 0 }, { todayKey: '2026-08-05' });
+  assert.equal(pruned.liveDays?.['2026-08-06'], undefined);
+});
+
 test('widget stays read-only while a headless agent owns the shared archive', () => {
   let stored = {};
   let writes = 0;

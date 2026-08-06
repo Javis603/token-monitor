@@ -60,6 +60,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
         ? options.transformUsage(summary, reason, { preview: false })
         : summary;
       deviceState.updateUsage(transformed, reason, { epoch, preview: false });
+      return transformed;
     },
     onDiagnosticEvent(event) {
       if (!active) return;

@@ -244,6 +244,60 @@ test('collectUsageOnce uses the live history snapshot while archive ownership is
   assert.equal(fs.existsSync(archivePath), false);
 });
 
+test('startCollector retains a transformed watch total until the next history tick', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-live-history-ticks-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const todayKey = localTodayKey();
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    deviceId: 'live-history-ticks',
+    intervalMs: 60 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveWriteEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath },
+    projectsEnabled: false,
+    limitsEnabled: false,
+    wslScanEnabled: false,
+    anchorPersistenceEnabled: false,
+    runTokscale: async () => usageSnapshot(100),
+    runGraph: async () => ({ contributions: [{ date: todayKey, clients: [
+      { client: 'claude', modelId: 'opus', tokens: { input: 90 }, cost: 0, messages: 1 }
+    ] }] }),
+    onUpdate: (summary, reason) => {
+      const visibleTotal = reason === 'watch' ? 300 : 200;
+      const visible = {
+        ...summary,
+        today: { ...summary.today, totalTokens: visibleTotal }
+      };
+      updates.push({ reason, summary: visible });
+      return visible;
+    }
+  });
+
+  try {
+    await waitForCondition(() => updates.length >= 1);
+    await runtime.tick('watch', { todayOnly: true });
+    await runtime.tick('manual', { forceHistory: true });
+
+    const latest = updates.at(-1).summary;
+    assert.equal(latest.history.daily.find((day) => day.date === todayKey).tokens, 300);
+    const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+    assert.equal(
+      Object.values(stored.liveDays[todayKey].observations).reduce((sum, item) => sum + item.tokens, 0),
+      300
+    );
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('collectHistoryOnce falls back to the current graph when archive persistence fails', async () => {
   const messages = [];
   const history = await collectHistoryOnce({

@@ -267,16 +267,16 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
 function captureLiveDailyHistory(existingArchive, period, options = {}) {
   const archive = normalizeDailyHistoryArchive(existingArchive);
   const date = String(options.todayKey || '').slice(0, 10);
+  if (DAY_KEY_RE.test(date) && archive.liveDays) {
+    for (const liveDate of Object.keys(archive.liveDays)) {
+      if (liveDate > date) delete archive.liveDays[liveDate];
+    }
+  }
   const incoming = periodLiveDay(period, date);
   if (!incoming) return archive;
   const previous = archive.liveDays?.[date];
   if (!previous || liveDayIsGreater(incoming, previous)) {
     archive.liveDays = { ...(archive.liveDays || {}), [date]: incoming };
-  }
-  if (DAY_KEY_RE.test(date) && archive.liveDays) {
-    for (const liveDate of Object.keys(archive.liveDays)) {
-      if (liveDate > date) delete archive.liveDays[liveDate];
-    }
   }
   return archive;
 }
@@ -365,31 +365,62 @@ function clearDailyHistoryArchive(options = {}) {
   }
 }
 
+function mergeLiveDaysIntoArchive(existingArchive, liveDays) {
+  const archive = normalizeDailyHistoryArchive(existingArchive);
+  const incoming = normalizeDailyHistoryArchive({ liveDays }).liveDays || {};
+  for (const [date, liveDay] of Object.entries(incoming)) {
+    const previous = archive.liveDays?.[date];
+    if (!previous || liveDayIsGreater(liveDay, previous)) {
+      archive.liveDays = { ...(archive.liveDays || {}), [date]: liveDay };
+    }
+  }
+  return archive;
+}
+
+function archiveWriteEnabled(options = {}) {
+  return typeof options.writeEnabled === 'function'
+    ? options.writeEnabled() !== false
+    : options.writeEnabled !== false;
+}
+
 function retainDailyHistory(graphs, options = {}) {
-  const previous = options.archive === undefined
-    ? readDailyHistoryArchive(options)
-    : normalizeDailyHistoryArchive(options.archive);
-  const next = captureDailyHistoryArchive(previous, graphs, options);
+  const previous = readDailyHistoryArchive(options);
+  const capture = (archive) => captureDailyHistoryArchive(
+    mergeLiveDaysIntoArchive(archive, options.liveDays),
+    graphs,
+    options
+  );
+  let next = capture(previous);
   // Ownership can change while a graph scan is running (for example, a
   // headless agent starts after Electron's collector tick begins). Resolve a
   // lazy guard immediately before the write instead of freezing it at startup.
-  const writeEnabled = typeof options.writeEnabled === 'function'
-    ? options.writeEnabled() !== false
-    : options.writeEnabled !== false;
-  if (writeEnabled && !isDeepStrictEqual(previous, next)) {
-    writeDailyHistoryArchive(next, options);
+  if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
+    // The graph scan can take long enough for the other collector to update the
+    // shared archive. Rebase on the latest file immediately before writing so
+    // this scan cannot put that newer observation back on disk.
+    const latest = readDailyHistoryArchive(options);
+    next = capture(latest);
+    if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, next)) {
+      writeDailyHistoryArchive(next, options);
+    }
   }
   return graphFromDailyHistoryArchive(graphs, next, options);
 }
 
 function retainLiveDailyHistory(period, options = {}) {
   const previous = readDailyHistoryArchive(options);
-  const next = captureLiveDailyHistory(previous, period, options);
-  const writeEnabled = typeof options.writeEnabled === 'function'
-    ? options.writeEnabled() !== false
-    : options.writeEnabled !== false;
-  if (writeEnabled && !isDeepStrictEqual(previous, next)) {
-    writeDailyHistoryArchive(next, options);
+  const capture = (archive) => captureLiveDailyHistory(
+    mergeLiveDaysIntoArchive(archive, options.liveDays),
+    period,
+    options
+  );
+  let next = capture(previous);
+  if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
+    const latest = readDailyHistoryArchive(options);
+    next = capture(latest);
+    if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, next)) {
+      writeDailyHistoryArchive(next, options);
+    }
   }
   return next;
 }

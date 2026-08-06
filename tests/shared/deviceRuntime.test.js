@@ -79,10 +79,11 @@ test('usage transforms run only for usage events, not limits-only publishes', ()
       return { ...summary, transformed: true };
     }
   });
-  usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 4 } }, 'startup');
+  const visible = usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 4 } }, 'startup');
   limitsDeps.onUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
 
   assert.deepEqual(transformed, [{ reason: 'startup', preview: false }]);
+  assert.equal(visible.transformed, true);
   assert.equal(records.length, 2);
   assert.equal(records[1].record.transformed, true);
 });
