@@ -1409,9 +1409,24 @@ span.settings-note.settings-item-desc {
 .about-settings-diagnostics {
   display: grid;
   gap: 6px;
+  min-width: 0;
   margin-top: 11px;
   padding-top: 10px;
   border-top: 1px solid rgba(var(--line-rgb), 0.10);
+  transition: grid-template-rows 250ms cubic-bezier(0.4, 0, 0.2, 1),
+    margin-top 250ms cubic-bezier(0.4, 0, 0.2, 1),
+    padding-top 250ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-top-color 250ms ease;
+}
+.about-settings-diagnostics.hidden {
+  padding-top: 0;
+  border-top-color: transparent;
+}
+.diagnostic-preview.hidden { display: none; }
+.about-settings-diagnostics-inner {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
 }
 .about-settings-diagnostics-heading {
   color: var(--text);
@@ -1450,7 +1465,6 @@ span.settings-note.settings-item-desc {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-.diagnostic-preview-actions { gap: 8px; text-transform: none; letter-spacing: normal; }
 .diagnostic-generated-at { color: var(--muted); font-size: 9px; }
 #diagnosticReportText {
   max-height: 260px;
