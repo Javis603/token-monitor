@@ -125,17 +125,23 @@ test('About diagnostics open from the support links and separate generate, view 
   assert.match(about, /id="diagnosticPreview" class="diagnostic-preview hidden"[^>]*aria-hidden="true"[^>]*inert/);
   assert.ok(about.indexOf('id="reportIssueButton"') < about.indexOf('id="diagnosticToggleButton"'));
   assert.match(about, /data-i18n="settings\.about\.diagnostics\.privacy"/);
+  assert.ok(html.indexOf('src="diagnosticsPanel.js"') < html.indexOf('src="app.js"'));
 
   const app = read('app.js');
-  assert.match(app, /function ensureDiagnosticReport\([\s\S]*window\.tokenMonitor\.generateDiagnosticReport/);
-  assert.match(app, /function toggleDiagnosticDetails\([\s\S]*state\.diagnosticsDetailsOpen/);
-  assert.match(app, /state\.diagnosticsBusy = true[\s\S]*renderDiagnosticControls\(\)/);
-  assert.match(app, /function generateDiagnosticReport\(\)[\s\S]*ensureDiagnosticReport\(\{ openPreview: true \}\)/);
-  assert.match(app, /function regenerateDiagnosticReport\(\)[\s\S]*force: true/);
-  assert.match(app, /preview\.textContent = state\.diagnosticsPreviewOpen[\s\S]*settings\.about\.diagnostics\.hidePreview/);
-  assert.match(app, /function previewDiagnosticReport\(\)[\s\S]*state\.diagnosticsPreviewOpen = !state\.diagnosticsPreviewOpen/);
-  assert.match(app, /generateDiagnosticButton\?\.addEventListener\('click'/);
-  assert.match(app, /copyDiagnosticButton\?\.addEventListener\('click'/);
+  const panel = read('diagnosticsPanel.js');
+  assert.match(app, /const diagnosticsPanel = window\.TokenMonitorDiagnosticsPanel\?\.create\(/);
+  assert.match(app, /diagnosticsPanel\?\.render\(\)/);
+  assert.doesNotMatch(app, /state\.diagnostics(?:Busy|DetailsOpen|Text|GeneratedAt|PreviewOpen|StatusKey|StatusTone)/);
+  assert.match(panel, /async function requestReport\([\s\S]*generateDiagnosticReport/);
+  assert.match(panel, /async function ensureReport\([\s\S]*state\.busy/);
+  assert.match(panel, /function toggleDetails\([\s\S]*state\.detailsOpen/);
+  assert.match(panel, /state\.busy = true[\s\S]*render\(\)/);
+  assert.match(panel, /generate: \(\) => ensureReport\(\{ openPreview: true \}\)/);
+  assert.match(panel, /regenerate: \(\) => ensureReport\(\{ force: true, openPreview: true \}\)/);
+  assert.match(panel, /previewButton\.textContent = state\.previewOpen[\s\S]*settings\.about\.diagnostics\.hidePreview/);
+  assert.match(panel, /function togglePreview\([\s\S]*state\.previewOpen = !state\.previewOpen/);
+  assert.match(panel, /elements\.generate\?\.addEventListener\('click'/);
+  assert.match(panel, /elements\.copy\?\.addEventListener\('click'/);
   assert.doesNotMatch(app, /closeDiagnosticPreviewButton|function closeDiagnosticPreview/);
 });
 

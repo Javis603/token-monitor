@@ -44,8 +44,8 @@ const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../sha
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
-const { projectClientHealth, projectHubDevices } = require('../shared/diagnosticReport');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
+const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
@@ -2322,11 +2322,62 @@ let modeQueue = Promise.resolve();
 const pendingLimitInvalidations = new Map();
 const pendingUsageClientRefreshes = new Map();
 
+const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
+  getSettings: () => settings,
+  getMode: () => mode,
+  getEffectiveHubConfig: effectiveHubConfig,
+  getExternalAgentActive: isExternalAgentActive,
+  getDeviceRuntime: () => deviceRuntimeHandle,
+  getEmbeddedHub: () => embeddedHub,
+  getStreamState: () => ({ connected: streamConnected, failure: streamFailure }),
+  getLatestHubStats: () => latestHubStats,
+  getLatestHubStatsReceivedAt: () => latestHubStatsReceivedAt,
+  getLocalRecord: localArchiveSourceDevice,
+  getTokscaleStatus,
+  getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
+    usage: {
+      agentVersion: appVersion(),
+      agentRuntime: 'electron-widget',
+      commandTimeoutMs: 120 * 1000,
+      defaultDeviceId: defaultDeviceId(),
+      intervalMs: collectorIntervalMs(),
+      historyIntervalMs: normalizeHistoryIntervalMs(settings?.historyIntervalMs)
+    },
+    limits: {
+      env: process.env,
+      defaultLimitProviders: defaultLimitProviders()
+    },
+    syncUploadIntervalMs: syncUploadIntervalMs()
+  }),
+  getJournalSnapshot: () => diagnosticJournal.getSnapshot(),
+  getArchiveState: () => {
+    const enabled = settings?.sessionUsageArchiveEnabled !== false;
+    const loaded = sessionUsageArchive !== null;
+    return {
+      enabled,
+      loaded,
+      sessionCount: loaded ? Object.keys(sessionUsageArchive?.sessions || {}).length : null,
+      countSource: loaded ? 'loaded-memory' : enabled ? 'not-loaded' : 'not-enabled',
+      lastUpdate: lastSessionUsageArchiveUpdate
+    };
+  },
+  getAppVersion: appVersion,
+  getDefaultDeviceId: defaultDeviceId,
+  canRefreshUsageRuntime,
+  getAppState: () => ({
+    packaged: app.isPackaged,
+    preferredLanguages: typeof app.getPreferredSystemLanguages === 'function'
+      ? app.getPreferredSystemLanguages()
+      : [app.getLocale?.() || 'en'],
+    locale: app.getLocale?.() || 'en'
+  })
+});
+
 const diagnosticReportGenerator = createDiagnosticReportGenerator({
   getAppMetrics: () => app.getAppMetrics(),
   getSystemMemory: () => ({ total: os.totalmem(), free: os.freemem() }),
   privateMemorySupported: process.platform === 'win32',
-  getSnapshot: ({ generatedAt }) => buildDiagnosticSnapshot(generatedAt),
+  getSnapshot: ({ generatedAt }) => diagnosticSnapshotBuilder.build(generatedAt),
   getArchiveFileStat: async () => {
     if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
     try {
@@ -2512,263 +2563,6 @@ function isExternalAgentActive() {
     process.kill(pid, 0);
     return true;
   } catch (_) { return false; }
-}
-
-function diagnosticAgeSeconds(value, nowMs = Date.now()) {
-  const timestamp = Date.parse(String(value || ''));
-  if (!Number.isFinite(timestamp)) return null;
-  return Math.max(0, Math.round((nowMs - timestamp) / 1000));
-}
-
-function diagnosticHubTarget(url) {
-  const raw = String(url || '').trim();
-  if (!raw) return 'none';
-  try {
-    const hostname = new URL(raw).hostname.toLowerCase();
-    if (hostname === 'localhost' || hostname === '::1' || hostname.startsWith('127.')) return 'loopback';
-    if (hostname === '10.0.0.1' || hostname.startsWith('10.') || hostname.startsWith('192.168.') || hostname.endsWith('.local')) return 'lan';
-    const match = hostname.match(/^172\.(\d+)\./);
-    if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return 'lan';
-    return 'remote';
-  } catch (_) {
-    return 'remote';
-  }
-}
-
-function diagnosticHubTransport(url) {
-  try {
-    const protocol = new URL(String(url || '')).protocol;
-    if (protocol === 'http:' || protocol === 'https:') return protocol.slice(0, -1);
-  } catch (_) {}
-  return 'none';
-}
-
-function diagnosticOsInfo(device) {
-  const name = String(device?.osName || '').trim() || (
-    process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : process.platform
-  );
-  const version = String(device?.osVersion || '').trim() || os.release();
-  return { name, version };
-}
-
-function diagnosticTokscaleInfo() {
-  try {
-    const status = getTokscaleStatus();
-    return {
-      version: status.current?.version || status.bundled?.version || 'unknown',
-      source: status.current?.source || (status.bundled ? 'bundled' : 'unknown')
-    };
-  } catch (_) {
-    return { version: 'unknown', source: 'unknown' };
-  }
-}
-
-function diagnosticConfiguration() {
-  return diagnosticConfigurationFromSettings(settings || {}, {
-    usage: {
-      agentVersion: appVersion(),
-      agentRuntime: 'electron-widget',
-      commandTimeoutMs: 120 * 1000,
-      defaultDeviceId: defaultDeviceId(),
-      intervalMs: collectorIntervalMs(),
-      historyIntervalMs: normalizeHistoryIntervalMs(settings?.historyIntervalMs)
-    },
-    limits: {
-      env: process.env,
-      defaultLimitProviders: defaultLimitProviders()
-    },
-    syncUploadIntervalMs: syncUploadIntervalMs()
-  });
-}
-
-function diagnosticRuntimeInfo() {
-  const hubMode = settings?.hubMode || 'local';
-  const { url: hubUrl } = effectiveHubConfig();
-  const externalAgentActive = isExternalAgentActive();
-  const runtimeDiagnostics = deviceRuntimeHandle?.getDiagnostics?.() || {};
-  const usageDiagnostics = runtimeDiagnostics.usage || null;
-  const limitsDiagnostics = runtimeDiagnostics.limits || null;
-  const usageOwner = externalAgentActive
-    ? 'external-agent'
-    : usageDiagnostics && canRefreshUsageRuntime(mode, () => false)
-      ? 'electron-widget'
-      : 'none';
-  const limitsOwner = limitsDiagnostics ? 'electron-widget' : 'none';
-  const usageCompleteness = externalAgentActive
-    ? 'partial-external-owner'
-    : usageDiagnostics
-      ? 'full'
-      : 'partial-no-runtime';
-  const limitsCompleteness = limitsDiagnostics ? 'full' : 'partial-no-runtime';
-  let hubKind = 'none';
-  let hubSoftwareVersion = 'not-applicable';
-  let hubSoftwareVersionSource = 'not-applicable';
-  if (hubMode === 'host') {
-    hubKind = 'embedded-node';
-    hubSoftwareVersion = appVersion();
-    hubSoftwareVersionSource = 'embedded-app-version';
-  } else if (hubMode === 'client') {
-    hubKind = 'remote-unknown';
-    hubSoftwareVersion = 'unknown';
-    hubSoftwareVersionSource = 'unavailable';
-  }
-  const streamState = hubMode === 'local'
-    ? 'not-applicable'
-    : hubMode === 'host'
-      ? embeddedHub ? 'connected' : 'disconnected'
-      : streamConnected ? 'connected' : 'disconnected';
-  const lastStreamFailureCode = streamState === 'disconnected'
-    ? diagnosticStreamDetailCode(streamFailure || {})
-    : 'none';
-  const hubStatsCacheAgeSeconds = hubMode === 'local'
-    ? 'not-applicable'
-    : diagnosticAgeSeconds(latestHubStatsReceivedAt);
-  const hubRuntime = {
-    hubKind,
-    hubSoftwareVersion,
-    hubSoftwareVersionSource,
-    hubTarget: hubMode === 'local' ? 'none' : diagnosticHubTarget(hubUrl),
-    hubTransport: hubMode === 'local' ? 'none' : diagnosticHubTransport(hubUrl),
-    streamState,
-    hubStatsCacheAgeSeconds
-  };
-  return {
-    externalAgentActive,
-    runtimeDiagnostics,
-    usageDiagnostics,
-    limitsDiagnostics,
-    usageOwner,
-    limitsOwner,
-    usageCompleteness,
-    limitsCompleteness,
-    hubRuntime,
-    topology: {
-      hubMode,
-      hubTarget: hubRuntime.hubTarget,
-      hubTransport: hubRuntime.hubTransport,
-      externalAgentAlive: externalAgentActive,
-      usageOwner,
-      limitsOwner,
-      streamState,
-      lastStreamFailureCode,
-      embeddedHubRunning: Boolean(embeddedHub),
-      hubStatsCacheAgeSeconds: hubRuntime.hubStatsCacheAgeSeconds
-    }
-  };
-}
-
-function buildDiagnosticSnapshot(generatedAt = new Date()) {
-  const nowMs = Date.now();
-  const runtime = diagnosticRuntimeInfo();
-  const localRecord = localArchiveSourceDevice();
-  const osInfo = diagnosticOsInfo(localRecord);
-  const trackedClients = localRecord?.trackedClients || clientsCsvForSetting(settings?.clients).split(',').filter(Boolean);
-  const clientDevice = localRecord || { trackedClients };
-  const clients = projectClientHealth(localRecord?.clientHealth || null, clientDevice);
-  const usageObservationAt = runtime.usageDiagnostics?.lastTickSuccessAt || clients.observedAt;
-  const syncIntervalMs = Number(localRecord?.syncUploadIntervalMs);
-  const usageStaleAfterMs = Math.max(10 * 60 * 1000, Number.isFinite(syncIntervalMs) ? syncIntervalMs * 2 : 0);
-  const localRecordAgeSeconds = diagnosticAgeSeconds(localRecord?.receivedAt || localRecord?.updatedAt, nowMs);
-  let hubStats = null;
-  let hubSummarySource = 'not-applicable';
-  if (settings?.hubMode === 'host' && embeddedHub) {
-    hubStats = latestHubStats;
-    hubSummarySource = 'same-process-hub-cache';
-  } else if (settings?.hubMode === 'client') {
-    hubStats = latestHubStats;
-    hubSummarySource = 'cached-hub-stats';
-  }
-  const hubDevices = projectHubDevices(hubStats, {
-    summaryAvailable: Boolean(hubStats && Array.isArray(hubStats.devices)),
-    summarySource: hubSummarySource,
-    localDeviceId: settings?.deviceId || defaultDeviceId(),
-    nowMs
-  });
-  const tokScale = diagnosticTokscaleInfo();
-  const archiveLoaded = sessionUsageArchive !== null;
-  const archiveEnabled = settings?.sessionUsageArchiveEnabled !== false;
-  const reportJournal = diagnosticJournal.getSnapshot();
-  const reportCompleteness = runtime.usageCompleteness === 'full' && runtime.limitsCompleteness === 'full'
-    ? 'full'
-    : runtime.usageCompleteness === 'partial-external-owner'
-      ? 'partial-external-owner'
-      : 'partial-no-runtime';
-  return {
-    report: {
-      generatedAt: generatedAt instanceof Date ? generatedAt.toISOString() : new Date(generatedAt).toISOString(),
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
-      reportCompleteness,
-      usageCompleteness: runtime.usageCompleteness,
-      limitsCompleteness: runtime.limitsCompleteness,
-      journalScope: 'electron-widget',
-      journalStartedAt: reportJournal.startedAt,
-      journalOmittedCount: 0
-    },
-    environment: {
-      appVersion: appVersion(),
-      electronVersion: process.versions.electron,
-      nodeVersion: process.versions.node,
-      chromiumVersion: process.versions.chrome,
-      tokscaleVersion: tokScale.version,
-      tokscaleSource: tokScale.source,
-      packaged: app.isPackaged,
-      platform: process.platform,
-      osName: osInfo.name,
-      osVersion: osInfo.version,
-      architecture: process.arch,
-      languageSetting: settings?.language || 'auto',
-      resolvedLocale: resolveLocale(
-        settings?.language || 'auto',
-        typeof app.getPreferredSystemLanguages === 'function'
-          ? app.getPreferredSystemLanguages()
-          : [app.getLocale?.() || 'en']
-      ),
-      appUptimeSeconds: Math.round(process.uptime())
-    },
-    configuration: diagnosticConfiguration(),
-    topology: runtime.topology,
-    hub: {
-      runtime: runtime.hubRuntime,
-      devices: hubDevices
-    },
-    usage: {
-      usageOwner: runtime.usageOwner,
-      localUsageRuntimePresent: Boolean(deviceRuntimeHandle && runtime.usageDiagnostics),
-      usageRefreshAllowed: runtime.usageOwner === 'electron-widget',
-      usageCompleteness: runtime.usageCompleteness,
-      usageJournalAvailable: runtime.usageOwner === 'electron-widget' && Boolean(runtime.usageDiagnostics),
-      localRecordAgeSeconds,
-      usageObservationAgeSeconds: diagnosticAgeSeconds(usageObservationAt, nowMs),
-      usageStaleAfterSeconds: Math.round(usageStaleAfterMs / 1000),
-      limitsOwner: runtime.limitsOwner,
-      limitsCompleteness: runtime.limitsCompleteness
-    },
-    collector: {
-      ...(runtime.usageDiagnostics || { state: 'unavailable' }),
-      detailsAvailable: !runtime.externalAgentActive && Boolean(runtime.usageDiagnostics)
-    },
-    clients,
-    limits: runtime.limitsDiagnostics || { enabled: false, active: 0, maxConcurrency: null, queued: 0, providers: [] },
-    journal: reportJournal,
-    workload: {
-      sessionArchiveEnabled: archiveEnabled,
-      sessionArchivePresent: archiveLoaded,
-      sessionArchiveSessionCount: archiveLoaded ? Object.keys(sessionUsageArchive?.sessions || {}).length : null,
-      sessionArchiveCountSource: archiveLoaded ? 'loaded-memory' : archiveEnabled ? 'not-loaded' : 'not-enabled',
-      lastSessionArchiveUpdateDurationMs: lastSessionUsageArchiveUpdate.durationMs,
-      lastSessionArchiveUpdateAt: lastSessionUsageArchiveUpdate.at,
-      lastSessionArchiveFailureCode: lastSessionUsageArchiveUpdate.failureCode,
-      lastCollectorTickDurationMs: runtime.usageDiagnostics?.lastTickDurationMs ?? null,
-      lastCollectorTickScope: runtime.usageDiagnostics?.lastTickScope || null,
-      lastHistoryScanDurationMs: runtime.usageDiagnostics?.lastHistoryScanDurationMs ?? null
-    },
-    storage: {
-      settingsReadable: Boolean(settings),
-      settingsWritable: null,
-      archiveReadable: null,
-      archiveWritable: null
-    }
-  };
 }
 
 function ownsUsageRuntime() {
@@ -3577,17 +3371,6 @@ function updateTrayDisplay() {
     if (usageIconId) icon = providerTrayIcons[usageIconId];
   }
   tray.setImage(icon || getDefaultTrayIcon());
-}
-
-function diagnosticStreamDetailCode(failure = {}) {
-  const reason = String(failure.reason || '').trim().toLowerCase();
-  if (reason === 'refused') return 'connection-refused';
-  if (reason === 'timeout') return 'timeout';
-  if (reason === 'dns') return 'dns-failed';
-  if (reason === 'unauthorized') return 'unauthorized';
-  if (reason === 'disconnected') return 'eof';
-  if (reason === 'server_error') return 'http-error';
-  return 'unknown';
 }
 
 function recordDiagnosticEvent(event) {
