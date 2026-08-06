@@ -97,6 +97,10 @@ const {
   writeCodexAuthFile
 } = require('../shared/codexSystemSwitch');
 const {
+  commitManagedCodexAccountFromMaterial,
+  removeManagedCodexAccountRecord
+} = require('../shared/codexAccountImport');
+const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
   normalizePinnedClients
@@ -1442,72 +1446,57 @@ async function addCodexManagedAccount(onOutput, options = {}) {
 // constructed one built from a pasted token) already identifies the account, so the OAuth/workspace
 // dance is skipped and the auth.json is placed in a managed home exactly as a finished web login
 // leaves it. The committed record is identical to the web-login path — same id/email/keys — because
-// it funnels through the same commitCodexManagedAccount + codexAuthIdentity pipeline.
+// it funnels through the same commitCodexManagedAccount + codexAuthIdentity pipeline. The placement
+// + snapshot/restore rollback lives in the shared, dep-injected commitManagedCodexAccountFromMaterial.
 async function addCodexManagedAccountFromMaterial({ identity, data }) {
-  if (!hasCodexIdentity(identity)) {
-    return { ok: false, error: 'Could not identify the Codex account.' };
-  }
-  await fs.promises.mkdir(codexManagedRoot(), { recursive: true });
-  const existing = findExistingCodexAccount(normalizeCodexManagedAccounts(settings.codexManagedAccounts), identity);
-  const homePath = codexManagedHomePath(codexAccountId(identity, existing));
-  if (!homePath) return { ok: false, error: 'The saved Codex account path is invalid.' };
-  let homeExisted = false;
-  try {
-    await fs.promises.stat(homePath);
-    homeExisted = true;
-  } catch (_) { /* managed home does not exist yet */ }
   const previousAccounts = settings.codexManagedAccounts;
-  let authSnapshot = null;
-  let account;
-  try {
-    await fs.promises.mkdir(homePath, { recursive: true });
-    // On a re-import (refresh) the existing account's working auth.json is overwritten. Snapshot it
-    // first so a failed commit restores the previous credentials instead of leaving the account
-    // pointing at an auth.json that was never recorded — mirroring the web-login path's own snapshot.
-    if (homeExisted) authSnapshot = await snapshotCodexAuthFile(path.join(homePath, 'auth.json'));
-    await writeCodexAuthFile(path.join(homePath, 'auth.json'), data);
-    account = commitCodexManagedAccount(identity, homePath, existing, { restart: false });
-  } catch (error) {
-    settings.codexManagedAccounts = previousAccounts;
-    try { saveSettings(); } catch (rollbackError) {
-      console.warn('Could not restore Codex account settings:', rollbackError?.message || rollbackError);
+  return commitManagedCodexAccountFromMaterial({ identity, data }, {
+    accounts: normalizeCodexManagedAccounts(settings.codexManagedAccounts),
+    resolveHomePath: (accountId) => codexManagedHomePath(accountId),
+    ensureRoot: async () => { await fs.promises.mkdir(codexManagedRoot(), { recursive: true }); },
+    fs: {
+      mkdir: (homePath) => fs.promises.mkdir(homePath, { recursive: true }),
+      stat: (homePath) => fs.promises.stat(homePath)
+    },
+    snapshot: (authPath) => snapshotCodexAuthFile(authPath),
+    writeAuth: (authPath, authData) => writeCodexAuthFile(authPath, authData),
+    restore: (snapshot, options) => restoreCodexAuthFileSnapshot(snapshot, options),
+    removeHome: (homePath) => removeManagedHomeIfSafe(homePath),
+    commit: (ident, homePath, existing) => commitCodexManagedAccount(ident, homePath, existing, { restart: false }),
+    onSettingsRollback: async () => {
+      settings.codexManagedAccounts = previousAccounts;
+      try { saveSettings(); } catch (rollbackError) {
+        console.warn('Could not restore Codex account settings:', rollbackError?.message || rollbackError);
+      }
+    },
+    invalidate: (account) => {
+      void queueLimitInvalidation({
+        provider: 'codex',
+        accountId: account.id,
+        accountKey: account.accountKey || ''
+      }, 'account-imported');
     }
-    if (authSnapshot) {
-      // Restore the pre-import auth.json (or drop a freshly written one the snapshot saw no original for).
-      await restoreCodexAuthFileSnapshot(authSnapshot, { removeNewParent: false }).catch(() => {});
-    } else if (!homeExisted) {
-      // A brand-new home that failed before/during the first write is just litter; remove it. A
-      // pre-existing home is left untouched (its auth.json is restored via the snapshot above).
-      await removeManagedHomeIfSafe(homePath).catch(() => {});
-    }
-    throw error;
-  }
-  void queueLimitInvalidation({
-    provider: 'codex',
-    accountId: account.id,
-    accountKey: account.accountKey || ''
-  }, 'account-imported');
-  return { ok: true, account };
+  });
 }
 
 async function removeCodexManagedAccount(id) {
   const accountId = String(id || '').trim();
-  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  settings.codexManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (error) {
-    return { ok: false, error: error?.message || 'Could not persist account removal' };
-  }
-  await removeManagedHomeIfSafe(account.homePath);
-  try { ensureCredentialStore().removeCodexAccountToken(accountId); } catch (_) {}
-  void queueLimitInvalidation({ provider: 'codex', accountId, accountKey: account.accountKey || '' }, 'account-removed', {
-    clear: true,
-    refresh: false
+  return removeManagedCodexAccountRecord(accountId, {
+    accounts: normalizeCodexManagedAccounts(settings.codexManagedAccounts),
+    persist: async (nextAccounts) => {
+      settings.codexManagedAccounts = nextAccounts;
+      saveSettings({ throwOnError: true });
+    },
+    removeHome: (homePath) => removeManagedHomeIfSafe(homePath),
+    removeToken: (tokenId) => { ensureCredentialStore().removeCodexAccountToken(tokenId); },
+    invalidate: (acctId, accountKey) => {
+      void queueLimitInvalidation({ provider: 'codex', accountId: acctId, accountKey }, 'account-removed', {
+        clear: true,
+        refresh: false
+      });
+    },
+    rendererAccounts: () => codexAccountsForRenderer()
   });
-  return { ok: true, accounts: codexAccountsForRenderer() };
 }
 
 function setCodexManagedAccountEnabled(id, enabled) {

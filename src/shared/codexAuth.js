@@ -270,6 +270,7 @@ module.exports = {
   codexAuthIdentity,
   codexAccountKey,
   hashAccountKey,
+  hasCodexIdentity,
   parseCodexAuthJson,
   authFromCodexAccessToken
 };
