@@ -2288,6 +2288,7 @@ let lastCollectedDevice = null;
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
 let latestHubStatsSource = 'none';
+let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
 let trayRefreshInFlight = false;
@@ -2322,6 +2323,10 @@ let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
 const pendingLimitInvalidations = new Map();
 const pendingUsageClientRefreshes = new Map();
+
+function hubModeRequestIsCurrent(generation, expectedMode) {
+  return generation === hubModeGeneration && settings?.hubMode === expectedMode;
+}
 
 const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
   getSettings: () => settings,
@@ -3212,12 +3217,14 @@ function stopHostStats() {
 function startHostStats() {
   stopHostStats();
   if (!embeddedHub) return;
+  const generation = hubModeGeneration;
   // Host mode presents the same multi-device hub aggregate as connecting to a
   // remote hub, so it reuses the renderer's 'sync' status path (Live / synced
   // data). The in-process vs loopback distinction is internal to fetchStats.
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
+    if (!hubModeRequestIsCurrent(generation, 'host')) return;
     latestHubStats = stats;
     latestHubStatsReceivedAt = new Date().toISOString();
     latestHubStatsSource = 'host';
@@ -3462,6 +3469,8 @@ function parseSseChunk(chunk) {
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
+  const generation = hubModeGeneration;
+  if (settings?.hubMode !== 'client') return;
   if (options.resetSnapshot) {
     latestHubStats = null;
     latestHubStatsReceivedAt = null;
@@ -3478,6 +3487,7 @@ async function startStatsStream(options = {}) {
       headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
       signal: controller.signal
     });
+    if (!hubModeRequestIsCurrent(generation, 'client')) return;
     if (!response.ok || !response.body) {
       sendStatus(false, classifyStreamFailure({ status: response.status }));
       scheduleStreamRetry();
@@ -3488,6 +3498,7 @@ async function startStatsStream(options = {}) {
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
+      if (!hubModeRequestIsCurrent(generation, 'client')) return;
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -3509,10 +3520,11 @@ async function startStatsStream(options = {}) {
         }
       }
     }
+    if (!hubModeRequestIsCurrent(generation, 'client')) return;
     sendStatus(false, classifyStreamFailure({ eof: true }));
     scheduleStreamRetry();
   } catch (error) {
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client')) return;
     sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
   }
@@ -4056,6 +4068,7 @@ function exitTrayMode() {
 }
 
 function startMode() {
+  hubModeGeneration += 1;
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued.
   stopLocalCollector();
@@ -4205,6 +4218,7 @@ async function writeExportTo(dir, periods, options = {}) {
 }
 
 async function fetchStats(options = {}) {
+  const requestGeneration = hubModeGeneration;
   const force = Boolean(options?.force);
   // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
   // settings, account sign-ins and limits actions all refresh with { force: true },
@@ -4230,10 +4244,13 @@ async function fetchStats(options = {}) {
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  latestHubStats = await response.json();
-  latestHubStatsReceivedAt = new Date().toISOString();
-  latestHubStatsSource = 'client';
-  return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
+  const stats = await response.json();
+  if (hubModeRequestIsCurrent(requestGeneration, 'client')) {
+    latestHubStats = stats;
+    latestHubStatsReceivedAt = new Date().toISOString();
+    latestHubStatsSource = 'client';
+  }
+  return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
 }
 
 function managedPricingSidecarPath() {
