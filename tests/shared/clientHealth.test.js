@@ -8,6 +8,7 @@ const {
   CLIENT_HEALTH_OVERALL_STATES,
   CLIENT_HEALTH_VERSION,
   CLIENT_SOURCE_CHECK_IDS,
+  MAX_SYNC_DETAIL_INPUT_LENGTH,
   MAX_CHECKS_PER_CLIENT,
   MAX_DIAGNOSTICS_PER_CLIENT,
   MAX_TRACKED_CLIENTS,
@@ -558,8 +559,18 @@ test('sync detail classification is conservative and emits only closed codes', (
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Cursor API returned status 401' }), 'authentication-failed');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Invalid response from Cursor API - expected CSV format' }), 'invalid-response');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Failed to persist file: Permission denied /Users/alice' }), 'permission-denied');
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'spawn EPERM' }), 'permission-denied');
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Failed to write to cache manifest' }), 'cache-write-failed');
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Connection refused by Cursor API' }), 'network-failed');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'The request timed out' }), 'network-timeout');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'new upstream wording with no known meaning' }), null);
+  assert.equal(
+    classifyClientSyncDetailCode({
+      client: 'cursor',
+      text: `${'x'.repeat(MAX_SYNC_DETAIL_INPUT_LENGTH + 1)}connection refused`
+    }),
+    null
+  );
 });
 
 // lastSyncAt is the rate-limit anchor that claim() moves; a completion never

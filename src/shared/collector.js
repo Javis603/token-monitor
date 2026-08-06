@@ -11,6 +11,7 @@ const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const {
   CLIENT_HEALTH_VERSION,
+  MAX_SYNC_DETAIL_INPUT_LENGTH,
   MAX_DIAGNOSTICS_PER_CLIENT,
   classifyClientSyncDetailCode,
   deriveClientOverall
@@ -607,7 +608,11 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       child.kill('SIGTERM');
       settle(true, 'sync-timeout', { failureStage: 'timeout' });
     }, 30000);
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length >= MAX_SYNC_DETAIL_INPUT_LENGTH) return;
+      const remaining = MAX_SYNC_DETAIL_INPUT_LENGTH - stderr.length;
+      stderr += chunk.toString().slice(0, remaining);
+    });
     child.on('error', (err) => settle(true, 'sync-spawn-failed', {
       failureStage: 'spawn',
       detailCode: classifyClientSyncDetailCode({ client: 'antigravity', text: err?.message })

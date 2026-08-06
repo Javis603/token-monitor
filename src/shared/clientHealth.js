@@ -70,6 +70,7 @@ const CLIENT_SYNC_DETAIL_CODES = Object.freeze([
   'unknown'
 ]);
 const CLIENT_SYNC_DETAIL_CODE_SET = new Set(CLIENT_SYNC_DETAIL_CODES);
+const MAX_SYNC_DETAIL_INPUT_LENGTH = 8 * 1024;
 
 function normalizeClientSyncFailureStage(value) {
   const stage = String(value ?? '').trim().toLowerCase();
@@ -91,14 +92,27 @@ function normalizeClientSyncDetailCode(value) {
   return CLIENT_SYNC_DETAIL_CODE_SET.has(code) ? code : 'unknown';
 }
 
+function boundedSyncDetailText(value) {
+  const raw = String(value ?? '');
+  if (raw.length <= MAX_SYNC_DETAIL_INPUT_LENGTH) return raw;
+  let bounded = '';
+  let codePoints = 0;
+  for (const character of raw) {
+    if (codePoints >= MAX_SYNC_DETAIL_INPUT_LENGTH) break;
+    bounded += character;
+    codePoints += 1;
+  }
+  return bounded;
+}
+
 // Classify only high-confidence, stable substrings from the local sync error.
 // The input is used inside the process and the return value is the only part
 // that may cross the client-health or diagnostic boundaries.
 function classifyClientSyncDetailCode({ client = '', text = '' } = {}) {
-  const message = String(text ?? '').trim().toLowerCase();
+  const message = boundedSyncDetailText(text).trim().toLowerCase();
   if (!message) return null;
 
-  if (/permission denied|access is denied|operation not permitted|\beacces\b/.test(message)) {
+  if (/permission denied|access is denied|operation not permitted|\beacces\b|\beperm\b/.test(message)) {
     return 'permission-denied';
   }
   if (
@@ -440,6 +454,7 @@ module.exports = {
   CLIENT_COLLECTION_STATES,
   CLIENT_SYNC_DETAIL_CODES,
   CLIENT_SYNC_FAILURE_STAGES,
+  MAX_SYNC_DETAIL_INPUT_LENGTH,
   CLIENT_SOURCE_CHECK_IDS,
   CLIENT_SOURCE_STATES,
   MAX_CHECKS_PER_CLIENT,
