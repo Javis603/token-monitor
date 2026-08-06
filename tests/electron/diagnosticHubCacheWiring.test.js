@@ -23,7 +23,7 @@ test('late Hub responses cannot replace the active mode cache', () => {
   assert.match(fetchStats[1], /const requestGeneration = hubModeGeneration;/);
   assert.match(
     fetchStats[1],
-    /const stats = await response\.json\(\);[\s\S]*if \(hubModeRequestIsCurrent\(requestGeneration, 'client'\)\)/
+    /const stats = await response\.json\(\);[\s\S]*if \(!hubModeRequestIsCurrent\(requestGeneration, 'client'\)\)/
   );
   assert.match(fetchStats[1], /composeLocalSyncStats\(stats, lastCollectedDevice\)/);
 
@@ -31,4 +31,12 @@ test('late Hub responses cannot replace the active mode cache', () => {
   assert.ok(stream, 'startStatsStream exists');
   assert.match(stream[1], /const generation = hubModeGeneration;/);
   assert.match(stream[1], /hubModeRequestIsCurrent\(generation, 'client'\)/);
+  assert.match(
+    stream[1],
+    /const \{ value, done \} = await reader\.read\(\);\s*if \(!hubModeRequestIsCurrent\(generation, 'client'\)\) return;\s*if \(done\) break;/
+  );
+  assert.match(
+    fetchStats[1],
+    /if \(!hubModeRequestIsCurrent\(requestGeneration, 'client'\)\) \{[\s\S]*return fetchStats\(\{[\s\S]*force: false,[\s\S]*forceHistory: false,[\s\S]*forceSelfSync: false/
+  );
 });

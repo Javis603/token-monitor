@@ -3500,6 +3500,7 @@ async function startStatsStream(options = {}) {
     for (;;) {
       if (!hubModeRequestIsCurrent(generation, 'client')) return;
       const { value, done } = await reader.read();
+      if (!hubModeRequestIsCurrent(generation, 'client')) return;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let idx;
@@ -4245,11 +4246,20 @@ async function fetchStats(options = {}) {
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   const stats = await response.json();
-  if (hubModeRequestIsCurrent(requestGeneration, 'client')) {
-    latestHubStats = stats;
-    latestHubStatsReceivedAt = new Date().toISOString();
-    latestHubStatsSource = 'client';
+  if (!hubModeRequestIsCurrent(requestGeneration, 'client')) {
+    // The response belongs to a mode that is no longer active. Re-read the
+    // current mode without repeating an optional manual collector refresh so
+    // callers never receive the superseded Client snapshot.
+    return fetchStats({
+      ...options,
+      force: false,
+      forceHistory: false,
+      forceSelfSync: false
+    });
   }
+  latestHubStats = stats;
+  latestHubStatsReceivedAt = new Date().toISOString();
+  latestHubStatsSource = 'client';
   return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
 }
 
