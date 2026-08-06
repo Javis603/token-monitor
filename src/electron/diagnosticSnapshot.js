@@ -1,5 +1,6 @@
 'use strict';
 
+const net = require('node:net');
 const os = require('node:os');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { projectClientHealth, projectHubDevices } = require('../shared/diagnosticReport');
@@ -11,6 +12,34 @@ function diagnosticAgeSeconds(value, nowMs = Date.now()) {
   return Math.max(0, Math.round((nowMs - timestamp) / 1000));
 }
 
+function recordFreshnessMs(record) {
+  return [record?.receivedAt, record?.updatedAt]
+    .map((value) => Date.parse(String(value || '')))
+    .filter(Number.isFinite)
+    .reduce((latest, timestamp) => Math.max(latest, timestamp), null);
+}
+
+function selectLocalDeviceRecord(options = {}) {
+  const deviceId = String(options.deviceId || '').trim();
+  if (!deviceId) return null;
+  const hubRecord = (Array.isArray(options.latestStats?.devices) ? options.latestStats.devices : [])
+    .find((device) => device?.deviceId === deviceId) || null;
+  if (options.externalAgentActive === true) return hubRecord;
+
+  const candidates = [options.lastCollectedDevice, options.localDevice, hubRecord]
+    .filter((device) => device?.deviceId === deviceId);
+  let selected = null;
+  let selectedAt = null;
+  for (const candidate of candidates) {
+    const candidateAt = recordFreshnessMs(candidate);
+    if (!selected || (candidateAt !== null && (selectedAt === null || candidateAt > selectedAt))) {
+      selected = candidate;
+      selectedAt = candidateAt;
+    }
+  }
+  return selected;
+}
+
 function diagnosticHubTarget(url) {
   const raw = String(url || '').trim();
   if (!raw) return 'none';
@@ -20,7 +49,8 @@ function diagnosticHubTarget(url) {
     if (hostname === '10.0.0.1' || hostname.startsWith('10.') || hostname.startsWith('192.168.') || hostname.endsWith('.local')) return 'lan';
     const match = hostname.match(/^172\.(\d+)\./);
     if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return 'lan';
-    if (hostname.startsWith('fc') || hostname.startsWith('fd') || /^fe[89ab]/.test(hostname)) return 'lan';
+    if (net.isIP(hostname) === 6
+      && (hostname.startsWith('fc') || hostname.startsWith('fd') || /^fe[89ab]/.test(hostname))) return 'lan';
     return 'remote';
   } catch (_) {
     return 'remote';
@@ -331,5 +361,6 @@ module.exports = {
   diagnosticHubTransport,
   diagnosticOsInfo,
   diagnosticStreamDetailCode,
-  diagnosticTokscaleInfo
+  diagnosticTokscaleInfo,
+  selectLocalDeviceRecord
 };

@@ -45,7 +45,7 @@ const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs } 
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
-const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode } = require('./diagnosticSnapshot');
+const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
@@ -2109,10 +2109,13 @@ function removedTrackedClients(previousClients, nextClients) {
 }
 
 function localArchiveSourceDevice() {
-  const deviceId = settings?.deviceId || defaultDeviceId();
-  if (lastCollectedDevice?.deviceId === deviceId) return lastCollectedDevice;
-  if (localDevice?.deviceId === deviceId) return localDevice;
-  return (latestStats?.devices || []).find((device) => device?.deviceId === deviceId) || null;
+  return selectLocalDeviceRecord({
+    deviceId: settings?.deviceId || defaultDeviceId(),
+    externalAgentActive: isExternalAgentActive(),
+    lastCollectedDevice,
+    localDevice,
+    latestStats
+  });
 }
 
 function updateArchivedClientUsage(previousClients, nextClients) {

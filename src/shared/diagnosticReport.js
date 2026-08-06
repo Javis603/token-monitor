@@ -607,7 +607,9 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
       add({ code: 'limits-provider-failed', provider: provider.provider });
     }
   }
-  if (!isNoFailureCode(workload.lastSessionArchiveFailureCode)) {
+  if (workload.sessionArchiveEnabled !== false
+    && usage.usageOwner === 'electron-widget'
+    && !isNoFailureCode(workload.lastSessionArchiveFailureCode)) {
     add({ code: 'storage-archive-write-failed', detailCode: workload.lastSessionArchiveFailureCode });
   }
   return findings;

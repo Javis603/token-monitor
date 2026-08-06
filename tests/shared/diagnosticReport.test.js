@@ -301,6 +301,13 @@ test('archive write failures become actionable findings', () => {
     workload: { lastSessionArchiveFailureCode: 'archive-write-failed' }
   }), now), [{ code: 'storage-archive-write-failed', detailCode: 'archive-write-failed' }]);
   assert.deepEqual(deriveDiagnosticFindings(baseSnapshot({
+    workload: { sessionArchiveEnabled: false, lastSessionArchiveFailureCode: 'archive-write-failed' }
+  }), now), []);
+  assert.deepEqual(deriveDiagnosticFindings(baseSnapshot({
+    usage: { usageOwner: 'external-agent' },
+    workload: { lastSessionArchiveFailureCode: 'archive-write-failed' }
+  }), now), []);
+  assert.deepEqual(deriveDiagnosticFindings(baseSnapshot({
     storage: { settingsWritable: false, archiveWritable: false }
   }), now), []);
 });

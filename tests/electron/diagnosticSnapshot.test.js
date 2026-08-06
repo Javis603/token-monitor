@@ -6,7 +6,8 @@ const test = require('node:test');
 const {
   createDiagnosticSnapshotBuilder,
   diagnosticHubTarget,
-  diagnosticStreamDetailCode
+  diagnosticStreamDetailCode,
+  selectLocalDeviceRecord
 } = require('../../src/electron/diagnosticSnapshot');
 
 function createBuilder(overrides = {}) {
@@ -180,6 +181,26 @@ test('external-agent freshness uses the received local record, not the widget ti
   assert.equal(snapshot.usage.usageObservationAgeSeconds, 3600);
 });
 
+test('external-agent record selection prefers the live Hub record over the old widget record', () => {
+  const widgetRecord = {
+    deviceId: 'local-device',
+    agentRuntime: 'electron-widget',
+    receivedAt: '2026-08-06T08:00:00.000Z'
+  };
+  const agentRecord = {
+    deviceId: 'local-device',
+    agentRuntime: 'headless-agent',
+    receivedAt: '2026-08-06T09:59:00.000Z'
+  };
+
+  assert.equal(selectLocalDeviceRecord({
+    deviceId: 'local-device',
+    externalAgentActive: true,
+    lastCollectedDevice: widgetRecord,
+    latestStats: { devices: [agentRecord] }
+  }), agentRecord);
+});
+
 test('stream diagnostics map HTTP failures to the stable diagnostic code', () => {
   assert.equal(diagnosticStreamDetailCode({ reason: 'server_error' }), 'http-error');
   assert.equal(diagnosticStreamDetailCode({ reason: 'unauthorized' }), 'unauthorized');
@@ -193,4 +214,7 @@ test('Hub target classification handles IPv6 loopback and local ranges', () => {
   assert.equal(diagnosticHubTarget('http://[::1]:17321'), 'loopback');
   assert.equal(diagnosticHubTarget('http://[fd12::1]:17321'), 'lan');
   assert.equal(diagnosticHubTarget('http://[fe80::1]:17321'), 'lan');
+  assert.equal(diagnosticHubTarget('https://fda.gov'), 'remote');
+  assert.equal(diagnosticHubTarget('https://fc.example.com'), 'remote');
+  assert.equal(diagnosticHubTarget('https://fe8.example.com'), 'remote');
 });
