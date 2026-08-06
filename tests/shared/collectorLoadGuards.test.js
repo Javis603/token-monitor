@@ -1622,6 +1622,46 @@ test('cursor sync runs at most once per throttle window across ticks', async () 
   }
 });
 
+test('cursor sync failure metadata reaches client health without stderr or paths', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = recordingSpawn([]);
+  const cursorAuth = require('../../src/shared/cursorAuth');
+  const originalReadActiveAccount = cursorAuth.readActiveAccount;
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  cursorAuth.readActiveAccount = () => ({ accessToken: 'token' });
+  cursorAuth.runCursorSync = async () => {
+    const error = new Error('tokscale cursor sync exited 17: /Users/alice/.config/tokscale/private');
+    error.syncFailureStage = 'process-exit';
+    error.syncDetailCode = 'authentication-failed';
+    error.syncExitCode = 17;
+    throw error;
+  };
+  try {
+    const { collectUsageOnce } = freshCollector();
+    const summary = await collectUsageOnce({
+      clients: 'cursor',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      forceSelfSync: true,
+      limitsEnabled: false
+    });
+    const entry = summary.clientHealth.clients.cursor;
+    assert.equal(entry.collection.state, 'failed');
+    assert.equal(entry.collection.syncFailureStage, 'process-exit');
+    assert.equal(entry.collection.syncDetailCode, 'authentication-failed');
+    assert.equal(entry.collection.syncExitCode, 17);
+    assert.equal(JSON.stringify(summary).includes('/Users/alice'), false);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    cursorAuth.readActiveAccount = originalReadActiveAccount;
+    cursorAuth.runCursorSync = originalRunCursorSync;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('a targeted tick does not sync an unrelated self-synced client', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;

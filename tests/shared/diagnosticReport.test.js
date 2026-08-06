@@ -188,6 +188,69 @@ test('findings mark a collector stale after the effective interval threshold', (
   assert.deepEqual(findings, [{ code: 'collector-stale' }]);
 });
 
+test('client sync failures become findings for Cursor and Antigravity', () => {
+  const now = Date.parse('2026-08-05T10:00:00.000Z');
+  const findings = deriveDiagnosticFindings(baseSnapshot({
+    clients: {
+      clients: [
+        {
+          client: 'cursor',
+          collectionState: 'failed',
+          diagnosticCodes: ['sync-timeout']
+        },
+        {
+          client: 'antigravity',
+          collectionState: 'failed',
+          diagnosticCodes: ['sync-exit-error']
+        }
+      ],
+      counts: { attention: 2 }
+    }
+  }), now);
+
+  assert.deepEqual(findings, [
+    { code: 'client-sync-failed', client: 'cursor', detailCode: 'sync-timeout' },
+    { code: 'client-sync-failed', client: 'antigravity', detailCode: 'sync-exit-error' }
+  ]);
+});
+
+test('client findings require a recognized sync failure code', () => {
+  const now = Date.parse('2026-08-05T10:00:00.000Z');
+  const findings = deriveDiagnosticFindings(baseSnapshot({
+    clients: {
+      clients: [{
+        client: 'antigravity',
+        collectionState: 'failed',
+        diagnosticCodes: ['source-missing']
+      }],
+      counts: { attention: 1 }
+    }
+  }), now);
+
+  assert.deepEqual(findings, []);
+});
+
+test('client report includes bounded sync stage and exit evidence', () => {
+  const report = formatDiagnosticReport(baseSnapshot({
+    clients: {
+      clients: [{
+        client: 'antigravity',
+        collectionState: 'failed',
+        syncFailureStage: 'process-exit',
+        syncDetailCode: 'rpc-failed',
+        syncExitCode: 17,
+        diagnosticCodes: ['sync-exit-error']
+      }],
+      counts: { attention: 1 }
+    }
+  }));
+
+  assert.match(report.text, /syncFailureStage: process-exit/);
+  assert.match(report.text, /syncDetailCode: rpc-failed/);
+  assert.match(report.text, /syncExitCode: 17/);
+  assert.equal(report.text.includes('/Users/'), false);
+});
+
 test('diagnostic values preserve large token totals and archive sizes', () => {
   const report = formatDiagnosticReport(baseSnapshot({
     environment: {

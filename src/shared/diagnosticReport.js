@@ -1,6 +1,12 @@
 'use strict';
 
 const { staleAfterMsForSyncUpload } = require('./syncUploadInterval');
+const { SELF_SYNC_FAILURE_CODES } = require('./selfSyncThrottle');
+const {
+  normalizeClientSyncDetailCode,
+  normalizeClientSyncExitCode,
+  normalizeClientSyncFailureStage
+} = require('./clientHealth');
 
 const DIAGNOSTIC_SCHEMA_VERSION = 1;
 const DIAGNOSTIC_REDACTION_VERSION = 1;
@@ -18,6 +24,7 @@ const SOURCE_STATES = new Set(['detected', 'missing', 'unknown']);
 const FINDING_CODES = new Set([
   'collector-failed',
   'collector-stale',
+  'client-sync-failed',
   'external-agent-stale',
   'limits-provider-failed',
   'storage-archive-write-failed',
@@ -122,6 +129,15 @@ function projectClientHealth(health, device = {}) {
       checkedCount: integer(source.checkedCount, 0),
       sourceChecks: checks,
       collectionState: safeCollectionState(collection.state),
+      syncFailureStage: safeCollectionState(collection.state) === 'failed'
+        ? normalizeClientSyncFailureStage(collection.syncFailureStage)
+        : null,
+      syncDetailCode: safeCollectionState(collection.state) === 'failed'
+        ? (normalizeClientSyncDetailCode(collection.syncDetailCode) || 'unknown')
+        : null,
+      syncExitCode: safeCollectionState(collection.state) === 'failed'
+        ? normalizeClientSyncExitCode(collection.syncExitCode)
+        : null,
       lastAttemptAt: isoTimestamp(collection.lastAttemptAt),
       lastSuccessAt: isoTimestamp(collection.lastSuccessAt),
       lastActivityDay: text(data.lastActivityDay, 'unknown', 16),
@@ -413,6 +429,7 @@ function sanitizeClient(client = {}) {
   const diagnosticCodes = Array.isArray(client.diagnosticCodes)
     ? client.diagnosticCodes.map((code) => identifier(code, '')).filter(Boolean).slice(0, 4)
     : [];
+  const collectionState = safeCollectionState(client.collectionState);
   return {
     client: identifier(client.client),
     healthEntryAvailable: client.healthEntryAvailable === true,
@@ -421,7 +438,12 @@ function sanitizeClient(client = {}) {
     detectedCount: boundedCount(client.detectedCount),
     checkedCount: boundedCount(client.checkedCount),
     sourceChecks,
-    collectionState: safeCollectionState(client.collectionState),
+    collectionState,
+    syncFailureStage: collectionState === 'failed' ? normalizeClientSyncFailureStage(client.syncFailureStage) : null,
+    syncDetailCode: collectionState === 'failed'
+      ? (normalizeClientSyncDetailCode(client.syncDetailCode) || 'unknown')
+      : null,
+    syncExitCode: collectionState === 'failed' ? normalizeClientSyncExitCode(client.syncExitCode) : null,
     lastAttemptAt: isoTimestamp(client.lastAttemptAt),
     lastSuccessAt: isoTimestamp(client.lastSuccessAt),
     lastActivityDay: text(client.lastActivityDay, 'unknown', 16),
@@ -601,6 +623,13 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
   if (usage.usageOwner === 'external-agent' && usage.usageObservationAgeSeconds !== null && usage.usageObservationAgeSeconds > usageStaleAfterSeconds) {
     add({ code: 'external-agent-stale' });
   }
+  for (const client of snapshot.clients?.clients || []) {
+    if (client?.collectionState !== 'failed') continue;
+    const detailCode = (Array.isArray(client.diagnosticCodes) ? client.diagnosticCodes : [])
+      .map((code) => String(code || '').trim().toLowerCase())
+      .find((code) => SELF_SYNC_FAILURE_CODES.has(code));
+    if (detailCode) add({ code: 'client-sync-failed', client: client.client, detailCode });
+  }
   for (const provider of limits.providers || []) {
     const failureCode = provider.failureCode || provider.lastFailureCode;
     if (!isNoFailureCode(failureCode) && !isNotConfiguredFailure(failureCode)) {
@@ -760,6 +789,15 @@ function formatClient(client) {
     line('detectedCount', client.detectedCount, '    '),
     line('checkedCount', client.checkedCount, '    '),
     line('collectionState', client.collectionState, '    '),
+    ...(client.collectionState === 'failed' && client.syncFailureStage
+      ? [line('syncFailureStage', client.syncFailureStage, '    ')]
+      : []),
+    ...(client.collectionState === 'failed' && client.syncDetailCode
+      ? [line('syncDetailCode', client.syncDetailCode, '    ')]
+      : []),
+    ...(client.collectionState === 'failed' && client.syncExitCode !== null && client.syncExitCode !== undefined
+      ? [line('syncExitCode', client.syncExitCode, '    ')]
+      : []),
     line('lastAttemptAt', client.lastAttemptAt, '    '),
     line('lastSuccessAt', client.lastSuccessAt, '    '),
     line('lastActivityDay', client.lastActivityDay, '    '),

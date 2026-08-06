@@ -52,6 +52,89 @@ const CLIENT_COLLECTION_STATES = Object.freeze([
   'direct', 'idle', 'pending', 'ok', 'failed', 'unknown'
 ]);
 
+// Additional evidence for a failed self-sync. These values describe the stage
+// that failed, not the subprocess's message; the latter may contain paths and
+// is never allowed onto the device record.
+const CLIENT_SYNC_FAILURE_STAGES = Object.freeze(['spawn', 'timeout', 'process-exit', 'unknown']);
+const CLIENT_SYNC_FAILURE_STAGE_SET = new Set(CLIENT_SYNC_FAILURE_STAGES);
+const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
+const CLIENT_SYNC_DETAIL_CODES = Object.freeze([
+  'language-server-not-found',
+  'rpc-failed',
+  'permission-denied',
+  'cache-write-failed',
+  'invalid-response',
+  'network-timeout',
+  'network-failed',
+  'authentication-failed',
+  'unknown'
+]);
+const CLIENT_SYNC_DETAIL_CODE_SET = new Set(CLIENT_SYNC_DETAIL_CODES);
+
+function normalizeClientSyncFailureStage(value) {
+  const stage = String(value ?? '').trim().toLowerCase();
+  if (!stage) return null;
+  return CLIENT_SYNC_FAILURE_STAGE_SET.has(stage) ? stage : 'unknown';
+}
+
+function normalizeClientSyncExitCode(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const code = Number(raw);
+  return Number.isSafeInteger(code) && code >= 0 && code <= MAX_SYNC_EXIT_CODE ? code : null;
+}
+
+function normalizeClientSyncDetailCode(value) {
+  const code = String(value ?? '').trim().toLowerCase();
+  if (!code) return null;
+  return CLIENT_SYNC_DETAIL_CODE_SET.has(code) ? code : 'unknown';
+}
+
+// Classify only high-confidence, stable substrings from the local sync error.
+// The input is used inside the process and the return value is the only part
+// that may cross the client-health or diagnostic boundaries.
+function classifyClientSyncDetailCode({ client = '', text = '' } = {}) {
+  const message = String(text ?? '').trim().toLowerCase();
+  if (!message) return null;
+
+  if (/permission denied|access is denied|operation not permitted|\beacces\b/.test(message)) {
+    return 'permission-denied';
+  }
+  if (
+    /no space left on device|read-only file system/.test(message)
+    || /failed to (?:create|persist|write|save).*(?:cache|artifact|manifest)/.test(message)
+    || /(?:cache|artifact|manifest).*(?:write|persist|save).*(?:failed|error)/.test(message)
+  ) {
+    return 'cache-write-failed';
+  }
+  if (/session (?:token )?(?:expired|invalid)|invalid (?:api )?token|not authenticated|re-authenticate|unauthorized|forbidden|status\s+(?:401|403)\b/.test(message)) {
+    return 'authentication-failed';
+  }
+  if (/timed out|timeout|deadline has elapsed|operation timed out/.test(message)) {
+    return 'network-timeout';
+  }
+  if (/malformed.*response|invalid response|expected csv format|failed to parse response|invalid json/.test(message)) {
+    return 'invalid-response';
+  }
+  if (
+    client === 'antigravity'
+    && /cannot discover .*language servers?|language server.*(?:not found|unavailable)|no .*language servers?/.test(message)
+  ) {
+    return 'language-server-not-found';
+  }
+  if (
+    client === 'antigravity'
+    && (/\brpc\b.*(?:fail|error)|(?:fail|error).*\brpc\b|failed to connect to antigravity rpc/.test(message))
+  ) {
+    return 'rpc-failed';
+  }
+  if (/failed to connect|connection refused|connection reset|could not resolve|\bdns\b|\bnetwork\b/.test(message)) {
+    return 'network-failed';
+  }
+  return null;
+}
+
 // Stable ids for the source roots the collector probes. One id can stand for
 // several paths of the same kind — Copilot's workspaceStorage has a variant per
 // platform, Kiro's IDE globalStorage has four — because "the VS Code workspace
@@ -282,6 +365,14 @@ function normalizeClientHealthEntry(value) {
   if (lastAttemptAt) entry.collection.lastAttemptAt = lastAttemptAt;
   const lastSuccessAt = normalizeTimestamp(value?.collection?.lastSuccessAt);
   if (lastSuccessAt) entry.collection.lastSuccessAt = lastSuccessAt;
+  if (entry.collection.state === 'failed') {
+    const syncFailureStage = normalizeClientSyncFailureStage(value?.collection?.syncFailureStage);
+    if (syncFailureStage) entry.collection.syncFailureStage = syncFailureStage;
+    const syncExitCode = normalizeClientSyncExitCode(value?.collection?.syncExitCode);
+    if (syncExitCode !== null) entry.collection.syncExitCode = syncExitCode;
+    const syncDetailCode = normalizeClientSyncDetailCode(value?.collection?.syncDetailCode);
+    if (syncDetailCode) entry.collection.syncDetailCode = syncDetailCode;
+  }
   const lastActivityDay = normalizeDay(value?.data?.lastActivityDay);
   if (lastActivityDay) entry.data.lastActivityDay = lastActivityDay;
   const diagnostics = normalizeDiagnostics(value?.diagnostics, entry);
@@ -347,6 +438,8 @@ module.exports = {
   CLIENT_HEALTH_OVERALL_STATES,
   CLIENT_HEALTH_VERSION,
   CLIENT_COLLECTION_STATES,
+  CLIENT_SYNC_DETAIL_CODES,
+  CLIENT_SYNC_FAILURE_STAGES,
   CLIENT_SOURCE_CHECK_IDS,
   CLIENT_SOURCE_STATES,
   MAX_CHECKS_PER_CLIENT,
@@ -355,5 +448,9 @@ module.exports = {
   countOverall,
   deriveClientOverall,
   deriveLegacyClientStatus,
-  normalizeClientHealth
+  normalizeClientHealth,
+  normalizeClientSyncDetailCode,
+  normalizeClientSyncExitCode,
+  normalizeClientSyncFailureStage,
+  classifyClientSyncDetailCode
 };

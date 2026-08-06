@@ -5,6 +5,19 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { classifyClientSyncDetailCode } = require('./clientHealth');
+
+const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
+
+function annotateSyncError(error, failureStage, exitCode = null) {
+  const target = error instanceof Error ? error : new Error(String(error || 'Cursor sync failed'));
+  target.syncFailureStage = failureStage;
+  target.syncDetailCode = classifyClientSyncDetailCode({ client: 'cursor', text: target.message });
+  if (Number.isSafeInteger(exitCode) && exitCode >= 0 && exitCode <= MAX_SYNC_EXIT_CODE) {
+    target.syncExitCode = exitCode;
+  }
+  return target;
+}
 
 function credentialsPath(home = os.homedir()) {
   return path.join(home, '.config', 'tokscale', 'cursor-credentials.json');
@@ -85,15 +98,19 @@ function runTokscaleSubcommand(args, { stdin = null, timeoutMs = 30000 } = {}) {
     let stderr = '';
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
-      reject(new Error(`tokscale cursor ${args[0]} timed out after ${timeoutMs}ms`));
+      reject(annotateSyncError(new Error(`tokscale cursor ${args[0]} timed out after ${timeoutMs}ms`), 'timeout'));
     }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+    child.on('error', (err) => { clearTimeout(timer); reject(annotateSyncError(err, 'spawn')); });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        return reject(new Error(`tokscale cursor ${args[0]} exited ${code}: ${(stderr || stdout).trim()}`));
+        return reject(annotateSyncError(
+          new Error(`tokscale cursor ${args[0]} exited ${code}: ${(stderr || stdout).trim()}`),
+          'process-exit',
+          code
+        ));
       }
       resolve(stdout);
     });

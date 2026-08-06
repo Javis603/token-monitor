@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  CLIENT_SYNC_DETAIL_CODES,
   CLIENT_HEALTH_OVERALL_STATES,
   CLIENT_HEALTH_VERSION,
   CLIENT_SOURCE_CHECK_IDS,
@@ -13,6 +14,7 @@ const {
   countOverall,
   deriveClientOverall,
   deriveLegacyClientStatus,
+  classifyClientSyncDetailCode,
   normalizeClientHealth
 } = require('../../src/shared/clientHealth');
 const {
@@ -456,6 +458,9 @@ test('deriveClientHealth carries the self-sync lane into the record', () => {
   throttle.completeAttempt('cursor', attempt, true, 'sync-timeout');
   const failed = deriveClientHealth('cursor', { clients: { cursor: 500 } }, options).clients.cursor;
   assert.equal(failed.collection.state, 'failed');
+  assert.equal(failed.collection.syncFailureStage, 'timeout');
+  assert.equal(failed.collection.syncDetailCode, 'unknown');
+  assert.equal(Object.hasOwn(failed.collection, 'syncExitCode'), false);
   assert.equal(failed.overall, 'attention');
   assert.deepEqual(failed.diagnostics, [{ code: 'sync-timeout' }]);
 
@@ -465,6 +470,9 @@ test('deriveClientHealth carries the self-sync lane into the record', () => {
   const ok = deriveClientHealth('cursor', { clients: { cursor: 500 } }, options).clients.cursor;
   assert.equal(ok.collection.state, 'ok');
   assert.equal(ok.collection.lastSuccessAt, new Date(clock.now).toISOString());
+  assert.equal(Object.hasOwn(ok.collection, 'syncFailureStage'), false);
+  assert.equal(Object.hasOwn(ok.collection, 'syncDetailCode'), false);
+  assert.equal(Object.hasOwn(ok.collection, 'syncExitCode'), false);
   assert.equal(ok.overall, 'healthy');
   // A healthy client keeps its sync stamps: "last synced two minutes ago" is the
   // answer to "why is today still 0", not a fault report.
@@ -479,6 +487,79 @@ test('a self-sync failure reports a code and never its stderr', () => {
   const later = throttle.beginAttempt('antigravity');
   throttle.completeAttempt('antigravity', later, true, 'sync-exit-error');
   assert.equal(throttle.syncStatus('antigravity').failureCode, 'sync-exit-error');
+});
+
+test('client health preserves safe process-exit evidence and drops unsafe metadata', () => {
+  const valid = normalizeClientHealth({
+    clients: {
+      antigravity: {
+        ...core({
+          collection: {
+            state: 'failed',
+            syncFailureStage: 'process-exit',
+            syncDetailCode: 'rpc-failed',
+            syncExitCode: 17
+          }
+        }),
+        diagnostics: [{ code: 'sync-exit-error' }]
+      }
+    }
+  });
+  assert.equal(valid.clients.antigravity.collection.syncFailureStage, 'process-exit');
+  assert.equal(valid.clients.antigravity.collection.syncDetailCode, 'rpc-failed');
+  assert.equal(valid.clients.antigravity.collection.syncExitCode, 17);
+
+  const unsafe = normalizeClientHealth({
+    clients: {
+      antigravity: {
+        ...core({
+          collection: {
+            state: 'failed',
+            syncFailureStage: '/Users/alice/private',
+            syncDetailCode: '/Users/alice/private',
+            syncExitCode: '17; rm -rf'
+          }
+        }),
+        diagnostics: [{ code: 'sync-exit-error' }]
+      }
+    }
+  });
+  assert.equal(unsafe.clients.antigravity.collection.syncFailureStage, 'unknown');
+  assert.equal(unsafe.clients.antigravity.collection.syncDetailCode, 'unknown');
+  assert.equal(Object.hasOwn(unsafe.clients.antigravity.collection, 'syncExitCode'), false);
+});
+
+test('sync detail classification is conservative and emits only closed codes', () => {
+  assert.deepEqual([...CLIENT_SYNC_DETAIL_CODES].sort(), [
+    'authentication-failed',
+    'cache-write-failed',
+    'invalid-response',
+    'language-server-not-found',
+    'network-failed',
+    'network-timeout',
+    'permission-denied',
+    'rpc-failed',
+    'unknown'
+  ].sort());
+  assert.equal(
+    classifyClientSyncDetailCode({
+      client: 'antigravity',
+      text: 'Failed to connect to Antigravity RPC on port 12345'
+    }),
+    'rpc-failed'
+  );
+  assert.equal(
+    classifyClientSyncDetailCode({
+      client: 'antigravity',
+      text: 'Windows process discovery returned no data; cannot discover Antigravity language servers'
+    }),
+    'language-server-not-found'
+  );
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Cursor API returned status 401' }), 'authentication-failed');
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Invalid response from Cursor API - expected CSV format' }), 'invalid-response');
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'Failed to persist file: Permission denied /Users/alice' }), 'permission-denied');
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'The request timed out' }), 'network-timeout');
+  assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'new upstream wording with no known meaning' }), null);
 });
 
 // lastSyncAt is the rate-limit anchor that claim() moves; a completion never
