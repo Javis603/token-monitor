@@ -125,9 +125,8 @@ function createDeviceRuntime(options = {}, deps = {}) {
   }
 
   return {
-    // These two controls synchronously return a limits snapshot while active;
-    // null is their intentional post-stop no-op sentinel. Async controls below
-    // use Promise-based sentinels instead of changing the underlying API shape.
+    // clearLimits returns null after stop. Promise-based controls resolve to
+    // their no-op sentinel without delegating to stopped producers.
     clearLimits: (scope, reason) => active ? limitsRuntime.clear(scope, reason) : null,
     flush: () => active ? (sink?.flush?.() || Promise.resolve()) : Promise.resolve(),
     getDiagnostics: () => ({

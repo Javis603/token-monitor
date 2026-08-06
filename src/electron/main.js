@@ -2287,6 +2287,7 @@ let streamFailure = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
+let latestHubStatsSource = 'none';
 let tray = null;
 let latestStats = null;
 let trayRefreshInFlight = false;
@@ -2332,6 +2333,7 @@ const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
   getStreamState: () => ({ connected: streamConnected, failure: streamFailure }),
   getLatestHubStats: () => latestHubStats,
   getLatestHubStatsReceivedAt: () => latestHubStatsReceivedAt,
+  getLatestHubStatsSource: () => latestHubStatsSource,
   getLocalRecord: localArchiveSourceDevice,
   getTokscaleStatus,
   getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
@@ -3218,6 +3220,7 @@ function startHostStats() {
   const emit = (stats, reason = 'hub') => {
     latestHubStats = stats;
     latestHubStatsReceivedAt = new Date().toISOString();
+    latestHubStatsSource = 'host';
     updateDiscordRpcDisplay(stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
   };
@@ -3462,6 +3465,7 @@ async function startStatsStream(options = {}) {
   if (options.resetSnapshot) {
     latestHubStats = null;
     latestHubStatsReceivedAt = null;
+    latestHubStatsSource = 'none';
   }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
@@ -3496,6 +3500,7 @@ async function startStatsStream(options = {}) {
           if (parsed.event === 'stats' && parsed.data?.stats) {
             latestHubStats = parsed.data.stats;
             latestHubStatsReceivedAt = new Date().toISOString();
+            latestHubStatsSource = 'client';
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
             updateDiscordRpcDisplay(displayStats);
@@ -4227,6 +4232,7 @@ async function fetchStats(options = {}) {
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   latestHubStats = await response.json();
   latestHubStatsReceivedAt = new Date().toISOString();
+  latestHubStatsSource = 'client';
   return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
 }
 

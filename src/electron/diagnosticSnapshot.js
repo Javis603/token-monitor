@@ -75,6 +75,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
   const getStreamState = options.getStreamState || (() => ({ connected: false, failure: null }));
   const getLatestHubStats = options.getLatestHubStats || (() => null);
   const getLatestHubStatsReceivedAt = options.getLatestHubStatsReceivedAt || (() => null);
+  const getLatestHubStatsSource = options.getLatestHubStatsSource || null;
   const getLocalRecord = options.getLocalRecord || (() => null);
   const getTokscaleStatus = options.getTokscaleStatus || (() => null);
   const getConfiguration = options.getConfiguration || (() => ({}));
@@ -134,9 +135,19 @@ function createDiagnosticSnapshotBuilder(options = {}) {
     const lastStreamFailureCode = streamState === 'disconnected'
       ? diagnosticStreamDetailCode(stream.failure || {})
       : 'none';
+    const expectedHubStatsSource = hubMode === 'host'
+      ? 'host'
+      : hubMode === 'client'
+        ? 'client'
+        : 'none';
+    const hubStatsCacheMatchesMode = typeof getLatestHubStatsSource !== 'function'
+      ? true
+      : String(getLatestHubStatsSource() || 'none') === expectedHubStatsSource;
     const hubStatsCacheAgeSeconds = hubMode === 'local'
       ? 'not-applicable'
-      : diagnosticAgeSeconds(getLatestHubStatsReceivedAt(), getNowMs());
+      : hubStatsCacheMatchesMode
+        ? diagnosticAgeSeconds(getLatestHubStatsReceivedAt(), getNowMs())
+        : 'not-applicable';
     const hubRuntime = {
       hubKind,
       hubSoftwareVersion,
@@ -155,6 +166,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       limitsOwner,
       usageCompleteness,
       limitsCompleteness,
+      hubStatsCacheMatchesMode,
       hubRuntime,
       topology: {
         hubMode,
@@ -189,10 +201,10 @@ function createDiagnosticSnapshotBuilder(options = {}) {
     let hubStats = null;
     let hubSummarySource = 'not-applicable';
     if (settings.hubMode === 'host') {
-      hubStats = getLatestHubStats();
+      hubStats = runtime.hubStatsCacheMatchesMode ? getLatestHubStats() : null;
       hubSummarySource = 'same-process-hub-cache';
     } else if (settings.hubMode === 'client') {
-      hubStats = getLatestHubStats();
+      hubStats = runtime.hubStatsCacheMatchesMode ? getLatestHubStats() : null;
       hubSummarySource = 'cached-hub-stats';
     }
     const hubDevices = projectHubDevices(hubStats, {

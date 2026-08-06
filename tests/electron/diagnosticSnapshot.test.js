@@ -78,6 +78,7 @@ function createBuilder(overrides = {}) {
     getStreamState: () => ({ connected: true, failure: null }),
     getLatestHubStats: () => cachedHubStats,
     getLatestHubStatsReceivedAt: () => new Date(nowMs - 4000).toISOString(),
+    getLatestHubStatsSource: () => 'host',
     getLocalRecord: () => localRecord,
     getTokscaleStatus: () => ({ current: { version: '4.10.0', source: 'bundled' } }),
     getConfiguration: () => ({ configurationSource: 'effective-normalized', allTimeSince: '2024-01-01' }),
@@ -122,6 +123,18 @@ test('host snapshots keep Hub Devices applicable when the embedded Hub is unavai
   assert.equal(snapshot.hub.devices.summarySource, 'same-process-hub-cache');
   assert.equal(snapshot.hub.devices.summaryAvailable, false);
   assert.equal(snapshot.hub.devices.notApplicable, false);
+});
+
+test('host snapshots ignore a cached client Hub after switching modes', () => {
+  const { builder } = createBuilder({
+    getLatestHubStatsSource: () => 'client'
+  });
+  const snapshot = builder.build(new Date('2026-08-06T10:00:00.000Z'));
+
+  assert.equal(snapshot.hub.devices.summarySource, 'same-process-hub-cache');
+  assert.equal(snapshot.hub.devices.summaryAvailable, false);
+  assert.equal(snapshot.hub.devices.deviceCount, 0);
+  assert.equal(snapshot.hub.runtime.hubStatsCacheAgeSeconds, 'not-applicable');
 });
 
 test('stream diagnostics map HTTP failures to the stable diagnostic code', () => {
