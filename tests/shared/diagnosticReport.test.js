@@ -148,6 +148,42 @@ test('diagnostic values preserve large token totals and archive sizes', () => {
   assert.equal(report.text.includes('remoteGroups:'), false);
 });
 
+test('configuration is allowlisted and preserves false values', () => {
+  const report = formatDiagnosticReport(baseSnapshot({
+    configuration: {
+      configurationSource: 'effective-normalized',
+      allTimeSince: '2025-06-01',
+      historyEnabled: false,
+      historyIntervalMs: 3600000,
+      projectsEnabled: false,
+      wslScanEnabled: false,
+      syncUploadIntervalMs: 0,
+      limitsRefreshMs: 60000,
+      claudeWebCookie: 'sessionKey=secret',
+      hubHostSecret: 'hub-secret'
+    }
+  }));
+
+  assert.match(report.text, /\[Configuration\][\s\S]*configurationSource: effective-normalized/);
+  assert.match(report.text, /allTimeSince: 2025-06-01/);
+  assert.match(report.text, /historyEnabled: false/);
+  assert.match(report.text, /projectsEnabled: false/);
+  assert.match(report.text, /wslScanEnabled: false/);
+  assert.match(report.text, /syncUploadIntervalMs: 0/);
+  assert.match(report.text, /limitsRefreshMs: 60000/);
+  assert.equal(report.text.includes('sessionKey=secret'), false);
+  assert.equal(report.text.includes('hub-secret'), false);
+});
+
+test('invalid diagnostic configuration dates are redacted to unknown', () => {
+  const report = formatDiagnosticReport(baseSnapshot({
+    configuration: { allTimeSince: '/Users/javis/private' }
+  }));
+
+  assert.match(report.text, /allTimeSince: unknown/);
+  assert.equal(report.text.includes('/Users/javis'), false);
+});
+
 test('not-configured limits are unavailable without raising a failure finding', () => {
   const limits = projectLimitsDiagnostics({
     providers: [

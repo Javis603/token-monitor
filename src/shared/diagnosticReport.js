@@ -46,6 +46,17 @@ function integer(value, fallback = null) {
   return numeric === null ? fallback : Math.round(numeric);
 }
 
+function booleanOrUnknown(value) {
+  return typeof value === 'boolean' ? value : 'unknown';
+}
+
+function dateKey(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return 'unknown';
+  const parsed = Date.parse(`${raw}T00:00:00.000Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === raw ? raw : 'unknown';
+}
+
 function isoTimestamp(value) {
   const parsed = value instanceof Date ? value.getTime() : Date.parse(String(value || ''));
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
@@ -570,6 +581,7 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
 function sanitizeDiagnosticSnapshot(input = {}) {
   const report = input.report || {};
   const environment = input.environment || {};
+  const configuration = input.configuration || {};
   const topology = input.topology || {};
   const usage = input.usage || {};
   const collector = sanitizeCollector(input.collector || {}, environment.platform);
@@ -609,6 +621,16 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       languageSetting: text(environment.languageSetting ?? environment.locale, 'auto'),
       resolvedLocale: text(environment.resolvedLocale, 'unknown'),
       appUptimeSeconds: integer(environment.appUptimeSeconds, null)
+    },
+    configuration: {
+      configurationSource: text(configuration.configurationSource, 'unknown', 64),
+      allTimeSince: dateKey(configuration.allTimeSince),
+      historyEnabled: booleanOrUnknown(configuration.historyEnabled),
+      historyIntervalMs: integer(configuration.historyIntervalMs, null),
+      projectsEnabled: booleanOrUnknown(configuration.projectsEnabled),
+      wslScanEnabled: booleanOrUnknown(configuration.wslScanEnabled),
+      syncUploadIntervalMs: integer(configuration.syncUploadIntervalMs, null),
+      limitsRefreshMs: integer(configuration.limitsRefreshMs, null)
     },
     topology: {
       hubMode: text(topology.hubMode),
@@ -791,6 +813,7 @@ function renderReport(snapshot, selected) {
   ];
 
   lines.push(section('Environment', Object.entries(snapshot.environment).map(([key, value]) => line(key, value)).join('\n').split('\n')));
+  lines.push(section('Configuration', Object.entries(snapshot.configuration).map(([key, value]) => line(key, value)).join('\n').split('\n')));
   lines.push(section('Hub Runtime', Object.entries(snapshot.hub.runtime).map(([key, value]) => line(key, value)).join('\n').split('\n')));
   const hubDevices = snapshot.hub.devices;
   const hubDeviceLines = hubDevices.notApplicable

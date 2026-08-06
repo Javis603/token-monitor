@@ -173,6 +173,7 @@ const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const {
   classifySettingsChange,
+  diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   usageConfigFromSettings
@@ -2562,6 +2563,24 @@ function diagnosticTokscaleInfo() {
   }
 }
 
+function diagnosticConfiguration() {
+  return diagnosticConfigurationFromSettings(settings || {}, {
+    usage: {
+      agentVersion: appVersion(),
+      agentRuntime: 'electron-widget',
+      commandTimeoutMs: 120 * 1000,
+      defaultDeviceId: defaultDeviceId(),
+      intervalMs: collectorIntervalMs(),
+      historyIntervalMs: normalizeHistoryIntervalMs(settings?.historyIntervalMs)
+    },
+    limits: {
+      env: process.env,
+      defaultLimitProviders: defaultLimitProviders()
+    },
+    syncUploadIntervalMs: syncUploadIntervalMs()
+  });
+}
+
 function diagnosticRuntimeInfo() {
   const hubMode = settings?.hubMode || 'local';
   const { url: hubUrl } = effectiveHubConfig();
@@ -2703,6 +2722,7 @@ function buildDiagnosticSnapshot(generatedAt = new Date()) {
       resolvedLocale: app.getLocale?.() || 'unknown',
       appUptimeSeconds: Math.round(process.uptime())
     },
+    configuration: diagnosticConfiguration(),
     topology: runtime.topology,
     hub: {
       runtime: runtime.hubRuntime,
