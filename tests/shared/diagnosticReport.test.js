@@ -7,10 +7,11 @@ const {
   deriveDiagnosticFindings,
   formatDiagnosticReport,
   MAX_REPORT_BYTES,
+  projectClientHealth,
   projectHubDevices,
   projectLimitsDiagnostics
 } = require('../../src/shared/diagnosticReport');
-const { createDiagnosticReportGenerator, processMetricsSnapshot } = require('../../src/electron/diagnostics');
+const { createDiagnosticReportGenerator, processMetricsSnapshot, statArchiveFile } = require('../../src/electron/diagnostics');
 
 function baseSnapshot(overrides = {}) {
   return {
@@ -61,6 +62,46 @@ test('process metrics aggregate current working set and CPU but keep peak as a m
   assert.equal(Object.hasOwn(resources.processGroups.tab, 'privateMemoryMb'), false);
 });
 
+test('process metrics include unclassified Electron processes in the aggregate', () => {
+  const resources = processMetricsSnapshot([
+    { type: 'Browser', memory: { workingSetSize: 1024, peakWorkingSetSize: 2048 }, cpu: { percentCPUUsage: 1 } },
+    { type: 'Zygote', memory: { workingSetSize: 2048, peakWorkingSetSize: 4096 }, cpu: { percentCPUUsage: 2 } }
+  ], { privateMemorySupported: false });
+
+  assert.equal(resources.processCount, 2);
+  assert.deepEqual(resources.processGroups.other, {
+    count: 1,
+    workingSetMb: 2,
+    peakWorkingSetMaxMb: 4,
+    cpuPercent: 2
+  });
+  assert.equal(resources.aggregateWorkingSetMb, 3);
+  assert.equal(resources.aggregateCpuPercent, 3);
+});
+
+test('archive stat projection distinguishes absent, disabled, and unreadable archives', () => {
+  assert.deepEqual(statArchiveFile({ size: 12 }), {
+    sessionArchivePresent: true,
+    sessionArchiveFileSizeBytes: 12,
+    archiveStatFailureCode: 'none'
+  });
+  assert.deepEqual(statArchiveFile(null, 'archive-not-present'), {
+    sessionArchivePresent: false,
+    sessionArchiveFileSizeBytes: 0,
+    archiveStatFailureCode: 'none'
+  });
+  assert.deepEqual(statArchiveFile(null, 'archive-not-enabled'), {
+    sessionArchivePresent: 'not-applicable',
+    sessionArchiveFileSizeBytes: 'not-applicable',
+    archiveStatFailureCode: 'none'
+  });
+  assert.deepEqual(statArchiveFile(null, 'archive-stat-failed'), {
+    sessionArchivePresent: 'unknown',
+    sessionArchiveFileSizeBytes: null,
+    archiveStatFailureCode: 'archive-stat-failed'
+  });
+});
+
 test('hub device projection removes identifiers and groups full OS compatibility data', () => {
   const now = Date.parse('2026-08-05T10:00:00.000Z');
   const projected = projectHubDevices({
@@ -99,6 +140,24 @@ test('hub device projection removes identifiers and groups full OS compatibility
   assert.equal(Object.hasOwn(projected.remoteGroups[0], 'recordAgeSeconds'), false);
 });
 
+test('client projection sorts by health before applying the report limit', () => {
+  const tracked = Array.from({ length: 64 }, (_, index) => `healthy-${index}`);
+  tracked.push('attention-late');
+  const clients = Object.fromEntries(tracked.map((client) => [client, {
+    overall: client === 'attention-late' ? 'attention' : 'healthy',
+    source: { state: 'detected' },
+    collection: { state: 'ok' },
+    data: {}
+  }]));
+  const projected = projectClientHealth({ clients }, { trackedClients: tracked });
+
+  assert.equal(projected.clients.length, 64);
+  assert.equal(projected.clients[0].client, 'attention-late');
+  assert.equal(projected.omittedClientCount, 1);
+  assert.equal(projected.counts.attention, 1);
+  assert.equal(projected.counts.healthy, 64);
+});
+
 test('findings respect the effective collection interval', () => {
   const now = Date.parse('2026-08-05T10:00:00.000Z');
   const findings = deriveDiagnosticFindings({
@@ -112,6 +171,21 @@ test('findings respect the effective collection interval', () => {
     limits: {}
   }, now);
   assert.deepEqual(findings, []);
+});
+
+test('findings mark a collector stale after the effective interval threshold', () => {
+  const now = Date.parse('2026-08-05T10:00:00.000Z');
+  const findings = deriveDiagnosticFindings({
+    collector: {
+      detailsAvailable: true,
+      intervalMs: 30 * 60 * 1000,
+      lastTickSuccessAt: new Date(now - 61 * 60 * 1000).toISOString()
+    },
+    usage: {},
+    topology: {},
+    limits: {}
+  }, now);
+  assert.deepEqual(findings, [{ code: 'collector-stale' }]);
 });
 
 test('diagnostic values preserve large token totals and archive sizes', () => {

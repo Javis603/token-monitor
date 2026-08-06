@@ -618,6 +618,21 @@ function normalizeHistoryIntervalMs(value) {
 }
 
 async function collectHistoryOnce(options) {
+  const startedAt = Date.now();
+  const attemptedAt = new Date(startedAt).toISOString();
+  let failureCode = null;
+  const reportStatus = (success) => {
+    try {
+      options.onHistoryStatus?.({
+        attemptedAt,
+        successAt: success ? new Date().toISOString() : null,
+        failureCode,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      });
+    } catch (_) {
+      // Diagnostic observers must never affect history collection.
+    }
+  };
   const clients = normalizeClientsCsv(options.clients);
   if (options.historyEnabled === false) return null;
   const histories = [];
@@ -631,6 +646,7 @@ async function collectHistoryOnce(options) {
       rawGraphs.push(graphJson);
       histories.push(normalizeHistory(parseGraphResult(graphJson), { capDays, todayKey }));
     } catch (error) {
+      failureCode = 'history-graph-failed';
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
   }
@@ -647,14 +663,22 @@ async function collectHistoryOnce(options) {
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
       const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
-      return retained.daily.length || retained.monthly.length ? retained : null;
+      const result = retained.daily.length || retained.monthly.length ? retained : null;
+      reportStatus(failureCode === null);
+      return result;
     } catch (error) {
+      failureCode = failureCode || 'daily-history-archive-failed';
       if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
     }
   }
-  if (histories.length === 0) return null;
+  if (histories.length === 0) {
+    reportStatus(false);
+    return null;
+  }
   const history = histories.length === 1 ? histories[0] : mergeHistories(histories, { todayKey });
-  return history.daily.length || history.monthly.length ? history : null;
+  const result = history.daily.length || history.monthly.length ? history : null;
+  reportStatus(failureCode === null);
+  return result;
 }
 
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
@@ -946,6 +970,7 @@ async function collectUsageOnce(options) {
       dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
       dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
+      onHistoryStatus: options.onHistoryStatus,
       logger: options.logger
     });
     if (history) summary.history = history;
@@ -1681,7 +1706,10 @@ function startCollector(options) {
   let pendingTargetClients = null;
   let pendingActivityRevision = null;
   let lastHistoryAt = 0;
-  let lastHistoryScanAt = 0;
+  let lastHistoryAttemptAt = 0;
+  let lastHistorySuccessAt = 0;
+  let lastHistoryFailureCode = null;
+  let lastHistoryScanDurationMs = null;
   // Last full-scan snapshot; lets watch ticks scan only --today and derive
   // month/allTime exactly (applyPeriodDelta). Reset by every full tick.
   // anchor holds Windows-only periods; wslAnchor is the WSL contribution frozen
@@ -1825,7 +1853,10 @@ function startCollector(options) {
   async function performTick(reason, tickOptions = {}) {
     const tickStartedAt = Date.now();
     const includeHistory = shouldIncludeHistory(Date.now(), lastHistoryAt, historyIntervalMs, Boolean(tickOptions.forceHistory), historyEnabled);
-    if (includeHistory) lastHistoryAt = Date.now();
+    if (includeHistory) {
+      lastHistoryAt = Date.now();
+      lastHistoryAttemptAt = tickStartedAt;
+    }
     const todayKey = localTodayKey();
     const requestedTargetClients = [...new Set(normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean))];
     const targetAnchorReady = canTargetTodayPartitions(anchor, requestedTargetClients);
@@ -1847,6 +1878,12 @@ function startCollector(options) {
         agentRuntime,
         osInfo: deviceOsInfo,
         includeHistory,
+        onHistoryStatus: includeHistory ? (status) => {
+          lastHistoryAttemptAt = Date.parse(status.attemptedAt) || lastHistoryAttemptAt;
+          lastHistorySuccessAt = Date.parse(status.successAt) || 0;
+          lastHistoryFailureCode = status.failureCode || null;
+          lastHistoryScanDurationMs = status.durationMs;
+        } : null,
         forceSelfSync: tickOptions.forceSelfSync ?? null,
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
         // Both selections name clients whose pending source event this tick has
@@ -1949,7 +1986,6 @@ function startCollector(options) {
       lastTickDurationMs = Math.max(0, tickFinishedAt - tickStartedAt);
       lastTickFailureCode = null;
       tickHadFailure = false;
-      if (includeHistory) lastHistoryScanAt = tickFinishedAt;
       if (hadPreviousFailure) {
         emitDiagnosticEvent({
           subsystem: 'collector',
@@ -2152,6 +2188,7 @@ function startCollector(options) {
     closeWatchers();
     if (dirs.length === 0) {
       watchedDirectoryKey = directoryKey;
+      lastWatchFailureCode = null;
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
     }
@@ -2180,6 +2217,7 @@ function startCollector(options) {
       watcher.on('error', handleWatchError);
       watchers.push(watcher);
       watchedDirectoryKey = directoryKey;
+      lastWatchFailureCode = null;
       for (const dir of dirs) log(`Watching ${dir} (${usePolling ? 'polling 2s' : 'native events'})`);
     } catch (error) {
       watchedDirectoryKey = null;
@@ -2261,7 +2299,10 @@ function startCollector(options) {
       lastTickFailureAt: timestampOrNull(lastTickFailureAt),
       lastTickDurationMs,
       lastFullScanAt: timestampOrNull(lastFullScanAt),
-      lastHistoryScanAt: timestampOrNull(lastHistoryScanAt),
+      lastHistoryAttemptAt: timestampOrNull(lastHistoryAttemptAt),
+      lastHistorySuccessAt: timestampOrNull(lastHistorySuccessAt),
+      lastHistoryFailureCode,
+      lastHistoryScanDurationMs,
       lastFailureCode: lastTickFailureCode,
       wslStatus: cloneDiagnosticValue(wslStatusAnchor)
     };

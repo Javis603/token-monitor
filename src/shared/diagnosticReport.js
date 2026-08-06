@@ -97,8 +97,7 @@ function projectClientHealth(health, device = {}) {
     ? device.trackedClients.map((client) => identifier(client, '')).filter(Boolean)
     : [];
   const entries = health?.clients && typeof health.clients === 'object' ? health.clients : {};
-  const ids = [...new Set([...tracked, ...Object.keys(entries).map((client) => identifier(client, '')).filter(Boolean)])]
-    .slice(0, MAX_CLIENTS_IN_REPORT);
+  const ids = [...new Set([...tracked, ...Object.keys(entries).map((client) => identifier(client, '')).filter(Boolean)])];
 
   const clients = ids.map((client) => {
     const entry = entries[client];
@@ -140,6 +139,7 @@ function projectClientHealth(health, device = {}) {
   clients.sort((a, b) => (order[a.overall] - order[b.overall]) || a.client.localeCompare(b.client));
   const counts = { healthy: 0, waiting: 0, attention: 0, unavailable: 0, unknown: 0 };
   for (const entry of clients) counts[entry.overall] += 1;
+  const omittedClientCount = Math.max(0, clients.length - MAX_CLIENTS_IN_REPORT);
   return {
     available: Boolean(health),
     observedAt: isoTimestamp(health?.observedAt),
@@ -147,7 +147,8 @@ function projectClientHealth(health, device = {}) {
     healthEntryCount: Object.keys(entries).length,
     missingHealthEntryCount: tracked.filter((client) => !entries[client]).length,
     counts,
-    clients
+    omittedClientCount,
+    clients: clients.slice(0, MAX_CLIENTS_IN_REPORT)
   };
 }
 
@@ -238,7 +239,25 @@ function projectHubDevices(stats, options = {}) {
         : group.softwareVersion === 'unknown' || group.runtime === 'unknown' ? 2
           : 3
   );
-  remoteGroups.sort((a, b) => priority(a) - priority(b) || b.count - a.count || a.softwareVersion.localeCompare(b.softwareVersion));
+  const compareText = (a, b) => String(a ?? '').localeCompare(String(b ?? ''));
+  const compareAge = (a, b) => {
+    if (a === b) return 0;
+    if (a === null || a === undefined) return 1;
+    if (b === null || b === undefined) return -1;
+    return a - b;
+  };
+  remoteGroups.sort((a, b) => (
+    priority(a) - priority(b)
+    || b.count - a.count
+    || compareText(a.softwareVersion, b.softwareVersion)
+    || compareText(a.runtime, b.runtime)
+    || compareText(a.platform, b.platform)
+    || compareText(a.osName, b.osName)
+    || compareText(a.osVersion, b.osVersion)
+    || compareText(a.freshness, b.freshness)
+    || compareAge(a.newestRecordAgeSeconds, b.newestRecordAgeSeconds)
+    || compareAge(a.oldestRecordAgeSeconds, b.oldestRecordAgeSeconds)
+  ));
   const selectedGroups = remoteGroups.slice(0, MAX_REMOTE_GROUPS_IN_REPORT);
 
   return {
@@ -374,7 +393,10 @@ function sanitizeCollector(collector = {}, platform) {
     lastTickFailureAt: isoTimestamp(collector.lastTickFailureAt) || 'none',
     lastTickDurationMs: boundedNumber(collector.lastTickDurationMs),
     lastFullScanAt: isoTimestamp(collector.lastFullScanAt),
-    lastHistoryScanAt: isoTimestamp(collector.lastHistoryScanAt),
+    lastHistoryAttemptAt: isoTimestamp(collector.lastHistoryAttemptAt),
+    lastHistorySuccessAt: isoTimestamp(collector.lastHistorySuccessAt),
+    lastHistoryFailureCode: collector.lastHistoryFailureCode ? identifier(collector.lastHistoryFailureCode) : 'none',
+    lastHistoryScanDurationMs: boundedNumber(collector.lastHistoryScanDurationMs),
     lastFailureCode: collector.lastFailureCode ? identifier(collector.lastFailureCode) : 'none',
     wslStatus: sanitizeWslStatus(collector.wslStatus, platform)
   };
@@ -439,7 +461,7 @@ function sanitizeHubDevices(devices = {}) {
     })
     : [];
   return {
-    summarySource: safeChoice(devices.summarySource, new Set(['cached-hub-stats', 'same-process-hub', 'not-applicable'])),
+    summarySource: safeChoice(devices.summarySource, new Set(['cached-hub-stats', 'same-process-hub-cache', 'same-process-hub', 'not-applicable'])),
     summaryAvailable: devices.summaryAvailable === true,
     notApplicable: devices.notApplicable === true || devices.summarySource === 'not-applicable',
     deviceCount: boundedCount(devices.deviceCount),
@@ -504,16 +526,28 @@ function sanitizeResources(resources = {}) {
       browser: sanitizeProcessGroup(groups.browser, includePrivateMemory),
       tab: sanitizeProcessGroup(groups.tab, includePrivateMemory),
       gpu: sanitizeProcessGroup(groups.gpu, includePrivateMemory),
-      utility: sanitizeProcessGroup(groups.utility, includePrivateMemory)
+      utility: sanitizeProcessGroup(groups.utility, includePrivateMemory),
+      other: sanitizeProcessGroup(groups.other, includePrivateMemory)
     }
   };
+}
+
+function archivePresence(value) {
+  if (value === true || value === false) return value;
+  const normalized = String(value || '').trim().toLowerCase();
+  return new Set(['unknown', 'not-applicable']).has(normalized) ? normalized : 'unknown';
+}
+
+function archiveSize(value) {
+  if (value === 'not-applicable') return 'not-applicable';
+  return boundedLargeInteger(value);
 }
 
 function sanitizeWorkload(workload = {}) {
   return {
     sessionArchiveEnabled: workload.sessionArchiveEnabled !== false,
-    sessionArchivePresent: workload.sessionArchivePresent === true,
-    sessionArchiveFileSizeBytes: boundedLargeInteger(workload.sessionArchiveFileSizeBytes),
+    sessionArchivePresent: archivePresence(workload.sessionArchivePresent),
+    sessionArchiveFileSizeBytes: archiveSize(workload.sessionArchiveFileSizeBytes),
     sessionArchiveSessionCount: boundedLargeInteger(workload.sessionArchiveSessionCount),
     sessionArchiveCountSource: safeChoice(workload.sessionArchiveCountSource, new Set(['loaded-memory', 'not-loaded', 'not-enabled', 'unavailable'])),
     lastSessionArchiveUpdateDurationMs: boundedNumber(workload.lastSessionArchiveUpdateDurationMs),
@@ -679,7 +713,8 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       trackedClientCount: integer(clients.trackedClientCount, 0),
       healthEntryCount: integer(clients.healthEntryCount, 0),
       missingHealthEntryCount: integer(clients.missingHealthEntryCount, 0),
-      omittedClientCount: Math.max(0, (Array.isArray(clients.clients) ? clients.clients.length : 0) - MAX_CLIENTS_IN_REPORT),
+      omittedClientCount: Math.max(0, integer(clients.omittedClientCount, 0))
+        + Math.max(0, (Array.isArray(clients.clients) ? clients.clients.length : 0) - MAX_CLIENTS_IN_REPORT),
       counts: {
         healthy: boundedCount(clients.counts?.healthy),
         waiting: boundedCount(clients.counts?.waiting),

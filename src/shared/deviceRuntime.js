@@ -123,18 +123,24 @@ function createDeviceRuntime(options = {}, deps = {}) {
   }
 
   return {
-    clearLimits: (scope, reason) => limitsRuntime.clear(scope, reason),
-    flush: () => sink?.flush?.() || Promise.resolve(),
+    clearLimits: (scope, reason) => active ? limitsRuntime.clear(scope, reason) : null,
+    flush: () => active ? (sink?.flush?.() || Promise.resolve()) : Promise.resolve(),
     getDiagnostics: () => ({
       usage: usageRuntime?.getDiagnostics?.() ?? null,
       limits: limitsRuntime?.getDiagnostics?.() ?? null
     }),
     getSnapshot: () => deviceState.getSnapshot(),
-    reconfigureLimits: (next) => limitsRuntime.reconfigure(next),
-    refreshClient: (clientId, refreshOptions) => usageRuntime.refreshClient(clientId, refreshOptions),
-    refreshLimits: (scope, reason) => limitsRuntime.refresh(scope, reason),
+    reconfigureLimits: (next) => active ? limitsRuntime.reconfigure(next) : null,
+    refreshClient: (clientId, refreshOptions) => active
+      ? usageRuntime.refreshClient(clientId, refreshOptions)
+      : Promise.resolve(false),
+    refreshLimits: (scope, reason) => active
+      ? limitsRuntime.refresh(scope, reason)
+      : Promise.resolve(false),
     stop,
-    tick: (reason, tickOptions) => usageRuntime.tick(reason, tickOptions)
+    tick: (reason, tickOptions) => active
+      ? usageRuntime.tick(reason, tickOptions)
+      : Promise.resolve(false)
   };
 }
 

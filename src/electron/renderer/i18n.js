@@ -3573,7 +3573,7 @@
       'settings.about.diagnostics.generate': '生成报告',
       'settings.about.diagnostics.copy': '复制报告',
       'settings.about.diagnostics.preview': '查看报告',
-      'settings.about.diagnostics.privacy': '可能包含去识别化的装置软体版本、平台及 OS 版本摘要；不包含凭证、对话、帐号、完整路径或原始错误输出。',
+      'settings.about.diagnostics.privacy': '可能包含去识别化的设备软件版本、平台及 OS 版本摘要；不包含凭证、对话、账号、完整路径或原始错误输出。',
       'settings.about.diagnostics.generating': '正在产生诊断报告…',
       'settings.about.diagnostics.generated': '产生时间：{time}',
       'settings.about.diagnostics.copied': '诊断报告已复制。',

@@ -25,21 +25,32 @@ const SAMPLE_GRAPH = {
 };
 
 test('collectHistoryOnce normalizes injected graph JSON into a History', async () => {
+  const statuses = [];
   const history = await collectHistoryOnce({
-    clients: 'claude', todayKey: '2026-06-07',
+    clients: 'claude', todayKey: '2026-06-07', onHistoryStatus: (status) => statuses.push(status),
     runGraph: async () => SAMPLE_GRAPH
   });
   assert.equal(history.daily.length, 1);
   assert.equal(history.daily[0].tokens, 30);
   assert.equal(history.summary.totalTokens, 30);
+  assert.equal(statuses.length, 1);
+  assert.ok(statuses[0].attemptedAt);
+  assert.ok(statuses[0].successAt);
+  assert.equal(statuses[0].failureCode, null);
+  assert.ok(statuses[0].durationMs >= 0);
 });
 
 test('collectHistoryOnce returns null when the graph run throws', async () => {
+  const statuses = [];
   const history = await collectHistoryOnce({
     clients: 'claude', todayKey: '2026-06-07',
+    onHistoryStatus: (status) => statuses.push(status),
     runGraph: async () => { throw new Error('boom'); }
   });
   assert.equal(history, null);
+  assert.deepEqual(statuses.map(({ failureCode, successAt }) => ({ failureCode, successAt })), [
+    { failureCode: 'history-graph-failed', successAt: null }
+  ]);
 });
 
 test('collectHistoryOnce returns null when there are no clients', async () => {

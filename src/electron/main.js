@@ -2672,10 +2672,8 @@ function buildDiagnosticSnapshot(generatedAt = new Date()) {
   let hubStats = null;
   let hubSummarySource = 'not-applicable';
   if (settings?.hubMode === 'host' && embeddedHub) {
-    try {
-      hubStats = embeddedHub.hub.getStats();
-      hubSummarySource = 'same-process-hub';
-    } catch (_) {}
+    hubStats = latestHubStats;
+    hubSummarySource = 'same-process-hub-cache';
   } else if (settings?.hubMode === 'client') {
     hubStats = latestHubStats;
     hubSummarySource = 'cached-hub-stats';
@@ -2719,7 +2717,12 @@ function buildDiagnosticSnapshot(generatedAt = new Date()) {
       osVersion: osInfo.version,
       architecture: process.arch,
       languageSetting: settings?.language || 'auto',
-      resolvedLocale: app.getLocale?.() || 'unknown',
+      resolvedLocale: resolveLocale(
+        settings?.language || 'auto',
+        typeof app.getPreferredSystemLanguages === 'function'
+          ? app.getPreferredSystemLanguages()
+          : [app.getLocale?.() || 'en']
+      ),
       appUptimeSeconds: Math.round(process.uptime())
     },
     configuration: diagnosticConfiguration(),
@@ -2755,9 +2758,9 @@ function buildDiagnosticSnapshot(generatedAt = new Date()) {
       lastSessionArchiveUpdateDurationMs: lastSessionUsageArchiveUpdate.durationMs,
       lastSessionArchiveUpdateAt: lastSessionUsageArchiveUpdate.at,
       lastSessionArchiveFailureCode: lastSessionUsageArchiveUpdate.failureCode,
-      lastCollectorTickDurationMs: runtime.usageDiagnostics?.lastTickDurationMs || null,
+      lastCollectorTickDurationMs: runtime.usageDiagnostics?.lastTickDurationMs ?? null,
       lastCollectorTickScope: runtime.usageDiagnostics?.lastTickScope || null,
-      lastHistoryScanDurationMs: null
+      lastHistoryScanDurationMs: runtime.usageDiagnostics?.lastHistoryScanDurationMs ?? null
     },
     storage: {
       settingsReadable: Boolean(settings),
@@ -3419,6 +3422,7 @@ function startHostStats() {
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
+    latestHubStats = stats;
     latestHubStatsReceivedAt = new Date().toISOString();
     updateDiscordRpcDisplay(stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
@@ -3582,6 +3586,7 @@ function diagnosticStreamDetailCode(failure = {}) {
   if (reason === 'dns') return 'dns-failed';
   if (reason === 'unauthorized') return 'unauthorized';
   if (reason === 'disconnected') return 'eof';
+  if (reason === 'server_error') return 'http-error';
   return 'unknown';
 }
 

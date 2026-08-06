@@ -8,7 +8,7 @@ const {
 } = require('../shared/diagnosticReport');
 
 const DEFAULT_CPU_SAMPLE_DURATION_MS = 500;
-const PROCESS_GROUPS = ['browser', 'tab', 'gpu', 'utility'];
+const PROCESS_GROUPS = ['browser', 'tab', 'gpu', 'utility', 'other'];
 
 function finiteNumber(value, fallback = null) {
   const number = Number(value);
@@ -46,8 +46,7 @@ function processMetricsSnapshot(metrics, options = {}) {
   }]));
 
   for (const metric of rows) {
-    const name = metricGroup(metric?.type);
-    if (!name) continue;
+    const name = metricGroup(metric?.type) || 'other';
     const group = processGroups[name];
     const memory = metric?.memory || {};
     group.count += 1;
@@ -95,12 +94,26 @@ function statArchiveFile(stat, errorCode = null) {
     return {
       sessionArchivePresent: true,
       sessionArchiveFileSizeBytes: Math.max(0, Math.round(Number(stat.size))),
-      archiveStatFailureCode: null
+      archiveStatFailureCode: 'none'
+    };
+  }
+  if (errorCode === 'archive-not-enabled') {
+    return {
+      sessionArchivePresent: 'not-applicable',
+      sessionArchiveFileSizeBytes: 'not-applicable',
+      archiveStatFailureCode: 'none'
+    };
+  }
+  if (errorCode === 'archive-not-present') {
+    return {
+      sessionArchivePresent: false,
+      sessionArchiveFileSizeBytes: 0,
+      archiveStatFailureCode: 'none'
     };
   }
   return {
-    sessionArchivePresent: false,
-    sessionArchiveFileSizeBytes: 0,
+    sessionArchivePresent: 'unknown',
+    sessionArchiveFileSizeBytes: null,
     archiveStatFailureCode: errorCode || 'archive-stat-failed'
   };
 }

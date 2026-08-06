@@ -2289,6 +2289,59 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
   }
 });
 
+test('a successful watcher rebuild clears the current watcher failure', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchCalls = 0;
+  chokidar.watch = () => {
+    watchCalls += 1;
+    if (watchCalls === 1) throw new Error('temporary watcher setup failure');
+    return { on: () => {}, close: () => {} };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = recordingSpawn([]);
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 1000,
+      watchEnabled: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    assert.equal(handle.getDiagnostics().lastWatchFailureCode, 'watcher-rebuild-failed');
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(watchCalls, 2);
+    assert.equal(handle.getDiagnostics().lastWatchFailureCode, null);
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // The two tests below need a home that is definitely NOT its own canonical
 // path, because that is the only input under which canonicalWatchPath() does
 // anything observable. Simply skipping realpath would not do it: that only

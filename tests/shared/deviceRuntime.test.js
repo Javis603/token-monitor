@@ -149,3 +149,17 @@ test('runtime diagnostics proxy keeps usage and limits ownership separate', () =
   });
   runtime.stop();
 });
+
+test('runtime control wrappers do not delegate after stop', async () => {
+  const { calls, runtime } = harness();
+  runtime.stop();
+
+  assert.equal(await runtime.tick('late'), false);
+  assert.equal(await runtime.refreshClient('cursor'), false);
+  assert.equal(await runtime.refreshLimits({ provider: 'kimi' }, 'late'), false);
+  assert.equal(runtime.reconfigureLimits({ limitsRefreshMs: 60000 }), null);
+  assert.equal(runtime.clearLimits({ provider: 'kimi' }, 'late'), null);
+  await runtime.flush();
+
+  assert.deepEqual(calls, [['usageStop'], ['limitsStop']]);
+});
