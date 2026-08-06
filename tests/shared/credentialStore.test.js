@@ -303,3 +303,33 @@ test('stores, migrates, and removes MiMo account cookies in the unified store', 
   assert.equal(store.readMimoCredential('account-1'), '');
   assert.equal(store.writeMimoCredential('__proto__', 'serviceToken=unsafe'), false);
 });
+
+test('round-trips an imported Codex access token without exposing it to the renderer', (t) => {
+  const dataDir = tempDataDir(t);
+  const store = new CredentialStore(dataDir);
+  const accountId = 'codex-abc123def456';
+  const token = 'eyJhbGciOi.example-codex-access-token';
+
+  // The pasted token persists under the codex provider, mirroring MiMo cookies.
+  assert.equal(store.writeCodexAccountToken(accountId, token), true);
+  assert.equal(store.readCodexAccountToken(accountId), token);
+
+  // It is durably on disk under the codex provider path.
+  const document = JSON.parse(fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8'));
+  assert.equal(document.credentials.providers.codex.accounts[accountId].accessToken, token);
+
+  // It is NOT a fixed credential setting path, so the redacted settings view the renderer receives
+  // never carries the raw token (no allowlist entry exposes it).
+  const redacted = credentialSettingsForRenderer({ codexManagedAccounts: [{ id: accountId, email: 'a@b.com' }] });
+  assert.ok(!JSON.stringify(redacted).includes(token));
+  assert.equal(redacted.codexAccessToken, undefined);
+
+  // Removal clears the token and prunes the account node.
+  assert.equal(store.removeCodexAccountToken(accountId), true);
+  assert.equal(store.readCodexAccountToken(accountId), '');
+
+  // Empty / unsafe ids are rejected.
+  assert.equal(store.writeCodexAccountToken('__proto__', token), false);
+  assert.equal(store.writeCodexAccountToken(accountId, ''), false);
+  assert.equal(store.readCodexAccountToken(''), '');
+});

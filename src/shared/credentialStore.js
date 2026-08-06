@@ -357,6 +357,35 @@ class CredentialStore {
     return !this.readMimoCredential(accountId);
   }
 
+  readCodexAccountToken(id, document = this.readDocument()) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return '';
+    const value = valueAt(document.credentials, ['providers', 'codex', 'accounts', accountId, 'accessToken']);
+    return typeof value === 'string' ? value : '';
+  }
+
+  // A pasted Codex access token is a GUI-entered raw secret, so it lives in the credential store
+  // (mirroring mimo cookies / kimi tokens) and never in settings.json or the redacted renderer view.
+  // The managed-home auth.json the collector reads is the functional working copy; this is the
+  // canonical store for the value the user typed.
+  writeCodexAccountToken(id, accessToken) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId || !credentialValuePresent(accessToken)) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['providers', 'codex', 'accounts', accountId, 'accessToken'], accessToken);
+    this.writeDocument(document);
+    return true;
+  }
+
+  removeCodexAccountToken(id) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['providers', 'codex', 'accounts', accountId]);
+    this.writeDocument(document);
+    return !this.readCodexAccountToken(accountId);
+  }
+
   migrateLegacyMimoCredentials(entries) {
     const document = this.readDocument();
     if (Number(document.migrations.mimoFiles || 0) >= MIMO_MIGRATION_VERSION) {

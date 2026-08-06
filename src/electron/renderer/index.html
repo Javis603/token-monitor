@@ -671,6 +671,17 @@
                   <summary data-i18n="settings.codex.loginDetails">Details</summary>
                   <pre id="codexLoginOutput" class="codex-login-output"></pre>
                 </details>
+                <details id="codexImportPanel" class="codex-import-panel">
+                  <summary data-i18n="settings.codex.importToggle">Import an account</summary>
+                  <p class="settings-note" data-i18n="settings.codex.importNote">Skip the browser sign-in: import your ~/.codex/auth.json file, or paste a Codex access token (JWT).</p>
+                  <div class="settings-actions">
+                    <button id="codexImportFileButton" type="button" data-i18n="settings.codex.importFile">Import auth.json</button>
+                  </div>
+                  <textarea id="codexAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" placeholder="eyJhbGciOi..." data-i18n-placeholder="settings.codex.tokenPlaceholder"></textarea>
+                  <div class="settings-actions">
+                    <button id="codexImportTokenButton" type="button" data-i18n="settings.codex.importToken">Add token</button>
+                  </div>
+                </details>
                 <div id="codexAccountErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>

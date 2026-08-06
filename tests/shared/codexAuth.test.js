@@ -11,12 +11,23 @@ const {
   codexAuthIdentity,
   hashAccountKey,
   preserveCodexManagedHydrationCollisions,
-  upgradeCodexManagedAccountIdentity
+  upgradeCodexManagedAccountIdentity,
+  parseCodexAuthJson,
+  authFromCodexAccessToken
 } = require('../../src/shared/codexAuth');
 
 function jwt(payload) {
   const seg = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
   return `${seg({ alg: 'none', typ: 'JWT' })}.${seg(payload)}.`;
+}
+
+function sampleAuthJson({ email = 'alice@example.com', plan = 'plus', accountId = 'acct_1' } = {}) {
+  return {
+    tokens: {
+      access_token: 'access-jwt',
+      id_token: jwt({ email, chatgpt_plan_type: plan, chatgpt_account_id: accountId })
+    }
+  };
 }
 
 test('decodeJwtPayload returns the decoded middle segment', () => {
@@ -298,4 +309,54 @@ test('managed Codex hydration resolves cascading collisions without dropping acc
   const resolved = preserveCodexManagedHydrationCollisions(stored, hydrated);
   assert.deepEqual(resolved, stored);
   assert.equal(new Set(resolved.map(codexManagedAccountIdentityKey)).size, stored.length);
+});
+
+test('parseCodexAuthJson yields the same identity the web-login path derives', () => {
+  const auth = sampleAuthJson();
+  const { identity, data, source } = parseCodexAuthJson(JSON.stringify(auth));
+  // The import path and the web-login path both run codexAuthIdentity over the parsed auth, so an
+  // imported account lands on the identical id/email/keys as a browser sign-in.
+  assert.deepEqual(identity, codexAuthIdentity(auth));
+  assert.equal(identity.email, 'alice@example.com');
+  assert.equal(identity.accountLabel, 'plus');
+  assert.match(identity.accountKey, /^sha256:[0-9a-f]{64}$/);
+  // Normalized storage text matches the shape writeCodexAuthFile stores for a web-login account.
+  assert.equal(data, `${JSON.stringify(auth, null, 2)}\n`);
+  assert.equal(source, 'authJson');
+});
+
+test('parseCodexAuthJson rejects malformed auth.json with a clear error', () => {
+  assert.throws(() => parseCodexAuthJson('{not json'), /not valid JSON/);
+  assert.throws(() => parseCodexAuthJson(''), /empty/);
+  assert.throws(() => parseCodexAuthJson('   '), /empty/);
+  assert.throws(() => parseCodexAuthJson('null'), /JSON object/);
+  assert.throws(() => parseCodexAuthJson('[]'), /JSON object/);
+  assert.throws(() => parseCodexAuthJson(JSON.stringify({ tokens: {} })), /Could not identify/);
+});
+
+test('authFromCodexAccessToken identifies a JWT and falls back to a pasted auth.json', () => {
+  const token = jwt({ email: 'bob@example.com', chatgpt_plan_type: 'pro', chatgpt_account_id: 'acct_2' });
+  const { identity, auth, data, source } = authFromCodexAccessToken(token);
+  assert.equal(identity.email, 'bob@example.com');
+  assert.equal(identity.accountLabel, 'pro');
+  assert.equal(identity.providerAccountId, 'acct_2');
+  assert.equal(auth.tokens.access_token, token);
+  assert.equal(auth.tokens.id_token, token);
+  assert.ok(data.includes('"access_token"'));
+  assert.ok(data.includes('"id_token"'));
+  assert.equal(source, 'token');
+
+  // A pasted full auth.json delegates to the structured parser for a consistent result, and is
+  // tagged as authJson so the import handler stores it as a credential file, not a bare token.
+  const pasted = JSON.stringify(sampleAuthJson({ email: 'carol@example.com' }));
+  const fromJson = authFromCodexAccessToken(pasted);
+  assert.equal(fromJson.identity.email, 'carol@example.com');
+  assert.equal(fromJson.source, 'authJson');
+  assert.deepEqual(fromJson.identity, codexAuthIdentity(JSON.parse(pasted)));
+});
+
+test('authFromCodexAccessToken rejects empty or identity-less tokens', () => {
+  assert.throws(() => authFromCodexAccessToken(''), /empty/);
+  assert.throws(() => authFromCodexAccessToken('   '), /empty/);
+  assert.throws(() => authFromCodexAccessToken('opaque-token-without-claims'), /Could not identify/);
 });

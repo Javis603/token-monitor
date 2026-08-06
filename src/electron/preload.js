@@ -159,6 +159,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   codex: {
     accounts: () => ipcRenderer.invoke('codex:accounts'),
     addAccount: (options = {}) => ipcRenderer.invoke('codex:addAccount', options),
+    importAuthFile: () => ipcRenderer.invoke('codex:importAuthFile'),
+    importAccessToken: (token) => ipcRenderer.invoke('codex:importAccessToken', token),
     selectWorkspace: (options = {}) => ipcRenderer.invoke('codex:selectWorkspace', options),
     cancelLogin: (options = {}) => ipcRenderer.invoke('codex:cancelLogin', options),
     removeAccount: (id) => ipcRenderer.invoke('codex:removeAccount', id),
