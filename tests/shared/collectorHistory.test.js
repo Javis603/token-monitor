@@ -7,8 +7,23 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
-  localTodayKey, collectHistoryOnce, collectUsageOnce, shouldIncludeHistory
+  localTodayKey, collectHistoryOnce, collectUsageOnce, shouldIncludeHistory, startCollector
 } = require('../../src/shared/collector');
+
+function waitForCondition(predicate, timeoutMs = 2000) {
+  const startedAt = Date.now();
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (predicate()) {
+        clearInterval(timer);
+        resolve();
+      } else if (Date.now() - startedAt >= timeoutMs) {
+        clearInterval(timer);
+        reject(new Error('Timed out waiting for collector update'));
+      }
+    }, 5);
+  });
+}
 
 test('localTodayKey returns a YYYY-MM-DD string for the given date', () => {
   const key = localTodayKey(new Date(2026, 5, 7, 15, 30)); // local June 7 2026
@@ -51,6 +66,45 @@ test('collectHistoryOnce returns null when the graph run throws', async () => {
   assert.deepEqual(statuses.map(({ failureCode, successAt }) => ({ failureCode, successAt })), [
     { failureCode: 'history-graph-failed', successAt: null }
   ]);
+});
+
+test('collector preserves the last successful history timestamp after a failed refresh', async () => {
+  let graphCalls = 0;
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'history-diagnostics',
+    intervalMs: 60 * 60 * 1000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: false,
+    anchorPersistenceEnabled: false,
+    runTokscale: async () => ({ entries: [] }),
+    runGraph: async () => {
+      graphCalls += 1;
+      if (graphCalls === 1) return SAMPLE_GRAPH;
+      throw new Error('history unavailable');
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitForCondition(() => updates.length >= 1);
+    const firstDiagnostics = runtime.getDiagnostics();
+    assert.ok(firstDiagnostics.lastHistorySuccessAt);
+    const previousSuccessAt = firstDiagnostics.lastHistorySuccessAt;
+
+    await runtime.tick('manual', { forceHistory: true });
+
+    const afterFailure = runtime.getDiagnostics();
+    assert.equal(afterFailure.lastHistorySuccessAt, previousSuccessAt);
+    assert.equal(afterFailure.lastHistoryFailureCode, 'history-graph-failed');
+  } finally {
+    runtime.stop();
+  }
 });
 
 test('collectHistoryOnce returns null when there are no clients', async () => {

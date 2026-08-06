@@ -112,6 +112,18 @@ test('host snapshots use the cached Hub stats without rebuilding aggregates', ()
   assert.equal(snapshot.usage.usageOwner, 'electron-widget');
 });
 
+test('host snapshots keep Hub Devices applicable when the embedded Hub is unavailable', () => {
+  const { builder } = createBuilder({
+    getEmbeddedHub: () => null,
+    getLatestHubStats: () => null
+  });
+  const snapshot = builder.build(new Date('2026-08-06T10:00:00.000Z'));
+
+  assert.equal(snapshot.hub.devices.summarySource, 'same-process-hub-cache');
+  assert.equal(snapshot.hub.devices.summaryAvailable, false);
+  assert.equal(snapshot.hub.devices.notApplicable, false);
+});
+
 test('stream diagnostics map HTTP failures to the stable diagnostic code', () => {
   assert.equal(diagnosticStreamDetailCode({ reason: 'server_error' }), 'http-error');
   assert.equal(diagnosticStreamDetailCode({ reason: 'unauthorized' }), 'unauthorized');

@@ -188,7 +188,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
     const localRecordAgeSeconds = diagnosticAgeSeconds(localRecord?.receivedAt || localRecord?.updatedAt, nowMs);
     let hubStats = null;
     let hubSummarySource = 'not-applicable';
-    if (settings.hubMode === 'host' && getEmbeddedHub()) {
+    if (settings.hubMode === 'host') {
       hubStats = getLatestHubStats();
       hubSummarySource = 'same-process-hub-cache';
     } else if (settings.hubMode === 'client') {

@@ -62,6 +62,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
       deviceState.updateUsage(transformed, reason, { epoch, preview: false });
     },
     onDiagnosticEvent(event) {
+      if (!active) return;
       try {
         options.usageOptions?.onDiagnosticEvent?.(event);
       } catch (error) {
@@ -95,6 +96,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
       deviceState.updateLimits(summary, 'limits', { epoch });
     },
     onEvent(event) {
+      if (!active) return;
       try {
         deps.limitsDeps?.onEvent?.(event);
       } catch (error) {
@@ -123,6 +125,9 @@ function createDeviceRuntime(options = {}, deps = {}) {
   }
 
   return {
+    // These two controls synchronously return a limits snapshot while active;
+    // null is their intentional post-stop no-op sentinel. Async controls below
+    // use Promise-based sentinels instead of changing the underlying API shape.
     clearLimits: (scope, reason) => active ? limitsRuntime.clear(scope, reason) : null,
     flush: () => active ? (sink?.flush?.() || Promise.resolve()) : Promise.resolve(),
     getDiagnostics: () => ({

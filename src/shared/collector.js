@@ -1880,7 +1880,8 @@ function startCollector(options) {
         includeHistory,
         onHistoryStatus: includeHistory ? (status) => {
           lastHistoryAttemptAt = Date.parse(status.attemptedAt) || lastHistoryAttemptAt;
-          lastHistorySuccessAt = Date.parse(status.successAt) || 0;
+          const successAt = Date.parse(status.successAt);
+          if (Number.isFinite(successAt)) lastHistorySuccessAt = successAt;
           lastHistoryFailureCode = status.failureCode || null;
           lastHistoryScanDurationMs = status.durationMs;
         } : null,

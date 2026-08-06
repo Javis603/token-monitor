@@ -6,6 +6,7 @@ const test = require('node:test');
 const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
 
 function harness(options = {}) {
+  const { limitsDeps: injectedLimitsDeps = {}, ...runtimeOptions } = options;
   let usageOptions;
   let limitsDeps;
   const calls = [];
@@ -26,7 +27,7 @@ function harness(options = {}) {
   const runtime = createDeviceRuntime({
     envelope: { deviceId: 'device-1', hostname: 'host' },
     onRecord: (record, meta) => records.push({ record, meta }),
-    ...options
+    ...runtimeOptions
   }, {
     createUsageRuntime(next) {
       usageOptions = next;
@@ -35,7 +36,8 @@ function harness(options = {}) {
     createLimitsRuntime(_config, nextDeps) {
       limitsDeps = nextDeps;
       return limitsHandle;
-    }
+    },
+    limitsDeps: injectedLimitsDeps
   });
   return { calls, limitsDeps, records, runtime, usageOptions };
 }
@@ -122,6 +124,37 @@ test('stop invalidates both producer callbacks before stopping handles', () => {
   limitsDeps.onUpdate({ providers: [] });
   assert.deepEqual(records, []);
   assert.deepEqual(calls, [['usageStop'], ['limitsStop']]);
+});
+
+test('stop suppresses delegated diagnostic callbacks from late producer events', () => {
+  const usageEvents = [];
+  const limitsEvents = [];
+  const forwardedEvents = [];
+  const { limitsDeps, runtime, usageOptions } = harness({
+    usageOptions: {
+      onDiagnosticEvent: (event) => usageEvents.push(event)
+    },
+    limitsDeps: {
+      onEvent: (event) => limitsEvents.push(event)
+    },
+    onDiagnosticEvent: (event) => forwardedEvents.push(event)
+  });
+
+  const usageEvent = { subsystem: 'collector', code: 'before-stop' };
+  const limitsEvent = { type: 'retry-scheduled', provider: 'kimi' };
+  usageOptions.onDiagnosticEvent(usageEvent);
+  limitsDeps.onEvent(limitsEvent);
+  runtime.stop();
+
+  usageOptions.onDiagnosticEvent({ subsystem: 'collector', code: 'late' });
+  limitsDeps.onEvent({ type: 'retry-scheduled', provider: 'zai' });
+
+  assert.deepEqual(usageEvents, [usageEvent]);
+  assert.deepEqual(limitsEvents, [limitsEvent]);
+  assert.deepEqual(forwardedEvents, [
+    usageEvent,
+    { subsystem: 'limits', code: 'limits-retry-scheduled', provider: 'kimi' }
+  ]);
 });
 
 test('runtime control methods delegate to the precise producer', () => {
