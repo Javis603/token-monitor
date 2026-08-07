@@ -2,8 +2,8 @@
    <a href="./README.md">EN</a> | <a href="./README.zh-CN.md">简</a> | <a href="./README.zh-TW.md">繁</a> | <strong>KO</strong> | <a href="./README.ja.md">JA</a>
 </p>
 <div align="center">
-    <img src=".github/assets/app.png" alt="Token Monitor logo" width="120">
-    <h1>Token Monitor</h1>
+    <img src=".github/assets/app.png" alt="Routed Monitoring logo" width="120">
+    <h1>Routed Monitoring</h1>
 </div>
 
 <p align="center">
@@ -11,8 +11,8 @@
 </p>
 
 <p align="center">
-    <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="최신 릴리스" /></a>
-    <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="총 다운로드" /></a>
+    <a href="https://github.com/Javis603/routed-monitoring/releases"><img src="https://img.shields.io/github/v/release/Javis603/routed-monitoring?include_prereleases&style=flat-square&label=release&color=22c55e" alt="최신 릴리스" /></a>
+    <a href="https://github.com/Javis603/routed-monitoring/releases"><img src="https://img.shields.io/github/downloads/Javis603/routed-monitoring/total?style=flat-square&color=22c55e" alt="총 다운로드" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 이상" />
     <img src="https://img.shields.io/badge/macOS-14%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 14 or later" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
@@ -24,13 +24,13 @@
     <img src=".github/assets/demo.gif">
 </div>
 
-## Token Monitor란?
+## Routed Monitoring란?
 
 Claude Code, Codex, Cursor, GitHub Copilot 등 28개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
 
 ## 지원 도구
 
-Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 각각 지원합니다.
+Routed Monitoring는 **토큰 사용량**, **계정 한도**, **세션 상세**를 각각 지원합니다.
 
 | Logo | 도구 | 데이터 경로 | 토큰 사용량 | AI 도구 한도 | 세션 상세 |
 |:---:|------|-----------|:---:|:---:|:---:|
@@ -87,9 +87,9 @@ Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매�
 </tr>
 </table>
 
-## Token Monitor를 쓰는 이유
+## Routed Monitoring를 쓰는 이유
 
-대부분의 사용량 모니터는 실행 중인 그 기기에서만 유용합니다. Token Monitor는 멀티 디바이스 작업을 위해 만들어졌습니다. 각 기기가 로컬 로그를 감시하고 hub로 요약을 보내면, 연결된 모든 위젯이 토큰 변화를 거의 실시간으로 볼 수 있습니다.
+대부분의 사용량 모니터는 실행 중인 그 기기에서만 유용합니다. Routed Monitoring는 멀티 디바이스 작업을 위해 만들어졌습니다. 각 기기가 로컬 로그를 감시하고 hub로 요약을 보내면, 연결된 모든 위젯이 토큰 변화를 거의 실시간으로 볼 수 있습니다.
 
 ## 기능
 
@@ -105,7 +105,7 @@ Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매�
 
 - **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, Kimi 등 18개 이상 공급자의 session/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, DeepSeek 선불 잔액과 사용액
 - **여러 계정과 Codex 전환** — 한 공급자에서 여러 계정을 추적하고 각각의 한도를 표시. 추적 중인 Codex 계정은 재인증 없이 로컬 계정으로 한 번에 전환 가능
-- **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Token Monitor가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
+- **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Routed Monitoring가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
 - **사용 추세 & 대시보드** — 홈 화면 활동 히트맵·추세 차트, 연속 일수·기기 전체 도구/모델별 누적 사용(막대·K선) 전용 대시보드 창
 - **상태 보기** (선택) — Claude, OpenAI, Cursor, DeepSeek 상태 페이지 수동/주기 확인
 - **데이터 내보내기** — 도구 무관 CSV + JSON으로 수동 내보내기 또는 폴더 자동 기록 (스프레드시트, Obsidian, Grafana, 스크립트용); [docs/export.md](docs/export.md) 참고
@@ -132,7 +132,7 @@ Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매�
 
 ## 설치
 
-[GitHub Releases](https://github.com/Javis603/token-monitor/releases)에서 다운로드하세요.
+[GitHub Releases](https://github.com/Javis603/routed-monitoring/releases)에서 다운로드하세요.
 
 - **macOS (Apple Silicon)** — `.dmg`, 서명 및 notarize 완료
 - **macOS (Intel)** — x64 `.dmg`, 서명 및 notarize 완료
@@ -153,7 +153,7 @@ Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매�
 
 항상 켜 둔 기기에서 **설정 → 멀티 디바이스 동기화 → 이 기기에서 Hub 호스팅**을 선택합니다. 위젯이 secret을 생성하고 LAN URL(Tailscale/ZeroTier 포함)을 표시합니다. 다른 기기에서는 **Hub에 연결**에 URL과 secret을 붙여 넣습니다.
 
-Token Monitor가 실행 중일 때만 hub가 동작합니다. 앱을 종료하면(창만 닫는 것과 다름) hub가 멈추고 연결된 기기가 끊깁니다.
+Routed Monitoring가 실행 중일 때만 hub가 동작합니다. 앱을 종료하면(창만 닫는 것과 다름) hub가 멈추고 연결된 기기가 끊깁니다.
 
 #### 옵션 B — Node hub 자체 호스트 (상시 headless 기기)
 
@@ -166,7 +166,7 @@ npm run hub
 
 #### 옵션 C — Cloudflare Worker hub (네트워크 간, iPhone 포함)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Javis603/token-monitor/tree/main/worker)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Javis603/routed-monitoring/tree/main/worker)
 
 원클릭 배포 시 `TOKEN_MONITOR_SECRET` 입력을 요청합니다. 수동 배포:
 
@@ -186,9 +186,9 @@ npx wrangler deploy
 
 | 플랫폼 | 경로 |
 |--------|------|
-| macOS | `~/Library/Application Support/Token Monitor/` |
-| Windows | `%APPDATA%/Token Monitor/` |
-| Linux | `~/.config/Token Monitor/` |
+| macOS | `~/Library/Application Support/Routed Monitoring/` |
+| Windows | `%APPDATA%/Routed Monitoring/` |
+| Linux | `~/.config/Routed Monitoring/` |
 
 ## 소스에서 빌드
 
@@ -221,7 +221,7 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
 
 ## 세션 데이터 보존 기간
 
-**삭제된 세션 사용량 유지**(설정 → 수집)를 켜면 Token Monitor는 관측한 일별 도구/모델 사용량을 기간 제한 없이 로컬에 보관합니다. 원본 도구가 나중에 세션을 정리해도 히트맵과 추세는 영향을 받지 않습니다.
+**삭제된 세션 사용량 유지**(설정 → 수집)를 켜면 Routed Monitoring는 관측한 일별 도구/모델 사용량을 기간 제한 없이 로컬에 보관합니다. 원본 도구가 나중에 세션을 정리해도 히트맵과 추세는 영향을 받지 않습니다.
 
 <details>
 <summary><strong>고급: 원본 도구 자체의 보존 기간 늘리기</strong></summary>
@@ -238,13 +238,13 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
 
 값을 키우면 더 오래 남길 수 있지만, 그만큼 트랜스크립트가 디스크에 계속 남습니다. 다른 도구의 기본값과 설정 파일 경로는 tokscale의 [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) 표를 참고하세요.
 
-이 아카이브는 Token Monitor가 이미 관측한 날짜만 포함합니다. 추적을 시작하기 전에 삭제된 데이터는 복구할 수 없습니다.
+이 아카이브는 Routed Monitoring가 이미 관측한 날짜만 포함합니다. 추적을 시작하기 전에 삭제된 데이터는 복구할 수 없습니다.
 
 </details>
 
 ## 설정
 
-Token Monitor 설정은 두 곳에 있으며, 일상 사용에는 앞의 것만 필요합니다.
+Routed Monitoring 설정은 두 곳에 있으며, 일상 사용에는 앞의 것만 필요합니다.
 
 - **위젯 (GUI)** — 오른쪽 아래 `⚙` 버튼으로 엽니다. 섹션 순서: 일반(언어, 로그인 시 시작, 업데이트), 메인 화면(홈 모듈과 표시 통화), 창(창 동작, 메뉴 막대·플로팅 버블 레이아웃, 트레이 모드, 단축키), 외관(테마와 도구별 색), 수집(추적 도구, 수집 주기, 삭제된 세션 사용량 유지, 데이터 내보내기), AI 도구 한도(공급자 선택, 한도, 자격 증명), 구독(계정별 지불 금액), 멀티 디바이스 동기화. 타이틀 바의 `⇧` 버튼으로 창 동작을 전환합니다.
 - **Headless agent와 hub** — UI 없음. 프로젝트 루트의 `.env`(`.env.example` 복사)로 설정하며, 우선순위는 CLI 플래그 → 환경 변수 → 기본값입니다.
@@ -253,15 +253,15 @@ Token Monitor 설정은 두 곳에 있으며, 일상 사용에는 앞의 것만 
 
 ## 프라이버시
 
-Token Monitor는 사용 로그를 로컬에서 처리하며 프로젝트 관리자에게 분석 또는 원격 측정 데이터를 보내지 않습니다. 네트워크 접근은 문서화되었거나 사용자가 활성화한 기능에만 사용됩니다. 업데이트, 제공자 연동, Discord Rich Presence 및 선택적 다중 기기 동기화에서 사용하는 데이터는 [개인정보 처리방침](docs/privacy.md)을 참고하세요.
+Routed Monitoring는 사용 로그를 로컬에서 처리하며 프로젝트 관리자에게 분석 또는 원격 측정 데이터를 보내지 않습니다. 네트워크 접근은 문서화되었거나 사용자가 활성화한 기능에만 사용됩니다. 업데이트, 제공자 연동, Discord Rich Presence 및 선택적 다중 기기 동기화에서 사용하는 데이터는 [개인정보 처리방침](docs/privacy.md)을 참고하세요.
 
 ## Star 기록
 
-<a href="https://www.star-history.com/?repos=Javis603%2Ftoken-monitor&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=Javis603%2Frouted-monitoring&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&theme=dark&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&theme=dark&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
  </picture>
 </a>
 

@@ -21,9 +21,9 @@ const {
 } = require('../../scripts/signpath-windows-artifacts');
 
 const VERSION = '0.30.0';
-const APPLICATION = 'Token Monitor.exe';
-const INSTALLER = `Token-Monitor-Setup-${VERSION}.exe`;
-const PORTABLE = `Token-Monitor-${VERSION}.exe`;
+const APPLICATION = 'Routed Monitoring.exe';
+const INSTALLER = `Routed-Monitoring-Setup-${VERSION}.exe`;
+const PORTABLE = `Routed-Monitoring-${VERSION}.exe`;
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const SAMPLE_YAML = [
   `version: ${VERSION}`,
@@ -67,12 +67,12 @@ test('SignPath configurations restrict every signed PE to the release product me
   ]);
   assert.deepEqual(openingTagAttributes(artifactXml, 'pe-file'), [
     {
-      path: 'installer/Token-Monitor-Setup-${version}.exe',
+      path: 'installer/Routed-Monitoring-Setup-${version}.exe',
       'product-name': pkg.productName,
       'product-version': '${version}'
     },
     {
-      path: 'portable/Token-Monitor-${version}.exe',
+      path: 'portable/Routed-Monitoring-${version}.exe',
       'product-name': pkg.productName,
       'product-version': '${version}'
     }
@@ -119,7 +119,7 @@ test('release workflow signs the application before packaging and signs public a
 });
 
 function makeFixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-signpath-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-signpath-'));
   const distDir = path.join(root, 'dist');
   const inputDir = path.join(root, 'input');
   const signedDir = path.join(root, 'signed');
@@ -129,17 +129,17 @@ function makeFixture(t) {
   fs.writeFileSync(
     packageJsonPath,
     JSON.stringify({
-      name: 'token-monitor',
+      name: 'routed-monitoring',
       version: VERSION,
-      productName: 'Token Monitor',
+      productName: 'Routed Monitoring',
       build: {
         win: {
           verifyUpdateCodeSignature: true,
           signtoolOptions: { publisherName: 'SignPath Foundation' }
         },
-        nsis: { artifactName: 'Token-Monitor-Setup-${version}.${ext}' },
-        portable: { artifactName: 'Token-Monitor-${version}.${ext}' },
-        publish: [{ provider: 'github', owner: 'Javis603', repo: 'token-monitor' }]
+        nsis: { artifactName: 'Routed-Monitoring-Setup-${version}.${ext}' },
+        portable: { artifactName: 'Routed-Monitoring-${version}.${ext}' },
+        publish: [{ provider: 'github', owner: 'Javis603', repo: 'routed-monitoring' }]
       }
     })
   );
@@ -187,7 +187,7 @@ test('expectedWindowsApplication resolves the branded executable from package.js
   assert.deepEqual(expectedWindowsApplication(fixture.packageJsonPath, {}), {
     version: VERSION,
     productVersion: `${VERSION}.0`,
-    productName: 'Token Monitor',
+    productName: 'Routed Monitoring',
     application: APPLICATION
   });
 });
@@ -211,9 +211,9 @@ test('writes the updater config skipped by electron-builder prepackaged mode', (
   writeUnsignedApplication(fixture);
   const expected = [
     'owner: "Javis603"',
-    'repo: "token-monitor"',
+    'repo: "routed-monitoring"',
     'provider: "github"',
-    'updaterCacheDirName: "token-monitor-updater"',
+    'updaterCacheDirName: "routed-monitoring-updater"',
     'publisherName:',
     '  - "SignPath Foundation"',
     ''
@@ -292,7 +292,7 @@ test('expectedWindowsArtifacts rejects unsafe output names and output-parameter 
   assert.throws(() => expectedWindowsArtifacts(fixture.packageJsonPath), /Unsupported package version/);
 
   pkg.version = VERSION;
-  pkg.build.portable.artifactName = '..\\Token-Monitor-${version}.${ext}';
+  pkg.build.portable.artifactName = '..\\Routed-Monitoring-${version}.${ext}';
   fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
   assert.throws(() => expectedWindowsArtifacts(fixture.packageJsonPath), /Unsupported Windows artifactName/);
 });
@@ -300,7 +300,7 @@ test('expectedWindowsArtifacts rejects unsafe output names and output-parameter 
 test('expectedWindowsApplication rejects an unsafe product name', (t) => {
   const fixture = makeFixture(t);
   const pkg = JSON.parse(fs.readFileSync(fixture.packageJsonPath, 'utf8'));
-  pkg.productName = '..\\Token Monitor';
+  pkg.productName = '..\\Routed Monitoring';
   fs.writeFileSync(fixture.packageJsonPath, JSON.stringify(pkg));
   assert.throws(() => expectedWindowsApplication(fixture.packageJsonPath), /Unsupported productName/);
 });

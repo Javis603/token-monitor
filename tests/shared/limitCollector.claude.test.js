@@ -151,7 +151,7 @@ test('Claude Web source takes precedence and carries stable account metadata', a
   assert.equal(first.requests[0].options.headers.cookie, 'sessionKey=sk-ant-first-cookie');
   // This collector runs on undici, so it carries the browser agent. Pinned
   // verbatim: Cloudflare challenges every non-browser user-agent on this host, so
-  // swapping in the honest `token-monitor/<version>` agent would 403 the whole
+  // swapping in the honest `routed-monitoring/<version>` agent would 403 the whole
   // provider on the headless agent.
   assert.deepEqual(first.requests[0].options.headers, {
     accept: 'application/json',

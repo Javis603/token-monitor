@@ -1,8 +1,8 @@
 {
-  "name": "token-monitor-hub-worker",
+  "name": "routed-monitoring-hub-worker",
   "private": true,
-  "version": "0.39.0",
-  "description": "Cloudflare Worker deployment of the Token Monitor hub.",
+  "version": "1.0.5",
+  "description": "Cloudflare Worker deployment of the Routed Monitoring hub.",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -24,12 +24,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Javis603/token-monitor.git",
+    "url": "git+https://github.com/Javis603/routed-monitoring.git",
     "directory": "worker"
   },
-  "homepage": "https://github.com/Javis603/token-monitor/tree/main/worker#readme",
+  "homepage": "https://github.com/Javis603/routed-monitoring/tree/main/worker#readme",
   "bugs": {
-    "url": "https://github.com/Javis603/token-monitor/issues"
+    "url": "https://github.com/Javis603/routed-monitoring/issues"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

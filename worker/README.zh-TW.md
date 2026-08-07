@@ -2,9 +2,9 @@
    <a href="./README.md">EN</a> | <a href="./README.zh-CN.md">简</a> | <strong>繁</strong>
 </p>
 
-# Token Monitor Hub — Cloudflare Worker
+# Routed Monitoring Hub — Cloudflare Worker
 
-> 屬於 **[Token Monitor](https://github.com/Javis603/token-monitor)** 專案。這個目錄只是 Cloudflare Worker hub；桌面小工具、無頭 agent 和完整文件都在主倉庫。一鍵部署會建立一份獨立副本，不會自動更新，所以請回主倉庫查看新版本。
+> 屬於 **[Routed Monitoring](https://github.com/Javis603/routed-monitoring)** 專案。這個目錄只是 Cloudflare Worker hub；桌面小工具、無頭 agent 和完整文件都在主倉庫。一鍵部署會建立一份獨立副本，不會自動更新，所以請回主倉庫查看新版本。
 
 自架 Node hub 的即插即用替代品，以 Cloudflare Worker 部署，用 Durable Object 保存裝置狀態。它講的是同一套 HTTP 協定（`/api/ingest`、`/api/stats`、`/api/stats/stream`），所以小工具和 agent 無需改動即可使用，只是 Hub URL 不同。
 
@@ -32,7 +32,7 @@ npx wrangler deploy
 Wrangler 會印出部署後的 URL，例如：
 
 ```
-https://token-monitor-hub.<your-subdomain>.workers.dev
+https://routed-monitoring-hub.<your-subdomain>.workers.dev
 ```
 
 把每個 agent 和小工具都指向這個 URL。
@@ -65,7 +65,7 @@ npm run dev   # wrangler dev — local Worker with a real Durable Object
 
 設定 → Multi-device Sync：
 
-- Hub URL：`https://token-monitor-hub.<your-subdomain>.workers.dev`
+- Hub URL：`https://routed-monitoring-hub.<your-subdomain>.workers.dev`
 - Secret：你用 `wrangler secret put` 設定的值
 
 儲存。SSE 串流連上後，狀態標籤會從 `Local` 切換為 `Live`。
@@ -75,7 +75,7 @@ npm run dev   # wrangler dev — local Worker with a real Durable Object
 可以透過專案根目錄的 `.env`（從 `.env.example` 複製）：
 
 ```env
-TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev
+TOKEN_MONITOR_HUB_URL=https://routed-monitoring-hub.<your-subdomain>.workers.dev
 TOKEN_MONITOR_SECRET=<the same secret>
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 ```
@@ -83,7 +83,7 @@ TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 或在啟動時內聯匯出：
 
 ```bash
-TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev \
+TOKEN_MONITOR_HUB_URL=https://routed-monitoring-hub.<your-subdomain>.workers.dev \
 TOKEN_MONITOR_SECRET=<the same secret> \
 npm run agent
 ```
@@ -107,7 +107,7 @@ npx wrangler secret put PUBLIC_STATS_ENABLED   # enter 1
 最簡版本，只要一個數字：
 
 ```js
-const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
+const HUB = 'https://routed-monitoring-hub.<your-subdomain>.workers.dev';
 const SECRET = '<the same secret>';
 const url = HUB + '/api/stats?secret=' + SECRET;
 fetch(url)
@@ -132,7 +132,7 @@ fetch(url)
 帶設定區塊、並對 token 做精簡 `K / M / B` 格式化的組合版本，適合窄小工具版面：
 
 ```js
-const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
+const HUB = 'https://routed-monitoring-hub.<your-subdomain>.workers.dev';
 const SECRET = '<the same secret>';
 const PERIOD = 'today';        // 'today' | 'month' | 'allTime'
 const SHOW = 'tokens+cost';    // 'tokens' | 'cost' | 'tokens+cost'
@@ -165,7 +165,7 @@ fetch(HUB + '/api/stats?secret=' + SECRET)
 ### Scriptable
 
 ```js
-const req = new Request('https://token-monitor-hub.<your-subdomain>.workers.dev/api/stats');
+const req = new Request('https://routed-monitoring-hub.<your-subdomain>.workers.dev/api/stats');
 req.headers = { authorization: 'Bearer <the same secret>' };
 const stats = await req.loadJSON();
 const todayTokens = stats.periods.today.totalTokens;
@@ -248,7 +248,7 @@ iOS 小工具沒有省電的推送通道，所以執行環境會自行每隔幾�
 密鑰有三種接受方式（任一即可）：
 
 1. `Authorization: Bearer <secret>`：agent、小工具，以及任何伺服器 / 桌面客戶端首選。
-2. `x-token-monitor-secret: <secret>`：無法設定 `Authorization` 的客戶端的後備方案。
+2. `x-routed-monitoring-secret: <secret>`：無法設定 `Authorization` 的客戶端的後備方案。
 3. `?secret=<secret>` 查詢字串：針對 iOS 小工具執行環境（Widgy、Scriptable）的變通方案，它們的 WKWebView 難以處理 `Authorization` 標頭的 CORS 預檢。只在 URL 留在裝置本機的客戶端上使用。
 
 密鑰是必需的。當 `TOKEN_MONITOR_SECRET` 未設定時，所有資料路由都回傳 `503 secret_required`，只有 `/api/health` 和可選開啟的 `/api/public/stats` 會回應。請在部署前（或部署時）設定它。

@@ -359,8 +359,8 @@ test('fetchCodexLimits returns one provider per managed Codex account', async ()
   const seenHomes = [];
   const providers = await fetchCodexLimits({
     codexManagedAccounts: [
-      { id: 'one', email: 'one@example.com', homePath: '/tmp/token-monitor-codex/one' },
-      { id: 'two', email: 'two@example.com', homePath: '/tmp/token-monitor-codex/two' }
+      { id: 'one', email: 'one@example.com', homePath: '/tmp/routed-monitoring-codex/one' },
+      { id: 'two', email: 'two@example.com', homePath: '/tmp/routed-monitoring-codex/two' }
     ]
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
@@ -374,7 +374,7 @@ test('fetchCodexLimits returns one provider per managed Codex account', async ()
     }
   });
 
-  assert.deepEqual(seenHomes, ['/tmp/token-monitor-codex/one', '/tmp/token-monitor-codex/two']);
+  assert.deepEqual(seenHomes, ['/tmp/routed-monitoring-codex/one', '/tmp/routed-monitoring-codex/two']);
   assert.equal(providers.length, 2);
   assert.deepEqual(providers.map((provider) => provider.accountEmail), ['one@example.com', 'two@example.com']);
   assert.deepEqual(providers.map((provider) => provider.sourceDetail), ['managed', 'managed']);
@@ -390,7 +390,7 @@ test('fetchCodexLimits preserves same-email workspaces by account key', async ()
         email: 'member@example.com',
         workspaceAccountId: 'workspace-personal',
         workspaceKind: 'personal',
-        homePath: '/tmp/token-monitor-codex/personal'
+        homePath: '/tmp/routed-monitoring-codex/personal'
       },
       {
         id: 'team',
@@ -398,7 +398,7 @@ test('fetchCodexLimits preserves same-email workspaces by account key', async ()
         email: 'member@example.com',
         workspaceAccountId: 'workspace-team',
         workspaceLabel: 'Team',
-        homePath: '/tmp/token-monitor-codex/team'
+        homePath: '/tmp/routed-monitoring-codex/team'
       }
     ]
   }, {
@@ -423,15 +423,15 @@ test('fetchCodexLimits keeps same-workspace members distinct when auth omits ema
       id: 'one',
       email: 'one@example.com',
       workspaceAccountId: 'workspace-team',
-      homePath: '/tmp/token-monitor-codex/one',
-      authPath: '/tmp/token-monitor-codex/one/auth.json'
+      homePath: '/tmp/routed-monitoring-codex/one',
+      authPath: '/tmp/routed-monitoring-codex/one/auth.json'
     },
     {
       id: 'two',
       email: 'two@example.com',
       workspaceAccountId: 'workspace-team',
-      homePath: '/tmp/token-monitor-codex/two',
-      authPath: '/tmp/token-monitor-codex/two/auth.json'
+      homePath: '/tmp/routed-monitoring-codex/two',
+      authPath: '/tmp/routed-monitoring-codex/two/auth.json'
     }
   ];
   const providers = await fetchCodexLimits({
@@ -464,13 +464,13 @@ test('fetchCodexLimits error rows keep same-workspace members distinct', async (
         id: 'one',
         email: 'one@example.com',
         workspaceAccountId: 'workspace-team',
-        homePath: '/tmp/token-monitor-codex/one'
+        homePath: '/tmp/routed-monitoring-codex/one'
       },
       {
         id: 'two',
         email: 'two@example.com',
         workspaceAccountId: 'workspace-team',
-        homePath: '/tmp/token-monitor-codex/two'
+        homePath: '/tmp/routed-monitoring-codex/two'
       }
     ]
   }, {
@@ -503,8 +503,8 @@ test('fetchCodexLimits can refresh only the requested managed Codex account', as
       sourceDetail: 'managed'
     },
     codexManagedAccounts: [
-      { id: 'other', accountKey: 'sha256:other', email: 'other@example.com', homePath: '/tmp/token-monitor-codex/other' },
-      { id: 'target', accountKey: 'sha256:target', email: 'target@example.com', homePath: '/tmp/token-monitor-codex/target' }
+      { id: 'other', accountKey: 'sha256:other', email: 'other@example.com', homePath: '/tmp/routed-monitoring-codex/other' },
+      { id: 'target', accountKey: 'sha256:target', email: 'target@example.com', homePath: '/tmp/routed-monitoring-codex/target' }
     ]
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
@@ -518,7 +518,7 @@ test('fetchCodexLimits can refresh only the requested managed Codex account', as
     }
   });
 
-  assert.deepEqual(seenHomes, ['/tmp/token-monitor-codex/target']);
+  assert.deepEqual(seenHomes, ['/tmp/routed-monitoring-codex/target']);
   assert.equal(providers.length, 1);
   assert.equal(providers[0].accountKey, 'sha256:target');
   assert.equal(providers[0].accountEmail, 'target@example.com');
@@ -725,8 +725,8 @@ test('fetchCodexLimits skips disabled managed Codex accounts', async () => {
   const seenHomes = [];
   const providers = await fetchCodexLimits({
     codexManagedAccounts: [
-      { id: 'one', email: 'one@example.com', homePath: '/tmp/token-monitor-codex/one', enabled: true },
-      { id: 'two', email: 'two@example.com', homePath: '/tmp/token-monitor-codex/two', enabled: false }
+      { id: 'one', email: 'one@example.com', homePath: '/tmp/routed-monitoring-codex/one', enabled: true },
+      { id: 'two', email: 'two@example.com', homePath: '/tmp/routed-monitoring-codex/two', enabled: false }
     ]
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
@@ -738,7 +738,7 @@ test('fetchCodexLimits skips disabled managed Codex accounts', async () => {
     }
   });
 
-  assert.deepEqual(seenHomes, ['/tmp/token-monitor-codex/one']);
+  assert.deepEqual(seenHomes, ['/tmp/routed-monitoring-codex/one']);
   assert.equal(providers.length, 1);
   assert.equal(providers[0].accountEmail, 'one@example.com');
 });
@@ -747,7 +747,7 @@ test('fetchCodexLimits keeps the live system account visible alongside managed a
   const seenHomes = [];
   const providers = await fetchCodexLimits({
     codexManagedAccounts: [
-      { id: 'two', email: 'two@example.com', homePath: '/tmp/token-monitor-codex/two' }
+      { id: 'two', email: 'two@example.com', homePath: '/tmp/routed-monitoring-codex/two' }
     ]
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
@@ -763,7 +763,7 @@ test('fetchCodexLimits keeps the live system account visible alongside managed a
   });
 
   // The live login (the account the Codex app uses) is probed first and stays visible.
-  assert.deepEqual(seenHomes, ['<live>', '/tmp/token-monitor-codex/two']);
+  assert.deepEqual(seenHomes, ['<live>', '/tmp/routed-monitoring-codex/two']);
   assert.deepEqual(providers.map((provider) => provider.accountEmail), ['live@example.com', 'two@example.com']);
   assert.deepEqual(providers.map((provider) => provider.sourceDetail), ['app', 'managed']);
 });
@@ -771,7 +771,7 @@ test('fetchCodexLimits keeps the live system account visible alongside managed a
 test('fetchCodexLimits does not show the live account twice when it is also managed', async () => {
   const providers = await fetchCodexLimits({
     codexManagedAccounts: [
-      { id: 'a', email: 'a@example.com', homePath: '/tmp/token-monitor-codex/a' }
+      { id: 'a', email: 'a@example.com', homePath: '/tmp/routed-monitoring-codex/a' }
     ]
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
@@ -794,7 +794,7 @@ test('fetchCodexLimits carries the managed workspace label into the live account
         email: 'member@example.com',
         workspaceAccountId: 'workspace-team',
         workspaceLabel: 'Acme Team',
-        homePath: '/tmp/token-monitor-codex/team'
+        homePath: '/tmp/routed-monitoring-codex/team'
       }
     ]
   }, {
@@ -820,7 +820,7 @@ test('fetchCodexLimits dedups the live account against the same managed account 
   const idToken = makeIdToken({ chatgpt_account_id: 'acct_shared' }); // no email claim
   const providers = await fetchCodexLimits({
     codexManagedAccounts: [
-      { id: 'm', email: '', accountKey: sharedKey, homePath: '/tmp/token-monitor-codex/m' }
+      { id: 'm', email: '', accountKey: sharedKey, homePath: '/tmp/routed-monitoring-codex/m' }
     ]
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
@@ -843,7 +843,7 @@ test('fetchCodexLimits fills the live account email from auth.json when the RPC 
   const idToken = makeIdToken({ email: 'live@example.com', chatgpt_account_id: 'acct_live' });
   const providers = await fetchCodexLimits({
     codexManagedAccounts: [
-      { id: 'm', email: 'managed@example.com', accountKey: 'sha256:managed', homePath: '/tmp/token-monitor-codex/m' }
+      { id: 'm', email: 'managed@example.com', accountKey: 'sha256:managed', homePath: '/tmp/routed-monitoring-codex/m' }
     ]
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
@@ -1136,8 +1136,8 @@ test('fetchCodexLimits augments reset credits expiry from the Codex OAuth endpoi
   const fetches = [];
   const providers = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-30T00:00:00Z'),
-    env: { PATH: '/usr/bin', CODEX_HOME: '/tmp/token-monitor-codex/live' },
-    codexAuthPath: '/tmp/token-monitor-codex/live/auth.json',
+    env: { PATH: '/usr/bin', CODEX_HOME: '/tmp/routed-monitoring-codex/live' },
+    codexAuthPath: '/tmp/routed-monitoring-codex/live/auth.json',
     codexCommand: 'codex',
     readFileSync: (file) => {
       if (String(file).endsWith('auth.json')) {

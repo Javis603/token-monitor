@@ -769,7 +769,7 @@ function setupDashboard() {
     heatEl.innerHTML = heatmapSvg();
   }
   renderHeatmap();
-  window.addEventListener("token-monitor-languagechange", renderHeatmap);
+  window.addEventListener("routed-monitoring-languagechange", renderHeatmap);
   renderChart();
 
   function wireSeg(seg, attr, apply) {
@@ -824,7 +824,7 @@ function setupDashboard() {
 function setupGitHubStars() {
   var el = document.querySelector("[data-github-stars]");
   if (!el || !window.fetch) return;
-  var cacheKey = "token-monitor-github-stars";
+  var cacheKey = "routed-monitoring-github-stars";
   var maxAge = 60 * 60 * 1000;
 
   function formatCount(count) {
@@ -846,7 +846,7 @@ function setupGitHubStars() {
     }
   } catch (e) {}
 
-  window.fetch("https://api.github.com/repos/Javis603/token-monitor", {
+  window.fetch("https://api.github.com/repos/Javis603/routed-monitoring", {
     headers: { Accept: "application/vnd.github+json" }
   }).then(function (response) {
     if (!response.ok) throw new Error("GitHub returned " + response.status);
@@ -870,9 +870,9 @@ function setupSmartDownloads() {
   var buttons = document.querySelectorAll("[data-smart-download]");
   if (!buttons.length) return;
 
-  var releasePage = "https://github.com/Javis603/token-monitor/releases/latest";
-  var apiUrl = "https://api.github.com/repos/Javis603/token-monitor/releases/latest";
-  var cacheKey = "token-monitor-latest-release-v1";
+  var releasePage = "https://github.com/Javis603/routed-monitoring/releases/latest";
+  var apiUrl = "https://api.github.com/repos/Javis603/routed-monitoring/releases/latest";
+  var cacheKey = "routed-monitoring-latest-release-v1";
   var cacheMaxAge = 60 * 60 * 1000;
   var platform = detectPlatform();
   var architecture = "";
@@ -908,7 +908,7 @@ function setupSmartDownloads() {
     var matches = assets.filter(function (asset) {
       var name = String(asset.name || "");
       if (/\.blockmap$/i.test(name) || /\.ya?ml$/i.test(name)) return false;
-      if (key === "windows") return /^Token-Monitor-Setup-.*\.exe$/i.test(name);
+      if (key === "windows") return /^Routed-Monitoring-Setup-.*\.exe$/i.test(name);
       if (key === "linux") return /\.AppImage$/i.test(name);
       if (key !== "mac" || !/\.dmg$/i.test(name)) return false;
       if (architecture === "arm64") return /arm64/i.test(name);

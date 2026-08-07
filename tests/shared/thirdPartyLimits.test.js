@@ -78,7 +78,7 @@ function apiFetch(accounts, defaultStatusBody = { quota_per_unit: DEFAULT_QUOTA_
   };
 }
 
-test('New API helpers accept only the explicit Token Monitor environment surface', () => {
+test('New API helpers accept only the explicit Routed Monitoring environment surface', () => {
   const env = {
     TOKEN_MONITOR_NEWAPI_BASE_URL: '"https://example.com/v1/"',
     TOKEN_MONITOR_NEWAPI_ACCESS_TOKEN: "'access-token'",

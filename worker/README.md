@@ -2,9 +2,9 @@
    <strong>EN</strong> | <a href="./README.zh-CN.md">简</a> | <a href="./README.zh-TW.md">繁</a>
 </p>
 
-# Token Monitor Hub — Cloudflare Worker
+# Routed Monitoring Hub — Cloudflare Worker
 
-> Part of **[Token Monitor](https://github.com/Javis603/token-monitor)**. This directory is just the Cloudflare Worker hub; the desktop widget, headless agent, and full docs live in the main repo. A one-click deploy creates a standalone copy that won't auto-update, so check the main repo for new versions.
+> Part of **[Routed Monitoring](https://github.com/Javis603/routed-monitoring)**. This directory is just the Cloudflare Worker hub; the desktop widget, headless agent, and full docs live in the main repo. A one-click deploy creates a standalone copy that won't auto-update, so check the main repo for new versions.
 
 Drop-in replacement for the self-hosted Node hub, deployed as a Cloudflare
 Worker with a Durable Object holding device state. Speaks the same HTTP
@@ -36,7 +36,7 @@ npx wrangler deploy
 Wrangler prints the deployed URL, for example:
 
 ```
-https://token-monitor-hub.<your-subdomain>.workers.dev
+https://routed-monitoring-hub.<your-subdomain>.workers.dev
 ```
 
 Point each agent and widget at that URL.
@@ -72,7 +72,7 @@ Endpoints work the same as in production. Use a separate dev secret with
 
 Settings → Multi-device Sync:
 
-- Hub URL: `https://token-monitor-hub.<your-subdomain>.workers.dev`
+- Hub URL: `https://routed-monitoring-hub.<your-subdomain>.workers.dev`
 - Secret: the value you set with `wrangler secret put`
 
 Save. The status pill should switch from `Local` to `Live` once the SSE stream
@@ -83,7 +83,7 @@ connects.
 Either via `.env` at the project root (copy from `.env.example`):
 
 ```env
-TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev
+TOKEN_MONITOR_HUB_URL=https://routed-monitoring-hub.<your-subdomain>.workers.dev
 TOKEN_MONITOR_SECRET=<the same secret>
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 ```
@@ -91,7 +91,7 @@ TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 Or by exporting them inline when launching:
 
 ```bash
-TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev \
+TOKEN_MONITOR_HUB_URL=https://routed-monitoring-hub.<your-subdomain>.workers.dev \
 TOKEN_MONITOR_SECRET=<the same secret> \
 npm run agent
 ```
@@ -121,7 +121,7 @@ config, so the secret never hits an external log.
 Minimum version — just one number:
 
 ```js
-const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
+const HUB = 'https://routed-monitoring-hub.<your-subdomain>.workers.dev';
 const SECRET = '<the same secret>';
 const url = HUB + '/api/stats?secret=' + SECRET;
 fetch(url)
@@ -147,7 +147,7 @@ Combined version with a config block and compact `K / M / B` token
 formatting for tight widget layouts:
 
 ```js
-const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
+const HUB = 'https://routed-monitoring-hub.<your-subdomain>.workers.dev';
 const SECRET = '<the same secret>';
 const PERIOD = 'today';        // 'today' | 'month' | 'allTime'
 const SHOW = 'tokens+cost';    // 'tokens' | 'cost' | 'tokens+cost'
@@ -181,7 +181,7 @@ Each Widgy text element gets its own script — duplicate it and change
 ### Scriptable
 
 ```js
-const req = new Request('https://token-monitor-hub.<your-subdomain>.workers.dev/api/stats');
+const req = new Request('https://routed-monitoring-hub.<your-subdomain>.workers.dev/api/stats');
 req.headers = { authorization: 'Bearer <the same secret>' };
 const stats = await req.loadJSON();
 const todayTokens = stats.periods.today.totalTokens;
@@ -273,7 +273,7 @@ The secret is accepted three ways (any one works):
 
 1. `Authorization: Bearer <secret>` — preferred for agents, widget, and any
    server / desktop client.
-2. `x-token-monitor-secret: <secret>` — fallback for clients that cannot set
+2. `x-routed-monitoring-secret: <secret>` — fallback for clients that cannot set
    `Authorization`.
 3. `?secret=<secret>` query string — workaround for iOS widget runtimes
    (Widgy, Scriptable) whose WKWebView struggles with CORS preflight for the

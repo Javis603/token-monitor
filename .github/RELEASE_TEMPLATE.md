@@ -20,31 +20,31 @@
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.39.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.39.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-Setup-0.39.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.39.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.5-arm64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.5-x64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-x64.dmg)
+- **Windows Installer** — [Routed-Monitoring-Setup-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-Setup-1.0.5.exe) (recommended)
+- **Windows Portable** — [Routed-Monitoring-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.exe) (no install required)
+- **Linux x64** — [Routed-Monitoring-1.0.5.AppImage](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
 
 ### First launch
 
-**macOS:** the app is Developer ID-signed and notarized by Apple. Open the `.dmg`, then drag Token Monitor to Applications.
+**macOS:** the app is Developer ID-signed and notarized by Apple. Open the `.dmg`, then drag Routed Monitoring to Applications.
 
-**Windows:** both executables are signed ([how to verify](https://github.com/Javis603/token-monitor/blob/main/docs/code-signing.md#verify-a-download)).
+**Windows:** both executables are signed ([how to verify](https://github.com/Javis603/routed-monitoring/blob/main/docs/code-signing.md#verify-a-download)).
 
 **Linux:** mark the AppImage executable, then run it:
 
 ```bash
-chmod +x "Token Monitor"*.AppImage
-./"Token Monitor"*.AppImage
+chmod +x "Routed Monitoring"*.AppImage
+./"Routed Monitoring"*.AppImage
 ```
 
 ### Other notes
 
-Other platforms are not pre-built — run from source per the [README](https://github.com/Javis603/token-monitor#readme). The macOS `.zip` is the same app repackaged; ignore it unless you specifically need it.
+Other platforms are not pre-built — run from source per the [README](https://github.com/Javis603/routed-monitoring#readme). The macOS `.zip` is the same app repackaged; ignore it unless you specifically need it.
 
 ### tokscale dependency
 
@@ -78,31 +78,31 @@ open-source: https://github.com/junhoyeo/tokscale
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.39.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.39.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-Setup-0.39.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.39.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.5-arm64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.5-x64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-x64.dmg)
+- **Windows 安装版** — [Routed-Monitoring-Setup-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-Setup-1.0.5.exe)（推荐）
+- **Windows 便携版** — [Routed-Monitoring-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.exe)（免安装）
+- **Linux x64** — [Routed-Monitoring-1.0.5.AppImage](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
 
 ### 首次启动
 
-**macOS：** 应用已使用 Developer ID 签名并通过 Apple 公证。打开 `.dmg`，然后把 Token Monitor 拖到 Applications。
+**macOS：** 应用已使用 Developer ID 签名并通过 Apple 公证。打开 `.dmg`，然后把 Routed Monitoring 拖到 Applications。
 
-**Windows：** 两个可执行文件均已签名（[查看验证方法](https://github.com/Javis603/token-monitor/blob/main/docs/code-signing.md#verify-a-download)）。
+**Windows：** 两个可执行文件均已签名（[查看验证方法](https://github.com/Javis603/routed-monitoring/blob/main/docs/code-signing.md#verify-a-download)）。
 
 **Linux：** 先给 AppImage 执行权限，然后运行：
 
 ```bash
-chmod +x "Token Monitor"*.AppImage
-./"Token Monitor"*.AppImage
+chmod +x "Routed Monitoring"*.AppImage
+./"Routed Monitoring"*.AppImage
 ```
 
 ### 其他说明
 
-其他平台暂不提供预构建版本，请参考 [README](https://github.com/Javis603/token-monitor#readme) 从源码运行。macOS 的 `.zip` 只是同一个 app 的重新打包版本，除非你明确需要，否则可以忽略。
+其他平台暂不提供预构建版本，请参考 [README](https://github.com/Javis603/routed-monitoring#readme) 从源码运行。macOS 的 `.zip` 只是同一个 app 的重新打包版本，除非你明确需要，否则可以忽略。
 
 ### tokscale 依赖
 
@@ -114,7 +114,7 @@ https://github.com/junhoyeo/tokscale
 
 ---
 
-**Full Changelog:** [v0.38.0...v0.39.0](https://github.com/Javis603/token-monitor/compare/v0.38.0...v0.39.0)
+**Full Changelog:** [v0.38.0...v1.0.5](https://github.com/Javis603/routed-monitoring/compare/v0.38.0...v1.0.5)
 
 <details>
 <summary>繁體中文 · 한국어 · 日本語</summary>
@@ -144,11 +144,11 @@ https://github.com/junhoyeo/tokscale
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.39.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.39.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-Setup-0.39.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.39.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.5-arm64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.5-x64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-x64.dmg)
+- **Windows 安裝版** — [Routed-Monitoring-Setup-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-Setup-1.0.5.exe)（推薦）
+- **Windows 便攜版** — [Routed-Monitoring-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.exe)（免安裝）
+- **Linux x64** — [Routed-Monitoring-1.0.5.AppImage](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.AppImage)
 
 </details>
 
@@ -177,11 +177,11 @@ https://github.com/junhoyeo/tokscale
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.39.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.39.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-Setup-0.39.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.39.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.5-arm64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.5-x64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-x64.dmg)
+- **Windows 설치 버전** — [Routed-Monitoring-Setup-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-Setup-1.0.5.exe) (권장)
+- **Windows 포터블 버전** — [Routed-Monitoring-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.exe) (설치 필요 없음)
+- **Linux x64** — [Routed-Monitoring-1.0.5.AppImage](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.AppImage)
 
 </details>
 
@@ -210,11 +210,11 @@ https://github.com/junhoyeo/tokscale
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.39.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.39.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-Setup-0.39.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.39.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.39.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.39.0/Token-Monitor-0.39.0.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.5-arm64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.5-x64.dmg](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5-x64.dmg)
+- **Windows インストーラー** — [Routed-Monitoring-Setup-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-Setup-1.0.5.exe)（推奨）
+- **Windows ポータブル版** — [Routed-Monitoring-1.0.5.exe](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.exe)（インストール不要）
+- **Linux x64** — [Routed-Monitoring-1.0.5.AppImage](https://github.com/Javis603/routed-monitoring/releases/download/v1.0.5/Routed-Monitoring-1.0.5.AppImage)
 
 </details>
 

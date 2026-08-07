@@ -1,5 +1,5 @@
 {
-  "name": "token-monitor-site",
+  "name": "routed-monitoring-site",
   "private": true,
   "type": "module",
   "scripts": {

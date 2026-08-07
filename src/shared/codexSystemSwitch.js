@@ -47,7 +47,7 @@ async function writeCodexAuthFile(authPath, data, deps = {}) {
   const randomUUID = deps.randomUUID || crypto.randomUUID;
   const dir = path.dirname(authPath);
   await mkdir(dir, { recursive: true });
-  const tempPath = path.join(dir, `.auth.json.token-monitor-${randomUUID()}.tmp`);
+  const tempPath = path.join(dir, `.auth.json.routed-monitoring-${randomUUID()}.tmp`);
   try {
     await writeFile(tempPath, data, { mode: 0o600 });
     await chmod(tempPath, 0o600).catch(() => {});

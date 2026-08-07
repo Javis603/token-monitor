@@ -2,8 +2,8 @@
    <strong>EN</strong> | <a href="./README.zh-CN.md">简</a> | <a href="./README.zh-TW.md">繁</a> | <a href="./README.ko.md">KO</a> | <a href="./README.ja.md">JA</a>
 </p>
 <div align="center">
-    <img src=".github/assets/app.png" alt="Token Monitor logo" width="120">
-    <h1>Token Monitor</h1>
+    <img src=".github/assets/app.png" alt="Routed Monitoring logo" width="120">
+    <h1>Routed Monitoring</h1>
 </div>
 
 <p align="center">
@@ -11,8 +11,8 @@
 </p>
 
 <p align="center">
-    <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="Latest release" /></a>
-    <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="Total downloads" /></a>
+    <a href="https://github.com/Javis603/routed-monitoring/releases"><img src="https://img.shields.io/github/v/release/Javis603/routed-monitoring?include_prereleases&style=flat-square&label=release&color=22c55e" alt="Latest release" /></a>
+    <a href="https://github.com/Javis603/routed-monitoring/releases"><img src="https://img.shields.io/github/downloads/Javis603/routed-monitoring/total?style=flat-square&color=22c55e" alt="Total downloads" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 or later" />
     <img src="https://img.shields.io/badge/macOS-14%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 14 or later" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
@@ -24,13 +24,13 @@
     <img src=".github/assets/demo.gif">
 </div>
 
-## What is Token Monitor?
+## What is Routed Monitoring?
 
 A desktop widget that shows live token usage and AI Tool Limits across 28+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
 
 ## Supported Tools
 
-Token Monitor supports token usage, account-limit checks, and session details separately:
+Routed Monitoring supports token usage, account-limit checks, and session details separately:
 
 | Logo | Tool | Data path | Token Usage | AI Tool Limits | Session Details |
 |:---:|------|-----------|:---:|:---:|:---:|
@@ -87,9 +87,9 @@ Custom maps numeric JSON fields from one GET balance endpoint; OpenAI or Anthrop
 </tr>
 </table>
 
-## Why Token Monitor?
+## Why Routed Monitoring?
 
-Most usage monitors are useful on the machine they run on. Token Monitor is built for multi-device work: each device watches its own local logs, sends summary updates to your hub, and every connected widget sees token changes almost immediately.
+Most usage monitors are useful on the machine they run on. Routed Monitoring is built for multi-device work: each device watches its own local logs, sends summary updates to your hub, and every connected widget sees token changes almost immediately.
 
 ## Features
 
@@ -105,7 +105,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 - **AI Tool Limits detection** — provider-specific session, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 18+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
-- **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
+- **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Routed Monitoring archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
 - **Optional Status view** — Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
 - **Data export** — export usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
@@ -132,7 +132,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ## Installation
 
-Download from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+Download from [GitHub Releases](https://github.com/Javis603/routed-monitoring/releases).
 
 - **macOS (Apple Silicon)** — `.dmg`, signed and notarized
 - **macOS (Intel)** — x64 `.dmg`, signed and notarized
@@ -153,7 +153,7 @@ Pick ONE hub backend that all your devices (and any headless agents) connect to.
 
 In the widget on one always-on machine, open Settings → Multi-device Sync and pick **Host hub on this device**. The widget generates a random secret and lists the LAN URLs other devices can connect to (Tailscale or ZeroTier addresses appear here too). On every other device, pick **Connect to a hub** and paste the URL + secret.
 
-The hub runs while Token Monitor is running — quitting (not just closing the window) stops it for all connected devices.
+The hub runs while Routed Monitoring is running — quitting (not just closing the window) stops it for all connected devices.
 
 #### Option B — Self-hosted Node hub (always-on headless machine)
 
@@ -166,7 +166,7 @@ npm run hub
 
 #### Option C — Cloudflare Worker hub (across networks, including iPhone)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Javis603/token-monitor/tree/main/worker)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Javis603/routed-monitoring/tree/main/worker)
 
 One-click deploy — Cloudflare will prompt for the `TOKEN_MONITOR_SECRET` during setup. Or deploy manually:
 
@@ -186,9 +186,9 @@ App state lives in the OS user-data dir — delete it along with the app to full
 
 | Platform | Path |
 |----------|------|
-| macOS | `~/Library/Application Support/Token Monitor/` |
-| Windows | `%APPDATA%/Token Monitor/` |
-| Linux | `~/.config/Token Monitor/` |
+| macOS | `~/Library/Application Support/Routed Monitoring/` |
+| Windows | `%APPDATA%/Routed Monitoring/` |
+| Linux | `~/.config/Routed Monitoring/` |
 
 ## Build from source
 
@@ -221,7 +221,7 @@ The widget chooses local vs sync mode based on Settings → Multi-device Sync. T
 
 ## Session data retention
 
-With **Preserve deleted session usage** enabled (Settings → Collection), Token Monitor archives observed daily tool/model usage locally with no time limit — so even after a source tool prunes its own sessions, the heatmap and trends are unaffected.
+With **Preserve deleted session usage** enabled (Settings → Collection), Routed Monitoring archives observed daily tool/model usage locally with no time limit — so even after a source tool prunes its own sessions, the heatmap and trends are unaffected.
 
 <details>
 <summary><strong>Advanced: extend the source tool's own retention</strong></summary>
@@ -238,13 +238,13 @@ The heatmap and sync payload use a rolling 370-day window (older observations re
 
 A larger value keeps more, at the cost of transcripts living on disk for as long as you set. tokscale's [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) table covers the other tools' defaults and config paths.
 
-This archive only covers days Token Monitor has already observed; data deleted before it started tracking cannot be recovered.
+This archive only covers days Routed Monitoring has already observed; data deleted before it started tracking cannot be recovered.
 
 </details>
 
 ## Settings
 
-There are two places to configure Token Monitor; day-to-day use only needs the first:
+There are two places to configure Routed Monitoring; day-to-day use only needs the first:
 
 - **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates), Main (Home modules and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, shortcut), Appearance (theme and vendor colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, data export), AI Tool Limits (provider selection, limits, and credentials), Subscriptions (what you pay per account), and Multi-device Sync. The `⇧` button in the title bar cycles the window behavior.
 - **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default.
@@ -253,15 +253,15 @@ See the [configuration reference](docs/configuration.md) for every setting and a
 
 ## Privacy
 
-Token Monitor processes usage logs locally and sends no analytics or telemetry to the project maintainer. Network access occurs only for documented or user-enabled features. See the [privacy policy](docs/privacy.md) for the data used by updates, provider integrations, Discord Rich Presence, and optional multi-device sync.
+Routed Monitoring processes usage logs locally and sends no analytics or telemetry to the project maintainer. Network access occurs only for documented or user-enabled features. See the [privacy policy](docs/privacy.md) for the data used by updates, provider integrations, Discord Rich Presence, and optional multi-device sync.
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Javis603%2Ftoken-monitor&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=Javis603%2Frouted-monitoring&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&theme=dark&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&theme=dark&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
  </picture>
 </a>
 

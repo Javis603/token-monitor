@@ -73,9 +73,9 @@ function normalizeCustomEndpointPath(value) {
     || decoded.split('/').some((segment) => segment === '.' || segment === '..')
   ) return '';
   try {
-    const parsed = new URL(raw, 'https://token-monitor.invalid');
+    const parsed = new URL(raw, 'https://routed-monitoring.invalid');
     if (
-      parsed.origin !== 'https://token-monitor.invalid'
+      parsed.origin !== 'https://routed-monitoring.invalid'
       || parsed.search
       || parsed.hash
     ) return '';

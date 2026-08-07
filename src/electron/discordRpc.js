@@ -5,7 +5,7 @@ const { formatCurrencyFromUsd, normalizeCurrency } = require('../shared/currency
 const compactTokens = require('../shared/compactTokens');
 
 const CLIENT_ID = '1507034330436862062';
-const GITHUB_URL = 'https://github.com/Javis603/token-monitor';
+const GITHUB_URL = 'https://github.com/Javis603/routed-monitoring';
 const KNOWN_CLIENT_ASSETS = new Set([
   'claude', 'codex', 'hermes', 'gemini', 'cursor', 'opencode', 'openclaw', 'antigravity', 'cline',
   'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma'
@@ -51,12 +51,12 @@ function buildPayload(stats, currency = 'USD', compactTokenUnits = 'western', lo
   const base = {
     type: 0,
     largeImageKey: 'logo',
-    largeImageText: 'Token Monitor',
+    largeImageText: 'Routed Monitoring',
     startTimestamp,
     buttons: [{ label: 'View on GitHub', url: GITHUB_URL }]
   };
   if (totalTokens === 0) {
-    return { ...base, details: 'Token Monitor', state: 'No usage today' };
+    return { ...base, details: 'Routed Monitoring', state: 'No usage today' };
   }
   const top = topClient(today);
   const label = (top && CLIENT_LABELS[top]) || (top ? top : 'Active');

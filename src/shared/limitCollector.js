@@ -80,7 +80,7 @@ const CODEX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api';
 const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
 const CODEX_RPC_TIMEOUT_MS = 20_000;
-const TOKEN_MONITOR_USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
+const TOKEN_MONITOR_USER_AGENT = `routed-monitoring/${appVersion()} (+https://github.com/Javis603/routed-monitoring)`;
 
 function nowIso(nowMs) {
   return new Date(nowMs).toISOString();
@@ -655,7 +655,7 @@ function fetchClaudeWebJson(url, headers, deps = {}, options = {}) {
   // Chromium sends its own browser agent, and setting one here would override it
   // with a version that no longer matches the runtime. undici sends none at all,
   // and claude.ai's Cloudflare answers both that and an honest
-  // `token-monitor/<version>` agent with `403 cf-mitigated: challenge`, so that
+  // `routed-monitoring/<version>` agent with `403 cf-mitigated: challenge`, so that
   // path has to present as a browser.
   const webHeaders = viaChromium ? headers : { ...headers, 'user-agent': BROWSER_USER_AGENT };
   return fetchJson(url, webHeaders, webDeps, {
@@ -1915,7 +1915,7 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   const platform = deps.platform || process.platform;
   const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
   if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
-  const probeDir = deps.claudeProbeDir || path.join(os.tmpdir(), 'token-monitor-claude-probe');
+  const probeDir = deps.claudeProbeDir || path.join(os.tmpdir(), 'routed-monitoring-claude-probe');
   fs.mkdirSync(probeDir, { recursive: true });
   const runEnv = {
     ...env,
@@ -2787,7 +2787,7 @@ async function readCodexRpcWithCommand(command, deps = {}) {
   try {
     if (signal?.aborted) throw abortError(signal);
     await rpc.send('initialize', {
-      clientInfo: { name: 'token-monitor', title: 'Token Monitor', version: appVersion() }
+      clientInfo: { name: 'routed-monitoring', title: 'Routed Monitoring', version: appVersion() }
     });
     rpc.notify('initialized', {});
     let rateLimitResult = await rpc.send('account/rateLimits/read');

@@ -1,10 +1,10 @@
 # Privacy Policy
 
-Token Monitor is local-first. It processes AI-tool usage logs on the device and does not send analytics or telemetry to the project maintainer. The project does not operate a hosted data-collection service.
+Routed Monitoring is local-first. It processes AI-tool usage logs on the device and does not send analytics or telemetry to the project maintainer. The project does not operate a hosted data-collection service.
 
 ## Network features
 
-Token Monitor makes network requests only for documented or user-enabled features:
+Routed Monitoring makes network requests only for documented or user-enabled features:
 
 - Packaged builds check GitHub Releases for updates.
 - Exchange-rate and service-status views fetch their public data sources.
@@ -16,7 +16,7 @@ These requests are processed under the privacy policy of the service receiving t
 
 ## Multi-device sync
 
-Multi-device sync is optional and has no Token Monitor-operated default server. The operator chooses and controls the destination hub, whether it runs in the app, on a self-hosted Node server, or on Cloudflare Workers.
+Multi-device sync is optional and has no Routed Monitoring-operated default server. The operator chooses and controls the destination hub, whether it runs in the app, on a self-hosted Node server, or on Cloudflare Workers.
 
 When enabled, sync can send device identifiers and metadata; aggregate token and cost totals; client, model, session, and project attribution; retained usage history; and normalized provider-limit status. Project attribution can include an opaque project identifier and workspace-folder label, but never an absolute workspace path. Provider limits can include a hashed account identifier, account email, and plan label so the authenticated hub can distinguish accounts.
 

@@ -24,8 +24,8 @@ function response(status, body) {
 
 function apiFetch(keyBodies, creditsBodies = {}) {
   return async (url, init) => {
-    assert.equal(init.headers['HTTP-Referer'], 'https://github.com/Javis603/token-monitor');
-    assert.equal(init.headers['X-OpenRouter-Title'], 'Token Monitor');
+    assert.equal(init.headers['HTTP-Referer'], 'https://github.com/Javis603/routed-monitoring');
+    assert.equal(init.headers['X-OpenRouter-Title'], 'Routed Monitoring');
     assert.equal(init.headers['X-Title'], undefined);
     const key = String(init.headers.Authorization).slice('Bearer '.length);
     if (url === OPENROUTER_KEY_URL) {
@@ -38,7 +38,7 @@ function apiFetch(keyBodies, creditsBodies = {}) {
   };
 }
 
-test('openrouterToken prefers explicit, then Token Monitor env, then standard env', () => {
+test('openrouterToken prefers explicit, then Routed Monitoring env, then standard env', () => {
   assert.equal(openrouterToken({ TOKEN_MONITOR_OPENROUTER_API_KEY: 'tm', OPENROUTER_API_KEY: 'std' }, '"explicit"'), 'explicit');
   assert.equal(openrouterToken({ TOKEN_MONITOR_OPENROUTER_API_KEY: 'tm', OPENROUTER_API_KEY: 'std' }), 'tm');
   assert.equal(openrouterToken({ OPENROUTER_API_KEY: "'std'" }), 'std');

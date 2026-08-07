@@ -319,7 +319,7 @@ async function listeningPorts(pid, deps = {}) {
 }
 
 const LS_SERVICE = 'exa.language_server_pb.LanguageServerService';
-const USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
+const USER_AGENT = `routed-monitoring/${appVersion()} (+https://github.com/Javis603/routed-monitoring)`;
 
 function statusFromHttpCode(code) {
   if (code === 401 || code === 403) return 'unauthorized';
@@ -535,7 +535,7 @@ const UNLEASH_BODY = {
       hasAnthropicModelAccess: 'true',
       ide: 'antigravity',
       ideVersion: 'unknown',
-      installationId: 'token-monitor',
+      installationId: 'routed-monitoring',
       language: 'UNSPECIFIED',
       os: process.platform,
       requestedModelId: 'MODEL_UNSPECIFIED'

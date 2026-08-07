@@ -107,7 +107,7 @@ async function fetchLatestMetadata(appVersion = '0.0.0') {
   if (!packageName) return { supported: false };
   const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
   const metadata = await fetchJson(url, {
-    headers: { 'user-agent': `token-monitor/${appVersion}` }
+    headers: { 'user-agent': `routed-monitoring/${appVersion}` }
   });
   const version = String(metadata?.version || '');
   const tarball = String(metadata?.dist?.tarball || '');

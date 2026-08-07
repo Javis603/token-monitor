@@ -182,7 +182,7 @@ test('serializeSyncPayload keeps totals and projects while bounding large month 
       startedAt: `2026-07-${String(index + 1).padStart(2, '0')}T08:00:00.000Z`,
       lastUsedAt: `2026-07-${String(index + 1).padStart(2, '0')}T09:00:00.000Z`,
       projectId: 'sha256:project',
-      projectLabel: 'Token Monitor',
+      projectLabel: 'Routed Monitoring',
       models: { 'gpt-5': 1000 + index },
       modelCosts: { 'gpt-5': index / 100 },
       providers: { openai: 1000 + index }
@@ -199,7 +199,7 @@ test('serializeSyncPayload keeps totals and projects while bounding large month 
       clients: { codex: 25000 },
       models: { 'gpt-5': 25000 },
       sessions,
-      projects: { 'token monitor': { label: 'Token Monitor', tokens: 25000, costUsd: 2.76, clients: { codex: 25000 } } }
+      projects: { 'token monitor': { label: 'Routed Monitoring', tokens: 25000, costUsd: 2.76, clients: { codex: 25000 } } }
     },
     allTime: { totalTokens: 50000 }
   };

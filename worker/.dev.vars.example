@@ -1,4 +1,4 @@
-# Secrets for the Token Monitor hub Worker.
+# Secrets for the Routed Monitoring hub Worker.
 #
 # This file exists so the "Deploy to Cloudflare" button prompts for these
 # values during setup (Cloudflare reads secret names from .dev.vars.example).

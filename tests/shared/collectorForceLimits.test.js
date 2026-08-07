@@ -282,7 +282,7 @@ test('collectUsageOnce requests session-level tokscale grouping', async () => {
 });
 
 test('collectUsageOnce enriches session rows with local last-used timestamps', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-sessions-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-sessions-'));
   const claudeSession = 'claude-session-1';
   const codexSession = 'rollout-2026-05-30T11-44-50-abc';
   const claudeDir = path.join(tmp, '.claude', 'projects', 'project');

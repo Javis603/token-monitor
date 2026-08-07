@@ -10,7 +10,7 @@ const { applySessionUsageArchive } = require('../../src/shared/sessionUsageArchi
 const { aggregateDevices, applyProjectRollups, canonicalProjectKey, normalizePeriod, projectRollupFromSessions } = require('../../src/shared/usage');
 
 test('projectPathFromJsonl reads direct and nested session cwd metadata', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-project-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-project-'));
   try {
     const claude = path.join(root, 'claude.jsonl');
     const codex = path.join(root, 'codex.jsonl');
@@ -22,7 +22,7 @@ test('projectPathFromJsonl reads direct and nested session cwd metadata', () => 
 });
 
 test('projectPathFromJsonl caches unchanged transcript metadata', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-project-cache-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-project-cache-'));
   try {
     const file = path.join(root, 'session.jsonl');
     fs.writeFileSync(file, `${JSON.stringify({ cwd: '/work/cached' })}\n`);

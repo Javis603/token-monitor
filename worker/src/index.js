@@ -7,7 +7,7 @@ import { historyPreview, historyRevision } from './shared/history.js';
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret'
+  'access-control-allow-headers': 'authorization,content-type,x-routed-monitoring-secret'
 };
 
 function jsonResponse(status, payload, extra = {}) {
@@ -24,7 +24,7 @@ function textResponse(status, body, contentType = 'text/plain; charset=utf-8') {
 function requestSecret(request) {
   const auth = request.headers.get('authorization') || '';
   if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
-  const headerSecret = String(request.headers.get('x-token-monitor-secret') || '').trim();
+  const headerSecret = String(request.headers.get('x-routed-monitoring-secret') || '').trim();
   if (headerSecret) return headerSecret;
   try {
     const url = new URL(request.url);

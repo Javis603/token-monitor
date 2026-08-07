@@ -68,7 +68,7 @@ each language block.
 
 ---
 
-**Full Changelog:** [vPREVIOUS...vCURRENT](https://github.com/Javis603/token-monitor/compare/vPREVIOUS...vCURRENT)
+**Full Changelog:** [vPREVIOUS...vCURRENT](https://github.com/Javis603/routed-monitoring/compare/vPREVIOUS...vCURRENT)
 
 <details>
 <summary>繁體中文 · 한국어 · 日本語</summary>

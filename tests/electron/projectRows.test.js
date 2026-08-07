@@ -41,8 +41,8 @@ test('projectRowsForPeriod merges sessions by workspace and sorts by cost', () =
 test('projectRowsForPeriod prefers the bounded project rollup', () => {
   const rows = projectRowsForPeriod({
     projects: {
-      'token monitor': {
-        label: 'Token Monitor',
+      'routed monitoring': {
+        label: 'Routed Monitoring',
         tokens: 300,
         costUsd: 2.5,
         clients: { codex: 200, claude: 100 }
@@ -56,7 +56,7 @@ test('projectRowsForPeriod prefers the bounded project rollup', () => {
   assert.equal(rows.length, 1);
   assert.deepEqual(
     { key: rows[0].key, name: rows[0].name, value: rows[0].value, cost: rows[0].cost },
-    { key: 'token monitor', name: 'Token Monitor', value: 300, cost: 2.5 }
+    { key: 'routed monitoring', name: 'Routed Monitoring', value: 300, cost: 2.5 }
   );
   assert.deepEqual(rows[0].accordionRows.map(({ key, value }) => ({ key, value })), [
     { key: 'codex', value: 200 },

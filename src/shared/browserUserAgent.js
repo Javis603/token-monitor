@@ -2,7 +2,7 @@
 
 // Several web-session providers reject clients that don't present as a browser —
 // claude.ai answers anything else with a Cloudflare challenge — so their requests
-// carry a browser agent rather than the honest `token-monitor/<version>` one. It
+// carry a browser agent rather than the honest `routed-monitoring/<version>` one. It
 // lives here so bumping the version is a single edit instead of a hunt through
 // every collector, and so a stale copy can't survive in one of them.
 //

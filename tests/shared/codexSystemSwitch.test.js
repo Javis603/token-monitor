@@ -67,7 +67,7 @@ test('managed Codex accounts keep same-email workspaces distinct', () => {
 });
 
 test('Codex auth files are written atomically with private permissions and readable identity', async () => {
-  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'token-monitor-codex-switch-'));
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'routed-monitoring-codex-switch-'));
   const authPath = path.join(root, 'live', 'auth.json');
   const authData = JSON.stringify({
     account: { email: 'Primary.User@Example.com', planType: 'plus' }

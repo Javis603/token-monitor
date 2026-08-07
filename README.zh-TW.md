@@ -2,8 +2,8 @@
    <a href="./README.md">EN</a> | <a href="./README.zh-CN.md">简</a> | <strong>繁</strong> | <a href="./README.ko.md">KO</a> | <a href="./README.ja.md">JA</a>
 </p>
 <div align="center">
-    <img src=".github/assets/app.png" alt="Token Monitor logo" width="120">
-    <h1>Token Monitor</h1>
+    <img src=".github/assets/app.png" alt="Routed Monitoring logo" width="120">
+    <h1>Routed Monitoring</h1>
 </div>
 
 <p align="center">
@@ -11,8 +11,8 @@
 </p>
 
 <p align="center">
-    <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="最新發布" /></a>
-    <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="總下載量" /></a>
+    <a href="https://github.com/Javis603/routed-monitoring/releases"><img src="https://img.shields.io/github/v/release/Javis603/routed-monitoring?include_prereleases&style=flat-square&label=release&color=22c55e" alt="最新發布" /></a>
+    <a href="https://github.com/Javis603/routed-monitoring/releases"><img src="https://img.shields.io/github/downloads/Javis603/routed-monitoring/total?style=flat-square&color=22c55e" alt="總下載量" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 或更新" />
     <img src="https://img.shields.io/badge/macOS-14%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 14 或更新" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
@@ -24,13 +24,13 @@
     <img src=".github/assets/demo.gif">
 </div>
 
-## 什麼是 Token Monitor？
+## 什麼是 Routed Monitoring？
 
 一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot 等 28+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
 
 ## 支援的工具
 
-Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
+Routed Monitoring 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 | Logo | 工具 | 資料路徑 | Token 用量 | AI 工具額度 | session 明細 |
 |:---:|------|-----------|:---:|:---:|:---:|
@@ -87,9 +87,9 @@ Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 
 </tr>
 </table>
 
-## 為什麼要用 Token Monitor？
+## 為什麼要用 Routed Monitoring？
 
-大多數用量監控工具只在它執行的那台機器上有用。Token Monitor 是為多裝置工作流而設計的：每台裝置監看自己的本機紀錄、把摘要更新送到你的 hub，每個連線中的小工具幾乎都能即時看到 Token 變化。
+大多數用量監控工具只在它執行的那台機器上有用。Routed Monitoring 是為多裝置工作流而設計的：每台裝置監看自己的本機紀錄、把摘要更新送到你的 hub，每個連線中的小工具幾乎都能即時看到 Token 變化。
 
 ## 功能特色
 
@@ -105,7 +105,7 @@ Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 
 
 - **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 18+ 家供應商的 session、每週、帳單與 credits 視窗，支援多個 OpenRouter／第三方 profile，以及 DeepSeek 預付餘額與消費
 - **多帳號與 Codex 帳號切換**：同一供應商可追蹤多個帳號、各自顯示額度；已加入追蹤的 Codex 帳號還能一鍵切換為本機使用帳號，免重新登入授權
-- **保留已刪除會話用量**：許多工具會定期清除舊 session（Claude Code 預設清 30 天前的 transcript），一刪就再也算不到。開啟後，Token Monitor 會在本機不設期限地封存已觀測到的每日工具／模型用量，讓熱力圖與趨勢即使在來源檔案被清掉後仍然完整（詳見下方[〈會話資料保留期〉](#會話資料保留期)）
+- **保留已刪除會話用量**：許多工具會定期清除舊 session（Claude Code 預設清 30 天前的 transcript），一刪就再也算不到。開啟後，Routed Monitoring 會在本機不設期限地封存已觀測到的每日工具／模型用量，讓熱力圖與趨勢即使在來源檔案被清掉後仍然完整（詳見下方[〈會話資料保留期〉](#會話資料保留期)）
 - **使用趨勢與儀表板**：主頁的活躍熱力圖與趨勢圖，加上獨立的儀表板視窗，提供連續天數，以及跨所有裝置、依工具／依模型堆疊的歷史（柱狀圖與 K 線兩種檢視）
 - **可選的狀態檢視**：追蹤 Claude、OpenAI、Cursor 與 DeepSeek status 頁，支援手動或定時重新檢查
 - **資料匯出**：把使用資料匯出成與工具無關的 CSV + JSON，可手動或自動寫入資料夾，接試算表、Obsidian、Grafana 或自寫腳本；詳見 [docs/export.md](docs/export.md)
@@ -132,7 +132,7 @@ Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 
 
 ## 安裝
 
-從 [GitHub Releases](https://github.com/Javis603/token-monitor/releases) 下載。
+從 [GitHub Releases](https://github.com/Javis603/routed-monitoring/releases) 下載。
 
 - **macOS（Apple Silicon）** — `.dmg`，已簽章並 notarize
 - **macOS（Intel）** — x64 `.dmg`，已簽章並 notarize
@@ -153,7 +153,7 @@ Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 
 
 在一台持續開機的機器上打開小工具，進入 設定 → 多裝置同步，選 **在這台裝置架設 Hub**。小工具會產生隨機 secret，並列出其他裝置可連入的區網 URL（Tailscale 或 ZeroTier 位址也會顯示在這裡）。在其他每台裝置上選 **連接到 Hub**，把 URL 與 secret 貼進去即可。
 
-只要 Token Monitor 還在跑，hub 就會運作——結束 App（僅關閉視窗不算）會停掉 hub，所有連入的裝置都會中斷。
+只要 Routed Monitoring 還在跑，hub 就會運作——結束 App（僅關閉視窗不算）會停掉 hub，所有連入的裝置都會中斷。
 
 #### 選項 B——自架 Node hub（持續開機的無頭機器）
 
@@ -166,7 +166,7 @@ npm run hub
 
 #### 選項 C——Cloudflare Worker hub（跨網路，包括 iPhone）
 
-[![部署到 Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Javis603/token-monitor/tree/main/worker)
+[![部署到 Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Javis603/routed-monitoring/tree/main/worker)
 
 一鍵部署——Cloudflare 會在過程中請你輸入 `TOKEN_MONITOR_SECRET`。或手動部署：
 
@@ -186,9 +186,9 @@ App 狀態存在 OS 使用者資料目錄——解除安裝時一併刪除該資
 
 | 平台 | 路徑 |
 |------|------|
-| macOS | `~/Library/Application Support/Token Monitor/` |
-| Windows | `%APPDATA%/Token Monitor/` |
-| Linux | `~/.config/Token Monitor/` |
+| macOS | `~/Library/Application Support/Routed Monitoring/` |
+| Windows | `%APPDATA%/Routed Monitoring/` |
+| Linux | `~/.config/Routed Monitoring/` |
 
 ## 從原始碼建置
 
@@ -221,7 +221,7 @@ npm run pack         # 未封裝的 app 目錄（無安裝檔），方便本機�
 
 ## 會話資料保留期
 
-開啟**保留已刪除會話用量**（設定 → 採集）後，Token Monitor 會在本機不設期限地封存已觀測到的每日工具／模型用量——即使來源工具日後清掉 session，熱力圖與趨勢也不受影響。
+開啟**保留已刪除會話用量**（設定 → 採集）後，Routed Monitoring 會在本機不設期限地封存已觀測到的每日工具／模型用量——即使來源工具日後清掉 session，熱力圖與趨勢也不受影響。
 
 <details>
 <summary><strong>進階：延長來源工具本身的保留期</strong></summary>
@@ -238,7 +238,7 @@ npm run pack         # 未封裝的 app 目錄（無安裝檔），方便本機�
 
 設更大能留更多，代價是 transcript 會依你設定的期限一直留在磁碟上。其他工具的預設值與設定檔路徑，請見 tokscale 的 [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) 表。
 
-這份封存只涵蓋 Token Monitor 已觀測過的日期；在它開始追蹤之前就被刪除的資料無法補回。
+這份封存只涵蓋 Routed Monitoring 已觀測過的日期；在它開始追蹤之前就被刪除的資料無法補回。
 
 </details>
 
@@ -253,15 +253,15 @@ npm run pack         # 未封裝的 app 目錄（無安裝檔），方便本機�
 
 ## 隱私
 
-Token Monitor 會在本機處理使用紀錄，不會向專案維護者傳送分析或遙測資料。網路存取僅用於文件中說明或由使用者啟用的功能；更新、供應商整合、Discord Rich Presence 與可選多裝置同步所使用的資料，請參閱[隱私權政策](docs/privacy.md)。
+Routed Monitoring 會在本機處理使用紀錄，不會向專案維護者傳送分析或遙測資料。網路存取僅用於文件中說明或由使用者啟用的功能；更新、供應商整合、Discord Rich Presence 與可選多裝置同步所使用的資料，請參閱[隱私權政策](docs/privacy.md)。
 
 ## Star 歷史
 
-<a href="https://www.star-history.com/?repos=Javis603%2Ftoken-monitor&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=Javis603%2Frouted-monitoring&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&theme=dark&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Javis603/token-monitor&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&theme=dark&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Javis603/routed-monitoring&type=date&legend=top-left&sealed_token=VEcaPQSNlH8coYjuILJy7eT6t-pGJrGDEjOAjVwP8WGwNBOeNXoLTcz-KVBaZ2Y8eSqG1tLEpWGF3-5eMvVhW5G8n1ckdYI_uMZ6UCBE7b_eANd6we__7g7yc4ShXemuWfi-8SRcxgJNLK12VZGgBIccY1ceI3T3xm7jBM1TJjTVQFWJ0MmX2e-7QBp9" />
  </picture>
 </a>
 

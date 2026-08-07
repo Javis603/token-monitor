@@ -13,7 +13,7 @@ const { codexAccountDisplayLabel } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
-const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png');
+const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-routed-monitoring.png');
 
 function buildTrayIcon(options = {}) {
   const platform = options.platform || process.platform;
@@ -186,7 +186,7 @@ function createTray({
 }) {
   const { Tray, Menu } = require('electron');
   const tray = new Tray(buildTrayIcon());
-  tray.setToolTip('Token Monitor');
+  tray.setToolTip('Routed Monitoring');
 
   tray.on('click', () => onToggle(tray));
   tray.on('right-click', () => {

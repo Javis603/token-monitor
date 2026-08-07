@@ -69,7 +69,7 @@ test('the shared browser user-agent reads as a current browser', () => {
   // that doesn't, so a well-meaning edit to an honest agent has to fail here.
   assert.match(BROWSER_USER_AGENT, /^Mozilla\/5\.0 /);
   assert.match(BROWSER_USER_AGENT, /Chrome\/\d+[\d.]* Safari\/[\d.]+$/);
-  assert.doesNotMatch(BROWSER_USER_AGENT, /token-monitor/i);
+  assert.doesNotMatch(BROWSER_USER_AGENT, /routed-monitoring/i);
 });
 
 test('no source file hard-codes a browser user-agent', () => {

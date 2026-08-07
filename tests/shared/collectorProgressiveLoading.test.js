@@ -66,7 +66,7 @@ test('progressive loading fires onProgress after each period scan', async () => 
 });
 
 test('progressive previews include opaque project attribution', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-progress-project-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-progress-project-'));
   try {
     const transcriptDir = path.join(home, '.claude', 'projects', 'repo');
     fs.mkdirSync(transcriptDir, { recursive: true });
@@ -131,7 +131,7 @@ test('final project attribution retries a transient progressive miss', async () 
 });
 
 test('disabling project tracking skips local metadata attribution', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-progress-project-disabled-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-progress-project-disabled-'));
   try {
     const transcriptDir = path.join(home, '.claude', 'projects', 'repo');
     fs.mkdirSync(transcriptDir, { recursive: true });
@@ -157,7 +157,7 @@ test('disabling project tracking skips local metadata attribution', async () => 
 });
 
 test('session timestamps are backfilled even when project tracking is disabled', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-ts-no-projects-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-ts-no-projects-'));
   try {
     const transcriptDir = path.join(home, '.claude', 'projects', 'repo');
     fs.mkdirSync(transcriptDir, { recursive: true });

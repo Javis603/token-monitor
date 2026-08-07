@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Token Monitor</title>
+    <title>Routed Monitoring</title>
     <script src="floatingBubbleBoot.js"></script>
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -11,7 +11,7 @@
     <main class="shell">
       <header class="titlebar">
         <div>
-          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" title="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
+          <div class="app-title"><span class="app-title-text">Routed Monitoring</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" title="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><span class="app-title-measure" aria-hidden="true">Routed Monitoring</span></div>
           <div id="status" class="status">Starting</div>
         </div>
         <div class="title-controls">
@@ -117,7 +117,7 @@
                       <div class="maintenance-version-item"><span><span data-i18n="settings.tokscale.npm">On npm</span> <small data-i18n="settings.tokscale.latestTag">(latest tag)</small></span><strong id="tokscaleNpm" data-i18n="settings.common.notChecked">Not checked</strong></div>
                       <div id="tokscaleBundledLine" class="maintenance-version-item"><span data-i18n="settings.tokscale.bundled">Bundled</span><strong id="tokscaleBundled">—</strong></div>
                     </div>
-                    <p class="settings-note"><span data-i18n="settings.tokscale.noteBefore">Token Monitor uses tokscale (MIT, open-source) to read token data.</span> <button id="openTokscaleLinkButton" type="button" class="inline-link" data-i18n="settings.tokscale.learnMore">Learn more</button></p>
+                    <p class="settings-note"><span data-i18n="settings.tokscale.noteBefore">Routed Monitoring uses tokscale (MIT, open-source) to read token data.</span> <button id="openTokscaleLinkButton" type="button" class="inline-link" data-i18n="settings.tokscale.learnMore">Learn more</button></p>
                     <div id="tokscaleMessage" class="tokscale-message"></div>
                     <div class="settings-actions maintenance-actions">
                       <button id="checkTokscaleButton" type="button" data-i18n="settings.tokscale.checkNpm">Check npm</button>
@@ -135,7 +135,7 @@
               </div>
             </div>
             <div class="settings-subgroup about-settings">
-              <div class="settings-group-header"><span data-i18n="settings.about.title">About Token Monitor</span><span id="aboutVersion">—</span></div>
+              <div class="settings-group-header"><span data-i18n="settings.about.title">About Routed Monitoring</span><span id="aboutVersion">—</span></div>
               <p class="settings-note" data-i18n="settings.about.description">Open-source AI tool token usage monitor, licensed under MIT.</p>
               <div class="about-settings-links">
                 <button id="openRepositoryButton" type="button" class="inline-link" data-i18n="settings.about.repository">GitHub</button>
@@ -268,7 +268,7 @@
                     </select>
                   </label>
                   <div id="trayComposer" class="tray-composer hidden" data-surface="tray"></div>
-                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayProviderBadge">Show Token Monitor badge on provider icons</span></span><input id="showTrayProviderBadgeInput" type="checkbox" /></label>
+                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayProviderBadge">Show Routed Monitoring badge on provider icons</span></span><input id="showTrayProviderBadgeInput" type="checkbox" /></label>
                   <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayMode">Tray-only mode</span></span><input id="trayModeInput" type="checkbox" /></label>
                   <div id="trayOptions" class="presence-feature-body hidden">
                     <p class="settings-note" data-i18n="settings.display.trayNote">Hide the main window; show a popover from the macOS menu bar or Windows system tray.</p>
@@ -1313,7 +1313,7 @@
           </button>
           <div id="routingSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup">
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title">Enable local Ollama routing</span><span class="settings-note settings-item-desc">Runs only while Token Monitor is open. Keys rotate using the linked Ollama account’s monitored quota.</span></span><input id="freeLlmEnabledInput" type="checkbox" /></label>
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title">Enable local Ollama routing</span><span class="settings-note settings-item-desc">Runs only while Routed Monitoring is open. Keys rotate using the linked Ollama account’s monitored quota.</span></span><input id="freeLlmEnabledInput" type="checkbox" /></label>
               <div class="settings-item"><span class="settings-item-text"><span class="settings-item-title">OpenAI-compatible endpoint</span><span id="freeLlmEndpoint" class="settings-note settings-item-desc">Not running</span></span><button id="freeLlmCopyEndpoint" type="button">Copy</button></div>
             </div>
             <div class="settings-subgroup">
@@ -1388,7 +1388,7 @@
               <div id="hubStatusRow" class="hub-status"></div>
               <div id="hubAddressList" class="hub-address-list"></div>
               <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
-              <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
+              <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Routed Monitoring is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
             </div>
             <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
             <div class="settings-actions">
@@ -1449,7 +1449,7 @@
         </div>
       </div>
     </main>
-    <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
+    <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Routed Monitoring" aria-label="Show Routed Monitoring" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>
     </button>
     <script src="../../shared/limitBalanceDisplay.js"></script>

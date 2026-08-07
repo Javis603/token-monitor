@@ -60,7 +60,7 @@ function selectKey(keys, quotas, thresholdPercent, blocked = new Map(), nowMs = 
     if (block?.until > nowMs) continue;
     if (block) blocked.delete(key.id);
     const quota = byAccountId.get(key.ollamaAccountId);
-    // Routing is deliberately coupled to Token Monitor's authenticated quota data.
+    // Routing is deliberately coupled to Routed Monitoring's authenticated quota data.
     // A missing or stale source should never make a key look unlimited.
     if (!quota || quota.status !== 'ok') continue;
     const worst = worstQuotaWindow(quota);

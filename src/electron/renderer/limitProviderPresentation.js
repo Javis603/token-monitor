@@ -221,7 +221,7 @@
 
   // The "live" Codex account is the one THIS device's Codex app/CLI is currently
   // signed into (sourceDetail app/cli/unknown). Managed accounts added inside
-  // Token Monitor report sourceDetail 'managed' and are NOT live. A remote
+  // Routed Monitoring report sourceDetail 'managed' and are NOT live. A remote
   // device's live login (selectedIsRemote) is also not "live" from here — across
   // synced devices, "Live" only ever points at the local account.
   function isCodexLiveAccount(provider, provenance) {

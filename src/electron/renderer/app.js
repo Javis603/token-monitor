@@ -272,9 +272,9 @@ const SERVICE_STATUS_PLACEHOLDERS = [
   { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' }
 ];
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
-const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';
+const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/routed-monitoring';
 const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/choose`;
-const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
+const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/routed-monitoring/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'routing', 'sync'];
@@ -11095,7 +11095,7 @@ function trayComposerProviderIcon(provider) {
       });
     } catch (_) {}
   }
-  if (id === 'app') return '../../../assets/icons/tray-token-monitor.png';
+  if (id === 'app') return '../../../assets/icons/tray-routed-monitoring.png';
   return window.TokenMonitorTrayProviderIcons.trayProviderIconSources([id])[id] || '';
 }
 
@@ -11456,7 +11456,7 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   if (!window.tokenMonitor.setTrayIcons) return;
   const deliveryId = trayProviderIconDeliveryGuard.begin();
   const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(trayIconProviderIds);
-  sources.app = '../../../assets/icons/tray-token-monitor.png';
+  sources.app = '../../../assets/icons/tray-routed-monitoring.png';
   const icons = {};
   for (const [id, path] of Object.entries(sources)) {
     try {

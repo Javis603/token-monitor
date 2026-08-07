@@ -41,7 +41,7 @@ const stats = {
 };
 
 test('fallback tray icon source stays transparent and high-resolution', () => {
-  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png'));
+  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-routed-monitoring.png'));
   assert.equal(icon.toString('ascii', 1, 4), 'PNG');
   assert.deepEqual([icon.readUInt32BE(16), icon.readUInt32BE(20)], [44, 44]);
   assert.equal(icon[25], 6, 'tray PNG should use RGBA color');
@@ -77,7 +77,7 @@ test('macOS tray icon downsamples the high-resolution template like provider ico
     }
   }), resized);
 
-  assert.match(calls[0][1], /assets[\\/]icons[\\/]tray-token-monitor\.png$/);
+  assert.match(calls[0][1], /assets[\\/]icons[\\/]tray-routed-monitoring\.png$/);
   assert.deepEqual(calls.slice(1), [
     ['resize', { height: 20, quality: 'best' }],
     ['template', true]
@@ -119,7 +119,7 @@ test('tray context menu complements the primary click with useful commands', () 
   });
 
   assert.deepEqual(template.map((item) => item.label || item.type), [
-    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Quit Token Monitor'
+    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Quit Routed Monitoring'
   ]);
   assert.equal(template.some((item) => item.label === 'Show / Hide'), false);
   assert.equal(template[3].submenu.find((item) => item.label === 'Today Tokens + Cost').checked, true);
@@ -155,7 +155,7 @@ test('tray context menu uses the selected locale for every visible level', () =>
   });
 
   assert.deepEqual(template.map((item) => item.label || item.type), [
-    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '結束 Token Monitor'
+    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '結束 Routed Monitoring'
   ]);
   assert.equal(template[1].submenu[0].label, '主頁');
   assert.equal(template[3].submenu[0].label, '今日 Tokens');

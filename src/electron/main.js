@@ -209,7 +209,7 @@ const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 
 if (!app.isPackaged) loadDotEnv();
 
-const APP_NAME = 'Token Monitor';
+const APP_NAME = 'Routed Monitoring';
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
@@ -2132,7 +2132,7 @@ function reportCredentialStorageError(context, error) {
   try {
     dialog.showErrorBox(
       'Credential storage error',
-      `Token Monitor could not safely access credentials.json (${context}). The save was stopped and previous data was restored where possible. Check the file's JSON and permissions, then restart the app.\n\n${detail}`
+      `Routed Monitoring could not safely access credentials.json (${context}). The save was stopped and previous data was restored where possible. Check the file's JSON and permissions, then restart the app.\n\n${detail}`
     );
   } catch (_) {}
 }
@@ -3517,7 +3517,7 @@ function updateTrayDisplay() {
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
   const tip = formatTrayText(latestStats, 'both', currency, compactOptions);
-  tray.setToolTip(`Token Monitor - ${tip}`);
+  tray.setToolTip(`Routed Monitoring - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
   if (barsImageMode || trayImageMode || customImageMode) {
@@ -4314,7 +4314,7 @@ async function writeExportTo(dir, periods, options = {}) {
   const files = exportFileSet({
     periods: periods || {},
     history,
-    meta: { generatedAt: new Date().toISOString(), app: { name: 'token-monitor', version: appVersion() } }
+    meta: { generatedAt: new Date().toISOString(), app: { name: 'routed-monitoring', version: appVersion() } }
   });
   await fs.promises.mkdir(dir, { recursive: true });
   // Per-call token so a concurrent auto + manual export to the same folder never
@@ -4718,10 +4718,10 @@ function isAllowedExternalUrl(value) {
   if (isAllowedCodexLoginUrl(value)) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
   if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
-  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/token-monitor')) return true;
+  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/routed-monitoring')) return true;
   if (
     (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
-    && (parsed.pathname === '/token-monitor' || parsed.pathname.startsWith('/token-monitor/'))
+    && (parsed.pathname === '/routed-monitoring' || parsed.pathname.startsWith('/routed-monitoring/'))
   ) return true;
   if (parsed.hostname === 'claude.ai' && parsed.pathname.startsWith('/settings')) return true;
   if ((parsed.hostname === 'cursor.com' || parsed.hostname === 'www.cursor.com') && parsed.pathname.startsWith('/settings')) return true;

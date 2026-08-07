@@ -2,7 +2,7 @@
 
 const semver = require('semver');
 
-const GITHUB_REPO = 'Javis603/token-monitor';
+const GITHUB_REPO = 'Javis603/routed-monitoring';
 const RELEASES_LATEST_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 const REQUEST_TIMEOUT_MS = 10 * 1000;
 const APP_UPDATE_BACKGROUND_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -223,7 +223,7 @@ async function checkLatestRelease(currentVersion) {
         signal,
         headers: {
           'accept': 'application/vnd.github+json',
-          'user-agent': `token-monitor/${currentVersion || '0.0.0'}`,
+          'user-agent': `routed-monitoring/${currentVersion || '0.0.0'}`,
           'x-github-api-version': '2022-11-28'
         }
       });

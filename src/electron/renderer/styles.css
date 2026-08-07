@@ -222,7 +222,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   line-height: 1;
 }
 /* Offscreen probe: rendered with the same font/size as the title, used by JS */
-/* to detect "would Token Monitor still fit?". Independent of the live text */
+/* to detect "would Routed Monitoring still fit?". Independent of the live text */
 /* element so toggling its visibility never disturbs the measurement. */
 .app-title-measure {
   position: absolute;
@@ -272,7 +272,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .shell.title-icon-only .live-dot { cursor: pointer; }
 /* Scoped to the states that can actually show the reveal. Left on the base rule it would take
    6px of the flex row in the expanded state too, where updateTitleFit() does not account for
-   it — so "Token Monitor" would start clipping ~6px before the collapse to Σ triggers, leaving
+   it — so "Routed Monitoring" would start clipping ~6px before the collapse to Σ triggers, leaving
    a truncated title and no hover target. Constant rather than animated within these states:
    at rest the element is zero-wide and the gap sits after the live dot, the last thing in the
    collapsed title, so animating it would add a second layout property for no visual gain. */

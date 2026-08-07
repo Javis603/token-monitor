@@ -9,7 +9,7 @@ const SNAPSHOT_COLUMNS = ['period', 'dimension', 'name', 'tokens', 'cost_usd'];
 const DAILY_COLUMNS = ['date', 'tool', 'tokens', 'cost_usd'];
 // The complete set of generated filenames — the single source of truth the
 // writer uses to clean up orphans (e.g. a stale daily.csv once history empties).
-const EXPORT_FILENAMES = ['token-monitor-export.json', 'token-monitor-snapshot.csv', 'token-monitor-daily.csv'];
+const EXPORT_FILENAMES = ['routed-monitoring-export.json', 'routed-monitoring-snapshot.csv', 'routed-monitoring-daily.csv'];
 
 function num(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -86,7 +86,7 @@ function renderExportJson({ periods, history, meta } = {}) {
   const h = history && typeof history === 'object' ? history : {};
   const payload = {
     generatedAt: (meta && meta.generatedAt) || new Date().toISOString(),
-    app: (meta && meta.app) || { name: 'token-monitor' },
+    app: (meta && meta.app) || { name: 'routed-monitoring' },
     snapshot: {
       today: periodSnapshot(periods, 'today'),
       month: periodSnapshot(periods, 'month'),

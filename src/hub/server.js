@@ -298,7 +298,7 @@ if (require.main === module) {
 
   const hub = createHub({ port, host, secret, staleAfterMs, dataFile });
   hub.start().then(() => {
-    console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
+    console.log(`Routed Monitoring hub listening on http://${hub.bindHost}:${port}`);
     console.log(`Data file: ${dataFile}`);
     if (!secret) {
       console.warn(`Warning: TOKEN_MONITOR_SECRET is not set, so the hub is bound to ${hub.bindHost} (localhost only) to keep account identity off the network. Set a secret to accept connections from other devices.`);

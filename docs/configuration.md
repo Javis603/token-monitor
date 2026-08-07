@@ -1,6 +1,6 @@
 # Configuration
 
-Token Monitor has two configuration surfaces:
+Routed Monitoring has two configuration surfaces:
 
 - **Widget (GUI)** — everything the desktop app does, configured from the `⚙` settings panel. This is the only surface most people need.
 - **`.env`** — for the headless agent and standalone hub, which have no UI.

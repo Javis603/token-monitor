@@ -190,7 +190,7 @@ test('grokCredential reads from explicit grokBearerToken option', () => {
 });
 
 test('resolveGrokHome uses GROK_HOME for auth.json lookup', () => {
-  const grokHome = path.join(os.tmpdir(), 'token-monitor-grok-home');
+  const grokHome = path.join(os.tmpdir(), 'routed-monitoring-grok-home');
 
   assert.equal(resolveGrokHome({ GROK_HOME: grokHome }), path.resolve(grokHome));
 });

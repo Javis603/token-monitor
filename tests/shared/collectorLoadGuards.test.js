@@ -26,7 +26,7 @@ function freshCollector() {
 // differs from the canonical root the collector watches, so the synthetic event
 // paths below would stop mapping back to their client on Windows only.
 function withTmpHome(prepare) {
-  const tmp = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'token-monitor-home-'));
+  const tmp = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'routed-monitoring-home-'));
   for (const dir of prepare) fs.mkdirSync(path.join(tmp, dir), { recursive: true });
   return tmp;
 }
@@ -1283,7 +1283,7 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
 // nor developer mode, and a junction is one of the two things
 // canonicalWatchPath() exists to resolve.
 function withAliasedTmpHome(prepare) {
-  const base = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'token-monitor-alias-'));
+  const base = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'routed-monitoring-alias-'));
   const real = path.join(base, 'real-home');
   const alias = path.join(base, 'alias-home');
   fs.mkdirSync(real, { recursive: true });

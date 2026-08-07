@@ -6,7 +6,7 @@ function corsHeaders(extraHeaders = {}) {
   return {
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret',
+    'access-control-allow-headers': 'authorization,content-type,x-routed-monitoring-secret',
     ...extraHeaders
   };
 }
@@ -61,7 +61,7 @@ function readJsonBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
 function requestSecret(req) {
   const auth = req.headers.authorization || '';
   if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
-  return String(req.headers['x-token-monitor-secret'] || '').trim();
+  return String(req.headers['x-routed-monitoring-secret'] || '').trim();
 }
 
 function isAuthorized(req, expectedSecret) {

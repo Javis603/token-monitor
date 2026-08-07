@@ -7,7 +7,7 @@ const DEFAULT_CACHE_MS = 60_000;
 // the next visit instead of being pinned to "unknown" for the full cache window.
 const DEFAULT_ERROR_CACHE_MS = 10_000;
 const DEFAULT_TIMEOUT_MS = 5_000;
-const USER_AGENT = `TokenMonitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
+const USER_AGENT = `TokenMonitor/${appVersion()} (+https://github.com/Javis603/routed-monitoring)`;
 
 const SERVICE_STATUS_PROVIDERS = [
   {

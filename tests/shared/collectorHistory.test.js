@@ -50,7 +50,7 @@ test('collectHistoryOnce returns null when there are no clients', async () => {
 });
 
 test('collectHistoryOnce retains a prior client observation when a later graph loses it', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-daily-history-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-daily-history-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const archivePath = path.join(dir, 'daily-history.json');
   const options = {
@@ -78,7 +78,7 @@ test('collectHistoryOnce retains a prior client observation when a later graph l
 });
 
 test('collectHistoryOnce stores older days locally while capping daily output', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-full-daily-history-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'routed-monitoring-full-daily-history-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const archivePath = path.join(dir, 'daily-history.json');
   const history = await collectHistoryOnce({

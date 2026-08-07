@@ -4,39 +4,39 @@
 
 ## When this setup is needed
 
-On Windows, Token Monitor normally scans supported tools inside every running WSL distribution through `\\wsl$` and merges their usage about every five minutes. File-based sources such as Codex JSONL sessions work well with this path.
+On Windows, Routed Monitoring normally scans supported tools inside every running WSL distribution through `\\wsl$` and merges their usage about every five minutes. File-based sources such as Codex JSONL sessions work well with this path.
 
-OpenCode and Hermes store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Token Monitor may therefore show the tool under **Settings → Collection → WSL detection** with no usage.
+OpenCode and Hermes store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Routed Monitoring may therefore show the tool under **Settings → Collection → WSL detection** with no usage.
 
 Do not copy a live `.db` file as a workaround. Recent transactions may still be in `-wal`, and copying the database and sidecars separately does not guarantee a consistent snapshot.
 
 The reliable setup is:
 
 ```text
-WSL headless agent → Windows host hub → Token Monitor widget
+WSL headless agent → Windows host hub → Routed Monitoring widget
 ```
 
 The agent runs the Linux tokscale binary next to the database, then sends only the normalized usage summary to the hub.
 
 ## 1. Start the hub on Windows
 
-In Token Monitor, open **Settings → Multi-device Sync** and select **Host hub on this device**. Record the hub URL and shared secret.
+In Routed Monitoring, open **Settings → Multi-device Sync** and select **Host hub on this device**. Record the hub URL and shared secret.
 
 Keep the hub on a trusted network and retain the generated secret. If WSL cannot reach the displayed hostname, use the Windows host IP while keeping the same port, which defaults to `17321`.
 
 ## 2. Install the headless agent in WSL
 
-Token Monitor requires Node.js 22.13.0 or newer. Verify Node.js and npm inside WSL before installing; upgrade Node.js first if the reported version is older.
+Routed Monitoring requires Node.js 22.13.0 or newer. Verify Node.js and npm inside WSL before installing; upgrade Node.js first if the reported version is older.
 
 ```bash
 node --version
 npm --version
-git clone https://github.com/Javis603/token-monitor.git
-cd token-monitor
+git clone https://github.com/Javis603/routed-monitoring.git
+cd routed-monitoring
 npm ci
 ```
 
-Create `token-monitor/.env`:
+Create `routed-monitoring/.env`:
 
 ```env
 TOKEN_MONITOR_HUB_URL=http://WINDOWS_HOST_IP:17321
@@ -64,13 +64,13 @@ Send one snapshot first:
 npm run agent:once
 ```
 
-Confirm that a second device appears in Token Monitor and that OpenCode or Hermes has usage. Then run the continuous agent:
+Confirm that a second device appears in Routed Monitoring and that OpenCode or Hermes has usage. Then run the continuous agent:
 
 ```bash
 npm run agent
 ```
 
-For unattended use, run that command from your normal WSL service manager or login startup. Keep its working directory set to the Token Monitor checkout so `.env` is loaded.
+For unattended use, run that command from your normal WSL service manager or login startup. Keep its working directory set to the Routed Monitoring checkout so `.env` is loaded.
 
 ## Troubleshooting
 

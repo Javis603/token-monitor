@@ -77,9 +77,9 @@ test('renderSnapshotCsv has the expected header', () => {
 });
 
 test('renderExportJson has the documented shape', () => {
-  const json = JSON.parse(renderExportJson({ periods: PERIODS, history: HISTORY, meta: { generatedAt: 'X', app: { name: 'token-monitor', version: '1.2.3' } } }));
+  const json = JSON.parse(renderExportJson({ periods: PERIODS, history: HISTORY, meta: { generatedAt: 'X', app: { name: 'routed-monitoring', version: '1.2.3' } } }));
   assert.equal(json.generatedAt, 'X');
-  assert.deepEqual(json.app, { name: 'token-monitor', version: '1.2.3' });
+  assert.deepEqual(json.app, { name: 'routed-monitoring', version: '1.2.3' });
   assert.equal(json.snapshot.today.totalTokens, 30);
   assert.equal(json.daily.length, 2);
   assert.equal(json.monthly.length, 1);
@@ -132,10 +132,10 @@ test('exportSignature changes when usage or history changes', () => {
 
 test('exportFileSet omits daily.csv when history has no daily rows', () => {
   const withDaily = exportFileSet({ periods: PERIODS, history: HISTORY });
-  assert.deepEqual(withDaily.map((f) => f.name), ['token-monitor-export.json', 'token-monitor-snapshot.csv', 'token-monitor-daily.csv']);
+  assert.deepEqual(withDaily.map((f) => f.name), ['routed-monitoring-export.json', 'routed-monitoring-snapshot.csv', 'routed-monitoring-daily.csv']);
 
   const noDaily = exportFileSet({ periods: PERIODS, history: { daily: [], monthly: [] } });
-  assert.deepEqual(noDaily.map((f) => f.name), ['token-monitor-export.json', 'token-monitor-snapshot.csv']);
+  assert.deepEqual(noDaily.map((f) => f.name), ['routed-monitoring-export.json', 'routed-monitoring-snapshot.csv']);
 });
 
 test('exportFileSet names are always a subset of EXPORT_FILENAMES (writer cleanup relies on this)', () => {
