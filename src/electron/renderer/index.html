@@ -905,12 +905,20 @@
                 <div id="ollamaAccountList" class="managed-account-list"></div>
                 <div id="ollamaAccountEmpty" class="opencode-empty" data-i18n="settings.ollama.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
                 <div id="ollamaManualPanel" class="opencode-add-form">
-                  <button id="ollamaAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="ollamaAddDetails">
-                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                    <span data-i18n="settings.ollama.addAccount">Add account</span>
-                  </button>
+                  <div style="display: flex; gap: 8px;">
+                    <button id="ollamaAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="ollamaAddDetails" style="flex: 1; border-radius: 6px;">
+                      <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                      <span data-i18n="settings.ollama.addAccount">Add account</span>
+                    </button>
+                    <button id="ollamaUploadToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="ollamaUploadDetails" style="flex: 1; border-radius: 6px;">
+                      <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                      <span>Upload cookie</span>
+                    </button>
+                  </div>
                   <div id="ollamaAddDetails" class="opencode-add-details accordion-animated-container hidden">
                     <div class="accordion-animation-inner opencode-add-body">
                       <div class="settings-actions">
@@ -925,6 +933,19 @@
                       <textarea id="ollamaCookieInput" rows="3" spellcheck="false" placeholder="wos-session=..." data-i18n-placeholder="settings.ollama.cookiePlaceholder"></textarea>
                       <div class="settings-actions">
                         <button id="ollamaSaveAccountButton" data-i18n="settings.ollama.saveAccount">Add account</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div id="ollamaUploadDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <p class="settings-note">
+                        <strong>1.</strong> Create a .txt file containing the API keys and the Cookie.<br>
+                        <strong>2.</strong> Ensure the Cookie is present in the format <code>aid=...; __Secure-session=...</code>.<br>
+                        <strong>3.</strong> Click the button below to upload the file.
+                      </p>
+                      <div class="settings-actions">
+                        <input type="file" id="ollamaCookieUploadFile" accept=".txt" hidden="hidden" style="display: none !important; position: absolute; width: 0; height: 0;" />
+                        <button id="ollamaCookieUploadButtonDirect" type="button">Choose file to upload</button>
                       </div>
                     </div>
                   </div>
@@ -1305,7 +1326,9 @@
                     <label class="settings-field"><span>Label (optional)</span><input id="freeLlmKeyLabel" type="text" maxlength="80" autocomplete="off" placeholder="Personal Ollama" /></label>
                     <label class="settings-field"><span>Monitored Ollama account</span><select id="freeLlmAccountSelect"></select></label>
                     <label class="settings-field"><span>Ollama API key</span><input id="freeLlmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste API key" /></label>
-                    <div class="settings-actions"><button id="freeLlmAddKey" type="button">Add API key</button></div>
+                    <div class="settings-actions">
+                      <button id="freeLlmAddKey" type="button">Add API key</button>
+                    </div>
                   </div>
                 </div>
               </div>

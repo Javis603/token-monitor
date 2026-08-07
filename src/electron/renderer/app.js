@@ -14025,13 +14025,27 @@ function setupCursorAccountUI() {
 
     const addToggle = document.getElementById('ollamaAddToggle');
     const addDetails = document.getElementById('ollamaAddDetails');
+    const uploadToggle = document.getElementById('ollamaUploadToggle');
+    const uploadDetails = document.getElementById('ollamaUploadDetails');
+    
     function setOllamaAddExpanded(expanded) {
       const next = Boolean(expanded);
       addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
       addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('ollamaManualPanel')?.classList.toggle('expanded', next);
+      document.getElementById('ollamaManualPanel')?.classList.toggle('expanded', next || (uploadDetails && !uploadDetails.classList.contains('hidden')));
+      if (next && uploadToggle) setOllamaUploadExpanded(false);
     }
+    
+    function setOllamaUploadExpanded(expanded) {
+      const next = Boolean(expanded);
+      uploadToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
+      uploadDetails?.classList.toggle('hidden', !next);
+      document.getElementById('ollamaManualPanel')?.classList.toggle('expanded', next || (addDetails && !addDetails.classList.contains('hidden')));
+      if (next && addToggle) setOllamaAddExpanded(false);
+    }
+    
     addToggle?.addEventListener('click', () => setOllamaAddExpanded(addDetails?.classList.contains('hidden')));
+    uploadToggle?.addEventListener('click', () => setOllamaUploadExpanded(uploadDetails?.classList.contains('hidden')));
     setOllamaAccountExpanded(false);
     renderOllamaStatus();
 
@@ -14093,6 +14107,26 @@ function setupCursorAccountUI() {
       });
       await refreshStats({ force: true });
     });
+
+    document.getElementById('ollamaCookieUploadButtonDirect').addEventListener('click', () => {
+      document.getElementById('ollamaCookieUploadFile').click();
+    });
+
+    document.getElementById('ollamaCookieUploadFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const lines = text.split('\n');
+      const cookieLine = lines.find(line => line.includes('aid=') && line.includes('__Secure-session='));
+      if (cookieLine) {
+        document.getElementById('ollamaCookieInput').value = cookieLine.trim();
+        document.getElementById('ollamaSaveAccountButton').click();
+      } else {
+        state.ollamaAccountError = 'Could not find a valid Ollama cookie in the uploaded file.';
+        renderOllamaStatus();
+      }
+      e.target.value = '';
+    });
   }
 
   const freeLlmEnabledInput = document.getElementById('freeLlmEnabledInput');
@@ -14130,6 +14164,8 @@ function setupCursorAccountUI() {
       renderFreeLlmRouting();
       renderSettingsSummaries();
     });
+
+
     renderFreeLlmRouting();
   }
 
