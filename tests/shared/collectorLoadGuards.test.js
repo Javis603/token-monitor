@@ -1533,6 +1533,32 @@ test('watchIgnoreMatcher preserves bounded sources under an exporter parent', ()
   }
 });
 
+test('watchIgnoreMatcher preserves recursive sources nested under bounded roots', () => {
+  const opencodeRoot = path.join('.local', 'share', 'opencode');
+  const tmp = withTmpHome([path.join(opencodeRoot, 'sessions')]);
+  const originalHomedir = os.homedir;
+  const previousCodexHome = process.env.CODEX_HOME;
+  os.homedir = () => tmp;
+  try {
+    process.env.CODEX_HOME = path.join(tmp, opencodeRoot);
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('opencode,codex');
+    const codexRoot = path.join(tmp, opencodeRoot, 'sessions');
+    const opencodeRootPath = path.join(tmp, opencodeRoot);
+
+    assert.equal(ignored(codexRoot), false);
+    assert.equal(ignored(path.join(codexRoot, 'session.jsonl')), false);
+    assert.equal(ignored(path.join(opencodeRootPath, 'opencode.db')), false);
+    assert.equal(ignored(path.join(opencodeRootPath, 'log')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchIgnoreMatcher keeps an exporter file after Windows path canonicalization', () => {
   const exporter = path.join('.copilot', 'custom-export', 'copilot.jsonl');
   const { base, alias, real } = withAliasedTmpHome([path.dirname(exporter)]);

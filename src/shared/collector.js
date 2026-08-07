@@ -1524,6 +1524,13 @@ function watchIgnoreMatcher(clientsCsv) {
     // one before its own source-specific branch gets to classify the path.
     if (canonicalCopilotExporter && resolved === canonicalCopilotExporter) return false;
     if (copilotExporterRootSet.has(resolved)) return false;
+    // `ignored` is global to the chokidar instance, so a recursive source must
+    // win over every bounded client's pruning rule, not only over the custom
+    // Copilot exporter branch below. This matters when an explicit CODEX_HOME,
+    // CLINE_SESSION_DATA_DIR, etc. is nested under another client's data root.
+    for (const root of recursiveWatchRootSet) {
+      if (resolved === root || resolved.startsWith(root + path.sep)) return false;
+    }
     // Every explicit watch root stays watched — the home dir AND each profile
     // dir. A profile dir lives under the home root, so the child-prune below
     // would otherwise ignore it (basename isn't a db file) before we recognise
@@ -1634,12 +1641,6 @@ function watchIgnoreMatcher(clientsCsv) {
       if (!resolved.startsWith(root + path.sep)) continue;
       const parts = path.relative(root, resolved).split(path.sep);
       return !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]);
-    }
-    // Recursive transcript/session roots are valid sources at every depth.
-    // This union check prevents an arbitrary Copilot exporter parent such as
-    // $HOME from hiding another client's explicit root and its descendants.
-    for (const root of recursiveWatchRootSet) {
-      if (resolved === root || resolved.startsWith(root + path.sep)) return false;
     }
     for (const root of copilotExporterRoots) {
       if (!resolved.startsWith(root + path.sep)) continue;
