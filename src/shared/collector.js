@@ -1077,8 +1077,8 @@ function clientSourceRoots(clientsCsv) {
   add('codex', ['codex-sessions', path.join(home, '.codex', 'sessions')]);
   const hermesHome = resolveHermesHome({ env: process.env, homeDir: home });
   add('hermes', ['hermes-home', hermesHome], ...hermesProfileWatchDirs(hermesHome).map((dir) => ['hermes-profile', dir]));
-  // Tokscale 4.10.0 reads OpenCode's direct opencode*.db family and also keeps
-  // the legacy storage/message/**/*.json source for unmigrated data. The
+  // Within the default OpenCode data root, Tokscale 4.10.0 reads the direct
+  // opencode*.db family and the legacy storage/message/*/*.json source. The
   // watcher prunes the rest of this broad app data root below.
   add('opencode', ['opencode-data', path.join(home, '.local', 'share', 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
