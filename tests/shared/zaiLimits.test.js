@@ -87,7 +87,7 @@ test('parseZaiUsage treats a single 5-hour token limit as the old-plan session w
   assert.equal(usage.windows.find((window) => window.kind === 'weekly'), undefined);
 });
 
-test('parseZaiUsage recognizes CREDIT_LIMIT entries from BigModel CN as token windows', () => {
+test('parseZaiUsage recognizes CREDIT_LIMIT entries as token windows', () => {
   const usage = parseZaiUsage({
     data: {
       level: 'lite',
@@ -110,23 +110,22 @@ test('parseZaiUsage recognizes CREDIT_LIMIT entries from BigModel CN as token wi
   assert.equal(Math.round(usage.windows[1].usedPercent), 12);
 });
 
-test('parseZaiUsage routes a CREDIT_LIMIT MCP marker to the billing bucket', () => {
+test('parseZaiUsage retains a legacy 1-minute TOKENS_LIMIT entry as a token window', () => {
+  // The old format could carry the MCP marker as a TOKENS_LIMIT with
+  // unit=5/number=1 (1-minute); it must stay a token window, not be dropped.
   const usage = parseZaiUsage({
     data: {
       limits: [
-        { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 620, remaining: 1379, percentage: 31 },
-        { type: 'CREDIT_LIMIT', unit: 5, number: 1, usage: 100, currentValue: 13, remaining: 87, percentage: 13 }
+        { type: 'TOKENS_LIMIT', unit: 5, number: 1, percentage: 12, nextResetTime: '2026-07-07T18:00:00Z' }
       ]
     }
   }, null);
 
-  assert.equal(usage.windows.length, 2);
+  assert.equal(usage.windows.length, 1);
   assert.equal(usage.windows[0].kind, 'session');
   assert.equal(usage.windows[0].label, '5-hour');
-  assert.equal(usage.windows[1].kind, 'billing');
-  assert.equal(usage.windows[1].label, 'MCP');
-  assert.equal(usage.windows[1].resetDescription, 'Monthly');
-  assert.equal(usage.windows.find((window) => window.kind === 'weekly'), undefined);
+  assert.equal(usage.windows[0].usedPercent, 12);
+  assert.equal(usage.windows[0].windowMinutes, 1);
 });
 
 test('parseZaiUsage reads official plan labels from subscription or quota payloads', () => {
