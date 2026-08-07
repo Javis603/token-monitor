@@ -93,15 +93,15 @@ test('About uses runtime version and allowlisted Routed Monitoring links', () =>
   const app = read('app.js');
 
   assert.match(app, /aboutVersion\.textContent = state\.appInfo\?\.version \? `v\$\{state\.appInfo\.version\}` : '—'/);
-  assert.match(app, /TOKEN_MONITOR_REPOSITORY_URL = 'https:\/\/github\.com\/Javis603\/routed-monitoring'/);
+  assert.match(app, /TOKEN_MONITOR_REPOSITORY_URL = 'https:\/\/github\.com\/Javis603\/router-x-token-monitor'/);
   assert.match(app, /TOKEN_MONITOR_ISSUES_URL = `\$\{TOKEN_MONITOR_REPOSITORY_URL\}\/issues\/new\/choose`/);
-  assert.match(app, /TOKEN_MONITOR_WEBSITE_URL = 'https:\/\/javis-ai\.com\/routed-monitoring\/'/);
+  assert.match(app, /TOKEN_MONITOR_WEBSITE_URL = 'https:\/\/javis-ai\.com\/router-x-token-monitor\/'/);
   assert.match(app, /openRepositoryButton\?\.addEventListener\('click',[\s\S]*TOKEN_MONITOR_REPOSITORY_URL/);
   assert.match(app, /openWebsiteButton\?\.addEventListener\('click',[\s\S]*TOKEN_MONITOR_WEBSITE_URL/);
   assert.match(app, /reportIssueButton\?\.addEventListener\('click',[\s\S]*TOKEN_MONITOR_ISSUES_URL/);
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  assert.match(main, /parsed\.hostname === 'javis-ai\.com'[\s\S]*parsed\.pathname === '\/routed-monitoring'/);
+  assert.match(main, /parsed\.hostname === 'javis-ai\.com'[\s\S]*parsed\.pathname === '\/router-x-token-monitor'/);
 });
 
 test('About links stay visually secondary and wrap in narrow settings', () => {

@@ -1826,7 +1826,44 @@ function floatingBubblePayload() {
 
 // Load settings once and, on that first load, seed the in-memory view state
 // from the persisted snapshot so a cold start reopens the last-used view.
+function migrateLegacyData() {
+  const legacyAppDir = path.join(app.getPath('appData'), 'Token Monitor');
+  const currentAppDir = app.getPath('userData');
+  const markerFile = path.join(currentAppDir, '.migrated');
+
+  if (fs.existsSync(legacyAppDir) && !fs.existsSync(markerFile)) {
+    const filesToMigrate = [
+      'settings.json',
+      'credentials.json',
+      'daily-history-archive.json',
+      'session-usage-archive.json',
+      'collector-anchor.json',
+      'exchange-rates.json',
+      'hub-devices.json'
+    ];
+
+    for (const file of filesToMigrate) {
+      const src = path.join(legacyAppDir, file);
+      const dest = path.join(currentAppDir, file);
+      if (fs.existsSync(src)) {
+        try {
+          fs.copyFileSync(src, dest);
+        } catch (e) {
+          console.error(`Failed to migrate ${file}:`, e);
+        }
+      }
+    }
+    
+    try {
+      fs.writeFileSync(markerFile, 'Migrated on ' + new Date().toISOString());
+    } catch (e) {
+      console.error('Failed to write migration marker:', e);
+    }
+  }
+}
+
 function ensureSettingsLoaded() {
+  migrateLegacyData();
   if (settings) return settings;
   settings = readSettings();
   const persistedCodexAccounts = settings.codexManagedAccounts;
@@ -4718,10 +4755,10 @@ function isAllowedExternalUrl(value) {
   if (isAllowedCodexLoginUrl(value)) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
   if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
-  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/routed-monitoring')) return true;
+  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/router-x-token-monitor')) return true;
   if (
     (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
-    && (parsed.pathname === '/routed-monitoring' || parsed.pathname.startsWith('/routed-monitoring/'))
+    && (parsed.pathname === '/router-x-token-monitor' || parsed.pathname.startsWith('/router-x-token-monitor/'))
   ) return true;
   if (parsed.hostname === 'claude.ai' && parsed.pathname.startsWith('/settings')) return true;
   if ((parsed.hostname === 'cursor.com' || parsed.hostname === 'www.cursor.com') && parsed.pathname.startsWith('/settings')) return true;
