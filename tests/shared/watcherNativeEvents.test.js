@@ -22,7 +22,7 @@ const os = require('node:os');
 const path = require('node:path');
 const chokidar = require('chokidar');
 
-const { watcherOptions } = require('../../src/shared/collector');
+const { watcherOptions, watchIgnoreMatcher } = require('../../src/shared/collector');
 
 // awaitWriteFinish holds an event for stabilityThreshold (500 ms) before it is
 // emitted, so the floor is already half a second before any scheduling noise.
@@ -108,6 +108,75 @@ test('native file events reach a subdirectory created after the watch started', 
       `expected an event inside the new directory, got ${JSON.stringify(events)}`
     );
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('native watcher applies bounded pruning without hiding an overlapping recursive source', async () => {
+  const dir = withTmpDir();
+  const opencodeRoot = path.join(dir, '.local', 'share', 'opencode');
+  const codexRoot = path.join(opencodeRoot, 'sessions');
+  const unrelatedRoot = path.join(opencodeRoot, 'log');
+  const relevantFile = path.join(codexRoot, 'session.jsonl');
+  const unrelatedFile = path.join(unrelatedRoot, 'runtime.log');
+  const originalHomedir = os.homedir;
+  const previousCodexHome = process.env.CODEX_HOME;
+  let watcher;
+  os.homedir = () => dir;
+  try {
+    fs.mkdirSync(codexRoot, { recursive: true });
+    fs.mkdirSync(unrelatedRoot, { recursive: true });
+    process.env.CODEX_HOME = opencodeRoot;
+    const ignored = watchIgnoreMatcher('opencode,codex');
+    watcher = chokidar.watch(
+      [opencodeRoot, codexRoot],
+      watcherOptions(false, ignored)
+    );
+    await new Promise((resolve, reject) => {
+      watcher.once('ready', resolve);
+      watcher.once('error', reject);
+    });
+
+    const events = [];
+    const normalizePath = (filePath) => {
+      const resolved = path.resolve(filePath);
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    };
+    const relevantEvent = new Promise((resolve, reject) => {
+      const onEvent = (event, filePath) => {
+        events.push({ event, filePath });
+        if (normalizePath(filePath) === normalizePath(relevantFile)) {
+          resolve();
+        }
+      };
+      watcher.on('all', onEvent);
+      watcher.once('error', reject);
+    });
+    fs.writeFileSync(relevantFile, '{"tokens":1}\n');
+    await Promise.race([
+      relevantEvent,
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error(`no relevant native file event within ${EVENT_TIMEOUT_MS}ms on ${process.platform}`)),
+        EVENT_TIMEOUT_MS
+      ).unref())
+    ]);
+
+    fs.writeFileSync(unrelatedFile, 'noise\n');
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.ok(
+      events.some((entry) => normalizePath(entry.filePath) === normalizePath(relevantFile)),
+      `expected an event for ${relevantFile}, got ${JSON.stringify(events)}`
+    );
+    assert.equal(
+      events.some((entry) => normalizePath(entry.filePath) === normalizePath(unrelatedFile)),
+      false,
+      `unexpected event for pruned path ${unrelatedFile}: ${JSON.stringify(events)}`
+    );
+  } finally {
+    if (watcher) await watcher.close();
+    os.homedir = originalHomedir;
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
