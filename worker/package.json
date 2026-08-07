@@ -1,7 +1,7 @@
 {
   "name": "routed-monitoring-hub-worker",
   "private": true,
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Cloudflare Worker deployment of the Routed Monitoring hub.",
   "type": "module",
   "scripts": {

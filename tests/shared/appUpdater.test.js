@@ -452,7 +452,7 @@ test('parseLatestReleasePayload returns normalized object for valid payload', ()
   const result = parseLatestReleasePayload({
     tag_name: 'v0.1.3',
     name: 'Routed Monitoring 0.1.3',
-    html_url: 'https://github.com/Javis603/routed-monitoring/releases/tag/v0.1.3',
+    html_url: 'https://github.com/celestialgeeks/router-x-token-monitor/releases/tag/v0.1.3',
     published_at: '2026-05-26T12:00:00Z',
     body: `
 ## What's changed
@@ -467,7 +467,7 @@ test('parseLatestReleasePayload returns normalized object for valid payload', ()
     version: '0.1.3',
     tag: 'v0.1.3',
     name: 'Routed Monitoring 0.1.3',
-    htmlUrl: 'https://github.com/Javis603/routed-monitoring/releases/tag/v0.1.3',
+    htmlUrl: 'https://github.com/celestialgeeks/router-x-token-monitor/releases/tag/v0.1.3',
     publishedAt: '2026-05-26T12:00:00Z',
     releaseNotes: {
       en: [{ title: 'Added', items: ['Release summaries in the app.'] }]
@@ -478,7 +478,7 @@ test('parseLatestReleasePayload returns normalized object for valid payload', ()
 test('parseLatestReleasePayload falls back to tag when name is missing', () => {
   const result = parseLatestReleasePayload({
     tag_name: 'v0.1.3',
-    html_url: 'https://github.com/Javis603/routed-monitoring/releases/tag/v0.1.3'
+    html_url: 'https://github.com/celestialgeeks/router-x-token-monitor/releases/tag/v0.1.3'
   });
   assert.equal(result.name, 'v0.1.3');
   assert.equal(result.publishedAt, '');

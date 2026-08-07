@@ -80,7 +80,7 @@ const CODEX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api';
 const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
 const CODEX_RPC_TIMEOUT_MS = 20_000;
-const TOKEN_MONITOR_USER_AGENT = `routed-monitoring/${appVersion()} (+https://github.com/Javis603/routed-monitoring)`;
+const TOKEN_MONITOR_USER_AGENT = `routed-monitoring/${appVersion()} (+https://github.com/celestialgeeks/router-x-token-monitor)`;
 
 function nowIso(nowMs) {
   return new Date(nowMs).toISOString();

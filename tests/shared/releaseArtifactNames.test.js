@@ -66,9 +66,10 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
   assert.ok(intelBullets.every((line) => line.includes(`/download/v${rootPackage.version}/`)));
   const fullChangelogLines = releaseTemplate.split('\n').filter((line) => line.startsWith('**Full Changelog:**'));
   assert.equal(fullChangelogLines.length, 1);
-  assert.match(fullChangelogLines[0], /\[v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+\]/);
-  assert.match(fullChangelogLines[0], /https:\/\/github\.com\/Javis603\/routed-monitoring\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
-  assert.ok(fullChangelogLines[0].includes(`v${rootPackage.version}`));
+  const changelogLine = fullChangelogLines[0];
+  assert.match(changelogLine, /\[v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+\]/);
+  assert.match(changelogLine, /https:\/\/github\.com\/celestialgeeks\/router-x-token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
+  assert.ok(changelogLine.includes(`v${rootPackage.version}`));
   assert.match(
     releaseTemplate,
     /---\s*\*\*Full Changelog:\*\*[\s\S]*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/

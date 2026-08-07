@@ -4755,7 +4755,7 @@ function isAllowedExternalUrl(value) {
   if (isAllowedCodexLoginUrl(value)) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
   if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
-  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/router-x-token-monitor')) return true;
+  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/celestialgeeks/router-x-token-monitor')) return true;
   if (
     (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
     && (parsed.pathname === '/router-x-token-monitor' || parsed.pathname.startsWith('/router-x-token-monitor/'))

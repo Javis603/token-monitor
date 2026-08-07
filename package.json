@@ -125,11 +125,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Javis603/routed-monitoring.git"
+    "url": "git+https://github.com/celestialgeeks/router-x-token-monitor.git"
   },
-  "homepage": "https://github.com/Javis603/routed-monitoring#readme",
+  "homepage": "https://github.com/celestialgeeks/router-x-token-monitor#readme",
   "bugs": {
-    "url": "https://github.com/Javis603/routed-monitoring/issues"
+    "url": "https://github.com/celestialgeeks/router-x-token-monitor/issues"
   },
   "dependencies": {
     "@xhayper/discord-rpc": "^1.3.4",
