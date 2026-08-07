@@ -200,8 +200,12 @@ test('watchIgnoreMatcher bounds Kiro CLI, Zed, and CodeBuddy extension roots', (
     codebuddyLogs
   ]);
   const originalHomedir = os.homedir;
+  const previousLocalAppData = process.env.LOCALAPPDATA;
   os.homedir = () => tmp;
   try {
+    if (process.platform === 'win32') {
+      process.env.LOCALAPPDATA = path.join(tmp, 'AppData', 'Local');
+    }
     const { watchIgnoreMatcher, watchPathsForClients } = freshCollector();
     const ignored = watchIgnoreMatcher('kiro,zed,codebuddy');
     const kiroRoot = path.join(tmp, '.local', 'share', 'kiro-cli');
@@ -231,6 +235,8 @@ test('watchIgnoreMatcher bounds Kiro CLI, Zed, and CodeBuddy extension roots', (
     assert.equal(ignored(path.join(codebuddyRoot, 'Other', 'runtime.log')), true);
   } finally {
     os.homedir = originalHomedir;
+    if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = previousLocalAppData;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1357,11 +1363,174 @@ test('watchPathsForClients includes GitHub Copilot CLI and VS Code chat roots', 
   try {
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
     const dirs = watchPathsForClients('copilot');
-    assert.ok(dirs.includes(path.join(tmp, '.copilot', 'otel')));
+    assert.ok(dirs.includes(path.join(tmp, '.copilot')));
+    assert.ok(!dirs.includes(path.join(tmp, '.copilot', 'otel')));
     assert.ok(dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage')));
     assert.deepEqual(clientDataDirPresence('copilot'), { copilot: true });
   } finally {
     os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchPathsForClients includes Tokscale auxiliary source roots', () => {
+  const codexHome = path.join('custom-codex');
+  const headlessRoot = path.join('custom-headless');
+  const clineRoot = path.join('custom-cline-sessions');
+  const exporter = path.join('custom-export', 'copilot.jsonl');
+  const tmp = withTmpHome([
+    path.join('.copilot', 'otel'),
+    path.join('.zcode', 'cli', 'db'),
+    path.join('.grok', 'sessions'),
+    path.join('.grok', 'logs'),
+    path.join(codexHome, 'sessions'),
+    path.join(codexHome, 'archived_sessions'),
+    path.join(headlessRoot, 'codex'),
+    clineRoot,
+    path.dirname(exporter)
+  ]);
+  const originalHomedir = os.homedir;
+  const previousCodexHome = process.env.CODEX_HOME;
+  const previousHeadlessRoot = process.env.TOKSCALE_HEADLESS_DIR;
+  const previousClineRoot = process.env.CLINE_SESSION_DATA_DIR;
+  const previousExporter = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  os.homedir = () => tmp;
+  try {
+    process.env.CODEX_HOME = path.join(tmp, codexHome);
+    process.env.TOKSCALE_HEADLESS_DIR = path.join(tmp, headlessRoot);
+    process.env.CLINE_SESSION_DATA_DIR = path.join(tmp, clineRoot);
+    process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = path.join(tmp, exporter);
+    fs.writeFileSync(path.join(tmp, '.copilot', 'data.db'), '');
+    fs.writeFileSync(path.join(tmp, '.zcode', 'cli', 'db', 'db.sqlite'), '');
+    fs.writeFileSync(path.join(tmp, '.grok', 'logs', 'unified.jsonl'), '');
+    fs.writeFileSync(path.join(tmp, exporter), '');
+
+    const { clientDataDirPresence, watchPathsForClients } = freshCollector();
+    const dirs = watchPathsForClients('copilot,zcode,grok,codex,cline');
+    assert.ok(dirs.includes(path.join(tmp, '.copilot')));
+    assert.ok(!dirs.includes(path.join(tmp, '.copilot', 'otel')));
+    assert.ok(dirs.includes(path.join(tmp, '.zcode', 'cli', 'db')));
+    assert.ok(dirs.includes(path.join(tmp, '.grok', 'logs')));
+    assert.ok(dirs.includes(path.join(tmp, codexHome, 'sessions')));
+    assert.ok(dirs.includes(path.join(tmp, codexHome, 'archived_sessions')));
+    assert.ok(dirs.includes(path.join(tmp, headlessRoot, 'codex')));
+    assert.ok(dirs.includes(path.join(tmp, clineRoot)));
+    assert.ok(dirs.includes(path.join(tmp, path.dirname(exporter))));
+    assert.deepEqual(clientDataDirPresence('copilot,zcode,grok,codex,cline'), {
+      copilot: true, zcode: true, grok: true, codex: true, cline: true
+    });
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    if (previousHeadlessRoot === undefined) delete process.env.TOKSCALE_HEADLESS_DIR;
+    else process.env.TOKSCALE_HEADLESS_DIR = previousHeadlessRoot;
+    if (previousClineRoot === undefined) delete process.env.CLINE_SESSION_DATA_DIR;
+    else process.env.CLINE_SESSION_DATA_DIR = previousClineRoot;
+    if (previousExporter === undefined) delete process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+    else process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = previousExporter;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher bounds Copilot data, Grok unified, ZCode, and exporter roots', () => {
+  const exporter = path.join('.copilot', 'custom-export', 'copilot.jsonl');
+  const tmp = withTmpHome([
+    path.join('.copilot', 'otel'),
+    path.join('.grok', 'logs'),
+    path.join('.zcode', 'cli', 'db'),
+    path.dirname(exporter)
+  ]);
+  const originalHomedir = os.homedir;
+  const previousExporter = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  os.homedir = () => tmp;
+  try {
+    process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = `  ${path.join(tmp, exporter)}  `;
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('copilot,grok,zcode');
+    const copilotRoot = path.join(tmp, '.copilot');
+    const grokLogs = path.join(tmp, '.grok', 'logs');
+    const zcodeDb = path.join(tmp, '.zcode', 'cli', 'db');
+    const exporterRoot = path.join(tmp, path.dirname(exporter));
+
+    assert.equal(ignored(copilotRoot), false);
+    assert.equal(ignored(path.join(copilotRoot, 'data.db')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'data.db-wal')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'data.db-shm')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'otel', 'trace.jsonl')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'cache')), true);
+
+    assert.equal(ignored(grokLogs), false);
+    assert.equal(ignored(path.join(grokLogs, 'unified.jsonl')), false);
+    assert.equal(ignored(path.join(grokLogs, 'other.log')), true);
+    assert.equal(ignored(path.join(grokLogs, 'archive', 'unified.jsonl')), true);
+
+    assert.equal(ignored(zcodeDb), false);
+    assert.equal(ignored(path.join(zcodeDb, 'db.sqlite')), false);
+    assert.equal(ignored(path.join(zcodeDb, 'db.sqlite-wal')), false);
+    assert.equal(ignored(path.join(zcodeDb, 'cache')), true);
+
+    assert.equal(ignored(exporterRoot), false);
+    assert.equal(ignored(path.join(exporterRoot, 'copilot.jsonl')), false);
+    assert.equal(ignored(path.join(exporterRoot, 'other.jsonl')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousExporter === undefined) delete process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+    else process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = previousExporter;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher keeps an exporter file after Windows path canonicalization', () => {
+  const exporter = path.join('.copilot', 'custom-export', 'copilot.jsonl');
+  const { base, alias, real } = withAliasedTmpHome([path.dirname(exporter)]);
+  const originalHomedir = os.homedir;
+  const previousExporter = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  os.homedir = () => alias;
+  try {
+    process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = path.join(alias, exporter);
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('copilot');
+    const eventRoot = process.platform === 'win32' ? real : alias;
+    assert.equal(ignored(path.join(eventRoot, exporter)), false);
+    assert.equal(ignored(path.join(eventRoot, path.dirname(exporter), 'other.jsonl')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousExporter === undefined) delete process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+    else process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = previousExporter;
+    delete require.cache[collectorPath];
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('watchPathsForClients follows XDG_DATA_HOME for OpenCode, MiMo, and Zed', () => {
+  const xdgRoot = path.join('custom-xdg');
+  const tmp = withTmpHome([
+    path.join(xdgRoot, 'opencode'),
+    path.join(xdgRoot, 'mimocode'),
+    path.join(xdgRoot, 'zed', 'threads')
+  ]);
+  const originalHomedir = os.homedir;
+  const previousXdg = process.env.XDG_DATA_HOME;
+  os.homedir = () => tmp;
+  try {
+    process.env.XDG_DATA_HOME = path.join(tmp, xdgRoot);
+    const { clientDataDirPresence, watchPathsForClients } = freshCollector();
+    const dirs = watchPathsForClients('opencode,micode,zed');
+    assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'opencode')));
+    assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'mimocode')));
+    assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'zed', 'threads')));
+    assert.ok(!dirs.includes(path.join(tmp, '.local', 'share', 'opencode')));
+    assert.deepEqual(clientDataDirPresence('opencode,micode,zed'), {
+      opencode: true, micode: true, zed: true
+    });
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousXdg === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousXdg;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

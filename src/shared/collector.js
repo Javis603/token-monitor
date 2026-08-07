@@ -1047,6 +1047,49 @@ function dirExists(dir) {
   try { return fs.statSync(dir).isDirectory(); } catch (_) { return false; }
 }
 
+function fileExists(file) {
+  try { return fs.statSync(file).isFile(); } catch (_) { return false; }
+}
+
+function nonBlankEnvPath(name, fallback) {
+  const value = process.env[name];
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
+
+function xdgDataHome(home) {
+  return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'));
+}
+
+function tokscaleHeadlessRoots(home) {
+  const configured = nonBlankEnvPath('TOKSCALE_HEADLESS_DIR', null);
+  if (configured) return [configured];
+  return [
+    path.join(home, '.config', 'tokscale', 'headless'),
+    path.join(home, 'Library', 'Application Support', 'tokscale', 'headless')
+  ];
+}
+
+function copilotExporterPath() {
+  const configured = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  if (typeof configured !== 'string') return null;
+  const trimmed = configured.trim();
+  return trimmed ? path.resolve(trimmed) : null;
+}
+
+function hasWatchableParent(file) {
+  return path.dirname(file) !== path.parse(file).root;
+}
+
+function clineCliSessionRoot(home) {
+  const sessionDataDir = nonBlankEnvPath('CLINE_SESSION_DATA_DIR', null);
+  if (sessionDataDir) return sessionDataDir;
+  const dataDir = nonBlankEnvPath('CLINE_DATA_DIR', null);
+  if (dataDir) return path.join(dataDir, 'sessions');
+  const clineDir = nonBlankEnvPath('CLINE_DIR', null);
+  if (clineDir) return path.join(clineDir, 'data', 'sessions');
+  return path.join(home, '.cline', 'data', 'sessions');
+}
+
 function hasCopilotChatSessions(workspaceRoot) {
   try {
     return fs.readdirSync(workspaceRoot, { withFileTypes: true })
@@ -1071,22 +1114,40 @@ function clientSourceRoots(clientsCsv) {
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const byClient = {};
   const add = (client, ...roots) => {
-    if (enabled.has(client)) byClient[client] = roots.map(([id, dir]) => ({ id, dir }));
+    if (enabled.has(client)) {
+      byClient[client] = roots.map(([id, dir, sourcePath]) => ({
+        id,
+        dir,
+        ...(sourcePath ? { sourcePath } : {})
+      }));
+    }
   };
   add('claude', ['claude-projects', path.join(home, '.claude', 'projects')], ['claude-transcripts', path.join(home, '.claude', 'transcripts')]);
-  add('codex', ['codex-sessions', path.join(home, '.codex', 'sessions')]);
+  const codexHome = nonBlankEnvPath('CODEX_HOME', path.join(home, '.codex'));
+  add(
+    'codex',
+    ['codex-sessions', path.join(codexHome, 'sessions')],
+    ['codex-sessions', path.join(codexHome, 'archived_sessions')],
+    ...tokscaleHeadlessRoots(home).map((root) => ['codex-sessions', path.join(root, 'codex')])
+  );
   const hermesHome = resolveHermesHome({ env: process.env, homeDir: home });
   add('hermes', ['hermes-home', hermesHome], ...hermesProfileWatchDirs(hermesHome).map((dir) => ['hermes-profile', dir]));
-  // Within the default OpenCode data root, Tokscale 4.10.0 reads the direct
+  // Within the default OpenCode data root, Tokscale reads the direct
   // opencode*.db family and the legacy storage/message/*/*.json source. The
   // watcher prunes the rest of this broad app data root below.
-  add('opencode', ['opencode-data', path.join(home, '.local', 'share', 'opencode')]);
+  const xdgHome = xdgDataHome(home);
+  add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   add('cursor', ['tokscale-cursor-cache', path.join(home, '.config', 'tokscale', 'cursor-cache')]);
   add('antigravity', ['tokscale-antigravity-cache', path.join(home, '.config', 'tokscale', 'antigravity-cache')]);
   add('kimi', ['kimi-sessions', path.join(home, '.kimi', 'sessions')], ['kimi-code-sessions', path.join(process.env.KIMI_CODE_HOME || path.join(home, '.kimi-code'), 'sessions')]);
   add('qwen', ['qwen-projects', path.join(home, '.qwen', 'projects')]);
-  add('grok', ['grok-sessions', path.join(process.env.GROK_HOME || path.join(home, '.grok'), 'sessions')]);
+  const grokHome = nonBlankEnvPath('GROK_HOME', path.join(home, '.grok'));
+  add(
+    'grok',
+    ['grok-sessions', path.join(grokHome, 'sessions')],
+    ['grok-unified-log', path.join(grokHome, 'logs'), path.join(grokHome, 'logs', 'unified.jsonl')]
+  );
   // Tokscale 4.5.2 also parses VS Code Copilot Chat JSONL under each
   // workspaceStorage/*/chatSessions directory. Watch the workspaceStorage roots
   // so newly created workspaces are picked up; watchIgnoreMatcher prunes every
@@ -1099,11 +1160,17 @@ function clientSourceRoots(clientsCsv) {
       : []),
     path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage')
   ];
-  add(
-    'copilot',
-    ['copilot-otel', path.join(home, '.copilot', 'otel')],
+  const copilotOtelRoot = path.join(home, '.copilot', 'otel');
+  const copilotRoots = [
+    ['copilot-otel', copilotOtelRoot],
+    ['copilot-data', path.join(home, '.copilot'), path.join(home, '.copilot', 'data.db')],
     ...[...new Set(copilotWorkspaceRoots)].map((dir) => ['vscode-workspace-storage', dir])
-  );
+  ];
+  const exporterPath = copilotExporterPath();
+  if (exporterPath && hasWatchableParent(exporterPath) && !exporterPath.startsWith(path.resolve(copilotOtelRoot) + path.sep)) {
+    copilotRoots.push(['copilot-otel-exporter', path.dirname(exporterPath), exporterPath]);
+  }
+  add('copilot', ...copilotRoots);
   add('pi', ['pi-sessions', path.join(home, '.pi', 'agent', 'sessions')], ['omp-sessions', path.join(home, '.omp', 'agent', 'sessions')]);
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
@@ -1111,7 +1178,7 @@ function clientSourceRoots(clientsCsv) {
   // seconds-level refresh and a correct waiting/missing status.
   add(
     'zed',
-    ['zed-threads', path.join(home, '.local', 'share', 'zed', 'threads')],
+    ['zed-threads', path.join(xdgHome, 'zed', 'threads')],
     ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
     ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
@@ -1132,10 +1199,15 @@ function clientSourceRoots(clientsCsv) {
   // missing dir is dropped by watchClientRootsForClients.
   add(
     'micode',
-    ['mimocode-data', path.join(home, '.local', 'share', 'mimocode')],
+    ['mimocode-data', path.join(xdgHome, 'mimocode')],
     ['mimocode-orca-data', path.join(home, 'Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data')]
   );
-  add('zcode', ['zcode-projects', path.join(home, '.zcode', 'projects')]);
+  const zcodeDbDir = path.join(home, '.zcode', 'cli', 'db');
+  add(
+    'zcode',
+    ['zcode-projects', path.join(home, '.zcode', 'projects')],
+    ['zcode-cli-db', zcodeDbDir, path.join(zcodeDbDir, 'db.sqlite')]
+  );
   // CodeBuddy (Tencent): tokscale reads the home-relative CLI/WebUI JSONL dir on
   // every platform, plus the IDE / VS Code extension logs under a platform-
   // specific CodeBuddyExtension/Logs root (scanner.rs). Watch both so CLI and
@@ -1194,7 +1266,8 @@ function clientSourceRoots(clientsCsv) {
     ['cline-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
     ['cline-tasks', path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
     ['cline-tasks', path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
-    ['cline-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')]
+    ['cline-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
+    ['cline-cli-sessions', clineCliSessionRoot(home)]
   );
   return byClient;
 }
@@ -1204,7 +1277,13 @@ function clientSourceRoots(clientsCsv) {
 function clientWatchCandidates(clientsCsv) {
   const byClient = {};
   for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv))) {
-    byClient[client] = roots.map((root) => root.dir);
+    // The Copilot data root already keeps its `otel/` child through the
+    // matcher below. Keep that child as a diagnostic/source check, but do not
+    // hand both nested paths to chokidar or it may install two native watches
+    // over the same tree.
+    byClient[client] = roots
+      .filter((root) => !(client === 'copilot' && root.id === 'copilot-otel'))
+      .map((root) => root.dir);
   }
   return byClient;
 }
@@ -1311,6 +1390,9 @@ const MICODE_DB_WATCH_PATTERN = /^mimocode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|sh
 // recurse through the application data trees around them.
 const KIRO_DB_WATCH_PATTERN = /^data\.sqlite3(?:-(?:wal|shm))?$/;
 const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
+const COPILOT_DB_WATCH_PATTERN = /^data\.db(?:-(?:wal|shm))?$/;
+const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
+const GROK_UNIFIED_LOG_FILE = 'unified.jsonl';
 // Tokscale scans only these two CodeBuddy extension log subtrees. Keep their
 // recursive layout intact, but prune unrelated siblings under Logs before
 // chokidar allocates watches for them.
@@ -1345,6 +1427,24 @@ function watchIgnoreMatcher(clientsCsv) {
   const copilotRoots = (candidates.copilot || [])
     .filter((dir) => path.basename(dir) === 'workspaceStorage')
     .map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const copilotDataRoots = (candidates.copilot || [])
+    .filter((dir) => path.basename(dir) === '.copilot')
+    .map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const copilotDataRootSet = new Set(copilotDataRoots);
+  const configuredCopilotExporter = copilotExporterPath();
+  const canonicalCopilotExporter = configuredCopilotExporter && hasWatchableParent(configuredCopilotExporter)
+    ? canonicalWatchFilePath(configuredCopilotExporter)
+    : null;
+  const copilotOtelRoot = path.resolve(canonicalWatchPath(path.join(os.homedir(), '.copilot', 'otel')));
+  const copilotExporterRoot = configuredCopilotExporter
+    && hasWatchableParent(configuredCopilotExporter)
+    && !canonicalCopilotExporter.startsWith(copilotOtelRoot + path.sep)
+    ? path.dirname(configuredCopilotExporter)
+    : null;
+  const copilotExporterRoots = copilotExporterRoot
+    ? [path.resolve(canonicalWatchPath(copilotExporterRoot))]
+    : [];
+  const copilotExporterRootSet = new Set(copilotExporterRoots);
   const antigravityEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('antigravity');
   const antigravityRoots = antigravityEnabled
     ? antigravityDataRoots().map((dir) => path.resolve(canonicalWatchPath(dir)))
@@ -1366,15 +1466,27 @@ function watchIgnoreMatcher(clientsCsv) {
     .filter((dir) => path.basename(dir) === 'Logs')
     .map((dir) => path.resolve(canonicalWatchPath(dir)));
   const codebuddyExtensionRootSet = new Set(codebuddyExtensionRoots);
+  const grokUnifiedRoots = (candidates.grok || [])
+    .filter((dir) => path.basename(dir) === 'logs')
+    .map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const grokUnifiedRootSet = new Set(grokUnifiedRoots);
+  const zcodeDbRoots = (candidates.zcode || [])
+    .filter((dir) => path.basename(dir) === 'db')
+    .map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const zcodeDbRootSet = new Set(zcodeDbRoots);
   if (
     hermesRoots.length === 0
     && copilotRoots.length === 0
+    && copilotDataRoots.length === 0
+    && copilotExporterRoots.length === 0
     && antigravityRoots.length === 0
     && opencodeRoots.length === 0
     && micodeRoots.length === 0
     && kiroCliRoots.length === 0
     && zedRoots.length === 0
     && codebuddyExtensionRoots.length === 0
+    && grokUnifiedRoots.length === 0
+    && zcodeDbRoots.length === 0
   ) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
@@ -1385,6 +1497,23 @@ function watchIgnoreMatcher(clientsCsv) {
     if (hermesRootSet.has(resolved)) return false;
     for (const root of hermesRoots) {
       if (resolved.startsWith(root + path.sep)) return !HERMES_DB_FILES.has(path.basename(resolved));
+    }
+    if (copilotExporterRootSet.has(resolved)) return false;
+    if (copilotDataRootSet.has(resolved)) return false;
+    for (const root of copilotDataRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      const parts = path.relative(root, resolved).split(path.sep);
+      if (parts[0] === 'otel') return false;
+      if (parts.length === 1) {
+        if (canonicalCopilotExporter && resolved === canonicalCopilotExporter) return false;
+        return !COPILOT_DB_WATCH_PATTERN.test(parts[0]);
+      }
+      return canonicalCopilotExporter === resolved ? false : true;
+    }
+    for (const root of copilotExporterRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      if (resolved === canonicalCopilotExporter) return false;
+      return true;
     }
     for (const root of copilotRoots) {
       if (resolved === root) return false;
@@ -1437,6 +1566,23 @@ function watchIgnoreMatcher(clientsCsv) {
       if (path.dirname(resolved) !== root) return true;
       return !MICODE_DB_WATCH_PATTERN.test(path.basename(resolved));
     }
+    if (grokUnifiedRootSet.has(resolved)) return false;
+    for (const root of grokUnifiedRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      // The dual-source Grok scanner derives exactly logs/unified.jsonl from
+      // each Grok home. Keep the log parent visible for a file created later,
+      // but do not recurse through unrelated log files.
+      if (path.dirname(resolved) !== root) return true;
+      return path.basename(resolved) !== GROK_UNIFIED_LOG_FILE;
+    }
+    if (zcodeDbRootSet.has(resolved)) return false;
+    for (const root of zcodeDbRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      // ZCode v2 is a direct SQLite path, not a recursive project source.
+      // Keep WAL/SHM as event signals without treating them as databases.
+      if (path.dirname(resolved) !== root) return true;
+      return !ZCODE_DB_WATCH_PATTERN.test(path.basename(resolved));
+    }
     if (kiroCliRootSet.has(resolved)) return false;
     for (const root of kiroCliRoots) {
       if (!resolved.startsWith(root + path.sep)) continue;
@@ -1469,6 +1615,7 @@ function watchIgnoreMatcher(clientsCsv) {
 // derived from this rather than computed beside it, so the presence dot in the
 // UI and the health record can never disagree about what was found.
 function sourceRootExists(root) {
+  if (root.sourcePath) return fileExists(root.sourcePath);
   return root.id === 'vscode-workspace-storage'
     ? hasCopilotChatSessions(root.dir)
     : dirExists(root.dir);
@@ -1477,7 +1624,7 @@ function sourceRootExists(root) {
 function evaluatedClientSourceRoots(clientsCsv) {
   return Object.fromEntries(Object.entries(clientSourceRoots(clientsCsv)).map(([client, roots]) => [
     client,
-    roots.map((root) => ({ ...root, exists: sourceRootExists(root) }))
+    roots.map((root) => ({ id: root.id, dir: root.dir, exists: sourceRootExists(root) }))
   ]));
 }
 
@@ -1813,6 +1960,14 @@ function canonicalWatchPath(dir) {
   if (process.platform !== 'win32') return dir;
   try { return fs.realpathSync.native(dir); }
   catch (_) { return dir; }
+}
+
+// The exporter file may not exist when the watcher starts, so canonicalise its
+// existing parent and append the original basename instead of realpathing the
+// file itself. This keeps exact-file matching in the same path space as the
+// canonical directory root handed to chokidar on Windows.
+function canonicalWatchFilePath(file) {
+  return path.join(path.resolve(canonicalWatchPath(path.dirname(file))), path.basename(file));
 }
 
 function watcherOptions(usePolling, ignored) {

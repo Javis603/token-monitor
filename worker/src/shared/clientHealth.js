@@ -170,11 +170,15 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'claude-projects',
   'claude-transcripts',
   'cline-tasks',
+  'cline-cli-sessions',
   'codebuddy-extension-logs',
   'codebuddy-projects',
   'codex-sessions',
+  'copilot-data',
   'copilot-otel',
+  'copilot-otel-exporter',
   'grok-sessions',
+  'grok-unified-log',
   'hermes-home',
   'hermes-profile',
   'kilocode-tasks',
@@ -196,7 +200,8 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'vscode-workspace-storage',
   'workbuddy-projects',
   'zcode-projects',
-  'zed-threads'
+  'zed-threads',
+  'zcode-cli-db'
 ]);
 
 // Observations worth surfacing that the core three fields cannot state on their
