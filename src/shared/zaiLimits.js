@@ -221,9 +221,16 @@ function parseZaiUsage(quotaBody, subscriptionBody = null) {
   for (const limit of limits) {
     if (!limit || typeof limit !== 'object') continue;
     const type = String(limit.type || limit.limit_type || '').trim().toUpperCase();
-    if (type === 'TOKENS_LIMIT' && zaiUsedPercent(limit) !== null) {
+    const usedPercent = zaiUsedPercent(limit);
+    if (usedPercent === null) continue;
+    // BigModel CN now labels the coding-plan windows CREDIT_LIMIT instead of
+    // TOKENS_LIMIT (same fields and unit/number encodings). The MCP monthly
+    // bucket can still arrive as the misleading unit=5/number=1 (1-minute)
+    // marker, which is never a real window, so keep it on the billing path.
+    const windowMinutes = zaiWindowMinutes(numberOrNull(limit.unit), numberOrNull(limit.number));
+    if ((type === 'TOKENS_LIMIT' || type === 'CREDIT_LIMIT') && windowMinutes !== 1) {
       tokenLimits.push(limit);
-    } else if (type === 'TIME_LIMIT' && zaiUsedPercent(limit) !== null) {
+    } else if (type === 'TIME_LIMIT' || (type === 'CREDIT_LIMIT' && windowMinutes === 1)) {
       timeLimit = limit;
     }
   }

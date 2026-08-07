@@ -87,6 +87,48 @@ test('parseZaiUsage treats a single 5-hour token limit as the old-plan session w
   assert.equal(usage.windows.find((window) => window.kind === 'weekly'), undefined);
 });
 
+test('parseZaiUsage recognizes CREDIT_LIMIT entries from BigModel CN as token windows', () => {
+  const usage = parseZaiUsage({
+    data: {
+      level: 'lite',
+      limits: [
+        { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 620, remaining: 1379, percentage: 31, nextResetTime: 1786115117702 },
+        { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 10000, currentValue: 1248, remaining: 8751, percentage: 12, nextResetTime: 1786668792998 }
+      ]
+    }
+  }, null);
+
+  assert.equal(usage.plan, 'Lite');
+  assert.equal(usage.windows.length, 2);
+  assert.equal(usage.windows[0].kind, 'session');
+  assert.equal(usage.windows[0].label, '5-hour');
+  assert.equal(usage.windows[0].windowMinutes, 5 * 60);
+  assert.equal(Math.round(usage.windows[0].usedPercent), 31);
+  assert.equal(usage.windows[1].kind, 'weekly');
+  assert.equal(usage.windows[1].label, 'Weekly');
+  assert.equal(usage.windows[1].windowMinutes, 7 * 24 * 60);
+  assert.equal(Math.round(usage.windows[1].usedPercent), 12);
+});
+
+test('parseZaiUsage routes a CREDIT_LIMIT MCP marker to the billing bucket', () => {
+  const usage = parseZaiUsage({
+    data: {
+      limits: [
+        { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 620, remaining: 1379, percentage: 31 },
+        { type: 'CREDIT_LIMIT', unit: 5, number: 1, usage: 100, currentValue: 13, remaining: 87, percentage: 13 }
+      ]
+    }
+  }, null);
+
+  assert.equal(usage.windows.length, 2);
+  assert.equal(usage.windows[0].kind, 'session');
+  assert.equal(usage.windows[0].label, '5-hour');
+  assert.equal(usage.windows[1].kind, 'billing');
+  assert.equal(usage.windows[1].label, 'MCP');
+  assert.equal(usage.windows[1].resetDescription, 'Monthly');
+  assert.equal(usage.windows.find((window) => window.kind === 'weekly'), undefined);
+});
+
 test('parseZaiUsage reads official plan labels from subscription or quota payloads', () => {
   assert.equal(
     parseZaiUsage({ data: { level: 'lite', limits: [] } }, { data: [{ planName: 'Lite' }] }).plan,
