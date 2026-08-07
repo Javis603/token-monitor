@@ -1077,6 +1077,9 @@ function clientSourceRoots(clientsCsv) {
   add('codex', ['codex-sessions', path.join(home, '.codex', 'sessions')]);
   const hermesHome = resolveHermesHome({ env: process.env, homeDir: home });
   add('hermes', ['hermes-home', hermesHome], ...hermesProfileWatchDirs(hermesHome).map((dir) => ['hermes-profile', dir]));
+  // Tokscale 4.10.0 reads OpenCode's direct opencode*.db family and also keeps
+  // the legacy storage/message/**/*.json source for unmigrated data. The
+  // watcher prunes the rest of this broad app data root below.
   add('opencode', ['opencode-data', path.join(home, '.local', 'share', 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   add('cursor', ['tokscale-cursor-cache', path.join(home, '.config', 'tokscale', 'cursor-cache')]);
@@ -1288,6 +1291,11 @@ function clientsForWatchPath(filePath, rootsByClient) {
 // never recurses into an ignored dir (so the runaway poll is gone), yet a
 // newly created state.db-wal is still seen on the next top-level readdir.
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
+// OpenCode discovers only direct opencode.db / opencode-<channel>.db files.
+// WAL/SHM are not database inputs to tokscale, but they are the live-write
+// signals that must remain watched so a transaction committed before a
+// checkpoint refreshes the usage view.
+const OPENCODE_DB_WATCH_PATTERN = /^opencode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|shm))?$/;
 // MiMo Code keeps a multi-gigabyte log/ tree alongside its SQLite state files.
 // A plain recursive watch of ~/.local/share/mimocode storms the watcher (every
 // SQLite WAL/SHM transaction is a chokidar event, the log dir holds thousands
@@ -1333,9 +1341,11 @@ function watchIgnoreMatcher(clientsCsv) {
     ? antigravityDataRoots().map((dir) => path.resolve(canonicalWatchPath(dir)))
     : [];
   const antigravityRootSet = new Set(antigravityRoots);
+  const opencodeRoots = (candidates.opencode || []).map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const opencodeRootSet = new Set(opencodeRoots);
   const micodeRoots = (candidates.micode || []).map((dir) => path.resolve(canonicalWatchPath(dir)));
   const micodeRootSet = new Set(micodeRoots);
-  if (hermesRoots.length === 0 && copilotRoots.length === 0 && antigravityRoots.length === 0 && micodeRoots.length === 0) return undefined;
+  if (hermesRoots.length === 0 && copilotRoots.length === 0 && antigravityRoots.length === 0 && opencodeRoots.length === 0 && micodeRoots.length === 0) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
     // Every explicit watch root stays watched — the home dir AND each profile
@@ -1369,6 +1379,25 @@ function watchIgnoreMatcher(clientsCsv) {
       if (ANTIGRAVITY_SHALLOW_SOURCE_DIRS.has(firstChild)) return parts.length > 2;
       return false;
     }
+    if (opencodeRootSet.has(resolved)) return false;
+    for (const root of opencodeRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      const parts = path.relative(root, resolved).split(path.sep);
+      if (parts.length === 1) {
+        // Keep the root's readdir visible for newly created channel DBs, but
+        // do not descend into unrelated app files or directories.
+        return parts[0] !== 'storage' && !OPENCODE_DB_WATCH_PATTERN.test(parts[0]);
+      }
+      if (parts[0] !== 'storage') return true;
+      if (parts.length === 2) return parts[1] !== 'message';
+      if (parts[1] !== 'message') return true;
+      // Tokscale's legacy OpenCode source is storage/message/*/*.json. Keep
+      // the message root, one session directory, and its direct JSON files;
+      // prune deeper runtime trees before chokidar allocates more watches.
+      if (parts.length === 3) return false;
+      if (parts.length === 4) return !parts[3].endsWith('.json');
+      return true;
+    }
     if (micodeRootSet.has(resolved)) return false;
     for (const root of micodeRoots) {
       if (!resolved.startsWith(root + path.sep)) continue;
@@ -1378,7 +1407,7 @@ function watchIgnoreMatcher(clientsCsv) {
       if (path.dirname(resolved) !== root) return true;
       return !MICODE_DB_WATCH_PATTERN.test(path.basename(resolved));
     }
-    return false; // paths outside the bounded Hermes/Copilot/Antigravity/MiCode roots are never ignored
+    return false; // paths outside the bounded client roots are never ignored
   };
 }
 

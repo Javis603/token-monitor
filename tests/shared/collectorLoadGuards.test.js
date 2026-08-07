@@ -134,6 +134,60 @@ test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but p
   }
 });
 
+test('watchIgnoreMatcher bounds OpenCode to its database family and legacy message source', () => {
+  const root = path.join('.local', 'share', 'opencode');
+  const tmp = withTmpHome([
+    root,
+    path.join(root, 'storage', 'message'),
+    path.join(root, 'storage', 'message', 'session-1'),
+    path.join(root, 'storage', 'session_diff'),
+    path.join(root, 'log'),
+    path.join(root, 'snapshot')
+  ]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher, watchPathsForClients } = freshCollector();
+    const ignored = watchIgnoreMatcher('opencode');
+    const dataRoot = path.join(tmp, root);
+    assert.deepEqual(watchPathsForClients('opencode'), [dataRoot]);
+    assert.equal(typeof ignored, 'function');
+
+    const kept = [
+      dataRoot,
+      path.join(dataRoot, 'opencode.db'),
+      path.join(dataRoot, 'opencode.db-wal'),
+      path.join(dataRoot, 'opencode.db-shm'),
+      path.join(dataRoot, 'opencode-stable.db'),
+      path.join(dataRoot, 'opencode-nightly.db-wal'),
+      path.join(dataRoot, 'storage'),
+      path.join(dataRoot, 'storage', 'message'),
+      path.join(dataRoot, 'storage', 'message', 'session-1'),
+      path.join(dataRoot, 'storage', 'message', 'session-1', 'msg.json'),
+      path.join(dataRoot, 'storage', 'message', 'legacy.json')
+    ];
+    for (const target of kept) assert.equal(ignored(target), false, target);
+
+    const pruned = [
+      path.join(dataRoot, 'account.json'),
+      path.join(dataRoot, 'other.db'),
+      path.join(dataRoot, 'opencode.db-journal'),
+      path.join(dataRoot, 'log'),
+      path.join(dataRoot, 'log', 'runtime.log'),
+      path.join(dataRoot, 'snapshot'),
+      path.join(dataRoot, 'storage', 'session_diff'),
+      path.join(dataRoot, 'storage', 'message', 'session-1', 'nested'),
+      path.join(dataRoot, 'storage', 'message', 'session-1', 'nested', 'msg.json'),
+      path.join(dataRoot, 'storage', 'message', 'session-1', 'not-json.txt')
+    ];
+    for (const target of pruned) assert.equal(ignored(target), true, target);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchPathsForClients watches Antigravity source and CLI data but not the sync cache', () => {
   // The IDE source roots are read by `antigravity sync`, while the CLI writes
   // parse-local SQLite that we do not touch. Both are safe watch inputs; the
