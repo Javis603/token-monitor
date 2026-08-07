@@ -20,11 +20,11 @@
 
 ## Download
 
-- **macOS Apple Silicon** — [Routed-Monitoring-1.0.7-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-arm64.dmg)
-- **macOS Intel** — [Routed-Monitoring-1.0.7-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-x64.dmg)
-- **Windows Installer** — [Routed-Monitoring-Setup-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-Setup-1.0.7.exe) (recommended)
-- **Windows Portable** — [Routed-Monitoring-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.exe) (no install required)
-- **Linux x64** — [Routed-Monitoring-1.0.7.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.8-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.8-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-x64.dmg)
+- **Windows Installer** — [Routed-Monitoring-Setup-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-Setup-1.0.8.exe) (recommended)
+- **Windows Portable** — [Routed-Monitoring-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.exe) (no install required)
+- **Linux x64** — [Routed-Monitoring-1.0.8.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -78,11 +78,11 @@ open-source: https://github.com/junhoyeo/tokscale
 
 ## 下载
 
-- **macOS Apple Silicon** — [Routed-Monitoring-1.0.7-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-arm64.dmg)
-- **macOS Intel** — [Routed-Monitoring-1.0.7-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-x64.dmg)
-- **Windows 安装版** — [Routed-Monitoring-Setup-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-Setup-1.0.7.exe)（推荐）
-- **Windows 便携版** — [Routed-Monitoring-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.exe)（免安装）
-- **Linux x64** — [Routed-Monitoring-1.0.7.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.8-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.8-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-x64.dmg)
+- **Windows 安装版** — [Routed-Monitoring-Setup-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-Setup-1.0.8.exe)（推荐）
+- **Windows 便携版** — [Routed-Monitoring-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.exe)（免安装）
+- **Linux x64** — [Routed-Monitoring-1.0.8.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -114,7 +114,7 @@ https://github.com/junhoyeo/tokscale
 
 ---
 
-**Full Changelog:** [v0.38.0...v1.0.7](https://github.com/celestialgeeks/router-x-token-monitor/compare/v0.38.0...v1.0.7)
+**Full Changelog:** [v0.38.0...v1.0.8](https://github.com/celestialgeeks/router-x-token-monitor/compare/v0.38.0...v1.0.8)
 
 <details>
 <summary>繁體中文 · 한국어 · 日本語</summary>
@@ -144,11 +144,11 @@ https://github.com/junhoyeo/tokscale
 
 ## 下載
 
-- **macOS Apple Silicon** — [Routed-Monitoring-1.0.7-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-arm64.dmg)
-- **macOS Intel** — [Routed-Monitoring-1.0.7-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-x64.dmg)
-- **Windows 安裝版** — [Routed-Monitoring-Setup-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-Setup-1.0.7.exe)（推薦）
-- **Windows 便攜版** — [Routed-Monitoring-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.exe)（免安裝）
-- **Linux x64** — [Routed-Monitoring-1.0.7.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.8-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.8-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-x64.dmg)
+- **Windows 安裝版** — [Routed-Monitoring-Setup-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-Setup-1.0.8.exe)（推薦）
+- **Windows 便攜版** — [Routed-Monitoring-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.exe)（免安裝）
+- **Linux x64** — [Routed-Monitoring-1.0.8.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.AppImage)
 
 </details>
 
@@ -177,11 +177,11 @@ https://github.com/junhoyeo/tokscale
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Routed-Monitoring-1.0.7-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-arm64.dmg)
-- **macOS Intel** — [Routed-Monitoring-1.0.7-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-x64.dmg)
-- **Windows 설치 버전** — [Routed-Monitoring-Setup-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-Setup-1.0.7.exe) (권장)
-- **Windows 포터블 버전** — [Routed-Monitoring-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.exe) (설치 필요 없음)
-- **Linux x64** — [Routed-Monitoring-1.0.7.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.8-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.8-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-x64.dmg)
+- **Windows 설치 버전** — [Routed-Monitoring-Setup-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-Setup-1.0.8.exe) (권장)
+- **Windows 포터블 버전** — [Routed-Monitoring-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.exe) (설치 필요 없음)
+- **Linux x64** — [Routed-Monitoring-1.0.8.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.AppImage)
 
 </details>
 
@@ -210,11 +210,11 @@ https://github.com/junhoyeo/tokscale
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Routed-Monitoring-1.0.7-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-arm64.dmg)
-- **macOS Intel** — [Routed-Monitoring-1.0.7-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7-x64.dmg)
-- **Windows インストーラー** — [Routed-Monitoring-Setup-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-Setup-1.0.7.exe)（推奨）
-- **Windows ポータブル版** — [Routed-Monitoring-1.0.7.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.exe)（インストール不要）
-- **Linux x64** — [Routed-Monitoring-1.0.7.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.7/Routed-Monitoring-1.0.7.AppImage)
+- **macOS Apple Silicon** — [Routed-Monitoring-1.0.8-arm64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-arm64.dmg)
+- **macOS Intel** — [Routed-Monitoring-1.0.8-x64.dmg](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8-x64.dmg)
+- **Windows インストーラー** — [Routed-Monitoring-Setup-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-Setup-1.0.8.exe)（推奨）
+- **Windows ポータブル版** — [Routed-Monitoring-1.0.8.exe](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.exe)（インストール不要）
+- **Linux x64** — [Routed-Monitoring-1.0.8.AppImage](https://github.com/celestialgeeks/router-x-token-monitor/releases/download/v1.0.8/Routed-Monitoring-1.0.8.AppImage)
 
 </details>
 
