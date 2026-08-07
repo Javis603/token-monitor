@@ -23,6 +23,9 @@ const path = require('node:path');
 const chokidar = require('chokidar');
 
 const { watcherOptions, watchIgnoreMatcher } = require('../../src/shared/collector');
+const { installSourceEnvGuard } = require('../helpers/sourceEnv');
+
+installSourceEnvGuard(test);
 
 // awaitWriteFinish holds an event for stabilityThreshold (500 ms) before it is
 // emitted, so the floor is already half a second before any scheduling noise.

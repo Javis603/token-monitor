@@ -5605,6 +5605,13 @@ app.whenReady().then(() => {
       const roots = clientDiagnosticRoots(client)[client] || [];
       const target = roots.find((root) => root.exists);
       if (!target) return false;
+      // An exact-file source would otherwise be handed to openPath, which opens
+      // the file in whatever app claims .db/.jsonl. Select it in its folder
+      // instead — the user asked where the data lives, not to open it.
+      if (target.sourcePath) {
+        shell.showItemInFolder(target.sourcePath);
+        return true;
+      }
       return await shell.openPath(target.dir) === '';
     } catch (_) {
       return false;

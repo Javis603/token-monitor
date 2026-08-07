@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 const {
   CLIENT_SYNC_DETAIL_CODES,
@@ -32,6 +33,8 @@ const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
 const { applySessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
 const { aggregateDevices, mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
+
+installSourceEnvGuard(test);
 
 const core = (overrides = {}) => ({
   source: { state: 'detected', detectedCount: 1, checkedCount: 1 },

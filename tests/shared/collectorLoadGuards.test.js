@@ -17,7 +17,11 @@ const {
   clampTimerDelayMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
 } = require('../../src/shared/selfSyncThrottle');
 
+const { installSourceEnvGuard } = require('../helpers/sourceEnv');
+
 const collectorPath = require.resolve('../../src/shared/collector');
+
+installSourceEnvGuard(test);
 
 function freshCollector() {
   delete require.cache[collectorPath];
@@ -3483,6 +3487,175 @@ test('smart collection acknowledges the latest activity revision after tick coal
     os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// tokscale resolves opencode, zed and micode through `PathRoot::XdgData`
+// (clients.rs) and the CodeBuddy extension logs through `dirs::data_local_dir()`,
+// which is the XDG data home on Linux. Kiro's CLI database is the deliberate
+// exception: tokscale spells it as a home-relative literal, so following XDG
+// there would watch a directory it never reads.
+test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () => {
+  const tmp = withTmpHome([]);
+  const xdg = path.join(tmp, 'custom-xdg');
+  for (const dir of ['opencode', 'zed/threads', 'mimocode', 'CodeBuddyExtension/Logs']) {
+    fs.mkdirSync(path.join(xdg, dir), { recursive: true });
+  }
+  fs.mkdirSync(path.join(tmp, '.local', 'share', 'kiro-cli'), { recursive: true });
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  process.env.XDG_DATA_HOME = xdg;
+  try {
+    const { watchPathsForClients } = freshCollector();
+    const roots = watchPathsForClients('opencode,zed,micode,codebuddy,kiro');
+    assert.ok(roots.includes(path.join(xdg, 'opencode')));
+    assert.ok(roots.includes(path.join(xdg, 'zed', 'threads')));
+    assert.ok(roots.includes(path.join(xdg, 'mimocode')));
+    if (process.platform !== 'win32' && process.platform !== 'darwin') {
+      assert.ok(roots.includes(path.join(xdg, 'CodeBuddyExtension', 'Logs')));
+    }
+    // Home-relative in tokscale, so it must NOT follow XDG.
+    assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'kiro-cli')));
+    assert.ok(!roots.includes(path.join(xdg, 'kiro-cli')));
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('an unset XDG_DATA_HOME falls back to the .local/share roots', () => {
+  const tmp = withTmpHome([
+    path.join('.local', 'share', 'opencode'),
+    path.join('.local', 'share', 'zed', 'threads'),
+    path.join('.local', 'share', 'mimocode')
+  ]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchPathsForClients } = freshCollector();
+    const roots = watchPathsForClients('opencode,zed,micode');
+    assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'opencode')));
+    assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
+    assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'mimocode')));
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// tokscale treats a whitespace-only KIMI_CODE_HOME as unset because it joins
+// `sessions` onto the raw value: a blank export would resolve to the root-level
+// /sessions, hiding the real one and pointing the walker somewhere unrelated.
+test('a whitespace-only KIMI_CODE_HOME falls back instead of watching /sessions', () => {
+  const tmp = withTmpHome([path.join('.kimi-code', 'sessions')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  process.env.KIMI_CODE_HOME = '   ';
+  try {
+    const { watchPathsForClients } = freshCollector();
+    const roots = watchPathsForClients('kimi');
+    assert.ok(roots.includes(path.join(tmp, '.kimi-code', 'sessions')));
+    assert.ok(!roots.some((root) => root.trim().startsWith(path.sep + 'sessions')));
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// A custom exporter's parent has to be watched (the file may not exist yet) but
+// must never become a copilot attribution prefix: pointed at a file in $HOME it
+// would make every other client's event target copilot too, turning each
+// targeted --today scan into a two-client scan.
+test('a custom Copilot exporter watches its parent without attributing it', () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects'), '.copilot']);
+  const exporter = path.join(tmp, 'copilot-otel.jsonl');
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = exporter;
+  try {
+    const { watchPathsForClients, watchAttributionRootsForClients, clientsForWatchPath } = freshCollector();
+    const clients = 'claude,copilot';
+    // The parent is still watched, otherwise a later-created file is invisible.
+    assert.ok(watchPathsForClients(clients).includes(tmp));
+
+    const attribution = watchAttributionRootsForClients(clients);
+    assert.ok(!attribution.copilot.includes(tmp), 'the exporter parent must not be an attribution prefix');
+    assert.ok(attribution.copilot.some((root) => path.resolve(root) === path.resolve(exporter)));
+
+    // A Claude transcript write targets Claude alone.
+    assert.deepEqual(
+      clientsForWatchPath(path.join(tmp, '.claude', 'projects', 'a.jsonl'), attribution),
+      ['claude']
+    );
+    // The exporter file itself is what makes an event a Copilot event.
+    assert.deepEqual(clientsForWatchPath(exporter, attribution), ['copilot']);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// An exporter written straight into ~/.copilot shares its parent with the
+// copilot-data root, which owns that prefix for `otel/`. Dropping it there would
+// silence the OTel tree, so the parent survives when another source owns it.
+test('an exporter inside ~/.copilot keeps the data root as an attribution prefix', () => {
+  const tmp = withTmpHome([path.join('.copilot', 'otel')]);
+  const exporter = path.join(tmp, '.copilot', 'custom.jsonl');
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = exporter;
+  try {
+    const { watchAttributionRootsForClients, clientsForWatchPath } = freshCollector();
+    const attribution = watchAttributionRootsForClients('copilot');
+    assert.deepEqual(
+      clientsForWatchPath(path.join(tmp, '.copilot', 'otel', 'a.jsonl'), attribution),
+      ['copilot']
+    );
+    assert.deepEqual(clientsForWatchPath(exporter, attribution), ['copilot']);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// The diagnostics panel prints `dir` and colours it by `exists`. For an
+// exact-file source those have to describe the same filesystem entity, or the
+// panel calls a directory that is plainly there missing.
+test('exact-file sources report the file they probed, not the watch parent', () => {
+  const tmp = withTmpHome(['.copilot', path.join('.grok', 'logs'), path.join('.zcode', 'cli', 'db')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientDiagnosticRoots } = freshCollector();
+    const roots = clientDiagnosticRoots('copilot,grok,zcode');
+    const find = (client, id) => (roots[client] || []).find((root) => root.id === id);
+
+    const copilotData = find('copilot', 'copilot-data');
+    assert.equal(copilotData.dir, path.join(tmp, '.copilot', 'data.db'));
+    assert.equal(copilotData.exists, false);
+    assert.equal(copilotData.sourcePath, path.join(tmp, '.copilot', 'data.db'));
+
+    assert.equal(find('grok', 'grok-unified-log').dir, path.join(tmp, '.grok', 'logs', 'unified.jsonl'));
+    assert.equal(find('zcode', 'zcode-cli-db').dir, path.join(tmp, '.zcode', 'cli', 'db', 'db.sqlite'));
+
+    fs.writeFileSync(path.join(tmp, '.copilot', 'data.db'), '');
+    const afterCreate = clientDiagnosticRoots('copilot').copilot.find((root) => root.id === 'copilot-data');
+    assert.equal(afterCreate.exists, true);
+
+    // A directory source keeps reporting its directory and carries no sourcePath,
+    // which is what makes the reveal handler pick openPath over showItemInFolder.
+    const otel = find('copilot', 'copilot-otel');
+    assert.equal(otel.dir, path.join(tmp, '.copilot', 'otel'));
+    assert.equal(otel.sourcePath, undefined);
+  } finally {
+    os.homedir = originalHomedir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

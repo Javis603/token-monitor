@@ -166,8 +166,8 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'antigravity-ide-source',
   'claude-projects',
   'claude-transcripts',
-  'cline-tasks',
   'cline-cli-sessions',
+  'cline-tasks',
   'codebuddy-extension-logs',
   'codebuddy-projects',
   'codex-sessions',
@@ -196,9 +196,9 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'tokscale-cursor-cache',
   'vscode-workspace-storage',
   'workbuddy-projects',
+  'zcode-cli-db',
   'zcode-projects',
-  'zed-threads',
-  'zcode-cli-db'
+  'zed-threads'
 ]);
 
 // Observations worth surfacing that the core three fields cannot state on their
