@@ -141,27 +141,6 @@
                 <button id="openRepositoryButton" type="button" class="inline-link" data-i18n="settings.about.repository">GitHub</button>
                 <button id="openWebsiteButton" type="button" class="inline-link" data-i18n="settings.about.website">Website</button>
                 <button id="reportIssueButton" type="button" class="inline-link" data-i18n="settings.about.reportIssue">Report an issue</button>
-                <button id="diagnosticToggleButton" type="button" class="inline-link" data-i18n="settings.about.diagnostics.toggle" aria-expanded="false" aria-controls="diagnosticDetails">Diagnostics</button>
-              </div>
-              <div id="diagnosticDetails" class="about-settings-diagnostics accordion-animated-container hidden" aria-hidden="true" inert>
-                <div class="accordion-animation-inner about-settings-diagnostics-inner">
-                  <div class="about-settings-diagnostics-heading" data-i18n="settings.about.diagnostics.title">Diagnostics &amp; support</div>
-                  <p class="settings-note" data-i18n="settings.about.diagnostics.description">Create a redacted system diagnostic to help report issues.</p>
-                  <div class="diagnostic-actions">
-                    <button id="generateDiagnosticButton" type="button" data-i18n="settings.about.diagnostics.generate">Generate report</button>
-                    <button id="copyDiagnosticButton" type="button" class="hidden" data-i18n="settings.about.diagnostics.copy" hidden>Copy report</button>
-                    <button id="previewDiagnosticButton" type="button" class="inline-link hidden" data-i18n="settings.about.diagnostics.preview" aria-expanded="false" aria-controls="diagnosticPreview" hidden>View report</button>
-                    <button id="regenerateDiagnosticButton" type="button" class="inline-link hidden" data-i18n="settings.about.diagnostics.regenerate" hidden>Regenerate</button>
-                  </div>
-                  <p class="settings-note diagnostic-privacy-note" data-i18n="settings.about.diagnostics.privacy">Includes versions, collection state and token totals; excludes credentials, conversations, accounts, full paths and raw errors.</p>
-                  <div id="diagnosticStatus" class="diagnostic-status" role="status" aria-live="polite"></div>
-                  <div id="diagnosticPreview" class="diagnostic-preview hidden" aria-hidden="true" inert aria-label="Report preview" data-i18n-aria-label="settings.about.diagnostics.previewTitle">
-                    <div class="diagnostic-preview-header">
-                      <span data-i18n="settings.about.diagnostics.previewTitle">Report preview</span>
-                    </div>
-                    <pre id="diagnosticReportText" tabindex="0"></pre>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -388,7 +367,7 @@
           <div id="toolsSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-tools-subgroup">
               <div class="settings-note-row">
-                <p class="settings-note" data-i18n="settings.tools.note">Track controls collection. Show controls the main Tools list. Drag a row to reorder.</p>
+                <p class="settings-note" data-i18n="settings.tools.note">Track controls collection. Show controls the main Tools list.</p>
                 <div class="tool-header-actions">
                   <button id="resetClientDisplayOrderButton" class="tool-header-action" type="button" title="Reset order" aria-label="Reset order" data-i18n-title="settings.tools.resetOrder" data-i18n-aria-label="settings.tools.resetOrder"><span aria-hidden="true">↺</span></button>
                   <button id="showAllClientsButton" class="tool-header-action" type="button" title="Show all" aria-label="Show all" data-i18n-title="settings.tools.showAll" data-i18n-aria-label="settings.tools.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
@@ -923,24 +902,55 @@
                 </span>
               </button>
               <div id="ollamaSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="ollamaOpenBrowser" data-i18n="settings.ollama.openBrowser">Open Ollama settings</button>
-                  <button id="ollamaLogoutButton" class="hidden" data-i18n="settings.ollama.clearCookie">Clear cookie</button>
-                  <button id="ollamaRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="ollamaManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.ollama.step1">Open Ollama settings in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.ollama.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the settings document request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.ollama.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.ollama.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="ollamaCookieInput" rows="3" spellcheck="false" placeholder="wos-session=..." data-i18n-placeholder="settings.ollama.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="ollamaCookieSubmit" data-i18n="settings.ollama.saveCookie">Save cookie</button>
+                <div id="ollamaAccountList" class="managed-account-list"></div>
+                <div id="ollamaAccountEmpty" class="opencode-empty" data-i18n="settings.ollama.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
+                <div id="ollamaManualPanel" class="opencode-add-form">
+                  <div style="display: flex; gap: 8px;">
+                    <button id="ollamaAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="ollamaAddDetails" style="flex: 1; border-radius: 6px;">
+                      <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                      <span data-i18n="settings.ollama.addAccount">Add account</span>
+                    </button>
+                    <button id="ollamaUploadToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="ollamaUploadDetails" style="flex: 1; border-radius: 6px;">
+                      <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                      <span>Upload cookie</span>
+                    </button>
+                  </div>
+                  <div id="ollamaAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="ollamaOpenBrowser" type="button" data-i18n="settings.ollama.openBrowser">Open Ollama settings</button>
+                      </div>
+                      <p class="settings-note">
+                        <strong>1.</strong> <span data-i18n="settings.ollama.step1">Open Ollama settings in your browser (button above) and sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.ollama.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the settings document request.</span><br>
+                        <strong>3.</strong> <span data-i18n="settings.ollama.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.ollama.step4">Paste it below and click Save cookie.</span>
+                      </p>
+                      <textarea id="ollamaCookieInput" rows="3" spellcheck="false" placeholder="wos-session=..." data-i18n-placeholder="settings.ollama.cookiePlaceholder"></textarea>
+                      <div class="settings-actions">
+                        <button id="ollamaSaveAccountButton" data-i18n="settings.ollama.saveAccount">Add account</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div id="ollamaUploadDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <p class="settings-note">
+                        <strong>1.</strong> Create a .txt file containing the API keys and the Cookie.<br>
+                        <strong>2.</strong> Ensure the Cookie is present in the format <code>aid=...; __Secure-session=...</code>.<br>
+                        <strong>3.</strong> Click the button below to upload the file.
+                      </p>
+                      <div class="settings-actions">
+                        <input type="file" id="ollamaCookieUploadFile" accept=".txt" hidden="hidden" style="display: none !important; position: absolute; width: 0; height: 0;" />
+                        <button id="ollamaCookieUploadButtonDirect" type="button">Choose file to upload</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div id="ollamaErrorMessage" class="settings-note error hidden"></div>
+                <div id="ollamaAccountErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
             <div id="kimiAccountGroup" class="settings-group cursor-account-group">
@@ -1316,7 +1326,9 @@
                     <label class="settings-field"><span>Label (optional)</span><input id="freeLlmKeyLabel" type="text" maxlength="80" autocomplete="off" placeholder="Personal Ollama" /></label>
                     <label class="settings-field"><span>Monitored Ollama account</span><select id="freeLlmAccountSelect"></select></label>
                     <label class="settings-field"><span>Ollama API key</span><input id="freeLlmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste API key" /></label>
-                    <div class="settings-actions"><button id="freeLlmAddKey" type="button">Add API key</button></div>
+                    <div class="settings-actions">
+                      <button id="freeLlmAddKey" type="button">Add API key</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1452,9 +1464,6 @@
     <script src="limitProviderPresentation.js"></script>
     <script src="limitDisplayMode.js"></script>
     <script src="clientStatusPresentation.js"></script>
-    <script src="clientHealthPresentation.js"></script>
-    <script src="clientSourceCache.js"></script>
-    <script src="clientRescanState.js"></script>
     <script src="wslStatusPresentation.js"></script>
     <script src="serviceStatusPresentation.js"></script>
     <script src="serviceStatusProviderPreferences.js"></script>
@@ -1463,7 +1472,6 @@
     <script src="homeModulePreferences.js"></script>
     <script src="preferenceDragSort.js"></script>
     <script src="verticalDragSort.js"></script>
-    <script src="rowDragController.js"></script>
     <script src="i18n.js"></script>
     <script src="sessionRows.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
@@ -1485,7 +1493,6 @@
     <script src="windowsGlass.js"></script>
     <script src="glassRendering.js"></script>
     <script src="trayComposer.js"></script>
-    <script src="diagnosticsPanel.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
