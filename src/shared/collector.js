@@ -1474,6 +1474,35 @@ function watchIgnoreMatcher(clientsCsv) {
     .filter((dir) => path.basename(dir) === 'db')
     .map((dir) => path.resolve(canonicalWatchPath(dir)));
   const zcodeDbRootSet = new Set(zcodeDbRoots);
+  const boundedWatchRootSet = new Set([
+    ...hermesRoots,
+    ...copilotRoots,
+    ...copilotDataRoots,
+    ...antigravityRoots,
+    ...opencodeRoots,
+    ...micodeRoots,
+    ...grokUnifiedRoots,
+    ...zcodeDbRoots,
+    ...kiroCliRoots,
+    ...zedRoots,
+    ...codebuddyExtensionRoots
+  ]);
+  // `ignored` is global to the chokidar instance, while the roots below may
+  // overlap. Keep every non-Copilot recursive source in the union before the
+  // custom exporter branch gets a chance to prune its parent directory. The
+  // bounded roots above are handled by their client-specific branches below;
+  // self-synced cache roots are never handed to chokidar in the first place.
+  const antigravityCliRoots = antigravityEnabled && dirExists(antigravityCliDataDir())
+    ? [path.resolve(canonicalWatchPath(antigravityCliDataDir()))]
+    : [];
+  const recursiveWatchRootSet = new Set([
+    ...Object.entries(candidates)
+      .filter(([client]) => client !== 'copilot' && !SELF_SYNCED_CLIENTS.has(client))
+      .flatMap(([, roots]) => roots)
+      .map((dir) => path.resolve(canonicalWatchPath(dir)))
+      .filter((dir) => !boundedWatchRootSet.has(dir)),
+    ...antigravityCliRoots
+  ]);
   if (
     hermesRoots.length === 0
     && copilotRoots.length === 0
@@ -1490,6 +1519,11 @@ function watchIgnoreMatcher(clientsCsv) {
   ) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
+    // These explicit exporter paths/parents are roots in their own right. A
+    // broad bounded client root (for example OpenCode) must not prune either
+    // one before its own source-specific branch gets to classify the path.
+    if (canonicalCopilotExporter && resolved === canonicalCopilotExporter) return false;
+    if (copilotExporterRootSet.has(resolved)) return false;
     // Every explicit watch root stays watched — the home dir AND each profile
     // dir. A profile dir lives under the home root, so the child-prune below
     // would otherwise ignore it (basename isn't a db file) before we recognise
@@ -1509,11 +1543,6 @@ function watchIgnoreMatcher(clientsCsv) {
         return !COPILOT_DB_WATCH_PATTERN.test(parts[0]);
       }
       return canonicalCopilotExporter === resolved ? false : true;
-    }
-    for (const root of copilotExporterRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      if (resolved === canonicalCopilotExporter) return false;
-      return true;
     }
     for (const root of copilotRoots) {
       if (resolved === root) return false;
@@ -1605,6 +1634,16 @@ function watchIgnoreMatcher(clientsCsv) {
       if (!resolved.startsWith(root + path.sep)) continue;
       const parts = path.relative(root, resolved).split(path.sep);
       return !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]);
+    }
+    // Recursive transcript/session roots are valid sources at every depth.
+    // This union check prevents an arbitrary Copilot exporter parent such as
+    // $HOME from hiding another client's explicit root and its descendants.
+    for (const root of recursiveWatchRootSet) {
+      if (resolved === root || resolved.startsWith(root + path.sep)) return false;
+    }
+    for (const root of copilotExporterRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      return true;
     }
     return false; // paths outside the bounded client roots are never ignored
   };

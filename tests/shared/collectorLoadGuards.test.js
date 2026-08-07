@@ -1484,6 +1484,55 @@ test('watchIgnoreMatcher bounds Copilot data, Grok unified, ZCode, and exporter 
   }
 });
 
+test('watchIgnoreMatcher preserves recursive client roots under an exporter parent', () => {
+  const tmp = withTmpHome([path.join('.codex', 'sessions')]);
+  const originalHomedir = os.homedir;
+  const previousExporter = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  os.homedir = () => tmp;
+  try {
+    process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = path.join(tmp, 'copilot.jsonl');
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('copilot,codex');
+    const codexRoot = path.join(tmp, '.codex', 'sessions');
+
+    assert.equal(ignored(codexRoot), false);
+    assert.equal(ignored(path.join(codexRoot, 'session.jsonl')), false);
+    assert.equal(ignored(path.join(tmp, 'unrelated')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousExporter === undefined) delete process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+    else process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = previousExporter;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher preserves bounded sources under an exporter parent', () => {
+  const opencodeRoot = path.join('.local', 'share', 'opencode');
+  const exporter = path.join(opencodeRoot, 'copilot.jsonl');
+  const tmp = withTmpHome([opencodeRoot]);
+  const originalHomedir = os.homedir;
+  const previousExporter = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  os.homedir = () => tmp;
+  try {
+    process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = path.join(tmp, exporter);
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('copilot,opencode');
+    const root = path.join(tmp, opencodeRoot);
+
+    assert.equal(ignored(path.join(root, 'opencode.db')), false);
+    assert.equal(ignored(path.join(root, 'opencode.db-wal')), false);
+    assert.equal(ignored(path.join(root, 'log')), true);
+    assert.equal(ignored(path.join(root, 'copilot.jsonl')), false);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousExporter === undefined) delete process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+    else process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = previousExporter;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchIgnoreMatcher keeps an exporter file after Windows path canonicalization', () => {
   const exporter = path.join('.copilot', 'custom-export', 'copilot.jsonl');
   const { base, alias, real } = withAliasedTmpHome([path.dirname(exporter)]);
