@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import { Mesh, Program, Renderer, Triangle } from "ogl";
 import DarkVeil from "./darkVeil.jsx";
 
@@ -258,8 +259,25 @@ function heroHeatLevel(index) {
   return 1 + Math.min(3, Math.floor(strength * (1.3 + (column / 31) * 2.7)));
 }
 
-var HERO_HEAT_LEVELS = Array.from({ length: 224 }, function heatCell(_, index) {
-  return heroHeatLevel(index);
+var HERO_HEAT_CELL_COUNT = 224;
+var HERO_HEAT_END_DATE = Date.UTC(2026, 6, 31);
+var HERO_HEAT_TOKEN_BASES = [0, 12000000, 52000000, 142000000, 275700000];
+
+function heroHeatDate(index) {
+  return new Date(HERO_HEAT_END_DATE - (HERO_HEAT_CELL_COUNT - 1 - index) * 86400000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function heroHeatTokens(index, level) {
+  if (!level) return 0;
+  var variance = ((index * 17 + level * 23) % 15 - 7) / 100;
+  return Math.round((HERO_HEAT_TOKEN_BASES[level] * (1 + variance)) / 100000) * 100000;
+}
+
+var HERO_HEAT_CELLS = Array.from({ length: HERO_HEAT_CELL_COUNT }, function heatCell(_, index) {
+  var level = heroHeatLevel(index);
+  return { date: heroHeatDate(index), level: level, tokens: heroHeatTokens(index, level) };
 });
 
 function prefersReducedMotion() {
@@ -416,6 +434,12 @@ function HeroViewSwitcher() {
 function HeroDashboard() {
   var [period, setPeriod] = useState("day");
   var [liveTick, setLiveTick] = useState(0);
+  var [hoveredHeat, setHoveredHeat] = useState(null);
+  var [focusedHeatIndex, setFocusedHeatIndex] = useState(0);
+  var dashboardRef = useRef(null);
+  var heatmapRef = useRef(null);
+  var heatCellRefs = useRef([]);
+  var heatTooltipRef = useRef(null);
   var periodData = HERO_PERIODS[period];
   var periodIndex = HERO_PERIOD_IDS.indexOf(period);
   var liveTotal = periodData.total + liveTick * HERO_LIVE_STEP;
@@ -435,8 +459,85 @@ function HeroDashboard() {
     if (HERO_PERIODS[id]) setPeriod(id);
   }
 
+  function updateHeatTooltip(index, target) {
+    var dashboard = dashboardRef.current;
+    var tooltip = heatTooltipRef.current;
+    if (!dashboard || !target || !tooltip) return;
+    var dashboardRect = dashboard.getBoundingClientRect();
+    var cellRect = target.getBoundingClientRect();
+    var tooltipRect = tooltip.getBoundingClientRect();
+    var gap = 9;
+    var pad = 6;
+    var desiredX = cellRect.left + cellRect.width / 2;
+    var minCenterX = dashboardRect.left + pad + tooltipRect.width / 2;
+    var maxCenterX = dashboardRect.right - pad - tooltipRect.width / 2;
+    var left = Math.max(
+      minCenterX,
+      Math.min(maxCenterX, desiredX),
+    );
+    var aboveTop = cellRect.top - tooltipRect.height - gap;
+    var belowTop = cellRect.bottom + gap;
+    var minTop = dashboardRect.top + pad;
+    var maxTop = dashboardRect.bottom - pad - tooltipRect.height;
+    var aboveFits = aboveTop >= minTop;
+    var belowFits = belowTop <= maxTop;
+    var top = aboveFits
+      ? aboveTop
+      : belowFits
+        ? belowTop
+        : Math.max(minTop, Math.min(maxTop, aboveTop));
+    var placement = aboveFits ? "above" : "below";
+    setHoveredHeat(function keepStablePosition(current) {
+      if (current && current.index === index
+        && Math.abs(current.left - left) < 0.5
+        && Math.abs(current.top - top) < 0.5
+        && current.placement === placement) return current;
+      return { index: index, left: left, top: top, placement: placement };
+    });
+  }
+
+  function hideHeatTooltip() {
+    setHoveredHeat(null);
+  }
+
+  function handleHeatmapLeave() {
+    if (!heatmapRef.current || !heatmapRef.current.contains(document.activeElement)) hideHeatTooltip();
+  }
+
+  function moveHeatFocus(index, event) {
+    var row = index % 7;
+    var column = Math.floor(index / 7);
+    var next = index;
+    if (event.key === "ArrowUp") next = row === 0 ? index + 6 : index - 1;
+    else if (event.key === "ArrowDown") next = row === 6 ? index - 6 : index + 1;
+    else if (event.key === "ArrowLeft") next = column === 0 ? 31 * 7 + row : index - 7;
+    else if (event.key === "ArrowRight") next = column === 31 ? row : index + 7;
+    else if (event.key === "Home") next = row;
+    else if (event.key === "End") next = 31 * 7 + row;
+    else return;
+    event.preventDefault();
+    setFocusedHeatIndex(next);
+    var target = heatCellRefs.current[next];
+    if (target) target.focus();
+  }
+
+  useEffect(function keepHeatTooltipAnchored() {
+    if (!hoveredHeat) return undefined;
+    function refreshPosition() {
+      var target = heatCellRefs.current[hoveredHeat.index];
+      if (target) updateHeatTooltip(hoveredHeat.index, target);
+    }
+    refreshPosition();
+    window.addEventListener("resize", refreshPosition, { passive: true });
+    window.addEventListener("scroll", refreshPosition, { passive: true });
+    return function cleanup() {
+      window.removeEventListener("resize", refreshPosition);
+      window.removeEventListener("scroll", refreshPosition);
+    };
+  }, [hoveredHeat ? hoveredHeat.index : -1, liveTick]);
+
   return (
-    <div className="hero-dashboard" aria-label="Interactive Token Monitor Home dashboard">
+    <div className="hero-dashboard" ref={dashboardRef} aria-label="Interactive Token Monitor Home dashboard">
       <header className="hero-dashboard-titlebar">
         <div className="hero-dashboard-mark" aria-label="Token Monitor">
           <span aria-hidden="true">Σ</span>
@@ -560,9 +661,37 @@ function HeroDashboard() {
         </div>
         <div className="hero-dashboard-activity-scroll">
           <div className="hero-dashboard-activity-canvas">
-            <div className="hero-dashboard-heatmap" aria-hidden="true">
-              {HERO_HEAT_LEVELS.map(function renderHeat(level, index) {
-                return <i className={`level-${level}`} key={index}></i>;
+            <div
+              className="hero-dashboard-heatmap"
+              ref={heatmapRef}
+              role="group"
+              aria-label="Token activity by day"
+              onPointerLeave={handleHeatmapLeave}
+            >
+              {HERO_HEAT_CELLS.map(function renderHeat(cell, index) {
+                var tooltipActive = hoveredHeat && hoveredHeat.index === index;
+                var cellLabel = `${cell.date}: ${formatHeroCompact(cell.tokens)} tokens`;
+                return (
+                  <button
+                    className={`hero-dashboard-heat-cell level-${cell.level}`}
+                    key={cell.date}
+                    ref={function keepHeatCellRef(node) { heatCellRefs.current[index] = node; }}
+                    type="button"
+                    tabIndex={focusedHeatIndex === index ? 0 : -1}
+                    aria-label={cellLabel}
+                    aria-describedby={tooltipActive ? "hero-activity-tooltip" : undefined}
+                    onPointerEnter={function showHeatOnPointerEnter(event) { updateHeatTooltip(index, event.currentTarget); }}
+                    onPointerMove={function moveHeatWithPointer(event) { updateHeatTooltip(index, event.currentTarget); }}
+                    onFocus={function showHeatOnFocus(event) {
+                      setFocusedHeatIndex(index);
+                      updateHeatTooltip(index, event.currentTarget);
+                    }}
+                    onBlur={function hideHeatOnBlur(event) {
+                      if (!heatmapRef.current || !heatmapRef.current.contains(event.relatedTarget)) hideHeatTooltip();
+                    }}
+                    onKeyDown={function moveHeatWithKeyboard(event) { moveHeatFocus(index, event); }}
+                  ></button>
+                );
               })}
             </div>
             <div className="hero-dashboard-months" aria-hidden="true">
@@ -606,6 +735,26 @@ function HeroDashboard() {
           </svg>
         </button>
       </footer>
+      {typeof document !== "undefined" ? createPortal(
+        <div
+          id="hero-activity-tooltip"
+          ref={heatTooltipRef}
+          className={`hero-dashboard-heat-tooltip is-${hoveredHeat ? hoveredHeat.placement : "hidden"}`}
+          data-visible={hoveredHeat ? "true" : "false"}
+          aria-hidden={hoveredHeat ? "false" : "true"}
+          role="tooltip"
+          style={hoveredHeat ? { left: `${hoveredHeat.left}px`, top: `${hoveredHeat.top}px` } : undefined}
+        >
+          <span className="hero-dashboard-heat-tooltip-row">
+            <strong>{formatHeroCompact(HERO_HEAT_CELLS[hoveredHeat ? hoveredHeat.index : 0].tokens)}</strong>
+            <span>tokens</span>
+          </span>
+          <span className="hero-dashboard-heat-tooltip-date">
+            {HERO_HEAT_CELLS[hoveredHeat ? hoveredHeat.index : 0].date}
+          </span>
+        </div>,
+        document.body,
+      ) : null}
     </div>
   );
 }

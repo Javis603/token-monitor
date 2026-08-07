@@ -68,6 +68,40 @@ test('createUsageRuntime exposes the usage lifecycle handle', () => {
   assert.equal(receivedOptions.clients, 'codex');
 });
 
+test('startCollector exposes safe on-demand runtime diagnostics', async () => {
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'codex',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-diagnostics',
+    intervalMs: 60000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: false,
+    anchorPersistenceEnabled: false,
+    runTokscale: async () => emptyTokscaleResult(),
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitFor(() => updates.length >= 1);
+    const diagnostics = runtime.getDiagnostics();
+    assert.equal(diagnostics.state, 'idle');
+    assert.equal(diagnostics.collectionMode, 'interval');
+    assert.equal(diagnostics.watchMode, 'disabled');
+    assert.equal(diagnostics.tickInFlight, false);
+    assert.equal(diagnostics.tickPending, false);
+    assert.equal(diagnostics.lastTickScope, 'full');
+    assert.ok(diagnostics.lastTickAttemptAt);
+    assert.ok(diagnostics.lastTickSuccessAt);
+    assert.equal(diagnostics.lastFailureCode, null);
+  } finally {
+    runtime.stop();
+  }
+  assert.equal(runtime.getDiagnostics().state, 'stopped');
+});
+
 test('forced Cursor sync bypasses the throttle and resets the ordinary cadence', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
@@ -148,24 +182,65 @@ test('a scoped force syncs only the client it names', async () => {
   }
 });
 
+test('a backwards clock step cannot strand a self-sync behind its own stamp', async () => {
+  // An NTP correction or a VM resume can move Date.now backwards, leaving the
+  // last-sync stamp in the future. A negative elapsed compares below every floor,
+  // so without a guard the throttle would hold for the length of the jump — and
+  // the manual refresh, whose floor is zero, would be refused outright.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-clock-step-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  let antigravitySyncs = 0;
+  const options = {
+    clients: 'antigravity',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-only',
+    historyEnabled: false,
+    homeDir: home,
+    runTokscale: async () => emptyTokscaleResult(),
+    runAntigravitySync: async () => { antigravitySyncs += 1; }
+  };
+
+  const originalNow = Date.now;
+  let clockOffsetMs = 0;
+  Date.now = () => originalNow() + clockOffsetMs;
+  try {
+    await collectUsageOnce({ ...options, forceSelfSync: true });
+    const primed = antigravitySyncs;
+
+    clockOffsetMs = -60 * 60 * 1000;
+    await collectUsageOnce({ ...options, forceSelfSync: true });
+    assert.equal(antigravitySyncs, primed + 1, 'a manual refresh still waits for nothing');
+
+    // Re-anchored to the stepped clock, so the ordinary floor applies again.
+    await collectUsageOnce(options);
+    assert.equal(antigravitySyncs, primed + 1);
+  } finally {
+    Date.now = originalNow;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('refreshClient cursor runs one targeted today scan without rebuilding the runtime', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   const flags = [];
+  const scannedClients = [];
   let syncCalls = 0;
   cursorAuth.readActiveAccount = () => ({ accountId: 'cursor-test' });
   cursorAuth.runCursorSync = async () => { syncCalls += 1; };
   const updates = [];
 
   const runtime = startCollector({
-    clients: 'cursor',
+    clients: 'cursor,claude',
     allTimeSince: '2024-01-01',
     commandTimeoutMs: 1000,
     deviceId: 'usage-runtime',
     intervalMs: 60000,
     watchEnabled: false,
     historyEnabled: false,
-    runTokscale: async ({ flags: scanFlags }) => {
+    runTokscale: async ({ clients, flags: scanFlags }) => {
+      scannedClients.push(clients);
       flags.push(scanFlags);
       return emptyTokscaleResult();
     },
@@ -178,6 +253,7 @@ test('refreshClient cursor runs one targeted today scan without rebuilding the r
     await runtime.refreshClient('cursor', { forceSync: true });
     assert.equal(flags.length, callsAfterStartup + 1);
     assert.deepEqual(flags.at(-1), ['--today']);
+    assert.equal(scannedClients.at(-1), 'cursor');
     assert.equal(updates.at(-1).reason, 'client:cursor');
     assert.ok(syncCalls >= 1);
   } finally {
@@ -237,20 +313,116 @@ test('a coalesced manual refresh stays a full scan', async () => {
   }
 });
 
-test('refreshClient rejects unsupported targeted usage clients', async () => {
+test('coalesced targeted refreshes preserve the union of their clients', async () => {
+  const scans = [];
+  const updates = [];
+  let gate = null;
   const runtime = startCollector({
-    clients: '',
+    clients: 'claude,cursor',
     allTimeSince: '2024-01-01',
     commandTimeoutMs: 1000,
     deviceId: 'usage-runtime',
     intervalMs: 60000,
     watchEnabled: false,
     historyEnabled: false,
-    onUpdate: () => {}
+    runTokscale: async ({ clients, flags }) => {
+      scans.push({ clients, flags });
+      if (gate) await gate.promise;
+      return emptyTokscaleResult();
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
   });
 
   try {
-    assert.throws(() => runtime.refreshClient('claude'), /Unsupported targeted usage client/);
+    await waitFor(() => updates.length >= 1);
+    let release;
+    gate = { promise: new Promise((resolve) => { release = resolve; }) };
+    const held = runtime.tick('held', { todayOnly: true, targetClients: ['claude'] });
+    await waitFor(() => scans.at(-1)?.flags?.[0] === '--today');
+    const cursor = runtime.refreshClient('cursor');
+    const claude = runtime.refreshClient('claude');
+    gate = null;
+    release();
+    const results = await Promise.all([held, cursor, claude]);
+
+    assert.deepEqual(results, [true, true, true]);
+    assert.deepEqual(scans.at(-1), { clients: 'cursor,claude', flags: ['--today'] });
+    assert.equal(updates.at(-1).reason, 'coalesced');
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('coalesced targeted refresh reports the replay failure', async () => {
+  const scans = [];
+  const updates = [];
+  let gate = null;
+  const runtime = startCollector({
+    clients: 'claude,cursor',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-runtime',
+    intervalMs: 60000,
+    watchEnabled: false,
+    historyEnabled: false,
+    runTokscale: async ({ clients, flags }) => {
+      scans.push({ clients, flags });
+      if (gate) await gate.promise;
+      if (clients === 'cursor') {
+        throw new Error('scan failed');
+      }
+      return emptyTokscaleResult();
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason }),
+    onError: () => {}
+  });
+
+  try {
+    await waitFor(() => updates.length >= 1);
+    let release;
+    gate = { promise: new Promise((resolve) => { release = resolve; }) };
+    const held = runtime.tick('held', { todayOnly: true, targetClients: ['claude'] });
+    await waitFor(() => scans.at(-1)?.flags?.[0] === '--today');
+    const cursor = runtime.refreshClient('cursor');
+    gate = null;
+    release();
+
+    assert.equal(await held, true);
+    assert.equal(await cursor, false);
+    assert.deepEqual(scans.at(-1), { clients: 'cursor', flags: ['--today'] });
+  } finally {
+    runtime.stop();
+  }
+});
+
+// Targeted refresh is a control-plane API: it accepts only exact clients this
+// collector is configured to track, so bad input can never widen into all-client
+// work after collectUsageOnce filters it.
+test('refreshClient rejects empty, unknown, and untracked clients before scanning', async () => {
+  let scans = 0;
+  let updates = 0;
+  const runtime = startCollector({
+    clients: 'claude,cursor',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-runtime',
+    intervalMs: 60000,
+    watchEnabled: false,
+    historyEnabled: false,
+    runTokscale: async () => { scans += 1; return emptyTokscaleResult(); },
+    onUpdate: () => { updates += 1; }
+  });
+
+  try {
+    await waitFor(() => updates >= 1);
+    const startupScans = scans;
+    assert.throws(() => runtime.refreshClient(''), /Unsupported targeted usage client/);
+    assert.throws(() => runtime.refreshClient(null), /Unsupported targeted usage client/);
+    assert.throws(() => runtime.refreshClient('codex'), /Unsupported targeted usage client: codex/);
+    assert.throws(() => runtime.refreshClient('not-a-client'), /Unsupported targeted usage client: not-a-client/);
+    assert.equal(scans, startupScans);
+    assert.doesNotThrow(() => { void runtime.refreshClient('claude'); });
+    assert.doesNotThrow(() => { void runtime.refreshClient('cursor', { forceSync: true }); });
   } finally {
     runtime.stop();
   }

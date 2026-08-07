@@ -337,6 +337,20 @@ function normalizedDaily(history) {
   return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
 }
 
+const TREND_WINDOW_DAYS = 7;
+
+function localDayKey(date) {
+  const value = date instanceof Date ? date : new Date(date || Date.now());
+  if (Number.isNaN(value.getTime())) return '';
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+}
+
+function addCalendarDays(day, delta) {
+  const timestamp = Date.parse(`${day}T00:00:00.000Z`);
+  if (!Number.isFinite(timestamp)) return '';
+  return new Date(timestamp + delta * 86_400_000).toISOString().slice(0, 10);
+}
+
 function buildActivity(history, period) {
   const daily = normalizedDaily(history).slice(-182);
   const peak = daily.reduce((max, day) => Math.max(max, day.totalTokens), 0);
@@ -351,8 +365,45 @@ function buildActivity(history, period) {
   };
 }
 
-function buildTrend(history) {
-  const points = normalizedDaily(history).slice(-28);
+function buildTrend(history, options = {}) {
+  const daily = normalizedDaily(history);
+  let points = daily.slice(-28);
+  if (options.period === 'today') {
+    const today = localDayKey(options.now);
+    const livePeriod = options.livePeriod && typeof options.livePeriod === 'object' ? options.livePeriod : {};
+    const liveTokens = Math.round(nonNegativeNumber(livePeriod.totalTokens));
+    const liveCost = nonNegativeNumber(livePeriod.costUsd);
+    if (today && (daily.length > 0 || liveTokens > 0 || liveCost > 0)) {
+      const start = addCalendarDays(today, -(TREND_WINDOW_DAYS - 1));
+      const byDate = new Map(daily
+        .filter((point) => point.date >= start && point.date <= today)
+        .map((point) => [point.date, point]));
+      points = [];
+      for (let offset = -(TREND_WINDOW_DAYS - 1); offset <= 0; offset += 1) {
+        const date = addCalendarDays(today, offset);
+        const historical = byDate.get(date);
+        if (!historical) {
+          points.push({
+            date,
+            totalTokens: date === today ? liveTokens : 0,
+            costUsd: date === today ? liveCost : 0
+          });
+          continue;
+        }
+        points.push({
+          ...historical,
+          ...(date === today ? {
+            // The graph may already contain part or all of today's usage. Use
+            // the greater observation instead of adding live and graph values.
+            totalTokens: Math.max(historical.totalTokens, liveTokens),
+            costUsd: Math.max(historical.costUsd, liveCost)
+          } : {})
+        });
+      }
+    } else {
+      points = [];
+    }
+  }
   const peakTokens = points.reduce((max, point) => Math.max(max, point.totalTokens), 0);
   return {
     startDate: points[0]?.date || null,
@@ -363,12 +414,12 @@ function buildTrend(history) {
   };
 }
 
-function buildPeriodSnapshot(stats, period, generatedAt, history, sourceUpdatedAt) {
+function buildPeriodSnapshot(stats, period, generatedAt, history, sourceUpdatedAt, now) {
   const current = periodStats(stats, period);
   const tools = buildTools(current);
   const models = buildModels(current);
   const activity = buildActivity(history, period);
-  const trend = buildTrend(history);
+  const trend = buildTrend(history, { period, livePeriod: current, now });
   const overview = {
     currentPeriod: period,
     totalTokens: Math.round(nonNegativeNumber(current.totalTokens)),
@@ -426,9 +477,9 @@ function buildMacWidgetSnapshot(stats, options = {}) {
   const quota = buildQuota(stats?.limits);
   const history = options.history;
   const periods = {
-    day: buildPeriodSnapshot(stats, 'today', generatedAt, history, sourceFreshness.sourceUpdatedAt),
-    month: buildPeriodSnapshot(stats, 'month', generatedAt, history, sourceFreshness.sourceUpdatedAt),
-    total: buildPeriodSnapshot(stats, 'allTime', generatedAt, history, sourceFreshness.sourceUpdatedAt)
+    day: buildPeriodSnapshot(stats, 'today', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow),
+    month: buildPeriodSnapshot(stats, 'month', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow),
+    total: buildPeriodSnapshot(stats, 'allTime', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow)
   };
   const defaultPeriod = normalizedPeriod(presentation.defaultPeriod);
   const defaultKey = defaultPeriod === 'month' ? 'month' : defaultPeriod === 'allTime' ? 'total' : 'day';

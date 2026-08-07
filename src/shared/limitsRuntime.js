@@ -712,17 +712,55 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   }
 
   function getDiagnostics() {
+    const providers = [...configuredProviders].map((provider) => {
+      const lane = lanes.get(provider);
+      const identities = lane ? [...lane.identities.values()] : [];
+      const attempts = identities
+        .map((identity) => identity.lastAttempt)
+        .filter(Boolean);
+      const successful = identities
+        .map((identity) => identity.lastGood)
+        .filter(Boolean);
+      const latestAttempt = attempts
+        .map((attempt) => attempt.at)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || null;
+      const latestSuccess = successful
+        .map((row) => row.updatedAt)
+        .filter(Boolean)
+        .sort()
+        .at(-1)
+        || attempts
+          .filter((attempt) => publicAttemptStatus(attempt.status) === 'ok')
+          .map((attempt) => attempt.at)
+          .filter(Boolean)
+          .sort()
+          .at(-1)
+        || null;
+      const latestFailure = attempts
+        .filter((attempt) => publicAttemptStatus(attempt.status) !== 'ok')
+        .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')))
+        .at(-1);
+      return {
+        provider,
+        configured: true,
+        active: Boolean(lane?.active),
+        pending: lane?.pending.size || 0,
+        accountCount: identities.length,
+        retryAttempt: lane?.retryAttempt || 0,
+        retryAt: lane?.retryNotBefore > 0 ? new Date(lane.retryNotBefore).toISOString() : null,
+        lastAttemptAt: latestAttempt,
+        lastSuccessAt: latestSuccess,
+        lastFailureCode: latestFailure ? publicAttemptStatus(latestFailure.status) : null
+      };
+    });
     return {
+      enabled,
       active: executorActive,
       maxConcurrency,
       queued: providerQueue.length,
-      providers: [...lanes.values()].map((lane) => ({
-        provider: lane.provider,
-        active: Boolean(lane.active),
-        pending: lane.pending.size,
-        retryAttempt: lane.retryAttempt,
-        retryAt: lane.retryNotBefore > 0 ? new Date(lane.retryNotBefore).toISOString() : null
-      }))
+      providers
     };
   }
 

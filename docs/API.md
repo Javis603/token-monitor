@@ -212,6 +212,75 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 
 `periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). The hub uses it to expire a device's `today`/`month` from the aggregate once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
 
+`clientHealth` is optional per-client diagnostics: why a tracked tool shows the number it shows. It sits alongside the older `clientStatus` map (`active` / `waiting` / `missing` per client), which agents continue to send unchanged.
+
+```json
+{
+  "clientHealth": {
+    "version": 1,
+    "observedAt": "2026-08-04T09:15:00.000Z",
+    "clients": {
+      "claude": {
+        "source": { "state": "detected", "detectedCount": 1, "checkedCount": 2 },
+        "collection": { "state": "direct" },
+        "data": { "liveTokens": 481230, "lastActivityDay": "2026-08-04" },
+        "overall": "healthy"
+      },
+      "antigravity": {
+        "source": {
+          "state": "detected",
+          "detectedCount": 2,
+          "checkedCount": 3,
+          "checks": [
+            { "id": "tokscale-antigravity-cache", "exists": true },
+            { "id": "antigravity-ide-source", "exists": true },
+            { "id": "antigravity-cli-data", "exists": false }
+          ]
+        },
+        "collection": {
+          "state": "failed",
+          "syncFailureStage": "timeout",
+          "syncDetailCode": "network-timeout",
+          "lastAttemptAt": "2026-08-04T09:12:00.000Z",
+          "lastSuccessAt": "2026-08-04T08:40:00.000Z"
+        },
+        "data": { "liveTokens": 0, "lastActivityDay": "2026-08-03" },
+        "diagnostics": [{ "code": "sync-timeout" }],
+        "overall": "attention"
+      }
+    }
+  }
+}
+```
+
+Every tracked client sends the same fixed core — `source.state`, `source.detectedCount`, `source.checkedCount`, `collection.state`, `data.liveTokens`, and `overall` — because the hub recomputes `overall` from those inputs rather than storing what the producer claimed. Detail beyond the core is sparse: `source.checks` and `diagnostics` are sent only for a client that is not `healthy`, and a client with nothing to report sends neither.
+
+`overall` is `healthy` (usage was observed), `waiting` (sources present, nothing counted yet), `attention` (something we do on the user's behalf is failing), `unavailable` (no source found at all), or `unknown`. `source.state` is `detected`, `missing`, or `unknown`, and is **derived from the counts** on ingest rather than read from the payload, so a state that contradicts them cannot be stored; `detectedCount` is clamped to `checkedCount` first, and a client with nothing probed is `unknown` rather than `missing`. `collection.state` is `direct` for the clients whose files are parsed in place — the common case, with no fetch step to succeed or fail — and `idle` / `pending` / `ok` / `failed` for the self-synced clients (Cursor, Antigravity) whose usage is refreshed by a subprocess. A value the reader does not recognize becomes `unknown`, never `direct`: `direct` is the positive claim that there is no fetch step to fail, so collapsing a future state onto it would report a broken client as working.
+
+A client installed only inside a running WSL distro has no host directory, and its usage is merged into the same periods before either derivation runs. Its WSL marker is therefore a source that exists, reported as the `wsl-home` check — without it the same snapshot would count the client's tokens and call its source missing.
+
+`source.checks[].id` is a stable identifier for a *kind* of source root, never a filesystem path: one id can stand for several platform variants (a VS Code workspace-storage root has one per platform), and an absolute path contains the user's home directory. Ids outside the recognized set are dropped on ingest. A failed self-sync likewise reports a stable code in `diagnostics` (`sync-failed`, `sync-timeout`, `sync-spawn-failed`, `sync-exit-error`) and never the subprocess's stderr. The other diagnostic codes are `source-missing`, `no-usage-observed`, and `wsl-detected-no-data`; the last one states that a WSL marker was found and the scan returned nothing, which can equally mean the tool is installed in that distro and unused.
+
+For a failed self-sync, `collection.syncFailureStage` is an optional bounded stage: `spawn`, `timeout`, `process-exit`, or `unknown`. `collection.syncDetailCode` is a conservative classification of the failure: `language-server-not-found`, `rpc-failed`, `permission-denied`, `cache-write-failed`, `invalid-response`, `network-timeout`, `network-failed`, `authentication-failed`, or `unknown`. A non-negative `collection.syncExitCode` is included only when the subprocess reported a numeric exit code. These fields add process-level evidence without exposing stderr, paths, or provider output; an exit code is not interpreted as a universal root cause.
+
+`diagnostics` entries are objects carrying a `code`, not bare strings, even though `code` is the only field today: the extension point belongs inside the entry, matching how LSP, ESLint, SARIF, and RFC 9457 all shape a diagnostic. Adding a field to the object stays backward compatible; turning `string[]` into `object[]` would not. Severity is deliberately **not** on the wire — the same code means different things on different clients, so it is a renderer decision rather than something a collector can know. Observation time is likewise recorded once, as `clientHealth.observedAt`, rather than per diagnostic: every entry comes from the same scan. It is its own field because a limits-only ingest carries health forward while the record's `updatedAt` moves on, so `updatedAt` cannot be read as the time the diagnosis was made.
+
+There is deliberately no code for "some roots found, others absent". A client's roots are alternatives rather than dependencies — Antigravity's IDE cache, native sources, and CLI data are three ways to have it installed — so a partial set is what a normal install looks like. `source.checks` reports which ones were found as neutral evidence; only finding nothing at all is `source-missing`.
+
+A diagnostic the rest of the entry does not support is dropped on ingest rather than stored: `sync-*` requires a failed collection, `source-missing` a missing source, and `no-usage-observed` a *detected* source with nothing counted — "we can read this client and found nothing" is a different statement from "there is nothing to read". `source.checks` is held to the same standard: it is evidence for `detectedCount`/`checkedCount`, so an array whose length or found-count disagrees with them is dropped whole rather than allowed to overwrite the core. The hub stores a record that is internally consistent, not one that merely passes per-field range checks.
+
+`data.liveTokens` is the collector's per-client all-time usage **as scanned**, before any archive restoration runs. It is a lower bound on the device record's `allTime.clients[<id>]`, not a copy of it. Two separate restorations run afterwards, in the widget and the agent rather than in the collector: untracked-client usage, which by definition never touches a client that has a health entry, and session usage preserved after its source files were deleted, which applies to **any** client including tracked ones. So a tracked client can legitimately report `liveTokens: 0` in a record whose `allTime` counts its tokens.
+
+The difference between the two is therefore not a way to derive archived contribution — it mixes two archives with different rules, and consumers must not treat it as one. ClientHealth v1 deliberately describes neither archived usage nor presentation-layer data origins; attributing them belongs where the composition actually happens.
+
+`data.lastActivityDay` is the most recent day the collector holds usage for this client, taken from the daily history buckets. It is deliberately not "last used": tokscale exposes no per-turn timestamps, and the field is omitted entirely when history is unavailable.
+
+Every value is a closed enum and every list is capped — including the client ids themselves, which are bounded in both count and length. A hub that does not recognize a value downgrades it to `unknown` rather than storing it, so an older hub in front of a newer agent degrades instead of passing unvalidated data to renderers. `clients` must be a plain object: an array, or a prototype-sensitive key such as `__proto__`, is refused rather than stored under an invented client id.
+
+A limits-only ingest carries the previous usage forward, so `clientHealth` — along with `clientStatus` and `wslStatus` — travels with it when the payload omits the field. A full update that omits it still clears it: an agent posting complete usage without health is stating that it has none.
+
+`clientHealth` rides on the device record and is returned by the authenticated `GET /api/stats` inside `devices[]`. It is **never** aggregated across devices and never appears on `GET /api/public/stats`, which drops `devices` wholesale — a cross-device rollup is the one shape that would place these diagnostics on the unauthenticated surface.
+
 `limits` is optional. Agents and widgets include it when AI Tool Limits detection is enabled. Raw OAuth credentials, access tokens, refresh tokens, and provider response bodies must never be sent.
 
 `limits.providers[].provider` is one of `claude`, `codex`, `cursor`, `antigravity`, `opencode`, `openrouter`, `deepseek`, `minimax`, `mimo`, `grok`, `copilot`, `kiro`, `zai`, `zaiteam`, `volcengine`, `qoder`, `kimi`, `ollama`, or `thirdparty`.

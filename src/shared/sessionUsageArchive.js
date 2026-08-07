@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('./usage');
+const { hasSummaryPeriod } = require('./archivePeriods');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 
 function numberValue(value) {
@@ -265,6 +266,11 @@ function applySessionUsageArchive(summary, archive, options = {}) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
       if (!session || !hasSessionUsage(session) || !shouldApplyPeriod(periodName, entry, now)) continue;
+      // Same rule as the client archive: never create a period the summary does
+      // not have. A progressive preview is marked partial by the periods it
+      // omits, and a partial that looks complete loses the attribution fields
+      // deviceState would otherwise carry forward.
+      if (!hasSummaryPeriod(next, periodName)) continue;
       addArchivedSession(targetFor(periodName), session);
     }
   }

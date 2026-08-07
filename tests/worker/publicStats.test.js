@@ -70,6 +70,54 @@ test('Worker public stats strip every account identity and plan field', async ()
   assert.equal(Object.hasOwn(payload, 'devices'), false);
 });
 
+// clientHealth says which of a machine's directories exist and whether a
+// background sync is failing. It rides on the device record, which the public
+// route drops wholesale — so the only way it could surface is a cross-device
+// rollup at the top level, where `...rest` would carry it straight through.
+test('Worker public stats carry no client health', async () => {
+  const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const now = new Date().toISOString();
+  const device = {
+    deviceId: 'macbook',
+    updatedAt: now,
+    receivedAt: now,
+    clientHealth: {
+      clients: {
+        antigravity: {
+          source: { state: 'detected', detectedCount: 1, checkedCount: 3, checks: [{ id: 'antigravity-cli-data', exists: false }] },
+          collection: { state: 'failed', lastAttemptAt: now },
+          data: { liveTokens: 0 },
+          diagnostics: ['sync-timeout']
+        }
+      }
+    }
+  };
+  // Guards only the public request: the authenticated read below legitimately
+  // reaches for the subscription document to stamp its version.
+  let publicRequestInFlight = true;
+  const hub = new worker.HubDO({
+    storage: {
+      async get(key) {
+        if (publicRequestInFlight) throw new Error(`public stats must not read storage key: ${key}`);
+        return undefined;
+      },
+      async list() { return new Map([['dev:macbook', device]]); }
+    }
+  }, { PUBLIC_STATS_ENABLED: '1' });
+
+  const payload = await (await hub.fetch(new Request('https://example.com/api/public/stats'))).json();
+  publicRequestInFlight = false;
+  assert.equal(Object.hasOwn(payload, 'clientHealth'), false);
+  const json = JSON.stringify(payload);
+  assert.doesNotMatch(json, /antigravity-cli-data/);
+  assert.doesNotMatch(json, /sync-timeout/);
+
+  // The authenticated route is where it belongs, and still per device only.
+  const stats = await hub.statsWithSubscriptionVersion();
+  assert.equal(stats.devices[0].clientHealth.clients.antigravity.overall, 'attention');
+  assert.equal(Object.hasOwn(stats, 'clientHealth'), false);
+});
+
 test('Worker authenticated stats expose the effective staleness threshold', async () => {
   const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
   const hub = new worker.HubDO({

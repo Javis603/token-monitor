@@ -30,7 +30,24 @@ async function runManualDeviceRefresh(runtime, options = {}) {
   });
 }
 
+function canRefreshUsageRuntime(mode, isExternalAgentActive) {
+  return mode === 'local' || !isExternalAgentActive();
+}
+
+function drainPendingUsageClientRefreshes(pendingRefreshes, runtime, onError, options = {}) {
+  const pending = [...pendingRefreshes.values()];
+  pendingRefreshes.clear();
+  if (options.enabled === false) return;
+  for (const entry of pending) {
+    void Promise.resolve()
+      .then(() => runtime.refreshClient(entry.clientId, entry.options))
+      .catch((error) => onError?.(error));
+  }
+}
+
 module.exports = {
+  canRefreshUsageRuntime,
+  drainPendingUsageClientRefreshes,
   runLimitInvalidation,
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan

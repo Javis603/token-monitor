@@ -216,3 +216,23 @@ test('archived client usage is ignored and pruned once the client is tracked aga
   const pruned = pruneArchivedClientUsage(archive, 'codex,hermes');
   assert.deepEqual(pruned.clients, {});
 });
+
+// A progressive preview carries only the periods it has finished scanning, and
+// the ones it omits are exactly what marks the record partial — the signal
+// deviceState uses to carry clientStatus / clientHealth / wslStatus /
+// periodWindows forward from the last complete record. Creating a period here to
+// hold archived usage made every preview look complete, and those four fields
+// disappeared from the device for the length of a full scan: the tool tags fell
+// back to "waiting" and the diagnostics panel closed itself mid-refresh.
+test('an archive never invents a period the scan has not reported', () => {
+  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], new Date('2026-05-30T12:00:00.000Z'));
+  const preview = { deviceId: 'macbook', updatedAt: '2026-05-30T13:00:00.000Z', today: liveSummaryWithoutHermes().today };
+  const applied = applyArchivedClientUsage(preview, archive, {
+    activeClients: 'codex',
+    now: new Date('2026-05-30T13:00:00.000Z')
+  });
+  assert.equal('month' in applied, false);
+  assert.equal('allTime' in applied, false);
+  // The period it does have still gets the archived usage.
+  assert.equal(applied.today.clients.hermes, 100);
+});

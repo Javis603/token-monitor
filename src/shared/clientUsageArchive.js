@@ -1,6 +1,7 @@
 'use strict';
 
 const { PERIODS, normalizePeriod } = require('./usage');
+const { hasSummaryPeriod } = require('./archivePeriods');
 
 function normalizeClientId(value) {
   const raw = String(value || '').trim().toLowerCase();
@@ -230,6 +231,7 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
     for (const periodName of PERIODS) {
       const usage = entry.periods?.[periodName];
       if (!hasUsage(usage) || !shouldApplyPeriod(periodName, entry, now)) continue;
+      if (!hasSummaryPeriod(next, periodName)) continue;
       addClientUsage(targetPeriod(next, periodName), client, usage);
     }
   }

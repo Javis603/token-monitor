@@ -13,6 +13,9 @@ const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 
 const { emptyPeriod } = require('../../src/shared/usage');
+const {
+  clampTimerDelayMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
+} = require('../../src/shared/selfSyncThrottle');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
@@ -78,7 +81,7 @@ test('watchPathsForClients excludes the tokscale cache dirs our own syncs write'
 });
 
 test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
-  // tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox copy, and
+  // Tokscale unions the XDG data dir with orca's hook-sandbox copy, and
   // that copy can hold sessions the XDG one is missing. Watching only XDG would
   // leave an orca-driven install without the seconds-level refresh.
   const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
@@ -97,11 +100,47 @@ test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
   }
 });
 
-test('watchPathsForClients watches the Antigravity CLI data dir but not the IDE sync cache', () => {
-  // antigravity is self-synced (its IDE cache is watch-excluded to avoid the
-  // issue #15 loop), but the CLI writes parse-local SQLite we don't touch, so it
-  // must be watched for the seconds-level refresh the sync path can't give.
+test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but prunes logs', () => {
+  const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
+  const tmp = withTmpHome([path.join('.local', 'share', 'mimocode'), orcaRoot]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('micode');
+    const roots = [
+      path.join(tmp, '.local', 'share', 'mimocode'),
+      path.join(tmp, orcaRoot)
+    ];
+    const dbFamily = [
+      'mimocode.db',
+      'mimocode.db-wal',
+      'mimocode.db-shm',
+      'mimocode-nightly.db',
+      'mimocode-nightly.db-wal',
+      'mimocode-nightly.db-shm'
+    ];
+    for (const root of roots) {
+      assert.equal(ignored(root), false);
+      for (const name of dbFamily) assert.equal(ignored(path.join(root, name)), false);
+      assert.equal(ignored(path.join(root, 'log')), true);
+      assert.equal(ignored(path.join(root, 'log', 'mimocode-nightly.db')), true);
+      assert.equal(ignored(path.join(root, 'other.txt')), true);
+    }
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchPathsForClients watches Antigravity source and CLI data but not the sync cache', () => {
+  // The IDE source roots are read by `antigravity sync`, while the CLI writes
+  // parse-local SQLite that we do not touch. Both are safe watch inputs; the
+  // normalized cache remains excluded to avoid the issue #15 loop.
   const tmp = withTmpHome([
+    path.join('.gemini', 'antigravity', 'brain'),
+    path.join('.gemini', 'antigravity-ide', 'conversations'),
     path.join('.gemini', 'antigravity-cli', 'conversations'),
     path.join('.config', 'tokscale', 'antigravity-cache')
   ]);
@@ -112,8 +151,1009 @@ test('watchPathsForClients watches the Antigravity CLI data dir but not the IDE 
     delete process.env.GEMINI_CLI_HOME;
     const { watchPathsForClients } = freshCollector();
     const dirs = watchPathsForClients('antigravity');
+    assert.ok(dirs.includes(path.join(tmp, '.gemini', 'antigravity')));
+    assert.ok(dirs.includes(path.join(tmp, '.gemini', 'antigravity-ide')));
     assert.ok(dirs.includes(path.join(tmp, '.gemini', 'antigravity-cli', 'conversations')));
     assert.equal(dirs.filter((dir) => dir.includes(path.join('.config', 'tokscale'))).length, 0);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = previousGeminiHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher bounds Antigravity roots to source and metadata inputs', () => {
+  // Top-level names here are the real ones an Antigravity IDE home carries, so
+  // the pruned side of the assertion keeps meaning something: builtin/ alone
+  // churns more than brain/ does.
+  const root = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([
+    path.join(root, 'brain'),
+    path.join(root, 'conversations'),
+    path.join(root, 'annotations'),
+    path.join(root, 'agyhub_summaries_proto.pb'),
+    path.join(root, 'builtin'),
+    path.join(root, 'crashes'),
+    path.join('.config', 'tokscale', 'antigravity-cache')
+  ]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('antigravity');
+    assert.equal(ignored(path.join(tmp, root)), false);
+    assert.equal(ignored(path.join(tmp, root, 'brain')), false);
+    assert.equal(ignored(path.join(tmp, root, 'conversations', 'session-a.db-wal')), false);
+    assert.equal(ignored(path.join(tmp, root, 'annotations', 'session-a.pbtxt')), false);
+    assert.equal(ignored(path.join(tmp, root, 'agyhub_summaries_proto.pb')), false);
+    assert.equal(ignored(path.join(tmp, root, 'builtin', 'keep.txt')), true);
+    assert.equal(ignored(path.join(tmp, root, 'crashes', 'crash_1.log')), true);
+    assert.equal(ignored(path.join(tmp, root, 'antigravity_state.pbtxt')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher watches brain session dirs but never recurses into them', () => {
+  // A new session shows up as a new brain/<id> directory, so brain/ itself has
+  // to stay watched. Its contents are plans, uploads and screenshots — hundreds
+  // of directories per home for a handful of writes a week — and each one costs
+  // an inotify descriptor on Linux, which is what pushes the watcher into the
+  // sticky polling fallback where the whole tree then gets stat'd every pass.
+  const root = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(root, 'brain', 'session-a', '.system_generated')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('antigravity');
+    assert.equal(ignored(path.join(tmp, root, 'brain')), false);
+    assert.equal(ignored(path.join(tmp, root, 'brain', 'session-a')), false);
+    assert.equal(ignored(path.join(tmp, root, 'brain', 'session-a', 'media__1.png')), true);
+    assert.equal(ignored(path.join(tmp, root, 'brain', 'session-a', '.system_generated')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity source events target its umbrella client without watching sync cache', async () => {
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([
+    path.join(sourceRoot, 'brain'),
+    path.join('.config', 'tokscale', 'antigravity-cache')
+  ]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  let watchedDirs = null;
+  let ignored = null;
+  chokidar.watch = (dirs, options) => {
+    watchedDirs = dirs;
+    ignored = options.ignored;
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setImmediate(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  // Pinned to a captured instant, not `originalNow() + offset`: the floor is
+  // measured from the startup sync, so letting real time leak into the elapsed
+  // would make "inside the floor" depend on how long the startup tick took —
+  // flaky on a loaded CI host. waitForCondition runs off performance.now, so
+  // freezing Date.now does not stall the polling.
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => { syncCalls += 1; },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1, 'startup sync still runs while the IDE source exists');
+    assert.ok(watchedDirs.includes(path.join(tmp, sourceRoot)));
+    assert.equal(
+      watchedDirs.some((dir) => dir.includes(path.join('.config', 'tokscale'))),
+      false,
+      'the sync output cache remains outside the watcher'
+    );
+    assert.equal(ignored(path.join(tmp, sourceRoot, 'brain', 'session-a')), false);
+    assert.equal(ignored(path.join(tmp, sourceRoot, 'builtin', 'keep.txt')), true);
+    assert.ok(watchHandler, 'watcher handler captured');
+
+    // The floor is shorter than the idle cadence, not absent: `antigravity sync`
+    // re-fetches over RPC and rewrites every known session artifact on every run,
+    // and the per-turn source file is a SQLite WAL that churns for the whole
+    // turn, so an unrationed sync would spawn one of those per quiet gap.
+    assert.ok(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS < 60 * 1000);
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300;
+    watchHandler('change', path.join(tmp, sourceRoot, 'annotations', 'session-a.pbtxt'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1, 'a source event inside the floor reuses the fresh cache');
+    const targeted = calls[calls.length - 1];
+    assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.ok(targeted.includes('--today'));
+
+    // The floor defers that sync, it does not drop it. No second event follows —
+    // a turn that ends inside the floor must not sit on stale numbers until the
+    // fallback interval, so the catch-up has to fire on its own.
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    await waitForCondition(() => syncCalls === 2);
+    await waitForCondition(() => updates.length === 3);
+    const caughtUp = calls[calls.length - 1];
+    assert.equal(caughtUp[caughtUp.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.ok(caughtUp.includes('--today'), 'the catch-up rescans behind the sync it waited for');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a catch-up that comes due mid-tick keeps its targeted scan scope', async () => {
+  // runTick's coalesce state carries the sync selections but not targetClients,
+  // so folding the catch-up into an in-flight tick would silently widen it from
+  // one client's --today partition to every tracked client's. Two clients here
+  // precisely so a widened scan is distinguishable from a targeted one.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  let holdNextSpawn = null;
+  let heldSpawns = 0;
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    const hold = holdNextSpawn;
+    holdNextSpawn = null;
+    if (hold) heldSpawns += 1;
+    Promise.resolve(hold).then(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => { syncCalls += 1; },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1);
+
+    // A source event inside the floor, so the sync is deferred rather than run.
+    // The remaining floor becomes the catch-up's real timer delay, so it doubles
+    // as the deadline the hold below has to outlive.
+    const catchUpDelayMs = 400;
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - catchUpDelayMs;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    const armedAt = performance.now();
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1);
+
+    // Hold a tokscale child open so the tick is provably still in flight when the
+    // catch-up comes due. Both halves matter: the latch keeps the tick running so
+    // the ordinary drain path is unreachable, and the hold outlives the armed
+    // deadline by construction — mocking Date.now does not move a real
+    // setTimeout, so releasing early would assert against a callback that had not
+    // run yet and prove nothing about the re-arm.
+    let releaseInFlight = null;
+    holdNextSpawn = new Promise((resolve) => { releaseInFlight = resolve; });
+    const inFlight = handle.tick('manual');
+    await waitForCondition(() => heldSpawns === 1);
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    await waitForCondition(() => performance.now() - armedAt > catchUpDelayMs + 150, 4000);
+    assert.equal(syncCalls, 1, 'the catch-up waits rather than folding into the in-flight tick');
+
+    releaseInFlight();
+    await inFlight;
+    await waitForCondition(() => syncCalls === 2, 4000);
+    const caughtUp = calls[calls.length - 1];
+    const scanned = caughtUp[caughtUp.indexOf('--client') + 1];
+    assert.equal(scanned, 'antigravity,antigravity-cli', 'the catch-up stays targeted');
+    assert.equal(scanned.includes('claude'), false, 'and never widens to every tracked client');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a manual refresh satisfies a deferred source sync instead of adding one', async () => {
+  // The user reaches for refresh precisely when the number looks stale, which is
+  // when a source event is most likely to still be sitting inside the floor. The
+  // forced sync re-reads the IDE from scratch, so the deferred catch-up would be
+  // a second full `antigravity sync` for a change already picked up.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations'), path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => { syncCalls += 1; },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1);
+
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1, 'the source event is deferred, not run');
+
+    await handle.tick('manual', { forceSelfSync: true });
+    assert.equal(syncCalls, 2, 'the manual refresh syncs immediately');
+
+    // Well past the floor: a still-pending catch-up would fire straight away.
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 3;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(syncCalls, 2, 'the deferred sync was satisfied, not queued behind the manual one');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a failed forced sync hands the source event back instead of eating it', async (t) => {
+  // maybeSyncAntigravity resolves on every outcome so a stuck sync cannot hold
+  // the tick open, which means a timeout or non-zero exit is indistinguishable
+  // from success unless it reports. It has to: the tick already consumed the
+  // source event on its behalf, and swallowing the failure would put the refresh
+  // back on the fallback interval — the latency this path exists to remove.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  let failNextSync = false;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => {
+        syncCalls += 1;
+        if (failNextSync) throw new Error('language server went away');
+      },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1);
+
+    // A source event still inside the floor, so its sync is deferred.
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1);
+
+    // The manual refresh claims that pending event, then fails. The restored
+    // catch-up is armed a full floor out — the failed attempt still stamped the
+    // rate limit, deliberately, so a wedged language server cannot be retried in
+    // a loop — so the timer is mocked rather than waited on. waitForCondition
+    // runs off setInterval and stays real.
+    failNextSync = true;
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    await handle.tick('manual', { forceSelfSync: true });
+    assert.equal(syncCalls, 2, 'the forced sync was attempted');
+
+    // The change is still uncollected, so the catch-up has to come back for it —
+    // on the idle cadence, because the attempt that consumed it failed.
+    failNextSync = false;
+    clockOffsetMs = SYNC_MIN_INTERVAL_MS * 2;
+    t.mock.timers.tick(SYNC_MIN_INTERVAL_MS + 1000);
+    t.mock.timers.reset();
+    await waitForCondition(() => syncCalls === 3, 4000);
+    const retried = calls[calls.length - 1];
+    assert.equal(retried[retried.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a source event that keeps failing backs off to the idle cadence', async (t) => {
+  // Restoring a consumed event on failure is what stops a change being stranded,
+  // but the restore must not re-enter the ten-second floor: a sync that keeps
+  // failing would then drive its own next attempt for as long as the process
+  // lives. The first retry is fast, and a failure drops the client back to the
+  // idle cadence — which is exactly where it sat before any of this existed.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([path.join(sourceRoot, 'conversations')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = recordingSpawn([]);
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => {
+        syncCalls += 1;
+        // The startup sync succeeds: the client has to be on the fast floor for
+        // the source event below to be the thing that trips the backoff.
+        if (syncCalls > 1) throw new Error('language server unreachable');
+      },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1, 'the startup sync succeeded');
+
+    // Mocked before the event, not after: the restore arms a real timer, and
+    // enabling the mock afterwards would leave that timer outside its control —
+    // the assertion would then pass because nothing could fire, proving nothing.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    t.mock.timers.tick(50);
+    await waitForCondition(() => syncCalls === 2, 4000);
+
+    // Nothing further happens: no new events, just time. Advancing past the
+    // source floor must not produce another attempt — the restored event is
+    // parked on the idle cadence, so only a far larger jump would reach it.
+    clockOffsetMs += SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    t.mock.timers.tick(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000);
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.reset();
+    assert.equal(syncCalls, 2, 'a failing sync does not drive its own next attempt');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('an unrelated client event does not bypass a source-sync backoff', async () => {
+  // scheduleTick drains the pending source set on *every* watcher event, so the
+  // backoff cannot live in the catch-up timer alone: a client the user happens to
+  // be working in would drain the failed one straight back out and retry it on
+  // the fast floor — the same retry loop, driven by someone else's activity.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const tmp = withTmpHome([
+    path.join(sourceRoot, 'conversations'),
+    path.join('.claude', 'projects')
+  ]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => {
+        syncCalls += 1;
+        if (syncCalls > 1) throw new Error('language server unreachable');
+      },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1, 'the startup sync succeeded');
+
+    clockOffsetMs = SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000;
+    watchHandler('change', path.join(tmp, sourceRoot, 'conversations', 'session-a.db-wal'));
+    await waitForCondition(() => syncCalls === 2, 4000);
+
+    // Far past the source floor, so only the backoff can hold it back now.
+    clockOffsetMs += SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 4;
+    const updatesBefore = updates.length;
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'a', 'session.jsonl'));
+    await waitForCondition(() => updates.length > updatesBefore, 4000);
+    assert.equal(syncCalls, 2, 'the unrelated event did not retry the backed-off sync');
+  } finally {
+    Date.now = originalNow;
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a failed sync moves the client off the fast source floor', async () => {
+  // The backoff is one decision, read by all three schedulers — the drain, the
+  // catch-up arm and the sync itself. Pinning the decision rather than each
+  // caller is what stops them disagreeing: an earlier version backed off only
+  // the timer, and an unrelated client's watch event still drained the failed
+  // client on the fast floor, consuming a pending event for a sync that would
+  // then be refused.
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-floor-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+
+  try {
+    const { collectUsageOnce, selfSyncThrottle } = freshCollector();
+    const sourceSyncFloorMs = (kind) => selfSyncThrottle.sourceFloorMs(kind);
+    const options = {
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'usage-only',
+      historyEnabled: false,
+      homeDir: home,
+      runTokscale: async () => ({ entries: [] })
+    };
+
+    assert.equal(sourceSyncFloorMs('antigravity'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
+
+    await collectUsageOnce({
+      ...options,
+      forceSelfSync: true,
+      runAntigravitySync: async () => { throw new Error('language server unreachable'); }
+    });
+    assert.equal(sourceSyncFloorMs('antigravity'), SYNC_MIN_INTERVAL_MS, 'a failure backs the client off');
+
+    await collectUsageOnce({
+      ...options,
+      forceSelfSync: true,
+      runAntigravitySync: async () => {}
+    });
+    assert.equal(
+      sourceSyncFloorMs('antigravity'),
+      SYNC_SOURCE_EVENT_MIN_INTERVAL_MS,
+      'and a working sync earns the fast floor back'
+    );
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a superseded sync attempt cannot rewrite the current backoff', async () => {
+  // stop() cannot cancel a sync already in flight, so a collector rebuilt by a
+  // settings change can have the previous one's attempt land after its own.
+  // Whichever attempt started last owns the flag — otherwise a stale failure
+  // parks a healthy client on the five-minute cadence, and a stale success
+  // clears a backoff the live collector still needs.
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-supersede-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+
+  try {
+    const { collectUsageOnce, selfSyncThrottle } = freshCollector();
+    const sourceSyncFloorMs = (kind) => selfSyncThrottle.sourceFloorMs(kind);
+    const options = {
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'usage-only',
+      historyEnabled: false,
+      homeDir: home,
+      forceSelfSync: true,
+      runTokscale: async () => ({ entries: [] })
+    };
+
+    // The old attempt is still running when the new one starts and succeeds.
+    let releaseStale = null;
+    const staleStarted = new Promise((resolve) => {
+      const stale = collectUsageOnce({
+        ...options,
+        runAntigravitySync: () => new Promise((_, reject) => {
+          releaseStale = () => reject(new Error('language server went away'));
+          resolve();
+        })
+      });
+      stale.catch(() => {});
+    });
+    await staleStarted;
+
+    await collectUsageOnce({ ...options, runAntigravitySync: async () => {} });
+    assert.equal(sourceSyncFloorMs('antigravity'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
+
+    // Now the old one fails. It must not drag the live client into a backoff.
+    releaseStale();
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.notEqual(
+      sourceSyncFloorMs('antigravity'),
+      SYNC_MIN_INTERVAL_MS,
+      'the superseded failure was ignored'
+    );
+
+    // And the same in the other direction, which is the more dangerous one: a
+    // stale success must not clear a backoff the live client still needs.
+    let releaseStaleOk = null;
+    const staleOkStarted = new Promise((resolve) => {
+      const staleOk = collectUsageOnce({
+        ...options,
+        runAntigravitySync: () => new Promise((fulfil) => {
+          releaseStaleOk = () => fulfil();
+          resolve();
+        })
+      });
+      staleOk.catch(() => {});
+    });
+    await staleOkStarted;
+
+    await collectUsageOnce({
+      ...options,
+      runAntigravitySync: async () => { throw new Error('language server went away'); }
+    });
+    assert.equal(sourceSyncFloorMs('antigravity'), SYNC_MIN_INTERVAL_MS);
+
+    releaseStaleOk();
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      sourceSyncFloorMs('antigravity'),
+      SYNC_MIN_INTERVAL_MS,
+      'the superseded success did not clear the live backoff'
+    );
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a misbehaving sync child reports failure exactly once', async () => {
+  // A child reports more than once: a SIGTERM'd timeout still emits close, and
+  // error is normally followed by close. That was harmless while every path only
+  // resolved a promise, but onFailure re-arms the catch-up — and a late duplicate
+  // could land after a later catch-up already succeeded, putting the same source
+  // event back into a set with nothing left to collect.
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-sync-once-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  let emitAfterError = false;
+  childProcess.spawn = (_bin, args) => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    const isSync = args.includes('sync');
+    setImmediate(() => {
+      if (!isSync) {
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+        child.emit('close', 0);
+        return;
+      }
+      if (emitAfterError) child.emit('error', new Error('spawn failed'));
+      child.emit('close', 1);
+    });
+    return child;
+  };
+
+  try {
+    const { collectUsageOnce } = freshCollector();
+    for (const withError of [false, true]) {
+      emitAfterError = withError;
+      const failures = [];
+      await collectUsageOnce({
+        clients: 'antigravity',
+        allTimeSince: '2024-01-01',
+        commandTimeoutMs: 1000,
+        deviceId: 'usage-only',
+        historyEnabled: false,
+        homeDir: home,
+        forceSelfSync: true,
+        onSelfSyncFailed: (kind) => failures.push(kind)
+      });
+      assert.deepEqual(failures, ['antigravity'], withError ? 'error then close' : 'non-zero close');
+    }
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('an unusable watch debounce cannot turn the catch-up retry into a spin', () => {
+  // setTimeout rewrites a non-finite or oversized delay to 1ms, so an env-set
+  // TOKEN_MONITOR_WATCH_DEBOUNCE_MS of Infinity would make the mid-tick retry
+  // fire hundreds of times per second for the length of the tick.
+  assert.equal(clampTimerDelayMs(Infinity, 1000), 1000);
+  assert.equal(clampTimerDelayMs(-Infinity, 1000), 1000);
+  assert.equal(clampTimerDelayMs(NaN, 1000), 1000);
+  assert.equal(clampTimerDelayMs(undefined, 1000), 1000);
+  assert.equal(clampTimerDelayMs(0, 1000), 1000);
+  assert.equal(clampTimerDelayMs(-5, 1000), 1000);
+  assert.equal(clampTimerDelayMs(2 ** 32, 1000), 2 ** 31 - 1);
+  assert.equal(clampTimerDelayMs(1500, 1000), 1500);
+});
+
+test('an Antigravity CLI event rescans without paying for an IDE sync', async () => {
+  // Both roots share the umbrella client id, so the scan target is the same for
+  // either. Only the IDE roots feed `antigravity sync`; the CLI writes
+  // parse-local SQLite tokscale reads directly, so a CLI write has nothing to
+  // re-sync and must not skip the idle cadence to spawn one.
+  const sourceRoot = path.join('.gemini', 'antigravity');
+  const cliRoot = path.join('.gemini', 'antigravity-cli');
+  const tmp = withTmpHome([
+    path.join(sourceRoot, 'conversations'),
+    path.join(cliRoot, 'conversations')
+  ]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const previousGeminiHome = process.env.GEMINI_CLI_HOME;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  delete process.env.GEMINI_CLI_HOME;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  let syncCalls = 0;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      runAntigravitySync: async () => { syncCalls += 1; },
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(syncCalls, 1, 'startup sync still runs');
+
+    watchHandler('change', path.join(tmp, cliRoot, 'conversations', 'state.db'));
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(syncCalls, 1, 'a CLI-only event leaves the sync on its idle cadence');
+    const targeted = calls[calls.length - 1];
+    assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.ok(targeted.includes('--today'));
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = previousGeminiHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('selfSyncSourceRootsForClients covers the IDE roots and excludes the CLI dir', () => {
+  const tmp = withTmpHome([
+    path.join('.gemini', 'antigravity', 'brain'),
+    path.join('.gemini', 'antigravity-ide', 'conversations'),
+    path.join('.gemini', 'antigravity-cli', 'conversations'),
+    path.join('.config', 'tokscale', 'antigravity-cache')
+  ]);
+  const originalHomedir = os.homedir;
+  const previousGeminiHome = process.env.GEMINI_CLI_HOME;
+  os.homedir = () => tmp;
+  try {
+    delete process.env.GEMINI_CLI_HOME;
+    const { selfSyncSourceRootsForClients } = freshCollector();
+    assert.deepEqual(selfSyncSourceRootsForClients('antigravity'), {
+      antigravity: [
+        path.join(tmp, '.gemini', 'antigravity'),
+        path.join(tmp, '.gemini', 'antigravity-ide')
+      ]
+    });
+    assert.deepEqual(selfSyncSourceRootsForClients('claude'), {});
   } finally {
     os.homedir = originalHomedir;
     if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
@@ -152,6 +1192,20 @@ test('clientDataDirPresence still detects cursor/antigravity via their cache dir
     const presence = clientDataDirPresence('cursor,antigravity');
     assert.equal(presence.cursor, true);
     assert.equal(presence.antigravity, true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('clientDataDirPresence detects Antigravity native source roots', () => {
+  const tmp = withTmpHome([path.join('.gemini', 'antigravity', 'brain')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientDataDirPresence } = freshCollector();
+    assert.deepEqual(clientDataDirPresence('antigravity'), { antigravity: true });
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
@@ -560,6 +1614,46 @@ test('cursor sync runs at most once per throttle window across ticks', async () 
     await collectUsageOnce(options);
     await collectUsageOnce(options);
     assert.equal(syncCalls, 1);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    cursorAuth.readActiveAccount = originalReadActiveAccount;
+    cursorAuth.runCursorSync = originalRunCursorSync;
+    delete require.cache[collectorPath];
+  }
+});
+
+test('cursor sync failure metadata reaches client health without stderr or paths', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = recordingSpawn([]);
+  const cursorAuth = require('../../src/shared/cursorAuth');
+  const originalReadActiveAccount = cursorAuth.readActiveAccount;
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  cursorAuth.readActiveAccount = () => ({ accessToken: 'token' });
+  cursorAuth.runCursorSync = async () => {
+    const error = new Error('tokscale cursor sync exited 17: /Users/alice/.config/tokscale/private');
+    error.syncFailureStage = 'process-exit';
+    error.syncDetailCode = 'authentication-failed';
+    error.syncExitCode = 17;
+    throw error;
+  };
+  try {
+    const { collectUsageOnce } = freshCollector();
+    const summary = await collectUsageOnce({
+      clients: 'cursor',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      forceSelfSync: true,
+      limitsEnabled: false
+    });
+    const entry = summary.clientHealth.clients.cursor;
+    assert.equal(entry.collection.state, 'failed');
+    assert.equal(entry.collection.syncFailureStage, 'process-exit');
+    assert.equal(entry.collection.syncDetailCode, 'authentication-failed');
+    assert.equal(entry.collection.syncExitCode, 17);
+    assert.equal(JSON.stringify(summary).includes('/Users/alice'), false);
   } finally {
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;
@@ -1257,6 +2351,59 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
     await handle.tick('manual');
     await waitForCondition(() => watchOptions.length === 3);
     assert.equal(watchOptions[2].usePolling, true, 'the fallback is sticky');
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a successful watcher rebuild clears the current watcher failure', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchCalls = 0;
+  chokidar.watch = () => {
+    watchCalls += 1;
+    if (watchCalls === 1) throw new Error('temporary watcher setup failure');
+    return { on: () => {}, close: () => {} };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = recordingSpawn([]);
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 1000,
+      watchEnabled: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    assert.equal(handle.getDiagnostics().lastWatchFailureCode, 'watcher-rebuild-failed');
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(watchCalls, 2);
+    assert.equal(handle.getDiagnostics().lastWatchFailureCode, null);
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;

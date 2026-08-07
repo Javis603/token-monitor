@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { hashKey } = require('../../src/shared/hashKey');
+const { BROWSER_USER_AGENT } = require('../../src/shared/browserUserAgent');
 
 const {
   KIMI_CODE_USAGES_URL,
@@ -247,7 +248,11 @@ test('parseKimiUsage falls back to the top-level usage block when no matching ki
   assert.equal(usage.windows[0].resetsAt, '2026-08-01T00:00:00.000Z');
 });
 
-test('parseKimiUsage skips the top-level usage block once limits[] already covers its kind', () => {
+test('parseKimiUsage prefers the top-level usage detail over a limits[] window of the same kind', () => {
+  // The FEATURE_CODING detail on top-level `usage` is the authoritative weekly
+  // quota (the number the console shows). A compatible proxy that also reports
+  // a 7-day window in limits[] must not displace it — the same precedence rule
+  // fixed for the membership merge in #343, applied inside the parser.
   const usage = parseKimiUsage({
     limits: [
       { detail: { used: 40, limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'DAY' } }
@@ -257,7 +262,28 @@ test('parseKimiUsage skips the top-level usage block once limits[] already cover
 
   assert.equal(usage.windows.length, 1);
   assert.equal(usage.windows[0].kind, 'weekly');
-  assert.equal(usage.windows[0].usedPercent, 20);
+  assert.equal(usage.windows[0].usedPercent, 50);
+});
+
+test('parseKimiUsage keeps the top-level detail for weekly when limits[] carries 5h and 7d windows', () => {
+  // A compatible proxy may flatten two quota windows into limits[] (a 5-hour
+  // rate limit plus a 7-day window) while top-level `usage` still carries the
+  // FEATURE_CODING detail. The detail must win the weekly slot and the 7-day
+  // limit must be dropped, mirroring CodexBar's usage.detail-as-weekly source.
+  const usage = parseKimiUsage({
+    usage: { used: 214, limit: 2048, remaining: 1834, name: 'Weekly quota' },
+    limits: [
+      { detail: { used: 20, limit: 60, remaining: 40 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } },
+      { detail: { used: 40, limit: 200, remaining: 160 }, window: { duration: 7, timeUnit: 'DAY' } }
+    ]
+  });
+
+  assert.equal(usage.windows.length, 2);
+  const session = usage.windows.find((w) => w.kind === 'session');
+  const weekly = usage.windows.find((w) => w.kind === 'weekly');
+  assert.equal(session.usedPercent, (20 / 60) * 100);
+  assert.equal(weekly.usedPercent, (214 / 2048) * 100);
+  assert.equal(weekly.windowMinutes, 7 * 24 * 60);
 });
 
 test('fetchKimiLimits returns notConfigured without an API key', async () => {
@@ -334,6 +360,13 @@ test('fetchKimiLimits prefers web membership windows when a web token is configu
   assert.equal(requests.some((request) => request.url === KIMI_CODE_USAGES_URL), false);
   assert.equal(requests[0].init.headers.Authorization, 'Bearer web-token');
   assert.equal(requests[0].init.headers.Cookie, 'kimi-auth=web-token');
+  // Both web endpoints share the browser-presenting headers (the console
+  // rejects undici's default `node` agent); assert on both requests so a future
+  // per-endpoint header divergence is caught, not just the first call.
+  for (const request of requests) {
+    assert.equal(request.init.headers['User-Agent'], BROWSER_USER_AGENT);
+    assert.equal(request.init.headers['r-timezone'], Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }
   assert.equal(provider.source, 'web');
   assert.equal(provider.status, 'ok');
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'billing']);
@@ -406,6 +439,94 @@ test('fetchKimiLimits keeps web 5-hour and weekly windows when monthly enrichmen
 
   assert.equal(provider.status, 'ok');
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly']);
+});
+
+test('fetchKimiLimits uses the GetUsages detail for weekly, not the membership 7-day ratio', async () => {
+  // Canonical shapes: GetUsages carries the FEATURE_CODING weekly used/limit
+  // (the number the Kimi console shows) plus the 5-hour limit, while the
+  // membership stats carry only the shared monthly pool and a Code 7-day ratio.
+  // The weekly slot must come from the GetUsages detail — regression for #343,
+  // where merging membership first let ratelimitCode7d overwrite it.
+  const provider = await fetchKimiLimits(
+    { kimiWebAccessToken: 'web-token' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-19T00:00:00Z'),
+      fetch: async (url) => {
+        if (String(url) === KIMI_MEMBERSHIP_STATS_URL) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              subscriptionBalance: { feature: 'FEATURE_OMNI', type: 'SUBSCRIPTION', amountUsedRatio: 0.25 },
+              ratelimitCode7d: { ratio: 0.48, enabled: true }
+            })
+          };
+        }
+        assert.equal(String(url), KIMI_WEB_USAGES_URL);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            usages: [{
+              scope: 'FEATURE_CODING',
+              detail: { used: 214, limit: 2048 },
+              limits: [{ detail: { used: 20, limit: 60 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } }]
+            }]
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'billing']);
+  const weekly = provider.windows.find((window) => window.kind === 'weekly');
+  assert.ok(weekly);
+  assert.equal(weekly.usedPercent, (214 / 2048) * 100);
+  assert.equal(weekly.windowMinutes, 7 * 24 * 60);
+  const session = provider.windows.find((window) => window.kind === 'session');
+  assert.equal(session.usedPercent, (20 / 60) * 100);
+  assert.equal(provider.windows.find((window) => window.kind === 'billing').usedPercent, 25);
+});
+
+test('fetchKimiLimits falls back to the membership 7-day ratio when GetUsages lacks a weekly detail', async () => {
+  // When the FEATURE_CODING detail carries no usable used/limit, the merged
+  // weekly slot fills from ratelimitCode7d instead of disappearing.
+  const provider = await fetchKimiLimits(
+    { kimiWebAccessToken: 'web-token' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-19T00:00:00Z'),
+      fetch: async (url) => {
+        if (String(url) === KIMI_MEMBERSHIP_STATS_URL) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              subscriptionBalance: { feature: 'FEATURE_OMNI', type: 'SUBSCRIPTION', amountUsedRatio: 0.25 },
+              ratelimitCode7d: { ratio: 0.48, enabled: true }
+            })
+          };
+        }
+        assert.equal(String(url), KIMI_WEB_USAGES_URL);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            usages: [{
+              scope: 'FEATURE_CODING',
+              detail: { limit: 2048 },
+              limits: [{ detail: { used: 20, limit: 60 }, window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' } }]
+            }]
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly').usedPercent, 48);
 });
 
 test('fetchKimiLimits bounds monthly enrichment without delaying web usage windows', async () => {

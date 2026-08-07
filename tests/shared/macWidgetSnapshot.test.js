@@ -106,8 +106,13 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
   assert.equal(snapshot.activity.activeDays, 3);
   assert.deepEqual(snapshot.activity.days.map((day) => day.intensity), [2, 4, 1]);
   assert.deepEqual(snapshot.activity.days.map((day) => day.totalTokens), [100, 200, 50]);
-  assert.equal(snapshot.trend.currentTokens, 50);
-  assert.equal(snapshot.trend.peakTokens, 200);
+  assert.deepEqual(snapshot.trend.points.map((point) => point.date), [
+    '2026-07-11', '2026-07-12', '2026-07-13', '2026-07-14',
+    '2026-07-15', '2026-07-16', '2026-07-17'
+  ]);
+  assert.deepEqual(snapshot.trend.points.map((point) => point.totalTokens), [0, 0, 0, 0, 100, 200, 1_200_000]);
+  assert.equal(snapshot.trend.currentTokens, 1_200_000);
+  assert.equal(snapshot.trend.peakTokens, 1_200_000);
   assert.deepEqual(snapshot.presentation, {
     defaultPeriod: 'today', currencyCode: 'CNY', currencySymbol: '¥', currencyRate: 7.1,
     numberStyle: 'compact', compactTokenUnits: 'localized', showCost: true, locale: 'zh-CN', theme: 'custom'
@@ -292,14 +297,14 @@ test('keeps up to ten provider and model rows for adaptive widget capacity', () 
   assert.equal(snapshot.models.length, 10);
 });
 
-test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and leaves trend at 28', () => {
+test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and keeps DAY trend at 7 dates', () => {
   for (const count of [28, 90, 180]) {
     const daily = dailyHistory(count);
     const snapshot = buildSnapshot({ history: { daily } }, { now: NOW });
     assert.equal(snapshot.activity.days.length, count);
     assert.equal(snapshot.activity.days[0].date, daily[0].date);
     assert.equal(snapshot.activity.days.at(-1).date, daily.at(-1).date);
-    assert.equal(snapshot.trend.points.length, 28);
+    assert.equal(snapshot.trend.points.length, 7);
   }
 
   const daily = dailyHistory(190, '2025-12-01');
@@ -307,7 +312,36 @@ test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and leaves tr
   assert.equal(snapshot.activity.days.length, 182);
   assert.equal(snapshot.activity.days[0].date, daily[8].date);
   assert.equal(snapshot.activity.days.at(-1).date, daily.at(-1).date);
-  assert.equal(snapshot.trend.points.length, 28);
+  assert.equal(snapshot.trend.points.length, 7);
+});
+
+test('builds a local seven-day Widget trend from live usage without double counting history', () => {
+  const now = new Date(2026, 7, 6, 12, 0, 0);
+  const stats = {
+    periods: {
+      today: { totalTokens: 99, costUsd: 0.9 },
+      month: { totalTokens: 200, costUsd: 2, models: { monthModel: 200 } },
+      allTime: { totalTokens: 300, costUsd: 3, models: { totalModel: 300 } }
+    },
+    history: { daily: [
+      { date: '2026-08-01', tokens: 210, cost: 2.1 },
+      { date: '2026-08-05', tokens: 123, cost: 1.5 }
+    ] }
+  };
+  const snapshot = buildSnapshot(stats, { now });
+
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.date), [
+    '2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03',
+    '2026-08-04', '2026-08-05', '2026-08-06'
+  ]);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [0, 210, 0, 0, 0, 123, 99]);
+
+  const liveOnly = buildSnapshot({ periods: { today: { totalTokens: 99, costUsd: 0.9 } } }, { now });
+  assert.deepEqual(liveOnly.periods.day.trend.points.map((point) => point.totalTokens), [0, 0, 0, 0, 0, 0, 99]);
+  assert.equal(snapshot.periods.month.trend.points.length, 2);
+  assert.equal(snapshot.periods.total.trend.points.length, 2);
+  assert.equal(snapshot.periods.month.models[0].sharePercent, 100);
+  assert.equal(snapshot.periods.total.models[0].sharePercent, 100);
 });
 
 test('accepts only real UTC calendar dates and lets the last duplicate date win', () => {
@@ -319,7 +353,7 @@ test('accepts only real UTC calendar dates and lets the last duplicate date win'
     { date: '2024-02-29', tokens: 4, cost: 0.4 },
     { date: '2026-02-28', tokens: 8, cost: 0.8 },
     { date: '2026-01-01T00:00:00Z', tokens: 99, cost: 9.9 }
-  ] } }, { now: NOW });
+  ] } }, { now: '2026-03-01T12:00:00.000Z' });
 
   assert.deepEqual(snapshot.activity.days.map((day) => day.date), [
     '2024-02-29', '2026-02-28', '2026-03-01'
@@ -477,6 +511,62 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
     amount: 3.62,
     currency: 'CNY'
   });
+});
+
+test('keeps diagnostics, health, subscriptions, sync failures and sensitive fields out of the Widget Snapshot', () => {
+  const stats = sampleStats();
+  Object.assign(stats, {
+    clientHealth: { status: 'degraded', sourcePath: '/Users/person/client.json' },
+    diagnostics: { findings: [{ code: 'sync-failed', detail: 'private diagnostic' }] },
+    sourcePaths: ['/Users/person/private.db'],
+    selfSync: { failureStage: 'upload', exitCode: 17, detailCode: 'private-detail' },
+    subscriptions: [{ id: 'subscription-record', price: 12, period: 'monthly', accountId: 'account-private' }],
+    subscriptionsUpdatedAt: '2026-07-17T08:29:00.000Z',
+    credentials: { token: 'credential-private' },
+    cookies: ['cookie-private'],
+    emails: ['private@example.com'],
+    prompts: ['private prompt'],
+    rawSessions: [{ sessionId: 'session-private' }],
+    absolutePath: '/Users/person/private.db'
+  });
+  stats.devices = [{
+    clientHealth: { status: 'ok' },
+    diagnostics: { findings: ['finding-private'] },
+    sourcePath: '/Users/person/source.json',
+    selfSync: { failureStage: 'collect', exitCode: 2, detailCode: 'detail-private' },
+    subscriptions: stats.subscriptions
+  }];
+
+  const serialized = serializeMacWidgetSnapshot(stats, { now: NOW, history: stats.history });
+  const parsed = JSON.parse(serialized);
+  const keys = new Set();
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    for (const [key, child] of Object.entries(value)) {
+      keys.add(key);
+      visit(child);
+    }
+  };
+  visit(parsed);
+  for (const key of [
+    'clientHealth', 'diagnostics', 'findings', 'sourcePath', 'sourcePaths',
+    'failureStage', 'exitCode', 'detailCode', 'subscriptions', 'subscriptionsUpdatedAt',
+    'price', 'period', 'accountId', 'credentials', 'cookie', 'cookies', 'emails',
+    'prompts', 'rawSessions', 'absolutePath'
+  ]) {
+    assert.equal(keys.has(key), false, key);
+  }
+  for (const value of [
+    'private diagnostic', 'finding-private', 'private-detail', 'subscription-record',
+    'account-private', 'credential-private', 'cookie-private', 'private prompt',
+    'session-private', '/Users/person/private.db'
+  ]) {
+    assert.equal(serialized.includes(value), false, value);
+  }
 });
 
 test('provider status summarizes configuration and login requirements without identity', () => {

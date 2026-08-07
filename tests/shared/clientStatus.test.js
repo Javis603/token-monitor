@@ -143,3 +143,16 @@ test('aggregateDevices omits wslStatus when the record has none', () => {
   const stats = aggregateDevices([{ deviceId: 'win' }], 0);
   assert.equal(Object.prototype.hasOwnProperty.call(stats.devices[0], 'wslStatus'), false);
 });
+
+// The three attribution fields describe this machine's own files, so sync/host
+// mode stamps the freshly collected values back onto the local device rather
+// than trusting whatever the hub echoed. Health has to travel with the other two
+// or the local machine is the one device whose diagnostics go missing — the
+// opposite of useful, since it is the one the user can act on.
+test('sync mode stamps every locally collected attribution field back onto the local device', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const block = main.slice(main.indexOf('function injectLocalDeviceStatus'), main.indexOf('function injectLocalDeviceStatus') + 700);
+  for (const field of ['clientStatus', 'clientHealth', 'wslStatus']) {
+    assert.match(block, new RegExp(`lastCollectedDevice\\.${field}\\) device\\.${field} = lastCollectedDevice\\.${field}`), field);
+  }
+});

@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
@@ -40,8 +41,11 @@ const {
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
+const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
+const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
+const { createDiagnosticReportGenerator } = require('./diagnostics');
+const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
@@ -93,11 +97,14 @@ const {
 } = require('../shared/tokscaleUpdater');
 const {
   appUpdateInstallSupport,
+  classifyAppUpdateError,
   checkLatestRelease,
   deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
-  GITHUB_REPO,
+  latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
+  providerUpdateCheckAvailability,
+  resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck
 } = require('../shared/appUpdater');
@@ -107,7 +114,6 @@ const opencodeWeb = require('../shared/opencodeWeb');
 const openrouterLimits = require('../shared/openrouterLimits');
 const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
-const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
@@ -123,6 +129,7 @@ const {
   clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
+  sessionUsageArchivePath,
   sessionUsageArchiveDate,
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
@@ -171,11 +178,14 @@ const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const {
   classifySettingsChange,
+  diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
+  canRefreshUsageRuntime,
+  drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
   runLimitInvalidation,
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
@@ -258,9 +268,15 @@ let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
 let sessionUsageArchive = null;
+let lastSessionUsageArchiveUpdate = {
+  at: null,
+  durationMs: null,
+  failureCode: null
+};
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
+const diagnosticJournal = createDiagnosticJournal();
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
@@ -2108,10 +2124,14 @@ function removedTrackedClients(previousClients, nextClients) {
 }
 
 function localArchiveSourceDevice() {
-  const deviceId = settings?.deviceId || defaultDeviceId();
-  if (lastCollectedDevice?.deviceId === deviceId) return lastCollectedDevice;
-  if (localDevice?.deviceId === deviceId) return localDevice;
-  return (latestStats?.devices || []).find((device) => device?.deviceId === deviceId) || null;
+  return selectLocalDeviceRecord({
+    deviceId: settings?.deviceId || defaultDeviceId(),
+    externalAgentActive: isExternalAgentActive(),
+    lastCollectedDevice,
+    localDevice,
+    latestHubStats: currentHubStatsCache(),
+    latestStats
+  });
 }
 
 function updateArchivedClientUsage(previousClients, nextClients) {
@@ -2135,15 +2155,30 @@ function ensureSessionUsageArchiveLoaded() {
 }
 
 function updateSessionUsageArchive(summary, now) {
+  const startedAt = Date.now();
+  const finish = (failureCode = null) => {
+    lastSessionUsageArchiveUpdate = {
+      at: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - startedAt),
+      failureCode
+    };
+  };
   const previous = ensureSessionUsageArchiveLoaded();
   const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
+  if (JSON.stringify(next) === JSON.stringify(previous)) {
+    finish();
+    return previous;
+  }
   try {
     writeSessionUsageArchive(next);
     sessionUsageArchive = next;
   } catch (error) {
+    finish('archive-write-failed');
+    diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' });
     console.log(`[session-archive] write failed: ${error.message}`);
+    return next;
   }
+  finish();
   return next;
 }
 
@@ -2270,6 +2305,11 @@ let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
+let latestHubStatsReceivedAt = null;
+let latestHubStatsSource = 'none';
+let latestHubStatsGeneration = null;
+let latestHubStatsIdentity = null;
+let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
 let pendingMacWidgetStats = null;
@@ -2310,6 +2350,121 @@ let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
 const pendingLimitInvalidations = new Map();
 const pendingUsageClientRefreshes = new Map();
+
+function hubModeRequestIsCurrent(generation, expectedMode, expectedIdentity = null) {
+  return generation === hubModeGeneration
+    && settings?.hubMode === expectedMode
+    && (expectedIdentity === null || currentHubStatsIdentity(expectedMode) === expectedIdentity);
+}
+
+function currentHubStatsIdentity(expectedMode = settings?.hubMode) {
+  const { url } = effectiveHubConfig();
+  return `${String(expectedMode || 'none')}|${String(url || 'none').replace(/\/$/, '')}`;
+}
+
+function currentHubStatsCache() {
+  const hubMode = settings?.hubMode || 'local';
+  const expectedSource = hubMode === 'host'
+    ? 'host'
+    : hubMode === 'client'
+      ? 'client'
+      : 'none';
+  if (!latestHubStats
+    || latestHubStatsSource !== expectedSource
+    || latestHubStatsGeneration !== hubModeGeneration
+    || latestHubStatsIdentity !== currentHubStatsIdentity(hubMode)) {
+    return null;
+  }
+  return latestHubStats;
+}
+
+function clearLatestHubStatsCache() {
+  latestHubStats = null;
+  latestHubStatsReceivedAt = null;
+  latestHubStatsSource = 'none';
+  latestHubStatsGeneration = null;
+  latestHubStatsIdentity = null;
+}
+
+function setLatestHubStatsCache(stats, source, generation, identity) {
+  latestHubStats = stats;
+  latestHubStatsReceivedAt = new Date().toISOString();
+  latestHubStatsSource = source;
+  latestHubStatsGeneration = generation;
+  latestHubStatsIdentity = identity;
+}
+
+const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
+  getSettings: () => settings,
+  getMode: () => mode,
+  getEffectiveHubConfig: effectiveHubConfig,
+  getExternalAgentActive: isExternalAgentActive,
+  getDeviceRuntime: () => deviceRuntimeHandle,
+  getEmbeddedHub: () => embeddedHub,
+  getStreamState: () => ({ connected: streamConnected, failure: streamFailure }),
+  getLatestHubStats: () => latestHubStats,
+  getLatestHubStatsReceivedAt: () => latestHubStatsReceivedAt,
+  getLatestHubStatsSource: () => latestHubStatsSource,
+  getLatestHubStatsGeneration: () => latestHubStatsGeneration,
+  getLatestHubStatsIdentity: () => latestHubStatsIdentity,
+  getHubModeGeneration: () => hubModeGeneration,
+  getCurrentHubStatsIdentity: (hubMode) => currentHubStatsIdentity(hubMode),
+  getLocalRecord: localArchiveSourceDevice,
+  getTokscaleStatus,
+  getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
+    usage: {
+      agentVersion: appVersion(),
+      agentRuntime: 'electron-widget',
+      commandTimeoutMs: 120 * 1000,
+      defaultDeviceId: defaultDeviceId(),
+      intervalMs: collectorIntervalMs(),
+      historyIntervalMs: normalizeHistoryIntervalMs(settings?.historyIntervalMs)
+    },
+    limits: {
+      env: process.env,
+      defaultLimitProviders: defaultLimitProviders()
+    },
+    syncUploadIntervalMs: syncUploadIntervalMs()
+  }),
+  getJournalSnapshot: () => diagnosticJournal.getSnapshot(),
+  getArchiveState: () => {
+    const enabled = settings?.sessionUsageArchiveEnabled !== false;
+    const loaded = sessionUsageArchive !== null;
+    return {
+      enabled,
+      loaded,
+      sessionCount: loaded ? Object.keys(sessionUsageArchive?.sessions || {}).length : null,
+      countSource: loaded ? 'loaded-memory' : enabled ? 'not-loaded' : 'not-enabled',
+      lastUpdate: lastSessionUsageArchiveUpdate
+    };
+  },
+  getAppVersion: appVersion,
+  getDefaultDeviceId: defaultDeviceId,
+  canRefreshUsageRuntime,
+  getAppState: () => ({
+    packaged: app.isPackaged,
+    preferredLanguages: typeof app.getPreferredSystemLanguages === 'function'
+      ? app.getPreferredSystemLanguages()
+      : [app.getLocale?.() || 'en'],
+    locale: app.getLocale?.() || 'en'
+  })
+});
+
+const diagnosticReportGenerator = createDiagnosticReportGenerator({
+  getAppMetrics: () => app.getAppMetrics(),
+  getSystemMemory: () => ({ total: os.totalmem(), free: os.freemem() }),
+  privateMemorySupported: process.platform === 'win32',
+  getSnapshot: ({ generatedAt }) => diagnosticSnapshotBuilder.build(generatedAt),
+  getArchiveFileStat: async () => {
+    if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
+    try {
+      const stat = await fs.promises.stat(sessionUsageArchivePath());
+      return { ok: true, stat };
+    } catch (error) {
+      return { ok: false, code: error?.code === 'ENOENT' ? 'archive-not-present' : 'archive-stat-failed' };
+    }
+  }
+});
 
 function limitInvalidationKey(scope) {
   const provider = String(scope?.provider || '').trim().toLowerCase();
@@ -2360,6 +2515,10 @@ function drainPendingLimitInvalidations(runtime) {
 
 function refreshUsageClient(clientId, options = {}) {
   const client = String(clientId || '').trim().toLowerCase();
+  const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+  if (!client || !KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) {
+    throw new TypeError(`Unsupported targeted usage client: ${client || '(empty)'}`);
+  }
   if (!deviceRuntimeHandle) {
     pendingUsageClientRefreshes.set(client, { clientId: client, options: { ...options } });
     return Promise.resolve({ queued: true });
@@ -2367,14 +2526,31 @@ function refreshUsageClient(clientId, options = {}) {
   return Promise.resolve(deviceRuntimeHandle.refreshClient(client, options));
 }
 
-function drainPendingUsageClientRefreshes(runtime) {
-  const pending = [...pendingUsageClientRefreshes.values()];
-  pendingUsageClientRefreshes.clear();
-  for (const entry of pending) {
-    void Promise.resolve(runtime.refreshClient(entry.clientId, entry.options)).catch((error) => {
-      console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
+function bestEffortTrackedUsageRefresh(clientId, options = {}) {
+  const client = String(clientId || '').trim().toLowerCase();
+  const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+  if (
+    !tracked.has(client)
+    || !canRefreshUsageRuntime(mode, isExternalAgentActive)
+  ) return;
+  try {
+    void refreshUsageClient(client, options).catch((error) => {
+      console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
     });
+  } catch (error) {
+    console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
   }
+}
+
+function drainPendingUsageClientRefreshes(runtime) {
+  drainPendingUsageClientRefreshQueue(
+    pendingUsageClientRefreshes,
+    runtime,
+    (error) => {
+      console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
+    },
+    { enabled: canRefreshUsageRuntime(mode, isExternalAgentActive) }
+  );
 }
 
 function drainPendingRuntimeActions(runtime) {
@@ -2464,6 +2640,13 @@ function isExternalAgentActive() {
     process.kill(pid, 0);
     return true;
   } catch (_) { return false; }
+}
+
+function ownsUsageRuntime() {
+  return Boolean(
+    deviceRuntimeHandle
+    && canRefreshUsageRuntime(mode, isExternalAgentActive)
+  );
 }
 
 async function deleteDeviceFromHub(deviceId) {
@@ -3043,6 +3226,7 @@ function startSyncCollector() {
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('sync-collector'),
     sink,
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3087,6 +3271,7 @@ function startHostCollector() {
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('host-collector'),
     sink,
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3102,12 +3287,16 @@ function stopHostStats() {
 function startHostStats() {
   stopHostStats();
   if (!embeddedHub) return;
+  const generation = hubModeGeneration;
+  const cacheIdentity = currentHubStatsIdentity('host');
   // Host mode presents the same multi-device hub aggregate as connecting to a
   // remote hub, so it reuses the renderer's 'sync' status path (Live / synced
   // data). The in-process vs loopback distinction is internal to fetchStats.
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
+    if (!hubModeRequestIsCurrent(generation, 'host', cacheIdentity)) return;
+    setLatestHubStatsCache(stats, 'host', generation, cacheIdentity);
     updateDiscordRpcDisplay(stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
   };
@@ -3118,16 +3307,17 @@ function startHostStats() {
 }
 
 // Detection status is about this machine's local files, so stamp the freshly
-// collected local clientStatus AND wslStatus onto the local device in whatever
-// stats we hand the renderer. This keeps the 采集 tags + WSL panel correct in
-// sync/host mode without depending on the hub (or a remote Worker) being
-// redeployed to preserve these fields.
+// collected local clientStatus, clientHealth AND wslStatus onto the local device
+// in whatever stats we hand the renderer. This keeps the 采集 tags + WSL panel
+// correct in sync/host mode without depending on the hub (or a remote Worker)
+// being redeployed to preserve these fields.
 function injectLocalDeviceStatus(stats) {
   if (!stats || !Array.isArray(stats.devices)) return stats;
   if (lastCollectedDevice) {
     const device = stats.devices.find((entry) => entry.deviceId === lastCollectedDevice.deviceId);
     if (device) {
       if (lastCollectedDevice.clientStatus) device.clientStatus = lastCollectedDevice.clientStatus;
+      if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
   }
@@ -3406,9 +3596,28 @@ function updateTrayDisplay() {
   tray.setImage(icon || getDefaultTrayIcon());
 }
 
+function recordDiagnosticEvent(event) {
+  diagnosticJournal.record({
+    ...event,
+    modeAtEvent: settings?.hubMode || 'local'
+  });
+}
+
 function sendStatus(connected, extra) {
+  const previous = streamConnected;
   streamConnected = Boolean(connected);
   streamFailure = streamConnected ? null : ((extra && extra.reason) ? { reason: extra.reason, detail: extra.detail ?? null } : streamFailure);
+  if (mode === 'sync') {
+    if (streamConnected && !previous) {
+      recordDiagnosticEvent({ subsystem: 'stream', code: 'stream-reconnected' });
+    } else if (!streamConnected && (previous || extra?.reason)) {
+      recordDiagnosticEvent({
+        subsystem: 'stream',
+        code: 'stream-disconnected',
+        detailCode: diagnosticStreamDetailCode(extra || streamFailure || {})
+      });
+    }
+  }
   sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
 }
 
@@ -3440,6 +3649,7 @@ function startLocalCollector() {
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
     },
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3472,7 +3682,12 @@ function parseSseChunk(chunk) {
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
-  if (options.resetSnapshot) latestHubStats = null;
+  const generation = hubModeGeneration;
+  if (settings?.hubMode !== 'client') return;
+  const cacheIdentity = currentHubStatsIdentity('client');
+  if (options.resetSnapshot) {
+    clearLatestHubStatsCache();
+  }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   mode = 'sync';
@@ -3484,6 +3699,7 @@ async function startStatsStream(options = {}) {
       headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
       signal: controller.signal
     });
+    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     if (!response.ok || !response.body) {
       sendStatus(false, classifyStreamFailure({ status: response.status }));
       scheduleStreamRetry();
@@ -3494,7 +3710,9 @@ async function startStatsStream(options = {}) {
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
+      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
+      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let idx;
@@ -3504,7 +3722,7 @@ async function startStatsStream(options = {}) {
         let parsed = parseSseChunk(chunk);
         if (parsed) {
           if (parsed.event === 'stats' && parsed.data?.stats) {
-            latestHubStats = parsed.data.stats;
+            setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
             updateDiscordRpcDisplay(displayStats);
@@ -3513,10 +3731,11 @@ async function startStatsStream(options = {}) {
         }
       }
     }
+    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ eof: true }));
     scheduleStreamRetry();
   } catch (error) {
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
   }
@@ -4081,6 +4300,8 @@ function exitTrayMode() {
 }
 
 function startMode() {
+  hubModeGeneration += 1;
+  clearLatestHubStatsCache();
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued.
   stopLocalCollector();
@@ -4230,14 +4451,15 @@ async function writeExportTo(dir, periods, options = {}) {
 }
 
 async function fetchStats(options = {}) {
+  const requestGeneration = hubModeGeneration;
+  const requestHubIdentity = currentHubStatsIdentity('client');
   const force = Boolean(options?.force);
   // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
   // settings, account sign-ins and limits actions all refresh with { force: true },
   // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
   // and Antigravity sync subprocesses — on every one of them. Only the manual
   // refresh button opts in.
-  const canRefreshRuntime = mode === 'local' || !isExternalAgentActive();
-  if (force && deviceRuntimeHandle && canRefreshRuntime) {
+  if (force && ownsUsageRuntime()) {
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
@@ -4256,8 +4478,22 @@ async function fetchStats(options = {}) {
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  latestHubStats = await response.json();
-  return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
+  const stats = await response.json();
+  if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
+    // The response belongs to a mode that is no longer active. Wait for the
+    // queued mode reconciliation before re-reading: Client -> Host may still
+    // be binding the embedded hub, and an immediate retry would hit its
+    // loopback URL before it is listening.
+    await modeQueue;
+    return fetchStats({
+      ...options,
+      force: false,
+      forceHistory: false,
+      forceSelfSync: false
+    });
+  }
+  setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
+  return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
 }
 
 function managedPricingSidecarPath() {
@@ -4277,7 +4513,7 @@ function regenerateTokscalePricing() {
 
 async function refreshAfterPricingChange() {
   try {
-    if (deviceRuntimeHandle && (mode === 'local' || !isExternalAgentActive())) {
+    if (ownsUsageRuntime()) {
       await deviceRuntimeHandle.tick('manual', {});
     }
   } catch (error) {
@@ -4335,6 +4571,7 @@ async function downloadTokscaleFromNpm() {
 let appUpdateCheckInFlight = false;
 let appUpdateCheckPromise = null;
 let appUpdateLastError = null;
+let appUpdateLastAttemptAt = null;
 let appUpdateBackgroundTimer = null;
 let appUpdateNativeBusy = false;
 let appUpdateNativeConfigured = false;
@@ -4345,29 +4582,20 @@ let appUpdateNativeState = {
   error: null
 };
 
-function latestFromUpdaterInfo(info) {
-  if (!info || typeof info !== 'object') return null;
-  const version = semver.valid(info.version);
-  if (!version) return null;
-  return {
-    version,
-    tag: `v${version}`,
-    name: (typeof info.releaseName === 'string' && info.releaseName.trim()) ? info.releaseName : `v${version}`,
-    htmlUrl: `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`,
-    publishedAt: typeof info.releaseDate === 'string' ? info.releaseDate : ''
-  };
-}
-
-function rememberLatestAppUpdate(latest, checkedAt = new Date().toISOString()) {
-  if (!latest) return null;
-  const merged = mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest);
+function rememberSuccessfulAppUpdateCheck(latest, checkedAt = new Date().toISOString(), { clearLatest = false } = {}) {
+  if (!latest && !clearLatest) return null;
+  const remembered = latest
+    ? mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest)
+    : null;
   settings.appUpdate = {
     ...(settings.appUpdate || {}),
     lastCheckedAt: checkedAt,
-    lastKnownLatest: merged
+    lastKnownLatest: remembered
   };
   saveSettings();
-  return merged;
+  appUpdateLastAttemptAt = checkedAt;
+  appUpdateLastError = null;
+  return remembered;
 }
 
 function setNativeAppUpdateState(patch = {}) {
@@ -4381,18 +4609,6 @@ function configureNativeAppUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.logger = console;
-  autoUpdater.on('checking-for-update', () => {
-    setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
-  });
-  autoUpdater.on('update-available', (info) => {
-    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
-    setNativeAppUpdateState({ phase: 'available', version: latest?.version || info?.version || null, progress: null, error: null });
-  });
-  autoUpdater.on('update-not-available', (info) => {
-    appUpdateNativeBusy = false;
-    const latest = rememberLatestAppUpdate(latestFromUpdaterInfo(info));
-    setNativeAppUpdateState({ phase: 'idle', version: latest?.version || null, progress: null, error: null });
-  });
   autoUpdater.on('download-progress', (progress) => {
     setNativeAppUpdateState({
       phase: 'downloading',
@@ -4406,9 +4622,39 @@ function configureNativeAppUpdater() {
     setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
   });
   autoUpdater.on('error', (error) => {
+    // Availability checks use the same provider but report through
+    // appUpdateLastError. Only a real download attempt owns installError.
+    if (!appUpdateNativeBusy) return;
     appUpdateNativeBusy = false;
     setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
   });
+}
+
+async function checkAppUpdateProvider() {
+  if (!app.isPackaged) return checkLatestRelease(app.getVersion());
+  const checkedAt = new Date().toISOString();
+  configureNativeAppUpdater();
+  const result = await autoUpdater.checkForUpdates();
+  const availability = providerUpdateCheckAvailability(result, app.getVersion());
+  if (!availability.valid) {
+    return {
+      ok: false,
+      newer: false,
+      latest: null,
+      error: 'Update metadata missing or invalid',
+      errorKind: 'metadata',
+      checkedAt
+    };
+  }
+  return {
+    ok: true,
+    newer: availability.newer,
+    latest: availability.latest,
+    clearLatest: availability.clearLatest,
+    error: null,
+    errorKind: null,
+    checkedAt
+  };
 }
 
 function deriveAppUpdateState() {
@@ -4431,8 +4677,10 @@ function deriveAppUpdateState() {
     showUpdateNotice: availability.showUpdateNotice,
     dismissedVersion,
     lastCheckedAt: block.lastCheckedAt || null,
+    lastAttemptAt: appUpdateLastAttemptAt,
     checking: appUpdateCheckInFlight,
-    lastError: appUpdateLastError,
+    lastError: appUpdateLastError?.message || null,
+    lastErrorKind: appUpdateLastError?.kind || null,
     installSupported: installSupport.supported,
     installSupportReason: installSupport.reason,
     installPhase: appUpdateNativeState.phase,
@@ -4465,11 +4713,10 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
     if (force) sendAppUpdatePush();
     const activeResult = await appUpdateCheckPromise;
     if (force) {
+      appUpdateLastAttemptAt = activeResult?.checkedAt || new Date().toISOString();
+      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, activeResult, { force: true });
       if (activeResult?.ok) {
         if (activeResult.newer) restoreDismissedAppUpdate(activeResult.latest?.version);
-        appUpdateLastError = null;
-      } else {
-        appUpdateLastError = activeResult?.error || 'Update check failed';
       }
       sendAppUpdatePush();
     }
@@ -4487,24 +4734,35 @@ async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {})
   }
   const checkTask = (async () => {
     appUpdateCheckInFlight = true;
-    appUpdateLastError = null;
+    appUpdateLastAttemptAt = new Date().toISOString();
     if (force) sendAppUpdatePush();
     let result;
     try {
-      result = await checkLatestRelease(app.getVersion());
+      result = await checkAppUpdateProvider();
+      appUpdateLastAttemptAt = result.checkedAt || appUpdateLastAttemptAt;
       if (result.ok) {
-        rememberLatestAppUpdate(result.latest, result.checkedAt);
+        rememberSuccessfulAppUpdateCheck(result.latest, result.checkedAt, { clearLatest: result.clearLatest });
         if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
-        appUpdateLastError = null;
       } else {
-        appUpdateLastError = force ? (result.error || 'Update check failed') : null;
+        appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, result, { force });
         if (!force) console.warn('App update check failed:', result.error);
       }
     } catch (error) {
-      const message = error.message || String(error);
-      appUpdateLastError = force ? message : null;
+      const classified = classifyAppUpdateError(error);
+      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, {
+        ok: false,
+        error: classified.message,
+        errorKind: classified.kind
+      }, { force });
       if (!force) console.warn('App update check threw:', error);
-      return { ok: false, newer: false, latest: null, error: message };
+      return {
+        ok: false,
+        newer: false,
+        latest: null,
+        error: classified.message,
+        errorKind: classified.kind,
+        checkedAt: appUpdateLastAttemptAt
+      };
     } finally {
       appUpdateCheckInFlight = false;
       sendAppUpdatePush();
@@ -4555,6 +4813,7 @@ async function downloadAndPrepareAppUpdate() {
     setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
     return deriveAppUpdateState();
   }
+  if (appUpdateCheckPromise) await appUpdateCheckPromise;
   if (appUpdateNativeBusy) return deriveAppUpdateState();
   const latest = settings?.appUpdate?.lastKnownLatest || null;
   if (downloadedAppUpdateMatchesLatest({
@@ -4562,19 +4821,26 @@ async function downloadAndPrepareAppUpdate() {
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
-  restoreDismissedAppUpdate(latest?.version);
   configureNativeAppUpdater();
   appUpdateNativeBusy = true;
   setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
   try {
     const result = await autoUpdater.checkForUpdates();
-    const info = result?.updateInfo || null;
-    const version = semver.valid(info?.version) || null;
-    if (!version || !semver.gt(version, app.getVersion())) {
+    const availability = providerUpdateCheckAvailability(result, app.getVersion());
+    if (!availability.valid) throw new Error('Update metadata missing or invalid');
+    const checkedAt = new Date().toISOString();
+    const latestFromCheck = rememberSuccessfulAppUpdateCheck(
+      availability.latest,
+      checkedAt,
+      { clearLatest: availability.clearLatest }
+    );
+    const version = latestFromCheck?.version || null;
+    if (!availability.newer || !version) {
       appUpdateNativeBusy = false;
       setNativeAppUpdateState({ phase: 'idle', version, progress: null, error: null });
       return deriveAppUpdateState();
     }
+    restoreDismissedAppUpdate(version);
     setNativeAppUpdateState({ phase: 'downloading', version, progress: 0, error: null });
     await autoUpdater.downloadUpdate();
   } catch (error) {
@@ -5439,10 +5705,80 @@ app.whenReady().then(() => {
     osRelease: require('os').release(),
     isPackaged: app.isPackaged,
     userData: app.getPath('userData'),
+    // So the diagnostics panel can print ~/… instead of the user's account name.
+    homeDir: require('os').homedir(),
     sharedDataDir: sharedDataDir(),
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState()
   }));
+  ipcMain.handle('diagnostics:generate', async () => {
+    const report = await diagnosticReportGenerator.generate();
+    return {
+      generatedAt: report.generatedAt,
+      completeness: report.completeness,
+      text: report.text,
+      bytes: report.bytes,
+      truncated: report.truncated,
+      includedClientCount: report.includedClientCount,
+      omittedClientCount: report.omittedClientCount,
+      includedLimitProviderCount: report.includedLimitProviderCount,
+      omittedLimitProviderCount: report.omittedLimitProviderCount,
+      includedRemoteGroupCount: report.includedRemoteGroupCount,
+      omittedRemoteGroupCount: report.omittedRemoteGroupCount,
+      includedJournalEventCount: report.includedJournalEventCount,
+      journalOmittedCount: report.journalOmittedCount
+    };
+  });
+  // Where each tracked tool's data is read from on THIS machine. The absolute
+  // paths stay local by design — they carry the user's home directory and never
+  // go on the wire — so the renderer asks the main process for them instead.
+  //
+  // Probe only the client whose detail panel is open. The renderer caches the
+  // result for the current health snapshot, avoiding both eager filesystem work
+  // and path flicker when a stats tick rebuilds the panel.
+  ipcMain.handle('usage:clientSources', (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
+    try {
+      const seen = new Set();
+      const all = (clientDiagnosticRoots(client)[client] || [])
+        .filter((root) => {
+          const key = `${root.id}\0${root.dir}`;
+          return !seen.has(key) && seen.add(key);
+        })
+        .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
+      const sources = all.slice(0, 32);
+      return { sources, omittedCount: all.length - sources.length };
+    } catch (_) {
+      return null;
+    }
+  });
+  // Reveals one of those paths. The renderer sends a client id, never a path:
+  // anything it could send would otherwise become an arbitrary filesystem open.
+  ipcMain.handle('usage:revealClientSource', async (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return false;
+    try {
+      const roots = clientDiagnosticRoots(client)[client] || [];
+      const target = roots.find((root) => root.exists);
+      if (!target) return false;
+      return await shell.openPath(target.dir) === '';
+    } catch (_) {
+      return false;
+    }
+  });
+  ipcMain.handle('usage:rescanClient', async (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    if (!client || !ownsUsageRuntime()) return false;
+    try {
+      return await refreshUsageClient(client, { forceSync: true }) === true;
+    } catch (error) {
+      console.log(`[usage-runtime] rescan failed: ${error.message}`);
+      return false;
+    }
+  });
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;
@@ -5484,7 +5820,7 @@ app.whenReady().then(() => {
       await cursorAuth.runCursorLogin(token);
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
-      void refreshUsageClient('cursor', { forceSync: true });
+      bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
       return { ok: true, email: probeResult.user.email };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -5595,7 +5931,7 @@ app.whenReady().then(() => {
       await cursorAuth.runCursorLogout();
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'logout', { clear: true });
-      void refreshUsageClient('cursor', { forceSync: true });
+      bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };

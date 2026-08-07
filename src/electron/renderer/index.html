@@ -141,6 +141,27 @@
                 <button id="openRepositoryButton" type="button" class="inline-link" data-i18n="settings.about.repository">GitHub</button>
                 <button id="openWebsiteButton" type="button" class="inline-link" data-i18n="settings.about.website">Website</button>
                 <button id="reportIssueButton" type="button" class="inline-link" data-i18n="settings.about.reportIssue">Report an issue</button>
+                <button id="diagnosticToggleButton" type="button" class="inline-link" data-i18n="settings.about.diagnostics.toggle" aria-expanded="false" aria-controls="diagnosticDetails">Diagnostics</button>
+              </div>
+              <div id="diagnosticDetails" class="about-settings-diagnostics accordion-animated-container hidden" aria-hidden="true" inert>
+                <div class="accordion-animation-inner about-settings-diagnostics-inner">
+                  <div class="about-settings-diagnostics-heading" data-i18n="settings.about.diagnostics.title">Diagnostics &amp; support</div>
+                  <p class="settings-note" data-i18n="settings.about.diagnostics.description">Create a redacted system diagnostic to help report issues.</p>
+                  <div class="diagnostic-actions">
+                    <button id="generateDiagnosticButton" type="button" data-i18n="settings.about.diagnostics.generate">Generate report</button>
+                    <button id="copyDiagnosticButton" type="button" class="hidden" data-i18n="settings.about.diagnostics.copy" hidden>Copy report</button>
+                    <button id="previewDiagnosticButton" type="button" class="inline-link hidden" data-i18n="settings.about.diagnostics.preview" aria-expanded="false" aria-controls="diagnosticPreview" hidden>View report</button>
+                    <button id="regenerateDiagnosticButton" type="button" class="inline-link hidden" data-i18n="settings.about.diagnostics.regenerate" hidden>Regenerate</button>
+                  </div>
+                  <p class="settings-note diagnostic-privacy-note" data-i18n="settings.about.diagnostics.privacy">Includes versions, collection state and token totals; excludes credentials, conversations, accounts, full paths and raw errors.</p>
+                  <div id="diagnosticStatus" class="diagnostic-status" role="status" aria-live="polite"></div>
+                  <div id="diagnosticPreview" class="diagnostic-preview hidden" aria-hidden="true" inert aria-label="Report preview" data-i18n-aria-label="settings.about.diagnostics.previewTitle">
+                    <div class="diagnostic-preview-header">
+                      <span data-i18n="settings.about.diagnostics.previewTitle">Report preview</span>
+                    </div>
+                    <pre id="diagnosticReportText" tabindex="0"></pre>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -367,7 +388,7 @@
           <div id="toolsSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-tools-subgroup">
               <div class="settings-note-row">
-                <p class="settings-note" data-i18n="settings.tools.note">Track controls collection. Show controls the main Tools list.</p>
+                <p class="settings-note" data-i18n="settings.tools.note">Track controls collection. Show controls the main Tools list. Drag a row to reorder.</p>
                 <div class="tool-header-actions">
                   <button id="resetClientDisplayOrderButton" class="tool-header-action" type="button" title="Reset order" aria-label="Reset order" data-i18n-title="settings.tools.resetOrder" data-i18n-aria-label="settings.tools.resetOrder"><span aria-hidden="true">↺</span></button>
                   <button id="showAllClientsButton" class="tool-header-action" type="button" title="Show all" aria-label="Show all" data-i18n-title="settings.tools.showAll" data-i18n-aria-label="settings.tools.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
@@ -1263,6 +1284,7 @@
                     </div>
                     <p class="settings-note subscription-field-note" data-i18n="settings.subscriptions.topUpEntriesNote">Record every top-up. This month's total is what gets compared against this month's usage.</p>
                   </div>
+                  <p id="subscriptionErrorMessage" class="settings-note error subscription-form-error hidden" role="alert" aria-atomic="true"></p>
                   <div class="settings-actions">
                     <button id="subscriptionSubmit" data-i18n="settings.subscriptions.save">Save subscription</button>
                     <button id="subscriptionCancelEdit" class="hidden" data-i18n="settings.subscriptions.cancelEdit">Cancel</button>
@@ -1271,7 +1293,6 @@
               </div>
             </div>
             <div id="subscriptionTotalRow" class="subscription-total hidden"></div>
-            <div id="subscriptionErrorMessage" class="settings-note error hidden"></div>
           </div>
         </div>
 
@@ -1402,6 +1423,9 @@
     <script src="limitProviderPresentation.js"></script>
     <script src="limitDisplayMode.js"></script>
     <script src="clientStatusPresentation.js"></script>
+    <script src="clientHealthPresentation.js"></script>
+    <script src="clientSourceCache.js"></script>
+    <script src="clientRescanState.js"></script>
     <script src="wslStatusPresentation.js"></script>
     <script src="serviceStatusPresentation.js"></script>
     <script src="serviceStatusProviderPreferences.js"></script>
@@ -1410,6 +1434,7 @@
     <script src="homeModulePreferences.js"></script>
     <script src="preferenceDragSort.js"></script>
     <script src="verticalDragSort.js"></script>
+    <script src="rowDragController.js"></script>
     <script src="i18n.js"></script>
     <script src="sessionRows.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
@@ -1425,11 +1450,13 @@
     <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/trayText.js"></script>
     <script src="../../shared/trayLayout.js"></script>
+    <script src="tokenRatePresentation.js"></script>
     <script src="../motionPreference.js"></script>
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>
     <script src="glassRendering.js"></script>
     <script src="trayComposer.js"></script>
+    <script src="diagnosticsPanel.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

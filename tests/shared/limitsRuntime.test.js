@@ -176,12 +176,24 @@ test('diagnostic events expose queue state without leaking scoped credentials', 
   assert.ok(events.every((event) => Number.isInteger(event.active) && Number.isInteger(event.queued)));
   assert.ok(!JSON.stringify(events).includes('secret-cookie'));
   await waitFor(() => runtime.getDiagnostics().active === 0, 'executor to become idle');
-  assert.deepEqual(runtime.getDiagnostics(), {
-    active: 0,
-    maxConcurrency: 1,
-    queued: 0,
-    providers: [{ provider: 'kimi', active: false, pending: 0, retryAttempt: 0, retryAt: null }]
+  const diagnostics = runtime.getDiagnostics();
+  assert.equal(diagnostics.enabled, true);
+  assert.equal(diagnostics.active, 0);
+  assert.equal(diagnostics.maxConcurrency, 1);
+  assert.equal(diagnostics.queued, 0);
+  assert.deepEqual(diagnostics.providers[0], {
+    provider: 'kimi',
+    configured: true,
+    active: false,
+    pending: 0,
+    accountCount: 1,
+    retryAttempt: 0,
+    retryAt: null,
+    lastAttemptAt: diagnostics.providers[0].lastAttemptAt,
+    lastSuccessAt: '2026-07-21T00:00:00.000Z',
+    lastFailureCode: null
   });
+  assert.match(diagnostics.providers[0].lastAttemptAt, /^\d{4}-\d{2}-\d{2}T/);
   runtime.stop();
 });
 

@@ -14,6 +14,7 @@ function usage(updatedAt = '2026-07-21T01:00:00.000Z', extra = {}) {
     allTime: { totalTokens: 30 },
     history: { daily: [{ date: '2026-07-21', tokens: 10 }], monthly: [], summary: {} },
     clientStatus: { codex: 'active' },
+    clientHealth: { version: 1, clients: { codex: { overall: 'healthy' } } },
     wslStatus: { state: 'active' },
     ...extra
   };
@@ -105,6 +106,10 @@ test('partial usage previews carry broader periods and optional usage state', ()
   assert.equal(preview.allTime.totalTokens, 30);
   assert.equal(preview.history.daily[0].tokens, 10);
   assert.equal(preview.clientStatus.codex, 'active');
+  // Status and health carry together. They are what the tool rows and the
+  // diagnostics panel are drawn from, and a preview that kept one but dropped
+  // the other would close the panel on every full scan.
+  assert.equal(preview.clientHealth.clients.codex.overall, 'healthy');
   assert.equal(preview.wslStatus.state, 'active');
   assert.equal(preview.periodWindows.today.endsAt, '2026-07-22T00:00:00.000Z');
   assert.equal(preview.allTimeProjectsIncomplete, true);

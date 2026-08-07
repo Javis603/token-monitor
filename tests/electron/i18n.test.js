@@ -56,6 +56,10 @@ test('translate falls back to English and interpolates values', () => {
   assert.equal(translate('zh-TW', 'settings.codex.personalWorkspace'), '個人');
   assert.equal(translate('zh-CN', 'settings.codex.personalWorkspace'), '个人');
   assert.equal(translate('zh-CN', 'settings.appUpdate.latestWithStatus', { version: '0.2.1', status: '已是最新' }), 'v0.2.1（已是最新）');
+  const diagnosticsDescription = translate('zh-CN', 'settings.about.diagnostics.description');
+  assert.equal(typeof diagnosticsDescription, 'string');
+  assert.ok(diagnosticsDescription.trim());
+  assert.notEqual(diagnosticsDescription, 'settings.about.diagnostics.description');
   assert.equal(translate('zh-TW', 'missing.key'), 'missing.key');
 });
 
@@ -70,6 +74,21 @@ test('automatic app update copy describes background downloads, not update check
     translate('zh-TW', 'settings.appUpdate.automaticUnsupportedWindowsPortable'),
     'Portable 版本不支援自動下載，請透過「查看 release」手動更新。'
   );
+});
+
+test('tool health copy stays compact and describes snapshots, not liveness', () => {
+  assert.equal(
+    translate('zh-TW', 'settings.summary.toolsHealth', {
+      healthy: 7, review: 5, unavailable: 9
+    }),
+    '正常 7 · 待查 5 · 未安裝 9'
+  );
+  assert.equal(translate('zh-TW', 'settings.tools.health.source'), '來源');
+  assert.equal(translate('zh-TW', 'settings.tools.health.sync'), '採集');
+  assert.equal(translate('zh-TW', 'settings.tools.health.usage'), '用量');
+  assert.equal(translate('en', 'settings.tools.health.sync.pending'), 'Sync pending');
+  assert.equal(translate('en', 'settings.tools.health.sync.ok'), 'Last sync succeeded');
+  assert.equal(translate('zh-TW', 'settings.tools.health.rescanFailed'), '無法重新掃描，請稍後再試。');
 });
 
 test('every bundled locale defines every English key', () => {
