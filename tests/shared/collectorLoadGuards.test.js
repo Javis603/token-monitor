@@ -188,6 +188,54 @@ test('watchIgnoreMatcher bounds OpenCode to its database family and legacy messa
   }
 });
 
+test('watchIgnoreMatcher bounds Kiro CLI, Zed, and CodeBuddy extension roots', () => {
+  const codebuddyLogs = process.platform === 'win32'
+    ? path.join('AppData', 'Local', 'CodeBuddyExtension', 'Logs')
+    : process.platform === 'darwin'
+      ? path.join('Library', 'Application Support', 'CodeBuddyExtension', 'Logs')
+      : path.join('.local', 'share', 'CodeBuddyExtension', 'Logs');
+  const tmp = withTmpHome([
+    path.join('.local', 'share', 'kiro-cli'),
+    path.join('.local', 'share', 'zed', 'threads'),
+    codebuddyLogs
+  ]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher, watchPathsForClients } = freshCollector();
+    const ignored = watchIgnoreMatcher('kiro,zed,codebuddy');
+    const kiroRoot = path.join(tmp, '.local', 'share', 'kiro-cli');
+    const zedRoot = path.join(tmp, '.local', 'share', 'zed', 'threads');
+    const codebuddyRoot = path.join(tmp, codebuddyLogs);
+    assert.ok(watchPathsForClients('kiro,zed,codebuddy').includes(kiroRoot));
+    assert.ok(watchPathsForClients('kiro,zed,codebuddy').includes(zedRoot));
+    assert.ok(watchPathsForClients('kiro,zed,codebuddy').includes(codebuddyRoot));
+
+    assert.equal(ignored(kiroRoot), false);
+    assert.equal(ignored(path.join(kiroRoot, 'data.sqlite3')), false);
+    assert.equal(ignored(path.join(kiroRoot, 'data.sqlite3-wal')), false);
+    assert.equal(ignored(path.join(kiroRoot, 'data.sqlite3-shm')), false);
+    assert.equal(ignored(path.join(kiroRoot, 'logs')), true);
+    assert.equal(ignored(path.join(kiroRoot, 'logs', 'runtime.log')), true);
+
+    assert.equal(ignored(zedRoot), false);
+    assert.equal(ignored(path.join(zedRoot, 'threads.db')), false);
+    assert.equal(ignored(path.join(zedRoot, 'threads.db-wal')), false);
+    assert.equal(ignored(path.join(zedRoot, 'threads.db-shm')), false);
+    assert.equal(ignored(path.join(zedRoot, 'cache')), true);
+
+    assert.equal(ignored(codebuddyRoot), false);
+    assert.equal(ignored(path.join(codebuddyRoot, 'CodeBuddyIDE')), false);
+    assert.equal(ignored(path.join(codebuddyRoot, 'CodeBuddyIDE', 'session.log')), false);
+    assert.equal(ignored(path.join(codebuddyRoot, 'VSCode', 'extension.log')), false);
+    assert.equal(ignored(path.join(codebuddyRoot, 'Other', 'runtime.log')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchPathsForClients watches Antigravity source and CLI data but not the sync cache', () => {
   // The IDE source roots are read by `antigravity sync`, while the CLI writes
   // parse-local SQLite that we do not touch. Both are safe watch inputs; the

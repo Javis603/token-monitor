@@ -1306,6 +1306,15 @@ const OPENCODE_DB_WATCH_PATTERN = /^opencode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|
 // The home root itself stays watched so a freshly created database or sidecar
 // still surfaces on the next top-level readdir.
 const MICODE_DB_WATCH_PATTERN = /^mimocode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|shm))?$/;
+// Kiro CLI and Zed expose one SQLite database at a known path. Keep their
+// parent dirs watched so the database can appear after startup, but do not
+// recurse through the application data trees around them.
+const KIRO_DB_WATCH_PATTERN = /^data\.sqlite3(?:-(?:wal|shm))?$/;
+const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
+// Tokscale scans only these two CodeBuddy extension log subtrees. Keep their
+// recursive layout intact, but prune unrelated siblings under Logs before
+// chokidar allocates watches for them.
+const CODEBUDDY_EXTENSION_SOURCE_DIRS = new Set(['CodeBuddyIDE', 'VSCode']);
 // Which parts of an Antigravity IDE home are worth an event. Not "what tokscale
 // parses" — tokscale gets the token data over RPC from the running language
 // server and only reads `brain/`+`conversations/` to enumerate session ids.
@@ -1345,7 +1354,28 @@ function watchIgnoreMatcher(clientsCsv) {
   const opencodeRootSet = new Set(opencodeRoots);
   const micodeRoots = (candidates.micode || []).map((dir) => path.resolve(canonicalWatchPath(dir)));
   const micodeRootSet = new Set(micodeRoots);
-  if (hermesRoots.length === 0 && copilotRoots.length === 0 && antigravityRoots.length === 0 && opencodeRoots.length === 0 && micodeRoots.length === 0) return undefined;
+  const kiroCliRoots = (candidates.kiro || [])
+    .filter((dir) => path.basename(dir) === 'kiro-cli')
+    .map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const kiroCliRootSet = new Set(kiroCliRoots);
+  const zedRoots = (candidates.zed || [])
+    .filter((dir) => path.basename(dir) === 'threads')
+    .map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const zedRootSet = new Set(zedRoots);
+  const codebuddyExtensionRoots = (candidates.codebuddy || [])
+    .filter((dir) => path.basename(dir) === 'Logs')
+    .map((dir) => path.resolve(canonicalWatchPath(dir)));
+  const codebuddyExtensionRootSet = new Set(codebuddyExtensionRoots);
+  if (
+    hermesRoots.length === 0
+    && copilotRoots.length === 0
+    && antigravityRoots.length === 0
+    && opencodeRoots.length === 0
+    && micodeRoots.length === 0
+    && kiroCliRoots.length === 0
+    && zedRoots.length === 0
+    && codebuddyExtensionRoots.length === 0
+  ) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
     // Every explicit watch root stays watched — the home dir AND each profile
@@ -1406,6 +1436,29 @@ function watchIgnoreMatcher(clientsCsv) {
       // other recursive subtree before chokidar descends into it.
       if (path.dirname(resolved) !== root) return true;
       return !MICODE_DB_WATCH_PATTERN.test(path.basename(resolved));
+    }
+    if (kiroCliRootSet.has(resolved)) return false;
+    for (const root of kiroCliRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      // Tokscale opens only the direct data.sqlite3 path. Keep the parent
+      // watched so a fresh install or a recreated database is discovered, but
+      // never recurse into other kiro-cli runtime files and directories.
+      if (path.dirname(resolved) !== root) return true;
+      return !KIRO_DB_WATCH_PATTERN.test(path.basename(resolved));
+    }
+    if (zedRootSet.has(resolved)) return false;
+    for (const root of zedRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      // Tokscale resolves threads/threads.db directly. WAL/SHM remain live
+      // write signals even though they are not parsed as separate databases.
+      if (path.dirname(resolved) !== root) return true;
+      return !ZED_DB_WATCH_PATTERN.test(path.basename(resolved));
+    }
+    if (codebuddyExtensionRootSet.has(resolved)) return false;
+    for (const root of codebuddyExtensionRoots) {
+      if (!resolved.startsWith(root + path.sep)) continue;
+      const parts = path.relative(root, resolved).split(path.sep);
+      return !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]);
     }
     return false; // paths outside the bounded client roots are never ignored
   };
