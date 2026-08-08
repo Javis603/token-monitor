@@ -1103,6 +1103,9 @@ function renderSettingsAppUpdateRow() {
     const percent = Number.isFinite(s.installProgress) ? Math.round(s.installProgress) : 0;
     els.appUpdateMessage.textContent = t('settings.appUpdate.downloading', { percent });
     els.appUpdateMessage.classList.remove('error');
+  } else if (s.installStarting) {
+    els.appUpdateMessage.textContent = t('settings.appUpdate.installStarting');
+    els.appUpdateMessage.classList.remove('error');
   } else if (s.downloaded) {
     els.appUpdateMessage.textContent = t('settings.appUpdate.ready');
     els.appUpdateMessage.classList.remove('error');

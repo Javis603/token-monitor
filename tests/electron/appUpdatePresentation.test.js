@@ -95,6 +95,29 @@ test('every locale can say how to recover from an install that never started', (
   }
 });
 
+test('the hand-off window has its own message, ahead of ready to install', () => {
+  const app = require('node:fs').readFileSync(
+    require('node:path').resolve(__dirname, '../../src/electron/renderer/app.js'),
+    'utf8'
+  );
+  const chain = app.slice(app.indexOf("if (s.installPhase === 'downloading')"));
+  const startingAt = chain.indexOf('s.installStarting');
+  const downloadedAt = chain.indexOf('} else if (s.downloaded) {');
+  assert.ok(startingAt >= 0, 'the hand-off window has to say something');
+  assert.ok(downloadedAt >= 0, 'the ready branch has to still be there');
+  // Order is the whole point: `downloaded` stays true through the hand-off, so a
+  // branch placed after it would never run and the row would keep claiming the
+  // update is merely ready while the installer is already starting.
+  assert.ok(startingAt < downloadedAt, 'installStarting has to be tested first');
+  assert.match(chain.slice(startingAt, downloadedAt), /settings\.appUpdate\.installStarting/);
+
+  for (const locale of Object.keys(MESSAGES)) {
+    const value = MESSAGES[locale]['settings.appUpdate.installStarting'];
+    assert.equal(typeof value, 'string', `${locale} is missing the hand-off message`);
+    assert.ok(value.length > 0, `${locale} has an empty hand-off message`);
+  }
+});
+
 test('automatic download control is enabled only for supported idle builds', () => {
   assert.deepEqual(automaticAppUpdateControlState({
     preferenceEnabled: true,

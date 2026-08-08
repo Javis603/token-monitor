@@ -346,6 +346,9 @@ test('an in-flight install is reported as busy and its reason as a kind', () => 
   assert.match(derive, /installBusy: [\s\S]*?updateInstallQuit\.isInstalling\(\)/);
   // The renderer maps the kind to a localized string; the raw message never shows.
   assert.match(derive, /installErrorKind: appUpdateNativeState\.errorKind/);
+  // And the hand-off window is the state machine's own answer, not a conjunction
+  // reassembled downstream.
+  assert.match(derive, /installStarting: updateInstallQuit\.isInstalling\(\)/);
 
   const stalled = main.slice(main.indexOf('onStalled: () => {'));
   assert.match(stalled.slice(0, stalled.indexOf('\n  }')), /errorKind: 'installer-did-not-start'/);

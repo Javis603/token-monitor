@@ -4662,6 +4662,10 @@ function deriveAppUpdateState() {
     installError: appUpdateNativeState.error,
     installErrorKind: appUpdateNativeState.errorKind || null,
     downloaded: availability.downloaded,
+    // The hand-off window, straight from the state machine rather than inferred
+    // from a pair of booleans downstream: between the press and the installer
+    // taking over there is nothing else to tell the user.
+    installStarting: updateInstallQuit.isInstalling(),
     // An install the guard is still trying to complete counts as busy: on macOS
     // Squirrel can take tens of seconds, and leaving the control live for that long
     // invites a second press the guard can only refuse.
