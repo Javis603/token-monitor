@@ -3809,3 +3809,88 @@ test('Tokscale headless capture roots are optional only while they are the defau
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('the quit variant of stop() skips the watcher walk and leans on `stopped`', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  let closeCalls = 0;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() { closeCalls += 1; }
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const collectorOptions = {
+    clients: 'claude',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'test-device',
+    agentVersion: 'test',
+    intervalMs: 60 * 60 * 1000,
+    watchEnabled: true,
+    watchUsePolling: false,
+    watchTriggersCollection: true,
+    watchDebounceMs: 10,
+    limitsEnabled: false,
+    historyEnabled: false,
+    anchorPersistenceEnabled: false
+  };
+
+  let replaced = null;
+  let quitting = null;
+  try {
+    const { startCollector } = freshCollector();
+
+    // A mode switch has to hand the same paths to a new watcher, so the old one
+    // is really closed even though chokidar's close() walks the whole tree.
+    const replacedUpdates = [];
+    replaced = startCollector({ ...collectorOptions, onUpdate: () => replacedUpdates.push(1) });
+    await waitForCondition(() => replacedUpdates.length === 1);
+    assert.ok(watchHandler, 'watcher handler captured');
+    replaced.stop();
+    assert.equal(closeCalls, 1);
+
+    // Quit teardown runs inline ahead of SIGKILL, where that same walk reads as a
+    // hang, so it is skipped and the OS reclaims the handles at exit instead.
+    const quittingUpdates = [];
+    quitting = startCollector({ ...collectorOptions, onUpdate: () => quittingUpdates.push(1) });
+    await waitForCondition(() => quittingUpdates.length === 1);
+    const spawnsBeforeStop = calls.length;
+    quitting.stop({ skipCloseWatchers: true });
+    assert.equal(closeCalls, 1, 'the quit path never walks the watch tree');
+
+    // Leaving the watcher open is only safe because `stopped` severs it: an event
+    // that lands in the gap before SIGKILL must not start another scan.
+    watchHandler('change', path.join(tmp, '.claude', 'projects', 'demo.jsonl'));
+    await new Promise((resolve) => { setTimeout(resolve, 60); });
+    assert.equal(calls.length, spawnsBeforeStop, 'a late event cannot spawn another scan');
+    assert.equal(quittingUpdates.length, 1);
+  } finally {
+    if (replaced) replaced.stop();
+    if (quitting) quitting.stop({ skipCloseWatchers: true });
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

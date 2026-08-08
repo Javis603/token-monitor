@@ -116,9 +116,9 @@ function createDeviceRuntime(options = {}, deps = {}) {
   const usageRuntime = makeUsageRuntime(usageOptions, deps.usageDeps || {});
   const limitsRuntime = makeLimitsRuntime(limitsOptions, limitsDeps);
 
-  // 停止运行时：active=false 立即置位以阻断所有下游回调（onRecord/onUpdate 等
-  // 均先检查 active），保持同步阻断语义。options 透传给各子 stop（退出路径传
-  // skipCloseWatchers 让 collector 跳过 watcher.close 的同步遍历）。
+  // Clearing `active` first is what severs the downstream callbacks; the child
+  // stops are cleanup. `options` is passed through untouched so the quit path can
+  // reach the collector with `skipCloseWatchers`.
   function stop(options = {}) {
     if (!active) return;
     active = false;

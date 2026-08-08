@@ -3167,9 +3167,9 @@ async function saveSubscriptions(list, base) {
   return settingsForRenderer();
 }
 
+// `options` is forwarded verbatim to the runtime; the quit path passes
+// `skipCloseWatchers` (see stopAll).
 function stopSyncCollector(options = {}) {
-  // options.skipCloseWatchers 用于退出路径：跳过 chokidar watcher.close() 的
-  // 同步遍历（大型文件树下阻塞主线程，让 SIGKILL 兜底都来不及调度）。
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
 }
@@ -3458,9 +3458,9 @@ function sendStatus(connected, extra) {
   sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
 }
 
+// `options` is forwarded verbatim to the runtime; the quit path passes
+// `skipCloseWatchers` (see stopAll).
 function stopLocalCollector(options = {}) {
-  // options.skipCloseWatchers 用于退出路径：跳过 chokidar watcher.close() 的
-  // 同步遍历（大型文件树下阻塞主线程，让 SIGKILL 兜底都来不及调度）。
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   localDevice = null;
@@ -4198,19 +4198,26 @@ function restartDeviceRuntimeForMode() {
   else startLocalCollector();
 }
 
-// 退出路径专用：停止全部运行时资源。向 collector 传 skipCloseWatchers=true，
-// 跳过 chokidar watcher.close() 的同步遍历（监听大型文件树时会长时间阻塞主线程），
-// 让 OS 在进程终止后回收底层句柄（FSEvents stream、kqueue 等）。模式切换场景不
-// 走这里，仍走 stopLocalCollector() / stopSyncCollector() 默认行为（真正关闭
-// watcher，避免新旧 watcher 重叠监听）。await 仅用于 stopEmbeddedHub——其他
-// stop 同步阻断回调后立即返回，无需 await。
-async function stopAll() {
+// Quit-path teardown. Every step here must be synchronous, because performQuit
+// force-kills the process on the next line and anything awaited in between is a
+// chance to never get there. `skipCloseWatchers` is what buys that: chokidar's
+// close() synchronously walks every watched dirent and closes every fs.watch
+// handle, which on a tree the size of ~/.claude/projects blocks the main thread
+// long enough to look like a hang. The OS reclaims those handles at exit anyway.
+// Mode switches deliberately do NOT come through here: they keep the default
+// stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
+// really gone before a new one starts on the same paths.
+function stopAll() {
   stopPersistBoundsTimer();
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
   stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
-  await stopEmbeddedHub();
+  // Fire-and-forget on purpose. server.close() does not resolve while a request
+  // is in flight, so awaiting it hands a remote device on the embedded hub the
+  // power to block our own exit indefinitely. SIGKILL drops the listening socket
+  // regardless, and a graceful hub close buys nothing on the way out.
+  void stopEmbeddedHub();
   stopDiscordRpc();
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
@@ -4218,19 +4225,21 @@ async function stopAll() {
 
 let quitRequested = false;
 let quitInProgress = false;
+// Set only by installDownloadedAppUpdate: electron-updater restarts the process
+// itself, so the forced exit below has to stand down or the install never runs.
+let skipForcedQuit = false;
 
-// 统一的异步退出路径：先 await stopAll() 等待 chokidar watcher / 内嵌 hub 关闭，
-// 再用 SIGKILL 杀进程。Electron 的 app.exit() / process.exit() 在某些 Electron
-// 主进程环境下会被框架内部 quit 处理（preload 同步代码、IPC handler 等）阻塞，
-// 无法保证立即退出；SIGKILL 不可捕获，OS 立即终止进程并回收所有子进程、句柄、
-// FSEvents stream，是 Electron 退出卡死的唯一可靠兜底。
-async function performQuit() {
+// The single quit path. app.quit() / app.exit() can be stalled by Electron's own
+// shutdown work, so teardown runs synchronously and then SIGKILL ends the process
+// outright: it cannot be caught or deferred, and the watch descriptors and
+// sockets skipped above are reclaimed with the process.
+function performQuit() {
   if (quitInProgress) return;
   quitInProgress = true;
   try {
-    await stopAll();
+    stopAll();
   } catch (error) {
-    console.log(`[quit] stopAll 出错: ${error?.message || error}`);
+    console.log(`[quit] stopAll failed: ${error?.message || error}`);
   }
   try { process.kill(process.pid, 'SIGKILL'); } catch (_) {}
 }
@@ -4238,7 +4247,7 @@ async function performQuit() {
 function requestAppQuit() {
   if (quitRequested) return;
   quitRequested = true;
-  void performQuit();
+  performQuit();
 }
 
 // Write the export file set (JSON + CSVs) into `dir`, atomically (temp + rename)
@@ -4698,10 +4707,9 @@ function installDownloadedAppUpdate() {
     latest
   })) return deriveAppUpdateState();
   quitRequested = true;
-  // autoUpdater.quitAndInstall 会触发 before-quit；更新安装由 electron-updater
-  // 接管进程重启，必须放行（skipAsyncQuit），否则 before-quit 的 preventDefault
-  // 会拦死更新安装。
-  skipAsyncQuit = true;
+  // quitAndInstall goes through before-quit, and electron-updater owns the
+  // restart from there. Stand the forced exit down or the installer never runs.
+  skipForcedQuit = true;
   // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
   // (per-user install needs no elevation); isForceRunAfter relaunches the app.
   autoUpdater.quitAndInstall(true, true);
@@ -6374,20 +6382,17 @@ app.whenReady().then(() => {
 
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-// before-quit 是 Electron 退出流程入口（Cmd+Q、窗口关闭、系统关机等都会触发），
-// 但它不会等待 async 回调——handler 返回后 Electron 即继续退出。所以这里
-// preventDefault 接管退出，走 performQuit() 异步完成清理后用 SIGKILL 杀进程。
-// 唯一例外是 autoUpdater.quitAndInstall()：它自己负责重启进程，必须放行，否则
-// 更新安装会被拦死，因此用 skipAsyncQuit 标志跳过接管。
-let skipAsyncQuit = false;
-app.on('before-quit', (event) => {
+// Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
+// performQuit is synchronous through to SIGKILL, so there is nothing to wait for
+// and deliberately no preventDefault: taking the quit over would cancel an
+// OS-initiated logout or restart on macOS.
+app.on('before-quit', () => {
   quitRequested = true;
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
   unregisterWindowToggleShortcut();
-  if (skipAsyncQuit) return;
-  event.preventDefault();
-  void performQuit();
+  if (skipForcedQuit) return;
+  performQuit();
 });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.once(signal, requestAppQuit);

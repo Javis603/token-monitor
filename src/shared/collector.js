@@ -2586,10 +2586,11 @@ function startCollector(options) {
     }, watchDebounceMs);
   }
 
-  // 同步关闭所有 chokidar watcher。chokidar v4 的 watcher.close() 内部会同步遍历
-  // _watched 集合并对每个 dirent 调 dispose，监听大型文件树（成千上万 JSONL）时
-  // 是 O(n) 同步阻塞——这就是退出卡死的根因之一。退出场景靠 stop({ skipCloseWatchers })
-  // 完全跳过此函数，让 OS 回收句柄；模式切换等必须关闭旧 watcher 的场景仍走这里。
+  // chokidar's close() is synchronous: it walks every watched dirent and closes
+  // every fs.watch handle inline, so on a tree the size of ~/.claude/projects it
+  // blocks the caller for as long as that takes. Callers that must not overlap an
+  // old watcher with a new one (mode switches) pay that cost; the quit path skips
+  // it via stop({ skipCloseWatchers }) and lets the OS reclaim the handles.
   function closeWatchers() {
     for (const watcher of watchers) {
       try { watcher.close(); } catch (_) {}
@@ -2660,6 +2661,9 @@ function startCollector(options) {
       const ignored = watchIgnoreMatcher(clients);
       const watcher = chokidar.watch(dirs, watcherOptions(usePolling, ignored));
       watcher.on('all', (event, filePath) => {
+        // The quit path leaves the watcher open (see stop), so events can still
+        // arrive after the collector is done with them.
+        if (stopped) return;
         activityRevision += 1;
         if (tickPending) {
           pendingActivityRevision = pendingActivityRevision === null
@@ -2723,19 +2727,16 @@ function startCollector(options) {
     });
   }
 
-  // 停止采集：同步执行置 stopped、清定时器、停 sourceSyncQueue 以阻断后续回调。
-  // 不返回 Promise——startMode() 等调用方依赖 stop() 立即阻断旧 collector。
-  // skipCloseWatchers=true 用于退出路径，跳过 closeWatchers 的同步遍历（见上）。
+  // Stays synchronous and never returns a promise: startMode() and friends rely
+  // on stop() having severed the old collector by the time it returns. Setting
+  // `stopped` is what does the severing, so a watcher left alive by
+  // skipCloseWatchers still cannot drive a tick.
   function stop(options = {}) {
     if (stopped) return;
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     sourceSyncQueue.stop();
-    // skipCloseWatchers=true 用于退出路径：跳过 chokidar watcher.close()，
-    // 其内部同步遍历 _watched 集合在监听大型文件树（成千上万 JSONL）时会
-    // 长时间阻塞主线程，让 SIGKILL 兜底也来不及触发。退出时进程立即终止，
-    // OS 回收底层 FSEvents stream / kqueue 句柄，无需进程内清理。
     if (!options.skipCloseWatchers) closeWatchers();
     watchedDirectoryKey = null;
   }
