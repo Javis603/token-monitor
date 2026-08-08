@@ -1498,236 +1498,166 @@ const ANTIGRAVITY_SOURCE_FILES = new Set(['agyhub_summaries_proto.pb']);
 // Watching `brain/` itself still catches a new session directory appearing.
 const ANTIGRAVITY_SHALLOW_SOURCE_DIRS = new Set(['brain']);
 
-function watchIgnoreMatcher(clientsCsv) {
+// A watch policy answers one question about one source root: given a path
+// inside it, does this source want the event? It never sees the root itself,
+// which is always kept, so `parts` is a non-empty relative path already split.
+//
+// Roots overlap. An explicit CODEX_HOME can sit inside another client's data
+// root, a custom Copilot exporter can name a file inside OpenCode's, and two
+// clients can resolve to the same directory outright. chokidar's `ignored` is
+// global to the instance, so every root containing a path shares one answer for
+// it, and the only safe one is the union of what they read: prune when EVERY
+// containing root declines the path, keep it as soon as one wants it.
+//
+// This replaced an ordered chain of per-client branches in which the first
+// matching root answered for all of them, so overlap resolved by declaration
+// order rather than by what tokscale reads. A bounded root pruned an
+// equally-rooted recursive source out of existence, two bounded roots resolved
+// by whichever branch was written first, and the exporter needed its own checks
+// hoisted above the chain to survive a broader root declared over it.
+const KEEP_EVERYTHING = () => false;
+const EMPTY_SET = new Set();
+
+// Tokscale opens one exact database directly under this root instead of walking
+// it. Keep the direct children it names — including the WAL/SHM sidecars, which
+// are the live-write signal even though tokscale never parses them as databases
+// — so a database created later is still discovered, and never recurse into the
+// runtime files beside it.
+function directChildOnly(isSource) {
+  return (parts) => parts.length > 1 || !isSource(parts[0]);
+}
+
+// Every source root of every tracked client, paired with its policy. Bounded
+// roots are counted so a client set with nothing to prune can skip the matcher
+// entirely rather than hand chokidar a predicate that always answers false.
+function watchPolicyEntries(clientsCsv) {
   const candidates = clientWatchCandidates(clientsCsv);
   // canonicalWatchPath must be applied here too: chokidar reports events under
   // whatever root it was handed, so a matcher built on the uncanonicalised path
   // would stop matching on Windows and silently un-prune the Hermes runtime
   // (issue #38) while the watch itself still worked.
-  const hermesRoots = (candidates.hermes || []).map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const hermesRootSet = new Set(hermesRoots);
-  const copilotRoots = (candidates.copilot || [])
-    .filter((dir) => path.basename(dir) === 'workspaceStorage')
-    .map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const copilotDataRoots = (candidates.copilot || [])
-    .filter((dir) => path.basename(dir) === '.copilot')
-    .map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const copilotDataRootSet = new Set(copilotDataRoots);
-  const copilotExporter = copilotExporterWatch(os.homedir());
-  const canonicalCopilotExporter = copilotExporter ? copilotExporter.canonicalFile : null;
-  const copilotExporterRoots = copilotExporter
-    ? [path.resolve(canonicalWatchPath(copilotExporter.dir))]
-    : [];
-  const copilotExporterRootSet = new Set(copilotExporterRoots);
+  const canonicalRoot = (dir) => path.resolve(canonicalWatchPath(dir));
+  const entries = [];
+  const claimed = new Map();
+  let boundedCount = 0;
+  // Same-root duplicates within one client (Kiro's cased globalStorage spellings,
+  // Zed's per-platform roots) collapse here. Duplicates ACROSS clients must not:
+  // two policies on one directory is precisely the overlap the union resolves,
+  // which is why `claimed` is keyed per client — an identical path under two
+  // clients would otherwise let the bounded one swallow the recursive one, the
+  // very failure this table replaced.
+  const bound = (client, dirs, policy) => {
+    if (!claimed.has(client)) claimed.set(client, new Set());
+    const seen = claimed.get(client);
+    for (const dir of dirs) seen.add(dir);
+    for (const root of new Set(dirs.map(canonicalRoot))) {
+      entries.push({ root, prefix: root + path.sep, policy });
+      boundedCount += 1;
+    }
+  };
+  const withBasename = (client, basename) =>
+    (candidates[client] || []).filter((dir) => path.basename(dir) === basename);
+
+  // Hermes: the SQLite trio is the only source, at any depth. Each explicit
+  // watch root — the home AND every profile dir under it — is kept by the
+  // matcher itself, so a profile's own database still reports.
+  bound('hermes', candidates.hermes || [], (parts) => !HERMES_DB_FILES.has(parts[parts.length - 1]));
+
+  bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
+    if (parts[0] === 'otel') return false;
+    if (parts.length === 1) return !COPILOT_DB_WATCH_PATTERN.test(parts[0]);
+    return true;
+  });
+  bound('copilot', withBasename('copilot', 'workspaceStorage'), (parts) => {
+    if (parts.length === 1) return false; // workspace hash dir
+    if (parts[1] === 'chatSessions') return false;
+    if (parts.length === 2 && parts[1] === 'workspace.json') return false;
+    return true;
+  });
+  // Tokscale ingests exactly the file COPILOT_OTEL_FILE_EXPORTER_PATH names
+  // (`path.is_file()`, no glob), but that file need not exist yet, so its parent
+  // is what gets watched. The parent is an arbitrary user-chosen directory and
+  // can be $HOME — everything in it except that one file is pruned, and
+  // watchAttributionRootsForClients keeps it from becoming a copilot prefix.
+  const exporter = copilotExporterWatch(os.homedir());
+  if (exporter) bound('copilot', [exporter.dir], (_parts, resolved) => resolved !== exporter.canonicalFile);
+
   const antigravityEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('antigravity');
-  const antigravityRoots = antigravityEnabled
-    ? antigravityDataRoots().map((dir) => path.resolve(canonicalWatchPath(dir)))
-    : [];
-  const antigravityRootSet = new Set(antigravityRoots);
-  const opencodeRoots = (candidates.opencode || []).map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const opencodeRootSet = new Set(opencodeRoots);
-  const micodeRoots = (candidates.micode || []).map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const micodeRootSet = new Set(micodeRoots);
-  const kiroCliRoots = (candidates.kiro || [])
-    .filter((dir) => path.basename(dir) === 'kiro-cli')
-    .map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const kiroCliRootSet = new Set(kiroCliRoots);
-  const zedRoots = (candidates.zed || [])
-    .filter((dir) => path.basename(dir) === 'threads')
-    .map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const zedRootSet = new Set(zedRoots);
-  const codebuddyExtensionRoots = (candidates.codebuddy || [])
-    .filter((dir) => path.basename(dir) === 'Logs')
-    .map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const codebuddyExtensionRootSet = new Set(codebuddyExtensionRoots);
-  const grokUnifiedRoots = (candidates.grok || [])
-    .filter((dir) => path.basename(dir) === 'logs')
-    .map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const grokUnifiedRootSet = new Set(grokUnifiedRoots);
-  const zcodeDbRoots = (candidates.zcode || [])
-    .filter((dir) => path.basename(dir) === 'db')
-    .map((dir) => path.resolve(canonicalWatchPath(dir)));
-  const zcodeDbRootSet = new Set(zcodeDbRoots);
-  const boundedWatchRootSet = new Set([
-    ...hermesRoots,
-    ...copilotRoots,
-    ...copilotDataRoots,
-    ...antigravityRoots,
-    ...opencodeRoots,
-    ...micodeRoots,
-    ...grokUnifiedRoots,
-    ...zcodeDbRoots,
-    ...kiroCliRoots,
-    ...zedRoots,
-    ...codebuddyExtensionRoots
-  ]);
-  // `ignored` is global to the chokidar instance, while the roots below may
-  // overlap. Keep every non-Copilot recursive source in the union before the
-  // custom exporter branch gets a chance to prune its parent directory. The
-  // bounded roots above are handled by their client-specific branches below;
-  // self-synced cache roots are never handed to chokidar in the first place.
-  const antigravityCliRoots = antigravityEnabled && dirExists(antigravityCliDataDir())
-    ? [path.resolve(canonicalWatchPath(antigravityCliDataDir()))]
-    : [];
-  const recursiveWatchRootSet = new Set([
+  bound('antigravity', antigravityEnabled ? antigravityDataRoots() : [], (parts) => {
+    if (parts.length === 1) {
+      return !ANTIGRAVITY_SOURCE_DIRS.has(parts[0]) && !ANTIGRAVITY_SOURCE_FILES.has(parts[0]);
+    }
+    const firstChild = parts[0];
+    if (!ANTIGRAVITY_SOURCE_DIRS.has(firstChild)) return true;
+    // brain/<session> is kept (a new session shows up there); brain/<session>/**
+    // is not — see ANTIGRAVITY_SHALLOW_SOURCE_DIRS.
+    if (ANTIGRAVITY_SHALLOW_SOURCE_DIRS.has(firstChild)) return parts.length > 2;
+    return false;
+  });
+
+  bound('opencode', candidates.opencode || [], (parts) => {
+    if (parts.length === 1) {
+      // Keep the root's readdir visible for newly created channel DBs, but
+      // do not descend into unrelated app files or directories.
+      return parts[0] !== 'storage' && !OPENCODE_DB_WATCH_PATTERN.test(parts[0]);
+    }
+    if (parts[0] !== 'storage') return true;
+    if (parts.length === 2) return parts[1] !== 'message';
+    if (parts[1] !== 'message') return true;
+    // Tokscale's legacy OpenCode source is storage/message/*/*.json. Keep
+    // the message root, one session directory, and its direct JSON files;
+    // prune deeper runtime trees before chokidar allocates more watches.
+    if (parts.length === 3) return false;
+    if (parts.length === 4) return !parts[3].endsWith('.json');
+    return true;
+  });
+
+  // Tokscale reads only direct children of each MiMo root, so log/* and every
+  // other recursive subtree is pruned before chokidar descends into it.
+  bound('micode', candidates.micode || [], directChildOnly((name) => MICODE_DB_WATCH_PATTERN.test(name)));
+  // The dual-source Grok scanner derives exactly logs/unified.jsonl from each
+  // Grok home.
+  bound('grok', withBasename('grok', 'logs'), directChildOnly((name) => name === GROK_UNIFIED_LOG_FILE));
+  // ZCode v2 is a direct SQLite path, not a recursive project source.
+  bound('zcode', withBasename('zcode', 'db'), directChildOnly((name) => ZCODE_DB_WATCH_PATTERN.test(name)));
+  bound('kiro', withBasename('kiro', 'kiro-cli'), directChildOnly((name) => KIRO_DB_WATCH_PATTERN.test(name)));
+  bound('zed', withBasename('zed', 'threads'), directChildOnly((name) => ZED_DB_WATCH_PATTERN.test(name)));
+  bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
+
+  // Everything left is a recursive transcript tree: tokscale walks it, so every
+  // path inside it is a potential source. Copilot is excluded wholesale because
+  // each of its roots is bounded above, and the self-synced cache roots are
+  // never handed to chokidar in the first place. The parse-local Antigravity CLI
+  // dir is added back explicitly — it shares the umbrella client id but is
+  // written by `agy`, not by our sync.
+  const recursive = [
     ...Object.entries(candidates)
       .filter(([client]) => client !== 'copilot' && !SELF_SYNCED_CLIENTS.has(client))
-      .flatMap(([, roots]) => roots)
-      .map((dir) => path.resolve(canonicalWatchPath(dir)))
-      .filter((dir) => !boundedWatchRootSet.has(dir)),
-    ...antigravityCliRoots
-  ]);
-  if (
-    hermesRoots.length === 0
-    && copilotRoots.length === 0
-    && copilotDataRoots.length === 0
-    && copilotExporterRoots.length === 0
-    && antigravityRoots.length === 0
-    && opencodeRoots.length === 0
-    && micodeRoots.length === 0
-    && kiroCliRoots.length === 0
-    && zedRoots.length === 0
-    && codebuddyExtensionRoots.length === 0
-    && grokUnifiedRoots.length === 0
-    && zcodeDbRoots.length === 0
-  ) return undefined;
+      .flatMap(([client, dirs]) => dirs.filter((dir) => !(claimed.get(client) || EMPTY_SET).has(dir))),
+    ...(antigravityEnabled && dirExists(antigravityCliDataDir()) ? [antigravityCliDataDir()] : [])
+  ];
+  for (const root of new Set(recursive.map(canonicalRoot))) {
+    entries.push({ root, prefix: root + path.sep, policy: KEEP_EVERYTHING });
+  }
+  return { entries, boundedCount };
+}
+
+function watchIgnoreMatcher(clientsCsv) {
+  const { entries, boundedCount } = watchPolicyEntries(clientsCsv);
+  if (boundedCount === 0) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
-    // These explicit exporter paths/parents are roots in their own right. A
-    // broad bounded client root (for example OpenCode) must not prune either
-    // one before its own source-specific branch gets to classify the path.
-    if (canonicalCopilotExporter && resolved === canonicalCopilotExporter) return false;
-    if (copilotExporterRootSet.has(resolved)) return false;
-    // `ignored` is global to the chokidar instance, so a recursive source that
-    // sits *inside* a bounded client's root has to stay visible — an explicit
-    // CODEX_HOME or CLINE_SESSION_DATA_DIR nested under another client's data
-    // root would otherwise be pruned by that client's rule.
-    //
-    // That nested case is the only overlap this guarantees, and it is the only
-    // one covered by a test. Overlap between roots is NOT resolved in general:
-    // a recursive root equal to a bounded root loses (it is filtered out of the
-    // set above), a recursive root that is an *ancestor* of a bounded root wins
-    // and cancels that client's pruning entirely, and two bounded roots resolve
-    // by whichever branch below is written first. All three need a specificity
-    // rule this ordered chain cannot express — see the table-driven follow-up.
-    for (const root of recursiveWatchRootSet) {
-      if (resolved === root || resolved.startsWith(root + path.sep)) return false;
-    }
-    // Every explicit watch root stays watched — the home dir AND each profile
-    // dir. A profile dir lives under the home root, so the child-prune below
-    // would otherwise ignore it (basename isn't a db file) before we recognise
-    // it as a watch root in its own right, silencing profile-db change events.
-    if (hermesRootSet.has(resolved)) return false;
-    for (const root of hermesRoots) {
-      if (resolved.startsWith(root + path.sep)) return !HERMES_DB_FILES.has(path.basename(resolved));
-    }
-    if (copilotDataRootSet.has(resolved)) return false;
-    for (const root of copilotDataRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      // The exporter file and its parent already returned above, so neither can
-      // reach this branch — do not re-test them here. Two earlier copies of that
-      // rule lived in this loop and only ever restated the top of the function.
-      const parts = path.relative(root, resolved).split(path.sep);
-      if (parts[0] === 'otel') return false;
-      if (parts.length === 1) return !COPILOT_DB_WATCH_PATTERN.test(parts[0]);
-      return true;
-    }
-    for (const root of copilotRoots) {
+    let contained = false;
+    for (const { root, prefix, policy } of entries) {
+      // A watch root is a source in its own right — a Hermes profile dir inside
+      // the Hermes home, the parent of a database created later — so it survives
+      // whatever the roots around it would say about a path at that depth.
       if (resolved === root) return false;
-      if (!resolved.startsWith(root + path.sep)) continue;
-      const parts = path.relative(root, resolved).split(path.sep);
-      if (parts.length === 1) return false; // workspace hash dir
-      if (parts[1] === 'chatSessions') return false;
-      if (parts.length === 2 && parts[1] === 'workspace.json') return false;
-      return true;
+      if (!resolved.startsWith(prefix)) continue;
+      contained = true;
+      if (!policy(path.relative(root, resolved).split(path.sep), resolved)) return false;
     }
-    if (antigravityRootSet.has(resolved)) return false;
-    for (const root of antigravityRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      const parts = path.relative(root, resolved).split(path.sep);
-      if (parts.length === 1) {
-        return !ANTIGRAVITY_SOURCE_DIRS.has(parts[0]) && !ANTIGRAVITY_SOURCE_FILES.has(parts[0]);
-      }
-      const firstChild = parts[0];
-      if (!ANTIGRAVITY_SOURCE_DIRS.has(firstChild)) return true;
-      // brain/<session> is kept (a new session shows up there); brain/<session>/**
-      // is not — see ANTIGRAVITY_SHALLOW_SOURCE_DIRS.
-      if (ANTIGRAVITY_SHALLOW_SOURCE_DIRS.has(firstChild)) return parts.length > 2;
-      return false;
-    }
-    if (opencodeRootSet.has(resolved)) return false;
-    for (const root of opencodeRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      const parts = path.relative(root, resolved).split(path.sep);
-      if (parts.length === 1) {
-        // Keep the root's readdir visible for newly created channel DBs, but
-        // do not descend into unrelated app files or directories.
-        return parts[0] !== 'storage' && !OPENCODE_DB_WATCH_PATTERN.test(parts[0]);
-      }
-      if (parts[0] !== 'storage') return true;
-      if (parts.length === 2) return parts[1] !== 'message';
-      if (parts[1] !== 'message') return true;
-      // Tokscale's legacy OpenCode source is storage/message/*/*.json. Keep
-      // the message root, one session directory, and its direct JSON files;
-      // prune deeper runtime trees before chokidar allocates more watches.
-      if (parts.length === 3) return false;
-      if (parts.length === 4) return !parts[3].endsWith('.json');
-      return true;
-    }
-    if (micodeRootSet.has(resolved)) return false;
-    for (const root of micodeRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      // Tokscale reads only direct children of each MiMo root. Keep those
-      // database names and their WAL/SHM sidecars, but prune log/* and every
-      // other recursive subtree before chokidar descends into it.
-      if (path.dirname(resolved) !== root) return true;
-      return !MICODE_DB_WATCH_PATTERN.test(path.basename(resolved));
-    }
-    if (grokUnifiedRootSet.has(resolved)) return false;
-    for (const root of grokUnifiedRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      // The dual-source Grok scanner derives exactly logs/unified.jsonl from
-      // each Grok home. Keep the log parent visible for a file created later,
-      // but do not recurse through unrelated log files.
-      if (path.dirname(resolved) !== root) return true;
-      return path.basename(resolved) !== GROK_UNIFIED_LOG_FILE;
-    }
-    if (zcodeDbRootSet.has(resolved)) return false;
-    for (const root of zcodeDbRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      // ZCode v2 is a direct SQLite path, not a recursive project source.
-      // Keep WAL/SHM as event signals without treating them as databases.
-      if (path.dirname(resolved) !== root) return true;
-      return !ZCODE_DB_WATCH_PATTERN.test(path.basename(resolved));
-    }
-    if (kiroCliRootSet.has(resolved)) return false;
-    for (const root of kiroCliRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      // Tokscale opens only the direct data.sqlite3 path. Keep the parent
-      // watched so a fresh install or a recreated database is discovered, but
-      // never recurse into other kiro-cli runtime files and directories.
-      if (path.dirname(resolved) !== root) return true;
-      return !KIRO_DB_WATCH_PATTERN.test(path.basename(resolved));
-    }
-    if (zedRootSet.has(resolved)) return false;
-    for (const root of zedRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      // Tokscale resolves threads/threads.db directly. WAL/SHM remain live
-      // write signals even though they are not parsed as separate databases.
-      if (path.dirname(resolved) !== root) return true;
-      return !ZED_DB_WATCH_PATTERN.test(path.basename(resolved));
-    }
-    if (codebuddyExtensionRootSet.has(resolved)) return false;
-    for (const root of codebuddyExtensionRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      const parts = path.relative(root, resolved).split(path.sep);
-      return !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]);
-    }
-    for (const root of copilotExporterRoots) {
-      if (!resolved.startsWith(root + path.sep)) continue;
-      return true;
-    }
-    return false; // paths outside the bounded client roots are never ignored
+    return contained; // a path under no source root at all is never ignored
   };
 }
 

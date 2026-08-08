@@ -1563,6 +1563,91 @@ test('watchIgnoreMatcher preserves recursive sources nested under bounded roots'
   }
 });
 
+// The three ways two source roots can overlap. `ignored` is one predicate for
+// the whole chokidar instance, so each of these is a case where two clients
+// need different answers about the same path and only one can be given: the
+// union of what they read. An ordered branch chain answered from whichever root
+// it happened to test first, which is why all three are pinned here.
+
+test('watchIgnoreMatcher keeps a recursive source rooted on a bounded root', () => {
+  const shared = 'shared-root';
+  const tmp = withTmpHome([shared]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    // Hermes prunes everything but its SQLite trio; the Cline CLI session dir is
+    // a recursive transcript tree. Pointed at one directory, Hermes' rule would
+    // erase Cline's source unless the recursive root gets a say at equal depth.
+    process.env.HERMES_HOME = path.join(tmp, shared);
+    process.env.CLINE_SESSION_DATA_DIR = path.join(tmp, shared);
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('hermes,cline');
+    const root = path.join(tmp, shared);
+
+    assert.equal(ignored(root), false);
+    assert.equal(ignored(path.join(root, 'state.db')), false);
+    assert.equal(ignored(path.join(root, 'session.jsonl')), false);
+    assert.equal(ignored(path.join(root, 'nested', 'task.json')), false);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher lets a recursive ancestor override a bounded root inside it', () => {
+  const tmp = withTmpHome([path.join('nest', 'sessions', 'grok', 'logs')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    // Grok keeps only logs/unified.jsonl, but here that log dir sits inside a
+    // Codex transcript tree, which tokscale walks in full. Pruning Grok's
+    // siblings would drop paths Codex reads, so the ancestor wins.
+    process.env.CODEX_HOME = path.join(tmp, 'nest');
+    process.env.GROK_HOME = path.join(tmp, 'nest', 'sessions', 'grok');
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('codex,grok');
+    const grokLogs = path.join(tmp, 'nest', 'sessions', 'grok', 'logs');
+
+    assert.equal(ignored(path.join(grokLogs, 'unified.jsonl')), false);
+    assert.equal(ignored(path.join(grokLogs, 'other.log')), false);
+    assert.equal(ignored(path.join(grokLogs, 'archive', 'unified.jsonl')), false);
+    // Outside the Codex tree the same Grok rule still prunes.
+    assert.equal(ignored(path.join(tmp, 'nest', 'archived_sessions', 'run.jsonl')), false);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('watchIgnoreMatcher unions two bounded roots on one directory', () => {
+  const tmp = withTmpHome([path.join('shared', 'logs')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    // Both clients bound the same directory to a different single file. Neither
+    // rule may answer for the other, and what neither wants is still pruned —
+    // the union must not degrade into watching everything.
+    process.env.HERMES_HOME = path.join(tmp, 'shared', 'logs');
+    process.env.GROK_HOME = path.join(tmp, 'shared');
+    const { watchIgnoreMatcher } = freshCollector();
+    const ignored = watchIgnoreMatcher('hermes,grok');
+    const root = path.join(tmp, 'shared', 'logs');
+
+    assert.equal(ignored(root), false);
+    assert.equal(ignored(path.join(root, 'state.db')), false);
+    assert.equal(ignored(path.join(root, 'state.db-wal')), false);
+    assert.equal(ignored(path.join(root, 'unified.jsonl')), false);
+    assert.equal(ignored(path.join(root, 'other.log')), true);
+    assert.equal(ignored(path.join(root, 'archive', 'unified.jsonl')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchIgnoreMatcher keeps an exporter file after Windows path canonicalization', () => {
   const exporter = path.join('.copilot', 'custom-export', 'copilot.jsonl');
   const { base, alias, real } = withAliasedTmpHome([path.dirname(exporter)]);
