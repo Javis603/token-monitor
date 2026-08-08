@@ -4301,7 +4301,12 @@ let skipForcedQuit = false;
 // quitAndInstall() returns void: nothing reports back whether the installer
 // launched. If it did not, the process stays alive holding two flags that
 // between them make Exit a no-op and disable the forced exit for the rest of
-// the session. Every way out of that call releases them again.
+// the session. Every signal we do get releases them again: a synchronous throw,
+// an updater error, and where the failure would otherwise be silent, a grace
+// timer. One case is still uncovered, and predates all of this: a macOS
+// hand-off that stalls while reporting nothing, for which MacUpdater forwards
+// no terminal event. Closing that needs the flags claimed at the hand-off
+// itself rather than at the request, which is a lifecycle change of its own.
 let updateInstallQuitPending = false;
 let updateInstallQuitTimer = null;
 
