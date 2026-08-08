@@ -1,8 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -112,63 +110,6 @@ test('pending local paths stay neutral without changing canonical truth', () => 
   assert.deepEqual(source.checks[0].paths, [
     { dir: '/Users/x/.codex/sessions', exists: false, pending: true }
   ]);
-});
-
-test('an absent optional source is hidden without moving the detected count', () => {
-  const source = clientHealthGroups(entry({
-    source: { state: 'detected', detectedCount: 1, checkedCount: 1, checks: [{ id: 'codex-sessions', exists: true }] }
-  }), {
-    sources: [
-      { id: 'codex-sessions', dir: '/Users/x/.codex/sessions', exists: true },
-      { id: 'codex-sessions', dir: '/Users/x/.config/tokscale/headless/codex', exists: false, optional: true }
-    ]
-  })[0];
-
-  assert.deepEqual(source.checks[0].paths.map((info) => info.dir), ['/Users/x/.codex/sessions']);
-  assert.equal(source.detectedCount, 1);
-  assert.equal(source.checkedCount, 1);
-  assert.equal(source.checks[0].exists, true);
-});
-
-test('an optional source that exists is shown like any other', () => {
-  const source = clientHealthGroups(entry({
-    source: { state: 'detected', detectedCount: 1, checkedCount: 1, checks: [{ id: 'codex-sessions', exists: true }] }
-  }), {
-    sources: [
-      { id: 'codex-sessions', dir: '/Users/x/.codex/sessions', exists: false },
-      { id: 'codex-sessions', dir: '/Users/x/.config/tokscale/headless/codex', exists: true, optional: true }
-    ]
-  })[0];
-
-  assert.deepEqual(source.checks[0].paths, [
-    { dir: '/Users/x/.codex/sessions', exists: false, pending: false },
-    { dir: '/Users/x/.config/tokscale/headless/codex', exists: true, pending: false }
-  ]);
-});
-
-// A client whose every root is optional and absent must not lose the row: the
-// panel would then answer "where does this read from" with nothing at all.
-test('a required source stays listed when it is the only thing left to show', () => {
-  const source = clientHealthGroups(entry({
-    source: { state: 'missing', detectedCount: 0, checkedCount: 1, checks: [{ id: 'codex-sessions', exists: false }] }
-  }), {
-    sources: [
-      { id: 'codex-sessions', dir: '/Users/x/.codex/sessions', exists: false },
-      { id: 'codex-sessions', dir: '/Users/x/.config/tokscale/headless/codex', exists: false, optional: true }
-    ]
-  })[0];
-
-  assert.deepEqual(source.checks[0].paths.map((info) => info.dir), ['/Users/x/.codex/sessions']);
-});
-
-// `optional` crosses four layers and three of them rebuild the object field by
-// field, so a re-map that forgets it silently un-hides the capture roots with
-// every test still green. The two ends are covered above and in the collector
-// suite; the IPC projection has no seam to call, so it is pinned as source.
-test('the clientSources IPC projection forwards optional to the renderer', () => {
-  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const handler = main.match(/ipcMain\.handle\('usage:clientSources'[\s\S]*?\n {2}\}\);/)[0];
-  assert.match(handler, /\.\.\.\(root\.optional \? \{ optional: true \} : \{\}\)/);
 });
 
 test('pathless and probe-only checks survive the source merge', () => {

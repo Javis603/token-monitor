@@ -41,7 +41,7 @@ const {
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
+const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
@@ -5583,17 +5583,12 @@ app.whenReady().then(() => {
     if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
     try {
       const seen = new Set();
-      const all = (clientDiagnosticRoots(client)[client] || [])
+      const all = (visibleDiagnosticRoots(client)[client] || [])
         .filter((root) => {
           const key = `${root.id}\0${root.dir}`;
           return !seen.has(key) && seen.add(key);
         })
-        .map((root) => ({
-          id: root.id,
-          dir: root.dir,
-          exists: root.exists === true,
-          ...(root.optional ? { optional: true } : {})
-        }));
+        .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
       const sources = all.slice(0, 32);
       return { sources, omittedCount: all.length - sources.length };
     } catch (_) {

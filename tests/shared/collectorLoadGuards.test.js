@@ -3760,32 +3760,49 @@ test('Tokscale headless capture roots are optional only while they are the defau
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
-    const { clientDiagnosticRoots, clientSourceChecks } = freshCollector();
+    const { clientDiagnosticRoots, clientSourceChecks, visibleDiagnosticRoots } = freshCollector();
     const headless = (roots) => roots.filter((root) => root.dir.includes('headless'));
+    const capture = path.join(tmp, '.config', 'tokscale', 'headless', 'codex');
 
-    const defaults = clientDiagnosticRoots('codex').codex;
-    assert.deepEqual(headless(defaults).map((root) => root.dir), [
-      path.join(tmp, '.config', 'tokscale', 'headless', 'codex'),
+    const probed = clientDiagnosticRoots('codex').codex;
+    assert.deepEqual(headless(probed).map((root) => root.dir), [
+      capture,
       path.join(tmp, 'Library', 'Application Support', 'tokscale', 'headless', 'codex')
     ]);
-    assert.ok(headless(defaults).every((root) => root.optional === true));
+    assert.ok(headless(probed).every((root) => root.optional === true));
     // The roots Codex itself writes are never optional: their absence is the
     // one thing the panel exists to report.
-    assert.ok(defaults.filter((root) => !root.dir.includes('headless')).every((root) => root.optional === undefined));
+    assert.ok(probed.filter((root) => !root.dir.includes('headless')).every((root) => root.optional === undefined));
 
-    // Hiding is a display choice, so the health check is untouched — one id for
-    // every Codex root, still detected because ~/.codex/sessions is there.
+    // The panel-facing list drops them while they are absent...
+    assert.deepEqual(visibleDiagnosticRoots('codex').codex.map((root) => root.dir), [
+      path.join(tmp, '.codex', 'sessions'),
+      path.join(tmp, '.codex', 'archived_sessions')
+    ]);
+
+    // ...and stops dropping one the moment it exists, because by then it is
+    // contributing tokens. Nothing else has to change for it to reappear.
+    fs.mkdirSync(capture, { recursive: true });
+    assert.deepEqual(visibleDiagnosticRoots('codex').codex.map((root) => root.dir), [
+      path.join(tmp, '.codex', 'sessions'),
+      path.join(tmp, '.codex', 'archived_sessions'),
+      capture
+    ]);
+    fs.rmSync(capture, { recursive: true, force: true });
+
+    // Hiding is a display choice, so the health check is untouched either way —
+    // one id for every Codex root, still detected because ~/.codex/sessions is there.
     assert.deepEqual(clientSourceChecks('codex').codex, [{ id: 'codex-sessions', exists: true }]);
 
-    // An explicitly configured root replaces the pair and is not optional: the
-    // user named that path, so its absence is exactly what they want to see.
+    // An explicitly configured root replaces the pair and is not optional, so it
+    // survives the panel-facing filter while missing: the user named that path.
     process.env.TOKSCALE_HEADLESS_DIR = path.join(tmp, 'capture');
-    const configured = clientDiagnosticRoots('codex').codex;
+    const configured = visibleDiagnosticRoots('codex').codex;
     assert.deepEqual(headless(configured), []);
-    const capture = configured.find((root) => root.dir.startsWith(path.join(tmp, 'capture')));
-    assert.equal(capture.dir, path.join(tmp, 'capture', 'codex'));
-    assert.equal(capture.exists, false);
-    assert.equal(capture.optional, undefined);
+    const named = configured.find((root) => root.dir.startsWith(path.join(tmp, 'capture')));
+    assert.equal(named.dir, path.join(tmp, 'capture', 'codex'));
+    assert.equal(named.exists, false);
+    assert.equal(named.optional, undefined);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];

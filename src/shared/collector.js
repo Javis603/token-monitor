@@ -1749,6 +1749,24 @@ function clientSourceChecks(clientsCsv, options = {}) {
 // holds antigravity's *sync cache*, which is ours and says nothing about which
 // Antigravity is installed — the IDE session roots and the CLI's own data dir
 // are the ones that answer it, and they are checks without being watch roots.
+// What the diagnostics panel should list, which is not everything probed. An
+// optional root that is absent is dropped here, in the main process, so the
+// flag never crosses IPC: the renderer flattens cached sources to
+// `exists: false, pending: true` while a re-probe is in flight, and any
+// visibility rule that reads `exists` downstream of that would blink an
+// existing capture directory out of the panel and back on every snapshot.
+// Deciding it where `exists` is still the answer to a real stat() is the only
+// place the question can be asked once.
+//
+// clientDiagnosticRoots() stays faithful for callers that want every probed
+// root — the reveal handler picks from it and selects on `exists` itself.
+function visibleDiagnosticRoots(clientsCsv) {
+  return Object.fromEntries(Object.entries(clientDiagnosticRoots(clientsCsv)).map(([client, roots]) => [
+    client,
+    roots.filter((root) => !(root.optional === true && root.exists !== true))
+  ]));
+}
+
 function clientDiagnosticRoots(clientsCsv) {
   const byClient = evaluatedClientSourceRoots(clientsCsv);
   if (byClient.antigravity) {
@@ -2787,6 +2805,7 @@ module.exports = {
   clientActivityDaysFromHistory,
   clientDataDirPresence,
   clientDiagnosticRoots,
+  visibleDiagnosticRoots,
   clientSourceChecks,
   clientSourceRoots,
   clientsForWatchPath,
