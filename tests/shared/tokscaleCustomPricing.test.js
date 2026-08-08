@@ -48,6 +48,20 @@ test('normalize accepts explicit 0 cache-read (free) but omits unset fields', ()
   assert.deepEqual(out, [{ modelId: 'm', inputPerM: undefined, outputPerM: 0.8, cacheReadPerM: 0 }]);
 });
 
+test('normalize drops a row when any provided price is invalid instead of salvaging it', () => {
+  for (const invalid of [false, '   ', [], -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.deepEqual(
+      normalizeCustomPricingSetting([{ modelId: 'invalid', inputPerM: invalid, outputPerM: 0 }]),
+      [],
+      `invalid input price should drop the row: ${String(invalid)}`
+    );
+  }
+  assert.deepEqual(
+    normalizeCustomPricingSetting([{ modelId: 'invalid-cache', inputPerM: 1, outputPerM: 0, cacheReadPerM: -1 }]),
+    []
+  );
+});
+
 test('buildTokscaleModels emits per-million keys, omitting undefined fields', () => {
   const models = buildTokscaleModels([
     { modelId: 'mimo-v2.5-pro', inputPerM: 0.4, outputPerM: 0.8, cacheReadPerM: 0.003 },
@@ -87,20 +101,28 @@ test('applyCustomPricing writes tokscale file + sidecar and round-trips through 
     const sidecarPath = path.join(dir, 'sidecar.json');
 
     applyCustomPricing(
-      [{ modelId: 'mimo-v2.5-pro', inputPerM: 0.4, outputPerM: 0.8, cacheReadPerM: 0.003 }],
+      [
+        { modelId: 'mimo-v2.5-pro', inputPerM: 0.4, outputPerM: 0.8, cacheReadPerM: 0.003 },
+        { modelId: 'free', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0 }
+      ],
       { pricingPath, sidecarPath }
     );
 
     assert.deepEqual(JSON.parse(fs.readFileSync(pricingPath, 'utf8')), {
       models: {
-        'mimo-v2.5-pro': {
-          input_cost_per_million_tokens: 0.4,
-          output_cost_per_million_tokens: 0.8,
-          cache_read_input_token_cost_per_million_tokens: 0.003
+          'mimo-v2.5-pro': {
+            input_cost_per_million_tokens: 0.4,
+            output_cost_per_million_tokens: 0.8,
+            cache_read_input_token_cost_per_million_tokens: 0.003
+          },
+          free: {
+            input_cost_per_million_tokens: 0,
+            output_cost_per_million_tokens: 0,
+            cache_read_input_token_cost_per_million_tokens: 0
+          }
         }
-      }
-    });
-    assert.deepEqual(JSON.parse(fs.readFileSync(sidecarPath, 'utf8')), { version: 1, managedIds: ['mimo-v2.5-pro'] });
+      });
+    assert.deepEqual(JSON.parse(fs.readFileSync(sidecarPath, 'utf8')), { version: 1, managedIds: ['mimo-v2.5-pro', 'free'] });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

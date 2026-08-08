@@ -46,8 +46,12 @@
   }
 
   function hasUsableBasePrice(entry) {
-    const valid = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
-    return valid(entry?.inputPerM) || valid(entry?.outputPerM);
+    const validOrUnset = (value) => value === undefined
+      || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+    if (!entry || !validOrUnset(entry.inputPerM) || !validOrUnset(entry.outputPerM) || !validOrUnset(entry.cacheReadPerM)) {
+      return false;
+    }
+    return entry.inputPerM !== undefined || entry.outputPerM !== undefined;
   }
 
   return { inUseModelIds, perMillionFromPricing, upsertOverride, removeOverride, hasUsableBasePrice };

@@ -43,7 +43,12 @@ test('hasUsableBasePrice accepts explicit free input/output and rejects invalid 
   assert.equal(hasUsableBasePrice({ inputPerM: 0, outputPerM: 0 }), true);
   assert.equal(hasUsableBasePrice({ outputPerM: 0 }), true);
   assert.equal(hasUsableBasePrice({ inputPerM: -1, outputPerM: undefined }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: -1, outputPerM: 0 }), false);
   assert.equal(hasUsableBasePrice({ inputPerM: Number.NaN, outputPerM: undefined }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: 1, outputPerM: 0, cacheReadPerM: -1 }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: false, outputPerM: 0 }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: '   ', outputPerM: 0 }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: [], outputPerM: 0 }), false);
   assert.equal(hasUsableBasePrice({}), false);
 });
 

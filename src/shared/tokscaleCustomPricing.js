@@ -2,13 +2,14 @@
 
 const { readJson, writeJsonAtomic } = require('./config');
 
-// '' / null / undefined => unset (undefined). Numbers >= 0 accepted (0 = explicit free).
-// Negative / NaN => unset.
+const INVALID_UNIT_PRICE = Symbol('invalid custom pricing value');
+
+// '' / null / undefined => unset (undefined). Finite numbers >= 0 are accepted
+// (0 = explicit free). Other provided values are invalid, not unset.
 function toUnitPrice(value) {
   if (value === '' || value === null || value === undefined) return undefined;
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return undefined;
-  return n;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return INVALID_UNIT_PRICE;
+  return value;
 }
 
 // Array<{modelId,inputPerM,outputPerM,cacheReadPerM}> -> cleaned array.
@@ -24,6 +25,7 @@ function normalizeCustomPricingSetting(value) {
     const inputPerM = toUnitPrice(raw.inputPerM);
     const outputPerM = toUnitPrice(raw.outputPerM);
     const cacheReadPerM = toUnitPrice(raw.cacheReadPerM);
+    if ([inputPerM, outputPerM, cacheReadPerM].includes(INVALID_UNIT_PRICE)) continue;
     if (inputPerM === undefined && outputPerM === undefined) continue;
     byId.set(modelId, { modelId, inputPerM, outputPerM, cacheReadPerM });
   }
