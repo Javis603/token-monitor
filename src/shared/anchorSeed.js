@@ -23,6 +23,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     allTimeSince = '',
     projectsEnabled = true,
     wslScanEnabled = true,
+    wslSupported = false,
     hostname = '',
     platform = '',
     now = new Date()
@@ -42,6 +43,15 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // above, so all three windows are safe to merge.
   const wsl = wslScanEnabled !== false ? saved.wslBundle : null;
   const withWsl = (period, wslPeriod) => (wslPeriod ? mergePeriods(period, wslPeriod) : period);
+  // Mirrors collectUsageOnce: a non-Windows host reports no WSL status at all,
+  // a Windows host with scanning off reports it as disabled rather than absent,
+  // and otherwise the anchor's own snapshot stands until the first scan. Absent
+  // and disabled are different states downstream, so the distinction is kept.
+  const wslStatus = !wslSupported
+    ? null
+    : wslScanEnabled === false
+      ? { state: 'disabled', detected: [], withData: [] }
+      : (saved.wslStatus || null);
   const at = new Date(capturedAtMs).toISOString();
   return {
     ...envelope,
@@ -50,6 +60,12 @@ function deviceRecordFromAnchor(saved, options = {}) {
     updatedAt: at,
     receivedAt: at,
     trackedClients: String(clients || '').split(',').filter(Boolean),
+    // Both drive UI beyond the totals: projectsEnabled decides whether the
+    // all-time project breakdown is flagged incomplete, wslStatus feeds the
+    // attribution panel. Leaving them off makes the seed a record that looks
+    // subtly unlike the one replacing it.
+    projectsEnabled,
+    ...(wslStatus ? { wslStatus } : {}),
     // Required, not decorative. Without them aggregateDevices falls back to
     // comparing UTC days, and anywhere ahead of UTC a local day that has not
     // rolled over in UTC yet reads as an expired window: today's tokens get

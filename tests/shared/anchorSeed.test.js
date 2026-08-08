@@ -66,6 +66,42 @@ test('a matching anchor seeds a full device record', () => {
   assert.equal(record.today.totalTokens, 1_000);
   assert.equal(record.month.totalTokens, 30_000);
   assert.equal(record.allTime.totalTokens, 900_000);
+  // Drives whether the all-time project breakdown is flagged incomplete, so a
+  // seed without it renders differently from the record that replaces it.
+  assert.equal(record.projectsEnabled, true);
+  // Not a Windows host, so no WSL status at all rather than an empty one.
+  assert.equal(Object.prototype.hasOwnProperty.call(record, 'wslStatus'), false);
+});
+
+test('WSL status follows the platform and the toggle, the way a collected record does', () => {
+  const wslStatus = { state: 'active', detected: ['claude'], withData: ['claude'] };
+
+  const restored = deviceRecordFromAnchor(
+    anchorFixture({ wslStatus }),
+    seedOptions({ wslSupported: true, platform: 'win32-x64' })
+  );
+  assert.deepEqual(restored.wslStatus, wslStatus);
+
+  // Disabled is a state the panel renders, not the same as not knowing yet.
+  const off = deviceRecordFromAnchor(
+    anchorFixture({ wslStatus }),
+    seedOptions({ wslSupported: true, wslScanEnabled: false, platform: 'win32-x64' })
+  );
+  assert.deepEqual(off.wslStatus, { state: 'disabled', detected: [], withData: [] });
+
+  const noSnapshot = deviceRecordFromAnchor(
+    anchorFixture(),
+    seedOptions({ wslSupported: true, platform: 'win32-x64' })
+  );
+  assert.equal(Object.prototype.hasOwnProperty.call(noSnapshot, 'wslStatus'), false);
+});
+
+test('the seed reports the project setting it was built under', () => {
+  const off = deviceRecordFromAnchor(
+    anchorFixture({ configFingerprint: configFingerprint(CLIENTS, ALL_TIME_SINCE, false) }),
+    seedOptions({ projectsEnabled: false })
+  );
+  assert.equal(off.projectsEnabled, false);
 });
 
 test('an anchor from another local day is refused', () => {

@@ -3503,6 +3503,7 @@ function primeLocalStatsFromAnchor(usageOptions) {
       allTimeSince: usageOptions.allTimeSince,
       projectsEnabled: usageOptions.projectsEnabled,
       wslScanEnabled: usageOptions.wslScanEnabled,
+      wslSupported: process.platform === 'win32',
       hostname: os.hostname(),
       platform: `${process.platform}-${process.arch}`
     }
