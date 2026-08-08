@@ -116,7 +116,14 @@
       const pending = source?.pending === true;
       if (!groups.has(id)) groups.set(id, { id, exists, paths: [] });
       else if (!canonicalIds.has(id)) groups.get(id).exists ||= exists;
-      if (dir) groups.get(id).paths.push({ dir, exists, pending });
+      // An optional root is an opt-in capture directory: its absence says only
+      // that the user never opted in, which is not what a struck-through chip
+      // beside a real missing source reads as. It still counts toward the
+      // check's `exists` above, so one that IS populated stays visible and
+      // keeps contributing — hiding is a display choice, not a health one.
+      if (dir && !(source?.optional === true && !exists)) {
+        groups.get(id).paths.push({ dir, exists, pending });
+      }
     }
     return [...groups.values()];
   }

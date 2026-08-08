@@ -1060,12 +1060,24 @@ function xdgDataHome(home) {
   return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'));
 }
 
+// Where tokscale looks for captured `codex exec --json` output. Both defaults
+// are scanned on every platform — upstream pushes them with no cfg gate, so the
+// Application Support one is not a macOS variant of the .config one — and
+// TOKSCALE_HEADLESS_DIR replaces the pair rather than adding to it
+// (scanner.rs `headless_roots_with_env_strategy`). Neither default follows
+// XDG_CONFIG_HOME: upstream spells the .config path as a literal.
+//
+// `optional` marks a root whose absence carries no information. Nobody has
+// these unless they opted into a capture workflow, so the diagnostics panel
+// hides them when they are missing rather than showing them struck through
+// beside a real "Codex wrote nothing here". A configured root is the opposite:
+// the user named that path, so its absence is exactly what they want to see.
 function tokscaleHeadlessRoots(home) {
   const configured = nonBlankEnvPath('TOKSCALE_HEADLESS_DIR', null);
-  if (configured) return [configured];
+  if (configured) return [{ dir: configured, optional: false }];
   return [
-    path.join(home, '.config', 'tokscale', 'headless'),
-    path.join(home, 'Library', 'Application Support', 'tokscale', 'headless')
+    { dir: path.join(home, '.config', 'tokscale', 'headless'), optional: true },
+    { dir: path.join(home, 'Library', 'Application Support', 'tokscale', 'headless'), optional: true }
   ];
 }
 
@@ -1134,10 +1146,11 @@ function clientSourceRoots(clientsCsv) {
   const byClient = {};
   const add = (client, ...roots) => {
     if (enabled.has(client)) {
-      byClient[client] = roots.map(([id, dir, sourcePath]) => ({
+      byClient[client] = roots.map(([id, dir, sourcePath, optional]) => ({
         id,
         dir,
-        ...(sourcePath ? { sourcePath } : {})
+        ...(sourcePath ? { sourcePath } : {}),
+        ...(optional ? { optional: true } : {})
       }));
     }
   };
@@ -1147,7 +1160,7 @@ function clientSourceRoots(clientsCsv) {
     'codex',
     ['codex-sessions', path.join(codexHome, 'sessions')],
     ['codex-sessions', path.join(codexHome, 'archived_sessions')],
-    ...tokscaleHeadlessRoots(home).map((root) => ['codex-sessions', path.join(root, 'codex')])
+    ...tokscaleHeadlessRoots(home).map(({ dir, optional }) => ['codex-sessions', path.join(dir, 'codex'), null, optional])
   );
   const hermesHome = resolveHermesHome({ env: process.env, homeDir: home });
   add('hermes', ['hermes-home', hermesHome], ...hermesProfileWatchDirs(hermesHome).map((dir) => ['hermes-profile', dir]));
@@ -1686,6 +1699,7 @@ function evaluatedClientSourceRoots(clientsCsv) {
       id: root.id,
       dir: root.sourcePath || root.dir,
       ...(root.sourcePath ? { sourcePath: root.sourcePath } : {}),
+      ...(root.optional ? { optional: true } : {}),
       exists: sourceRootExists(root)
     }))
   ]));

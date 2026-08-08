@@ -3754,3 +3754,41 @@ test('exact-file sources report the file they probed, not the watch parent', () 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('Tokscale headless capture roots are optional only while they are the defaults', () => {
+  const tmp = withTmpHome([path.join('.codex', 'sessions')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientDiagnosticRoots, clientSourceChecks } = freshCollector();
+    const headless = (roots) => roots.filter((root) => root.dir.includes('headless'));
+
+    const defaults = clientDiagnosticRoots('codex').codex;
+    assert.deepEqual(headless(defaults).map((root) => root.dir), [
+      path.join(tmp, '.config', 'tokscale', 'headless', 'codex'),
+      path.join(tmp, 'Library', 'Application Support', 'tokscale', 'headless', 'codex')
+    ]);
+    assert.ok(headless(defaults).every((root) => root.optional === true));
+    // The roots Codex itself writes are never optional: their absence is the
+    // one thing the panel exists to report.
+    assert.ok(defaults.filter((root) => !root.dir.includes('headless')).every((root) => root.optional === undefined));
+
+    // Hiding is a display choice, so the health check is untouched — one id for
+    // every Codex root, still detected because ~/.codex/sessions is there.
+    assert.deepEqual(clientSourceChecks('codex').codex, [{ id: 'codex-sessions', exists: true }]);
+
+    // An explicitly configured root replaces the pair and is not optional: the
+    // user named that path, so its absence is exactly what they want to see.
+    process.env.TOKSCALE_HEADLESS_DIR = path.join(tmp, 'capture');
+    const configured = clientDiagnosticRoots('codex').codex;
+    assert.deepEqual(headless(configured), []);
+    const capture = configured.find((root) => root.dir.startsWith(path.join(tmp, 'capture')));
+    assert.equal(capture.dir, path.join(tmp, 'capture', 'codex'));
+    assert.equal(capture.exists, false);
+    assert.equal(capture.optional, undefined);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
