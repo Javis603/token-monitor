@@ -43,21 +43,28 @@ function appUpdateInstallSupport({
 }
 
 // How long an install attempt may sit unconfirmed before we conclude the
-// installer never took over. quitAndInstall() returns void and BaseUpdater's
-// failure path resets its own state without emitting anything, so still being
-// alive is the only failure signal there is. One bound serves every platform
-// because expiry is not a verdict on the install: it only gives the quit flags
-// back, and the hand-off re-claims them if it arrives afterwards.
-const UPDATE_INSTALL_QUIT_GRACE_MS = 10 * 1000;
-
-// Whether reaching that bound is conclusive. NsisUpdater and AppImageUpdater run
-// install() synchronously and emit the hand-off from a setImmediate, so there the
-// grace period cannot expire on a working install and expiry is worth reporting.
-// MacUpdater may instead return from quitAndInstall() having only asked Squirrel
-// to check, then hand off whenever that round-trip completes with no upper bound,
-// so expiry there carries no verdict and stays silent.
-function updateInstallHandoffIsSameTick(platform = process.platform) {
-  return platform !== 'darwin';
+// installer never took over, and whether reaching that point is a verdict.
+// quitAndInstall() returns void and the failure paths emit nothing, so still
+// being alive is the only failure signal there is. The bound must clear a
+// working install by a wide margin, because expiring on one would hand the quit
+// flags back mid-install.
+//
+// NsisUpdater and AppImageUpdater run install() synchronously and emit the
+// hand-off from a setImmediate, so a working install is gone within a tick.
+// Expiry there means install() returned false and said nothing, which is worth
+// reporting: the user pressed Install and nothing happened.
+//
+// macOS is the opposite. We run with autoInstallOnAppQuit off, so MacUpdater
+// does not have Squirrel fetch anything at download time (updateDownloaded only
+// calls checkForUpdates when that flag is on). quitAndInstall() therefore always
+// takes the branch that asks Squirrel to pull the whole app zip through
+// electron-updater's local proxy, and the hand-off follows the entire transfer.
+// Tens of seconds is normal, so the bound is minutes and expiry is not a verdict
+// on anything: it only means nobody should be stuck in an app they cannot quit.
+function updateInstallQuitPolicy(platform = process.platform) {
+  return platform === 'darwin'
+    ? { graceMs: 5 * 60 * 1000, expiryIsConclusive: false }
+    : { graceMs: 10 * 1000, expiryIsConclusive: true };
 }
 
 function parseTag(tag) {
@@ -589,9 +596,8 @@ async function checkLatestRelease(currentVersion) {
 }
 
 module.exports = {
-  UPDATE_INSTALL_QUIT_GRACE_MS,
   appUpdateInstallSupport,
-  updateInstallHandoffIsSameTick,
+  updateInstallQuitPolicy,
   parseTag,
   parseLatestReleasePayload,
   latestFromUpdaterInfo,

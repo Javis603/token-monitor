@@ -98,7 +98,6 @@ const {
   resetToBundled
 } = require('../shared/tokscaleUpdater');
 const {
-  UPDATE_INSTALL_QUIT_GRACE_MS,
   appUpdateInstallSupport,
   classifyAppUpdateError,
   checkLatestRelease,
@@ -110,7 +109,7 @@ const {
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck,
-  updateInstallHandoffIsSameTick
+  updateInstallQuitPolicy
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
@@ -4306,15 +4305,15 @@ let skipForcedQuit = false;
 // unconfirmed window; these two flags are all it touches here. See
 // updateInstallQuit.js for why the claim expires and what promotes it.
 const updateInstallQuit = createUpdateInstallQuitGuard({
-  graceMs: UPDATE_INSTALL_QUIT_GRACE_MS,
+  ...updateInstallQuitPolicy(),
   claim: () => { quitRequested = true; skipForcedQuit = true; },
   release: () => { quitRequested = false; skipForcedQuit = false; },
-  onStalled: () => {
-    // Where the hand-off is same-tick, expiry means install() returned false and
-    // said nothing, which is exactly what the user is looking at: they pressed
-    // Install and the app neither restarted nor complained. Elsewhere expiry
-    // carries no verdict, so it stays silent.
-    if (!updateInstallHandoffIsSameTick()) return;
+  onStalled: (expiryIsConclusive) => {
+    // Only where a working install could not have reached the bound. There it
+    // means install() returned false and said nothing, which is exactly what the
+    // user is looking at: they pressed Install and the app neither restarted nor
+    // complained. Elsewhere expiry says only that the wait ran long.
+    if (!expiryIsConclusive) return;
     setNativeAppUpdateState({ phase: 'error', progress: null, error: 'Update installer did not start' });
   }
 });

@@ -21,6 +21,7 @@
 // reaches the real quit whenever a native check completes, with no upper bound.
 function createUpdateInstallQuitGuard({
   graceMs,
+  expiryIsConclusive = false,
   claim,
   release,
   onStalled = () => {},
@@ -52,7 +53,9 @@ function createUpdateInstallQuitGuard({
       if (phase !== 'requested') return;
       phase = 'idle';
       release();
-      onStalled();
+      // Whether the bound was short enough that a working install could not have
+      // reached it, which is what decides if this is worth telling the user.
+      onStalled(expiryIsConclusive);
     }, graceMs);
     // The fallback must never be the reason the process stays up.
     timer?.unref?.();

@@ -10,24 +10,23 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { createUpdateInstallQuitGuard } = require('../../src/electron/updateInstallQuit');
-const {
-  UPDATE_INSTALL_QUIT_GRACE_MS,
-  updateInstallHandoffIsSameTick
-} = require('../../src/shared/appUpdater');
+const { updateInstallQuitPolicy } = require('../../src/shared/appUpdater');
 
 const ROOT = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
 
 // Records the flag movements as an ordered log and hands the grace period back as
 // something the test fires by hand, so every transition is observable.
-function harness({ graceMs = UPDATE_INSTALL_QUIT_GRACE_MS } = {}) {
+function harness({ graceMs = 10_000, expiryIsConclusive = true } = {}) {
   const events = [];
   const timers = [];
+  const stalledWith = [];
   const guard = createUpdateInstallQuitGuard({
     graceMs,
+    expiryIsConclusive,
     claim: () => events.push('claim'),
     release: () => events.push('release'),
-    onStalled: () => events.push('stalled'),
+    onStalled: (conclusive) => { events.push('stalled'); stalledWith.push(conclusive); },
     setTimeoutFn: (fn, ms) => {
       const handle = {
         fn,
@@ -41,7 +40,7 @@ function harness({ graceMs = UPDATE_INSTALL_QUIT_GRACE_MS } = {}) {
     },
     clearTimeoutFn: (handle) => { if (handle) handle.cleared = true; }
   });
-  return { guard, events, timers, fire: (index = timers.length - 1) => timers[index].fn() };
+  return { guard, events, timers, stalledWith, fire: (index = timers.length - 1) => timers[index].fn() };
 }
 
 test('a request claims the flags and arms exactly one grace period', () => {
@@ -50,7 +49,7 @@ test('a request claims the flags and arms exactly one grace period', () => {
   assert.deepEqual(events, ['claim']);
   assert.equal(guard.phase(), 'requested');
   assert.equal(timers.length, 1);
-  assert.equal(timers[0].ms, UPDATE_INSTALL_QUIT_GRACE_MS);
+  assert.equal(timers[0].ms, 10_000);
   // The fallback must never be the reason the process stays up.
   assert.equal(timers[0].unrefCount, 1);
 });
@@ -142,20 +141,40 @@ test('a request is possible again once the previous one ended', () => {
   assert.equal(timers.length, 2);
 });
 
-test('the grace period is bounded on both sides', () => {
-  // Long enough not to race a hand-off that arrives on the next tick, short
-  // enough that an app nobody can quit is not the steady state.
-  assert.ok(UPDATE_INSTALL_QUIT_GRACE_MS >= 5_000);
-  assert.ok(UPDATE_INSTALL_QUIT_GRACE_MS <= 60_000);
+test('expiry carries a verdict only where a working install could not reach it', () => {
+  const { stalledWith, fire, guard } = harness({ expiryIsConclusive: false });
+  guard.request();
+  fire();
+  assert.deepEqual(stalledWith, [false]);
+
+  const conclusive = harness({ expiryIsConclusive: true });
+  conclusive.guard.request();
+  conclusive.fire();
+  assert.deepEqual(conclusive.stalledWith, [true]);
 });
 
-test('only the same-tick install paths treat expiry as a verdict', () => {
+test('the same-tick install paths get a short, conclusive bound', () => {
   // NsisUpdater and AppImageUpdater run install() synchronously and emit the
-  // hand-off from a setImmediate, so expiry there cannot happen on a working
-  // install. MacUpdater has no upper bound, so expiry says nothing.
-  assert.equal(updateInstallHandoffIsSameTick('win32'), true);
-  assert.equal(updateInstallHandoffIsSameTick('linux'), true);
-  assert.equal(updateInstallHandoffIsSameTick('darwin'), false);
+  // hand-off from a setImmediate, so a working install is gone within a tick.
+  for (const platform of ['win32', 'linux']) {
+    const policy = updateInstallQuitPolicy(platform);
+    assert.equal(policy.expiryIsConclusive, true, platform);
+    assert.ok(policy.graceMs >= 5_000, `${platform} must not race a next-tick quit`);
+    assert.ok(policy.graceMs <= 60_000, `${platform} must not leave an unquittable app sitting`);
+  }
+});
+
+test('macOS gets a bound that clears a real Squirrel transfer', () => {
+  // With autoInstallOnAppQuit off, MacUpdater has Squirrel pull the whole app zip
+  // through electron-updater's local proxy only once quitAndInstall() is called,
+  // and hands off after the entire transfer. Tens of seconds is normal, so a bound
+  // anywhere near the same-tick one would expire on working installs and hand the
+  // quit flags back mid-install.
+  const policy = updateInstallQuitPolicy('darwin');
+  assert.equal(policy.expiryIsConclusive, false);
+  assert.ok(policy.graceMs >= 2 * 60 * 1000, 'a normal transfer must never reach the bound');
+  const sameTick = updateInstallQuitPolicy('win32');
+  assert.ok(policy.graceMs > sameTick.graceMs * 10);
 });
 
 // main.js cannot be required outside Electron, so its wiring is pinned at the
@@ -173,6 +192,10 @@ test('the guard moves both quit flags together, in the same direction', () => {
   const start = main.indexOf('createUpdateInstallQuitGuard({');
   assert.ok(start >= 0, 'the guard has to be constructed');
   const block = main.slice(start, main.indexOf('\n});', start));
+  // The bound and its verdict come from the shared policy, never inlined here:
+  // a number written at the call site is one nobody can weigh against what the
+  // install path actually does.
+  assert.match(block, /\.\.\.updateInstallQuitPolicy\(\)/);
   // quitRequested predates the forced exit and on its own is already enough to
   // make requestAppQuit return early forever, so it cannot be left behind.
   for (const [role, value] of [['claim', 'true'], ['release', 'false']]) {
