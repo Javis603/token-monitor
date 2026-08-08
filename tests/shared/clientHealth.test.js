@@ -2,6 +2,9 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 const {
@@ -355,6 +358,24 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   assert.deepEqual(ids('antigravity'), ['tokscale-antigravity-cache', 'antigravity-ide-source', 'antigravity-cli-data']);
   for (const list of Object.values(checks)) {
     for (const check of list) assert.equal(typeof check.exists, 'boolean');
+  }
+});
+
+test('Qoder CN source health requires local.db, not only its watch parent', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-qodercn-health-'));
+  const dbPath = path.join(tempRoot, 'cache', 'db', 'local.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = dbPath;
+  try {
+    const roots = clientSourceRoots('qodercn').qodercn;
+    assert.equal(roots[0].dir, path.dirname(dbPath));
+    assert.equal(roots[0].sourcePath, dbPath);
+    assert.deepEqual(clientSourceChecks('qodercn').qodercn, [{ id: 'qodercn-db', exists: false }]);
+  } finally {
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = previous;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 

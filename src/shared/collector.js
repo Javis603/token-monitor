@@ -1392,7 +1392,7 @@ function clientSourceRoots(clientsCsv) {
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderPaths = qoderDataPaths({ homeDir: home, platform: process.platform, env: process.env });
-  add('qodercn', ...qoderPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath)]));
+  add('qodercn', ...qoderPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
