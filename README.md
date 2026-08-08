@@ -63,9 +63,16 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie (session/weekly usage via ollama.com/settings) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="Third-party APIs" /> | Third-party APIs | New API-compatible account preset (including compatible One API forks), New API API-key preset, and a declarative Custom balance endpoint | — | ✅ | — |
 
+<details>
+<summary><strong>Custom balance endpoints, and data that lives outside the default paths</strong></summary>
+
+<br>
+
 Paths above are the defaults. Token Monitor follows the same environment overrides Tokscale does — `$XDG_DATA_HOME` for the `~/.local/share/` roots, and per-tool variables such as `$CODEX_HOME`, `$GROK_HOME`, `$HERMES_HOME`, `$KIMI_CODE_HOME` and the `$CLINE_*` family.
 
 Custom maps numeric JSON fields from one GET balance endpoint; OpenAI or Anthropic compatibility alone is not enough.
+
+</details>
 
 ## Showcase
 

@@ -63,9 +63,16 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie（ollama.com/settings で session/weekly 使用量を取得） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="サードパーティAPI" /> | サードパーティAPI | New API互換アカウントプリセット（互換性のあるOne APIフォークを含む）、New APIキープリセット、宣言型カスタム残高エンドポイント | — | ✅ | — |
 
+<details>
+<summary><strong>Custom 残高エンドポイントと、デフォルト以外の場所にあるデータ</strong></summary>
+
+<br>
+
 上記はデフォルトのパスです。Token Monitor は Tokscale と同じ環境変数の上書きに従います。`~/.local/share/` 配下は `$XDG_DATA_HOME`、ツール個別では `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$KIMI_CODE_HOME`、`$CLINE_*` などです。
 
 Customは1つのGET残高エンドポイントから数値JSONフィールドをマッピングします。OpenAIまたはAnthropic API互換だけでは不十分です。
+
+</details>
 
 ## ショーケース
 

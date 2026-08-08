@@ -63,9 +63,16 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie（通过 ollama.com/settings 查询 session／每周用量） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="第三方 API" /> | 第三方 API | New API 兼容账号预设方案（包括兼容的 One API 分支）、New API 密钥预设方案与声明式自定义余额端点 | — | ✅ | — |
 
+<details>
+<summary><strong>Custom 余额端点，以及数据不在默认路径时</strong></summary>
+
+<br>
+
 上表为默认路径。Token Monitor 与 Tokscale 遵循相同的环境变量覆盖：`~/.local/share/` 下的路径跟随 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$KIMI_CODE_HOME` 以及 `$CLINE_*` 系列。
 
 Custom 会从一个 GET 余额端点映射数值 JSON 字段；仅兼容 OpenAI 或 Anthropic API 并不足够。
+
+</details>
 
 ## 界面展示
 

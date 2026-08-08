@@ -63,9 +63,16 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie (ollama.com/settings에서 session/weekly 사용량 조회) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="서드파티 API" /> | 서드파티 API | New API 호환 계정 프리셋(호환 One API 포크 포함), New API 키 프리셋, 선언형 사용자 지정 잔액 엔드포인트 | — | ✅ | — |
 
+<details>
+<summary><strong>Custom 잔액 엔드포인트와 기본 경로가 아닌 곳의 데이터</strong></summary>
+
+<br>
+
 위 경로는 기본값입니다. Token Monitor는 Tokscale과 동일한 환경 변수 재정의를 따릅니다 — `~/.local/share/` 아래 경로는 `$XDG_DATA_HOME`, 도구별로는 `$CODEX_HOME`, `$GROK_HOME`, `$HERMES_HOME`, `$KIMI_CODE_HOME`, `$CLINE_*` 계열입니다.
 
 Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매핑합니다. OpenAI 또는 Anthropic API 호환만으로는 충분하지 않습니다.
+
+</details>
 
 ## 쇼케이스
 
