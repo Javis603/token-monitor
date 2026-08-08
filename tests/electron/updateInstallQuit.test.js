@@ -24,6 +24,7 @@ const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
 function harness({ graceMs = 10_000, watchdogEnabled = true, singleUseAttempt = true } = {}) {
   const events = [];
   const timers = [];
+  const handoffs = [];
   const guard = createUpdateInstallQuitGuard({
     graceMs,
     singleUseAttempt,
@@ -31,6 +32,7 @@ function harness({ graceMs = 10_000, watchdogEnabled = true, singleUseAttempt = 
     claim: () => events.push('claim'),
     release: () => events.push('release'),
     onStalled: () => events.push('stalled'),
+    onHandoff: (afterStalledReport) => handoffs.push(afterStalledReport),
     setTimeoutFn: (fn, ms) => {
       const handle = {
         fn,
@@ -44,7 +46,7 @@ function harness({ graceMs = 10_000, watchdogEnabled = true, singleUseAttempt = 
     },
     clearTimeoutFn: (handle) => { if (handle) handle.cleared = true; }
   });
-  return { guard, events, timers, fire: (index = timers.length - 1) => timers[index].fn() };
+  return { guard, events, timers, handoffs, fire: (index = timers.length - 1) => timers[index].fn() };
 }
 
 test('a request claims the flags and arms exactly one grace period', () => {
@@ -143,8 +145,8 @@ test('an error spends the attempt too, so a retry cannot stack a listener', () =
   assert.equal(timers.length, 1);
 });
 
-test('a hand-off still lands on a spent attempt', () => {
-  const { guard, events, fire } = harness();
+test('a hand-off still lands on a spent attempt, and says the report was wrong', () => {
+  const { guard, events, handoffs, fire } = harness();
   guard.request();
   fire();
   // Squirrel finishing after we stopped waiting still has to win: the installer is
@@ -152,6 +154,22 @@ test('a hand-off still lands on a spent attempt', () => {
   assert.equal(guard.noteHandoff(), true);
   assert.equal(guard.phase(), 'handoff');
   assert.deepEqual(events, ['claim', 'release', 'stalled', 'claim']);
+  // The bound was a decision to stop waiting, not proof the installer was dead, so
+  // whoever reported the stall has to be told it was withdrawn.
+  assert.deepEqual(handoffs, [true]);
+});
+
+test('a hand-off within the grace period withdraws nothing', () => {
+  const { guard, handoffs } = harness();
+  guard.request();
+  guard.noteHandoff();
+  assert.deepEqual(handoffs, [false]);
+});
+
+test('a refused hand-off reports nothing at all', () => {
+  const { guard, handoffs } = harness();
+  assert.equal(guard.noteHandoff(), false);
+  assert.deepEqual(handoffs, []);
 });
 
 test('a second error on a spent attempt is not reported again', () => {
@@ -349,6 +367,13 @@ test('an in-flight install is reported as busy and its reason as a kind', () => 
   // And the hand-off window is the state machine's own answer, not a conjunction
   // reassembled downstream.
   assert.match(derive, /installStarting: updateInstallQuit\.isInstalling\(\)/);
+
+  const start = main.indexOf('onHandoff: (afterStalledReport) => {');
+  assert.ok(start >= 0, 'a late hand-off has to be handled');
+  const handler = main.slice(start, main.indexOf('\n  }', start));
+  // Only the late case clears anything; a normal hand-off has no report to withdraw.
+  assert.match(handler, /if \(!afterStalledReport\) return;/);
+  assert.match(handler, /error: null/);
 
   const stalled = main.slice(main.indexOf('onStalled: () => {'));
   assert.match(stalled.slice(0, stalled.indexOf('\n  }')), /errorKind: 'installer-did-not-start'/);

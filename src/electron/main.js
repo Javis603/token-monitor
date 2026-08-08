@@ -4324,6 +4324,13 @@ const updateInstallQuit = createUpdateInstallQuitGuard({
       error: 'Update installer did not start',
       errorKind: 'installer-did-not-start'
     });
+  },
+  onHandoff: (afterStalledReport) => {
+    // The bound is a decision to stop waiting, not proof the installer is dead, so
+    // a hand-off that turns up later withdraws the report rather than leaving the
+    // app advising a restart it is about to perform itself.
+    if (!afterStalledReport) return;
+    setNativeAppUpdateState({ phase: 'downloaded', progress: 100, error: null });
   }
 });
 

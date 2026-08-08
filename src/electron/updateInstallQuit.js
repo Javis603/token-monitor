@@ -33,6 +33,7 @@ function createUpdateInstallQuitGuard({
   claim,
   release,
   onStalled = () => {},
+  onHandoff = () => {},
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout
 } = {}) {
@@ -79,9 +80,14 @@ function createUpdateInstallQuitGuard({
   // ever coming to release it.
   function noteHandoff() {
     if (phase !== 'requested' && phase !== 'spent') return false;
+    // Arriving from `spent` means the grace period ran out of patience and was
+    // wrong: the install was slow, not stalled. Whoever reported that needs to
+    // know, or the app tells the user to restart while it restarts them.
+    const afterStalledReport = phase === 'spent';
     phase = 'handoff';
     clearTimer();
     claim();
+    onHandoff(afterStalledReport);
     return true;
   }
 
