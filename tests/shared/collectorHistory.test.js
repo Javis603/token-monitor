@@ -7,8 +7,23 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
-  localTodayKey, collectHistoryOnce, collectUsageOnce, shouldIncludeHistory
+  localTodayKey, collectHistoryOnce, collectUsageOnce, shouldIncludeHistory, startCollector
 } = require('../../src/shared/collector');
+
+function waitForCondition(predicate, timeoutMs = 2000) {
+  const startedAt = Date.now();
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (predicate()) {
+        clearInterval(timer);
+        resolve();
+      } else if (Date.now() - startedAt >= timeoutMs) {
+        clearInterval(timer);
+        reject(new Error('Timed out waiting for collector update'));
+      }
+    }, 5);
+  });
+}
 
 test('localTodayKey returns a YYYY-MM-DD string for the given date', () => {
   const key = localTodayKey(new Date(2026, 5, 7, 15, 30)); // local June 7 2026
@@ -24,22 +39,84 @@ const SAMPLE_GRAPH = {
   ]
 };
 
+function usageSnapshot(totalTokens) {
+  return {
+    entries: [{
+      client: 'claude',
+      modelId: 'opus',
+      input: totalTokens,
+      cost: 0,
+      messages: 1
+    }]
+  };
+}
+
 test('collectHistoryOnce normalizes injected graph JSON into a History', async () => {
+  const statuses = [];
   const history = await collectHistoryOnce({
-    clients: 'claude', todayKey: '2026-06-07',
+    clients: 'claude', todayKey: '2026-06-07', onHistoryStatus: (status) => statuses.push(status),
     runGraph: async () => SAMPLE_GRAPH
   });
   assert.equal(history.daily.length, 1);
   assert.equal(history.daily[0].tokens, 30);
   assert.equal(history.summary.totalTokens, 30);
+  assert.equal(statuses.length, 1);
+  assert.ok(statuses[0].attemptedAt);
+  assert.ok(statuses[0].successAt);
+  assert.equal(statuses[0].failureCode, null);
+  assert.ok(statuses[0].durationMs >= 0);
 });
 
 test('collectHistoryOnce returns null when the graph run throws', async () => {
+  const statuses = [];
   const history = await collectHistoryOnce({
     clients: 'claude', todayKey: '2026-06-07',
+    onHistoryStatus: (status) => statuses.push(status),
     runGraph: async () => { throw new Error('boom'); }
   });
   assert.equal(history, null);
+  assert.deepEqual(statuses.map(({ failureCode, successAt }) => ({ failureCode, successAt })), [
+    { failureCode: 'history-graph-failed', successAt: null }
+  ]);
+});
+
+test('collector preserves the last successful history timestamp after a failed refresh', async () => {
+  let graphCalls = 0;
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'history-diagnostics',
+    intervalMs: 60 * 60 * 1000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: false,
+    anchorPersistenceEnabled: false,
+    runTokscale: async () => ({ entries: [] }),
+    runGraph: async () => {
+      graphCalls += 1;
+      if (graphCalls === 1) return SAMPLE_GRAPH;
+      throw new Error('history unavailable');
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitForCondition(() => updates.length >= 1);
+    const firstDiagnostics = runtime.getDiagnostics();
+    assert.ok(firstDiagnostics.lastHistorySuccessAt);
+    const previousSuccessAt = firstDiagnostics.lastHistorySuccessAt;
+
+    await runtime.tick('manual', { forceHistory: true });
+
+    const afterFailure = runtime.getDiagnostics();
+    assert.equal(afterFailure.lastHistorySuccessAt, previousSuccessAt);
+    assert.equal(afterFailure.lastHistoryFailureCode, 'history-graph-failed');
+  } finally {
+    runtime.stop();
+  }
 });
 
 test('collectHistoryOnce returns null when there are no clients', async () => {
@@ -101,6 +178,124 @@ test('collectHistoryOnce stores older days locally while capping daily output', 
   assert.deepEqual(history.daily.map((day) => day.date), ['2026-07-17']);
   assert.deepEqual(history.monthly.map((month) => month.month), ['2025-06', '2026-07']);
   assert.equal(history.summary.totalTokens, 125);
+});
+
+test('collectUsageOnce hands the live day total to history across local rollover', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-live-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const common = {
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    deviceId: 'live-handoff',
+    includeHistory: true,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveWriteEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath },
+    projectsEnabled: false,
+    limitsEnabled: false,
+    wslScanEnabled: false,
+    runGraph: async () => ({ contributions: [{ date: '2026-08-05', clients: [
+      { client: 'claude', modelId: 'opus', tokens: { input: 507_800_000 }, cost: 0, messages: 1 }
+    ] }] })
+  };
+  const collect = (now, todayTotal) => collectUsageOnce({
+    ...common,
+    now,
+    runTokscale: async () => usageSnapshot(todayTotal)
+  });
+
+  const beforeRollover = await collect(new Date(2026, 7, 5, 23, 55), 645_957_554);
+  assert.equal(beforeRollover.today.totalTokens, 645_957_554);
+  assert.equal(beforeRollover.history.daily[0].tokens, 645_957_554);
+
+  const afterRollover = await collect(new Date(2026, 7, 6, 0, 5), 11_751_310);
+  const previousDay = afterRollover.history.daily.find((day) => day.date === '2026-08-05');
+  const currentDay = afterRollover.history.daily.find((day) => day.date === '2026-08-06');
+  assert.equal(previousDay.tokens, 645_957_554);
+  assert.equal(currentDay.tokens, 11_751_310);
+});
+
+test('collectUsageOnce uses the live history snapshot while archive ownership is read-only', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-read-only-live-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const result = await collectUsageOnce({
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    deviceId: 'read-only-live-history',
+    now: new Date(2026, 7, 5, 12),
+    includeHistory: true,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveWriteEnabled: false,
+    dailyHistoryArchiveOptions: { path: archivePath },
+    projectsEnabled: false,
+    limitsEnabled: false,
+    wslScanEnabled: false,
+    runTokscale: async () => usageSnapshot(645_957_554),
+    runGraph: async () => ({ contributions: [{ date: '2026-08-05', clients: [
+      { client: 'claude', modelId: 'opus', tokens: { input: 507_800_000 }, cost: 0, messages: 1 }
+    ] }] })
+  });
+
+  assert.equal(result.history.daily[0].tokens, 645_957_554);
+  assert.equal(fs.existsSync(archivePath), false);
+});
+
+test('startCollector retains a transformed watch total until the next history tick', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-live-history-ticks-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const todayKey = localTodayKey();
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    deviceId: 'live-history-ticks',
+    intervalMs: 60 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveWriteEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath },
+    projectsEnabled: false,
+    limitsEnabled: false,
+    wslScanEnabled: false,
+    anchorPersistenceEnabled: false,
+    runTokscale: async () => usageSnapshot(100),
+    runGraph: async () => ({ contributions: [{ date: todayKey, clients: [
+      { client: 'claude', modelId: 'opus', tokens: { input: 90 }, cost: 0, messages: 1 }
+    ] }] }),
+    onUpdate: (summary, reason) => {
+      const visibleTotal = reason === 'watch' ? 300 : 200;
+      const visible = {
+        ...summary,
+        today: { ...summary.today, totalTokens: visibleTotal }
+      };
+      updates.push({ reason, summary: visible });
+      return visible;
+    }
+  });
+
+  try {
+    await waitForCondition(() => updates.length >= 1);
+    await runtime.tick('watch', { todayOnly: true });
+    await runtime.tick('manual', { forceHistory: true });
+
+    const latest = updates.at(-1).summary;
+    assert.equal(latest.history.daily.find((day) => day.date === todayKey).tokens, 300);
+    const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+    assert.equal(
+      Object.values(stored.liveDays[todayKey].observations).reduce((sum, item) => sum + item.tokens, 0),
+      300
+    );
+  } finally {
+    runtime.stop();
+  }
 });
 
 test('collectHistoryOnce falls back to the current graph when archive persistence fails', async () => {

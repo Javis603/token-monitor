@@ -65,6 +65,13 @@ function normalizeDailyHistoryArchive(value) {
     const day = normalizeDay(rawDay, date);
     if (day) normalized.days[day.date] = day;
   }
+  const liveSource = value?.liveDays && typeof value.liveDays === 'object' ? value.liveDays : {};
+  const liveDays = {};
+  for (const [date, rawDay] of Object.entries(liveSource)) {
+    const day = normalizeDay(rawDay, date);
+    if (day) liveDays[day.date] = day;
+  }
+  if (Object.keys(liveDays).length > 0) normalized.liveDays = liveDays;
   return normalized;
 }
 
@@ -151,6 +158,129 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   return archive;
 }
 
+function periodLiveDay(period, date) {
+  if (!period || typeof period !== 'object' || !DAY_KEY_RE.test(date)) return null;
+  const observations = new Map();
+  const addObservation = (client, modelId, tokens, cost) => {
+    const observation = {
+      client,
+      modelId,
+      tokens: Math.max(0, Math.round(num(tokens))),
+      cost: Math.max(0, num(cost)),
+      messages: 0
+    };
+    const key = observationKey(observation);
+    const previous = observations.get(key);
+    if (!previous) {
+      observations.set(key, observation);
+      return;
+    }
+    previous.tokens += observation.tokens;
+    previous.cost += observation.cost;
+  };
+  const clientModels = period.clientModels && typeof period.clientModels === 'object'
+    ? period.clientModels
+    : {};
+  const clientModelCosts = period.clientModelCosts && typeof period.clientModelCosts === 'object'
+    ? period.clientModelCosts
+    : {};
+  const clients = period.clients && typeof period.clients === 'object' ? period.clients : {};
+  const clientCosts = period.clientCosts && typeof period.clientCosts === 'object' ? period.clientCosts : {};
+  const clientIds = new Set([...Object.keys(clientModels), ...Object.keys(clients), ...Object.keys(clientCosts)]);
+
+  for (const client of clientIds) {
+    const models = clientModels[client] && typeof clientModels[client] === 'object'
+      ? clientModels[client]
+      : {};
+    const modelIds = Object.keys(models);
+    let modeledTokens = 0;
+    let modeledCost = 0;
+    for (const modelId of modelIds) {
+      const modelTokens = Math.max(0, Math.round(num(models[modelId])));
+      const modelCost = Math.max(0, num(clientModelCosts[client]?.[modelId]));
+      addObservation(client, modelId, modelTokens, modelCost);
+      modeledTokens += modelTokens;
+      modeledCost += modelCost;
+    }
+    const clientTokens = Math.max(0, Math.round(num(clients[client])));
+    const clientCost = Math.max(0, num(clientCosts[client]));
+    const remainderTokens = Math.max(0, clientTokens - modeledTokens);
+    const remainderCost = Math.max(0, clientCost - modeledCost);
+    if (modelIds.length === 0 || remainderTokens > 0 || remainderCost > 0) {
+      addObservation(client, 'unknown', remainderTokens, remainderCost);
+    }
+  }
+
+  const totalTokens = Math.max(0, Math.round(num(period.totalTokens)));
+  const totalCost = Math.max(0, num(period.costUsd));
+  const observed = [...observations.values()];
+  const observedTokens = observed.reduce((sum, observation) => sum + observation.tokens, 0);
+  const observedCost = observed.reduce((sum, observation) => sum + observation.cost, 0);
+  if (totalTokens > observedTokens || totalCost > observedCost) {
+    addObservation(
+      'unknown',
+      'unknown',
+      Math.max(0, totalTokens - observedTokens),
+      Math.max(0, totalCost - observedCost)
+    );
+  }
+
+  const day = normalizeDay({ date, activeTimeMs: 0, observations: [...observations.values()] }, date);
+  return day && Object.keys(day.observations).length > 0 ? day : null;
+}
+
+function dayTokens(day) {
+  return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.tokens), 0);
+}
+
+function dayCost(day) {
+  return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.cost), 0);
+}
+
+function liveDayIsGreater(incoming, previous) {
+  const incomingTokens = dayTokens(incoming);
+  const previousTokens = dayTokens(previous);
+  if (incomingTokens !== previousTokens) return incomingTokens > previousTokens;
+  return dayCost(incoming) > dayCost(previous);
+}
+
+function mergeLiveDayMetadata(liveDay, previousDay) {
+  if (!previousDay) return liveDay;
+  const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
+    const previous = previousDay.observations[key];
+    if (!previous) return [key, observation];
+    return [key, {
+      ...observation,
+      messages: Math.max(observation.messages, previous.messages),
+      ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
+        ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
+        : {})
+    }];
+  }));
+  return {
+    ...liveDay,
+    activeTimeMs: Math.max(liveDay.activeTimeMs, previousDay.activeTimeMs),
+    observations
+  };
+}
+
+function captureLiveDailyHistory(existingArchive, period, options = {}) {
+  const archive = normalizeDailyHistoryArchive(existingArchive);
+  const date = String(options.todayKey || '').slice(0, 10);
+  if (DAY_KEY_RE.test(date) && archive.liveDays) {
+    for (const liveDate of Object.keys(archive.liveDays)) {
+      if (liveDate > date) delete archive.liveDays[liveDate];
+    }
+  }
+  const incoming = periodLiveDay(period, date);
+  if (!incoming) return archive;
+  const previous = archive.liveDays?.[date];
+  if (!previous || liveDayIsGreater(incoming, previous)) {
+    archive.liveDays = { ...(archive.liveDays || {}), [date]: incoming };
+  }
+  return archive;
+}
+
 function graphTimeMetrics(graphs, activeTimeMs) {
   const source = graphsArray(graphs)
     .map((graph) => graph.timeMetrics ?? graph.time_metrics)
@@ -174,6 +304,13 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   for (const [date, day] of Object.entries(normalizedArchive.days)) {
     if (hasTodayKey && date > todayKey) continue;
     currentDays.set(date, day);
+  }
+  for (const [date, liveDay] of Object.entries(normalizedArchive.liveDays || {})) {
+    if (hasTodayKey && date > todayKey) continue;
+    const previous = currentDays.get(date);
+    if (!previous || liveDayIsGreater(liveDay, previous)) {
+      currentDays.set(date, mergeLiveDayMetadata(liveDay, previous));
+    }
   }
 
   const contributions = [...currentDays.values()]
@@ -228,19 +365,64 @@ function clearDailyHistoryArchive(options = {}) {
   }
 }
 
+function mergeLiveDaysIntoArchive(existingArchive, liveDays) {
+  const archive = normalizeDailyHistoryArchive(existingArchive);
+  const incoming = normalizeDailyHistoryArchive({ liveDays }).liveDays || {};
+  for (const [date, liveDay] of Object.entries(incoming)) {
+    const previous = archive.liveDays?.[date];
+    if (!previous || liveDayIsGreater(liveDay, previous)) {
+      archive.liveDays = { ...(archive.liveDays || {}), [date]: liveDay };
+    }
+  }
+  return archive;
+}
+
+function archiveWriteEnabled(options = {}) {
+  return typeof options.writeEnabled === 'function'
+    ? options.writeEnabled() !== false
+    : options.writeEnabled !== false;
+}
+
 function retainDailyHistory(graphs, options = {}) {
   const previous = readDailyHistoryArchive(options);
-  const next = captureDailyHistoryArchive(previous, graphs, options);
+  const capture = (archive) => captureDailyHistoryArchive(
+    mergeLiveDaysIntoArchive(archive, options.liveDays),
+    graphs,
+    options
+  );
+  let next = capture(previous);
   // Ownership can change while a graph scan is running (for example, a
   // headless agent starts after Electron's collector tick begins). Resolve a
   // lazy guard immediately before the write instead of freezing it at startup.
-  const writeEnabled = typeof options.writeEnabled === 'function'
-    ? options.writeEnabled() !== false
-    : options.writeEnabled !== false;
-  if (writeEnabled && !isDeepStrictEqual(previous, next)) {
-    writeDailyHistoryArchive(next, options);
+  if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
+    // The graph scan can take long enough for the other collector to update the
+    // shared archive. Rebase on the latest file immediately before writing so
+    // this scan cannot put that newer observation back on disk.
+    const latest = readDailyHistoryArchive(options);
+    next = capture(latest);
+    if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, next)) {
+      writeDailyHistoryArchive(next, options);
+    }
   }
   return graphFromDailyHistoryArchive(graphs, next, options);
+}
+
+function retainLiveDailyHistory(period, options = {}) {
+  const previous = readDailyHistoryArchive(options);
+  const capture = (archive) => captureLiveDailyHistory(
+    mergeLiveDaysIntoArchive(archive, options.liveDays),
+    period,
+    options
+  );
+  let next = capture(previous);
+  if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
+    const latest = readDailyHistoryArchive(options);
+    next = capture(latest);
+    if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, next)) {
+      writeDailyHistoryArchive(next, options);
+    }
+  }
+  return next;
 }
 
 module.exports = {
@@ -248,10 +430,12 @@ module.exports = {
   clearDailyHistoryArchive,
   dailyHistoryArchivePath,
   graphFromDailyHistoryArchive,
+  captureLiveDailyHistory,
   normalizeDailyHistoryArchive,
   observationKey,
   readDailyHistoryArchive,
   retainDailyHistory,
+  retainLiveDailyHistory,
   shouldReplaceObservation,
   writeDailyHistoryArchive
 };

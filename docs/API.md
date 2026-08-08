@@ -239,6 +239,8 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
         },
         "collection": {
           "state": "failed",
+          "syncFailureStage": "timeout",
+          "syncDetailCode": "network-timeout",
           "lastAttemptAt": "2026-08-04T09:12:00.000Z",
           "lastSuccessAt": "2026-08-04T08:40:00.000Z"
         },
@@ -258,6 +260,8 @@ Every tracked client sends the same fixed core — `source.state`, `source.detec
 A client installed only inside a running WSL distro has no host directory, and its usage is merged into the same periods before either derivation runs. Its WSL marker is therefore a source that exists, reported as the `wsl-home` check — without it the same snapshot would count the client's tokens and call its source missing.
 
 `source.checks[].id` is a stable identifier for a *kind* of source root, never a filesystem path: one id can stand for several platform variants (a VS Code workspace-storage root has one per platform), and an absolute path contains the user's home directory. Ids outside the recognized set are dropped on ingest. A failed self-sync likewise reports a stable code in `diagnostics` (`sync-failed`, `sync-timeout`, `sync-spawn-failed`, `sync-exit-error`) and never the subprocess's stderr. The other diagnostic codes are `source-missing`, `no-usage-observed`, and `wsl-detected-no-data`; the last one states that a WSL marker was found and the scan returned nothing, which can equally mean the tool is installed in that distro and unused.
+
+For a failed self-sync, `collection.syncFailureStage` is an optional bounded stage: `spawn`, `timeout`, `process-exit`, or `unknown`. `collection.syncDetailCode` is a conservative classification of the failure: `language-server-not-found`, `rpc-failed`, `permission-denied`, `cache-write-failed`, `invalid-response`, `network-timeout`, `network-failed`, `authentication-failed`, or `unknown`. A non-negative `collection.syncExitCode` is included only when the subprocess reported a numeric exit code. These fields add process-level evidence without exposing stderr, paths, or provider output; an exit code is not interpreted as a universal root cause.
 
 `diagnostics` entries are objects carrying a `code`, not bare strings, even though `code` is the only field today: the extension point belongs inside the entry, matching how LSP, ESLint, SARIF, and RFC 9457 all shape a diagnostic. Adding a field to the object stays backward compatible; turning `string[]` into `object[]` would not. Severity is deliberately **not** on the wire — the same code means different things on different clients, so it is a renderer decision rather than something a collector can know. Observation time is likewise recorded once, as `clientHealth.observedAt`, rather than per diagnostic: every entry comes from the same scan. It is its own field because a limits-only ingest carries health forward while the record's `updatedAt` moves on, so `updatedAt` cannot be read as the time the diagnosis was made.
 

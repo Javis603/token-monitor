@@ -87,6 +87,48 @@ test('parseZaiUsage treats a single 5-hour token limit as the old-plan session w
   assert.equal(usage.windows.find((window) => window.kind === 'weekly'), undefined);
 });
 
+test('parseZaiUsage recognizes CREDIT_LIMIT entries as token windows', () => {
+  const usage = parseZaiUsage({
+    data: {
+      level: 'lite',
+      limits: [
+        { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 620, remaining: 1379, percentage: 31, nextResetTime: 1786115117702 },
+        { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 10000, currentValue: 1248, remaining: 8751, percentage: 12, nextResetTime: 1786668792998 }
+      ]
+    }
+  }, null);
+
+  assert.equal(usage.plan, 'Lite');
+  assert.equal(usage.windows.length, 2);
+  assert.equal(usage.windows[0].kind, 'session');
+  assert.equal(usage.windows[0].label, '5-hour');
+  assert.equal(usage.windows[0].windowMinutes, 5 * 60);
+  assert.equal(Math.round(usage.windows[0].usedPercent), 31);
+  assert.equal(usage.windows[1].kind, 'weekly');
+  assert.equal(usage.windows[1].label, 'Weekly');
+  assert.equal(usage.windows[1].windowMinutes, 7 * 24 * 60);
+  assert.equal(Math.round(usage.windows[1].usedPercent), 12);
+});
+
+test('parseZaiUsage retains a legacy 1-minute TOKENS_LIMIT entry as a token window', () => {
+  // Pins the existing routing: a 1-minute TOKENS_LIMIT stays a token window.
+  // Recognizing CREDIT_LIMIT must not reroute or drop it. (The MCP marker is
+  // TIME_LIMIT with unit=5/number=1 — a different branch.)
+  const usage = parseZaiUsage({
+    data: {
+      limits: [
+        { type: 'TOKENS_LIMIT', unit: 5, number: 1, percentage: 12, nextResetTime: '2026-07-07T18:00:00Z' }
+      ]
+    }
+  }, null);
+
+  assert.equal(usage.windows.length, 1);
+  assert.equal(usage.windows[0].kind, 'session');
+  assert.equal(usage.windows[0].label, '5-hour');
+  assert.equal(usage.windows[0].usedPercent, 12);
+  assert.equal(usage.windows[0].windowMinutes, 1);
+});
+
 test('parseZaiUsage reads official plan labels from subscription or quota payloads', () => {
   assert.equal(
     parseZaiUsage({ data: { level: 'lite', limits: [] } }, { data: [{ planName: 'Lite' }] }).plan,

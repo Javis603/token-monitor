@@ -5,10 +5,69 @@ const test = require('node:test');
 
 const {
   classifySettingsChange,
+  diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
+  normalizeAllTimeSince,
   usageConfigFromSettings
 } = require('../../src/electron/runtimeConfig');
+
+test('all-time dates are normalized before entering the usage runtime', () => {
+  assert.equal(normalizeAllTimeSince('2026-02-28'), '2026-02-28');
+  assert.equal(normalizeAllTimeSince('2026-02-30'), '2024-01-01');
+  assert.equal(normalizeAllTimeSince('not-a-date'), '2024-01-01');
+});
+
+test('diagnostic configuration projects effective normalized values without credentials', () => {
+  const configuration = diagnosticConfigurationFromSettings({
+    allTimeSince: '2026-02-30',
+    historyEnabled: false,
+    historyIntervalMs: 'invalid',
+    projectsEnabled: false,
+    wslScanEnabled: false,
+    syncUploadIntervalMs: 'invalid',
+    limitsRefreshMs: 'invalid',
+    claudeWebCookie: 'sessionKey=secret',
+    deepseekApiKey: 'deepseek-secret',
+    hubHostSecret: 'hub-secret'
+  }, {
+    usage: { historyIntervalMs: 'invalid' },
+    limits: { env: {}, defaultLimitProviders: 'kimi,zai' },
+    syncUploadIntervalMs: 20 * 60 * 1000
+  });
+
+  assert.deepEqual(configuration, {
+    configurationSource: 'effective-normalized',
+    allTimeSince: '2024-01-01',
+    historyEnabled: false,
+    historyIntervalMs: 15 * 60 * 1000,
+    projectsEnabled: false,
+    wslScanEnabled: false,
+    syncUploadIntervalMs: 20 * 60 * 1000,
+    limitsRefreshMs: 5 * 60 * 1000
+  });
+  assert.equal(JSON.stringify(configuration).includes('secret'), false);
+});
+
+test('diagnostic configuration preserves a custom all-time date and false flags', () => {
+  const configuration = diagnosticConfigurationFromSettings({
+    allTimeSince: '2025-06-01',
+    historyEnabled: false,
+    historyIntervalMs: 60 * 60 * 1000,
+    projectsEnabled: false,
+    wslScanEnabled: false,
+    syncUploadIntervalMs: 0,
+    limitsRefreshMs: 60 * 1000
+  }, { limits: { env: {}, defaultLimitProviders: 'kimi' } });
+
+  assert.equal(configuration.allTimeSince, '2025-06-01');
+  assert.equal(configuration.historyEnabled, false);
+  assert.equal(configuration.projectsEnabled, false);
+  assert.equal(configuration.wslScanEnabled, false);
+  assert.equal(configuration.historyIntervalMs, 60 * 60 * 1000);
+  assert.equal(configuration.syncUploadIntervalMs, 0);
+  assert.equal(configuration.limitsRefreshMs, 60 * 1000);
+});
 
 test('runtime config keeps usage, limits credentials, and envelope in separate inputs', () => {
   const settings = {

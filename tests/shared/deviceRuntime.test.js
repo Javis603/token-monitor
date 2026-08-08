@@ -6,16 +6,19 @@ const test = require('node:test');
 const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
 
 function harness(options = {}) {
+  const { limitsDeps: injectedLimitsDeps = {}, ...runtimeOptions } = options;
   let usageOptions;
   let limitsDeps;
   const calls = [];
   const usageHandle = {
+    getDiagnostics: () => ({ state: 'idle', lastTickSuccessAt: 'usage-time' }),
     refreshClient: (...args) => { calls.push(['refreshClient', ...args]); return 'client'; },
     stop: () => calls.push(['usageStop']),
     tick: (...args) => { calls.push(['tick', ...args]); return 'tick'; }
   };
   const limitsHandle = {
     clear: (...args) => { calls.push(['clear', ...args]); return 'clear'; },
+    getDiagnostics: () => ({ enabled: true, providers: [] }),
     reconfigure: (...args) => { calls.push(['reconfigure', ...args]); return 'reconfigure'; },
     refresh: (...args) => { calls.push(['refresh', ...args]); return 'refresh'; },
     stop: () => calls.push(['limitsStop'])
@@ -24,7 +27,7 @@ function harness(options = {}) {
   const runtime = createDeviceRuntime({
     envelope: { deviceId: 'device-1', hostname: 'host' },
     onRecord: (record, meta) => records.push({ record, meta }),
-    ...options
+    ...runtimeOptions
   }, {
     createUsageRuntime(next) {
       usageOptions = next;
@@ -33,7 +36,8 @@ function harness(options = {}) {
     createLimitsRuntime(_config, nextDeps) {
       limitsDeps = nextDeps;
       return limitsHandle;
-    }
+    },
+    limitsDeps: injectedLimitsDeps
   });
   return { calls, limitsDeps, records, runtime, usageOptions };
 }
@@ -75,10 +79,11 @@ test('usage transforms run only for usage events, not limits-only publishes', ()
       return { ...summary, transformed: true };
     }
   });
-  usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 4 } }, 'startup');
+  const visible = usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 4 } }, 'startup');
   limitsDeps.onUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
 
   assert.deepEqual(transformed, [{ reason: 'startup', preview: false }]);
+  assert.equal(visible.transformed, true);
   assert.equal(records.length, 2);
   assert.equal(records[1].record.transformed, true);
 });
@@ -122,6 +127,37 @@ test('stop invalidates both producer callbacks before stopping handles', () => {
   assert.deepEqual(calls, [['usageStop'], ['limitsStop']]);
 });
 
+test('stop suppresses delegated diagnostic callbacks from late producer events', () => {
+  const usageEvents = [];
+  const limitsEvents = [];
+  const forwardedEvents = [];
+  const { limitsDeps, runtime, usageOptions } = harness({
+    usageOptions: {
+      onDiagnosticEvent: (event) => usageEvents.push(event)
+    },
+    limitsDeps: {
+      onEvent: (event) => limitsEvents.push(event)
+    },
+    onDiagnosticEvent: (event) => forwardedEvents.push(event)
+  });
+
+  const usageEvent = { subsystem: 'collector', code: 'before-stop' };
+  const limitsEvent = { type: 'retry-scheduled', provider: 'kimi' };
+  usageOptions.onDiagnosticEvent(usageEvent);
+  limitsDeps.onEvent(limitsEvent);
+  runtime.stop();
+
+  usageOptions.onDiagnosticEvent({ subsystem: 'collector', code: 'late' });
+  limitsDeps.onEvent({ type: 'retry-scheduled', provider: 'zai' });
+
+  assert.deepEqual(usageEvents, [usageEvent]);
+  assert.deepEqual(limitsEvents, [limitsEvent]);
+  assert.deepEqual(forwardedEvents, [
+    usageEvent,
+    { subsystem: 'limits', code: 'limits-retry-scheduled', provider: 'kimi' }
+  ]);
+});
+
 test('runtime control methods delegate to the precise producer', () => {
   const { calls, runtime } = harness();
   assert.equal(runtime.tick('manual', { forceHistory: true }), 'tick');
@@ -137,4 +173,27 @@ test('runtime control methods delegate to the precise producer', () => {
     ['clear', { provider: 'kimi' }, 'logout']
   ]);
   runtime.stop();
+});
+
+test('runtime diagnostics proxy keeps usage and limits ownership separate', () => {
+  const { runtime } = harness();
+  assert.deepEqual(runtime.getDiagnostics(), {
+    usage: { state: 'idle', lastTickSuccessAt: 'usage-time' },
+    limits: { enabled: true, providers: [] }
+  });
+  runtime.stop();
+});
+
+test('runtime control wrappers do not delegate after stop', async () => {
+  const { calls, runtime } = harness();
+  runtime.stop();
+
+  assert.equal(await runtime.tick('late'), false);
+  assert.equal(await runtime.refreshClient('cursor'), false);
+  assert.equal(await runtime.refreshLimits({ provider: 'kimi' }, 'late'), false);
+  assert.equal(runtime.reconfigureLimits({ limitsRefreshMs: 60000 }), null);
+  assert.equal(runtime.clearLimits({ provider: 'kimi' }, 'late'), null);
+  await runtime.flush();
+
+  assert.deepEqual(calls, [['usageStop'], ['limitsStop']]);
 });
