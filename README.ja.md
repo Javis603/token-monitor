@@ -64,7 +64,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="サードパーティAPI" /> | サードパーティAPI | New API互換アカウントプリセット（互換性のあるOne APIフォークを含む）、New APIキープリセット、宣言型カスタム残高エンドポイント | — | ✅ | — |
 
 <details>
-<summary><strong>Custom 残高エンドポイントと、デフォルト以外の場所にあるデータ</strong></summary>
+<summary><strong>Custom 残高エンドポイントと、環境変数で変更したデータパス</strong></summary>
 
 <br>
 

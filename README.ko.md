@@ -64,7 +64,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="서드파티 API" /> | 서드파티 API | New API 호환 계정 프리셋(호환 One API 포크 포함), New API 키 프리셋, 선언형 사용자 지정 잔액 엔드포인트 | — | ✅ | — |
 
 <details>
-<summary><strong>Custom 잔액 엔드포인트와 기본 경로가 아닌 곳의 데이터</strong></summary>
+<summary><strong>Custom 잔액 엔드포인트와 환경 변수로 지정한 데이터 경로</strong></summary>
 
 <br>
 

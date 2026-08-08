@@ -64,7 +64,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="Third-party APIs" /> | Third-party APIs | New API-compatible account preset (including compatible One API forks), New API API-key preset, and a declarative Custom balance endpoint | — | ✅ | — |
 
 <details>
-<summary><strong>Custom balance endpoints, and data that lives outside the default paths</strong></summary>
+<summary><strong>Custom balance endpoints, and data paths overridden by environment variables</strong></summary>
 
 <br>
 

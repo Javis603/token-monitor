@@ -64,7 +64,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="第三方 API" /> | 第三方 API | New API 相容帳戶預設方案（包括相容的 One API 分支）、New API 金鑰預設方案與宣告式自訂餘額端點 | — | ✅ | — |
 
 <details>
-<summary><strong>Custom 餘額端點，以及資料不在預設路徑時</strong></summary>
+<summary><strong>Custom 餘額端點，以及用環境變數覆寫的資料路徑</strong></summary>
 
 <br>
 
