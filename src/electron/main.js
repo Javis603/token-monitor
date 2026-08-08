@@ -178,6 +178,7 @@ const {
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
+  updateInstallQuitGraceMs,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
@@ -4303,7 +4304,6 @@ let skipForcedQuit = false;
 // the session. Every way out of that call releases them again.
 let updateInstallQuitPending = false;
 let updateInstallQuitTimer = null;
-const UPDATE_INSTALL_QUIT_GRACE_MS = 10 * 1000;
 
 function releaseUpdateInstallQuit() {
   if (!updateInstallQuitPending) return;
@@ -4803,10 +4803,16 @@ function installDownloadedAppUpdate() {
   quitRequested = true;
   skipForcedQuit = true;
   if (updateInstallQuitTimer) clearTimeout(updateInstallQuitTimer);
-  // Nothing reports a failed handoff, so still being here after the grace period
-  // is the signal. unref'd: the fallback must never be the reason we stay up.
-  updateInstallQuitTimer = setTimeout(releaseUpdateInstallQuit, UPDATE_INSTALL_QUIT_GRACE_MS);
-  updateInstallQuitTimer.unref?.();
+  // On the platforms whose install path fails silently, still being here after the
+  // grace period is the only signal there is. Where the hand-off is unbounded
+  // instead, updateInstallQuitGraceMs returns null and we wait for the error
+  // event rather than race the installer. unref'd either way: the fallback must
+  // never be the reason we stay up.
+  const graceMs = updateInstallQuitGraceMs();
+  if (graceMs !== null) {
+    updateInstallQuitTimer = setTimeout(releaseUpdateInstallQuit, graceMs);
+    updateInstallQuitTimer.unref?.();
+  }
   try {
     // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
     // (per-user install needs no elevation); isForceRunAfter relaunches the app.

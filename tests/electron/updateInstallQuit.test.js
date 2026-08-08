@@ -14,6 +14,26 @@ const test = require('node:test');
 const ROOT = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
 
+const { updateInstallQuitGraceMs } = require('../../src/electron/runtimeConfig');
+
+test('the grace period exists only where a failed hand-off is silent', () => {
+  // BaseUpdater runs install() synchronously and quits on the next tick when it
+  // worked; when it did not it resets its own state and emits nothing, so the
+  // timer is the only recovery and success never approaches it.
+  for (const platform of ['win32', 'linux']) {
+    const graceMs = updateInstallQuitGraceMs(platform);
+    assert.ok(graceMs > 0, `${platform} needs a fallback`);
+    assert.ok(graceMs >= 5_000, `${platform} must not race a next-tick quit`);
+  }
+
+  // MacUpdater frequently returns from quitAndInstall() without quitting: it
+  // waits on a native update-downloaded that has no deadline, and the real quit
+  // follows whenever that lands. A timer would clear the flags mid-hand-off and
+  // let the forced exit pre-empt the installer. Native errors are forwarded, so
+  // the failure path stays covered without one.
+  assert.equal(updateInstallQuitGraceMs('darwin'), null);
+});
+
 function functionSource(signature) {
   const start = main.indexOf(signature);
   assert.ok(start >= 0, `${signature} not found`);
@@ -31,8 +51,11 @@ test('the install hand-off claims the quit flags through the release helper', ()
   const guarded = /try \{[\s\S]*?autoUpdater\.quitAndInstall\([\s\S]*?\} catch \(error\) \{[\s\S]*?releaseUpdateInstallQuit\(\);/.exec(install);
   assert.ok(guarded, 'quitAndInstall must release the flags when it throws');
 
-  // Nothing reports a failed hand-off, so still being alive later is the signal.
-  assert.match(install, /setTimeout\(releaseUpdateInstallQuit, UPDATE_INSTALL_QUIT_GRACE_MS\)/);
+  // Where a failed hand-off is silent, still being alive later is the signal, and
+  // where it is unbounded the policy returns null so no timer is armed at all.
+  assert.match(install, /const graceMs = updateInstallQuitGraceMs\(\);/);
+  assert.match(install, /if \(graceMs !== null\) \{/);
+  assert.match(install, /setTimeout\(releaseUpdateInstallQuit, graceMs\)/);
   // The fallback must never be the reason the process stays up.
   assert.match(install, /updateInstallQuitTimer\.unref\?\.\(\)/);
 });
