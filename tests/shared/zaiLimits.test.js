@@ -111,8 +111,9 @@ test('parseZaiUsage recognizes CREDIT_LIMIT entries as token windows', () => {
 });
 
 test('parseZaiUsage retains a legacy 1-minute TOKENS_LIMIT entry as a token window', () => {
-  // The old format could carry the MCP marker as a TOKENS_LIMIT with
-  // unit=5/number=1 (1-minute); it must stay a token window, not be dropped.
+  // Pins the existing routing: a 1-minute TOKENS_LIMIT stays a token window.
+  // Recognizing CREDIT_LIMIT must not reroute or drop it. (The MCP marker is
+  // TIME_LIMIT with unit=5/number=1 — a different branch.)
   const usage = parseZaiUsage({
     data: {
       limits: [
