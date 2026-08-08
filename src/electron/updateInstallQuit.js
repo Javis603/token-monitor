@@ -10,26 +10,25 @@
 // the hand-off never happens, that leaves an app nothing can quit.
 //
 // Two different things are outstanding from that moment, and they do not end
-// together. The claim on the quit flags is ours and can be given back on a timer.
-// The updater's own request is not ours: on macOS Squirrel may still be working
-// long after we stop waiting, and electron-updater offers no way to cancel it or
-// to detach the listener it added. So the states are:
+// together. The claim on the quit flags is ours, and a timer can give it back.
+// The updater's own request is not ours to end at all.
 //
 //   idle       nothing outstanding
 //   requested  quitAndInstall() called, nothing heard since
 //   handoff    before-quit-for-update arrived; the installer owns the exit
-//   waiting    the grace period expired; the quit flags are back, but the
-//              updater's request may still be live, so no new one is allowed
+//   spent      the attempt ended without a hand-off, on a platform that cannot
+//              safely make another; the quit flags are back, requests are not
 //
-// `waiting` is terminal for the process unless the updater reports an error,
-// which is the one signal that its request really ended. Anything else would let
-// a second quitAndInstall() stack another MacUpdater listener on top of the first,
-// and both would re-enter the install when Squirrel finally answers. On Windows
-// and Linux a retry after expiry would in fact be safe, since BaseUpdater resets
-// itself when install() returns false, but the stalled report already blocks the
-// button there, so the distinction buys nothing and costs a branch.
+// `spent` exists because on macOS the *call* is what cannot be repeated, whatever
+// its outcome: MacUpdater attaches an anonymous nativeUpdater 'update-downloaded'
+// listener before starting Squirrel and nothing ever detaches it, so a second
+// quitAndInstall() leaves two listeners that each re-enter the install when
+// Squirrel finally answers. That is why a timeout and an error land in the same
+// place. Where the request leaves nothing behind, both land in `idle` instead and
+// the user may try again. See updateInstallQuitPolicy for which is which.
 function createUpdateInstallQuitGuard({
   graceMs,
+  singleUseAttempt = false,
   watchdogEnabled = () => true,
   claim,
   release,
@@ -46,9 +45,9 @@ function createUpdateInstallQuitGuard({
     timer = null;
   }
 
-  // Refused unless nothing is outstanding, and not only to avoid redundant work:
-  // MacUpdater adds a nativeUpdater 'update-downloaded' listener per
-  // quitAndInstall() and never removes it.
+  // Where the attempt ends when it did not hand off.
+  const endedPhase = () => (singleUseAttempt ? 'spent' : 'idle');
+
   function request() {
     if (phase !== 'idle') return false;
     phase = 'requested';
@@ -57,14 +56,14 @@ function createUpdateInstallQuitGuard({
     // Armed only when the hand-off can actually be observed. Without that
     // listener an expiry would hand the flags back with nothing able to take them
     // again, and a late hand-off would then race a forced exit. Holding the claim
-    // for the session is the lesser failure, and is what shipped before this.
+    // for the session is the lesser failure.
     if (!watchdogEnabled()) return true;
     timer = setTimeoutFn(() => {
       timer = null;
       // The hand-off cancels this timer, so reaching it in any other phase means
       // the claim it was armed for is already gone.
       if (phase !== 'requested') return;
-      phase = 'waiting';
+      phase = endedPhase();
       release();
       onStalled();
     }, graceMs);
@@ -73,24 +72,26 @@ function createUpdateInstallQuitGuard({
     return true;
   }
 
-  // Re-claims instead of assuming the claim survived: the hand-off can arrive
-  // after the grace period already gave the flags back.
+  // Re-claims rather than assuming the claim survived, because the hand-off can
+  // arrive after the grace period already gave the flags back. Refused from
+  // `idle`, where no install of ours is running: honouring a stray event there
+  // would stand the forced exit down for the rest of the session with nothing
+  // ever coming to release it.
   function noteHandoff() {
+    if (phase !== 'requested' && phase !== 'spent') return false;
     phase = 'handoff';
     clearTimer();
     claim();
+    return true;
   }
 
-  // A terminal failure, from a synchronous throw or an updater error. This is the
-  // only thing that ends `waiting`, because it is the only evidence that the
-  // updater's own request is over rather than merely slow. Releasing from
-  // `handoff` too: an error after the hand-off means the installer reported
-  // failure rather than restarting us, so the app has to be quittable again.
-  // Reports whether anything was outstanding, which is what tells an updater error
-  // that belongs to an install from one that belongs to a check.
+  // A terminal failure, from a synchronous throw or an updater error. Reports
+  // whether it ended something that was still outstanding, which is what tells an
+  // updater error belonging to an install from one belonging to a check, and keeps
+  // an already-reported stall from being reported twice.
   function abort() {
-    if (phase === 'idle') return false;
-    phase = 'idle';
+    if (phase !== 'requested' && phase !== 'handoff') return false;
+    phase = endedPhase();
     clearTimer();
     release();
     return true;
@@ -105,4 +106,18 @@ function createUpdateInstallQuitGuard({
   };
 }
 
-module.exports = { createUpdateInstallQuitGuard };
+// Registration has to be verified rather than merely attempted. Optional chaining
+// over a missing emitter no-ops in silence, and a watchdog armed on that lie would
+// release the quit flags with nothing able to reclaim them on a late hand-off.
+// Returns whether a listener is genuinely attached.
+function observeUpdateInstallHandoff(emitter, onHandoff) {
+  if (!emitter || typeof emitter.on !== 'function') return false;
+  try {
+    emitter.on('before-quit-for-update', onHandoff);
+  } catch (_) {
+    return false;
+  }
+  return true;
+}
+
+module.exports = { createUpdateInstallQuitGuard, observeUpdateInstallHandoff };

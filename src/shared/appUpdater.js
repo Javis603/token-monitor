@@ -61,8 +61,19 @@ function appUpdateInstallSupport({
 // localhost and quick; the validation and staging are not. Seconds to tens of
 // seconds is normal, so the bound is minutes. At that distance expiry does mean
 // something has genuinely stalled, which is why it is reported on every platform.
-function updateInstallQuitGraceMs(platform = process.platform) {
-  return platform === 'darwin' ? 5 * 60 * 1000 : 10 * 1000;
+//
+// singleUseAttempt is the other half, and it is a property of the call rather
+// than of any outcome. MacUpdater.quitAndInstall() attaches an anonymous
+// nativeUpdater 'update-downloaded' listener before it starts Squirrel, and
+// nothing ever detaches it: not an error, which only warns and re-emits, and not
+// a timeout. So on macOS the first call is the only one this process may safely
+// make, however it ends. BaseUpdater instead resets quitAndInstallCalled whenever
+// install() returns false or throws, leaving nothing behind, so Windows and Linux
+// can retry a failed attempt.
+function updateInstallQuitPolicy(platform = process.platform) {
+  return platform === 'darwin'
+    ? { graceMs: 5 * 60 * 1000, singleUseAttempt: true }
+    : { graceMs: 10 * 1000, singleUseAttempt: false };
 }
 
 function parseTag(tag) {
@@ -595,7 +606,7 @@ async function checkLatestRelease(currentVersion) {
 
 module.exports = {
   appUpdateInstallSupport,
-  updateInstallQuitGraceMs,
+  updateInstallQuitPolicy,
   parseTag,
   parseLatestReleasePayload,
   latestFromUpdaterInfo,

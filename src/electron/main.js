@@ -109,7 +109,7 @@ const {
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck,
-  updateInstallQuitGraceMs
+  updateInstallQuitPolicy
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
@@ -171,7 +171,7 @@ const {
   trayToggleAction
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
-const { createUpdateInstallQuitGuard } = require('./updateInstallQuit');
+const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
@@ -4308,7 +4308,7 @@ let skipForcedQuit = false;
 let updateHandoffObserved = false;
 
 const updateInstallQuit = createUpdateInstallQuitGuard({
-  graceMs: updateInstallQuitGraceMs(),
+  ...updateInstallQuitPolicy(),
   watchdogEnabled: () => updateHandoffObserved,
   claim: () => { quitRequested = true; skipForcedQuit = true; },
   release: () => { quitRequested = false; skipForcedQuit = false; },
@@ -4567,17 +4567,21 @@ function configureNativeAppUpdater() {
     setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
   });
   // The hand-off is emitted on Electron's own autoUpdater, not electron-updater's:
-  // BaseUpdater re-emits it there to mimic what Squirrel does natively. Guarded
-  // because the native module is documented for macOS and Windows only. Losing it
-  // is not merely losing a confirmation: without it nothing could re-claim the
-  // flags after the grace period, so the guard stops arming the watchdog at all
-  // rather than expire into a state a late hand-off cannot recover from.
+  // BaseUpdater re-emits it there to mimic what Squirrel does natively. Losing it
+  // is not merely losing a confirmation, so the flag records a verified
+  // registration and nothing weaker: without the listener nothing could re-claim
+  // the flags after the grace period, and the guard would expire into a state a
+  // late hand-off could not recover from. It stops arming the watchdog instead.
   try {
-    require('electron').autoUpdater?.on?.('before-quit-for-update', () => updateInstallQuit.noteHandoff());
-    updateHandoffObserved = true;
+    updateHandoffObserved = observeUpdateInstallHandoff(
+      require('electron').autoUpdater,
+      () => updateInstallQuit.noteHandoff()
+    );
   } catch (error) {
+    updateHandoffObserved = false;
     console.log(`[update] cannot observe the install hand-off: ${error?.message || error}`);
   }
+  if (!updateHandoffObserved) console.log('[update] no install hand-off signal; quit recovery disabled');
   autoUpdater.on('error', (error) => {
     // Released before the busy guard below, deliberately: update-downloaded has
     // already cleared appUpdateNativeBusy by the time an install can fail, so a
@@ -4821,9 +4825,20 @@ function installDownloadedAppUpdate() {
   })) return deriveAppUpdateState();
   // quitAndInstall goes through before-quit, and electron-updater owns the
   // restart from there. Stand the forced exit down or the installer never runs.
-  // Refused while an earlier request is still unconfirmed, so a second press
-  // cannot stack install attempts.
-  if (!updateInstallQuit.request()) return deriveAppUpdateState();
+  // Refused while an earlier request is still outstanding, and permanently once an
+  // attempt is spent, so a second press can never stack install attempts.
+  if (!updateInstallQuit.request()) {
+    // Say so rather than leave a button that quietly does nothing: a spent attempt
+    // cannot be retried in this process at all.
+    if (updateInstallQuit.phase() === 'spent') {
+      setNativeAppUpdateState({
+        phase: 'error',
+        progress: null,
+        error: 'Update install was already attempted. Restart the app and try again.'
+      });
+    }
+    return deriveAppUpdateState();
+  }
   try {
     // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
     // (per-user install needs no elevation); isForceRunAfter relaunches the app.
