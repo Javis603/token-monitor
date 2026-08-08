@@ -74,6 +74,23 @@ test('an anchor from another local day is refused', () => {
   assert.equal(deviceRecordFromAnchor(anchorFixture({ month: null }), seedOptions()), null);
 });
 
+test('an anchor whose capture time cannot be trusted is refused', () => {
+  // The timestamp becomes updatedAt and the instant the archive projection is
+  // evaluated at, so a snapshot of unknown age must not pass as one taken now.
+  assert.equal(deviceRecordFromAnchor(anchorFixture({ fullScanAt: undefined }), seedOptions()), null);
+  assert.equal(deviceRecordFromAnchor(anchorFixture({ fullScanAt: 'not-a-timestamp' }), seedOptions()), null);
+
+  const future = new Date(NOW.getTime() + 60_000).toISOString();
+  assert.equal(deviceRecordFromAnchor(anchorFixture({ fullScanAt: future }), seedOptions()), null);
+
+  // Old but trustworthy still seeds, and keeps its own timestamp rather than
+  // being restamped as fresh.
+  const earlier = new Date(NOW.getTime() - 6 * 60 * 60 * 1000).toISOString();
+  const record = deviceRecordFromAnchor(anchorFixture({ fullScanAt: earlier }), seedOptions());
+  assert.equal(record.updatedAt, earlier);
+  assert.equal(record.receivedAt, earlier);
+});
+
 test('an anchor the collector would discard is refused here too', () => {
   // Same day, but the config moved. The collector drops this anchor on load, so
   // seeding from it would put the old client set's totals on screen for the

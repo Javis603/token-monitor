@@ -3324,22 +3324,24 @@ function injectLocalDeviceStatus(stats) {
   return stats;
 }
 
-function sendPush(payload) {
+// `options.skipExport` is for stats that are republished rather than newly
+// observed, so they do not consume the auto-export interval.
+function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
-    if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
+    if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
       writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
         .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
     }
   }
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
-  }
+  // Deferred when the renderer is still loading. webContents.send drops messages
+  // sent before the listener is registered, which a cold-start push races.
+  sendMainWindowEvent('stats:push', payload);
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
     if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -3506,14 +3508,16 @@ function primeLocalStatsFromAnchor(usageOptions) {
   );
   localDevice = visible;
   localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
-  // sendPush hands straight to webContents.send, which drops the message when
-  // the renderer has not registered its listener yet, and a cold start runs this
-  // while createWindow's loadFile is still in flight. sendMainWindowEvent waits
-  // for did-finish-load.
-  sendMainWindowEvent('stats:push', {
+  // Through the normal publisher, not straight to the renderer: the tray reads
+  // what sendPush sets, and in tray mode the window is hidden, so a seed that
+  // only reached the renderer would leave the one visible surface on zero.
+  // Export is the exception. These totals were already exported at the end of
+  // the run that produced the anchor, and re-exporting them here would spend the
+  // interval budget that the first real scan of this run needs.
+  sendPush({
     event: 'stats',
     data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
-  });
+  }, { skipExport: true });
 }
 
 function startLocalCollector() {

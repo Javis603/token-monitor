@@ -30,12 +30,19 @@ function deviceRecordFromAnchor(saved, options = {}) {
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled)) return null;
+  // startCollector trusts fullScanAt only when it parses and is not in the
+  // future, and refuses to reuse the anchor otherwise. Seeding is stricter still
+  // and declines outright: the timestamp becomes this record's updatedAt and the
+  // window the archive projection is evaluated against, so a snapshot of unknown
+  // age must not be presented as one taken now.
+  const capturedAtMs = Date.parse(saved.fullScanAt || '');
+  if (!Number.isFinite(capturedAtMs) || capturedAtMs > now.getTime()) return null;
   // The anchor keeps host periods and the WSL bundle apart, the way
   // collectUsageOnce does before summing them. Same local day is established
   // above, so all three windows are safe to merge.
   const wsl = wslScanEnabled !== false ? saved.wslBundle : null;
   const withWsl = (period, wslPeriod) => (wslPeriod ? mergePeriods(period, wslPeriod) : period);
-  const at = saved.fullScanAt || now.toISOString();
+  const at = new Date(capturedAtMs).toISOString();
   return {
     ...envelope,
     hostname,

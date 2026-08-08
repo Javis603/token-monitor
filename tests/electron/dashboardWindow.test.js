@@ -181,7 +181,7 @@ test('dashboard motion is data-scoped and respects reduced-motion preferences', 
 
 test('main invalidates an open dashboard only when stats history changes', () => {
   const main = read('src', 'electron', 'main.js');
-  const sendPush = /function sendPush\(payload\)\s*\{([\s\S]*?)\n\}\n\nfunction statsHistoryRevision/.exec(main);
+  const sendPush = /function sendPush\(payload[^)]*\)\s*\{([\s\S]*?)\n\}\n\nfunction statsHistoryRevision/.exec(main);
   assert.ok(sendPush, 'sendPush should be defined before statsHistoryRevision');
   assert.match(sendPush[1], /if \(payload\?\.data\?\.stats\) \{[\s\S]*?nextHistoryRevision !== previousHistoryRevision[\s\S]*?dashboardWindow\.webContents\.send\('dashboard:historyChanged'\)/);
 });
