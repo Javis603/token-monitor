@@ -227,6 +227,26 @@ test('abort releases from the hand-off too', () => {
   assert.deepEqual(events, ['claim', 'claim', 'release']);
 });
 
+test('a spent attempt is reported as blocked, and nothing else is', () => {
+  const { guard, fire } = harness();
+  assert.equal(guard.isSpent(), false);
+  guard.request();
+  assert.equal(guard.isSpent(), false);
+  fire();
+  assert.equal(guard.isSpent(), true);
+
+  const handed = harness();
+  handed.guard.request();
+  handed.guard.noteHandoff();
+  assert.equal(handed.guard.isSpent(), false);
+
+  // A platform that can retry never reaches it at all.
+  const retryable = harness({ singleUseAttempt: false });
+  retryable.guard.request();
+  retryable.fire();
+  assert.equal(retryable.guard.isSpent(), false);
+});
+
 test('only an install this process can still finish counts as busy', () => {
   const { guard } = harness();
   assert.equal(guard.isInstalling(), false);
@@ -367,6 +387,9 @@ test('an in-flight install is reported as busy and its reason as a kind', () => 
   // And the hand-off window is the state machine's own answer, not a conjunction
   // reassembled downstream.
   assert.match(derive, /installStarting: updateInstallQuit\.isInstalling\(\)/);
+  // And the spent state has to reach the action policy and the automatic
+  // downloader, or both go on offering an install this process cannot perform.
+  assert.match(derive, /installRetryBlocked: updateInstallQuit\.isSpent\(\)/);
 
   const start = main.indexOf('onHandoff: (afterStalledReport) => {');
   assert.ok(start >= 0, 'a late hand-off has to be handled');

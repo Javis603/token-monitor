@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  appUpdateActionMode,
   appUpdateErrorMessageKey,
   appUpdateInstallErrorMessageKey,
   appUpdateStatusPresentation,
@@ -116,6 +117,34 @@ test('the hand-off window has its own message, ahead of ready to install', () =>
     assert.equal(typeof value, 'string', `${locale} is missing the hand-off message`);
     assert.ok(value.length > 0, `${locale} has an empty hand-off message`);
   }
+});
+
+const READY = {
+  hasUpdate: true,
+  installSupported: true,
+  downloaded: true,
+  installRetryBlocked: false,
+  latest: { version: '0.43.0', htmlUrl: 'https://example.invalid/r' }
+};
+
+test('the action follows what the app can actually do next', () => {
+  assert.equal(appUpdateActionMode(READY), 'install');
+  assert.equal(appUpdateActionMode({ ...READY, downloaded: false }), 'download');
+  assert.equal(appUpdateActionMode({ ...READY, downloaded: false, installSupported: false }), 'release');
+  assert.equal(appUpdateActionMode({ ...READY, downloaded: false, hasUpdate: false }), '');
+  assert.equal(appUpdateActionMode(null), '');
+});
+
+test('a spent attempt closes the in-app path instead of offering a download', () => {
+  // Re-downloading only buys another refusal, and on macOS it restarts a download
+  // lifecycle while the first Squirrel request may still be live. This is the one
+  // branch that has to win over `downloaded`, since a stalled attempt clears it and
+  // the control would otherwise turn back into Download.
+  const spent = { ...READY, downloaded: false, installRetryBlocked: true };
+  assert.equal(appUpdateActionMode(spent), 'release');
+  assert.equal(appUpdateActionMode({ ...spent, downloaded: true }), 'release');
+  // With nowhere manual to send them either, offer nothing rather than a dead end.
+  assert.equal(appUpdateActionMode({ ...spent, latest: { version: '0.43.0' } }), '');
 });
 
 test('automatic download control is enabled only for supported idle builds', () => {

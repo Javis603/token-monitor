@@ -112,7 +112,11 @@ function createUpdateInstallQuitGuard({
     // An install this process is still trying to complete, which is what makes the
     // Install control busy. Deliberately not `spent`: that one is over, and
     // treating it as busy would disable checking for updates for the session.
-    isInstalling: () => phase === 'requested' || phase === 'handoff'
+    isInstalling: () => phase === 'requested' || phase === 'handoff',
+    // An attempt that ended without a hand-off on a platform that cannot make
+    // another. Nothing this process does can produce an install now, so the whole
+    // in-app update path has to stand down, not just the Install control.
+    isSpent: () => phase === 'spent'
   };
 }
 

@@ -4673,6 +4673,9 @@ function deriveAppUpdateState() {
     // from a pair of booleans downstream: between the press and the installer
     // taking over there is nothing else to tell the user.
     installStarting: updateInstallQuit.isInstalling(),
+    // No further attempt is possible until a restart, so the action policy and the
+    // automatic downloader both have to stop offering one.
+    installRetryBlocked: updateInstallQuit.isSpent(),
     // An install the guard is still trying to complete counts as busy: on macOS
     // Squirrel can take tens of seconds, and leaving the control live for that long
     // invites a second press the guard can only refuse.

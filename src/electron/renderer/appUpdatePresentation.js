@@ -69,6 +69,20 @@
     return keys[kind] || 'settings.appUpdate.installError';
   }
 
+  // What the update control should offer. A spent install attempt closes the
+  // in-app path entirely: re-downloading only buys another refusal, and on macOS it
+  // restarts a download lifecycle while the first Squirrel request may still be
+  // live. The release page is what remains until a restart.
+  function appUpdateActionMode(updateState) {
+    const s = updateState;
+    if (!s) return '';
+    if (s.installRetryBlocked) return s.latest?.htmlUrl ? 'release' : '';
+    if (s.downloaded) return 'install';
+    if (!s.hasUpdate) return '';
+    if (s.installSupported) return 'download';
+    return s.latest?.htmlUrl ? 'release' : '';
+  }
+
   function appUpdateStatusPresentation(updateState = null) {
     const displayVersion = updateState?.latest?.version || updateState?.installVersion || '';
     const hasCheckError = Boolean(updateState?.lastError);
@@ -89,6 +103,7 @@
   }
 
   return {
+    appUpdateActionMode,
     appUpdateErrorMessageKey,
     appUpdateInstallErrorMessageKey,
     appUpdateStatusPresentation,

@@ -538,6 +538,10 @@ function shouldDownloadAutomaticAppUpdate({
     && updateState.dismissedVersion !== updateState.latest?.version
     && !updateState.downloaded
     && !updateState.installBusy
+    // A spent attempt can never be installed in this process, so downloading again
+    // on every background check would be a repeating download of an artifact
+    // nothing can use.
+    && !updateState.installRetryBlocked
   );
 }
 
