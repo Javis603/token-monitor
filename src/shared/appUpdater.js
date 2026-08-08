@@ -42,6 +42,24 @@ function appUpdateInstallSupport({
   return { supported: false, reason: 'unsupported-platform' };
 }
 
+// How long an install attempt may sit unconfirmed before we conclude the
+// installer never took over. quitAndInstall() returns void and BaseUpdater's
+// failure path resets its own state without emitting anything, so still being
+// alive is the only failure signal there is. One bound serves every platform
+// because expiry is not a verdict on the install: it only gives the quit flags
+// back, and the hand-off re-claims them if it arrives afterwards.
+const UPDATE_INSTALL_QUIT_GRACE_MS = 10 * 1000;
+
+// Whether reaching that bound is conclusive. NsisUpdater and AppImageUpdater run
+// install() synchronously and emit the hand-off from a setImmediate, so there the
+// grace period cannot expire on a working install and expiry is worth reporting.
+// MacUpdater may instead return from quitAndInstall() having only asked Squirrel
+// to check, then hand off whenever that round-trip completes with no upper bound,
+// so expiry there carries no verdict and stays silent.
+function updateInstallHandoffIsSameTick(platform = process.platform) {
+  return platform !== 'darwin';
+}
+
 function parseTag(tag) {
   if (typeof tag !== 'string') return null;
   const trimmed = tag.trim();
@@ -571,7 +589,9 @@ async function checkLatestRelease(currentVersion) {
 }
 
 module.exports = {
+  UPDATE_INSTALL_QUIT_GRACE_MS,
   appUpdateInstallSupport,
+  updateInstallHandoffIsSameTick,
   parseTag,
   parseLatestReleasePayload,
   latestFromUpdaterInfo,

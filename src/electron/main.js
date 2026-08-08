@@ -98,6 +98,7 @@ const {
   resetToBundled
 } = require('../shared/tokscaleUpdater');
 const {
+  UPDATE_INSTALL_QUIT_GRACE_MS,
   appUpdateInstallSupport,
   classifyAppUpdateError,
   checkLatestRelease,
@@ -108,7 +109,8 @@ const {
   providerUpdateCheckAvailability,
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
-  shouldSkipAppUpdateCheck
+  shouldSkipAppUpdateCheck,
+  updateInstallHandoffIsSameTick
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
@@ -170,6 +172,7 @@ const {
   trayToggleAction
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
+const { createUpdateInstallQuitGuard } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
@@ -178,7 +181,6 @@ const {
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
-  updateInstallQuitGraceMs,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
@@ -4294,29 +4296,28 @@ function stopAll() {
 
 let quitRequested = false;
 let quitInProgress = false;
-// Set only by installDownloadedAppUpdate: electron-updater restarts the process
-// itself, so the exit below has to stand down or the install never runs.
+// Owned by the update-install guard below and by nothing else: electron-updater
+// restarts the process itself, so the exit has to stand down or the install
+// never runs.
 let skipForcedQuit = false;
 
-// quitAndInstall() returns void: nothing reports back whether the installer
-// launched. If it did not, the process stays alive holding two flags that
-// between them make Exit a no-op and disable the forced exit for the rest of
-// the session. Every signal we do get releases them again: a synchronous throw,
-// an updater error, and where the failure would otherwise be silent, a grace
-// timer. One case is still uncovered, and predates all of this: a macOS
-// hand-off that stalls while reporting nothing, for which MacUpdater forwards
-// no terminal event. Closing that needs the flags claimed at the hand-off
-// itself rather than at the request, which is a lifecycle change of its own.
-let updateInstallQuitPending = false;
-let updateInstallQuitTimer = null;
-
-function releaseUpdateInstallQuit() {
-  if (!updateInstallQuitPending) return;
-  updateInstallQuitPending = false;
-  if (updateInstallQuitTimer) { clearTimeout(updateInstallQuitTimer); updateInstallQuitTimer = null; }
-  quitRequested = false;
-  skipForcedQuit = false;
-}
+// An install request stands the forced exit down, and quitAndInstall() never
+// reports back whether the installer actually took over. The guard owns that
+// unconfirmed window; these two flags are all it touches here. See
+// updateInstallQuit.js for why the claim expires and what promotes it.
+const updateInstallQuit = createUpdateInstallQuitGuard({
+  graceMs: UPDATE_INSTALL_QUIT_GRACE_MS,
+  claim: () => { quitRequested = true; skipForcedQuit = true; },
+  release: () => { quitRequested = false; skipForcedQuit = false; },
+  onStalled: () => {
+    // Where the hand-off is same-tick, expiry means install() returned false and
+    // said nothing, which is exactly what the user is looking at: they pressed
+    // Install and the app neither restarted nor complained. Elsewhere expiry
+    // carries no verdict, so it stays silent.
+    if (!updateInstallHandoffIsSameTick()) return;
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: 'Update installer did not start' });
+  }
+});
 
 // The single quit path. Teardown above is what used to hang, so it runs
 // synchronously and cheaply, and then app.exit() ends the process without
@@ -4558,13 +4559,22 @@ function configureNativeAppUpdater() {
     const latest = latestFromUpdaterInfo(info);
     setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
   });
+  // The hand-off is emitted on Electron's own autoUpdater, not electron-updater's:
+  // BaseUpdater re-emits it there to mimic what Squirrel does natively. Guarded
+  // because the native module is documented for macOS and Windows only, and
+  // losing the listener costs the confirmation, not correctness: the grace period
+  // still bounds an unconfirmed claim.
+  try {
+    require('electron').autoUpdater?.on?.('before-quit-for-update', () => updateInstallQuit.noteHandoff());
+  } catch (error) {
+    console.log(`[update] cannot observe the install hand-off: ${error?.message || error}`);
+  }
   autoUpdater.on('error', (error) => {
     // Released before the busy guard below, deliberately: update-downloaded has
     // already cleared appUpdateNativeBusy by the time an install can fail, so a
     // rollback behind that guard would never run and the quit flags would stay
     // stuck for the rest of the session.
-    const wasInstalling = updateInstallQuitPending;
-    releaseUpdateInstallQuit();
+    const wasInstalling = updateInstallQuit.abort();
     // Availability checks use the same provider but report through
     // appUpdateLastError. Only a real download or install attempt owns installError.
     if (!appUpdateNativeBusy && !wasInstalling) return;
@@ -4802,28 +4812,15 @@ function installDownloadedAppUpdate() {
   })) return deriveAppUpdateState();
   // quitAndInstall goes through before-quit, and electron-updater owns the
   // restart from there. Stand the forced exit down or the installer never runs.
-  // Both flags are claimed through the helper so every exit from this call
-  // releases them again; see releaseUpdateInstallQuit.
-  updateInstallQuitPending = true;
-  quitRequested = true;
-  skipForcedQuit = true;
-  if (updateInstallQuitTimer) clearTimeout(updateInstallQuitTimer);
-  // On the platforms whose install path fails silently, still being here after the
-  // grace period is the only signal there is. Where the hand-off is unbounded
-  // instead, updateInstallQuitGraceMs returns null and we wait for the error
-  // event rather than race the installer. unref'd either way: the fallback must
-  // never be the reason we stay up.
-  const graceMs = updateInstallQuitGraceMs();
-  if (graceMs !== null) {
-    updateInstallQuitTimer = setTimeout(releaseUpdateInstallQuit, graceMs);
-    updateInstallQuitTimer.unref?.();
-  }
+  // Refused while an earlier request is still unconfirmed, so a second press
+  // cannot stack install attempts.
+  if (!updateInstallQuit.request()) return deriveAppUpdateState();
   try {
     // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
     // (per-user install needs no elevation); isForceRunAfter relaunches the app.
     autoUpdater.quitAndInstall(true, true);
   } catch (error) {
-    releaseUpdateInstallQuit();
+    updateInstallQuit.abort();
     setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
   }
   return deriveAppUpdateState();
