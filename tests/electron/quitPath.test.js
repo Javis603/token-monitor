@@ -2,7 +2,7 @@
 
 // Quitting used to hang: teardown blocked the main thread and the app never
 // reached its exit. The fix is a teardown that stays synchronous all the way to
-// SIGKILL, and the failure mode is subtle enough to re-introduce by accident,
+// the exit, and the failure mode is subtle enough to re-introduce by accident,
 // so the shape is asserted here. main.js cannot be required outside Electron,
 // hence the source-level contract.
 
@@ -21,14 +21,20 @@ function functionSource(signature) {
   return main.slice(start, end === -1 ? main.length : end);
 }
 
-test('nothing asynchronous sits between teardown and the forced exit', () => {
+test('nothing asynchronous sits between teardown and the exit', () => {
   const performQuit = functionSource('function performQuit()');
-  assert.match(performQuit, /stopAll\(\);/);
-  assert.match(performQuit, /process\.kill\(process\.pid, 'SIGKILL'\)/);
+  assert.ok(
+    performQuit.indexOf('stopAll();') < performQuit.indexOf('app.exit(0);'),
+    'teardown has to finish before the process goes'
+  );
   // An await here is the original bug in a new place: whatever it waits on gets
   // to decide whether the process ever exits.
   assert.doesNotMatch(performQuit, /\bawait\b/);
   assert.doesNotMatch(performQuit, /^async function performQuit/);
+  // app.exit() is the documented immediate exit and reports success. Reaching
+  // for an unconditional kill instead would need a reproducer showing app.exit()
+  // itself hangs once the expensive teardown is skipped, and there is none.
+  assert.doesNotMatch(performQuit, /SIGKILL/);
 });
 
 test('quit teardown never waits on the embedded hub', () => {

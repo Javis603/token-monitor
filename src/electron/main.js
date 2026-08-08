@@ -4199,11 +4199,11 @@ function restartDeviceRuntimeForMode() {
 }
 
 // Quit-path teardown. Every step here must be synchronous, because performQuit
-// force-kills the process on the next line and anything awaited in between is a
-// chance to never get there. `skipCloseWatchers` is what buys that: chokidar's
-// close() synchronously walks every watched dirent and closes every fs.watch
-// handle, which on a tree the size of ~/.claude/projects blocks the main thread
-// long enough to look like a hang. The OS reclaims those handles at exit anyway.
+// exits on the next line and anything awaited in between is a chance to never
+// get there. `skipCloseWatchers` is what buys that: chokidar's close() returns a
+// promise, but not before an O(N) synchronous pass over every watched entry, and
+// on a tree the size of ~/.claude/projects that pass alone blocks the main
+// thread long enough to look like a hang. The descriptors go with the process.
 // Mode switches deliberately do NOT come through here: they keep the default
 // stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
 // really gone before a new one starts on the same paths.
@@ -4213,10 +4213,10 @@ function stopAll() {
   stopStatsStream();
   stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
-  // Fire-and-forget on purpose. server.close() does not resolve while a request
-  // is in flight, so awaiting it hands a remote device on the embedded hub the
-  // power to block our own exit indefinitely. SIGKILL drops the listening socket
-  // regardless, and a graceful hub close buys nothing on the way out.
+  // Fire-and-forget on purpose. server.close() does not complete until every
+  // in-flight request does, so awaiting it hands a remote device on the embedded
+  // hub the power to hold our own exit open. The listening socket closes with
+  // the process, and a graceful hub close buys nothing on the way out.
   void stopEmbeddedHub();
   stopDiscordRpc();
   if (tray && !tray.isDestroyed()) tray.destroy();
@@ -4226,13 +4226,12 @@ function stopAll() {
 let quitRequested = false;
 let quitInProgress = false;
 // Set only by installDownloadedAppUpdate: electron-updater restarts the process
-// itself, so the forced exit below has to stand down or the install never runs.
+// itself, so the exit below has to stand down or the install never runs.
 let skipForcedQuit = false;
 
-// The single quit path. app.quit() / app.exit() can be stalled by Electron's own
-// shutdown work, so teardown runs synchronously and then SIGKILL ends the process
-// outright: it cannot be caught or deferred, and the watch descriptors and
-// sockets skipped above are reclaimed with the process.
+// The single quit path. Teardown above is what used to hang, so it runs
+// synchronously and cheaply, and then app.exit() ends the process without
+// another trip through Electron's shutdown events.
 function performQuit() {
   if (quitInProgress) return;
   quitInProgress = true;
@@ -4241,7 +4240,7 @@ function performQuit() {
   } catch (error) {
     console.log(`[quit] stopAll failed: ${error?.message || error}`);
   }
-  try { process.kill(process.pid, 'SIGKILL'); } catch (_) {}
+  app.exit(0);
 }
 
 function requestAppQuit() {
@@ -6383,8 +6382,8 @@ app.whenReady().then(() => {
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
-// performQuit is synchronous through to SIGKILL, so there is nothing to wait for
-// and deliberately no preventDefault: taking the quit over would cancel an
+// performQuit is synchronous through to the exit, so there is nothing to wait
+// for and deliberately no preventDefault: taking the quit over would cancel an
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;

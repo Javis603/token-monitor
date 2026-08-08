@@ -2586,11 +2586,12 @@ function startCollector(options) {
     }, watchDebounceMs);
   }
 
-  // chokidar's close() is synchronous: it walks every watched dirent and closes
-  // every fs.watch handle inline, so on a tree the size of ~/.claude/projects it
-  // blocks the caller for as long as that takes. Callers that must not overlap an
-  // old watcher with a new one (mode switches) pay that cost; the quit path skips
-  // it via stop({ skipCloseWatchers }) and lets the OS reclaim the handles.
+  // chokidar's close() returns a promise, but only after an O(N) synchronous
+  // pass that walks every watched entry and closes every fs.watch handle inline,
+  // so on a tree the size of ~/.claude/projects it blocks the caller for as long
+  // as that takes. Callers that must not overlap an old watcher with a new one
+  // (mode switches) pay that cost; the quit path skips it via
+  // stop({ skipCloseWatchers }) and lets the descriptors go with the process.
   function closeWatchers() {
     for (const watcher of watchers) {
       try { watcher.close(); } catch (_) {}

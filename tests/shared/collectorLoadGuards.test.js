@@ -3867,7 +3867,7 @@ test('the quit variant of stop() skips the watcher walk and leans on `stopped`',
     replaced.stop();
     assert.equal(closeCalls, 1);
 
-    // Quit teardown runs inline ahead of SIGKILL, where that same walk reads as a
+    // Quit teardown runs inline ahead of the exit, where that same walk reads as a
     // hang, so it is skipped and the OS reclaims the handles at exit instead.
     const quittingUpdates = [];
     quitting = startCollector({ ...collectorOptions, onUpdate: () => quittingUpdates.push(1) });
@@ -3877,7 +3877,7 @@ test('the quit variant of stop() skips the watcher walk and leans on `stopped`',
     assert.equal(closeCalls, 1, 'the quit path never walks the watch tree');
 
     // Leaving the watcher open is only safe because `stopped` severs it: an event
-    // that lands in the gap before SIGKILL must not start another scan.
+    // that lands in the gap before the process goes must not start another scan.
     watchHandler('change', path.join(tmp, '.claude', 'projects', 'demo.jsonl'));
     await new Promise((resolve) => { setTimeout(resolve, 60); });
     assert.equal(calls.length, spawnsBeforeStop, 'a late event cannot spawn another scan');
