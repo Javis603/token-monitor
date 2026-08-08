@@ -209,6 +209,24 @@ test('abort releases from the hand-off too', () => {
   assert.deepEqual(events, ['claim', 'claim', 'release']);
 });
 
+test('only an install this process can still finish counts as busy', () => {
+  const { guard } = harness();
+  assert.equal(guard.isInstalling(), false);
+  guard.request();
+  assert.equal(guard.isInstalling(), true);
+  guard.noteHandoff();
+  assert.equal(guard.isInstalling(), true);
+
+  const stalled = harness();
+  stalled.guard.request();
+  stalled.fire();
+  // Spent is over, not busy: treating it as busy would disable checking for
+  // updates for the rest of the session.
+  assert.equal(stalled.guard.phase(), 'spent');
+  assert.equal(stalled.guard.isInstalling(), false);
+  assert.equal(stalled.guard.isOutstanding(), true);
+});
+
 test('the same-tick install paths get a short bound and stay retryable', () => {
   // NsisUpdater and AppImageUpdater run install() synchronously and emit the
   // hand-off from a setImmediate, so a working install is gone within a tick, and
@@ -310,13 +328,34 @@ test('the install request goes through the guard before quitAndInstall', () => {
   assert.ok(requestAt >= 0, 'the claim has to be taken through the guard');
   assert.ok(callAt >= 0, 'the install has to be requested');
   assert.ok(requestAt < callAt, 'the claim has to precede the hand-off');
-  // A refusal must not be a button that quietly does nothing.
+  // A refusal must not be a button that quietly does nothing, and the reason has to
+  // travel as a kind, since the renderer never shows the raw message.
   assert.match(install, /phase\(\) === 'spent'/);
+  assert.match(install, /errorKind: 'attempt-spent'/);
   // A synchronous throw leaves the app running, so it has to give the flags back.
   assert.match(
     install,
     /try \{[\s\S]*?autoUpdater\.quitAndInstall\([\s\S]*?\} catch \(error\) \{[\s\S]*?updateInstallQuit\.abort\(\);/
   );
+});
+
+test('an in-flight install is reported as busy and its reason as a kind', () => {
+  const derive = functionSource('function deriveAppUpdateState()');
+  // Without this the Install control stays live through the whole macOS wait, and a
+  // second press is a refusal nobody can see.
+  assert.match(derive, /installBusy: [\s\S]*?updateInstallQuit\.isInstalling\(\)/);
+  // The renderer maps the kind to a localized string; the raw message never shows.
+  assert.match(derive, /installErrorKind: appUpdateNativeState\.errorKind/);
+
+  const stalled = main.slice(main.indexOf('onStalled: () => {'));
+  assert.match(stalled.slice(0, stalled.indexOf('\n  }')), /errorKind: 'installer-did-not-start'/);
+});
+
+test('an error kind never outlives the error it arrived with', () => {
+  const setter = functionSource('function setNativeAppUpdateState(patch = {}) {');
+  // Every other updater failure has to stay generic without each call site saying so.
+  assert.match(setter, /'error' in patch && !\('errorKind' in patch\)/);
+  assert.match(setter, /next\.errorKind = null;/);
 });
 
 test('an updater error aborts ahead of the download guard', () => {

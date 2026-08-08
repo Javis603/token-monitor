@@ -58,6 +58,17 @@
     return keys[kind] || 'settings.appUpdate.githubError';
   }
 
+  // An install failure the updater merely reports has nothing to tell the user
+  // beyond "it failed". These two do: the app is still running and restarting is
+  // the only way to get another attempt, which a generic message cannot say.
+  function appUpdateInstallErrorMessageKey(kind) {
+    const keys = {
+      'installer-did-not-start': 'settings.appUpdate.installerDidNotStart',
+      'attempt-spent': 'settings.appUpdate.installAttemptSpent'
+    };
+    return keys[kind] || 'settings.appUpdate.installError';
+  }
+
   function appUpdateStatusPresentation(updateState = null) {
     const displayVersion = updateState?.latest?.version || updateState?.installVersion || '';
     const hasCheckError = Boolean(updateState?.lastError);
@@ -79,6 +90,7 @@
 
   return {
     appUpdateErrorMessageKey,
+    appUpdateInstallErrorMessageKey,
     appUpdateStatusPresentation,
     automaticAppUpdateControlState,
     releaseNoteGroupsForLocale

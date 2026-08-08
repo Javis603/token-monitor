@@ -5,9 +5,11 @@ const test = require('node:test');
 
 const {
   appUpdateErrorMessageKey,
+  appUpdateInstallErrorMessageKey,
   appUpdateStatusPresentation,
   automaticAppUpdateControlState
 } = require('../../src/electron/renderer/appUpdatePresentation');
+const { MESSAGES } = require('../../src/electron/renderer/i18n');
 
 test('failed checks mark cached versions as last known instead of up to date', () => {
   assert.deepEqual(appUpdateStatusPresentation({
@@ -62,6 +64,35 @@ test('update error presentation distinguishes actionable failure classes', () =>
   assert.equal(appUpdateErrorMessageKey('metadata'), 'settings.appUpdate.metadataError');
   assert.equal(appUpdateErrorMessageKey('network'), 'settings.appUpdate.githubError');
   assert.equal(appUpdateErrorMessageKey('unknown'), 'settings.appUpdate.githubError');
+});
+
+test('the two install failures the user can act on get their own message', () => {
+  // Both mean the app is still running and only a restart yields another attempt,
+  // which the generic "couldn't install" cannot say.
+  assert.equal(
+    appUpdateInstallErrorMessageKey('installer-did-not-start'),
+    'settings.appUpdate.installerDidNotStart'
+  );
+  assert.equal(
+    appUpdateInstallErrorMessageKey('attempt-spent'),
+    'settings.appUpdate.installAttemptSpent'
+  );
+  // Anything the updater merely reported stays generic.
+  assert.equal(appUpdateInstallErrorMessageKey(null), 'settings.appUpdate.installError');
+  assert.equal(appUpdateInstallErrorMessageKey(undefined), 'settings.appUpdate.installError');
+  assert.equal(appUpdateInstallErrorMessageKey('some-updater-failure'), 'settings.appUpdate.installError');
+});
+
+test('every locale can say how to recover from an install that never started', () => {
+  // The renderer never shows the main process error text, so a message with no key
+  // behind it reaches nobody.
+  for (const kind of ['installer-did-not-start', 'attempt-spent']) {
+    const key = appUpdateInstallErrorMessageKey(kind);
+    for (const locale of Object.keys(MESSAGES)) {
+      assert.equal(typeof MESSAGES[locale][key], 'string', `${locale} is missing ${key}`);
+      assert.ok(MESSAGES[locale][key].length > 0, `${locale} has an empty ${key}`);
+    }
+  }
 });
 
 test('automatic download control is enabled only for supported idle builds', () => {

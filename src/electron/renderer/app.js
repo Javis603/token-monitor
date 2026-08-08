@@ -1107,7 +1107,7 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateMessage.textContent = t('settings.appUpdate.ready');
     els.appUpdateMessage.classList.remove('error');
   } else if (s.installError) {
-    els.appUpdateMessage.textContent = t('settings.appUpdate.installError');
+    els.appUpdateMessage.textContent = t(appUpdatePresentationApi.appUpdateInstallErrorMessageKey(s.installErrorKind));
     els.appUpdateMessage.classList.add('error');
   } else if (s.lastError) {
     const error = t(presentation.errorKey);

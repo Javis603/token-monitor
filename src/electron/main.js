@@ -4321,7 +4321,8 @@ const updateInstallQuit = createUpdateInstallQuitGuard({
     setNativeAppUpdateState({
       phase: 'error',
       progress: null,
-      error: 'Update installer did not start. Restart the app and try again.'
+      error: 'Update installer did not start',
+      errorKind: 'installer-did-not-start'
     });
   }
 });
@@ -4524,7 +4525,8 @@ let appUpdateNativeState = {
   phase: 'idle',
   version: null,
   progress: null,
-  error: null
+  error: null,
+  errorKind: null
 };
 
 function rememberSuccessfulAppUpdateCheck(latest, checkedAt = new Date().toISOString(), { clearLatest = false } = {}) {
@@ -4544,7 +4546,12 @@ function rememberSuccessfulAppUpdateCheck(latest, checkedAt = new Date().toISOSt
 }
 
 function setNativeAppUpdateState(patch = {}) {
-  appUpdateNativeState = { ...appUpdateNativeState, ...patch };
+  const next = { ...appUpdateNativeState, ...patch };
+  // A kind belongs to the error it arrived with and must never outlive it, so any
+  // patch that touches `error` without naming one clears it. That keeps the
+  // ordinary updater failures generic without every call site restating it.
+  if ('error' in patch && !('errorKind' in patch)) next.errorKind = null;
+  appUpdateNativeState = next;
   sendAppUpdatePush();
 }
 
@@ -4653,8 +4660,15 @@ function deriveAppUpdateState() {
     installProgress: appUpdateNativeState.progress,
     installVersion: appUpdateNativeState.version,
     installError: appUpdateNativeState.error,
+    installErrorKind: appUpdateNativeState.errorKind || null,
     downloaded: availability.downloaded,
-    installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
+    // An install the guard is still trying to complete counts as busy: on macOS
+    // Squirrel can take tens of seconds, and leaving the control live for that long
+    // invites a second press the guard can only refuse.
+    installBusy: appUpdateNativeBusy
+      || updateInstallQuit.isInstalling()
+      || appUpdateNativeState.phase === 'checking'
+      || appUpdateNativeState.phase === 'downloading'
   };
 }
 
@@ -4834,7 +4848,8 @@ function installDownloadedAppUpdate() {
       setNativeAppUpdateState({
         phase: 'error',
         progress: null,
-        error: 'Update install was already attempted. Restart the app and try again.'
+        error: 'Update install was already attempted',
+        errorKind: 'attempt-spent'
       });
     }
     return deriveAppUpdateState();

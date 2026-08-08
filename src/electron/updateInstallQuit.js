@@ -102,7 +102,11 @@ function createUpdateInstallQuitGuard({
     noteHandoff,
     abort,
     phase: () => phase,
-    isOutstanding: () => phase !== 'idle'
+    isOutstanding: () => phase !== 'idle',
+    // An install this process is still trying to complete, which is what makes the
+    // Install control busy. Deliberately not `spent`: that one is over, and
+    // treating it as busy would disable checking for updates for the session.
+    isInstalling: () => phase === 'requested' || phase === 'handoff'
   };
 }
 
