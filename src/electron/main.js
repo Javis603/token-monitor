@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const path = require('node:path');
 const os = require('node:os');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
@@ -41,8 +42,11 @@ const {
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
+const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
+const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
+const { createDiagnosticReportGenerator } = require('./diagnostics');
+const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
@@ -126,6 +130,7 @@ const {
   clearSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive,
+  sessionUsageArchivePath,
   sessionUsageArchiveDate,
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
@@ -169,6 +174,7 @@ const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const {
   classifySettingsChange,
+  diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   usageConfigFromSettings
@@ -258,9 +264,15 @@ let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
 let sessionUsageArchive = null;
+let lastSessionUsageArchiveUpdate = {
+  at: null,
+  durationMs: null,
+  failureCode: null
+};
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
+const diagnosticJournal = createDiagnosticJournal();
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
@@ -2098,10 +2110,14 @@ function removedTrackedClients(previousClients, nextClients) {
 }
 
 function localArchiveSourceDevice() {
-  const deviceId = settings?.deviceId || defaultDeviceId();
-  if (lastCollectedDevice?.deviceId === deviceId) return lastCollectedDevice;
-  if (localDevice?.deviceId === deviceId) return localDevice;
-  return (latestStats?.devices || []).find((device) => device?.deviceId === deviceId) || null;
+  return selectLocalDeviceRecord({
+    deviceId: settings?.deviceId || defaultDeviceId(),
+    externalAgentActive: isExternalAgentActive(),
+    lastCollectedDevice,
+    localDevice,
+    latestHubStats: currentHubStatsCache(),
+    latestStats
+  });
 }
 
 function updateArchivedClientUsage(previousClients, nextClients) {
@@ -2125,15 +2141,30 @@ function ensureSessionUsageArchiveLoaded() {
 }
 
 function updateSessionUsageArchive(summary, now) {
+  const startedAt = Date.now();
+  const finish = (failureCode = null) => {
+    lastSessionUsageArchiveUpdate = {
+      at: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - startedAt),
+      failureCode
+    };
+  };
   const previous = ensureSessionUsageArchiveLoaded();
   const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
+  if (JSON.stringify(next) === JSON.stringify(previous)) {
+    finish();
+    return previous;
+  }
   try {
     writeSessionUsageArchive(next);
     sessionUsageArchive = next;
   } catch (error) {
+    finish('archive-write-failed');
+    diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' });
     console.log(`[session-archive] write failed: ${error.message}`);
+    return next;
   }
+  finish();
   return next;
 }
 
@@ -2260,6 +2291,11 @@ let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
+let latestHubStatsReceivedAt = null;
+let latestHubStatsSource = 'none';
+let latestHubStatsGeneration = null;
+let latestHubStatsIdentity = null;
+let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
 let trayRefreshInFlight = false;
@@ -2294,6 +2330,121 @@ let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
 const pendingLimitInvalidations = new Map();
 const pendingUsageClientRefreshes = new Map();
+
+function hubModeRequestIsCurrent(generation, expectedMode, expectedIdentity = null) {
+  return generation === hubModeGeneration
+    && settings?.hubMode === expectedMode
+    && (expectedIdentity === null || currentHubStatsIdentity(expectedMode) === expectedIdentity);
+}
+
+function currentHubStatsIdentity(expectedMode = settings?.hubMode) {
+  const { url } = effectiveHubConfig();
+  return `${String(expectedMode || 'none')}|${String(url || 'none').replace(/\/$/, '')}`;
+}
+
+function currentHubStatsCache() {
+  const hubMode = settings?.hubMode || 'local';
+  const expectedSource = hubMode === 'host'
+    ? 'host'
+    : hubMode === 'client'
+      ? 'client'
+      : 'none';
+  if (!latestHubStats
+    || latestHubStatsSource !== expectedSource
+    || latestHubStatsGeneration !== hubModeGeneration
+    || latestHubStatsIdentity !== currentHubStatsIdentity(hubMode)) {
+    return null;
+  }
+  return latestHubStats;
+}
+
+function clearLatestHubStatsCache() {
+  latestHubStats = null;
+  latestHubStatsReceivedAt = null;
+  latestHubStatsSource = 'none';
+  latestHubStatsGeneration = null;
+  latestHubStatsIdentity = null;
+}
+
+function setLatestHubStatsCache(stats, source, generation, identity) {
+  latestHubStats = stats;
+  latestHubStatsReceivedAt = new Date().toISOString();
+  latestHubStatsSource = source;
+  latestHubStatsGeneration = generation;
+  latestHubStatsIdentity = identity;
+}
+
+const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
+  getSettings: () => settings,
+  getMode: () => mode,
+  getEffectiveHubConfig: effectiveHubConfig,
+  getExternalAgentActive: isExternalAgentActive,
+  getDeviceRuntime: () => deviceRuntimeHandle,
+  getEmbeddedHub: () => embeddedHub,
+  getStreamState: () => ({ connected: streamConnected, failure: streamFailure }),
+  getLatestHubStats: () => latestHubStats,
+  getLatestHubStatsReceivedAt: () => latestHubStatsReceivedAt,
+  getLatestHubStatsSource: () => latestHubStatsSource,
+  getLatestHubStatsGeneration: () => latestHubStatsGeneration,
+  getLatestHubStatsIdentity: () => latestHubStatsIdentity,
+  getHubModeGeneration: () => hubModeGeneration,
+  getCurrentHubStatsIdentity: (hubMode) => currentHubStatsIdentity(hubMode),
+  getLocalRecord: localArchiveSourceDevice,
+  getTokscaleStatus,
+  getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
+    usage: {
+      agentVersion: appVersion(),
+      agentRuntime: 'electron-widget',
+      commandTimeoutMs: 120 * 1000,
+      defaultDeviceId: defaultDeviceId(),
+      intervalMs: collectorIntervalMs(),
+      historyIntervalMs: normalizeHistoryIntervalMs(settings?.historyIntervalMs)
+    },
+    limits: {
+      env: process.env,
+      defaultLimitProviders: defaultLimitProviders()
+    },
+    syncUploadIntervalMs: syncUploadIntervalMs()
+  }),
+  getJournalSnapshot: () => diagnosticJournal.getSnapshot(),
+  getArchiveState: () => {
+    const enabled = settings?.sessionUsageArchiveEnabled !== false;
+    const loaded = sessionUsageArchive !== null;
+    return {
+      enabled,
+      loaded,
+      sessionCount: loaded ? Object.keys(sessionUsageArchive?.sessions || {}).length : null,
+      countSource: loaded ? 'loaded-memory' : enabled ? 'not-loaded' : 'not-enabled',
+      lastUpdate: lastSessionUsageArchiveUpdate
+    };
+  },
+  getAppVersion: appVersion,
+  getDefaultDeviceId: defaultDeviceId,
+  canRefreshUsageRuntime,
+  getAppState: () => ({
+    packaged: app.isPackaged,
+    preferredLanguages: typeof app.getPreferredSystemLanguages === 'function'
+      ? app.getPreferredSystemLanguages()
+      : [app.getLocale?.() || 'en'],
+    locale: app.getLocale?.() || 'en'
+  })
+});
+
+const diagnosticReportGenerator = createDiagnosticReportGenerator({
+  getAppMetrics: () => app.getAppMetrics(),
+  getSystemMemory: () => ({ total: os.totalmem(), free: os.freemem() }),
+  privateMemorySupported: process.platform === 'win32',
+  getSnapshot: ({ generatedAt }) => diagnosticSnapshotBuilder.build(generatedAt),
+  getArchiveFileStat: async () => {
+    if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
+    try {
+      const stat = await fs.promises.stat(sessionUsageArchivePath());
+      return { ok: true, stat };
+    } catch (error) {
+      return { ok: false, code: error?.code === 'ENOENT' ? 'archive-not-present' : 'archive-stat-failed' };
+    }
+  }
+});
 
 function limitInvalidationKey(scope) {
   const provider = String(scope?.provider || '').trim().toLowerCase();
@@ -3055,6 +3206,7 @@ function startSyncCollector() {
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('sync-collector'),
     sink,
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3099,6 +3251,7 @@ function startHostCollector() {
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('host-collector'),
     sink,
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3114,12 +3267,16 @@ function stopHostStats() {
 function startHostStats() {
   stopHostStats();
   if (!embeddedHub) return;
+  const generation = hubModeGeneration;
+  const cacheIdentity = currentHubStatsIdentity('host');
   // Host mode presents the same multi-device hub aggregate as connecting to a
   // remote hub, so it reuses the renderer's 'sync' status path (Live / synced
   // data). The in-process vs loopback distinction is internal to fetchStats.
   mode = 'sync';
   sendStatus(true);
   const emit = (stats, reason = 'hub') => {
+    if (!hubModeRequestIsCurrent(generation, 'host', cacheIdentity)) return;
+    setLatestHubStatsCache(stats, 'host', generation, cacheIdentity);
     updateDiscordRpcDisplay(stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
   };
@@ -3275,9 +3432,28 @@ function updateTrayDisplay() {
   tray.setImage(icon || getDefaultTrayIcon());
 }
 
+function recordDiagnosticEvent(event) {
+  diagnosticJournal.record({
+    ...event,
+    modeAtEvent: settings?.hubMode || 'local'
+  });
+}
+
 function sendStatus(connected, extra) {
+  const previous = streamConnected;
   streamConnected = Boolean(connected);
   streamFailure = streamConnected ? null : ((extra && extra.reason) ? { reason: extra.reason, detail: extra.detail ?? null } : streamFailure);
+  if (mode === 'sync') {
+    if (streamConnected && !previous) {
+      recordDiagnosticEvent({ subsystem: 'stream', code: 'stream-reconnected' });
+    } else if (!streamConnected && (previous || extra?.reason)) {
+      recordDiagnosticEvent({
+        subsystem: 'stream',
+        code: 'stream-disconnected',
+        detailCode: diagnosticStreamDetailCode(extra || streamFailure || {})
+      });
+    }
+  }
   sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
 }
 
@@ -3366,6 +3542,7 @@ function startLocalCollector() {
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       sendStatus(true, { reason });
     },
+    onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
   }, {
     limitsDeps: electronLimitsDeps()
@@ -3398,7 +3575,12 @@ function parseSseChunk(chunk) {
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
-  if (options.resetSnapshot) latestHubStats = null;
+  const generation = hubModeGeneration;
+  if (settings?.hubMode !== 'client') return;
+  const cacheIdentity = currentHubStatsIdentity('client');
+  if (options.resetSnapshot) {
+    clearLatestHubStatsCache();
+  }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   mode = 'sync';
@@ -3410,6 +3592,7 @@ async function startStatsStream(options = {}) {
       headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
       signal: controller.signal
     });
+    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     if (!response.ok || !response.body) {
       sendStatus(false, classifyStreamFailure({ status: response.status }));
       scheduleStreamRetry();
@@ -3420,7 +3603,9 @@ async function startStatsStream(options = {}) {
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
+      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
+      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let idx;
@@ -3430,7 +3615,7 @@ async function startStatsStream(options = {}) {
         let parsed = parseSseChunk(chunk);
         if (parsed) {
           if (parsed.event === 'stats' && parsed.data?.stats) {
-            latestHubStats = parsed.data.stats;
+            setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
             updateDiscordRpcDisplay(displayStats);
@@ -3439,10 +3624,11 @@ async function startStatsStream(options = {}) {
         }
       }
     }
+    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ eof: true }));
     scheduleStreamRetry();
   } catch (error) {
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
   }
@@ -3986,6 +4172,8 @@ function exitTrayMode() {
 }
 
 function startMode() {
+  hubModeGeneration += 1;
+  clearLatestHubStatsCache();
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued.
   stopLocalCollector();
@@ -4135,6 +4323,8 @@ async function writeExportTo(dir, periods, options = {}) {
 }
 
 async function fetchStats(options = {}) {
+  const requestGeneration = hubModeGeneration;
+  const requestHubIdentity = currentHubStatsIdentity('client');
   const force = Boolean(options?.force);
   // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
   // settings, account sign-ins and limits actions all refresh with { force: true },
@@ -4160,8 +4350,22 @@ async function fetchStats(options = {}) {
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  latestHubStats = await response.json();
-  return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
+  const stats = await response.json();
+  if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
+    // The response belongs to a mode that is no longer active. Wait for the
+    // queued mode reconciliation before re-reading: Client -> Host may still
+    // be binding the embedded hub, and an immediate retry would hit its
+    // loopback URL before it is listening.
+    await modeQueue;
+    return fetchStats({
+      ...options,
+      force: false,
+      forceHistory: false,
+      forceSelfSync: false
+    });
+  }
+  setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
+  return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
 }
 
 function managedPricingSidecarPath() {
@@ -5406,6 +5610,24 @@ app.whenReady().then(() => {
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState()
   }));
+  ipcMain.handle('diagnostics:generate', async () => {
+    const report = await diagnosticReportGenerator.generate();
+    return {
+      generatedAt: report.generatedAt,
+      completeness: report.completeness,
+      text: report.text,
+      bytes: report.bytes,
+      truncated: report.truncated,
+      includedClientCount: report.includedClientCount,
+      omittedClientCount: report.omittedClientCount,
+      includedLimitProviderCount: report.includedLimitProviderCount,
+      omittedLimitProviderCount: report.omittedLimitProviderCount,
+      includedRemoteGroupCount: report.includedRemoteGroupCount,
+      omittedRemoteGroupCount: report.omittedRemoteGroupCount,
+      includedJournalEventCount: report.includedJournalEventCount,
+      journalOmittedCount: report.journalOmittedCount
+    };
+  });
   // Where each tracked tool's data is read from on THIS machine. The absolute
   // paths stay local by design — they carry the user's home directory and never
   // go on the wire — so the renderer asks the main process for them instead.
@@ -5419,7 +5641,7 @@ app.whenReady().then(() => {
     if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
     try {
       const seen = new Set();
-      const all = (clientDiagnosticRoots(client)[client] || [])
+      const all = (visibleDiagnosticRoots(client)[client] || [])
         .filter((root) => {
           const key = `${root.id}\0${root.dir}`;
           return !seen.has(key) && seen.add(key);
@@ -5441,6 +5663,13 @@ app.whenReady().then(() => {
       const roots = clientDiagnosticRoots(client)[client] || [];
       const target = roots.find((root) => root.exists);
       if (!target) return false;
+      // An exact-file source would otherwise be handed to openPath, which opens
+      // the file in whatever app claims .db/.jsonl. Select it in its folder
+      // instead — the user asked where the data lives, not to open it.
+      if (target.sourcePath) {
+        shell.showItemInFolder(target.sourcePath);
+        return true;
+      }
       return await shell.openPath(target.dir) === '';
     } catch (_) {
       return false;

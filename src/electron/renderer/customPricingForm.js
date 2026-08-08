@@ -45,5 +45,14 @@
     return (Array.isArray(list) ? list : []).filter((e) => e && e.modelId !== modelId);
   }
 
-  return { inUseModelIds, perMillionFromPricing, upsertOverride, removeOverride };
+  function hasUsableBasePrice(entry) {
+    const validOrUnset = (value) => value === undefined
+      || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+    if (!entry || !validOrUnset(entry.inputPerM) || !validOrUnset(entry.outputPerM) || !validOrUnset(entry.cacheReadPerM)) {
+      return false;
+    }
+    return entry.inputPerM !== undefined || entry.outputPerM !== undefined;
+  }
+
+  return { inUseModelIds, perMillionFromPricing, upsertOverride, removeOverride, hasUsableBasePrice };
 });

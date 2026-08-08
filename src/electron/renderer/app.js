@@ -511,6 +511,12 @@ function t(key, params) {
   return i18n.translate(currentLocale(), key, params);
 }
 
+const diagnosticsPanel = window.TokenMonitorDiagnosticsPanel?.createDiagnosticsPanel({
+  api: window.tokenMonitor,
+  translate: t,
+  getLocale: currentLocale
+});
+
 function translatedLimitCapabilityTag(label) {
   const key = LIMIT_CAPABILITY_TAG_KEYS[label];
   return key ? t(key) : label;
@@ -526,6 +532,7 @@ function applySettingsTranslations() {
   i18n.applyTranslations(document, currentLocale());
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
+  diagnosticsPanel?.render();
 }
 
 function applySettingsSectionDom(id, open) {
@@ -9915,6 +9922,7 @@ async function init() {
     state.settings.startAtLogin = Boolean(state.appInfo.loginItemOpenAtLogin);
   }
   syncSettingsForm();
+  diagnosticsPanel?.render();
   publishViewState();
   await refreshHubInfo();
   await refreshTokscaleStatus();
@@ -13332,9 +13340,7 @@ function setupCustomPricingUI() {
       outputPerM: outputEl.value === '' ? undefined : Number(outputEl.value),
       cacheReadPerM: cacheReadEl.value === '' ? undefined : Number(cacheReadEl.value)
     };
-    const hasInput = typeof entry.inputPerM === 'number' && entry.inputPerM > 0;
-    const hasOutput = typeof entry.outputPerM === 'number' && entry.outputPerM > 0;
-    if (!hasInput && !hasOutput) { showError(t('settings.customPricing.errorNoPrice')); return; }
+    if (!customPricingFormApi.hasUsableBasePrice(entry)) { showError(t('settings.customPricing.errorNoPrice')); return; }
     const next = customPricingFormApi.upsertOverride(state.settings?.customModelPricing || [], entry);
     await saveSettings({ customModelPricing: next });
     closeForm();

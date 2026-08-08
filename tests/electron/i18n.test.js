@@ -56,6 +56,10 @@ test('translate falls back to English and interpolates values', () => {
   assert.equal(translate('zh-TW', 'settings.codex.personalWorkspace'), '個人');
   assert.equal(translate('zh-CN', 'settings.codex.personalWorkspace'), '个人');
   assert.equal(translate('zh-CN', 'settings.appUpdate.latestWithStatus', { version: '0.2.1', status: '已是最新' }), 'v0.2.1（已是最新）');
+  const diagnosticsDescription = translate('zh-CN', 'settings.about.diagnostics.description');
+  assert.equal(typeof diagnosticsDescription, 'string');
+  assert.ok(diagnosticsDescription.trim());
+  assert.notEqual(diagnosticsDescription, 'settings.about.diagnostics.description');
   assert.equal(translate('zh-TW', 'missing.key'), 'missing.key');
 });
 

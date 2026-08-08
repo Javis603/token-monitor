@@ -68,6 +68,40 @@ test('createUsageRuntime exposes the usage lifecycle handle', () => {
   assert.equal(receivedOptions.clients, 'codex');
 });
 
+test('startCollector exposes safe on-demand runtime diagnostics', async () => {
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'codex',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-diagnostics',
+    intervalMs: 60000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: false,
+    anchorPersistenceEnabled: false,
+    runTokscale: async () => emptyTokscaleResult(),
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitFor(() => updates.length >= 1);
+    const diagnostics = runtime.getDiagnostics();
+    assert.equal(diagnostics.state, 'idle');
+    assert.equal(diagnostics.collectionMode, 'interval');
+    assert.equal(diagnostics.watchMode, 'disabled');
+    assert.equal(diagnostics.tickInFlight, false);
+    assert.equal(diagnostics.tickPending, false);
+    assert.equal(diagnostics.lastTickScope, 'full');
+    assert.ok(diagnostics.lastTickAttemptAt);
+    assert.ok(diagnostics.lastTickSuccessAt);
+    assert.equal(diagnostics.lastFailureCode, null);
+  } finally {
+    runtime.stop();
+  }
+  assert.equal(runtime.getDiagnostics().state, 'stopped');
+});
+
 test('forced Cursor sync bypasses the throttle and resets the ordinary cadence', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;

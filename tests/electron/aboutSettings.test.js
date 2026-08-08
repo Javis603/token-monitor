@@ -110,3 +110,49 @@ test('About links stay visually secondary and wrap in narrow settings', () => {
   assert.match(css, /\.about-settings-links \{[\s\S]*flex-wrap: wrap;/);
   assert.match(css, /\.about-settings-links \.inline-link \{ font-size: 10px; \}/);
 });
+
+test('About diagnostics open from the support links and separate generate, view and copy actions', () => {
+  const html = read('index.html');
+  const about = html.match(/<div class="settings-subgroup about-settings">[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/)?.[0] || '';
+
+  assert.match(about, /id="diagnosticToggleButton"[\s\S]*settings\.about\.diagnostics\.toggle[\s\S]*aria-controls="diagnosticDetails"/);
+  assert.match(about, /id="diagnosticDetails" class="about-settings-diagnostics accordion-animated-container hidden"[^>]*inert/);
+  assert.match(about, /class="accordion-animation-inner about-settings-diagnostics-inner"/);
+  assert.match(about, /id="generateDiagnosticButton"[\s\S]*settings\.about\.diagnostics\.generate/);
+  assert.match(about, /id="copyDiagnosticButton"[^>]*class="hidden"[\s\S]*settings\.about\.diagnostics\.copy/);
+  assert.match(about, /id="previewDiagnosticButton"[^>]*class="inline-link hidden"[\s\S]*settings\.about\.diagnostics\.preview/);
+  assert.doesNotMatch(about, /id="closeDiagnosticPreviewButton"/);
+  assert.doesNotMatch(about, /id="diagnosticGeneratedAt"/);
+  assert.match(about, /id="diagnosticPreview" class="diagnostic-preview hidden"[^>]*aria-hidden="true"[^>]*inert/);
+  assert.ok(about.indexOf('id="reportIssueButton"') < about.indexOf('id="diagnosticToggleButton"'));
+  assert.match(about, /data-i18n="settings\.about\.diagnostics\.privacy"/);
+  assert.ok(html.indexOf('src="diagnosticsPanel.js"') < html.indexOf('src="app.js"'));
+
+  const app = read('app.js');
+  const panel = read('diagnosticsPanel.js');
+  assert.match(app, /const diagnosticsPanel = window\.TokenMonitorDiagnosticsPanel\?\.createDiagnosticsPanel\(/);
+  assert.match(app, /diagnosticsPanel\?\.render\(\)/);
+  assert.doesNotMatch(app, /state\.diagnostics(?:Busy|DetailsOpen|Text|GeneratedAt|PreviewOpen|StatusKey|StatusTone)/);
+  assert.match(panel, /async function requestReport\([\s\S]*generateDiagnosticReport/);
+  assert.match(panel, /async function ensureReport\([\s\S]*state\.busy/);
+  assert.match(panel, /function toggleDetails\([\s\S]*state\.detailsOpen/);
+  assert.match(panel, /state\.busy = true[\s\S]*render\(\)/);
+  assert.match(panel, /generate: \(\) => ensureReport\(\{ openPreview: true \}\)/);
+  assert.match(panel, /regenerate: \(\) => ensureReport\(\{ force: true, openPreview: true \}\)/);
+  assert.match(panel, /previewButton\.textContent = state\.previewOpen[\s\S]*settings\.about\.diagnostics\.hidePreview/);
+  assert.match(panel, /function togglePreview\([\s\S]*state\.previewOpen = !state\.previewOpen/);
+  assert.match(panel, /elements\.generate\?\.addEventListener\('click'/);
+  assert.match(panel, /elements\.copy\?\.addEventListener\('click'/);
+  assert.doesNotMatch(app, /closeDiagnosticPreviewButton|function closeDiagnosticPreview/);
+  assert.doesNotMatch(panel, /diagnosticGeneratedAt/);
+});
+
+test('Diagnostic disclosure uses the shared accordion transition and compact preview styling', () => {
+  const css = read('styles.css');
+
+  assert.match(css, /\.about-settings-diagnostics \{[\s\S]*transition: grid-template-rows 250ms cubic-bezier/);
+  assert.match(css, /\.about-settings-diagnostics\.hidden \{[\s\S]*padding-top: 0;[\s\S]*border-top-color: transparent;/);
+  assert.doesNotMatch(css, /\.about-settings-diagnostics\.hidden,\s*\.diagnostic-preview\.hidden \{ display: none; \}/);
+  assert.match(css, /#diagnosticReportText \{[\s\S]*max-height: 260px;[\s\S]*overflow: auto;/);
+  assert.match(css, /\.diagnostic-actions button:disabled[\s\S]*opacity: 0\.45/);
+});

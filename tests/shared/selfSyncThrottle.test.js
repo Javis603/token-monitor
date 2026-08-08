@@ -120,6 +120,36 @@ test('a failure drops the source floor to the idle cadence until one succeeds', 
   assert.equal(throttle.sourceFloorMs('antigravity'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
 });
 
+test('a failed sync keeps bounded stage and exit metadata without retaining stderr', () => {
+  const throttle = createSelfSyncThrottle({ now: () => 1 });
+  const attempt = throttle.beginAttempt('antigravity');
+  throttle.completeAttempt('antigravity', attempt, true, 'sync-exit-error', {
+    failureStage: 'process-exit',
+    exitCode: 17,
+    stderr: 'ENOENT: /Users/alice/.gemini/private'
+  });
+
+  assert.deepEqual(throttle.syncStatus('antigravity'), {
+    state: 'failed',
+    lastAttemptAt: 1,
+    lastSuccessAt: 0,
+    failureCode: 'sync-exit-error',
+    failureStage: 'process-exit',
+    detailCode: 'unknown',
+    exitCode: 17
+  });
+  assert.equal(JSON.stringify(throttle.syncStatus('antigravity')).includes('alice'), false);
+});
+
+test('failure stage infers the stable code when a producer supplies only stage metadata', () => {
+  const throttle = createSelfSyncThrottle({ now: () => 1 });
+  const attempt = throttle.beginAttempt('cursor');
+  throttle.completeAttempt('cursor', attempt, true, '', { failureStage: 'timeout' });
+  assert.equal(throttle.syncStatus('cursor').failureCode, 'sync-timeout');
+  assert.equal(throttle.syncStatus('cursor').failureStage, 'timeout');
+  assert.equal(throttle.syncStatus('cursor').detailCode, 'unknown');
+});
+
 test('a superseded attempt cannot rewrite the current backoff', () => {
   // stop() cannot cancel a sync already in flight, so a collector rebuilt by a
   // settings change can have the previous one's attempt land after its own.

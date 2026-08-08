@@ -19,6 +19,11 @@
 // be wrong about the other.
 
 const SELF_SYNC_KINDS = ['cursor', 'antigravity'];
+const {
+  normalizeClientSyncDetailCode,
+  normalizeClientSyncExitCode,
+  normalizeClientSyncFailureStage
+} = require('./clientHealth');
 
 // Re-running these syncs on every ordinary tick is pure overhead, so they keep
 // their own slow cadence rather than the collector's.
@@ -40,6 +45,18 @@ const SYNC_SOURCE_EVENT_MIN_INTERVAL_MS = 10 * 1000;
 // UI, and tokscale's stderr is neither translatable nor guaranteed free of the
 // user's paths. Anything unrecognised collapses to the generic code.
 const SELF_SYNC_FAILURE_CODES = new Set(['sync-failed', 'sync-timeout', 'sync-spawn-failed', 'sync-exit-error']);
+const FAILURE_STAGE_BY_CODE = Object.freeze({
+  'sync-failed': 'unknown',
+  'sync-timeout': 'timeout',
+  'sync-spawn-failed': 'spawn',
+  'sync-exit-error': 'process-exit'
+});
+const FAILURE_CODE_BY_STAGE = Object.freeze({
+  unknown: 'sync-failed',
+  timeout: 'sync-timeout',
+  spawn: 'sync-spawn-failed',
+  'process-exit': 'sync-exit-error'
+});
 
 // setTimeout stores its delay in a 32-bit signed int and silently rewrites
 // anything larger — or non-finite — to 1ms, turning a "wait a while" into a
@@ -104,6 +121,9 @@ function createSelfSyncThrottle(options = {}) {
   const lastAttemptAt = {};
   const lastSuccessAt = {};
   const lastFailureCode = {};
+  const lastFailureStage = {};
+  const lastDetailCode = {};
+  const lastExitCode = {};
   const completedSeq = {};
   for (const kind of SELF_SYNC_KINDS) {
     lastSyncAt[kind] = 0;
@@ -112,6 +132,9 @@ function createSelfSyncThrottle(options = {}) {
     lastAttemptAt[kind] = 0;
     lastSuccessAt[kind] = 0;
     lastFailureCode[kind] = '';
+    lastFailureStage[kind] = '';
+    lastDetailCode[kind] = '';
+    lastExitCode[kind] = null;
     completedSeq[kind] = 0;
   }
 
@@ -149,16 +172,26 @@ function createSelfSyncThrottle(options = {}) {
     return attemptSeq[kind];
   }
 
-  function completeAttempt(kind, attempt, failed, code = '') {
+  function completeAttempt(kind, attempt, failed, code = '', details = {}) {
     if (attempt !== attemptSeq[kind]) return;
     completedSeq[kind] = attempt;
     lastSyncFailed[kind] = failed;
     if (!failed) {
       lastSuccessAt[kind] = now();
       lastFailureCode[kind] = '';
+      lastFailureStage[kind] = '';
+      lastDetailCode[kind] = '';
+      lastExitCode[kind] = null;
       return;
     }
-    lastFailureCode[kind] = SELF_SYNC_FAILURE_CODES.has(code) ? code : 'sync-failed';
+    const requestedStage = normalizeClientSyncFailureStage(details?.failureStage);
+    const failureStage = requestedStage || FAILURE_STAGE_BY_CODE[code] || 'unknown';
+    lastFailureCode[kind] = SELF_SYNC_FAILURE_CODES.has(code)
+      ? code
+      : (FAILURE_CODE_BY_STAGE[failureStage] || 'sync-failed');
+    lastFailureStage[kind] = failureStage;
+    lastDetailCode[kind] = normalizeClientSyncDetailCode(details?.detailCode) || 'unknown';
+    lastExitCode[kind] = normalizeClientSyncExitCode(details?.exitCode);
   }
 
   // A read-only view for diagnostics. `pending` is reachable rather than
@@ -176,7 +209,10 @@ function createSelfSyncThrottle(options = {}) {
       state,
       lastAttemptAt: lastAttemptAt[kind] || 0,
       lastSuccessAt: lastSuccessAt[kind] || 0,
-      failureCode: lastFailureCode[kind] || ''
+      failureCode: lastFailureCode[kind] || '',
+      failureStage: lastFailureStage[kind] || '',
+      detailCode: lastDetailCode[kind] || '',
+      exitCode: lastExitCode[kind]
     };
   }
 

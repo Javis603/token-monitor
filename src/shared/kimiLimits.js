@@ -3,6 +3,7 @@
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
+const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 
 const KIMI_FETCH_TIMEOUT_MS = 12_000;
 
@@ -20,6 +21,8 @@ const KIMI_MEMBERSHIP_GRACE_MS = 2000;
 // more than one limits[] entry, so duration-based classification remains
 // defensive. Kimi Code itself has no monthly/billing window here.
 const KIMI_SESSION_MAX_MINUTES = 6 * 60;
+const KIMI_SESSION_WINDOW_MINUTES = 5 * 60;
+const KIMI_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 
 function cleanSecret(value) {
   let raw = value;
@@ -236,6 +239,35 @@ function parseKimiUsage(rawBody) {
   const body = rawBody?.data && typeof rawBody.data === 'object' ? rawBody.data : rawBody;
   const windows = [];
   const seenKinds = new Set();
+
+  // The FEATURE_CODING detail on top-level `usage` is the authoritative weekly
+  // quota on both endpoints — the number the console shows. Add it before the
+  // limits[] entries so a compatible proxy that also reports a 7-day window
+  // cannot displace it: limits[] only backfills kinds the detail does not cover.
+  const usage = body?.usage;
+  if (usage && typeof usage === 'object') {
+    const usedPercent = usedPercentFromDetail(usage);
+    if (usedPercent !== null) {
+      const name = pickString(usage, ['name', 'label', 'title']);
+      const kind = classifyKimiUsageName(name);
+      const resetAt = pickRaw(usage, ['reset_at', 'resetAt', 'resetTime', 'reset_time']);
+      windows.push({
+        kind,
+        label: name.trim() || kindLabel(kind),
+        usedPercent,
+        remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)),
+        // This detail is the FEATURE_CODING weekly quota on both endpoints;
+        // anchor its pace to the canonical 7-day window instead of leaving it
+        // duration-less now that it is the primary weekly source (the members
+        // 7-day ratio it supersedes always carried the 7d duration).
+        windowMinutes: kind === 'weekly' ? KIMI_WEEKLY_WINDOW_MINUTES : undefined,
+        resetsAt: toIso(resetAt),
+        showMeter: true
+      });
+      seenKinds.add(kind);
+    }
+  }
+
   const entries = limitEntries(body);
   const classified = entries.length === 2 ? classifyKimiPair(entries) : entries.map((entry) => ({
     ...entry,
@@ -243,6 +275,7 @@ function parseKimiUsage(rawBody) {
   }));
 
   for (const entry of classified) {
+    if (seenKinds.has(entry.kind)) continue;
     seenKinds.add(entry.kind);
     windows.push({
       kind: entry.kind,
@@ -253,26 +286,6 @@ function parseKimiUsage(rawBody) {
       resetsAt: entry.resetsAt || undefined,
       showMeter: true
     });
-  }
-
-  const usage = body?.usage;
-  if (usage && typeof usage === 'object') {
-    const usedPercent = usedPercentFromDetail(usage);
-    if (usedPercent !== null) {
-      const name = pickString(usage, ['name', 'label', 'title']);
-      const kind = classifyKimiUsageName(name);
-      if (!seenKinds.has(kind)) {
-        const resetAt = pickRaw(usage, ['reset_at', 'resetAt', 'resetTime', 'reset_time']);
-        windows.push({
-          kind,
-          label: name.trim() || kindLabel(kind),
-          usedPercent,
-          remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)),
-          resetsAt: toIso(resetAt),
-          showMeter: true
-        });
-      }
-    }
   }
 
   return { windows };
@@ -334,14 +347,14 @@ function parseKimiMembershipStats(rawBody) {
     ['ratelimitCode5h', 'ratelimit_code_5h', 'ratelimit5h', 'ratelimit_5h'],
     'session',
     '5-hour',
-    5 * 60
+    KIMI_SESSION_WINDOW_MINUTES
   );
   const weekly = membershipRateWindow(
     body,
     ['ratelimitCode7d', 'ratelimit_code_7d', 'ratelimit7d', 'ratelimit_7d'],
     'weekly',
     'Weekly',
-    7 * 24 * 60
+    KIMI_WEEKLY_WINDOW_MINUTES
   );
   if (session) windows.push(session);
   if (weekly) windows.push(weekly);
@@ -423,6 +436,7 @@ function jwtSessionHeaders(token) {
 }
 
 function kimiWebHeaders(token) {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return {
     Authorization: `Bearer ${token}`,
     Cookie: `kimi-auth=${token}`,
@@ -433,6 +447,11 @@ function kimiWebHeaders(token) {
     'connect-protocol-version': '1',
     'x-language': 'en-US',
     'x-msh-platform': 'web',
+    // undici sends `User-Agent: node` by default; the web console rejects
+    // non-browser clients, so present as Chrome like the sibling web-session
+    // providers (mimo/qoder) do.
+    'User-Agent': BROWSER_USER_AGENT,
+    ...(timezone ? { 'r-timezone': timezone } : {}),
     ...jwtSessionHeaders(token)
   };
 }
@@ -493,7 +512,13 @@ async function fetchKimiWebWindows(token, deps = {}) {
   const membershipWindows = membership.value ? parseKimiMembershipStats(membership.value).windows : [];
   const usageWindows = usage.value ? parseKimiWebUsage(usage.value).windows : [];
   return {
-    windows: mergeKimiWindows(membershipWindows, usageWindows),
+    // GetUsages is the authoritative quota source: the FEATURE_CODING detail is
+    // the 7-day used/limit the Kimi console shows, and limits[0] is the 5-hour
+    // rate limit. Membership stats only enrich that baseline with the shared
+    // monthly pool (and may offer 5h/7d ratios as a fallback when GetUsages
+    // lacks a window). mergeKimiWindows keeps the first window of each kind, so
+    // usage must be listed first for its detail to fill the weekly slot.
+    windows: mergeKimiWindows(usageWindows, membershipWindows),
     errors: [membership.error, usage.error].filter(Boolean)
   };
 }
@@ -508,6 +533,9 @@ async function fetchKimiCodeWindows(key, deps = {}) {
   return parseKimiUsage(body).windows;
 }
 
+// First window of each kind wins, so callers list authoritative sources first
+// (usage before membership) and later groups only fill the kinds that are
+// still missing.
 function mergeKimiWindows(...groups) {
   const byKind = new Map();
   for (const windows of groups) {
