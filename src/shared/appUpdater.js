@@ -43,30 +43,26 @@ function appUpdateInstallSupport({
 }
 
 // How long an install attempt may sit unconfirmed before we conclude the
-// installer never took over, and whether reaching that point is a verdict.
-// quitAndInstall() returns void and the failure paths emit nothing, so still
-// being alive is the only failure signal there is. The bound must clear a
-// working install by a wide margin, because expiring on one would hand the quit
-// flags back mid-install.
+// installer never took over. quitAndInstall() returns void and the failure paths
+// emit nothing, so still being alive is the only failure signal there is. The
+// bound has to clear a working install by a wide margin: expiring on one would
+// hand the quit flags back mid-install, and on macOS it also burns the session's
+// one install attempt.
 //
 // NsisUpdater and AppImageUpdater run install() synchronously and emit the
 // hand-off from a setImmediate, so a working install is gone within a tick.
-// Expiry there means install() returned false and said nothing, which is worth
-// reporting: the user pressed Install and nothing happened.
 //
-// macOS is the opposite. We run with autoInstallOnAppQuit off, so MacUpdater does
-// not involve Squirrel at download time (updateDownloaded only calls
-// checkForUpdates when that flag is on). quitAndInstall() therefore always takes
-// the branch that starts Squirrel from scratch: it pulls the already-downloaded
-// zip back through electron-updater's local proxy, then validates the signature
-// and stages the swap, and only then hands off. The pull is localhost and quick;
-// the validation and staging are not. Seconds to tens of seconds is the normal
-// case, so the bound is minutes and expiry is not a verdict on anything. It means
-// only that nobody should be stuck in an app they cannot quit.
-function updateInstallQuitPolicy(platform = process.platform) {
-  return platform === 'darwin'
-    ? { graceMs: 5 * 60 * 1000, expiryIsConclusive: false }
-    : { graceMs: 10 * 1000, expiryIsConclusive: true };
+// macOS is far slower, for a reason easy to miss. We run with autoInstallOnAppQuit
+// off, so MacUpdater does not involve Squirrel at download time (updateDownloaded
+// only calls checkForUpdates when that flag is on). quitAndInstall() therefore
+// always takes the branch that starts Squirrel from scratch: it pulls the
+// already-downloaded zip back through electron-updater's local proxy, validates
+// the signature and stages the swap, and only then hands off. The pull is
+// localhost and quick; the validation and staging are not. Seconds to tens of
+// seconds is normal, so the bound is minutes. At that distance expiry does mean
+// something has genuinely stalled, which is why it is reported on every platform.
+function updateInstallQuitGraceMs(platform = process.platform) {
+  return platform === 'darwin' ? 5 * 60 * 1000 : 10 * 1000;
 }
 
 function parseTag(tag) {
@@ -599,7 +595,7 @@ async function checkLatestRelease(currentVersion) {
 
 module.exports = {
   appUpdateInstallSupport,
-  updateInstallQuitPolicy,
+  updateInstallQuitGraceMs,
   parseTag,
   parseLatestReleasePayload,
   latestFromUpdaterInfo,

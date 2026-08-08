@@ -109,7 +109,7 @@ const {
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck,
-  updateInstallQuitPolicy
+  updateInstallQuitGraceMs
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
@@ -4304,17 +4304,25 @@ let skipForcedQuit = false;
 // reports back whether the installer actually took over. The guard owns that
 // unconfirmed window; these two flags are all it touches here. See
 // updateInstallQuit.js for why the claim expires and what promotes it.
+// Set once the hand-off listener is actually attached; see the guard's watchdog.
+let updateHandoffObserved = false;
+
 const updateInstallQuit = createUpdateInstallQuitGuard({
-  ...updateInstallQuitPolicy(),
+  graceMs: updateInstallQuitGraceMs(),
+  watchdogEnabled: () => updateHandoffObserved,
   claim: () => { quitRequested = true; skipForcedQuit = true; },
   release: () => { quitRequested = false; skipForcedQuit = false; },
-  onStalled: (expiryIsConclusive) => {
-    // Only where a working install could not have reached the bound. There it
-    // means install() returned false and said nothing, which is exactly what the
-    // user is looking at: they pressed Install and the app neither restarted nor
-    // complained. Elsewhere expiry says only that the wait ran long.
-    if (!expiryIsConclusive) return;
-    setNativeAppUpdateState({ phase: 'error', progress: null, error: 'Update installer did not start' });
+  onStalled: () => {
+    // The bound is far enough out that reaching it means the install genuinely
+    // stalled, which is exactly what the user is looking at: they pressed Install
+    // and the app neither restarted nor complained. Restarting is the only advice
+    // we can honestly give, since the guard cannot allow another attempt while the
+    // updater's own request may still be live.
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: 'Update installer did not start. Restart the app and try again.'
+    });
   }
 });
 
@@ -4560,11 +4568,13 @@ function configureNativeAppUpdater() {
   });
   // The hand-off is emitted on Electron's own autoUpdater, not electron-updater's:
   // BaseUpdater re-emits it there to mimic what Squirrel does natively. Guarded
-  // because the native module is documented for macOS and Windows only, and
-  // losing the listener costs the confirmation, not correctness: the grace period
-  // still bounds an unconfirmed claim.
+  // because the native module is documented for macOS and Windows only. Losing it
+  // is not merely losing a confirmation: without it nothing could re-claim the
+  // flags after the grace period, so the guard stops arming the watchdog at all
+  // rather than expire into a state a late hand-off cannot recover from.
   try {
     require('electron').autoUpdater?.on?.('before-quit-for-update', () => updateInstallQuit.noteHandoff());
+    updateHandoffObserved = true;
   } catch (error) {
     console.log(`[update] cannot observe the install hand-off: ${error?.message || error}`);
   }

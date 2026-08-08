@@ -10,23 +10,22 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { createUpdateInstallQuitGuard } = require('../../src/electron/updateInstallQuit');
-const { updateInstallQuitPolicy } = require('../../src/shared/appUpdater');
+const { updateInstallQuitGraceMs } = require('../../src/shared/appUpdater');
 
 const ROOT = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
 
 // Records the flag movements as an ordered log and hands the grace period back as
 // something the test fires by hand, so every transition is observable.
-function harness({ graceMs = 10_000, expiryIsConclusive = true } = {}) {
+function harness({ graceMs = 10_000, watchdogEnabled = true } = {}) {
   const events = [];
   const timers = [];
-  const stalledWith = [];
   const guard = createUpdateInstallQuitGuard({
     graceMs,
-    expiryIsConclusive,
+    watchdogEnabled: () => watchdogEnabled,
     claim: () => events.push('claim'),
     release: () => events.push('release'),
-    onStalled: (conclusive) => { events.push('stalled'); stalledWith.push(conclusive); },
+    onStalled: () => events.push('stalled'),
     setTimeoutFn: (fn, ms) => {
       const handle = {
         fn,
@@ -40,7 +39,7 @@ function harness({ graceMs = 10_000, expiryIsConclusive = true } = {}) {
     },
     clearTimeoutFn: (handle) => { if (handle) handle.cleared = true; }
   });
-  return { guard, events, timers, stalledWith, fire: (index = timers.length - 1) => timers[index].fn() };
+  return { guard, events, timers, fire: (index = timers.length - 1) => timers[index].fn() };
 }
 
 test('a request claims the flags and arms exactly one grace period', () => {
@@ -72,7 +71,52 @@ test('an expired claim gives the flags back before it reports', () => {
   // Release first: the app has to be quittable whether or not anyone is watching
   // the error that follows.
   assert.deepEqual(events, ['claim', 'release', 'stalled']);
+  // Not idle. The quit claim ended; the updater's own request did not.
+  assert.equal(guard.phase(), 'waiting');
+});
+
+test('an expired claim still refuses a second install', () => {
+  const { guard, events, timers, fire } = harness();
+  guard.request();
+  fire();
+  // The sequence that matters on macOS: pressing Install again here would stack a
+  // second MacUpdater listener on top of the first, and both would re-enter the
+  // install once Squirrel finally answers.
+  assert.equal(guard.request(), false);
+  assert.deepEqual(events, ['claim', 'release', 'stalled']);
+  assert.equal(timers.length, 1);
+  assert.equal(guard.phase(), 'waiting');
+});
+
+test('a hand-off still lands after the claim expired', () => {
+  const { guard, events, fire } = harness();
+  guard.request();
+  fire();
+  guard.noteHandoff();
+  assert.deepEqual(events, ['claim', 'release', 'stalled', 'claim']);
+  assert.equal(guard.phase(), 'handoff');
+});
+
+test('an updater error is the one thing that ends the wait', () => {
+  const { guard, events, fire } = harness();
+  guard.request();
+  fire();
+  // A late error is evidence the updater's request really ended, so it both
+  // attributes to the install and frees the guard for another attempt.
+  assert.equal(guard.abort(), true);
   assert.equal(guard.phase(), 'idle');
+  assert.equal(guard.request(), true);
+  assert.deepEqual(events, ['claim', 'release', 'stalled', 'release', 'claim']);
+});
+
+test('the watchdog is not armed when the hand-off cannot be observed', () => {
+  const { guard, events, timers } = harness({ watchdogEnabled: false });
+  // Expiring with nothing able to re-claim would let a late hand-off race the
+  // forced exit. Holding the claim is the lesser failure.
+  assert.equal(guard.request(), true);
+  assert.equal(timers.length, 0);
+  assert.equal(guard.phase(), 'requested');
+  assert.deepEqual(events, ['claim']);
 });
 
 test('the hand-off cancels the grace period', () => {
@@ -95,18 +139,6 @@ test('an expiry that fires after the hand-off releases nothing', () => {
   assert.deepEqual(events, []);
   assert.equal(guard.phase(), 'handoff');
   assert.equal(timers.length, 1);
-});
-
-test('a hand-off arriving after the claim expired takes the flags back', () => {
-  const { guard, events, fire } = harness();
-  guard.request();
-  // macOS: quitAndInstall() can return having only asked Squirrel to check, and
-  // the real hand-off follows whenever that round-trip completes.
-  fire();
-  assert.equal(guard.phase(), 'idle');
-  guard.noteHandoff();
-  assert.deepEqual(events, ['claim', 'release', 'stalled', 'claim']);
-  assert.equal(guard.phase(), 'handoff');
 });
 
 test('abort reports whether a claim was outstanding', () => {
@@ -141,40 +173,25 @@ test('a request is possible again once the previous one ended', () => {
   assert.equal(timers.length, 2);
 });
 
-test('expiry carries a verdict only where a working install could not reach it', () => {
-  const { stalledWith, fire, guard } = harness({ expiryIsConclusive: false });
-  guard.request();
-  fire();
-  assert.deepEqual(stalledWith, [false]);
-
-  const conclusive = harness({ expiryIsConclusive: true });
-  conclusive.guard.request();
-  conclusive.fire();
-  assert.deepEqual(conclusive.stalledWith, [true]);
-});
-
-test('the same-tick install paths get a short, conclusive bound', () => {
+test('the same-tick install paths get a short bound', () => {
   // NsisUpdater and AppImageUpdater run install() synchronously and emit the
   // hand-off from a setImmediate, so a working install is gone within a tick.
   for (const platform of ['win32', 'linux']) {
-    const policy = updateInstallQuitPolicy(platform);
-    assert.equal(policy.expiryIsConclusive, true, platform);
-    assert.ok(policy.graceMs >= 5_000, `${platform} must not race a next-tick quit`);
-    assert.ok(policy.graceMs <= 60_000, `${platform} must not leave an unquittable app sitting`);
+    const graceMs = updateInstallQuitGraceMs(platform);
+    assert.ok(graceMs >= 5_000, `${platform} must not race a next-tick quit`);
+    assert.ok(graceMs <= 60_000, `${platform} must not leave an unquittable app sitting`);
   }
 });
 
-test('macOS gets a bound that clears a real Squirrel transfer', () => {
-  // With autoInstallOnAppQuit off, MacUpdater has Squirrel pull the whole app zip
-  // through electron-updater's local proxy only once quitAndInstall() is called,
-  // and hands off after the entire transfer. Tens of seconds is normal, so a bound
-  // anywhere near the same-tick one would expire on working installs and hand the
-  // quit flags back mid-install.
-  const policy = updateInstallQuitPolicy('darwin');
-  assert.equal(policy.expiryIsConclusive, false);
-  assert.ok(policy.graceMs >= 2 * 60 * 1000, 'a normal transfer must never reach the bound');
-  const sameTick = updateInstallQuitPolicy('win32');
-  assert.ok(policy.graceMs > sameTick.graceMs * 10);
+test('macOS gets a bound that clears a real Squirrel install', () => {
+  // With autoInstallOnAppQuit off, quitAndInstall() is where Squirrel starts from
+  // scratch: pull the zip back through the local proxy, validate the signature,
+  // stage the swap. Seconds to tens of seconds is normal, so a bound anywhere near
+  // the same-tick one would expire on working installs, hand the quit flags back
+  // mid-install, and burn the session's one attempt.
+  const graceMs = updateInstallQuitGraceMs('darwin');
+  assert.ok(graceMs >= 2 * 60 * 1000, 'a normal install must never reach the bound');
+  assert.ok(graceMs > updateInstallQuitGraceMs('win32') * 10);
 });
 
 // main.js cannot be required outside Electron, so its wiring is pinned at the
@@ -192,10 +209,11 @@ test('the guard moves both quit flags together, in the same direction', () => {
   const start = main.indexOf('createUpdateInstallQuitGuard({');
   assert.ok(start >= 0, 'the guard has to be constructed');
   const block = main.slice(start, main.indexOf('\n});', start));
-  // The bound and its verdict come from the shared policy, never inlined here:
-  // a number written at the call site is one nobody can weigh against what the
-  // install path actually does.
-  assert.match(block, /\.\.\.updateInstallQuitPolicy\(\)/);
+  // The bound comes from the shared policy, never inlined here: a number written
+  // at the call site is one nobody can weigh against what the install path does.
+  assert.match(block, /graceMs: updateInstallQuitGraceMs\(\)/);
+  // And the watchdog stays gated on the hand-off actually being observable.
+  assert.match(block, /watchdogEnabled: \(\) => updateHandoffObserved/);
   // quitRequested predates the forced exit and on its own is already enough to
   // make requestAppQuit return early forever, so it cannot be left behind.
   for (const [role, value] of [['claim', 'true'], ['release', 'false']]) {
@@ -214,6 +232,10 @@ test('the hand-off is observed on Electron own updater, not electron-updater', (
   // never fire, and the failure mode is silent.
   assert.match(line, /require\('electron'\)/);
   assert.match(line, /noteHandoff/);
+  // The flag has to be set only after a registration that did not throw, or the
+  // watchdog would arm with nothing able to re-claim the flags it releases.
+  const registration = main.slice(main.indexOf(line), main.indexOf('} catch', main.indexOf(line)));
+  assert.match(registration, /updateHandoffObserved = true;/);
 });
 
 test('the install request goes through the guard before quitAndInstall', () => {
