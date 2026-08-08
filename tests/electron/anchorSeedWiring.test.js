@@ -38,10 +38,12 @@ test('only the seed waits for the renderer, so the deferral cannot queue up', ()
   // Live stats send directly. Deferring all of them would add a
   // did-finish-load listener per frame while the renderer loads, and the
   // renderer's own refreshStats() on init already covers what gets dropped.
-  assert.match(push, /if \(options\.deferToRenderer\) sendMainWindowEvent\('stats:push', payload\);/);
+  assert.match(push, /if \(options\.deferToRenderer\)/);
   assert.match(push, /else if \(mainWindow && !mainWindow\.isDestroyed\(\)\)/);
-  const seedCalls = (main.match(/deferToRenderer: true/g) || []).length;
-  assert.equal(seedCalls, 1, 'exactly one caller may defer');
+  assert.equal((main.match(/deferToRenderer: true/g) || []).length, 1, 'exactly one caller may defer');
+  // The queued snapshot is only delivered while it is still what was published
+  // last; deferredWindowSend.test.js covers the behaviour.
+  assert.match(push, /latestStats === deferred/);
 });
 
 test('the seed runs before the collector and only on a cold start', () => {
