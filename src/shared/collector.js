@@ -2586,6 +2586,12 @@ function startCollector(options) {
     }, watchDebounceMs);
   }
 
+  // chokidar's close() returns a promise, but only after an O(N) synchronous
+  // pass that walks every watched entry and closes every fs.watch handle inline,
+  // so on a tree the size of ~/.claude/projects it blocks the caller for as long
+  // as that takes. Callers that must not overlap an old watcher with a new one
+  // (mode switches) pay that cost; the quit path skips it via
+  // stop({ skipCloseWatchers }) and lets the descriptors go with the process.
   function closeWatchers() {
     for (const watcher of watchers) {
       try { watcher.close(); } catch (_) {}
@@ -2656,6 +2662,9 @@ function startCollector(options) {
       const ignored = watchIgnoreMatcher(clients);
       const watcher = chokidar.watch(dirs, watcherOptions(usePolling, ignored));
       watcher.on('all', (event, filePath) => {
+        // The quit path leaves the watcher open (see stop), so events can still
+        // arrive after the collector is done with them.
+        if (stopped) return;
         activityRevision += 1;
         if (tickPending) {
           pendingActivityRevision = pendingActivityRevision === null
@@ -2719,13 +2728,17 @@ function startCollector(options) {
     });
   }
 
-  function stop() {
+  // Stays synchronous and never returns a promise: startMode() and friends rely
+  // on stop() having severed the old collector by the time it returns. Setting
+  // `stopped` is what does the severing, so a watcher left alive by
+  // skipCloseWatchers still cannot drive a tick.
+  function stop(options = {}) {
     if (stopped) return;
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     sourceSyncQueue.stop();
-    closeWatchers();
+    if (!options.skipCloseWatchers) closeWatchers();
     watchedDirectoryKey = null;
   }
 

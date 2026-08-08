@@ -116,13 +116,16 @@ function createDeviceRuntime(options = {}, deps = {}) {
   const usageRuntime = makeUsageRuntime(usageOptions, deps.usageDeps || {});
   const limitsRuntime = makeLimitsRuntime(limitsOptions, limitsDeps);
 
-  function stop() {
+  // Clearing `active` first is what severs the downstream callbacks; the child
+  // stops are cleanup. `options` is passed through untouched so the quit path can
+  // reach the collector with `skipCloseWatchers`.
+  function stop(options = {}) {
     if (!active) return;
     active = false;
     deviceState.stop();
-    usageRuntime?.stop?.();
-    limitsRuntime?.stop?.();
-    sink?.stop?.();
+    usageRuntime?.stop?.(options);
+    limitsRuntime?.stop?.(options);
+    sink?.stop?.(options);
   }
 
   return {
