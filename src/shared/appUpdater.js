@@ -54,13 +54,15 @@ function appUpdateInstallSupport({
 // Expiry there means install() returned false and said nothing, which is worth
 // reporting: the user pressed Install and nothing happened.
 //
-// macOS is the opposite. We run with autoInstallOnAppQuit off, so MacUpdater
-// does not have Squirrel fetch anything at download time (updateDownloaded only
-// calls checkForUpdates when that flag is on). quitAndInstall() therefore always
-// takes the branch that asks Squirrel to pull the whole app zip through
-// electron-updater's local proxy, and the hand-off follows the entire transfer.
-// Tens of seconds is normal, so the bound is minutes and expiry is not a verdict
-// on anything: it only means nobody should be stuck in an app they cannot quit.
+// macOS is the opposite. We run with autoInstallOnAppQuit off, so MacUpdater does
+// not involve Squirrel at download time (updateDownloaded only calls
+// checkForUpdates when that flag is on). quitAndInstall() therefore always takes
+// the branch that starts Squirrel from scratch: it pulls the already-downloaded
+// zip back through electron-updater's local proxy, then validates the signature
+// and stages the swap, and only then hands off. The pull is localhost and quick;
+// the validation and staging are not. Seconds to tens of seconds is the normal
+// case, so the bound is minutes and expiry is not a verdict on anything. It means
+// only that nobody should be stuck in an app they cannot quit.
 function updateInstallQuitPolicy(platform = process.platform) {
   return platform === 'darwin'
     ? { graceMs: 5 * 60 * 1000, expiryIsConclusive: false }
