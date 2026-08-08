@@ -27,14 +27,21 @@ test('the anchor seed publishes through sendPush, not straight to the renderer',
   // Going direct would leave latestStats, the tray and the local status
   // injection on the empty state, which in tray mode is the whole UI.
   assert.doesNotMatch(prime, /sendMainWindowEvent\(/);
-  // Seeded totals were already exported by the run that wrote the anchor.
+  // A republished snapshot must not spend the export interval the first live
+  // scan of this run needs.
   assert.match(prime, /skipExport: true/);
+  assert.match(prime, /deferToRenderer: true/);
 });
 
-test('every stats push survives a renderer that is still loading', () => {
+test('only the seed waits for the renderer, so the deferral cannot queue up', () => {
   const push = functionSource('function sendPush(');
-  assert.match(push, /sendMainWindowEvent\('stats:push', payload\);/);
-  assert.doesNotMatch(push, /webContents\.send\('stats:push'/);
+  // Live stats send directly. Deferring all of them would add a
+  // did-finish-load listener per frame while the renderer loads, and the
+  // renderer's own refreshStats() on init already covers what gets dropped.
+  assert.match(push, /if \(options\.deferToRenderer\) sendMainWindowEvent\('stats:push', payload\);/);
+  assert.match(push, /else if \(mainWindow && !mainWindow\.isDestroyed\(\)\)/);
+  const seedCalls = (main.match(/deferToRenderer: true/g) || []).length;
+  assert.equal(seedCalls, 1, 'exactly one caller may defer');
 });
 
 test('the seed runs before the collector and only on a cold start', () => {

@@ -3324,8 +3324,13 @@ function injectLocalDeviceStatus(stats) {
   return stats;
 }
 
-// `options.skipExport` is for stats that are republished rather than newly
-// observed, so they do not consume the auto-export interval.
+// Two options, both for the cold-start seed and neither for live stats.
+// `skipExport` keeps a republished snapshot from spending the auto-export
+// interval that this run's first real scan needs. `deferToRenderer` waits for
+// did-finish-load, and is deliberately not the default: a push that lands while
+// the renderer is loading is already covered by the refreshStats() the renderer
+// runs on init, so deferring every one of them would only queue a listener per
+// frame against a slow load and then replay a burst of superseded stats.
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   if (payload?.data?.stats) {
@@ -3339,9 +3344,10 @@ function sendPush(payload, options = {}) {
         .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
     }
   }
-  // Deferred when the renderer is still loading. webContents.send drops messages
-  // sent before the listener is registered, which a cold-start push races.
-  sendMainWindowEvent('stats:push', payload);
+  if (options.deferToRenderer) sendMainWindowEvent('stats:push', payload);
+  else if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
+  }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
     if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -3511,13 +3517,13 @@ function primeLocalStatsFromAnchor(usageOptions) {
   // Through the normal publisher, not straight to the renderer: the tray reads
   // what sendPush sets, and in tray mode the window is hidden, so a seed that
   // only reached the renderer would leave the one visible surface on zero.
-  // Export is the exception. These totals were already exported at the end of
-  // the run that produced the anchor, and re-exporting them here would spend the
-  // interval budget that the first real scan of this run needs.
+  // This one push waits for the renderer because it is the only one that fires
+  // before the window has loaded, and it must not spend the export interval
+  // this run's first live scan needs on a snapshot it is only republishing.
   sendPush({
     event: 'stats',
     data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
-  }, { skipExport: true });
+  }, { skipExport: true, deferToRenderer: true });
 }
 
 function startLocalCollector() {
