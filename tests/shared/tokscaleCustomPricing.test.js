@@ -17,16 +17,18 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'custompricing-'));
 }
 
-test('normalize trims modelId, drops blanks and rows with no positive input/output', () => {
+test('normalize trims modelId, drops blanks and rows with no input/output price', () => {
   const out = normalizeCustomPricingSetting([
     { modelId: '  mimo-v2.5-pro ', inputPerM: 0.4, outputPerM: 0.8, cacheReadPerM: 0.003 },
     { modelId: '', inputPerM: 1 },                       // no id
     { modelId: 'x', inputPerM: '', outputPerM: '' },     // neither input nor output
-    { modelId: 'y', inputPerM: -1, outputPerM: 0 },      // negative + zero => dropped
+    { modelId: 'y', inputPerM: -1, outputPerM: '' },     // invalid + unset => dropped
+    { modelId: 'free', inputPerM: 0, outputPerM: 0 },     // explicit free model
     { modelId: 'z', outputPerM: 0.5 }                    // output-only is valid
   ]);
   assert.deepEqual(out, [
     { modelId: 'mimo-v2.5-pro', inputPerM: 0.4, outputPerM: 0.8, cacheReadPerM: 0.003 },
+    { modelId: 'free', inputPerM: 0, outputPerM: 0, cacheReadPerM: undefined },
     { modelId: 'z', inputPerM: undefined, outputPerM: 0.5, cacheReadPerM: undefined }
   ]);
 });
@@ -49,6 +51,7 @@ test('normalize accepts explicit 0 cache-read (free) but omits unset fields', ()
 test('buildTokscaleModels emits per-million keys, omitting undefined fields', () => {
   const models = buildTokscaleModels([
     { modelId: 'mimo-v2.5-pro', inputPerM: 0.4, outputPerM: 0.8, cacheReadPerM: 0.003 },
+    { modelId: 'free', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0 },
     { modelId: 'z', inputPerM: undefined, outputPerM: 0.5, cacheReadPerM: undefined }
   ]);
   assert.deepEqual(models, {
@@ -56,6 +59,11 @@ test('buildTokscaleModels emits per-million keys, omitting undefined fields', ()
       input_cost_per_million_tokens: 0.4,
       output_cost_per_million_tokens: 0.8,
       cache_read_input_token_cost_per_million_tokens: 0.003
+    },
+    free: {
+      input_cost_per_million_tokens: 0,
+      output_cost_per_million_tokens: 0,
+      cache_read_input_token_cost_per_million_tokens: 0
     },
     z: { output_cost_per_million_tokens: 0.5 }
   });

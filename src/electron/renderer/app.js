@@ -13340,9 +13340,7 @@ function setupCustomPricingUI() {
       outputPerM: outputEl.value === '' ? undefined : Number(outputEl.value),
       cacheReadPerM: cacheReadEl.value === '' ? undefined : Number(cacheReadEl.value)
     };
-    const hasInput = typeof entry.inputPerM === 'number' && entry.inputPerM > 0;
-    const hasOutput = typeof entry.outputPerM === 'number' && entry.outputPerM > 0;
-    if (!hasInput && !hasOutput) { showError(t('settings.customPricing.errorNoPrice')); return; }
+    if (!customPricingFormApi.hasUsableBasePrice(entry)) { showError(t('settings.customPricing.errorNoPrice')); return; }
     const next = customPricingFormApi.upsertOverride(state.settings?.customModelPricing || [], entry);
     await saveSettings({ customModelPricing: next });
     closeForm();

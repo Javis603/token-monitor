@@ -11,12 +11,9 @@ function toUnitPrice(value) {
   return n;
 }
 
-function isPositive(n) {
-  return typeof n === 'number' && n > 0;
-}
-
 // Array<{modelId,inputPerM,outputPerM,cacheReadPerM}> -> cleaned array.
-// Mirrors tokscale's rule: at least one of input/output must be present and positive.
+// Mirrors tokscale's rule: at least one of input/output must be present.
+// A present zero is an explicit free price; undefined means unset.
 function normalizeCustomPricingSetting(value) {
   if (!Array.isArray(value)) return [];
   const byId = new Map();
@@ -27,7 +24,7 @@ function normalizeCustomPricingSetting(value) {
     const inputPerM = toUnitPrice(raw.inputPerM);
     const outputPerM = toUnitPrice(raw.outputPerM);
     const cacheReadPerM = toUnitPrice(raw.cacheReadPerM);
-    if (!(isPositive(inputPerM) || isPositive(outputPerM))) continue;
+    if (inputPerM === undefined && outputPerM === undefined) continue;
     byId.set(modelId, { modelId, inputPerM, outputPerM, cacheReadPerM });
   }
   return [...byId.values()];

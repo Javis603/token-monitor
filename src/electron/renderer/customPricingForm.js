@@ -45,5 +45,10 @@
     return (Array.isArray(list) ? list : []).filter((e) => e && e.modelId !== modelId);
   }
 
-  return { inUseModelIds, perMillionFromPricing, upsertOverride, removeOverride };
+  function hasUsableBasePrice(entry) {
+    const valid = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+    return valid(entry?.inputPerM) || valid(entry?.outputPerM);
+  }
+
+  return { inUseModelIds, perMillionFromPricing, upsertOverride, removeOverride, hasUsableBasePrice };
 });
