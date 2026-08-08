@@ -1247,17 +1247,33 @@ function clientSourceRoots(clientsCsv) {
   // IDE usage each refresh in seconds; the shared Code/logs tree is deliberately
   // not watched (too broad for polling — full ticks still scan it). No --home
   // host-DB fallback, so every root is safe to watch cross-platform.
-  // The extension log root is tokscale's `dirs::data_local_dir()` (scanner.rs),
-  // which is %LOCALAPPDATA% on Windows, Application Support on macOS, and the
-  // XDG data home on Linux — so the Linux arm has to follow XDG_DATA_HOME, not
-  // a hardcoded .local/share. This is a `dirs` crate lookup rather than a path
-  // literal, which is why it does not show up when grepping tokscale's strings.
-  const codebuddyExtLogs = process.platform === 'win32'
-    ? path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'CodeBuddyExtension', 'Logs')
-    : process.platform === 'darwin'
-      ? path.join(home, 'Library', 'Application Support', 'CodeBuddyExtension', 'Logs')
-      : path.join(xdgHome, 'CodeBuddyExtension', 'Logs');
-  add('codebuddy', ['codebuddy-projects', path.join(home, '.codebuddy', 'projects')], ['codebuddy-extension-logs', codebuddyExtLogs]);
+  // Two extension-log roots, because tokscale scans two (scanner.rs). It seeds
+  // the list with the home-relative Windows-shaped path on EVERY platform, and
+  // only then adds the native `dirs::data_local_dir()` root — so a home carried
+  // over from Windows is scanned on macOS/Linux too, and watching only the
+  // native one would let the periodic scan see usage the watcher never does.
+  //
+  // `dirs::data_local_dir()` is %LOCALAPPDATA% on Windows, Application Support
+  // on macOS, and the XDG data home on Linux, so the Linux arm follows
+  // XDG_DATA_HOME rather than a hardcoded .local/share. Being a `dirs` lookup
+  // rather than a path literal is why it does not appear in tokscale's strings.
+  //
+  // On Windows the two normally resolve to the same directory and the Set
+  // collapses them; elsewhere watchClientRootsForClients drops whichever is
+  // absent, which is the usual case for the Windows-shaped one.
+  const codebuddyExtLogRoots = [
+    path.join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Logs'),
+    process.platform === 'win32'
+      ? path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'CodeBuddyExtension', 'Logs')
+      : process.platform === 'darwin'
+        ? path.join(home, 'Library', 'Application Support', 'CodeBuddyExtension', 'Logs')
+        : path.join(xdgHome, 'CodeBuddyExtension', 'Logs')
+  ];
+  add(
+    'codebuddy',
+    ['codebuddy-projects', path.join(home, '.codebuddy', 'projects')],
+    ...[...new Set(codebuddyExtLogRoots)].map((dir) => ['codebuddy-extension-logs', dir])
+  );
   // WorkBuddy (Tencent): watch only the detailed session dir (projects/*.jsonl,
   // the preferred source) — not the whole ~/.workbuddy app home, whose config /
   // auth churn would add polling load and spurious ticks with no usage change.

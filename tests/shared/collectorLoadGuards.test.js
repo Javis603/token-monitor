@@ -3504,6 +3504,7 @@ test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () =>
     fs.mkdirSync(path.join(xdg, dir), { recursive: true });
   }
   fs.mkdirSync(path.join(tmp, '.local', 'share', 'kiro-cli'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, 'AppData', 'Local', 'CodeBuddyExtension', 'Logs'), { recursive: true });
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   process.env.XDG_DATA_HOME = xdg;
@@ -3516,6 +3517,10 @@ test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () =>
     if (process.platform !== 'win32' && process.platform !== 'darwin') {
       assert.ok(roots.includes(path.join(xdg, 'CodeBuddyExtension', 'Logs')));
     }
+    // tokscale seeds its CodeBuddy log list with the home-relative
+    // Windows-shaped path on every platform, so a home carried over from
+    // Windows has to be watched here too, not only scanned periodically.
+    assert.ok(roots.includes(path.join(tmp, 'AppData', 'Local', 'CodeBuddyExtension', 'Logs')));
     // Home-relative in tokscale, so it must NOT follow XDG.
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'kiro-cli')));
     assert.ok(!roots.includes(path.join(xdg, 'kiro-cli')));
