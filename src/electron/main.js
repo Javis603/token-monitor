@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const os = require('node:os');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
@@ -43,6 +42,7 @@ installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
+const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
@@ -2168,24 +2168,29 @@ function updateSessionUsageArchive(summary, now) {
   return next;
 }
 
-function summaryWithArchivedClientUsage(summary) {
-  const now = sessionUsageArchiveDate(summary);
+// Read-only projection of both archives onto a summary. Un-tracked clients and
+// retained sessions add to the period totals, not just to the breakdowns, so
+// anything rendered without this reads low. Takes the session archive as an
+// argument because capturing into it is a separate decision, see below.
+function summaryWithArchivesApplied(summary, sessionArchive, now) {
   const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
     activeClients: settings?.clients,
     now
   });
-  let visibleSummary = withArchivedClients;
-  if (settings?.sessionUsageArchiveEnabled === false) {
-    return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
-  }
+  const visibleSummary = settings?.sessionUsageArchiveEnabled === false
+    ? withArchivedClients
+    : applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+}
+
+function summaryWithArchivedClientUsage(summary) {
+  const now = sessionUsageArchiveDate(summary);
+  if (settings?.sessionUsageArchiveEnabled === false) return summaryWithArchivesApplied(summary, null, now);
   if (isExternalAgentActive()) {
     sessionUsageArchive = null;
-    visibleSummary = applySessionUsageArchive(withArchivedClients, ensureSessionUsageArchiveLoaded(), { now });
-  } else {
-    const sessionArchive = updateSessionUsageArchive(summary, now);
-    visibleSummary = applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+    return summaryWithArchivesApplied(summary, ensureSessionUsageArchiveLoaded(), now);
   }
-  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+  return summaryWithArchivesApplied(summary, updateSessionUsageArchive(summary, now), now);
 }
 
 function applyMacActivationPolicy(state = {}) {
@@ -3464,73 +3469,63 @@ function stopLocalCollector() {
   localStats = null;
 }
 
-function localDayKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-// 从 collector-anchor.json 预填 localStats。anchor 已经在 collector 加载时
-// 验证过 dateKey === localTodayKey() 和 configFingerprint 匹配；这里只把
-// 它包装成 device record + aggregate result，立刻 push 给 renderer，让用户
-// 在 cold launch 时几毫秒内看到上次累计的数字。full scan 完成后用真实数据覆盖。
-function primeLocalStatsFromAnchor() {
-  const anchorPath = path.join(sharedDataDir(), 'collector-anchor.json');
-  const saved = readJson(anchorPath, null);
-  if (!saved || !saved.dateKey || saved.dateKey !== localDayKey()) return;
-  if (!saved.today || !saved.month || !saved.allTime) return;
-  const deviceId = settings?.deviceId || defaultDeviceId();
-  const deviceRecord = {
-    deviceId,
-    hostname: os.hostname(),
-    platform: `${process.platform}-${process.arch}`,
-    updatedAt: saved.fullScanAt || new Date().toISOString(),
-    receivedAt: saved.fullScanAt || new Date().toISOString(),
-    trackedClients: (settings?.clients || '').split(',').filter(Boolean),
-    periods: {
-      today: saved.today,
-      month: saved.month,
-      allTime: saved.allTime
-    },
-    clientStatus: {},
-    wslStatus: {},
-    // A starting-from-anchor render is by definition not "stale" — the device
-    // was alive moments ago. Without this flag aggregateDevices would grey the
-    // card for the few seconds until the first full tick lands.
-    stale: false
-  };
-  lastCollectedDevice = deviceRecord;
-  localDevice = deviceRecord;
-  localStats = withHistoryPreview(aggregateDevices([deviceRecord], 0), [deviceRecord]);
-  // sendPush goes through mainWindow.webContents.send, which silently drops the
-  // IPC message when the renderer hasn't yet registered its onStatsPush
-  // listener (cold launch runs prime while createWindow's loadFile is still in
-  // flight). Defer the push to did-finish-load so the hydrated numbers actually
-  // arrive at the renderer instead of disappearing into the void.
-  const pushPayload = { event: 'stats', data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt } };
-  sendMainWindowEvent('stats:push', pushPayload);
+// Show the last full scan's totals while the first one of this run is still
+// going, instead of zeros for the tens of seconds it takes. deviceRecordFromAnchor
+// owns the trust rules; anything it rejects leaves the renderer on its normal
+// wait-for-real-data path.
+function primeLocalStatsFromAnchor(usageOptions) {
+  // Cold start only. startMode() re-enters here on structural settings changes
+  // as well, and there the numbers already collected are newer than any anchor.
+  if (lastCollectedDevice) return;
+  const deviceRecord = deviceRecordFromAnchor(
+    readJson(path.join(sharedDataDir(), 'collector-anchor.json'), null),
+    {
+      envelope: electronDeviceEnvelope(),
+      clients: usageOptions.clients,
+      allTimeSince: usageOptions.allTimeSince,
+      projectsEnabled: usageOptions.projectsEnabled,
+      wslScanEnabled: usageOptions.wslScanEnabled,
+      hostname: os.hostname(),
+      platform: `${process.platform}-${process.arch}`
+    }
+  );
+  if (!deviceRecord) return;
+  // The anchor holds raw collector output, while everything the renderer is ever
+  // shown has been through the archives first. Project the same way or the seed
+  // reads low for anyone with an un-tracked client or retained sessions, and then
+  // jumps when the first scan lands. Read-only on purpose: the capture step
+  // records a fresh observation, and an anchor from hours ago is not one.
+  const visible = summaryWithArchivesApplied(
+    deviceRecord,
+    settings?.sessionUsageArchiveEnabled === false ? null : ensureSessionUsageArchiveLoaded(),
+    sessionUsageArchiveDate(deviceRecord)
+  );
+  localDevice = visible;
+  localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
+  // sendPush hands straight to webContents.send, which drops the message when
+  // the renderer has not registered its listener yet, and a cold start runs this
+  // while createWindow's loadFile is still in flight. sendMainWindowEvent waits
+  // for did-finish-load.
+  sendMainWindowEvent('stats:push', {
+    event: 'stats',
+    data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
+  });
 }
 
 function startLocalCollector() {
   stopLocalCollector();
   mode = 'local';
   sendStatus(false, { reason: 'collecting' });
-  // The first full scan takes long enough (today + month + `--since allTimeSince`
-  // scanned serially to avoid the 500% CPU spike from issue #15) that the
-  // renderer would sit at zero for tens of seconds on a cold launch. Hydrate
-  // localStats/lastCollectedDevice from the last anchor — anchored to today's
-  // local date and a matching config fingerprint, so cross-day or
-  // settings-changing restarts still get an empty renderer. The first full tick
-  // then supersedes this with real numbers; onRecord reuses lastCollectedDevice
-  // for next-tick continuity either way.
-  primeLocalStatsFromAnchor();
+  // One config object for both, so the fingerprint the seed validates against
+  // cannot drift from the one the collector will compute.
+  const usageOptions = electronUsageConfig('collector');
+  primeLocalStatsFromAnchor(usageOptions);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('collector'),
+    usageOptions,
     progressive: true,
     onRecord: (summary, meta) => {
       const reason = meta.reason;
