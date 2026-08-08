@@ -1606,14 +1606,18 @@ test('watchIgnoreMatcher lets a recursive ancestor override a bounded root insid
     process.env.CODEX_HOME = path.join(tmp, 'nest');
     process.env.GROK_HOME = path.join(tmp, 'nest', 'sessions', 'grok');
     const { watchIgnoreMatcher } = freshCollector();
-    const ignored = watchIgnoreMatcher('codex,grok');
+    const ignored = watchIgnoreMatcher('codex,grok,zcode');
     const grokLogs = path.join(tmp, 'nest', 'sessions', 'grok', 'logs');
 
     assert.equal(ignored(path.join(grokLogs, 'unified.jsonl')), false);
     assert.equal(ignored(path.join(grokLogs, 'other.log')), false);
     assert.equal(ignored(path.join(grokLogs, 'archive', 'unified.jsonl')), false);
-    // Outside the Codex tree the same Grok rule still prunes.
-    assert.equal(ignored(path.join(tmp, 'nest', 'archived_sessions', 'run.jsonl')), false);
+    // An ancestor suspends pruning under itself, not everywhere: ZCode's root is
+    // home-relative, so it sits outside the Codex tree and still prunes. Asserting
+    // this on another Codex root would prove nothing — the ancestor covers those.
+    const zcodeDb = path.join(tmp, '.zcode', 'cli', 'db');
+    assert.equal(ignored(path.join(zcodeDb, 'db.sqlite')), false);
+    assert.equal(ignored(path.join(zcodeDb, 'cache')), true);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
