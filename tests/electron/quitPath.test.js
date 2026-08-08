@@ -23,10 +23,12 @@ function functionSource(signature) {
 
 test('nothing asynchronous sits between teardown and the exit', () => {
   const performQuit = functionSource('function performQuit()');
-  assert.ok(
-    performQuit.indexOf('stopAll();') < performQuit.indexOf('app.exit(0);'),
-    'teardown has to finish before the process goes'
-  );
+  const teardownAt = performQuit.indexOf('stopAll();');
+  const exitAt = performQuit.indexOf('app.exit(0);');
+  // Both positions are checked before they are compared: a missing call reads as
+  // -1, which would otherwise satisfy the ordering on its own.
+  assert.ok(teardownAt >= 0, 'quit teardown has to run');
+  assert.ok(exitAt > teardownAt, 'the exit has to follow teardown');
   // An await here is the original bug in a new place: whatever it waits on gets
   // to decide whether the process ever exits.
   assert.doesNotMatch(performQuit, /\bawait\b/);
