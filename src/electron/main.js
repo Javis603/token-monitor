@@ -4297,6 +4297,22 @@ let quitInProgress = false;
 // itself, so the exit below has to stand down or the install never runs.
 let skipForcedQuit = false;
 
+// quitAndInstall() returns void: nothing reports back whether the installer
+// launched. If it did not, the process stays alive holding two flags that
+// between them make Exit a no-op and disable the forced exit for the rest of
+// the session. Every way out of that call releases them again.
+let updateInstallQuitPending = false;
+let updateInstallQuitTimer = null;
+const UPDATE_INSTALL_QUIT_GRACE_MS = 10 * 1000;
+
+function releaseUpdateInstallQuit() {
+  if (!updateInstallQuitPending) return;
+  updateInstallQuitPending = false;
+  if (updateInstallQuitTimer) { clearTimeout(updateInstallQuitTimer); updateInstallQuitTimer = null; }
+  quitRequested = false;
+  skipForcedQuit = false;
+}
+
 // The single quit path. Teardown above is what used to hang, so it runs
 // synchronously and cheaply, and then app.exit() ends the process without
 // another trip through Electron's shutdown events.
@@ -4538,9 +4554,15 @@ function configureNativeAppUpdater() {
     setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
   });
   autoUpdater.on('error', (error) => {
+    // Released before the busy guard below, deliberately: update-downloaded has
+    // already cleared appUpdateNativeBusy by the time an install can fail, so a
+    // rollback behind that guard would never run and the quit flags would stay
+    // stuck for the rest of the session.
+    const wasInstalling = updateInstallQuitPending;
+    releaseUpdateInstallQuit();
     // Availability checks use the same provider but report through
-    // appUpdateLastError. Only a real download attempt owns installError.
-    if (!appUpdateNativeBusy) return;
+    // appUpdateLastError. Only a real download or install attempt owns installError.
+    if (!appUpdateNativeBusy && !wasInstalling) return;
     appUpdateNativeBusy = false;
     setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
   });
@@ -4773,13 +4795,26 @@ function installDownloadedAppUpdate() {
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
-  quitRequested = true;
   // quitAndInstall goes through before-quit, and electron-updater owns the
   // restart from there. Stand the forced exit down or the installer never runs.
+  // Both flags are claimed through the helper so every exit from this call
+  // releases them again; see releaseUpdateInstallQuit.
+  updateInstallQuitPending = true;
+  quitRequested = true;
   skipForcedQuit = true;
-  // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
-  // (per-user install needs no elevation); isForceRunAfter relaunches the app.
-  autoUpdater.quitAndInstall(true, true);
+  if (updateInstallQuitTimer) clearTimeout(updateInstallQuitTimer);
+  // Nothing reports a failed handoff, so still being here after the grace period
+  // is the signal. unref'd: the fallback must never be the reason we stay up.
+  updateInstallQuitTimer = setTimeout(releaseUpdateInstallQuit, UPDATE_INSTALL_QUIT_GRACE_MS);
+  updateInstallQuitTimer.unref?.();
+  try {
+    // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
+    // (per-user install needs no elevation); isForceRunAfter relaunches the app.
+    autoUpdater.quitAndInstall(true, true);
+  } catch (error) {
+    releaseUpdateInstallQuit();
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
+  }
   return deriveAppUpdateState();
 }
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const { computePeriodWindows, configFingerprint, localTodayKey } = require('./collector');
+const { collectorAnchorTrust, computePeriodWindows } = require('./collector');
 const { mergePeriods } = require('./usage');
 
 // The collector persists every full scan to collector-anchor.json so it can
@@ -10,12 +10,12 @@ const { mergePeriods } = require('./usage');
 // (today + month + `--since allTimeSince`, run serially to avoid the CPU spike
 // from issue #15).
 //
-// The validation here has to be startCollector's, not a subset of it. An anchor
-// the collector is about to discard, because the tracked-client list or
-// allTimeSince changed, would otherwise show the previous configuration's
-// totals for a minute and then drop them, which reads as a counting bug rather
-// than a seed being replaced. Returns a device record, or null when the anchor
-// cannot be trusted.
+// Whether the anchor may be reused at all is collectorAnchorTrust's call, shared
+// with startCollector so the two cannot drift: an anchor the collector is about
+// to discard would otherwise show the previous configuration's totals for a
+// minute and then drop them, which reads as a counting bug rather than a seed
+// being replaced. Seeding then adds one rule of its own, below.
+// Returns a device record, or null when the anchor cannot be used.
 function deviceRecordFromAnchor(saved, options = {}) {
   const {
     envelope = {},
@@ -28,16 +28,14 @@ function deviceRecordFromAnchor(saved, options = {}) {
     platform = '',
     now = new Date()
   } = options;
-  if (!saved || saved.dateKey !== localTodayKey(now)) return null;
-  if (!saved.today || !saved.month || !saved.allTime) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled)) return null;
-  // startCollector trusts fullScanAt only when it parses and is not in the
-  // future, and refuses to reuse the anchor otherwise. Seeding is stricter still
-  // and declines outright: the timestamp becomes this record's updatedAt and the
-  // window the archive projection is evaluated against, so a snapshot of unknown
-  // age must not be presented as one taken now.
-  const capturedAtMs = Date.parse(saved.fullScanAt || '');
-  if (!Number.isFinite(capturedAtMs) || capturedAtMs > now.getTime()) return null;
+  const trust = collectorAnchorTrust(saved, { clients, allTimeSince, projectsEnabled, now });
+  if (!trust) return null;
+  // The seed's own rule, and the one place it is stricter than the collector.
+  // A capture time the collector cannot trust only costs it a full scan, but
+  // here that timestamp becomes the record's updatedAt and the instant the
+  // archive projection is evaluated at, so a snapshot of unknown age must not
+  // be presented as one taken now.
+  if (trust.capturedAtMs === null) return null;
   // The anchor keeps host periods and the WSL bundle apart, the way
   // collectUsageOnce does before summing them. Same local day is established
   // above, so all three windows are safe to merge.
@@ -52,7 +50,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     : wslScanEnabled === false
       ? { state: 'disabled', detected: [], withData: [] }
       : (saved.wslStatus || null);
-  const at = new Date(capturedAtMs).toISOString();
+  const at = new Date(trust.capturedAtMs).toISOString();
   return {
     ...envelope,
     hostname,

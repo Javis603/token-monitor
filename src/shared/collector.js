@@ -1997,6 +1997,25 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
   return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}`;
 }
 
+// The one place that decides whether a persisted anchor may be reused, shared by
+// startCollector and by the widget's cold-start seed. Two consumers with two
+// copies of these rules is how they drift, and a drifted copy shows the previous
+// configuration's totals as if they were current.
+//
+// Returns null when the anchor is unusable at all. Otherwise `capturedAtMs` is
+// the moment it was written, or null when that moment cannot be trusted: the
+// collector still reuses the periods then and simply forces a full scan, while
+// a seed has nothing to stand on and declines.
+function collectorAnchorTrust(saved, options = {}) {
+  const { clients = '', allTimeSince = '', projectsEnabled = true, now = new Date() } = options;
+  if (!saved || saved.dateKey !== localTodayKey(now)) return null;
+  if (!saved.today || !saved.month || !saved.allTime) return null;
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled)) return null;
+  const parsed = Date.parse(saved.fullScanAt || '');
+  const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
+  return { capturedAtMs };
+}
+
 // Force a full scan at least this often even when the anchor is otherwise
 // valid, so a long-running session periodically rescans month/allTime
 // and picks up any changes that the delta-derivation might miss.
@@ -2226,35 +2245,31 @@ function startCollector(options) {
   if (options.anchorPersistenceEnabled !== false) {
     try {
       const saved = readJson(anchorPath, null);
-      if (saved && saved.dateKey === localTodayKey()) {
-        const fp = configFingerprint(clients, allTimeSince, options.projectsEnabled);
-        if (saved.configFingerprint === fp) {
-          anchor = {
-            dateKey: saved.dateKey,
-            today: saved.today,
-            month: saved.month,
-            allTime: saved.allTime,
-            // Per-client partitions are deliberately rebuilt by the first
-            // anchored all-client tick after restart. Persisted partitions
-            // could be stale for clients that changed while the app was down.
-            todayPartitions: null
-          };
-          // Don't restore a persisted WSL snapshot when WSL scanning is now off —
-          // the configFingerprint intentionally ignores the toggle (host periods
-          // stay valid), so without this gate a warm-scan preview would briefly
-          // re-merge the old WSL totals before the first full tick clears them.
-          wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
-          wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
-          if (saved.fullScanAt) {
-            const parsed = Date.parse(saved.fullScanAt);
-            // Only trust timestamps that are valid and not in the future.
-            // Invalid, future, or missing timestamps leave lastFullScanAt at 0,
-            // which forces a full scan on the first interval tick (see loop()).
-            if (Number.isFinite(parsed) && parsed <= Date.now()) {
-              lastFullScanAt = parsed;
-            }
-          }
-        }
+      const trust = collectorAnchorTrust(saved, {
+        clients,
+        allTimeSince,
+        projectsEnabled: options.projectsEnabled
+      });
+      if (trust) {
+        anchor = {
+          dateKey: saved.dateKey,
+          today: saved.today,
+          month: saved.month,
+          allTime: saved.allTime,
+          // Per-client partitions are deliberately rebuilt by the first
+          // anchored all-client tick after restart. Persisted partitions
+          // could be stale for clients that changed while the app was down.
+          todayPartitions: null
+        };
+        // Don't restore a persisted WSL snapshot when WSL scanning is now off —
+        // the configFingerprint intentionally ignores the toggle (host periods
+        // stay valid), so without this gate a warm-scan preview would briefly
+        // re-merge the old WSL totals before the first full tick clears them.
+        wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
+        wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
+        // An untrustworthy capture time leaves lastFullScanAt at 0, which forces
+        // a full scan on the first interval tick (see loop()).
+        if (trust.capturedAtMs !== null) lastFullScanAt = trust.capturedAtMs;
       }
     } catch (_) {}
   }
@@ -2824,6 +2839,7 @@ module.exports = {
   clientsForWatchPath,
   clientWatchCandidates,
   computePeriodWindows,
+  collectorAnchorTrust,
   configFingerprint,
   deriveClientHealth,
   deriveClientStatus,
