@@ -1591,11 +1591,10 @@ test('Claude prepaid balance stays off and disabled until Web login is configure
   assert.equal(loggedInInput?.disabled, false);
 });
 
-test('OpenCode local DB fallback is off by default and hides an old local result', () => {
+test('OpenCode local DB fallback is off by default', () => {
   const app = readRendererFile('app.js');
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
-  const displayProvider = functionBody(app, 'displayLimitProvider', 'renderLimitProviderRow');
   const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
   const updateHandler = main.slice(
     main.indexOf("ipcMain.handle('settings:update'"),
@@ -1636,26 +1635,6 @@ test('OpenCode local DB fallback is off by default and hides an old local result
   const input = settingsContext.result?.children?.[0]?.children?.[1];
   assert.equal(input?.checked, false);
 
-  const rendered = vm.runInNewContext(
-    `${displayProvider}\nresult = displayLimitProvider({ provider: 'opencode', source: 'local', status: 'ok', stale: true, windows: [{ kind: 'session' }] });`,
-    { state: { settings: { opencodeLocalLimitsEnabled: false } } }
-  );
-  assert.equal(rendered.status, 'disabled');
-  assert.equal(rendered.windows.length, 0);
-  assert.equal(rendered.stale, false);
-  const localSourceRendered = vm.runInNewContext(
-    `${displayProvider}\nresult = displayLimitProvider({ provider: 'opencode', source: 'local', sourceDeviceId: 'LOCAL-DEVICE', status: 'ok', stale: true, windows: [{ kind: 'session' }] });`,
-    { state: { mode: 'sync', settings: { deviceId: 'local-device', opencodeLocalLimitsEnabled: false } } }
-  );
-  assert.equal(localSourceRendered.status, 'disabled');
-  assert.equal(localSourceRendered.windows.length, 0);
-  const remoteRendered = vm.runInNewContext(
-    `${displayProvider}\nresult = displayLimitProvider({ provider: 'opencode', source: 'local', sourceDeviceId: 'remote-device', status: 'ok', stale: true, windows: [{ kind: 'session' }] });`,
-    { state: { mode: 'sync', settings: { deviceId: 'local-device', opencodeLocalLimitsEnabled: false } } }
-  );
-  assert.equal(remoteRendered.status, 'ok');
-  assert.equal(remoteRendered.windows.length, 1);
-  assert.equal(remoteRendered.stale, true);
   assert.match(defaults, /opencodeLocalLimitsEnabled:\s*false/);
   assert.match(updateHandler, /opencodeLocalLimitsEnabled:\s*parseBoolean\(patch\.opencodeLocalLimitsEnabled \?\? settings\.opencodeLocalLimitsEnabled, false\)/);
 });

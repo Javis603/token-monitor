@@ -4755,46 +4755,15 @@ function renderProviderWindows(provider, color) {
   return windows;
 }
 
-function displayLimitProvider(provider) {
-  const sourceDeviceId = String(provider?.sourceDeviceId || '').trim().toLowerCase();
-  const localDeviceId = String(state.settings?.deviceId || '').trim().toLowerCase();
-  const syncActive = state.mode === 'sync' || Boolean(String(state.settings?.hubUrl || '').trim());
-  // Synced providers carry the device that produced the record. Only suppress
-  // a local OpenCode estimate from this device; a local DB record from another
-  // device is still valid remote data and must not be relabeled as Disabled.
-  // If an older synced record has no provenance, keep it visible in sync mode
-  // because its origin is unknown rather than claiming it is local.
-  const isLocalSource = sourceDeviceId
-    ? Boolean(localDeviceId && sourceDeviceId === localDeviceId)
-    : !syncActive;
-  if (provider?.provider !== 'opencode'
-    || provider?.source !== 'local'
-    || !isLocalSource
-    || state.settings?.opencodeLocalLimitsEnabled !== false) {
-    return provider;
-  }
-  // A refresh can arrive after the setting changes, so do not leave a
-  // device-wide local estimate visible until the next provider probe.
-  return {
-    ...provider,
-    status: 'disabled',
-    stale: false,
-    windows: [],
-    balance: null,
-    balanceUsd: null
-  };
-}
-
 function renderLimitProviderRow(id, label, provider, color, options = {}) {
-  const visibleProvider = displayLimitProvider(provider);
   const row = document.createElement('div');
   const classes = ['limit-row'];
   if (options.accountRow) classes.push('limit-account-row');
-  if (visibleProvider.stale) classes.push('stale');
+  if (provider.stale) classes.push('stale');
   row.className = classes.join(' ');
   row.append(
-    renderLimitProviderHead(id, label, visibleProvider, color, options),
-    renderProviderWindows(visibleProvider, color)
+    renderLimitProviderHead(id, label, provider, color, options),
+    renderProviderWindows(provider, color)
   );
   return row;
 }
@@ -5029,7 +4998,7 @@ function renderLimits() {
     const providerEntries = limitsEnabled && enabled.has(id)
       ? (providers.get(id) || [{ provider: id, status: state.stats ? missingLimitProviderStatus() : 'unavailable', windows: [] }])
       : [{ provider: id, status: 'disabled', windows: [] }];
-    return [id, providerEntries.map(displayLimitProvider)];
+    return [id, providerEntries];
   }));
   const renderSignature = JSON.stringify({
     locale: currentLocale(),
@@ -9406,7 +9375,7 @@ function renderLimitProviderCheckboxesNow() {
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? displayLimitProvider(collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
+      ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
     row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}`;
@@ -9598,15 +9567,14 @@ const LIMIT_PROVIDER_SETTINGS = {
 function limitProviderSettingsRenderSignature() {
   const settings = state.settings || {};
   const providerSignature = (provider) => {
-    const visible = displayLimitProvider(provider);
     return [
-      visible?.provider || '',
-      visible?.status || '',
-      Boolean(visible?.stale),
-      visible?.source || '',
-      visible?.sourceDetail || '',
-      visible?.sourceDeviceId || '',
-      visible?.accountKey || ''
+      provider?.provider || '',
+      provider?.status || '',
+      Boolean(provider?.stale),
+      provider?.source || '',
+      provider?.sourceDetail || '',
+      provider?.sourceDeviceId || '',
+      provider?.accountKey || ''
     ];
   };
   const deviceSignature = (device) => [
@@ -10725,7 +10693,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     // Local collector overlays update client-mode data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
-    if (payload.data?.reason !== 'local') {
+    if (payload.data?.reason !== 'local' && payload.data?.reason !== 'presentation') {
       state.streamConnected = true;
       state.streamFailure = null;
     }
