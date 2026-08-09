@@ -3126,13 +3126,11 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
 
   // ── Single account (0 or 1 cookie): existing merged behavior ─────────────
   if (!multiAccountMode) {
-    // The widget defaults this fallback off because the database is device-wide
-    // and has no stable account identity. Keep omitted options enabled for
-    // direct shared callers and older integrations; the Electron setting passes
-    // an explicit false when the user opts out.
-    const goLocal = options.opencodeLocalLimitsEnabled === false
-      ? { status: 'notConfigured', windows: [] }
-      : collectGo({ env: deps.env || process.env, now: () => nowMs });
+    // The database is device-wide and has no stable account identity, so every
+    // caller must opt in explicitly before this process reads it.
+    const goLocal = options.opencodeLocalLimitsEnabled === true
+      ? collectGo({ env: deps.env || process.env, now: () => nowMs })
+      : { status: 'notConfigured', windows: [] };
     const cookie = cookies[0]?.cookie;
     const [goWeb, zen] = cookie
       ? await Promise.all([
