@@ -929,6 +929,8 @@ test('aggregateLimits resolves OpenCode components independently of device order
   );
 
   assert.deepEqual(percentages(forward), { session: 30, weekly: 40, billing: 50 });
+  assert.equal(forward.providers[0].updatedAt, '2026-08-09T08:02:00.000Z');
+  assert.equal(forward.providers[0].sourceDeviceId, 'newer-device');
   assert.deepEqual(reverse, forward);
 });
 

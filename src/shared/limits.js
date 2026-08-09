@@ -617,10 +617,10 @@ function betterOpenCodeProvider(current, candidate) {
   if (current.stale !== candidate.stale) return current.stale ? candidate : current;
   const rankDiff = statusRank(candidate.status) - statusRank(current.status);
   if (rankDiff !== 0) return rankDiff > 0 ? candidate : current;
-  const windowRankDiff = providerWindowRank(candidate) - providerWindowRank(current);
-  if (windowRankDiff !== 0) return windowRankDiff > 0 ? candidate : current;
   const timestampDiff = timestampMs(candidate.updatedAt) - timestampMs(current.updatedAt);
   if (timestampDiff !== 0) return timestampDiff > 0 ? candidate : current;
+  const windowRankDiff = providerWindowRank(candidate) - providerWindowRank(current);
+  if (windowRankDiff !== 0) return windowRankDiff > 0 ? candidate : current;
   return openCodeProviderTieBreakKey(candidate).localeCompare(openCodeProviderTieBreakKey(current)) > 0
     ? candidate
     : current;
