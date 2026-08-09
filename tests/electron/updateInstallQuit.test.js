@@ -262,6 +262,9 @@ test('only an install this process can still finish counts as busy', () => {
   // updates for the rest of the session.
   assert.equal(stalled.guard.phase(), 'spent');
   assert.equal(stalled.guard.isInstalling(), false);
+  // But still outstanding, which is what the download boundary asks: nothing this
+  // process downloads can be installed now, and starting the lifecycle again is
+  // what re-enters MacUpdater against a listener that never came off.
   assert.equal(stalled.guard.isOutstanding(), true);
 });
 
@@ -462,8 +465,16 @@ test('an outstanding install is the only thing driving the updater', () => {
   // its result reported as though this call had made it.
   assert.ok(gate < check.indexOf('if (appUpdateCheckPromise)'), 'the gate has to come first');
 
+  // Downloading refuses more than the check does: `isOutstanding` covers a spent
+  // attempt as well, since re-entering the lifecycle rebuilds MacUpdater's proxy
+  // against a listener that is still attached. The renderer and the automatic
+  // predicate both decline it too, but an IPC action queued before the attempt
+  // ended arrives here regardless -- this is the boundary, they are the policy.
   const download = functionSource('async function downloadAndPrepareAppUpdate()');
-  assert.match(download, /if \(updateInstallQuit\.isInstalling\(\)\) return deriveAppUpdateState\(\);/);
+  assert.match(download, /if \(updateInstallQuit\.isOutstanding\(\)\) return deriveAppUpdateState\(\);/);
+  // And the check deliberately does not, or a spent attempt would cost the user
+  // update checking for the rest of the session.
+  assert.doesNotMatch(check, /isOutstanding\(\)|isSpent\(\)/);
 
   // And the other direction: refusing new work only holds the boundary if nothing
   // was already running when the install began. This one waits instead of

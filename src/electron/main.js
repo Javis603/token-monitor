@@ -4830,9 +4830,16 @@ async function downloadAndPrepareAppUpdate() {
     setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
     return deriveAppUpdateState();
   }
-  // Same ownership rule as the check path: this one also drives the shared
-  // electron-updater instance, and its failures arrive on the same event.
-  if (updateInstallQuit.isInstalling()) return deriveAppUpdateState();
+  // Same ownership rule as the check path, and one more: a spent attempt can never
+  // be installed by this process either, so re-entering the download lifecycle
+  // rebuilds MacUpdater's local proxy while the listener the first quitAndInstall()
+  // attached is still on the native updater. The renderer stops offering this and
+  // the automatic downloader stands down, but neither of those is the boundary --
+  // this is, and an IPC action queued before the attempt ended still arrives here.
+  //
+  // Checking stays available through a spent attempt (see runAppUpdateCheck): it
+  // touches none of that, and losing it for the session is the worse trade.
+  if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
   if (appUpdateCheckPromise) await appUpdateCheckPromise;
   if (appUpdateNativeBusy) return deriveAppUpdateState();
   const latest = settings?.appUpdate?.lastKnownLatest || null;
