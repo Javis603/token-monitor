@@ -172,6 +172,61 @@ test('recovery after a cold failure needs only the retry floor, not the freshnes
   assert.equal(calls, 2);
 });
 
+test('a warm-cache failure uses the retry floor even when freshness is immediate', async () => {
+  let calls = 0;
+  const fetchHistory = () => {
+    calls += 1;
+    if (calls === 1) return history('good');
+    throw new Error('aggregation failed');
+  };
+  const retryIntervalMs = 30_000;
+
+  await resolveMacWidgetHistory({
+    sourceKey: 's', revision: 'r1', fetchHistory, now: 0, minIntervalMs: 0, retryIntervalMs
+  });
+  const afterFailure = await resolveMacWidgetHistory({
+    sourceKey: 's', revision: 'r2', fetchHistory, now: 10, minIntervalMs: 0, retryIntervalMs
+  });
+  const insideRetryFloor = await resolveMacWidgetHistory({
+    sourceKey: 's', revision: 'r3', fetchHistory, now: 11, minIntervalMs: 0, retryIntervalMs
+  });
+
+  assert.equal(calls, 2, 'a last-good cache must not make a failing source retry per push');
+  assert.equal(afterFailure.summary.label, 'good');
+  assert.equal(insideRetryFloor.summary.label, 'good');
+
+  await resolveMacWidgetHistory({
+    sourceKey: 's', revision: 'r4', fetchHistory, now: 10 + retryIntervalMs, minIntervalMs: 0, retryIntervalMs
+  });
+  assert.equal(calls, 3, 'the bounded retry becomes due without discarding last-good history');
+});
+
+test('a stale source failure cannot return the active source cache', async () => {
+  let rejectSourceA;
+  let markSourceAStarted;
+  const sourceAStarted = new Promise((resolve) => { markSourceAStarted = resolve; });
+  const sourceAResult = resolveMacWidgetHistory({
+    sourceKey: 'hub-a',
+    revision: 'a1',
+    now: 0,
+    logger: () => {},
+    fetchHistory: () => {
+      markSourceAStarted();
+      return new Promise((resolve, reject) => { rejectSourceA = reject; });
+    }
+  });
+  await sourceAStarted;
+
+  const sourceBResult = await resolveMacWidgetHistory({
+    sourceKey: 'hub-b', revision: 'b1', now: 1, fetchHistory: () => history('hub-b')
+  });
+  rejectSourceA(new Error('hub-a failed after the source changed'));
+  const staleResult = await sourceAResult;
+
+  assert.equal(sourceBResult.summary.label, 'hub-b');
+  assert.deepEqual(staleResult, { daily: [], monthly: [], summary: {} });
+});
+
 test('an in-process source opts out of the freshness floor but keeps the retry floor', async () => {
   let calls = 0;
   const fetchHistory = () => { calls += 1; return history(`call-${calls}`); };

@@ -38,6 +38,7 @@ let cachedHistory = null;
 let activeSourceKey = '';
 let cachedRevision = '';
 let lastAttemptAt = null;
+let lastAttemptFailed = false;
 let inFlight = null;
 
 function log(logger, message) {
@@ -85,6 +86,7 @@ async function resolveMacWidgetHistory(options = {}) {
     cachedHistory = null;
     cachedRevision = '';
     lastAttemptAt = null;
+    lastAttemptFailed = false;
     inFlight = null;
   }
 
@@ -98,7 +100,9 @@ async function resolveMacWidgetHistory(options = {}) {
   // result gets cached, which is why this matches on the source alone.
   if (inFlight && inFlight.sourceKey === sourceKey) return inFlight.promise;
 
-  const floorMs = cachedHistory ? minIntervalMs : retryIntervalMs;
+  const floorMs = cachedHistory
+    ? Math.max(minIntervalMs, lastAttemptFailed ? retryIntervalMs : 0)
+    : retryIntervalMs;
   const elapsedMs = lastAttemptAt === null ? null : now - lastAttemptAt;
   // A wall-clock rollback makes the previous stamp meaningless. Treat a negative
   // elapsed as due and re-anchor below instead of suppressing refreshes until the
@@ -121,10 +125,15 @@ async function resolveMacWidgetHistory(options = {}) {
       if (sourceKey !== activeSourceKey) return history;
       cachedHistory = history;
       cachedRevision = revision;
+      lastAttemptFailed = false;
       return history;
     })
     .catch((error) => {
       log(logger, `[mac-widget] complete history unavailable: ${error?.message || error}`);
+      // A superseded request belongs to its original source and must not observe
+      // the active source's cache through this module-level state.
+      if (sourceKey !== activeSourceKey) return emptyHistory();
+      lastAttemptFailed = true;
       // Keep whatever last rendered rather than blanking the heatmap. The
       // revision is left untouched so the next attempt past the floor still
       // sees this revision as unfetched.
