@@ -120,7 +120,9 @@ test('Reasonix native rows reuse the common session schema without a native acco
   assert.equal(row.subtitle, '14:10 · 2 msgs');
   assert.equal(row.detail, 'ABC123');
   assert.equal(row.value, 15382);
-  assert.equal(row.cost, 0);
+  assert.equal(row.cost, 0.25);
+  assert.equal(row.sessionDetailAvailable, false);
+  assert.equal(row.periodTokenDataUnavailable, false);
   assert.equal(row.client, 'reasonix');
   assert.equal(row.sortTime, new Date(localIso(2026, 8, 8, 14, 10)).getTime());
   assert.doesNotMatch(row.name, /测试一下/);
@@ -186,7 +188,33 @@ test('Reasonix native rows remain visible when official per-session tokens are u
 
   assert.equal(row.value, 0);
   assert.equal(row.tokenDataUnavailable, true);
+  assert.equal(row.periodTokenDataUnavailable, false);
+  assert.equal(row.sessionDetailAvailable, false);
   assert.equal(row.subtitle, '14:10 · 2 msgs');
+});
+
+test('Reasonix native rows hide cumulative totals for an unreliable bounded period', () => {
+  const [row] = sessionRowsForPeriod({ sessions: {} }, {
+    nativeSessions: {
+      'reasonix:resumed': {
+        client: 'reasonix',
+        sessionId: 'reasonix:resumed',
+        model: 'deepseek-v4-flash',
+        totalTokens: 14777,
+        reportedCostUsd: 0.00402028,
+        periodTokenDataUnavailable: true,
+        messageCount: 5,
+        lastUsedAt: localIso(2026, 8, 9, 11, 46)
+      }
+    },
+    clientLabels: { reasonix: 'Reasonix' },
+    now: new Date(2026, 7, 9, 12, 0)
+  });
+
+  assert.equal(row.value, 0);
+  assert.equal(row.cost, 0);
+  assert.equal(row.tokenDataUnavailable, true);
+  assert.equal(row.periodTokenDataUnavailable, true);
 });
 
 test('session rows label archived sessions without claiming the source was deleted', () => {

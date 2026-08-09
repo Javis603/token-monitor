@@ -1,6 +1,7 @@
 'use strict';
 
 const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', reasonix: 'Reasonix' };
+const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
@@ -1458,12 +1459,27 @@ function animateRowNumber(el, from, to, duration = 420) {
   rowNumberAnimations.set(el, motion);
 }
 
+function cancelRowNumberAnimation(el) {
+  if (!el) return;
+  const motion = rowNumberAnimations.get(el);
+  if (motion) cancelAnimationFrame(motion.handle);
+  rowNumberAnimations.delete(el);
+  delete el.dataset.motionTarget;
+}
+
 function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
   if (!snapshot) return;
   const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
   if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return;
   let enteringIndex = 0;
   for (const row of rows) {
+    // An unavailable native session value must stay a semantic label. The
+    // ordinary row-number tween formats its zero placeholder as "0", which
+    // would turn unknown data into a false numeric reading after every render.
+    if (row.dataset.tokenDataUnavailable === 'true') {
+      cancelRowNumberAnimation(row.querySelector('.row-value'));
+      continue;
+    }
     const previous = snapshot.get(row.dataset.key);
     const value = Number(row.dataset.motionValue || 0);
     const fill = row.querySelector('.bar-fill');
@@ -1706,7 +1722,7 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
   accordionInner.dataset.signature = signature;
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, tokenDataUnavailable }) {
+function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, tokenDataUnavailable, sessionDetailAvailable }) {
   const width = rowWidth(value, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
@@ -1721,6 +1737,11 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
+  if (kind === 'session' && client === 'reasonix') {
+    row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
+  } else if (row.hasAttribute('data-detail-unavailable')) {
+    row.removeAttribute('data-detail-unavailable');
+  }
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -1738,9 +1759,14 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
   detailEl.textContent = detail || '';
   detailEl.classList.toggle('hidden', !detail);
   const valueEl = row.querySelector('.row-value');
-  valueEl.textContent = tokenDataUnavailable === true
-    ? (t('detailTokenUnavailable') || 'Unavailable')
-    : formatNumber(value);
+  if (tokenDataUnavailable === true) {
+    row.dataset.tokenDataUnavailable = 'true';
+    cancelRowNumberAnimation(valueEl);
+    valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
+  } else {
+    delete row.dataset.tokenDataUnavailable;
+    valueEl.textContent = formatNumber(value);
+  }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
   row.querySelector('.row-cost').textContent = tokenDataUnavailable === true ? '' : formatCost(cost || 0);
@@ -6670,7 +6696,11 @@ function settleRefreshButtonState(status) {
 // injectLocalDeviceStatus in main.js.
 function overlayAllTimeSessions(stats) {
   if (stats && stats.allTimeSessionsView && stats.periods?.allTime) {
-    stats.periods.allTime.sessions = stats.allTimeSessionsView;
+    const sessions = reasonixSessionGuard?.filterReasonixSyntheticSessions
+      ? reasonixSessionGuard.filterReasonixSyntheticSessions(stats.allTimeSessionsView)
+      : stats.allTimeSessionsView;
+    stats.allTimeSessionsView = sessions;
+    stats.periods.allTime.sessions = sessions;
   }
   return stats;
 }
@@ -9983,6 +10013,7 @@ els.breakdown.addEventListener('click', (event) => {
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
   if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix') return;
+  if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
@@ -9993,7 +10024,7 @@ els.breakdown.addEventListener('click', (event) => {
   openSessionDetail({
     client,
     sessionId,
-    sessionCost: client === 'reasonix' ? 0 : Number(session?.costUsd || 0),
+    sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
     title: rowEl.querySelector('.row-title')?.textContent || ''
   });
 });

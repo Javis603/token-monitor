@@ -154,7 +154,7 @@ test('Reasonix native adapter derives msg count from the trusted official transc
   const metaPath = path.join(sessionsDir, 'official.jsonl.meta');
   const eventsPath = path.join(sessionsDir, 'official.events.jsonl');
   writeJson(metaPath, {
-    id: 'branch-from-official-meta',
+    BranchMeta: { ID: 'branch-from-official-meta' },
     schema_version: 1,
     created_at: '2026-08-08T09:00:00.000Z',
     updated_at: '2026-08-08T09:02:00.000Z',
@@ -176,6 +176,7 @@ test('Reasonix native adapter derives msg count from the trusted official transc
   assert.equal(session.sessionId, 'reasonix:branch-from-official-meta');
   assert.equal(session.messageCount, 2);
   assert.equal(session.tokenDataUnavailable, true);
+  assert.equal(session.sessionDetailAvailable, false);
   assert.equal(Object.hasOwn(session, 'totalTokens'), false);
   assert.equal(JSON.stringify(session).includes(root), false);
 
@@ -184,7 +185,64 @@ test('Reasonix native adapter derives msg count from the trusted official transc
   assert.equal(Object.hasOwn(view.projects.today, 'token-monitor'), false);
 });
 
-test('Reasonix native period attribution uses created_at for today/month and lifetime all-time', () => {
+test('Reasonix resumed sessions use the latest trusted event message for live periods', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-resumed-events-'));
+  const stateHome = path.join(root, 'state');
+  const sessionsDir = path.join(stateHome, 'projects', '-home-global-workspace', 'sessions');
+  const id = 'resumed-with-events';
+  const paths = sidecars(sessionsDir, id, {
+    id,
+    schema_version: 1,
+    created_at: '2026-08-08T13:00:00.000Z',
+    updated_at: '2026-08-09T03:00:00.000Z',
+    scope: 'global',
+    model: 'deepseek-flash/deepseek-v4-flash'
+  }, nativeTelemetry({ totalTokens: 320 }));
+  const eventPath = path.join(sessionsDir, `${id}.events.jsonl`);
+  fs.writeFileSync(eventPath, [
+    {
+      schema_version: 1,
+      type: 'replace',
+      created_at: '2026-08-08T13:00:00.000Z',
+      messages: [
+        { role: 'user', raw_content: '昨天的输入', content: '<reasoning-language>内部包装</reasoning-language>昨天的输入', createdAt: Date.parse('2026-08-08T13:00:00.000Z') },
+        { role: 'assistant', createdAt: Date.parse('2026-08-08T13:00:01.000Z') }
+      ]
+    },
+    {
+      schema_version: 1,
+      type: 'append',
+      message_index: 2,
+      created_at: '2026-08-09T03:00:00.000Z',
+      messages: [
+        { role: 'user', raw_content: '今天继续', createdAt: Date.parse('2026-08-09T03:00:00.000Z') },
+        { role: 'assistant' }
+      ]
+    }
+  ].map((record) => JSON.stringify(record)).join('\n') + '\n');
+
+  const session = readReasonixNativeSession(paths.metaPath, paths.telemetryPath, { eventPath });
+  assert.equal(session.lastMessageAt, '2026-08-09T03:00:00.000Z');
+  assert.equal(session.model, 'deepseek-v4-flash');
+  assert.equal(session.reportedCostUsd, 0.25);
+  assert.equal(session.sessionDetailAvailable, false);
+
+  const view = cacheFor(stateHome, projectIdentity).getView({
+    now: new Date('2026-08-09T12:00:00.000Z')
+  });
+  assert.ok(view.sessions.today[`reasonix:${id}`]);
+  assert.ok(view.sessions.month[`reasonix:${id}`]);
+  assert.ok(view.sessions.allTime[`reasonix:${id}`]);
+  assert.equal(view.sessions.today[`reasonix:${id}`].periodTokenDataUnavailable, true);
+  assert.equal(view.sessions.today[`reasonix:${id}`].tokenDataUnavailable, true);
+  assert.equal(view.sessions.today[`reasonix:${id}`].totalTokens, 320);
+  assert.equal(view.sessions.today[`reasonix:${id}`].reportedCostUsd, 0.25);
+  assert.notEqual(view.sessions.month[`reasonix:${id}`].periodTokenDataUnavailable, true);
+  assert.equal(view.sessions.month[`reasonix:${id}`].totalTokens, 320);
+  assert.notEqual(view.sessions.allTime[`reasonix:${id}`].periodTokenDataUnavailable, true);
+});
+
+test('Reasonix native period attribution falls back to created_at without message timestamps', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-periods-'));
   const stateHome = path.join(root, 'state');
   const sessionsDir = path.join(stateHome, 'sessions');
@@ -443,16 +501,21 @@ test('Reasonix native view stays outside aggregate, history, archive and sync pa
       return nativeView;
     }
   };
-  const runTokscale = async () => ({ entries: [{
-    client: 'reasonix',
-    model: 'deepseek-v4',
-    input: 80,
-    output: 30,
-    cacheRead: 20,
-    cacheWrite: 0,
-    reasoning: 10,
-    costUsd: 0.25
-  }] });
+  let tokScaleCalls = 0;
+  const runTokscale = async ({ clients }) => {
+    tokScaleCalls += 1;
+    assert.equal(clients, 'reasonix');
+    return { entries: [{
+      client: 'reasonix',
+      sessionId: 'reasonix-stats:/Users/test/.reasonix/stats/2026-08-08.jsonl',
+      model: 'deepseek-v4',
+      input: 80,
+      output: 30,
+      cacheRead: 20,
+      reasoning: 10,
+      cost: 0.25
+    }] };
+  };
   const summary = await collectUsageOnce({
     clients: 'reasonix',
     allTimeSince: '2026-01-01',
@@ -467,6 +530,7 @@ test('Reasonix native view stays outside aggregate, history, archive and sync pa
   });
 
   assert.equal(summary.today.totalTokens, 140);
+  assert.equal(tokScaleCalls, 3);
   assert.equal(summary.today.costUsd, 0.25);
   assert.equal(summary.today.clients.reasonix, 140);
   assert.deepEqual(summary.today.sessions, {});
@@ -537,7 +601,8 @@ test('Reasonix native rows use the common session formatter and merge project at
   assert.equal(rows[0].subtitle, '11:00');
   assert.equal(rows[0].detail, 'row-id');
   assert.equal(Object.hasOwn(rows[0], 'nativeSessionBreakdown'), false);
-  assert.equal(rows[0].cost, 0);
+  assert.equal(rows[0].cost, 0.25);
+  assert.equal(rows[0].sessionDetailAvailable, false);
 
   const projects = projectRowsForPeriod({ projects: {} }, {
     nativeProjects: {

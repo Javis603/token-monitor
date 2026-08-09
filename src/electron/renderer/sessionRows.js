@@ -1,10 +1,14 @@
 'use strict';
 
 (function exposeSessionRows(root, factory) {
-  const api = factory();
+  const api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSessionRows = api;
-})(typeof window !== 'undefined' ? window : null, function createSessionRowsApi() {
+})(typeof window !== 'undefined' ? window : null, function createSessionRowsApi(root) {
+  const reasonixSessionGuard = typeof module === 'object' && module.exports
+    ? require('../../shared/reasonixSessionGuard')
+    : root?.TokenMonitorReasonixSessionGuard;
+  const isReasonixSyntheticSession = reasonixSessionGuard?.isReasonixSyntheticSession || (() => false);
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function finiteNumber(value) {
@@ -49,7 +53,10 @@
   function sessionIdLabel(id) {
     const raw = String(id || '').trim();
     if (!raw) return '';
-    if (raw.startsWith('reasonix:')) return raw.slice('reasonix:'.length);
+    const reasonixLabel = raw.startsWith('reasonix:') ? raw.slice('reasonix:'.length) : raw;
+    if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return '';
+    if (raw.startsWith('reasonix:')) return reasonixLabel;
+    if (raw.toLowerCase().startsWith('reasonix-stats:')) return '';
     const rollout = raw.match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}[:-]\d{2}-(.+)$/);
     if (rollout) return rollout[1];
     if (/^\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}/.test(raw)) return '';
@@ -97,8 +104,11 @@
   }
 
   function nativeSessionRow(session, key, options, now) {
-    const value = finiteNumber(session?.totalTokens);
-    const tokenDataUnavailable = session?.tokenDataUnavailable === true;
+    const periodTokenDataUnavailable = session?.periodTokenDataUnavailable === true;
+    // Native telemetry is cumulative. A bounded period cannot display it unless
+    // the session scanner proved that the session started within that period.
+    const tokenDataUnavailable = session?.tokenDataUnavailable === true || periodTokenDataUnavailable;
+    const value = tokenDataUnavailable ? 0 : finiteNumber(session?.totalTokens);
     if (value <= 0 && !tokenDataUnavailable) return null;
     const labels = options.clientLabels || {};
     const colors = options.clientColors || {};
@@ -123,9 +133,11 @@
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
-      // Native telemetry cost is a Reasonix-reported detail value, not the
-      // Token Monitor aggregate cost authority used by generic rows.
-      cost: 0,
+      periodTokenDataUnavailable,
+      // Cumulative cost is unavailable for an unreliable bounded period too;
+      // never present it beside an unavailable token value.
+      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.reportedCostUsd),
+      sessionDetailAvailable: session?.sessionDetailAvailable === true,
       color: colors[client] || stable(key, palette),
       stale: false,
       client,
@@ -144,6 +156,7 @@
     const now = options.now || new Date();
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
+        if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);
         if (value <= 0) return null;
         const { client, titleParts, clientLabel, modelLabel } = sessionTitleParts(session, labels);
@@ -190,6 +203,7 @@
     const archivedKeys = new Set();
     for (const periodName of ['today', 'month', 'allTime']) {
       for (const [key, session] of Object.entries(periods?.[periodName]?.sessions || {})) {
+        if (isReasonixSyntheticSession(session, key)) continue;
         if (session?.archived !== true && session?.deleted !== true && session?.sourceDeleted !== true) continue;
         archivedKeys.add(`${session?.client || ''}:${session?.sessionId || key}`);
       }

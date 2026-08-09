@@ -2,6 +2,7 @@
 
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits');
+const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
 const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
@@ -108,9 +109,7 @@ function sessionsWithoutReasonix(sessions) {
   const sanitized = {};
   let removed = false;
   for (const [key, session] of Object.entries(sessions)) {
-    const client = String(session?.client || '').trim().toLowerCase();
-    const sessionKey = String(key || '').trim().toLowerCase();
-    if (client === 'reasonix' || sessionKey.startsWith('reasonix:') || sessionKey.includes('reasonix-stats:')) {
+    if (isReasonixSyntheticSession(session, key)) {
       removed = true;
       continue;
     }

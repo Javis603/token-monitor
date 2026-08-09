@@ -175,7 +175,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs) {
 // id. Every alias must be a real tokscale client id: an unknown --client value is
 // rejected with exit 2 and takes the whole scan down with it (verified on 4.7.0
 // and 4.8.0), so this list is not a free-form place to invent sub-source names.
-// Clients tokscale doesn't know at all — `proma`, which we parse ourselves — are
+// Clients tokscale doesn't know at all — Proma, which we parse ourselves, is
 // stripped in collectUsageOnce before the filter is built, not dropped here.
 const TOKSCALE_CLIENT_ALIASES = { antigravity: ['antigravity-cli'] };
 
@@ -192,11 +192,15 @@ function tokscaleClientFilter(clients) {
 }
 
 function runTokscale({ clients, flags, commandTimeoutMs }) {
-  return spawnTokscaleJson(['--json', '--client', tokscaleClientFilter(clients), '--group-by', 'client,session,model', ...flags], commandTimeoutMs);
+  const clientFilter = tokscaleClientFilter(clients);
+  if (!clientFilter) return Promise.resolve({ entries: [] });
+  return spawnTokscaleJson(['--json', '--client', clientFilter, '--group-by', 'client,session,model', ...flags], commandTimeoutMs);
 }
 
 function runTokscaleGraph({ clients, commandTimeoutMs }) {
-  return spawnTokscaleJson(['graph', '--client', tokscaleClientFilter(clients), '--no-spinner'], commandTimeoutMs);
+  const clientFilter = tokscaleClientFilter(clients);
+  if (!clientFilter) return Promise.resolve({ contributions: [] });
+  return spawnTokscaleJson(['graph', '--client', clientFilter, '--no-spinner'], commandTimeoutMs);
 }
 
 function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
@@ -229,7 +233,7 @@ function normalizePromaPricing(result) {
   return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
 }
 
-async function resolvePromaPricing(rows, options = {}) {
+async function resolveModelPricing(rows, options = {}) {
   const lookup = options.lookupModelPricing || lookupModelPricing;
   const revision = options.pricingRevision ?? promaPricingRevision();
   const nowMs = options.nowMs ?? Date.now();
@@ -237,9 +241,14 @@ async function resolvePromaPricing(rows, options = {}) {
   // live usage refresh for the normal tokscale command timeout.
   const commandTimeoutMs = options.commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS;
   const pricingByModel = {};
-  const modelIds = [...new Set((Array.isArray(rows) ? rows : [])
-    .map((row) => String(row?.model || '').trim().toLowerCase()).filter(Boolean))];
-  for (const modelId of modelIds) {
+  const normalizeId = options.normalizeModelId || ((value) => String(value || '').trim().toLowerCase());
+  const modelIds = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const rawModelId = String(row?.model || '').trim();
+    const modelId = normalizeId(rawModelId);
+    if (modelId) modelIds.set(modelId, true);
+  }
+  for (const [modelId] of modelIds) {
     const cached = promaPricingCache.get(modelId);
     if (cached && cached.revision === revision && nowMs - cached.at < PROMA_PRICING_CACHE_TTL_MS) {
       if (cached.pricing) pricingByModel[modelId] = cached.pricing;
@@ -256,6 +265,10 @@ async function resolvePromaPricing(rows, options = {}) {
     if (pricing) pricingByModel[modelId] = pricing;
   }
   return pricingByModel;
+}
+
+async function resolvePromaPricing(rows, options = {}) {
+  return resolveModelPricing(rows, options);
 }
 
 function resetPromaPricingCache() {
@@ -751,10 +764,11 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // tokscale doesn't know about Proma yet — filter it out of the subprocess
-  // calls so --client doesn't reject an unknown value. Proma is parsed
-  // separately below and merged back in.
-  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',') : normalizedClients;
+  // Proma remains a local compatibility adapter; Reasonix aggregate usage is
+  // supplied by the same Tokscale path as every other tracked client.
+  const tokscaleClients = normalizedClients
+    ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',')
+    : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];

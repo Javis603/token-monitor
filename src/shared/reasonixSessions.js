@@ -3,8 +3,10 @@
 // Native Reasonix session metadata is deliberately kept outside the Tokscale
 // period/session collections. Tokscale owns the aggregate usage contract; this
 // module only projects the local BranchMeta + official event sidecars into a
-// renderer-only view. A legacy Token Monitor telemetry sidecar is still read
-// for backwards compatibility, but it is not treated as official per-turn data.
+// renderer-only view. The stats directory is consumed by Tokscale for aggregate
+// usage; these native files only provide local session metadata/transcripts. A
+// legacy Token Monitor telemetry sidecar is still read for backwards
+// compatibility, but it is not an official per-turn usage source.
 // It is Node-only because it reads the Reasonix filesystem directly.
 
 const fs = require('node:fs');
@@ -13,7 +15,12 @@ const path = require('node:path');
 
 const { REASONIX_CLIENT, resolveReasonixHome } = require('./reasonixPaths');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
-const { parseReasonixEventLog, countReasonixProviderMessages } = require('./reasonixSessionDetail');
+const { normalizeModelName } = require('./usage');
+const {
+  parseReasonixEventLog,
+  countReasonixProviderMessages,
+  tokenDataAvailable: reasonixTokenDataAvailable
+} = require('./reasonixSessionDetail');
 
 const META_SUFFIX = '.jsonl.meta';
 const TELEMETRY_SUFFIX = '.jsonl.telemetry.json';
@@ -248,9 +255,23 @@ function readTranscriptInfo(eventPath) {
   if (!eventPath) return null;
   try {
     const events = parseReasonixEventLog(fs.readFileSync(eventPath, 'utf8'));
+    let latestMessageMs = 0;
+    for (const event of events || []) {
+      const timestamp = Date.parse(event?.timestamp || '');
+      if (Number.isFinite(timestamp) && timestamp > latestMessageMs) latestMessageMs = timestamp;
+    }
     return {
       messageCount: countReasonixProviderMessages(events),
-      hasTranscript: true
+      hasTranscript: true,
+      tokenDataAvailable: reasonixTokenDataAvailable(events),
+      // The current official event schema has no per-turn cost field. A
+      // cumulative session cost cannot be split here without inventing a
+      // distribution, so the renderer must keep the detail entry closed.
+      perTurnCostAvailable: (() => {
+        const turns = (events || []).filter((event) => event?.kind === 'turn');
+        return turns.length > 0 && turns.every((event) => hasFiniteNumber(event?.cost));
+      })(),
+      ...(latestMessageMs > 0 ? { lastMessageAt: new Date(latestMessageMs).toISOString() } : {})
     };
   } catch (_) {
     return null;
@@ -279,12 +300,16 @@ function validWorkspaceRoot(value) {
 function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
   const meta = readJson(metaPath);
   if (!meta) return null;
-  const id = textValue(firstValue(meta, ['id']), 256);
+  const branchMeta = objectValue(firstValue(meta, ['BranchMeta', 'branchMeta', 'branch_meta', 'branch']));
+  const id = textValue(firstValue(meta, ['id', 'ID']), 256)
+    || textValue(firstValue(branchMeta, ['id', 'ID']), 256);
   if (!id) return null;
 
-  // `.jsonl.telemetry.json` is a legacy Token Monitor compatibility sidecar,
-  // not an official Reasonix per-turn source. Official sessions can still be
-  // listed from BranchMeta + events, but their tokens remain unavailable.
+  // `stats/*.jsonl` is the Tokscale aggregate source. This native session view
+  // reads BranchMeta and official events for identity, preview, timestamps and
+  // message counts. `.jsonl.telemetry.json`, when present, is a legacy local
+  // compatibility cache with cumulative session usage, not official per-turn
+  // usage. Without reliable per-turn usage/cost, Session Detail remains closed.
   const telemetry = readJson(telemetryPath);
   const usage = telemetryUsage(telemetry);
   const transcript = readTranscriptInfo(options.eventPath);
@@ -298,7 +323,8 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
   const project = scope === 'project' && validWorkspaceRoot(workspaceRoot)
     ? projectIdentityFor(workspaceRoot, options.projectIdentity)
     : {};
-  const model = textValue(firstValue(meta, ['model']), 256);
+  const rawModel = textValue(firstValue(meta, ['model']), 256);
+  const model = normalizeModelName(rawModel) || rawModel;
   const totalTokens = usage ? Math.max(0, Math.round(firstNumber(usage, ['totalTokens', 'total_tokens']))) : 0;
   const reportedCost = reportedCostUsd(usage);
   const createdAt = firstTimestamp(meta, ['created_at', 'createdAt']);
@@ -332,7 +358,14 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
       requestCount: integerValue(firstNumber(usage, ['requestCount', 'request_count']))
     } : { tokenDataUnavailable: true }),
     ...(reportedCost === undefined ? {} : { reportedCostUsd: reportedCost }),
+    // This is a positive allow-list: no native row may open Session Detail
+    // unless both per-turn usage and per-turn cost are explicitly available.
+    // The current official snapshot events provide neither, while telemetry
+    // only provides cumulative session values.
+    sessionDetailAvailable: transcript?.tokenDataAvailable === true
+      && transcript?.perTurnCostAvailable === true,
     ...(transcript ? { messageCount: transcript.messageCount } : {}),
+    ...(transcript?.lastMessageAt ? { lastMessageAt: transcript.lastMessageAt } : {}),
     ...(hasFiniteNumber(rawSchemaVersion) ? { schemaVersion } : {}),
     ...(countsTrusted && hasFiniteNumber(firstValue(meta, ['turns'])) ? { turns: integerValue(firstNumber(meta, ['turns'])) } : {}),
     ...(topicId ? { topicId } : {}),
@@ -371,13 +404,25 @@ function localDateBoundary(value) {
 function sessionPeriodKeys(session, now, allTimeSince) {
   const createdAt = session?.createdAt ? new Date(session.createdAt) : null;
   if (!createdAt || Number.isNaN(createdAt.getTime())) return { day: '', month: '', allTime: false };
-  const day = localDayKey(createdAt);
-  const month = localMonthKey(createdAt);
+  // A resumed branch keeps its original BranchMeta.created_at. When the
+  // trusted official event log has message timestamps, use the latest one for
+  // the bounded live windows; metadata.updated_at can also change for a title
+  // rename and must not turn an old session into a new day's activity.
+  const activityAt = session?.lastMessageAt ? new Date(session.lastMessageAt) : createdAt;
+  const activityDate = Number.isNaN(activityAt.getTime()) ? createdAt : activityAt;
+  const day = localDayKey(activityDate);
+  const month = localMonthKey(activityDate);
+  const createdDay = localDayKey(createdAt);
+  const createdMonth = localMonthKey(createdAt);
   const since = localDateBoundary(allTimeSince);
+  const allTime = since !== null && createdAt.getTime() >= since;
   return {
     day: day === localDayKey(now) ? day : '',
     month: month === localMonthKey(now) ? month : '',
-    allTime: since !== null && createdAt.getTime() >= since
+    allTime,
+    dayTokensReliable: day === localDayKey(now) && createdDay === day,
+    monthTokensReliable: month === localMonthKey(now) && createdMonth === month,
+    allTimeTokensReliable: allTime
   };
 }
 
@@ -389,7 +434,7 @@ function emptyNativeView() {
 }
 
 function projectEntry(projects, session) {
-  if (!session.projectId || !session.projectLabel || session.tokenDataUnavailable === true) return;
+  if (!session.projectId || !session.projectLabel || session.tokenDataUnavailable === true || session.periodTokenDataUnavailable === true) return;
   const key = canonicalProjectKey(session.projectLabel) || session.projectId;
   if (!key) return;
   if (!projects[key]) {
@@ -409,6 +454,25 @@ function projectEntry(projects, session) {
   project.tokens += tokens;
   project.clients[REASONIX_CLIENT] = (project.clients[REASONIX_CLIENT] || 0) + tokens;
   if (!project.sessionIds.includes(session.sessionId)) project.sessionIds.push(session.sessionId);
+}
+
+function sessionViewForPeriod(session, periodName, periodKeys) {
+  const tokensReliable = periodName === 'today'
+    ? periodKeys.dayTokensReliable === true
+    : periodName === 'month'
+      ? periodKeys.monthTokensReliable === true
+      : periodKeys.allTimeTokensReliable === true;
+  if (tokensReliable) return session;
+
+  // The only available native telemetry is cumulative for the whole Branch.
+  // There is no official per-turn usage field that would let us subtract the
+  // older portion without guessing, so a bounded period must fail closed in
+  // the renderer instead of showing a lifetime total as today's value.
+  return {
+    ...session,
+    periodTokenDataUnavailable: true,
+    tokenDataUnavailable: true
+  };
 }
 
 function buildNativeView(entries, options = {}) {
@@ -434,9 +498,9 @@ function buildNativeView(entries, options = {}) {
   for (const entry of sessionsById.values()) {
     const session = projectsEnabled ? entry : { ...entry, projectId: '', projectLabel: '' };
     const periodKeys = sessionPeriodKeys(session, now, allTimeSince);
-    if (periodKeys.allTime) view.sessions.allTime[session.sessionId] = session;
-    if (periodKeys.month === month) view.sessions.month[session.sessionId] = session;
-    if (periodKeys.day === day) view.sessions.today[session.sessionId] = session;
+    if (periodKeys.allTime) view.sessions.allTime[session.sessionId] = sessionViewForPeriod(session, 'allTime', periodKeys);
+    if (periodKeys.month === month) view.sessions.month[session.sessionId] = sessionViewForPeriod(session, 'month', periodKeys);
+    if (periodKeys.day === day) view.sessions.today[session.sessionId] = sessionViewForPeriod(session, 'today', periodKeys);
   }
 
   if (projectsEnabled) {

@@ -73,8 +73,10 @@ test('tracked client defaults, renderer, and README share one display order', ()
   assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => client !== 'micode'));
 });
 
-test('default tracked clients are accepted by bundled tokscale', () => {
-  const locallyParsedClients = new Set(['proma']);
+test('default tracked clients are supported by tokscale or a native adapter', () => {
+  // Proma and Reasonix are native adapters; neither is passed to Tokscale's
+  // --client parser by the collector.
+  const locallyParsedClients = new Set(['proma', 'reasonix']);
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;

@@ -122,7 +122,7 @@ test('Reasonix official schema replays replace/append, timestamps messages, and 
   const stateHome = path.join(root, 'state');
   const directory = path.join(stateHome, 'sessions');
   fs.mkdirSync(directory, { recursive: true });
-  writeJson(path.join(directory, 'filename-is-not-the-id.jsonl.meta'), { id: 'snapshot-1' });
+  writeJson(path.join(directory, 'filename-is-not-the-id.jsonl.meta'), { BranchMeta: { ID: 'snapshot-1' } });
   const initial = {
     schema_version: 1,
     type: 'replace',

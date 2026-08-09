@@ -550,5 +550,6 @@ module.exports = {
   readReasonixSessionEvents,
   reasonixTokens,
   stableId,
-  countReasonixProviderMessages
+  countReasonixProviderMessages,
+  tokenDataAvailable
 };

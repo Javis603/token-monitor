@@ -5,6 +5,7 @@ const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
 const { coerceHistory, mergeHistories } = require('./history');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
+const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
@@ -192,6 +193,8 @@ function detectClient(obj) {
 
 function normalizeModelName(value) {
   const raw = String(value || '').trim().toLowerCase();
+  const qualified = raw.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
+  if (qualified && qualified[1]) return qualified[1];
   return raw || null;
 }
 
@@ -246,6 +249,7 @@ function normalizeProjects(value) {
 function projectRollupFromSessions(sessions) {
   const projects = Object.create(null);
   for (const session of Object.values(sessions || {})) {
+    if (isReasonixSyntheticSession(session)) continue;
     const label = String(session?.projectLabel || '').trim().normalize('NFC');
     const key = canonicalProjectKey(label);
     if (!key) continue;
@@ -450,15 +454,16 @@ function mergeSession(target, source) {
 }
 
 function addSession(period, session) {
-  if (!session?.client || !session?.sessionId || session.client === REASONIX_CLIENT) return;
+  if (!session?.client || !session?.sessionId || isReasonixSyntheticSession(session)) return;
   const key = sessionKey(session.client, session.sessionId);
+  if (isReasonixSyntheticSession(session, key)) return;
   if (!period.sessions[key]) period.sessions[key] = emptySession(session.client, session.sessionId);
   mergeSession(period.sessions[key], session);
 }
 
 function sessionFromRow(row) {
   const client = detectClient(row);
-  if (!client || client === REASONIX_CLIENT) return null;
+  if (!client || client === REASONIX_CLIENT || isReasonixSyntheticSession(row)) return null;
   const id = detectSessionId(row);
   if (!id) return null;
   const session = emptySession(client, id);
@@ -481,6 +486,7 @@ function sessionFromRow(row) {
 
 function normalizeSession(input, fallbackKey) {
   if (!input || typeof input !== 'object') return null;
+  if (isReasonixSyntheticSession(input, fallbackKey)) return null;
   const client = normalizeClientName(input.client || input.source || input.platform || input.agent || input.tool);
   const id = normalizeSessionId(input.sessionId || input.session_id || input.session || input.conversationId || input.conversation_id || input.threadId || input.thread_id || fallbackKey);
   if (!client || client === REASONIX_CLIENT || !id) return null;
@@ -1202,6 +1208,7 @@ module.exports = {
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizeModelName,
   normalizeDeviceRecord,
   normalizePeriod,
   projectRollupFromSessions

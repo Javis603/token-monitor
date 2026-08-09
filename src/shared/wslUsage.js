@@ -202,8 +202,10 @@ async function collectWslUsage(options = {}, deps = {}) {
   if (!trackedClients) return { bundle, detected: [] };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
-  // Reasonix stays native-only for now: Tokscale's Windows PathRoot::ReasonixHome
-  // conflicts with the Linux-default `.reasonix/stats` path inside WSL.
+  // Reasonix aggregate usage is supported on the host, but remains excluded
+  // from WSL scans: Tokscale's Windows PathRoot::ReasonixHome conflicts with
+  // the Linux-default `.reasonix/stats` path inside WSL. Native session files
+  // are local-only as well.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
     .filter((client) => client !== REASONIX_CLIENT)
