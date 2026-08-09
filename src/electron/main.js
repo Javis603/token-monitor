@@ -3416,6 +3416,7 @@ function getMacWidgetHistory(stats) {
     sourceKey: macWidgetHistorySourceKey(config)
   };
   return resolveMacWidgetHistory({
+    generation: sourceToken.generation,
     sourceKey: sourceToken.sourceKey,
     revision: stats?.historyRevision,
     // The key and fetch must describe the same immutable source snapshot. Reading

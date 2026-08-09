@@ -31,10 +31,14 @@ const DEFAULT_RETRY_INTERVAL_MS = 30_000;
 const EMPTY_HISTORY = Object.freeze({ daily: [], monthly: [], summary: {} });
 
 let cachedHistory = null;
-// The source this cache currently describes. Claimed when a fetch starts, not
-// when one succeeds: the first request is in flight for as long as a hub round
-// trip takes, and every push arriving in that window would otherwise read the
-// unclaimed key as a source change and discard the request it should join.
+// The generation + source pair this cache currently describes. Claimed when a
+// fetch starts, not when one succeeds: the first request is in flight for as
+// long as a hub round trip takes, and every push arriving in that window would
+// otherwise read an unclaimed owner as a change and discard the request it
+// should join. Generation is a separate ownership epoch because a fast
+// A -> B -> A mode switch returns to the same semantic source key while the
+// original A request can still be on the wire.
+let activeGeneration = null;
 let activeSourceKey = '';
 let cachedRevision = '';
 let lastAttemptAt = null;
@@ -62,6 +66,7 @@ function macWidgetHistorySourceKey(config = {}) {
 }
 
 async function resolveMacWidgetHistory(options = {}) {
+  const generation = options.generation;
   const sourceKey = String(options.sourceKey || '');
   const revision = String(options.revision || '').trim();
   const fetchHistory = options.fetchHistory;
@@ -79,9 +84,10 @@ async function resolveMacWidgetHistory(options = {}) {
 
   if (typeof fetchHistory !== 'function') return cachedHistory || emptyHistory();
 
-  // A different source invalidates the cache outright: serving another hub's
-  // history would be wrong, not merely stale.
-  if (sourceKey !== activeSourceKey) {
+  // A different owner invalidates the cache outright: serving another hub's
+  // history or a superseded mode generation would be wrong, not merely stale.
+  if (generation !== activeGeneration || sourceKey !== activeSourceKey) {
+    activeGeneration = generation;
     activeSourceKey = sourceKey;
     cachedHistory = null;
     cachedRevision = '';
@@ -97,8 +103,10 @@ async function resolveMacWidgetHistory(options = {}) {
   // Checked before the floors: a request already on the wire is the answer, just
   // not arrived yet, so joining it beats both starting a second one and handing
   // back a stale stand-in. The revision it was started for only decides how its
-  // result gets cached, which is why this matches on the source alone.
-  if (inFlight && inFlight.sourceKey === sourceKey) return inFlight.promise;
+  // result gets cached, which is why this matches on the owner alone.
+  if (inFlight && inFlight.generation === generation && inFlight.sourceKey === sourceKey) {
+    return inFlight.promise;
+  }
 
   const floorMs = cachedHistory
     ? Math.max(minIntervalMs, lastAttemptFailed ? retryIntervalMs : 0)
@@ -119,10 +127,10 @@ async function resolveMacWidgetHistory(options = {}) {
     .then(() => fetchHistory())
     .then((history) => {
       if (!history || typeof history !== 'object') throw new Error('history resolver returned no data');
-      // A source change while this was in flight makes the answer belong to a
-      // hub nobody is asking about any more. It can neither populate the active
-      // cache nor escape to a caller that may publish it.
-      if (sourceKey !== activeSourceKey) return emptyHistory();
+      // An owner change while this was in flight makes the answer belong to a
+      // mode lifetime nobody is asking about any more. It can neither populate
+      // the active cache nor escape to a caller that may publish it.
+      if (generation !== activeGeneration || sourceKey !== activeSourceKey) return emptyHistory();
       cachedHistory = history;
       cachedRevision = revision;
       lastAttemptFailed = false;
@@ -130,9 +138,9 @@ async function resolveMacWidgetHistory(options = {}) {
     })
     .catch((error) => {
       log(logger, `[mac-widget] complete history unavailable: ${error?.message || error}`);
-      // A superseded request belongs to its original source and must not observe
-      // the active source's cache through this module-level state.
-      if (sourceKey !== activeSourceKey) return emptyHistory();
+      // A superseded request belongs to its original owner and must not observe
+      // the active owner's cache through this module-level state.
+      if (generation !== activeGeneration || sourceKey !== activeSourceKey) return emptyHistory();
       lastAttemptFailed = true;
       // Keep whatever last rendered rather than blanking the heatmap. The
       // revision is left untouched so the next attempt past the floor still
@@ -140,7 +148,7 @@ async function resolveMacWidgetHistory(options = {}) {
       return cachedHistory || emptyHistory();
     });
 
-  inFlight = { sourceKey, revision, promise };
+  inFlight = { generation, sourceKey, revision, promise };
   try {
     return await promise;
   } finally {
@@ -150,6 +158,7 @@ async function resolveMacWidgetHistory(options = {}) {
 
 function resetMacWidgetHistoryCache() {
   cachedHistory = null;
+  activeGeneration = null;
   activeSourceKey = '';
   cachedRevision = '';
   lastAttemptAt = null;

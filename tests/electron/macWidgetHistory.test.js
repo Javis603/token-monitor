@@ -250,6 +250,83 @@ test('a stale source success is discarded instead of reaching its caller', async
   assert.deepEqual(await sourceAResult, { daily: [], monthly: [], summary: {} });
 });
 
+test('a new generation does not join an old in-flight request for the same source', async () => {
+  let calls = 0;
+  let releaseGenerationOne;
+  let markGenerationOneStarted;
+  const generationOneStarted = new Promise((resolve) => { markGenerationOneStarted = resolve; });
+  const generationOneResult = resolveMacWidgetHistory({
+    generation: 1,
+    sourceKey: 'hub-a',
+    revision: 'a1',
+    now: 0,
+    fetchHistory: () => {
+      calls += 1;
+      markGenerationOneStarted();
+      return new Promise((resolve) => { releaseGenerationOne = resolve; });
+    }
+  });
+  await generationOneStarted;
+
+  const generationThreeResult = resolveMacWidgetHistory({
+    generation: 3,
+    sourceKey: 'hub-a',
+    revision: 'a3',
+    now: 1,
+    fetchHistory: () => {
+      calls += 1;
+      return history('hub-a-generation-3');
+    }
+  });
+  await Promise.resolve();
+  const callsBeforeRelease = calls;
+  releaseGenerationOne(history('hub-a-generation-1'));
+
+  assert.equal(callsBeforeRelease, 2, 'the generation-three request must not join generation one');
+  assert.equal((await generationThreeResult).summary.label, 'hub-a-generation-3');
+  assert.deepEqual(await generationOneResult, { daily: [], monthly: [], summary: {} });
+});
+
+test('returning to the same source in a new generation does not reuse the old generation cache', async () => {
+  let calls = 0;
+  let releaseGenerationOne;
+  let markGenerationOneStarted;
+  const generationOneStarted = new Promise((resolve) => { markGenerationOneStarted = resolve; });
+  const generationOneResult = resolveMacWidgetHistory({
+    generation: 1,
+    sourceKey: 'hub-a',
+    revision: 'a1',
+    now: 0,
+    fetchHistory: () => {
+      calls += 1;
+      markGenerationOneStarted();
+      return new Promise((resolve) => { releaseGenerationOne = resolve; });
+    }
+  });
+  await generationOneStarted;
+
+  // The serial snapshot lane is still waiting for generation one while the mode
+  // changes A -> B -> A. Generation three reaches this resolver only after the
+  // old request completes, so the semantic source key alone cannot reveal that
+  // its cache belongs to a superseded mode lifetime.
+  releaseGenerationOne(history('hub-a-generation-1'));
+  await generationOneResult;
+
+  const generationThreeResult = await resolveMacWidgetHistory({
+    generation: 3,
+    sourceKey: 'hub-a',
+    revision: 'a3',
+    now: 1,
+    fetchHistory: () => {
+      calls += 1;
+      return history('hub-a-generation-3');
+    }
+  });
+
+  assert.equal(calls, 2, 'a new generation must fetch even when it returns to the same source key');
+  assert.equal(generationThreeResult.summary.label, 'hub-a-generation-3');
+});
+
 test('an in-process source opts out of the freshness floor but keeps the retry floor', async () => {
   let calls = 0;
   const fetchHistory = () => { calls += 1; return history(`call-${calls}`); };

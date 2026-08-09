@@ -19,8 +19,9 @@ function history(label) {
   return { daily: [], monthly: [], summary: { label } };
 }
 
-test('the history source key and fetch use one immutable resolver config', async () => {
+test('the history owner and fetch use one immutable resolver config', async () => {
   let releaseFetch;
+  let resolverGeneration;
   const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
   let currentConfig = { source: 'hub-a' };
   const context = vm.createContext({
@@ -30,6 +31,7 @@ test('the history source key and fetch use one immutable resolver config', async
     macWidgetHistorySourceKey: (config) => config.source,
     resolveCompleteHistory: async (config) => config.source,
     resolveMacWidgetHistory: async (options) => {
+      resolverGeneration = options.generation;
       await fetchGate;
       return options.fetchHistory();
     }
@@ -46,6 +48,7 @@ test('the history source key and fetch use one immutable resolver config', async
 
   assert.equal(result?.history ?? result, 'hub-a');
   assert.equal(result.sourceToken.sourceKey, 'hub-a');
+  assert.equal(resolverGeneration, 1);
 });
 
 test('a superseded history result never publishes before the queued source', async () => {
