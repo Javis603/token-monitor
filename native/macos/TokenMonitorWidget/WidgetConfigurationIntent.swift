@@ -415,7 +415,6 @@ enum WidgetIntentActions {
         reload: (String) -> Void
     ) {
         guard store.selectedPeriod() != period else { return }
-        store.clearSelectedActivityDays()
         store.setSelectedPeriod(period)
         reload(widgetKind)
     }
@@ -425,7 +424,6 @@ enum WidgetIntentActions {
         widgetKind: String,
         reload: (String) -> Void
     ) {
-        store.clearSelectedActivityDays()
         store.setSelectedPeriod(store.selectedPeriod().next)
         reload(widgetKind)
     }

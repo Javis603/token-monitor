@@ -465,25 +465,34 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(reloadedKinds, ["test.widget.kind", "test.widget.kind"])
     }
 
-    func testPageAndPeriodActionsClearActivitySelection() {
+    func testPageCycleClearsOnlyThatFamilyActivitySelection() {
         let suite = "token-monitor-widget-clear-activity-day-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = WidgetPresentationStateStore(defaults: defaults)
 
         store.setSelectedActivityDay("2026-07-16", for: .medium)
+        store.setSelectedActivityDay("2026-07-17", for: .large)
         WidgetIntentActions.cyclePage(family: .medium, currentPage: .activity, store: store, widgetKind: "kind", reload: { _ in })
         XCTAssertNil(store.selectedActivityDay(for: .medium))
+        XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
+    }
+
+    func testPeriodActionsPreserveActivitySelections() {
+        let suite = "token-monitor-widget-preserve-activity-day-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WidgetPresentationStateStore(defaults: defaults)
 
         store.setSelectedActivityDay("2026-07-16", for: .medium)
         store.setSelectedActivityDay("2026-07-17", for: .large)
         WidgetIntentActions.setPeriod(.month, store: store, widgetKind: "kind", reload: { _ in })
-        XCTAssertNil(store.selectedActivityDay(for: .medium))
-        XCTAssertNil(store.selectedActivityDay(for: .large))
+        XCTAssertEqual(store.selectedActivityDay(for: .medium), "2026-07-16")
+        XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
 
-        store.setSelectedActivityDay("2026-07-17", for: .large)
         WidgetIntentActions.cyclePeriod(store: store, widgetKind: "kind", reload: { _ in })
-        XCTAssertNil(store.selectedActivityDay(for: .large))
+        XCTAssertEqual(store.selectedActivityDay(for: .medium), "2026-07-16")
+        XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
     }
 
     func testWidgetPageAndPeriodStateAreIndependent() {
