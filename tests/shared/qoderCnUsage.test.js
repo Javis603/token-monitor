@@ -10,32 +10,34 @@ let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 
 const {
-  QODER_MODEL_DISPLAY_NAMES,
-  buildQoderHistoryGraph,
-  buildQoderPeriods,
-  collectQoderRows,
-  normalizeQoderDbRow,
-  qoderDataPaths,
-  readQoderDbRows
+  QODER_CN_MODEL_DISPLAY_NAMES,
+  buildQoderCnHistoryGraph,
+  buildQoderCnPeriods,
+  collectQoderCnRows,
+  normalizeQoderCnDbRow,
+  qoderCnDataPaths,
+  readQoderCnDbRows,
+  resolveQoderCnPricing,
+  resetQoderCnPricingCache
 } = require('../../src/shared/qoderCnUsage');
 
-const QODER_DB_FIXTURE = path.join(__dirname, '..', 'fixtures', 'qoder-cn-local.db');
+const QODER_CN_DB_FIXTURE = path.join(__dirname, '..', 'fixtures', 'qoder-cn-local.db');
 
-test('QODER_MODEL_DISPLAY_NAMES covers every official model code and the retired preview', () => {
+test('QODER_CN_MODEL_DISPLAY_NAMES covers every official model code and the retired preview', () => {
   // Official codes from Qoder CN.app i18n `modelSelector.item.*` plus the
   // retired qmodel_preview found in real databases; custom codes pass through.
   for (const code of ['qmodel', 'qmodel_latest', 'qmodel_preview', 'gm51model', 'kmodel', 'dmodel', 'mmodel']) {
-    assert.ok(QODER_MODEL_DISPLAY_NAMES[code], `${code} must be mapped`);
+    assert.ok(QODER_CN_MODEL_DISPLAY_NAMES[code], `${code} must be mapped`);
   }
-  assert.equal(QODER_MODEL_DISPLAY_NAMES.qmodel_latest, 'Qwen3.7-Max');
-  assert.equal(QODER_MODEL_DISPLAY_NAMES.gm51model, 'GLM-5.2');
-  assert.equal(QODER_MODEL_DISPLAY_NAMES.qmodel_preview, 'Qwen3.8-Max-Preview');
-  assert.equal(QODER_MODEL_DISPLAY_NAMES.q35model_preview, 'Qwen3.8-Max-Preview');
-  assert.equal(QODER_MODEL_DISPLAY_NAMES.custom_model, undefined, 'custom models stay unmapped');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.qmodel_latest, 'Qwen3.7-Max');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.gm51model, 'GLM-5.2');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.qmodel_preview, 'Qwen3.8-Max-Preview');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.q35model_preview, 'Qwen3.8-Max-Preview');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.custom_model, undefined, 'custom models stay unmapped');
 });
 
-test('normalizeQoderDbRow separates cached input without double-counting', () => {
-  assert.deepEqual(normalizeQoderDbRow({
+test('normalizeQoderCnDbRow separates cached input without double-counting', () => {
+  assert.deepEqual(normalizeQoderCnDbRow({
     row_id: 7,
     id: 'message-1',
     session_id: 'session-1',
@@ -56,16 +58,16 @@ test('normalizeQoderDbRow separates cached input without double-counting', () =>
   });
 });
 
-test('Qoder normalizers reject malformed and zero-only usage', () => {
-  assert.equal(normalizeQoderDbRow({ token_info: '{}' }, 'cn'), null);
-  assert.equal(normalizeQoderDbRow({
+test('Qoder CN normalizers reject malformed and zero-only usage', () => {
+  assert.equal(normalizeQoderCnDbRow({ token_info: '{}' }, 'cn'), null);
+  assert.equal(normalizeQoderCnDbRow({
     token_info: JSON.stringify({ prompt_tokens: 0, cached_tokens: 0, completion_tokens: 0 })
   }, 'cn'), null);
 });
 
-test('normalizeQoderDbRow does not resolve inherited model names', () => {
+test('normalizeQoderCnDbRow does not resolve inherited model names', () => {
   for (const modelKey of ['constructor', 'toString']) {
-    const row = normalizeQoderDbRow({
+    const row = normalizeQoderCnDbRow({
       token_info: JSON.stringify({ prompt_tokens: 1, completion_tokens: 1 }),
       model_info: JSON.stringify({ model_key: modelKey })
     }, 'cn');
@@ -73,13 +75,13 @@ test('normalizeQoderDbRow does not resolve inherited model names', () => {
   }
 });
 
-test('buildQoderPeriods keeps day boundaries and tokscale-compatible totals', () => {
+test('buildQoderCnPeriods keeps day boundaries and tokscale-compatible totals', () => {
   const now = Date.parse('2026-07-29T18:00:00Z');
   const rows = [
     { sessionId: 's1', messageId: 'm1', model: 'qmodel', input: 10, output: 2, cacheRead: 3, cacheWrite: 0, createdAt: now - 24 * 60 * 60 * 1000, messages: 1 },
     { sessionId: 's1', messageId: 'm2', model: 'qmodel', input: 20, output: 4, cacheRead: 5, cacheWrite: 0, createdAt: now - 2 * 60 * 60 * 1000, messages: 1 }
   ];
-  const periods = buildQoderPeriods({ now: new Date(now).toISOString(), allTimeSince: '2026-01-01', rows });
+  const periods = buildQoderCnPeriods({ now: new Date(now).toISOString(), allTimeSince: '2026-01-01', rows });
   assert.equal(periods.today.totalInput, 20);
   assert.equal(periods.today.totalCacheRead, 5);
   assert.equal(periods.month.totalInput, 30);
@@ -87,7 +89,7 @@ test('buildQoderPeriods keeps day boundaries and tokscale-compatible totals', ()
   assert.equal(periods.allTime.entries[0].messageCount, 2);
 });
 
-test('Qoder routing modes do not inherit unrelated catalog prices', () => {
+test('Qoder CN routing modes do not inherit unrelated catalog prices', () => {
   const now = Date.parse('2026-08-01T08:00:00Z');
   const row = {
     sessionId: 's1',
@@ -106,7 +108,7 @@ test('Qoder routing modes do not inherit unrelated catalog prices', () => {
       outputCostPerToken: 1
     }
   };
-  const periods = buildQoderPeriods({
+  const periods = buildQoderCnPeriods({
     now: new Date(now).toISOString(),
     allTimeSince: '2026-01-01',
     rows: [row],
@@ -117,46 +119,98 @@ test('Qoder routing modes do not inherit unrelated catalog prices', () => {
 
   assert.equal(periods.today.totalInput + periods.today.totalOutput, 12);
   assert.equal(periods.today.totalCost, 0);
-  assert.equal(buildQoderHistoryGraph({
+  assert.equal(buildQoderCnHistoryGraph({
     rows: [row],
     pricingByModel
   }).contributions[0].clients[0].cost, 0);
 });
 
-test('undated qoder rows count for allTime only, mirroring the proma includeUndated rule', () => {
+test('Qoder CN pricing is resolved and cached independently', async () => {
+  resetQoderCnPricingCache();
+  let lookups = 0;
+  const lookupModelPricing = async (modelId) => {
+    lookups += 1;
+    assert.equal(modelId, 'qwen3.7-max');
+    return {
+      pricing: {
+        inputCostPerToken: 0.000001,
+        outputCostPerToken: 0.000002,
+        cacheReadInputTokenCost: 0.0000001,
+        cacheCreationInputTokenCost: 0.000003
+      }
+    };
+  };
+  const rows = [{ model: 'Qwen3.7-Max' }, { model: 'Auto' }];
+  const first = await resolveQoderCnPricing(rows, { lookupModelPricing, pricingRevision: 1, nowMs: 1000 });
+  const second = await resolveQoderCnPricing(rows, { lookupModelPricing, pricingRevision: 1, nowMs: 2000 });
+
+  assert.deepEqual(first, {
+    'qwen3.7-max': {
+      inputCostPerToken: 0.000001,
+      outputCostPerToken: 0.000002,
+      cacheReadInputTokenCost: 0.0000001,
+      cacheCreationInputTokenCost: 0.000003
+    }
+  });
+  assert.deepEqual(second, first);
+  assert.equal(lookups, 1, 'Auto has no selected underlying model and must not trigger a catalog lookup');
+  resetQoderCnPricingCache();
+});
+
+test('Qoder CN cost uses input, output, cache-read, and cache-write rates', () => {
+  const now = Date.parse('2026-08-01T08:00:00Z');
+  const rows = [{
+    sessionId: 's1', messageId: 'm1', model: 'Qwen3.7-Max', input: 10, output: 2,
+    cacheRead: 5, cacheWrite: 1, createdAt: now, messages: 1
+  }];
+  const pricingByModel = {
+    'qwen3.7-max': {
+      inputCostPerToken: 2,
+      outputCostPerToken: 3,
+      cacheReadInputTokenCost: 4,
+      cacheCreationInputTokenCost: 5
+    }
+  };
+  const periods = buildQoderCnPeriods({ now: new Date(now).toISOString(), allTimeSince: '2026-01-01', rows, pricingByModel });
+  const graph = buildQoderCnHistoryGraph({ rows, pricingByModel });
+  assert.equal(periods.today.totalCost, 51);
+  assert.equal(graph.contributions[0].clients[0].cost, 51);
+});
+
+test('undated Qoder CN rows count for allTime only, mirroring the proma includeUndated rule', () => {
   const now = Date.parse('2026-07-29T18:00:00Z');
   const rows = [
     { sessionId: 's1', messageId: 'm1', model: 'qmodel', input: 10, output: 2, cacheRead: 0, cacheWrite: 0, createdAt: 0, messages: 1 },
     { sessionId: 's1', messageId: 'm2', model: 'qmodel', input: 20, output: 4, cacheRead: 0, cacheWrite: 0, createdAt: now - 2 * 60 * 60 * 1000, messages: 1 }
   ];
-  const periods = buildQoderPeriods({ now: new Date(now).toISOString(), allTimeSince: '2026-01-01', rows });
+  const periods = buildQoderCnPeriods({ now: new Date(now).toISOString(), allTimeSince: '2026-01-01', rows });
   assert.equal(periods.today.totalInput, 20, 'undated row must not leak into today');
   assert.equal(periods.month.totalInput, 20, 'undated row must not leak into month');
   assert.equal(periods.allTime.totalInput, 30, 'undated row must count in allTime');
 
-  const graph = buildQoderHistoryGraph({ rows });
+  const graph = buildQoderCnHistoryGraph({ rows });
   assert.equal(graph.contributions.length, 1, 'undated rows must not create a history day');
   assert.equal(graph.contributions[0].clients[0].tokens.input, 20);
 });
 
-test('qoderDataPaths resolves QoderCN DB path per platform', () => {
+test('qoderCnDataPaths resolves QoderCN DB path per platform', () => {
   const suffix = path.join('QoderCN', 'SharedClientCache', 'cache', 'db', 'local.db');
 
-  const darwin = qoderDataPaths({ homeDir: '/Users/test', platform: 'darwin', env: {} });
+  const darwin = qoderCnDataPaths({ homeDir: '/Users/test', platform: 'darwin', env: {} });
   assert.deepEqual(darwin.dbPaths, [path.join('/Users/test', 'Library', 'Application Support', suffix)]);
 
-  const win = qoderDataPaths({ homeDir: '/home/test', platform: 'win32', env: { APPDATA: '/home/test/AppData/Roaming' } });
+  const win = qoderCnDataPaths({ homeDir: '/home/test', platform: 'win32', env: { APPDATA: '/home/test/AppData/Roaming' } });
   assert.deepEqual(win.dbPaths, [path.join('/home/test/AppData/Roaming', suffix)]);
 
-  const linux = qoderDataPaths({ homeDir: '/home/test', platform: 'linux', env: {} });
+  const linux = qoderCnDataPaths({ homeDir: '/home/test', platform: 'linux', env: {} });
   assert.deepEqual(linux.dbPaths, [path.join('/home/test/.config', suffix)]);
 });
 
-test('collectQoderRows reads DB rows and deduplicates by messageId', async (t) => {
+test('collectQoderCnRows reads DB rows and deduplicates by messageId', async (t) => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-usage-'));
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
 
-  const rows = await collectQoderRows({
+  const rows = await collectQoderCnRows({
     homeDir,
     platform: 'darwin',
     env: {},
@@ -184,22 +238,22 @@ test('collectQoderRows reads DB rows and deduplicates by messageId', async (t) =
   assert.equal(rows[0].output, 3);
 });
 
-test('readQoderDbRows fails loudly when both sqlite backends are unavailable', async () => {
+test('readQoderCnDbRows fails loudly when both sqlite backends are unavailable', async () => {
   const logged = [];
   await assert.rejects(
-    readQoderDbRows('/virtual/qoder.db', {
+    readQoderCnDbRows('/virtual/qoder.db', {
       execFile: async () => { throw new Error('sqlite3: ENOENT'); },
       requireFn: () => { throw new Error('node:sqlite not available'); },
       logger: (message) => logged.push(message)
     }),
-    /qoder sqlite read failed: sqlite3 CLI: sqlite3: ENOENT; node:sqlite: node:sqlite not available/
+    /qodercn sqlite read failed: sqlite3 CLI: sqlite3: ENOENT; node:sqlite: node:sqlite not available/
   );
   assert.equal(logged.length, 1);
   assert.match(logged[0], /sqlite3 CLI: sqlite3: ENOENT/);
   assert.match(logged[0], /node:sqlite: node:sqlite not available/);
 });
 
-(sqlite ? test : test.skip)('readQoderDbRows handles second and millisecond Qoder timestamps in anchored reads', async (t) => {
+(sqlite ? test : test.skip)('readQoderCnDbRows handles second and millisecond Qoder timestamps in anchored reads', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-since-'));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const dbPath = path.join(tmp, 'local.db');
@@ -240,7 +294,7 @@ test('readQoderDbRows fails loudly when both sqlite backends are unavailable', a
   add('new-iso', '2026-07-29T00:00:03.000Z');
   database.close();
 
-  const rows = await readQoderDbRows(dbPath, {
+  const rows = await readQoderCnDbRows(dbPath, {
     sinceMs,
     execFile: async () => { throw new Error('sqlite3 unavailable'); }
   });
@@ -251,7 +305,7 @@ test('readQoderDbRows fails loudly when both sqlite backends are unavailable', a
 test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
   let rows;
   try {
-    rows = await collectQoderRows({ dbPaths: [QODER_DB_FIXTURE] });
+    rows = await collectQoderCnRows({ dbPaths: [QODER_CN_DB_FIXTURE] });
   } catch (error) {
     t.skip(`no sqlite backend available: ${error.message}`);
     return;
@@ -287,7 +341,7 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
 test('anchored read applies a lenient window to text timestamps and filters in SQL', async (t) => {
   let rows;
   try {
-    rows = await readQoderDbRows(QODER_DB_FIXTURE, { sinceMs: 1_785_286_800_000 });
+    rows = await readQoderCnDbRows(QODER_CN_DB_FIXTURE, { sinceMs: 1_785_286_800_000 });
   } catch (error) {
     t.skip(`no sqlite backend available: ${error.message}`);
     return;
@@ -309,17 +363,17 @@ test('anchored read applies a lenient window to text timestamps and filters in S
 });
 
 test('sessions reach the projects rollup with project labels end to end', async (t) => {
-  const { collectQoderRows, buildQoderPeriods, resetQoderChatSessionProbe } = require('../../src/shared/qoderCnUsage');
+  const { collectQoderCnRows, buildQoderCnPeriods, resetQoderCnChatSessionProbe } = require('../../src/shared/qoderCnUsage');
   const { extractUsageFromTokscale } = require('../../src/shared/usage');
-  resetQoderChatSessionProbe();
+  resetQoderCnChatSessionProbe();
   let rows;
   try {
-    rows = await collectQoderRows({ dbPaths: [QODER_DB_FIXTURE] });
+    rows = await collectQoderCnRows({ dbPaths: [QODER_CN_DB_FIXTURE] });
   } catch (error) {
     t.skip(`no sqlite backend available: ${error.message}`);
     return;
   }
-  const periods = buildQoderPeriods({ now: new Date(), allTimeSince: '2024-01-01', rows });
+  const periods = buildQoderCnPeriods({ now: new Date(), allTimeSince: '2024-01-01', rows });
   const period = extractUsageFromTokscale(periods.allTime);
   const sessions = Object.values(period.sessions);
   const withProject = sessions.filter((s) => s.projectLabel);
@@ -330,11 +384,11 @@ test('sessions reach the projects rollup with project labels end to end', async 
 });
 
 test('reads survive a database without the chat_session table (fallback SQL)', async (t) => {
-  const { readQoderDbRows, resetQoderChatSessionProbe } = require('../../src/shared/qoderCnUsage');
+  const { readQoderCnDbRows, resetQoderCnChatSessionProbe } = require('../../src/shared/qoderCnUsage');
   const fs = require('node:fs');
   const os = require('node:os');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-no-session-'));
-  t.after(() => { fs.rmSync(tmp, { recursive: true, force: true }); resetQoderChatSessionProbe(); });
+  t.after(() => { fs.rmSync(tmp, { recursive: true, force: true }); resetQoderCnChatSessionProbe(); });
   const dbPath = path.join(tmp, 'local.db');
   let sql;
   try {
@@ -354,10 +408,10 @@ test('reads survive a database without the chat_session table (fallback SQL)', a
     sql.close();
     throw error;
   }
-  resetQoderChatSessionProbe();
+  resetQoderCnChatSessionProbe();
   let rows;
   try {
-    rows = await readQoderDbRows(dbPath);
+    rows = await readQoderCnDbRows(dbPath);
   } catch (error) {
     t.fail(`read must not fail without chat_session: ${error.message}`);
     return;

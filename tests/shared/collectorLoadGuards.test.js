@@ -2486,32 +2486,32 @@ test('smart collection uses native watching and skips idle intervals after start
   }
 });
 
-test('Qoder db-shm events are ignored without suppressing real database changes', () => {
-  const { isQoderSelfWatchEvent } = freshCollector();
+test('Qoder CN db-shm events are ignored without suppressing real database changes', () => {
+  const { isQoderCnSelfWatchEvent } = freshCollector();
   const root = path.join(os.tmpdir(), 'QoderCN', 'db');
   const roots = { qodercn: [root] };
 
-  assert.equal(isQoderSelfWatchEvent(path.join(root, 'local.db-shm'), roots), true);
-  assert.equal(isQoderSelfWatchEvent(path.join(root, 'local.db-wal'), roots), false);
-  assert.equal(isQoderSelfWatchEvent(path.join(os.tmpdir(), 'Other', 'local.db-shm'), roots), false);
+  assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'local.db-shm'), roots), true);
+  assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'local.db-wal'), roots), false);
+  assert.equal(isQoderCnSelfWatchEvent(path.join(os.tmpdir(), 'Other', 'local.db-shm'), roots), false);
 });
 
-test('collector preserves Qoder while publishing other clients after a later Qoder scan fails', async () => {
+test('collector preserves Qoder CN while publishing other clients after a later Qoder CN scan fails', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const qoderPath = require.resolve('../../src/shared/qoderCnUsage');
-  const qoderUsage = require(qoderPath);
-  const originalRows = qoderUsage.collectQoderRows;
-  const originalPeriods = qoderUsage.buildQoderPeriods;
+  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsage = require(qoderCnUsagePath);
+  const originalRows = qoderCnUsage.collectQoderCnRows;
+  const originalPeriods = qoderCnUsage.buildQoderCnPeriods;
   let failReads = false;
   let claudeTokens = 3;
-  qoderUsage.collectQoderRows = async () => {
+  qoderCnUsage.collectQoderCnRows = async () => {
     if (failReads) throw new Error('temporary sqlite read failure');
     return [];
   };
-  qoderUsage.buildQoderPeriods = () => ({
+  qoderCnUsage.buildQoderCnPeriods = () => ({
     today: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
     month: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
     allTime: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] }
@@ -2544,22 +2544,22 @@ test('collector preserves Qoder while publishing other clients after a later Qod
     await waitForCondition(() => updates.length === 1);
     const anchorPath = path.join(tmp, 'collector-anchor.json');
     const firstAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
-    assert.equal(firstAnchor.qoderPeriods.today.clients.qodercn, 7);
+    assert.equal(firstAnchor.qoderCnPeriods.today.clients.qodercn, 7);
     const initialPreviewCount = previews.length;
     failReads = true;
     claudeTokens = 5;
     await handle.tick('manual');
 
-    assert.equal(updates.length, 2, 'a Qoder failure must not suppress fresh data from other clients');
-    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'final update keeps the last Qoder period');
+    assert.equal(updates.length, 2, 'a Qoder CN failure must not suppress fresh data from other clients');
+    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'final update keeps the last Qoder CN period');
     assert.equal(updates.at(-1).today.clients.claude, 5, 'final update publishes the fresh Claude period');
     const fallbackAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
     assert.equal(fallbackAnchor.fullScanAt, firstAnchor.fullScanAt, 'a fallback is not recorded as a successful full scan');
     const failedPreviews = previews.slice(initialPreviewCount);
     assert.equal(failedPreviews.length, 2, 'the failed full scan still emits its two host previews');
-    assert.equal(Object.prototype.hasOwnProperty.call(failedPreviews.at(-1), 'qoderStatus'), false);
-    assert.equal(failedPreviews.at(-1).today.clients.qodercn, 7, 'preview keeps the anchored Qoder today partition');
-    assert.equal('month' in failedPreviews.at(-1), false, 'preview keeps the last complete month while Qoder is unavailable');
+    assert.equal(Object.prototype.hasOwnProperty.call(failedPreviews.at(-1), 'qoderCnStatus'), false);
+    assert.equal(failedPreviews.at(-1).today.clients.qodercn, 7, 'preview keeps the anchored Qoder CN today partition');
+    assert.equal('month' in failedPreviews.at(-1), false, 'preview keeps the last complete month while Qoder CN is unavailable');
 
     handle.stop();
     handle = startCollector({
@@ -2567,11 +2567,11 @@ test('collector preserves Qoder while publishing other clients after a later Qod
       onUpdate: (summary) => updates.push(summary)
     });
     await waitForCondition(() => updates.length === 3);
-    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'a persisted anchor keeps Qoder data after restart');
+    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'a persisted anchor keeps Qoder CN data after restart');
   } finally {
     if (handle) handle.stop();
-    qoderUsage.collectQoderRows = originalRows;
-    qoderUsage.buildQoderPeriods = originalPeriods;
+    qoderCnUsage.collectQoderCnRows = originalRows;
+    qoderCnUsage.buildQoderCnPeriods = originalPeriods;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
@@ -2579,34 +2579,34 @@ test('collector preserves Qoder while publishing other clients after a later Qod
   }
 });
 
-test('collector does not reuse persisted Qoder periods after the DB path changes', async () => {
+test('collector does not reuse persisted Qoder CN periods after the DB path changes', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  const originalQoderDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const originalQoderCnDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
   const oldDbPath = path.join(tmp, 'old', 'local.db');
   const newDbPath = path.join(tmp, 'new', 'local.db');
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
   process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = newDbPath;
 
   const initialCollector = freshCollector();
-  const oldQoderPeriod = emptyPeriod();
-  oldQoderPeriod.totalTokens = 9;
-  oldQoderPeriod.clients = { qodercn: 9 };
+  const oldQoderCnPeriod = emptyPeriod();
+  oldQoderCnPeriod.totalTokens = 9;
+  oldQoderCnPeriod.clients = { qodercn: 9 };
   fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
     dateKey: initialCollector.localTodayKey(),
     today: emptyPeriod(),
     month: emptyPeriod(),
     allTime: emptyPeriod(),
-    qoderPeriods: { today: oldQoderPeriod, month: oldQoderPeriod, allTime: oldQoderPeriod },
+    qoderCnPeriods: { today: oldQoderCnPeriod, month: oldQoderCnPeriod, allTime: oldQoderCnPeriod },
     configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath),
     fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
   }));
 
-  const qoderPath = require.resolve('../../src/shared/qoderCnUsage');
-  const qoderUsage = require(qoderPath);
-  const originalRows = qoderUsage.collectQoderRows;
-  qoderUsage.collectQoderRows = async () => {
-    throw new Error('new Qoder database is temporarily unavailable');
+  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsage = require(qoderCnUsagePath);
+  const originalRows = qoderCnUsage.collectQoderCnRows;
+  qoderCnUsage.collectQoderCnRows = async () => {
+    throw new Error('new Qoder CN database is temporarily unavailable');
   };
   delete require.cache[collectorPath];
 
@@ -2630,32 +2630,32 @@ test('collector does not reuse persisted Qoder periods after the DB path changes
 
     await waitForCondition(() => updates.length === 1);
     assert.equal(updates.at(-1).today.clients.claude, 3);
-    assert.equal(updates.at(-1).today.clients.qodercn || 0, 0, 'old-path Qoder fallback must not leak into the new path');
+    assert.equal(updates.at(-1).today.clients.qodercn || 0, 0, 'old-path Qoder CN fallback must not leak into the new path');
   } finally {
     if (handle) handle.stop();
-    qoderUsage.collectQoderRows = originalRows;
+    qoderCnUsage.collectQoderCnRows = originalRows;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    if (originalQoderDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
-    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = originalQoderDbPath;
+    if (originalQoderCnDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = originalQoderCnDbPath;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('collector publishes other clients when Qoder fails before the first complete snapshot', async () => {
+test('collector publishes other clients when Qoder CN fails before the first complete snapshot', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const qoderPath = require.resolve('../../src/shared/qoderCnUsage');
-  const qoderUsage = require(qoderPath);
-  const originalRows = qoderUsage.collectQoderRows;
-  let qoderReads = 0;
+  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsage = require(qoderCnUsagePath);
+  const originalRows = qoderCnUsage.collectQoderCnRows;
+  let qoderCnReads = 0;
   let claudeTokens = 3;
-  qoderUsage.collectQoderRows = async () => {
-    qoderReads += 1;
-    throw new Error('Qoder unavailable before first complete snapshot');
+  qoderCnUsage.collectQoderCnRows = async () => {
+    qoderCnReads += 1;
+    throw new Error('Qoder CN unavailable before first complete snapshot');
   };
   delete require.cache[collectorPath];
 
@@ -2682,12 +2682,12 @@ test('collector publishes other clients when Qoder fails before the first comple
     claudeTokens = 5;
     await handle.tick('incremental', { todayOnly: true });
 
-    assert.equal(qoderReads, 2, 'Qoder is retried on the incremental read');
-    assert.equal(updates.length, 2, 'a first-read Qoder failure must not suppress other clients');
+    assert.equal(qoderCnReads, 2, 'Qoder CN is retried on the incremental read');
+    assert.equal(updates.length, 2, 'a first-read Qoder CN failure must not suppress other clients');
     assert.equal(updates.at(-1).today.clients.claude, 5, 'the incremental Claude period is published');
   } finally {
     if (handle) handle.stop();
-    qoderUsage.collectQoderRows = originalRows;
+    qoderCnUsage.collectQoderCnRows = originalRows;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
@@ -2695,20 +2695,20 @@ test('collector publishes other clients when Qoder fails before the first comple
   }
 });
 
-test('collector publishes live periods when only Qoder history read fails', async () => {
+test('collector publishes live periods when only Qoder CN history read fails', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const qoderPath = require.resolve('../../src/shared/qoderCnUsage');
-  const qoderUsage = require(qoderPath);
-  const originalRows = qoderUsage.collectQoderRows;
-  const originalHistory = qoderUsage.buildQoderHistoryGraph;
+  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsage = require(qoderCnUsagePath);
+  const originalRows = qoderCnUsage.collectQoderCnRows;
+  const originalHistory = qoderCnUsage.buildQoderCnHistoryGraph;
   let failHistory = false;
   const todayKey = new Date().toISOString().slice(0, 10);
-  qoderUsage.collectQoderRows = async () => [];
-  qoderUsage.buildQoderHistoryGraph = () => {
-    if (failHistory) throw new Error('temporary Qoder history read failure');
+  qoderCnUsage.collectQoderCnRows = async () => [];
+  qoderCnUsage.buildQoderCnHistoryGraph = () => {
+    if (failHistory) throw new Error('temporary Qoder CN history read failure');
     return {
       contributions: [{
         date: todayKey,
@@ -2748,14 +2748,14 @@ test('collector publishes live periods when only Qoder history read fails', asyn
     await handle.tick('manual', { forceHistory: true });
 
     assert.equal(updates.length, 2, 'history-only failure must not suppress fresh live periods');
-    assert.equal(Object.prototype.hasOwnProperty.call(updates.at(-1), 'qoderStatus'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(updates.at(-1), 'qoderCnStatus'), false);
     assert.equal(updates.at(-1).history.daily[0].perClient.claude.tokens, 3);
     assert.equal(updates.at(-1).history.daily[0].perClient.qodercn.tokens, 2);
     assert.equal(updates.at(-1).today.clients.claude, 3);
   } finally {
     if (handle) handle.stop();
-    qoderUsage.collectQoderRows = originalRows;
-    qoderUsage.buildQoderHistoryGraph = originalHistory;
+    qoderCnUsage.collectQoderCnRows = originalRows;
+    qoderCnUsage.buildQoderCnHistoryGraph = originalHistory;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];

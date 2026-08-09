@@ -6,10 +6,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { promisify } = require('node:util');
-const { estimatedRowCost } = require('./promaUsage');
-
 const execFileAsync = promisify(execFile);
-const QODER_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.db');
+const { customPricingPath } = require('./tokscaleConfig');
+const QODER_CN_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.db');
 // Qoder CN stores internal model codes (model_info.model_key) instead of real
 // model names. Official display names come from the app's bundled i18n keys
 // `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
@@ -18,7 +17,7 @@ const QODER_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.db'
 // q35model_preview. Mapping at parse time keeps display and pricing (tokscale
 // resolves the display names case-insensitively) correct for every user's
 // data. Unmapped codes (custom models) pass through unchanged.
-const QODER_MODEL_DISPLAY_NAMES = Object.freeze({
+const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
   auto: 'Auto',
   dashscope_qmodel: 'Qwen3.7-Plus',
   dashscope_qwen3_coder: 'Qwen3-Coder-Plus',
@@ -40,7 +39,7 @@ const QODER_MODEL_DISPLAY_NAMES = Object.freeze({
   qmodel_preview: 'Qwen3.8-Max-Preview', // retired code, same preview model
   ultimate: 'Ultimate'
 });
-const QODER_USAGE_SQL = `
+const QODER_CN_USAGE_SQL = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create,
   (SELECT cs.project_name FROM chat_session cs WHERE cs.session_id = chat_message.session_id LIMIT 1) AS project_name
 FROM chat_message
@@ -49,7 +48,7 @@ WHERE role = 'assistant'
   AND trim(token_info) NOT IN ('', '{}')
 ORDER BY gmt_create, rowid
 `;
-const QODER_NORMALIZED_TIMESTAMP_SQL = `
+const QODER_CN_NORMALIZED_TIMESTAMP_SQL = `
 CASE
   WHEN typeof(gmt_create) = 'text' AND strftime('%s', trim(gmt_create)) IS NOT NULL
     THEN CAST(strftime('%s', trim(gmt_create)) AS REAL) * 1000
@@ -65,22 +64,22 @@ CASE
   ELSE CAST(gmt_create AS REAL)
 END
 `;
-const QODER_USAGE_SINCE_SQL = `
+const QODER_CN_USAGE_SINCE_SQL = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create,
   (SELECT cs.project_name FROM chat_session cs WHERE cs.session_id = chat_message.session_id LIMIT 1) AS project_name
 FROM chat_message
 WHERE role = 'assistant'
   AND token_info IS NOT NULL
   AND trim(token_info) NOT IN ('', '{}')
-  AND (typeof(gmt_create) != 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ?
-    OR typeof(gmt_create) = 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ? - 86400000)
+  AND (typeof(gmt_create) != 'text' AND (${QODER_CN_NORMALIZED_TIMESTAMP_SQL}) >= ?
+    OR typeof(gmt_create) = 'text' AND (${QODER_CN_NORMALIZED_TIMESTAMP_SQL}) >= ? - 86400000)
 ORDER BY gmt_create, rowid
 `;
 
 // Fallbacks for Qoder CN versions whose database has no chat_session table:
 // the scalar subquery would fail the whole read, so probe once per process and
 // use the plain queries instead (sessions then stay unattributed).
-const QODER_USAGE_SQL_NO_PROJECT = `
+const QODER_CN_USAGE_SQL_NO_PROJECT = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create
 FROM chat_message
 WHERE role = 'assistant'
@@ -88,22 +87,22 @@ WHERE role = 'assistant'
   AND trim(token_info) NOT IN ('', '{}')
 ORDER BY gmt_create, rowid
 `;
-const QODER_USAGE_SINCE_SQL_NO_PROJECT = `
+const QODER_CN_USAGE_SINCE_SQL_NO_PROJECT = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create
 FROM chat_message
 WHERE role = 'assistant'
   AND token_info IS NOT NULL
   AND trim(token_info) NOT IN ('', '{}')
-  AND (typeof(gmt_create) != 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ?
-    OR typeof(gmt_create) = 'text' AND (${QODER_NORMALIZED_TIMESTAMP_SQL}) >= ? - 86400000)
+  AND (typeof(gmt_create) != 'text' AND (${QODER_CN_NORMALIZED_TIMESTAMP_SQL}) >= ?
+    OR typeof(gmt_create) = 'text' AND (${QODER_CN_NORMALIZED_TIMESTAMP_SQL}) >= ? - 86400000)
 ORDER BY gmt_create, rowid
 `;
-const QODER_CHAT_SESSION_PROBE_SQL = `SELECT 1 FROM sqlite_master
+const QODER_CN_CHAT_SESSION_PROBE_SQL = `SELECT 1 FROM sqlite_master
 WHERE type = 'table' AND name = 'chat_session'
   AND EXISTS (SELECT 1 FROM pragma_table_info('chat_session') WHERE name = 'project_name')
 LIMIT 1`;
 
-function normalizeQoderProjectLabel(value) {
+function normalizeQoderCnProjectLabel(value) {
   // '.' is Qoder CN's "no project" sentinel; keep it unattributed so it does
   // not surface as a phantom project named '.' in the Projects view.
   const label = String(value || '').trim();
@@ -114,12 +113,12 @@ function normalizeQoderProjectLabel(value) {
 // or absent) is stable for the life of the database file, while a transient
 // probe failure returns null so the next read retries instead of locking the
 // process into the no-project fallback.
-const chatSessionTableCache = new Map();
+const qoderCnChatSessionTableCache = new Map();
 
 // Returns true when chat_session.project_name exists, false when the database
 // was read successfully without it, or null when the probe itself failed.
-async function probeChatSessionTable(dbPath, { run, requireFn } = {}) {
-  const probe = QODER_CHAT_SESSION_PROBE_SQL;
+async function probeQoderCnChatSessionTable(dbPath, { run, requireFn } = {}) {
+  const probe = QODER_CN_CHAT_SESSION_PROBE_SQL;
   try {
     if (run) {
       const result = await run('sqlite3', ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, probe], {
@@ -172,14 +171,85 @@ function sourceId(value) {
   return createHash('sha256').update(path.normalize(String(value || ''))).digest('hex').slice(0, 12);
 }
 
-function estimatedQoderRowCost(row, pricingByModel) {
-  // Qoder stores Auto as a routing mode without the model selected behind it.
+function estimatedQoderCnRowCost(row, pricingByModel) {
+  // Qoder CN stores Auto as a routing mode without the model selected behind it.
   // Do not let models.dev's unrelated morph/auto entry supply a false price.
-  if (String(row?.model || '').trim().toLowerCase() === 'auto') return null;
-  return estimatedRowCost(row, pricingByModel);
+  const modelId = String(row?.model || '').trim().toLowerCase();
+  if (modelId === 'auto') return null;
+  const pricing = pricingByModel?.[modelId];
+  if (!pricing || typeof pricing !== 'object') return null;
+  const components = [
+    [row.input, pricing.inputCostPerToken],
+    [row.output, pricing.outputCostPerToken],
+    [row.cacheRead, pricing.cacheReadInputTokenCost],
+    [row.cacheWrite, pricing.cacheCreationInputTokenCost]
+  ];
+  let cost = 0;
+  for (const [tokens, unitCost] of components) {
+    if (!tokens) continue;
+    if (!Number.isFinite(Number(unitCost)) || Number(unitCost) < 0) return null;
+    cost += tokens * Number(unitCost);
+  }
+  return cost;
 }
 
-function normalizeQoderDbRow(row, source = 'local') {
+const QODER_CN_PRICING_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const QODER_CN_PRICING_LOOKUP_TIMEOUT_MS = 3000;
+const qoderCnPricingCache = new Map();
+
+function qoderCnPricingRevision() {
+  try { return fs.statSync(customPricingPath()).mtimeMs; } catch (_) { return 0; }
+}
+
+function normalizeQoderCnPricing(result) {
+  const source = result?.pricing;
+  if (!source || typeof source !== 'object') return null;
+  const pick = (key) => {
+    const value = Number(source[key]);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  const pricing = {
+    inputCostPerToken: pick('inputCostPerToken'),
+    outputCostPerToken: pick('outputCostPerToken'),
+    cacheReadInputTokenCost: pick('cacheReadInputTokenCost'),
+    cacheCreationInputTokenCost: pick('cacheCreationInputTokenCost')
+  };
+  return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
+}
+
+async function resolveQoderCnPricing(rows, options = {}) {
+  const lookup = options.lookupModelPricing;
+  const revision = options.pricingRevision ?? qoderCnPricingRevision();
+  const nowMs = options.nowMs ?? Date.now();
+  const commandTimeoutMs = options.commandTimeoutMs || QODER_CN_PRICING_LOOKUP_TIMEOUT_MS;
+  const pricingByModel = {};
+  const modelIds = [...new Set((Array.isArray(rows) ? rows : [])
+    .map((row) => String(row?.model || '').trim().toLowerCase())
+    .filter((modelId) => modelId && modelId !== 'auto'))];
+  for (const modelId of modelIds) {
+    const cached = qoderCnPricingCache.get(modelId);
+    if (cached && cached.revision === revision && nowMs - cached.at < QODER_CN_PRICING_CACHE_TTL_MS) {
+      if (cached.pricing) pricingByModel[modelId] = cached.pricing;
+      continue;
+    }
+    let pricing = null;
+    try {
+      pricing = normalizeQoderCnPricing(await lookup(modelId, commandTimeoutMs));
+    } catch (_) {
+      // An unknown model, offline lookup, or custom channel must remain
+      // cost-unavailable instead of inheriting an unrelated catalog price.
+    }
+    qoderCnPricingCache.set(modelId, { at: nowMs, revision, pricing });
+    if (pricing) pricingByModel[modelId] = pricing;
+  }
+  return pricingByModel;
+}
+
+function resetQoderCnPricingCache() {
+  qoderCnPricingCache.clear();
+}
+
+function normalizeQoderCnDbRow(row, source = 'local') {
   const usage = jsonObject(row?.token_info);
   const prompt = numeric(usage?.prompt_tokens);
   const cached = numeric(usage?.cached_tokens ?? 0);
@@ -190,14 +260,14 @@ function normalizeQoderDbRow(row, source = 'local') {
   const message = String(row?.id || row?.request_id || row?.row_id || `${row?.gmt_create || 0}`);
   const modelInfo = jsonObject(row?.model_info);
   const modelKey = String(modelInfo?.model_key || modelInfo?.modelKey || 'qoder-agent');
-  const displayName = Object.prototype.hasOwnProperty.call(QODER_MODEL_DISPLAY_NAMES, modelKey)
-    ? QODER_MODEL_DISPLAY_NAMES[modelKey]
+  const displayName = Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, modelKey)
+    ? QODER_CN_MODEL_DISPLAY_NAMES[modelKey]
     : null;
   return {
     sessionId: `qodercn:${source}:${session}`,
     messageId: `qodercn:${source}:${session}:${message}`,
     model: displayName || modelKey,
-    projectLabel: normalizeQoderProjectLabel(row?.project_name),
+    projectLabel: normalizeQoderCnProjectLabel(row?.project_name),
     input: Math.max(0, prompt - cached),
     output,
     cacheRead: Math.min(prompt, cached),
@@ -207,7 +277,7 @@ function normalizeQoderDbRow(row, source = 'local') {
   };
 }
 
-function qoderDataPaths(options = {}) {
+function qoderCnDataPaths(options = {}) {
   const home = options.homeDir || os.homedir();
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
@@ -223,24 +293,24 @@ function qoderDataPaths(options = {}) {
   return {
     dbPaths: explicitDb
       ? [path.resolve(explicitDb)]
-      : [path.join(appSupport, 'QoderCN', QODER_DB_SUFFIX)]
+      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)]
   };
 }
 
-async function readQoderDbRows(dbPath, options = {}) {
+async function readQoderCnDbRows(dbPath, options = {}) {
   const run = options.execFile || execFileAsync;
   const sinceMs = options.sinceMs;
-  let probed = chatSessionTableCache.get(dbPath);
+  let probed = qoderCnChatSessionTableCache.get(dbPath);
   if (probed === undefined) {
-    probed = await probeChatSessionTable(dbPath, { run, requireFn: options.requireFn });
+    probed = await probeQoderCnChatSessionTable(dbPath, { run, requireFn: options.requireFn });
     // Only a successful probe outcome is cached (true or confirmed absent); a
     // null probe failure is retried on the next read.
-    if (probed !== null) chatSessionTableCache.set(dbPath, probed);
+    if (probed !== null) qoderCnChatSessionTableCache.set(dbPath, probed);
   }
   const withProject = probed === true;
   const sql = sinceMs
-    ? (withProject ? QODER_USAGE_SINCE_SQL : QODER_USAGE_SINCE_SQL_NO_PROJECT)
-    : (withProject ? QODER_USAGE_SQL : QODER_USAGE_SQL_NO_PROJECT);
+    ? (withProject ? QODER_CN_USAGE_SINCE_SQL : QODER_CN_USAGE_SINCE_SQL_NO_PROJECT)
+    : (withProject ? QODER_CN_USAGE_SQL : QODER_CN_USAGE_SQL_NO_PROJECT);
   const cliArgs = sinceMs
     ? ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql.replace('?', String(sinceMs)).replace('?', String(sinceMs))]
     : ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql];
@@ -258,25 +328,25 @@ async function readQoderDbRows(dbPath, options = {}) {
       try {
         database.exec('PRAGMA busy_timeout = 250');
         return sinceMs
-          ? database.prepare(withProject ? QODER_USAGE_SINCE_SQL : QODER_USAGE_SINCE_SQL_NO_PROJECT).all(sinceMs, sinceMs)
-          : database.prepare(withProject ? QODER_USAGE_SQL : QODER_USAGE_SQL_NO_PROJECT).all();
+          ? database.prepare(withProject ? QODER_CN_USAGE_SINCE_SQL : QODER_CN_USAGE_SINCE_SQL_NO_PROJECT).all(sinceMs, sinceMs)
+          : database.prepare(withProject ? QODER_CN_USAGE_SQL : QODER_CN_USAGE_SQL_NO_PROJECT).all();
       } finally {
         database.close();
       }
     } catch (nodeError) {
       // Fail loudly instead of silently returning empty usage. The collector
       // logs the error and retains its last complete snapshot when available.
-      const message = `qoder sqlite read failed: sqlite3 CLI: ${cliError.message}; node:sqlite: ${nodeError.message}`;
+      const message = `qodercn sqlite read failed: sqlite3 CLI: ${cliError.message}; node:sqlite: ${nodeError.message}`;
       if (typeof options.logger === 'function') options.logger(message);
       throw new Error(message, { cause: nodeError });
     }
   }
 }
 
-async function collectQoderRows(options = {}) {
-  const paths = qoderDataPaths(options);
+async function collectQoderCnRows(options = {}) {
+  const paths = qoderCnDataPaths(options);
   const dbPaths = Array.isArray(options.dbPaths) ? options.dbPaths : paths.dbPaths;
-  const readDbRows = options.readDbRows || readQoderDbRows;
+  const readDbRows = options.readDbRows || readQoderCnDbRows;
   const sinceMs = options.sinceMs;
   const rows = [];
 
@@ -285,7 +355,7 @@ async function collectQoderRows(options = {}) {
     const source = sourceId(dbPath);
     const dbRows = await readDbRows(dbPath, { ...options, sinceMs });
     for (const dbRow of dbRows) {
-      const row = normalizeQoderDbRow(dbRow, source);
+      const row = normalizeQoderCnDbRow(dbRow, source);
       if (row) rows.push(row);
     }
   }
@@ -309,7 +379,7 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
     group.cacheRead += row.cacheRead;
     group.cacheWrite += row.cacheWrite;
     group.messages += row.messages;
-    const cost = estimatedQoderRowCost(row, pricingByModel);
+    const cost = estimatedQoderCnRowCost(row, pricingByModel);
     group.cost += cost === null ? 0 : cost;
     if (row.createdAt && (!group.startedAt || row.createdAt < group.startedAt)) group.startedAt = row.createdAt;
     if (row.createdAt > group.lastUsedAt) group.lastUsedAt = row.createdAt;
@@ -331,7 +401,7 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
   };
 }
 
-function buildQoderPeriods(options = {}) {
+function buildQoderCnPeriods(options = {}) {
   const now = options.now ? new Date(options.now) : new Date();
   const rows = Array.isArray(options.rows) ? options.rows : [];
   const pricingByModel = options.pricingByModel;
@@ -351,7 +421,7 @@ function localDateKey(value) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function buildQoderHistoryGraph(options = {}) {
+function buildQoderCnHistoryGraph(options = {}) {
   const days = new Map();
   for (const row of options.rows || []) {
     const date = localDateKey(row.createdAt);
@@ -363,7 +433,7 @@ function buildQoderHistoryGraph(options = {}) {
       model = { client: 'qodercn', modelId: row.model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 0, messages: 0 };
       day.clients.push(model);
     }
-    const cost = estimatedQoderRowCost(row, options.pricingByModel);
+    const cost = estimatedQoderCnRowCost(row, options.pricingByModel);
     model.tokens.input += row.input;
     model.tokens.output += row.output;
     model.tokens.cacheRead += row.cacheRead;
@@ -375,12 +445,14 @@ function buildQoderHistoryGraph(options = {}) {
 }
 
 module.exports = {
-  QODER_MODEL_DISPLAY_NAMES,
-  buildQoderHistoryGraph,
-  buildQoderPeriods,
-  collectQoderRows,
-  normalizeQoderDbRow,
-  qoderDataPaths,
-  readQoderDbRows,
-  resetQoderChatSessionProbe() { chatSessionTableCache.clear(); }
+  QODER_CN_MODEL_DISPLAY_NAMES,
+  buildQoderCnHistoryGraph,
+  buildQoderCnPeriods,
+  collectQoderCnRows,
+  normalizeQoderCnDbRow,
+  qoderCnDataPaths,
+  readQoderCnDbRows,
+  resolveQoderCnPricing,
+  resetQoderCnPricingCache,
+  resetQoderCnChatSessionProbe() { qoderCnChatSessionTableCache.clear(); }
 };

@@ -31,14 +31,14 @@ function fakeTokscaleSpawn() {
 
 async function withQoderCollectorMock(mocks, callback) {
   const collectorPath = require.resolve('../../src/shared/collector');
-  const qoderUsage = require('../../src/shared/qoderCnUsage');
-  const originals = Object.fromEntries(Object.keys(mocks).map((key) => [key, qoderUsage[key]]));
-  Object.assign(qoderUsage, mocks);
+  const qoderCnUsage = require('../../src/shared/qoderCnUsage');
+  const originals = Object.fromEntries(Object.keys(mocks).map((key) => [key, qoderCnUsage[key]]));
+  Object.assign(qoderCnUsage, mocks);
   delete require.cache[collectorPath];
   try {
     return await callback(require(collectorPath));
   } finally {
-    Object.assign(qoderUsage, originals);
+    Object.assign(qoderCnUsage, originals);
     delete require.cache[collectorPath];
   }
 }
@@ -174,8 +174,8 @@ test('collectUsageOnce handles qodercn-only tracking without spawning tokscale',
   let tokscaleCalls = 0;
 
   await withQoderCollectorMock({
-    collectQoderRows: async () => [],
-    buildQoderPeriods: () => ({
+    collectQoderCnRows: async () => [],
+    buildQoderCnPeriods: () => ({
       today: { entries: [{ client: 'qodercn', model: 'qmodel', input: 12, output: 3 }] },
       month: { entries: [{ client: 'qodercn', model: 'qmodel', input: 20 }] },
       allTime: { entries: [{ client: 'qodercn', model: 'qmodel', input: 30 }] }

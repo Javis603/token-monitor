@@ -10,6 +10,7 @@ const test = require('node:test');
 
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
 const { configFingerprint } = require('../../src/shared/collector');
+const { qoderCnDataPaths } = require('../../src/shared/qoderCnUsage');
 const { aggregateDevices, emptyPeriod } = require('../../src/shared/usage');
 
 const CLIENTS = 'claude,codex';
@@ -102,6 +103,19 @@ test('the seed reports the project setting it was built under', () => {
     seedOptions({ projectsEnabled: false })
   );
   assert.equal(off.projectsEnabled, false);
+});
+
+test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
+  const homeDir = '/tmp/token-monitor-qodercn-home';
+  const qoderCnDbPath = qoderCnDataPaths({ homeDir }).dbPaths[0];
+  const clients = 'claude,qodercn';
+  const anchor = anchorFixture({
+    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, qoderCnDbPath)
+  });
+
+  const record = deviceRecordFromAnchor(anchor, seedOptions({ clients, homeDir }));
+  assert.equal(record.today.totalTokens, 1_000);
+  assert.deepEqual(record.trackedClients, ['claude', 'qodercn']);
 });
 
 test('an anchor from another local day is refused', () => {
