@@ -161,6 +161,35 @@ test('latest work supersedes an active prepared snapshot and removes its temp fi
   assert.deepEqual(harness.published, [{ source: 'second', history: 'second' }]);
 });
 
+test('a committed snapshot still reloads when queued same-source work is unchanged', async () => {
+  const syncing = deferred();
+  const syncStarted = deferred();
+  let prepares = 0;
+  const harness = createHarness({
+    async prepareSnapshot(work, resolvedHistory) {
+      prepares += 1;
+      if (prepares === 2) return { ok: true, changed: false };
+      const value = { work, history: resolvedHistory, tempPath: `/tmp/${work.sequence}.tmp` };
+      harness.prepared.push(value);
+      return { ok: true, changed: true, prepared: value };
+    },
+    async syncSnapshot() {
+      syncStarted.resolve();
+      await syncing.promise;
+    }
+  });
+  const producer = harness.controller.captureProducerOwner();
+  harness.controller.enqueue({ stats: { source: 'same-source' }, producerOwner: producer });
+  await syncStarted.promise;
+
+  harness.controller.enqueue({ stats: { source: 'same-source' }, producerOwner: producer });
+  syncing.resolve();
+  await harness.controller.whenIdle();
+
+  assert.deepEqual(harness.published, [{ source: 'same-source', history: 'same-source' }]);
+  assert.deepEqual(harness.reloaded, ['same-source']);
+});
+
 test('a transition during post-commit directory sync suppresses the stale reload', async () => {
   const syncing = deferred();
   const syncStarted = deferred();

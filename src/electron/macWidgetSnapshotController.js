@@ -84,9 +84,9 @@ function createMacWidgetSnapshotController(options = {}) {
       } catch (error) {
         safeLog(logger, `[mac-widget] snapshot directory sync failed: ${error?.message || error}`);
       }
-      if (workIsCurrent(work) && committed.changed !== false) {
+      if (ownerIsCurrent(work.owner) && committed.changed !== false) {
         reloadSnapshot?.(work, {
-          isCurrent: () => workIsCurrent(work)
+          isCurrent: () => ownerIsCurrent(work.owner)
         });
       }
     } catch (error) {
