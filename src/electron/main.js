@@ -148,10 +148,11 @@ const {
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
 const { historyPreview, historyRevision } = require('../shared/history');
-const { resolveCompleteHistory } = require('./historySource');
+const { completeHistorySource, resolveCompleteHistory } = require('./historySource');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const { resolveMacWidgetSnapshotPath, updateMacWidgetSnapshot } = require('./macWidgetBridge');
+const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
@@ -2324,9 +2325,6 @@ let tray = null;
 let latestStats = null;
 let pendingMacWidgetStats = null;
 let macWidgetWriteInFlight = false;
-let cachedMacWidgetHistory = null;
-let cachedMacWidgetHistoryKey = '';
-let macWidgetHistoryRequest = null;
 let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
@@ -3411,39 +3409,20 @@ function getCompleteHistory() {
   return resolveCompleteHistory(historyResolverOptions());
 }
 
-async function getMacWidgetHistory(stats) {
-  const revision = String(stats?.historyRevision || '').trim();
+function getMacWidgetHistory(stats) {
   const config = historyResolverOptions();
-  const key = [
-    config.mode,
-    config.hubMode,
-    config.historyEnabled,
-    config.hubUrl || '',
-    revision
-  ].join('|');
-  if (revision && cachedMacWidgetHistoryKey === key && cachedMacWidgetHistory) {
-    return cachedMacWidgetHistory;
-  }
-  if (macWidgetHistoryRequest?.key === key) return macWidgetHistoryRequest.promise;
-
-  const promise = getCompleteHistory()
-    .then((history) => {
-      if (revision) {
-        cachedMacWidgetHistory = history;
-        cachedMacWidgetHistoryKey = key;
-      }
-      return history;
-    })
-    .catch((error) => {
-      console.warn(`[mac-widget] complete history unavailable: ${error?.message || error}`);
-      return { daily: [], monthly: [], summary: {} };
-    });
-  macWidgetHistoryRequest = { key, promise };
-  try {
-    return await promise;
-  } finally {
-    if (macWidgetHistoryRequest?.promise === promise) macWidgetHistoryRequest = null;
-  }
+  return resolveMacWidgetHistory({
+    sourceKey: macWidgetHistorySourceKey(config),
+    revision: stats?.historyRevision,
+    fetchHistory: getCompleteHistory,
+    // Only a remote hub read is worth trading freshness for: it is an HTTP round
+    // trip with a 15s timeout, and `historyRevision` moves on every ingest from
+    // every device. Local and embedded-host history is an in-process
+    // aggregation, so throttling it would buy nothing and only let the Activity
+    // heatmap lag. The failure retry floor still applies to every source.
+    minIntervalMs: completeHistorySource(config) === 'remote' ? undefined : 0,
+    logger: (message) => console.warn(message)
+  });
 }
 
 function scheduleMacWidgetSnapshot(stats) {
@@ -3463,7 +3442,6 @@ function scheduleMacWidgetSnapshot(stats) {
           snapshotPath: config.snapshotPath,
           snapshotOptions: {
             presentation: {
-              defaultPeriod: settings?.lastViewState?.period,
               currencyCode: settings?.currency,
               currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
               compactNumbers: settings?.showCompactTotalTokens !== false,

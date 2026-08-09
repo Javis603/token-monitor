@@ -60,6 +60,7 @@ jobs:
           tests/shared/macWidgetSnapshot.test.js
           tests/electron/macWidgetBridge.test.js
           tests/electron/macWidgetDeepLink.test.js
+          tests/electron/macWidgetHistory.test.js
           tests/electron/macWidgetReloader.test.js
           tests/electron/macWidgetSigning.test.js
           tests/electron/macosProvisioning.test.js

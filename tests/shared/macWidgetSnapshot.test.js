@@ -114,7 +114,7 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
   assert.equal(snapshot.trend.currentTokens, 1_200_000);
   assert.equal(snapshot.trend.peakTokens, 1_200_000);
   assert.deepEqual(snapshot.presentation, {
-    defaultPeriod: 'today', currencyCode: 'CNY', currencySymbol: '¥', currencyRate: 7.1,
+    currencyCode: 'CNY', currencySymbol: '¥', currencyRate: 7.1,
     numberStyle: 'compact', compactTokenUnits: 'localized', showCost: true, locale: 'zh-CN', theme: 'custom'
   });
   assert.equal(snapshot.status.noData, false);
@@ -255,14 +255,20 @@ test('preserves a zero balance and omits missing, non-finite, or unsupported bal
   }
 });
 
-test('chooses the configured period without duplicating aggregation logic', () => {
+test('pins the legacy top-level mirror to day and keeps every period addressable', () => {
+  // The app's own Today/Month/AllTime tab must not reach the snapshot: each
+  // widget picks its period through the AppIntent, so anything that tracked the
+  // app's tab would rewrite the file and spend a reload budget on a change no
+  // widget renders.
   const snapshot = buildSnapshot(sampleStats(), {
     now: NOW,
-    presentation: { defaultPeriod: 'month' }
+    presentation: { defaultPeriod: 'month', currencyCode: 'USD' }
   });
-  assert.equal(snapshot.overview.currentPeriod, 'month');
-  assert.equal(snapshot.overview.totalTokens, 9_000_000);
+  assert.equal(snapshot.overview.currentPeriod, 'today');
+  assert.equal(snapshot.overview.totalTokens, 1_200_000);
+  assert.equal(snapshot.presentation.defaultPeriod, undefined);
   assert.equal(snapshot.periods.day.overview.totalTokens, 1_200_000);
+  assert.equal(snapshot.periods.month.overview.totalTokens, 9_000_000);
   assert.equal(snapshot.periods.total.overview.totalTokens, 20_000_000);
 });
 
@@ -603,9 +609,18 @@ test('fingerprints business content while ignoring snapshot clock fields', () =>
 
   const presentationChange = buildSnapshot(stats, {
     now: NOW,
-    presentation: { defaultPeriod: 'month' }
+    presentation: { currencyCode: 'CNY', currencyRate: 7.1 }
   });
   assert.notEqual(macWidgetSnapshotFingerprint(first), macWidgetSnapshotFingerprint(presentationChange));
+
+  // The app's period tab is the one presentation input the widget cannot
+  // render, so it must not reach the fingerprint: every switch would otherwise
+  // rewrite the snapshot and spend a WidgetKit reload on nothing.
+  const periodTabChange = buildSnapshot(stats, {
+    now: NOW,
+    presentation: { defaultPeriod: 'month' }
+  });
+  assert.equal(macWidgetSnapshotFingerprint(first), macWidgetSnapshotFingerprint(periodTabChange));
 });
 
 // The snapshot re-declares the supported UI locales as a literal instead of

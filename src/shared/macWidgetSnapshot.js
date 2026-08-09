@@ -12,7 +12,6 @@ const KNOWN_LIMIT_STATUSES = new Set([
   'sourceRateLimited', 'unavailable', 'error'
 ]);
 const KNOWN_WINDOW_KINDS = new Set(['session', 'weekly', 'billing']);
-const PERIODS = new Set(['today', 'month', 'allTime']);
 const CURRENCIES = Object.freeze({ USD: '$', TWD: 'NT$', HKD: 'HK$', CNY: '¥' });
 
 function finiteNumber(value, fallback = 0) {
@@ -106,11 +105,6 @@ function isLikelySensitivePathOrUrl(value) {
     || /(?:^|[\\/])(?:\.\.?)(?:[\\/]|$)/.test(raw)
     || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)
   );
-}
-
-function normalizedPeriod(value) {
-  const period = String(value || '').trim();
-  return PERIODS.has(period) ? period : 'today';
 }
 
 function periodStats(stats, period) {
@@ -433,12 +427,11 @@ function buildPeriodSnapshot(stats, period, generatedAt, history, sourceUpdatedA
   return { overview, models, activity, trend };
 }
 
-function buildPresentation(source = {}, period = 'today') {
+function buildPresentation(source = {}) {
   const currencyCode = String(source.currencyCode || source.currency || 'USD').trim().toUpperCase();
   const safeCurrency = Object.hasOwn(CURRENCIES, currencyCode) ? currencyCode : 'USD';
   const locale = String(source.locale || 'auto').trim();
   return {
-    defaultPeriod: normalizedPeriod(source.defaultPeriod || period),
     currencyCode: safeCurrency,
     currencySymbol: CURRENCIES[safeCurrency],
     currencyRate: Math.max(0.000001, finiteNumber(source.currencyRate, 1)),
@@ -476,7 +469,7 @@ function buildMacWidgetSnapshot(stats, options = {}) {
   const safeNow = Number.isNaN(now.getTime()) ? new Date() : now;
   const generatedAt = safeNow.toISOString();
   const sourceFreshness = resolveWidgetSourceFreshness(stats, safeNow);
-  const presentation = buildPresentation(options.presentation, options.presentation?.defaultPeriod);
+  const presentation = buildPresentation(options.presentation);
   const quota = buildQuota(stats?.limits);
   const history = options.history;
   const periods = {
@@ -484,9 +477,14 @@ function buildMacWidgetSnapshot(stats, options = {}) {
     month: buildPeriodSnapshot(stats, 'month', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow),
     total: buildPeriodSnapshot(stats, 'allTime', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow)
   };
-  const defaultPeriod = normalizedPeriod(presentation.defaultPeriod);
-  const defaultKey = defaultPeriod === 'month' ? 'month' : defaultPeriod === 'allTime' ? 'total' : 'day';
-  const selected = periods[defaultKey];
+  // The top-level mirror is the schemaVersion 1 shape. Every reader from
+  // version 2 on takes `periods.day` and ignores it, so it is pinned to the same
+  // period rather than tracking anything: sourcing it from the app's own
+  // Today/Month/AllTime tab used to rewrite the snapshot and spend a
+  // `WidgetCenter.reloadTimelines()` on a change no widget could render, and
+  // WidgetKit reload budgets are finite. Each widget picks its own period
+  // through the AppIntent instead.
+  const selected = periods.day;
   return {
     schemaVersion: MAC_WIDGET_SCHEMA_VERSION,
     generatedAt,

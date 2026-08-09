@@ -1253,3 +1253,58 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 }
+
+final class WidgetTimelineProviderPreviewTests: XCTestCase {
+    // The gallery is where someone decides whether the widget is worth adding.
+    // Before this fallback existed it rendered the redacted placeholder skeleton
+    // during a cold start, which is indistinguishable from a broken widget.
+    func testGalleryPreviewFallsBackToSampleDataInsteadOfAnEmptySkeleton() {
+        let preview = WidgetPeriodPolicy.previewAwareSnapshot(
+            loaded: nil,
+            period: .day,
+            isPreview: true
+        )
+        XCTAssertNotNil(preview)
+        XCTAssertFalse(preview?.isEmpty ?? true)
+    }
+
+    func testPlacedWidgetKeepsNilRatherThanInventingNumbers() {
+        XCTAssertNil(
+            WidgetPeriodPolicy.previewAwareSnapshot(
+                loaded: nil,
+                period: .day,
+                isPreview: false
+            )
+        )
+    }
+
+    func testARealSnapshotAlwaysWinsOverTheSample() throws {
+        let loaded = try XCTUnwrap(
+            WidgetSnapshot.load(from: Self.writeSnapshotFixture())
+        )
+        let resolved = WidgetPeriodPolicy.previewAwareSnapshot(
+            loaded: loaded,
+            period: .day,
+            isPreview: true
+        )
+        XCTAssertEqual(resolved?.overview.totalTokens, loaded.overview.totalTokens)
+    }
+
+    private static func writeSnapshotFixture() -> URL {
+        let json = """
+        {"schemaVersion":6,"generatedAt":"2026-08-09T07:00:00.000Z",
+         "periods":{"day":{"overview":{"currentPeriod":"today","totalTokens":4242,"costUsd":1.5,
+         "primaryTool":"codex","updatedAt":"2026-08-09T07:00:00.000Z"},"models":[],
+         "activity":{"days":[],"activeDays":0},"trend":{"points":[],"currentTokens":0,"peakTokens":0}}},
+         "quota":[],"presentation":{"currencyCode":"USD","currencySymbol":"$","currencyRate":1,
+         "numberStyle":"compact","compactTokenUnits":"western","showCost":true,"locale":"auto","theme":"system"},
+         "status":{"isStale":false,"sourceStale":false,"dataAgeSeconds":0,"providerConfigured":true,
+         "providerNeedsLogin":false,"noData":false,"sourceUpdatedAt":"2026-08-09T07:00:00.000Z",
+         "snapshotGeneratedAt":"2026-08-09T07:00:00.000Z"}}
+        """
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("preview-fixture-\(UUID().uuidString).json")
+        try? json.data(using: .utf8)?.write(to: url)
+        return url
+    }
+}

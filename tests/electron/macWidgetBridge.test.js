@@ -211,8 +211,18 @@ test('compares stable snapshot content instead of rewriting for clock-only chang
 
     assert.equal((await updateMacWidgetSnapshot(limitsChanged, {
       ...options,
-      snapshotOptions: { ...options.snapshotOptions, presentation: { defaultPeriod: 'month' } }
+      snapshotOptions: { ...options.snapshotOptions, presentation: { currencyCode: 'CNY', currencyRate: 7.1 } }
     })).changed, true);
+
+    // The app's own period tab is deliberately not part of the snapshot, so
+    // switching it must not reach disk or spend a WidgetKit reload.
+    assert.equal((await updateMacWidgetSnapshot(limitsChanged, {
+      ...options,
+      snapshotOptions: {
+        ...options.snapshotOptions,
+        presentation: { currencyCode: 'CNY', currencyRate: 7.1, defaultPeriod: 'month' }
+      }
+    })).changed, false);
   });
 });
 
