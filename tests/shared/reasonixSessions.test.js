@@ -234,7 +234,7 @@ test('Reasonix resumed sessions use the latest trusted event message for live pe
   assert.ok(view.sessions.month[`reasonix:${id}`]);
   assert.ok(view.sessions.allTime[`reasonix:${id}`]);
   assert.equal(view.sessions.today[`reasonix:${id}`].periodTokenDataUnavailable, true);
-  assert.equal(view.sessions.today[`reasonix:${id}`].tokenDataUnavailable, true);
+  assert.notEqual(view.sessions.today[`reasonix:${id}`].tokenDataUnavailable, true);
   assert.equal(view.sessions.today[`reasonix:${id}`].totalTokens, 320);
   assert.equal(view.sessions.today[`reasonix:${id}`].reportedCostUsd, 0.25);
   assert.notEqual(view.sessions.month[`reasonix:${id}`].periodTokenDataUnavailable, true);

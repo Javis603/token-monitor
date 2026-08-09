@@ -193,7 +193,7 @@ test('Reasonix native rows remain visible when official per-session tokens are u
   assert.equal(row.subtitle, '14:10 · 2 msgs');
 });
 
-test('Reasonix native rows hide cumulative totals for an unreliable bounded period', () => {
+test('Reasonix native rows show cumulative totals for an unreliable bounded period', () => {
   const [row] = sessionRowsForPeriod({ sessions: {} }, {
     nativeSessions: {
       'reasonix:resumed': {
@@ -211,9 +211,9 @@ test('Reasonix native rows hide cumulative totals for an unreliable bounded peri
     now: new Date(2026, 7, 9, 12, 0)
   });
 
-  assert.equal(row.value, 0);
-  assert.equal(row.cost, 0);
-  assert.equal(row.tokenDataUnavailable, true);
+  assert.equal(row.value, 14777);
+  assert.equal(row.cost, 0.00402028);
+  assert.equal(row.tokenDataUnavailable, false);
   assert.equal(row.periodTokenDataUnavailable, true);
 });
 

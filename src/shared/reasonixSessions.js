@@ -466,12 +466,12 @@ function sessionViewForPeriod(session, periodName, periodKeys) {
 
   // The only available native telemetry is cumulative for the whole Branch.
   // There is no official per-turn usage field that would let us subtract the
-  // older portion without guessing, so a bounded period must fail closed in
-  // the renderer instead of showing a lifetime total as today's value.
+  // older portion without guessing. Keep this marker for project rollups so a
+  // lifetime total is never counted as today's usage, while the session row
+  // may still show the trusted conversation-level total.
   return {
     ...session,
-    periodTokenDataUnavailable: true,
-    tokenDataUnavailable: true
+    periodTokenDataUnavailable: true
   };
 }
 

@@ -105,9 +105,11 @@
 
   function nativeSessionRow(session, key, options, now) {
     const periodTokenDataUnavailable = session?.periodTokenDataUnavailable === true;
-    // Native telemetry is cumulative. A bounded period cannot display it unless
-    // the session scanner proved that the session started within that period.
-    const tokenDataUnavailable = session?.tokenDataUnavailable === true || periodTokenDataUnavailable;
+    // Native telemetry is cumulative for a resumed Branch, but it remains a
+    // trusted conversation total. Only an actually missing native total is
+    // unavailable; periodTokenDataUnavailable is reserved for aggregation so
+    // the same lifetime value is never counted as today's project usage.
+    const tokenDataUnavailable = session?.tokenDataUnavailable === true;
     const value = tokenDataUnavailable ? 0 : finiteNumber(session?.totalTokens);
     if (value <= 0 && !tokenDataUnavailable) return null;
     const labels = options.clientLabels || {};
@@ -134,8 +136,9 @@
       value,
       tokenDataUnavailable,
       periodTokenDataUnavailable,
-      // Cumulative cost is unavailable for an unreliable bounded period too;
-      // never present it beside an unavailable token value.
+      // A reported session cost is the same trusted conversation-level value
+      // as the cumulative token total. Do not hide it merely because the
+      // period cannot be split exactly.
       cost: tokenDataUnavailable ? 0 : finiteNumber(session?.reportedCostUsd),
       sessionDetailAvailable: session?.sessionDetailAvailable === true,
       color: colors[client] || stable(key, palette),
