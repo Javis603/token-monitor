@@ -113,12 +113,17 @@ test('MacUpdater leaves Squirrel untouched until the install is requested', (t) 
 });
 
 // The guard keeps updating when the hand-off cannot be observed, losing only the
-// recovery. That choice rests on the emitter always being there, so the branch
-// describes a state that cannot occur rather than a mode we run in. Refusing to
-// install there would trade a rare, force-quittable failure for an app that can
-// never update itself.
+// recovery. Two tests sit under that choice, and between them they do not prove the
+// emitter is registered at runtime. Nothing readable from here can: registration
+// lives in Electron's native binding, and Electron documents the built-in updater
+// as macOS and Windows only, so neither the declarations nor a dependant's use of
+// them settles what Linux actually exposes.
 //
-// The two tests below pin different halves of that, and only one is about Electron.
+// The decision does not rest on it being settled. What it needs is that installing
+// anyway cannot be the worse option, and the second test is where that comes from:
+// were the emitter absent, electron-updater's own install would fail on it first.
+// Refusing would then trade a broken update path for a broken update path, and
+// charge every working install for it.
 test('the hand-off event is part of Electron public API, not something we inferred', (t) => {
   let types;
   try {
@@ -139,11 +144,11 @@ test('the Linux install path in electron-updater needs that emitter to exist', (
   const base = upstream('BaseUpdater.js');
   const appImage = upstream('AppImageUpdater.js');
   if (!base || !appImage) return t.skip('electron-updater is not installed');
-  // This is the part that actually establishes the runtime, and it is upstream's
-  // own code rather than our inference. AppImageUpdater extends BaseUpdater, and
-  // BaseUpdater emits on require("electron").autoUpdater with no platform guard, so
-  // an Electron that did not register the emitter on Linux would throw inside
-  // upstream's Linux install rather than merely cost us the recovery.
+  // Shared fate, not registration: a caller assuming an API says nothing about the
+  // provider implementing it. AppImageUpdater extends BaseUpdater, and BaseUpdater
+  // emits on require("electron").autoUpdater with no platform guard, so an Electron
+  // without the emitter breaks upstream's own Linux install before it can cost us a
+  // recovery. That is what makes the missing listener not worth failing closed over.
   assert.match(appImage, /class AppImageUpdater extends BaseUpdater_1\.BaseUpdater/);
   const fn = slice(base, 'quitAndInstall(isSilent', '\n    executeDownload(');
   assert.match(fn, /require\("electron"\)\.autoUpdater\.emit\("before-quit-for-update"\)/);

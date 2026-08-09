@@ -61,10 +61,10 @@ function createUpdateInstallQuitGuard({
     // The install still goes ahead, because supervision is not what makes it work:
     // this only gives up the recovery, leaving that case exactly where it stands
     // today. Refusing outright would instead turn a rare failure a force quit gets
-    // the user out of into an app that can never update itself. It is also a state
-    // that cannot arise where an install is supported at all, since electron-updater
-    // emits the hand-off on that emitter unguarded and would throw first;
-    // updateInstallQuitUpstream.test.js pins it. If that goes red, weigh this again.
+    // the user out of into an app that can never update itself. And it would buy
+    // nothing: electron-updater emits the hand-off on that same emitter unguarded,
+    // so an emitter we cannot observe is one its own install fails on regardless.
+    // updateInstallQuitUpstream.test.js pins that; if it goes red, weigh this again.
     if (!watchdogEnabled()) return true;
     timer = setTimeoutFn(() => {
       timer = null;
