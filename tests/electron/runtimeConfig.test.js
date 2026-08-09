@@ -187,6 +187,19 @@ test('Claude Web cookie falls back to env and invalidates only the Claude limits
   assert.equal(classification.limitsReconfigure, false);
 });
 
+test('OpenCode local limits are explicit and invalidate the OpenCode lane', () => {
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).opencodeLocalLimitsEnabled, false);
+  const limits = limitsConfigFromSettings({ opencodeLocalLimitsEnabled: false }, { env: {} });
+  assert.equal(limits.opencodeLocalLimitsEnabled, false);
+
+  const classification = classifySettingsChange(
+    { opencodeLocalLimitsEnabled: false },
+    { opencodeLocalLimitsEnabled: true }
+  );
+  assert.equal(classification.limitsReconfigure, true);
+  assert.deepEqual(classification.limitScopes, [{ provider: 'opencode' }]);
+});
+
 test('third-party profile changes invalidate only the third-party limits lane', () => {
   const classification = classifySettingsChange(
     {

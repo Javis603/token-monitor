@@ -4752,15 +4752,34 @@ function renderProviderWindows(provider, color) {
   return windows;
 }
 
+function displayLimitProvider(provider) {
+  if (provider?.provider !== 'opencode'
+    || provider?.source !== 'local'
+    || state.settings?.opencodeLocalLimitsEnabled !== false) {
+    return provider;
+  }
+  // A refresh can arrive after the setting changes, so do not leave a
+  // device-wide local estimate visible until the next provider probe.
+  return {
+    ...provider,
+    status: 'disabled',
+    stale: false,
+    windows: [],
+    balance: null,
+    balanceUsd: null
+  };
+}
+
 function renderLimitProviderRow(id, label, provider, color, options = {}) {
+  const visibleProvider = displayLimitProvider(provider);
   const row = document.createElement('div');
   const classes = ['limit-row'];
   if (options.accountRow) classes.push('limit-account-row');
-  if (provider.stale) classes.push('stale');
+  if (visibleProvider.stale) classes.push('stale');
   row.className = classes.join(' ');
   row.append(
-    renderLimitProviderHead(id, label, provider, color, options),
-    renderProviderWindows(provider, color)
+    renderLimitProviderHead(id, label, visibleProvider, color, options),
+    renderProviderWindows(visibleProvider, color)
   );
   return row;
 }
@@ -5002,7 +5021,7 @@ function renderLimits() {
       ? (providers.get(id) || [{ provider: id, status: state.stats ? missingLimitProviderStatus() : 'unavailable', windows: [] }])
       : [{ provider: id, status: 'disabled', windows: [] }];
     const visibleProviders = providerEntries.length > 0
-      ? providerEntries
+      ? providerEntries.map(displayLimitProvider)
       : { provider: id, status: 'disabled', windows: [] };
     const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
     if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
@@ -9315,13 +9334,25 @@ function renderLimitProviderCheckboxes() {
 function renderLimitProviderCheckboxesNow() {
   const previousRows = Array.from(els.limitProviderCheckboxes.children);
   const focusedId = document.activeElement?.id || '';
+  const reusableSettingInputs = new Map();
+  for (const row of previousRows) {
+    const providerId = row.dataset?.provider || '';
+    const settings = LIMIT_PROVIDER_SETTINGS[providerId] || [];
+    const inputs = row.querySelectorAll?.(
+      ':scope > .accordion-animated-container .limit-provider-settings-list > .settings-item > input[type="checkbox"]'
+    ) || [];
+    settings.forEach((setting, index) => {
+      const input = inputs[index];
+      if (input) reusableSettingInputs.set(`${providerId}:${setting.key}`, input);
+    });
+  }
   const enabled = enabledLimitProviderSet();
   const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
+      ? displayLimitProvider(collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
     row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}`;
@@ -9417,7 +9448,7 @@ function renderLimitProviderCheckboxesNow() {
         accountGroup.classList.add('limit-provider-account-group');
       }
       if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
-      if (settings) optionsInner.append(limitProviderSettingsList(id, settings));
+      if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -9500,10 +9531,16 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.prepaidBalanceDesc',
     requiresConfiguredKey: 'claudeWebCookieConfigured',
     defaultValue: true
+  }],
+  opencode: [{
+    key: 'opencodeLocalLimitsEnabled',
+    titleKey: 'settings.limits.opencodeLocalLimits',
+    descKey: 'settings.limits.opencodeLocalLimitsDesc',
+    defaultValue: false
   }]
 };
 
-function limitProviderSettingsList(providerId, settings) {
+function limitProviderSettingsList(providerId, settings, reusableInputs = null) {
   const list = document.createElement('div');
   list.className = 'settings-nested-list limit-provider-settings-list';
   for (const setting of settings) {
@@ -9519,18 +9556,21 @@ function limitProviderSettingsList(providerId, settings) {
     title.className = 'settings-item-title';
     title.textContent = t(setting.titleKey);
     copy.append(title);
-    const input = document.createElement('input');
+    const inputKey = `${providerId}:${setting.key}`;
+    const existingInput = reusableInputs?.get(inputKey);
+    const input = existingInput || document.createElement('input');
     input.type = 'checkbox';
     const available = !setting.requiresConfiguredKey || Boolean(state.settings?.[setting.requiresConfiguredKey]);
-    input.checked = available && state.settings?.[setting.key] !== false;
+    const storedValue = state.settings?.[setting.key];
+    const defaultValue = setting.defaultValue !== false;
+    input.checked = available && (storedValue === undefined ? defaultValue : storedValue !== false);
     input.disabled = !available;
     item.classList.toggle('is-disabled', !available);
-    input.addEventListener('change', async () => {
-      await saveSettings({ [setting.key]: input.checked });
-      // Switching this off hides the row immediately; the request it also stops
-      // would otherwise only be skipped on the next refresh.
-      renderLimits();
-    });
+    if (!existingInput) {
+      input.addEventListener('change', async () => {
+        await saveSettings({ [setting.key]: input.checked });
+      });
+    }
     const desc = document.createElement('span');
     desc.className = 'settings-note settings-item-desc';
     desc.textContent = t(setting.descKey);

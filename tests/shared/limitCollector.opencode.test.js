@@ -112,6 +112,31 @@ test('fetchOpenCodeLimits: Go web windows win over the local estimate', async ()
   assert.ok(p.windows.find((w) => w.kind === 'billing'), 'monthly normalizes to billing');
 });
 
+test('fetchOpenCodeLimits: disabled local fallback never reads the database', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  let localCalled = false;
+  const fakeGoWeb = { status: 'ok', workspaceId: 'wrk_1', windows: [
+    { kind: 'session', used: null, limit: null, usedPercent: 40, resetsAt: new Date(now).toISOString(), windowMinutes: 300 }
+  ] };
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1', opencodeLocalLimitsEnabled: false },
+    {
+      now: () => now,
+      opencodeCollectGo: () => {
+        localCalled = true;
+        return { status: 'ok', identity: 'go:/x', windows: [] };
+      },
+      opencodeFetchGoWeb: async () => fakeGoWeb,
+      opencodeFetchZen: async () => ({ status: 'notConfigured', windows: [], balanceUsd: null })
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.equal(localCalled, false);
+  assert.equal(p.status, 'ok');
+  assert.equal(p.source, 'web');
+  assert.equal(p.windows[0].usedPercent, 40);
+});
+
 test('fetchOpenCodeLimits: falls back to local estimate when Go web fails', async () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
   const fakeLocal = { status: 'ok', identity: 'go:/x', windows: [{ kind: 'session', used: 1, limit: 12, usedPercent: 8, resetsAt: new Date(now).toISOString(), windowMinutes: 300 }] };

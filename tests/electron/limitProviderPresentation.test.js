@@ -1591,6 +1591,75 @@ test('Claude prepaid balance stays off and disabled until Web login is configure
   assert.equal(loggedInInput?.disabled, false);
 });
 
+test('OpenCode local DB fallback is off by default and hides an old local result', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
+  const displayProvider = functionBody(app, 'displayLimitProvider', 'renderLimitProviderRow');
+  const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
+  const updateHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('settings:openConfig'")
+  );
+  const settings = [{
+    key: 'opencodeLocalLimitsEnabled',
+    titleKey: 'settings.limits.opencodeLocalLimits',
+    descKey: 'settings.limits.opencodeLocalLimitsDesc',
+    defaultValue: false
+  }];
+
+  class FakeElement {
+    constructor(tagName) {
+      this.tagName = tagName;
+      this.children = [];
+      this.className = '';
+      this.classList = {
+        toggle: (name, enabled) => {
+          if (enabled) this.className = `${this.className} ${name}`.trim();
+        }
+      };
+    }
+    append(...children) { this.children.push(...children); }
+    addEventListener() {}
+  }
+
+  const context = {
+    document: { createElement: (tagName) => new FakeElement(tagName) },
+    state: { settings: {} },
+    t: (key) => key
+  };
+  const settingsContext = { ...context, settings };
+  vm.runInNewContext(
+    `${renderList}\nresult = limitProviderSettingsList('opencode', settings);`,
+    settingsContext
+  );
+  const input = settingsContext.result?.children?.[0]?.children?.[1];
+  assert.equal(input?.checked, false);
+
+  const rendered = vm.runInNewContext(
+    `${displayProvider}\nresult = displayLimitProvider({ provider: 'opencode', source: 'local', status: 'ok', stale: true, windows: [{ kind: 'session' }] });`,
+    { state: { settings: { opencodeLocalLimitsEnabled: false } } }
+  );
+  assert.equal(rendered.status, 'disabled');
+  assert.equal(rendered.windows.length, 0);
+  assert.equal(rendered.stale, false);
+  assert.match(defaults, /opencodeLocalLimitsEnabled:\s*false/);
+  assert.match(updateHandler, /opencodeLocalLimitsEnabled:\s*parseBoolean\(patch\.opencodeLocalLimitsEnabled \?\? settings\.opencodeLocalLimitsEnabled, false\)/);
+});
+
+test('provider option rerenders reuse the existing switch DOM', () => {
+  const app = readRendererFile('app.js');
+  const renderRows = functionBody(app, 'renderLimitProviderCheckboxesNow', 'limitProviderAccountGroup');
+  const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
+
+  assert.match(renderRows, /const reusableSettingInputs = new Map\(\);/);
+  assert.match(renderRows, /row\.querySelectorAll\?\.\(/);
+  assert.match(renderRows, /limitProviderSettingsList\(id, settings, reusableSettingInputs\)/);
+  assert.match(renderList, /const existingInput = reusableInputs\?\.get\(inputKey\);/);
+  assert.match(renderList, /if \(!existingInput\) \{\s*input\.addEventListener\('change'/);
+  assert.doesNotMatch(renderList, /renderLimits\(\);/);
+});
+
 test('successful providers use a green dot while preserving source and account labels', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
