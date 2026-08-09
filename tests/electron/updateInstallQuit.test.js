@@ -334,8 +334,10 @@ test('the observer attaches the hand-off event and reports success', () => {
 function functionSource(signature) {
   const start = main.indexOf(signature);
   assert.ok(start >= 0, `${signature} not found`);
-  const end = main.indexOf('\nfunction ', start + signature.length);
-  return main.slice(start, end === -1 ? main.length : end);
+  const from = start + signature.length;
+  const ends = [main.indexOf('\nfunction ', from), main.indexOf('\nasync function ', from)]
+    .filter((at) => at >= 0);
+  return main.slice(start, ends.length ? Math.min(...ends) : main.length);
 }
 
 test('the guard moves both quit flags together, in the same direction', () => {
@@ -419,6 +421,57 @@ test('an in-flight install is reported as busy and its reason as a kind', () => 
     stalled.slice(0, stalled.indexOf('\n  }')),
     /errorKind: installFailureErrorKind\(\{ spent: updateInstallQuit\.isSpent\(\), stalled: true \}\)/
   );
+});
+
+// electron-updater reports a failed check by emitting on the same global 'error'
+// event an install failure arrives on, and nothing on the event says which it was.
+// So `wasInstalling` is only sound provenance while an outstanding install is the
+// one thing driving the updater. That is not a property of the error handler; it
+// is these three boundaries, and it is why they are tested as one invariant.
+
+test('an outstanding install is the only thing driving the updater', () => {
+  const enclosing = (index) => {
+    const head = main.slice(0, index);
+    const start = Math.max(head.lastIndexOf('\nfunction '), head.lastIndexOf('\nasync function '));
+    assert.ok(start >= 0, 'every updater call has to sit in a named function');
+    return main.slice(start).match(/^\n(?:async )?function ([A-Za-z0-9_$]+)/)[1];
+  };
+
+  const owners = new Set();
+  for (const match of main.matchAll(/autoUpdater\.(checkForUpdates|downloadUpdate|quitAndInstall)\(/g)) {
+    owners.add(enclosing(match.index));
+  }
+  // A new entry point fails here rather than silently inheriting none of the rules
+  // below, which is the only way this stays enforced as the file grows.
+  assert.deepEqual(
+    [...owners].sort(),
+    ['checkAppUpdateProvider', 'downloadAndPrepareAppUpdate', 'installDownloadedAppUpdate']
+  );
+
+  // The check path is gated one level up, in its only caller, so that the cooldown
+  // and in-flight bookkeeping are skipped along with the check itself.
+  const callers = [...main.matchAll(/checkAppUpdateProvider\(\)/g)]
+    .map((match) => enclosing(match.index))
+    .filter((name) => name !== 'checkAppUpdateProvider');
+  assert.deepEqual([...new Set(callers)], ['runAppUpdateCheck']);
+
+  const check = functionSource('async function runAppUpdateCheck(');
+  const gate = check.indexOf('if (updateInstallQuit.isInstalling()) return deriveAppUpdateState();');
+  assert.ok(gate >= 0, 'a check must not start while an install is outstanding');
+  // Ahead of the in-flight join, or a check already running would be awaited and
+  // its result reported as though this call had made it.
+  assert.ok(gate < check.indexOf('if (appUpdateCheckPromise)'), 'the gate has to come first');
+
+  const download = functionSource('async function downloadAndPrepareAppUpdate()');
+  assert.match(download, /if \(updateInstallQuit\.isInstalling\(\)\) return deriveAppUpdateState\(\);/);
+
+  // And the other direction: refusing new work only holds the boundary if nothing
+  // was already running when the install began. This one waits instead of
+  // refusing, because it is a button press and dropping it is not an option.
+  const install = functionSource('async function installDownloadedAppUpdate()');
+  const join = install.indexOf('await appUpdateCheckPromise');
+  assert.ok(join >= 0, 'an install has to let an in-flight check finish first');
+  assert.ok(join < install.indexOf('updateInstallQuit.request()'), 'and before it claims the flags');
 });
 
 test('all three terminal failures ask the same question the same way', () => {

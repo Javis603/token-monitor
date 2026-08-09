@@ -4717,6 +4717,15 @@ function sendAppUpdatePush() {
 }
 
 async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {}) {
+  // An outstanding install owns the updater until it hands off or the guard ends
+  // it. electron-updater reports a failed check by emitting on the same global
+  // 'error' event an install failure arrives on -- checkForUpdates() emits there
+  // and rethrows -- and the handler below has nothing to tell them apart. Treating
+  // a check's failure as the install's would spend the attempt and hand the quit
+  // flags back while Squirrel may still be staging, which is the state `spent`
+  // exists to prevent. The hourly check makes this an ordinary overlap on macOS,
+  // where an install is outstanding for as long as minutes.
+  if (updateInstallQuit.isInstalling()) return deriveAppUpdateState();
   if (appUpdateCheckPromise) {
     if (force) sendAppUpdatePush();
     const activeResult = await appUpdateCheckPromise;
@@ -4821,6 +4830,9 @@ async function downloadAndPrepareAppUpdate() {
     setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
     return deriveAppUpdateState();
   }
+  // Same ownership rule as the check path: this one also drives the shared
+  // electron-updater instance, and its failures arrive on the same event.
+  if (updateInstallQuit.isInstalling()) return deriveAppUpdateState();
   if (appUpdateCheckPromise) await appUpdateCheckPromise;
   if (appUpdateNativeBusy) return deriveAppUpdateState();
   const latest = settings?.appUpdate?.lastKnownLatest || null;
@@ -4858,7 +4870,13 @@ async function downloadAndPrepareAppUpdate() {
   return deriveAppUpdateState();
 }
 
-function installDownloadedAppUpdate() {
+async function installDownloadedAppUpdate() {
+  // The other half of the same rule. Refusing new operations during the install
+  // only holds the boundary if nothing was already running when it started, and a
+  // check begun a moment earlier would still be reporting on the shared event.
+  // Waiting rather than refusing, since this one is a button press: the checks
+  // below are read afterwards, when the update it is about to install is settled.
+  if (appUpdateCheckPromise) await appUpdateCheckPromise;
   const latest = settings?.appUpdate?.lastKnownLatest || null;
   if (!downloadedAppUpdateMatchesLatest({
     phase: appUpdateNativeState.phase,
