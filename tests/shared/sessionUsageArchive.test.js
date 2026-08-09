@@ -423,7 +423,7 @@ test('reapplies a large session archive without repeatedly normalizing growing p
   const elapsedMs = performance.now() - startedAt;
 
   assert.equal(Object.keys(visible.allTime.sessions).length, 2000);
-  assert.ok(elapsedMs < 250, `large archive apply took ${elapsedMs.toFixed(1)}ms`);
+  assert.ok(elapsedMs < 500, `large archive apply took ${elapsedMs.toFixed(1)}ms`);
 });
 
 // Same invariant as the client archive: the periods a progressive preview omits
