@@ -47,6 +47,9 @@ function log(logger, message) {
 }
 
 function launchReload(request, now) {
+  if (request.isCurrent && !request.isCurrent()) {
+    return { ok: false, reason: 'superseded' };
+  }
   const helperPath = resolveWidgetReloaderPath(request);
   if (!helperPath) return { ok: false, reason: 'helper-missing' };
   const widgetKind = String(request.widgetKind || DEFAULT_WIDGET_KIND).trim() || DEFAULT_WIDGET_KIND;

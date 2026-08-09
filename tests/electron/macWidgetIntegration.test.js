@@ -64,12 +64,48 @@ test('publishes projected stats to the macOS Widget on collection and presentati
   assert.ok(start >= 0 && end > start, 'sendPush function should exist');
   const sendPush = mainSource.slice(start, end);
   assert.match(sendPush, /latestStats = payload\.data\.stats;\s+const visibleStats = electronPresentationStats\(latestStats\);/);
-  assert.match(sendPush, /scheduleMacWidgetSnapshot\(visibleStats\);/);
+  assert.match(sendPush, /scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\);/);
+  assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\)/g) || []).length, 1);
   const refreshStart = mainSource.indexOf('function refreshLimitStatsPresentation()');
   const refreshEnd = mainSource.indexOf('\nfunction sendMimoAccountsPush', refreshStart);
   assert.ok(refreshStart >= 0 && refreshEnd > refreshStart, 'presentation refresh function should exist');
-  assert.match(mainSource.slice(refreshStart, refreshEnd), /scheduleMacWidgetSnapshot\(visibleStats\);/);
+  assert.match(
+    mainSource.slice(refreshStart, refreshEnd),
+    /scheduleMacWidgetSnapshot\(visibleStats, captureMacWidgetProducerOwner\(\)\);/
+  );
   assert.match(mainSource, /compactTokenUnits: settings\?\.compactTokenUnits/);
+});
+
+test('Widget producers carry lifetime ownership through the sendPush outlet', () => {
+  for (const signature of [
+    'function startSyncCollector()',
+    'function startHostStats()',
+    'function startLocalCollector()',
+    'async function startStatsStream(options = {})',
+    'async function refreshFromTray()'
+  ]) {
+    const start = mainSource.indexOf(signature);
+    const end = mainSource.indexOf('\nfunction ', start + signature.length);
+    assert.ok(start >= 0, `${signature} should exist`);
+    const source = mainSource.slice(start, end === -1 ? mainSource.length : end);
+    assert.match(source, /const widgetProducerOwner = captureMacWidgetProducerOwner\(\);/);
+    assert.match(source, /sendPush\([\s\S]*\{ widgetProducerOwner \}\)/);
+  }
+});
+
+test('Widget ownership advances producer lifetime only for mode transitions', () => {
+  assert.match(
+    mainSource,
+    /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);/
+  );
+  assert.match(
+    mainSource,
+    /const widgetHistorySourceChanged = previousRuntimeSettings\.historyEnabled !== settings\.historyEnabled;\s*if \(widgetHistorySourceChanged && !runtimeChange\.modeStructural\) \{\s*advanceMacWidgetSourceEpoch\(\);\s*scheduleMacWidgetSnapshot\(latestStats, captureMacWidgetProducerOwner\(\)\);/
+  );
+  assert.match(
+    mainSource,
+    /reloadSnapshot: \(work, options\) => requestMacWidgetReload\(\{\s*widgetKind: work\.widgetKind,\s*isCurrent: options\.isCurrent,/
+  );
 });
 
 test('keeps Widget packaging opt-in and injects artifacts only after a successful build', () => {

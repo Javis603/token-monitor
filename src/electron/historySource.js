@@ -6,28 +6,40 @@ function parseCompleteHistory(payload) {
   return coerceHistory(payload);
 }
 
+// Which of the four resolutions below a configuration selects. Callers that need
+// to know how expensive a history read will be ask this rather than re-deriving
+// the branches, so the cost model cannot drift from the resolver: only 'remote'
+// is a network round trip, and the other three are in-process.
+function completeHistorySource(options = {}) {
+  const { embeddedHub, hubMode, hubUrl, mode, historyEnabled = true } = options;
+  if (historyEnabled === false) return 'empty';
+  if (mode === 'local') return 'local';
+  if (hubMode === 'host' && embeddedHub) return 'embedded';
+  if (!hubUrl) return 'empty';
+  return 'remote';
+}
+
 async function resolveCompleteHistory(options = {}) {
   const {
     aggregateHistory,
     embeddedHub,
     fetchImpl = globalThis.fetch,
-    hubMode,
     hubUrl,
     localDevice,
-    mode,
     secret,
-    historyEnabled = true,
     timeoutMs = 15_000
   } = options;
   const aggregate = typeof aggregateHistory === 'function' ? aggregateHistory : () => parseCompleteHistory(null);
-  if (historyEnabled === false) return parseCompleteHistory(aggregate([]));
-  if (mode === 'local') {
-    return parseCompleteHistory(aggregate(localDevice ? [localDevice] : []));
+  switch (completeHistorySource(options)) {
+    case 'empty':
+      return parseCompleteHistory(aggregate([]));
+    case 'local':
+      return parseCompleteHistory(aggregate(localDevice ? [localDevice] : []));
+    case 'embedded':
+      return parseCompleteHistory(embeddedHub.hub.getHistory());
+    default:
+      break;
   }
-  if (hubMode === 'host' && embeddedHub) {
-    return parseCompleteHistory(embeddedHub.hub.getHistory());
-  }
-  if (!hubUrl) return parseCompleteHistory(aggregate([]));
   if (typeof fetchImpl !== 'function') throw new Error('History fetch is unavailable');
 
   const url = `${String(hubUrl).replace(/\/$/, '')}/api/history`;
@@ -46,6 +58,7 @@ async function resolveCompleteHistory(options = {}) {
 }
 
 module.exports = {
+  completeHistorySource,
   parseCompleteHistory,
   resolveCompleteHistory
 };

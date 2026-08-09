@@ -455,7 +455,10 @@ test('Electron routes cached stats through the presentation projection', () => {
   const renderer = fs.readFileSync(path.join(projectRoot, 'src', 'electron', 'renderer', 'app.js'), 'utf8');
 
   assert.match(main, /function electronPresentationStats\(stats\)[\s\S]*projectLimitStatsForDisplay/);
-  assert.match(main, /const visibleStats = electronPresentationStats\(latestStats\);[\s\S]*scheduleMacWidgetSnapshot\(visibleStats\)/);
+  assert.match(
+    main,
+    /const visibleStats = electronPresentationStats\(latestStats\);[\s\S]*scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\)/
+  );
   assert.match(main, /function updateTrayDisplay\(\)[\s\S]*formatTrayText\(visibleStats, mode/);
   assert.match(main, /function refreshLimitStatsPresentation\(\)[\s\S]*reason: 'presentation'/);
   assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*return electronPresentationStats\(stats\)/);

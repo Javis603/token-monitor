@@ -84,6 +84,41 @@ function fakeScheduler(start = 1_000_000) {
   };
 }
 
+test('drops a throttled reload when its owner expires before the timer fires', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-reloader-'));
+  try {
+    resetMacWidgetReloadThrottle();
+    const helper = path.join(root, 'TokenMonitorWidgetReloader');
+    fs.writeFileSync(helper, '');
+    const scheduler = fakeScheduler();
+    const calls = [];
+    let current = true;
+    const request = (widgetKind, isCurrent) => requestMacWidgetReload({
+      platform: 'darwin',
+      helperPath: helper,
+      widgetKind,
+      now: scheduler.now(),
+      scheduler,
+      isCurrent,
+      execFile: (file, args, callback) => {
+        calls.push([file, args]);
+        callback(null);
+      }
+    });
+
+    assert.equal(request('leading').ok, true);
+    assert.equal(request('stale-trailing', () => current).reason, 'throttled');
+    current = false;
+    scheduler.advance(30_000);
+
+    assert.deepEqual(calls, [[helper, ['leading']]]);
+    assert.equal(scheduler.pendingCount(), 0);
+  } finally {
+    resetMacWidgetReloadThrottle();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('coalesces throttled changes into one trailing reload using the latest kind', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-reloader-'));
   try {
