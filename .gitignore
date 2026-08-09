@@ -8,7 +8,6 @@ _site/
 skills-lock.json
 docs/superpowers/
 .superpowers/
-.reasonix/
 .codegraph/
 tmp/
 .env

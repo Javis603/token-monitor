@@ -67,7 +67,7 @@ function nativeTelemetry(overrides = {}) {
   };
 }
 
-test('Reasonix native adapter reads legacy usage sidecars without inventing message counts', () => {
+test('Reasonix native adapter reads official cumulative telemetry without inventing message counts', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-'));
   const stateHome = path.join(root, 'state');
   const globalDir = path.join(stateHome, 'sessions');
@@ -447,7 +447,49 @@ test('Reasonix native telemetry uses direct total, skips invalid sidecars, and i
   assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:stable-id'), false);
 });
 
-test('Reasonix native watcher roots share the resolved state home and ignore stats/events churn', () => {
+test('Reasonix event updates invalidate only the corresponding native session', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-event-cache-'));
+  const stateHome = path.join(root, 'state');
+  const sessionsDir = path.join(stateHome, 'sessions');
+  const first = sidecars(sessionsDir, 'first', {
+    id: 'first',
+    created_at: '2026-08-08T02:00:00.000Z'
+  }, nativeTelemetry({ totalTokens: 10 }));
+  const second = sidecars(sessionsDir, 'second', {
+    id: 'second',
+    created_at: '2026-08-08T02:00:00.000Z'
+  }, nativeTelemetry({ totalTokens: 20 }));
+  const firstEvents = path.join(sessionsDir, 'first.events.jsonl');
+  const secondEvents = path.join(sessionsDir, 'second.events.jsonl');
+  const snapshot = (assistantCount) => JSON.stringify({
+    schema_version: 1,
+    type: 'replace',
+    created_at: '2026-08-08T02:00:00.000Z',
+    messages: [
+      { role: 'user', raw_content: 'prompt' },
+      ...Array.from({ length: assistantCount }, (_, index) => ({ role: 'assistant', createdAt: `2026-08-08T02:00:0${index + 1}.000Z` }))
+    ]
+  });
+  fs.writeFileSync(firstEvents, `${snapshot(1)}\n`);
+  fs.writeFileSync(secondEvents, `${snapshot(1)}\n`);
+
+  const cache = cacheFor(stateHome, () => ({}));
+  const now = new Date('2026-08-08T12:00:00.000Z');
+  let view = cache.getView({ now });
+  assert.equal(view.sessions.allTime['reasonix:first'].messageCount, 1);
+  assert.equal(view.sessions.allTime['reasonix:second'].messageCount, 1);
+
+  fs.writeFileSync(firstEvents, `${snapshot(2)}\n`);
+  cache.invalidate(firstEvents);
+  assert.equal(cache.isDirty(), false, 'an events update should not dirty the whole native scan');
+  view = cache.getView({ now });
+  assert.equal(view.sessions.allTime['reasonix:first'].messageCount, 2);
+  assert.equal(view.sessions.allTime['reasonix:second'].messageCount, 1);
+  assert.equal(fs.existsSync(first.metaPath), true);
+  assert.equal(fs.existsSync(second.metaPath), true);
+});
+
+test('Reasonix native watcher roots share the resolved state home and keep stats/events live', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-watch-'));
   const stateHome = path.join(root, 'state');
   const statsDir = path.join(stateHome, 'stats');
@@ -463,13 +505,13 @@ test('Reasonix native watcher roots share the resolved state home and ignore sta
     assert.deepEqual(roots, [sessionsDir, projectsDir]);
     assert.equal(isReasonixNativeSessionPath(path.join(sessionsDir, 'a.jsonl.meta'), roots), true);
     assert.equal(isReasonixNativeSessionSidecar('a.jsonl.meta'), true);
-    assert.equal(isReasonixNativeSessionSidecar('a.events.jsonl'), false);
+    assert.equal(isReasonixNativeSessionSidecar('a.events.jsonl'), true);
 
     const ignored = watchIgnoreMatcher('reasonix');
     assert.equal(typeof ignored, 'function');
     assert.equal(ignored(path.join(sessionsDir, 'a.jsonl.meta')), false);
     assert.equal(ignored(path.join(sessionsDir, 'a.jsonl.telemetry.json')), false);
-    assert.equal(ignored(path.join(sessionsDir, 'a.events.jsonl')), true);
+    assert.equal(ignored(path.join(sessionsDir, 'a.events.jsonl')), false);
     assert.equal(ignored(path.join(sessionsDir, 'a.event-index.json')), true);
     assert.equal(ignored(sessionsDir), false);
     assert.deepEqual(watchPathsForClients('reasonix').sort(), [statsDir, projectsDir, sessionsDir].sort());

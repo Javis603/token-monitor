@@ -1,12 +1,10 @@
 'use strict';
 
 // Native Reasonix session metadata is deliberately kept outside the Tokscale
-// period/session collections. Tokscale owns the aggregate usage contract; this
-// module only projects the local BranchMeta + official event sidecars into a
-// renderer-only view. The stats directory is consumed by Tokscale for aggregate
-// usage; these native files only provide local session metadata/transcripts. A
-// legacy Token Monitor telemetry sidecar is still read for backwards
-// compatibility, but it is not an official per-turn usage source.
+// period/session collections. Tokscale owns the aggregate usage contract:
+// stats/*.jsonl is the aggregate authority. The .jsonl.meta, .events.jsonl and
+// .jsonl.telemetry.json files are native Session/Project metadata; telemetry is
+// trusted cumulative session usage, not authoritative per-turn usage.
 // It is Node-only because it reads the Reasonix filesystem directly.
 
 const fs = require('node:fs');
@@ -179,7 +177,30 @@ function reasonixSessionDirectories(options = {}) {
 function isReasonixNativeSessionSidecar(filePath) {
   const normalized = String(filePath || '').replace(/\\/g, '/');
   const name = normalized.slice(normalized.lastIndexOf('/') + 1);
-  return name.endsWith(META_SUFFIX) || name.endsWith(TELEMETRY_SUFFIX);
+  return name.endsWith(META_SUFFIX) || name.endsWith(TELEMETRY_SUFFIX) || name.endsWith(EVENTS_SUFFIX);
+}
+
+function sessionMetaPathForEvents(filePath, pathApi = path) {
+  const name = pathApi.basename(String(filePath || ''));
+  if (!name.endsWith(EVENTS_SUFFIX)) return '';
+  const stem = name.slice(0, -EVENTS_SUFFIX.length);
+  if (!stem) return '';
+  return pathApi.join(pathApi.dirname(String(filePath)), `${stem}${META_SUFFIX}`);
+}
+
+function candidateForMetaPath(metaPath, pathApi = path) {
+  const name = pathApi.basename(String(metaPath || ''));
+  if (!name.endsWith(META_SUFFIX)) return null;
+  const stem = name.slice(0, -META_SUFFIX.length);
+  if (!stem) return null;
+  const directory = pathApi.dirname(String(metaPath));
+  return {
+    stem,
+    directory,
+    metaPath: String(metaPath),
+    telemetryPath: pathApi.join(directory, `${stem}${TELEMETRY_SUFFIX}`),
+    eventPath: pathApi.join(directory, `${stem}${EVENTS_SUFFIX}`)
+  };
 }
 
 function isPathInside(filePath, root, pathApi = path) {
@@ -226,6 +247,14 @@ function sidecarCandidates(sessionDirectories, pathApi = path) {
     const rightPath = right.metaPath || right.telemetryPath || '';
     return leftPath.localeCompare(rightPath);
   });
+}
+
+function candidateSignature(candidate) {
+  const meta = fileSignature(candidate?.metaPath);
+  const telemetry = fileSignature(candidate?.telemetryPath);
+  const events = fileSignature(candidate?.eventPath);
+  if (!meta || (!telemetry && !events)) return '';
+  return `${meta}|${telemetry}|${events}`;
 }
 
 function sessionTitle(meta, { trustedPreview = '' } = {}) {
@@ -305,11 +334,12 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
     || textValue(firstValue(branchMeta, ['id', 'ID']), 256);
   if (!id) return null;
 
-  // `stats/*.jsonl` is the Tokscale aggregate source. This native session view
-  // reads BranchMeta and official events for identity, preview, timestamps and
-  // message counts. `.jsonl.telemetry.json`, when present, is a legacy local
-  // compatibility cache with cumulative session usage, not official per-turn
-  // usage. Without reliable per-turn usage/cost, Session Detail remains closed.
+  // `stats/*.jsonl` is the Tokscale aggregate authority. This native session
+  // view reads BranchMeta and official events for identity, preview, timestamps
+  // and message counts. `.jsonl.telemetry.json`, when present, is Reasonix
+  // Desktop's official trusted cumulative session usage, not authoritative
+  // per-turn usage. Without reliable per-turn usage/cost, Session Detail remains
+  // closed.
   const telemetry = readJson(telemetryPath);
   const usage = telemetryUsage(telemetry);
   const transcript = readTranscriptInfo(options.eventPath);
@@ -521,7 +551,7 @@ function scanEntries(options = {}, cache = new Map()) {
     if (!candidate.metaPath || (!candidate.telemetryPath && !candidate.eventPath)) continue;
     const key = candidate.metaPath;
     seen.add(key);
-    const signature = `${fileSignature(candidate.metaPath)}|${fileSignature(candidate.telemetryPath)}|${fileSignature(candidate.eventPath)}`;
+    const signature = candidateSignature(candidate);
     if (!signature) continue;
     const previous = cache.get(key);
     if (previous?.signature === signature) {
@@ -537,17 +567,34 @@ function scanEntries(options = {}, cache = new Map()) {
 
 function createReasonixNativeSessionCache(options = {}) {
   const resolvedOptions = pathOptions(options);
+  const pathApi = resolvedOptions.pathModule || path;
   let entries = new Map();
   let dirty = true;
   let cachedView = null;
   let cachedViewKey = '';
+  let invalidatedEventKeys = new Set();
 
   function invalidate(filePath) {
-    if (!filePath || isReasonixNativeSessionSidecar(filePath)) {
+    if (!filePath) {
       dirty = true;
       cachedView = null;
       cachedViewKey = '';
+      invalidatedEventKeys = new Set();
+      return;
     }
+    if (!isReasonixNativeSessionSidecar(filePath)) return;
+    const eventKey = sessionMetaPathForEvents(filePath, pathApi);
+    if (eventKey) {
+      // Events are append-only transcript updates. Re-read only the matching
+      // candidate on the next view, rather than walking every session again.
+      invalidatedEventKeys.add(eventKey);
+      cachedView = null;
+      cachedViewKey = '';
+      return;
+    }
+    dirty = true;
+    cachedView = null;
+    cachedViewKey = '';
   }
 
   function getView(viewOptions = {}) {
@@ -561,6 +608,26 @@ function createReasonixNativeSessionCache(options = {}) {
       const scanned = scanEntries({ ...resolvedOptions, projectIdentity: options.projectIdentity }, entries);
       entries = scanned.entries;
       dirty = false;
+      invalidatedEventKeys = new Set();
+      cachedView = null;
+      cachedViewKey = '';
+    } else if (invalidatedEventKeys.size > 0) {
+      for (const metaPath of invalidatedEventKeys) {
+        const candidate = candidateForMetaPath(metaPath, pathApi);
+        const signature = candidateSignature(candidate);
+        if (!candidate || !signature) {
+          entries.delete(metaPath);
+          continue;
+        }
+        const session = readReasonixNativeSession(candidate.metaPath, candidate.telemetryPath, {
+          ...resolvedOptions,
+          projectIdentity: options.projectIdentity,
+          eventPath: candidate.eventPath
+        });
+        if (session) entries.set(metaPath, { signature, session });
+        else entries.delete(metaPath);
+      }
+      invalidatedEventKeys = new Set();
       cachedView = null;
       cachedViewKey = '';
     }
