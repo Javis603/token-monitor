@@ -17,14 +17,26 @@ test('Star History runs daily and manually without per-star automation', () => {
   assert.doesNotMatch(workflow, /\*\/6/);
 });
 
-test('external generation is SHA-pinned and read-only', () => {
+test('privileged stargazer fetch is caller-owned and uploads identity-free input', () => {
+  const fetchJob = workflow.slice(workflow.indexOf('  fetch:'), workflow.indexOf('  generate:'));
+  assert.match(fetchJob, /permissions:\s+contents: write/);
+  assert.match(fetchJob, /persist-credentials: false/);
+  assert.match(fetchJob, /fetch-star-history-stargazers\.js/);
+  assert.match(fetchJob, /star-history-input\/stargazers\.json/);
+  assert.match(fetchJob, /artifact-id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
+  assert.doesNotMatch(fetchJob, /Javis603\/star-history-action/);
+});
+
+test('external generation is SHA-pinned, tokenless, and has no repository permission', () => {
   assert.match(
     workflow,
     /uses: Javis603\/star-history-action@[0-9a-f]{40}/,
   );
   const generate = workflow.slice(workflow.indexOf('  generate:'), workflow.indexOf('  validate:'));
-  assert.match(generate, /permissions:\s+contents: read/);
-  assert.doesNotMatch(generate, /contents: write/);
+  assert.match(generate, /permissions: \{\}/);
+  assert.match(generate, /artifact-ids: \$\{\{ needs\.fetch\.outputs\.artifact-id \}\}/);
+  assert.match(generate, /stars-file: \$\{\{ runner\.temp \}\}\/star-history-input\/stargazers\.json/);
+  assert.doesNotMatch(generate, /token:|contents: (?:read|write)/);
   assert.match(generate, /artifact-id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
   assert.match(generate, /retention-days: 1/);
   assert.doesNotMatch(workflow, /metadata: read/);
@@ -44,7 +56,7 @@ test('validation parses artifacts without write permission', () => {
   assert.match(validation, /snapshot-sha256=/);
 });
 
-test('only the caller-owned publish job can write without parsing artifacts', () => {
+test('caller-owned publisher writes without parsing artifacts', () => {
   const publish = workflow.slice(workflow.indexOf('  publish:'));
   assert.match(publish, /permissions:\s+contents: write/);
   assert.match(publish, /needs: \[generate, validate\]/);

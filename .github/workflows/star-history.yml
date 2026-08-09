@@ -19,19 +19,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  generate:
+  fetch:
     runs-on: ubuntu-latest
+    # GitHub's stargazer listing maps collaborator access to contents: write for
+    # GITHUB_TOKEN. Keep this job caller-owned and never run the generator here.
     permissions:
-      contents: read
+      contents: write
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
+      - name: Checkout trusted fetcher
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fetch identity-free stargazer timestamps
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_DIRECTORY: ${{ runner.temp }}/star-history-input
+        run: >-
+          node scripts/fetch-star-history-stargazers.js
+          --repository "$GITHUB_REPOSITORY"
+          --output "$INPUT_DIRECTORY/stargazers.json"
+
+      - name: Upload identity-free input
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: star-history-input
+          path: ${{ runner.temp }}/star-history-input/stargazers.json
+          if-no-files-found: error
+          retention-days: 1
+
+  generate:
+    needs: fetch
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Download identity-free input
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.fetch.outputs.artifact-id }}
+          path: ${{ runner.temp }}/star-history-input
+          merge-multiple: true
+          digest-mismatch: error
+
       - name: Generate with the external read-only action
         id: generate
-        uses: Javis603/star-history-action@bb3381bfc636969b3e635b2563ee2bcffe9f9044
+        uses: Javis603/star-history-action@cfeb3776e57b39f075dc824235e826b4c5ba343b
         with:
           repository: ${{ github.repository }}
-          token: ${{ github.token }}
+          stars-file: ${{ runner.temp }}/star-history-input/stargazers.json
 
       - name: Upload generated assets
         id: upload
