@@ -1,0 +1,109 @@
+name: Star History
+
+on:
+  schedule:
+    # 03:17 in Hong Kong; a non-zero minute avoids GitHub's top-of-hour peak.
+    - cron: '17 19 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Generate and retain the validated artifact without publishing it
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: star-history
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Generate with the external read-only action
+        id: generate
+        uses: Javis603/star-history-action@7eedfe3bfa6f651dc0796cb06ff4271e8a4e789e
+        with:
+          repository: ${{ github.repository }}
+          token: ${{ github.token }}
+
+      - name: Upload generated assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: star-history-output
+          path: ${{ steps.generate.outputs.output-directory }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout trusted publisher
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download generated assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: star-history-output
+          path: ${{ runner.temp }}/star-history-output
+
+      - name: Validate generated assets
+        env:
+          GENERATED_DIRECTORY: ${{ runner.temp }}/star-history-output
+        run: >-
+          node scripts/validate-star-history-artifact.js
+          --directory "$GENERATED_DIRECTORY"
+          --repository "$GITHUB_REPOSITORY"
+          --renderer-commit bcddc9d532b10bac7e0187a741288bf9cab17616
+
+      - name: Publish generated assets to the orphan branch
+        env:
+          GENERATED_DIRECTORY: ${{ runner.temp }}/star-history-output
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_TERMINAL_PROMPT: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          publish_dir="$(mktemp -d "$RUNNER_TEMP/star-history-publish.XXXXXX")"
+          git -C "$publish_dir" init --quiet
+          git -C "$publish_dir" config user.name 'github-actions[bot]'
+          git -C "$publish_dir" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$publish_dir" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
+          if git -C "$publish_dir" ls-remote --exit-code --heads origin star-history >/dev/null 2>&1; then
+            git -C "$publish_dir" fetch --depth=1 origin star-history
+            git -C "$publish_dir" checkout --quiet -B star-history FETCH_HEAD
+          else
+            git -C "$publish_dir" checkout --quiet --orphan star-history
+          fi
+
+          git -C "$publish_dir" clean -fdx
+          git -C "$publish_dir" rm -rf --ignore-unmatch .
+          install -m 0644 "$GENERATED_DIRECTORY/star-history.svg" "$publish_dir/star-history.svg"
+          install -m 0644 "$GENERATED_DIRECTORY/star-history-dark.svg" "$publish_dir/star-history-dark.svg"
+          install -m 0644 "$GENERATED_DIRECTORY/stars.json" "$publish_dir/stars.json"
+
+          git -C "$publish_dir" add star-history.svg star-history-dark.svg stars.json
+          if git -C "$publish_dir" diff --cached --quiet; then
+            echo 'Star History output is unchanged; no commit needed.'
+            exit 0
+          fi
+
+          git -C "$publish_dir" commit --quiet -m 'chore: update star history'
+          git -C "$publish_dir" \
+            -c credential.helper= \
+            -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f' \
+            push origin HEAD:star-history
