@@ -23,15 +23,18 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Generate with the external read-only action
         id: generate
-        uses: Javis603/star-history-action@6fa3ad0be57ee0010a5e48381d592a3437570ee6
+        uses: Javis603/star-history-action@bb3381bfc636969b3e635b2563ee2bcffe9f9044
         with:
           repository: ${{ github.repository }}
           token: ${{ github.token }}
 
       - name: Upload generated assets
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: star-history-output
@@ -39,14 +42,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  publish:
-    if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
+  validate:
     needs: generate
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      light-sha256: ${{ steps.validate.outputs.light-sha256 }}
+      dark-sha256: ${{ steps.validate.outputs.dark-sha256 }}
+      snapshot-sha256: ${{ steps.validate.outputs.snapshot-sha256 }}
     steps:
-      - name: Checkout trusted publisher
+      - name: Checkout trusted validator
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ github.sha }}
@@ -56,17 +62,70 @@ jobs:
       - name: Download generated assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: star-history-output
+          artifact-ids: ${{ needs.generate.outputs.artifact-id }}
           path: ${{ runner.temp }}/star-history-output
+          merge-multiple: true
+          digest-mismatch: error
+
+      - name: Install the XML validator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libxml2-utils
 
       - name: Validate generated assets
+        id: validate
         env:
           GENERATED_DIRECTORY: ${{ runner.temp }}/star-history-output
-        run: >-
-          node scripts/validate-star-history-artifact.js
-          --directory "$GENERATED_DIRECTORY"
-          --repository "$GITHUB_REPOSITORY"
-          --renderer-commit bcddc9d532b10bac7e0187a741288bf9cab17616
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node scripts/validate-star-history-artifact.js \
+            --directory "$GENERATED_DIRECTORY" \
+            --repository "$GITHUB_REPOSITORY" \
+            --renderer-commit bcddc9d532b10bac7e0187a741288bf9cab17616
+
+          light_digest="$(sha256sum "$GENERATED_DIRECTORY/star-history.svg")"
+          dark_digest="$(sha256sum "$GENERATED_DIRECTORY/star-history-dark.svg")"
+          snapshot_digest="$(sha256sum "$GENERATED_DIRECTORY/stars.json")"
+          echo "light-sha256=${light_digest%% *}" >> "$GITHUB_OUTPUT"
+          echo "dark-sha256=${dark_digest%% *}" >> "$GITHUB_OUTPUT"
+          echo "snapshot-sha256=${snapshot_digest%% *}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
+    needs: [generate, validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.generate.outputs.artifact-id }}
+          path: ${{ runner.temp }}/star-history-output
+          merge-multiple: true
+          digest-mismatch: error
+
+      - name: Verify validated asset hashes
+        env:
+          GENERATED_DIRECTORY: ${{ runner.temp }}/star-history-output
+          LIGHT_SHA256: ${{ needs.validate.outputs.light-sha256 }}
+          DARK_SHA256: ${{ needs.validate.outputs.dark-sha256 }}
+          SNAPSHOT_SHA256: ${{ needs.validate.outputs.snapshot-sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ "$LIGHT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DARK_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SNAPSHOT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          cd "$GENERATED_DIRECTORY"
+          printf '%s  %s\n' \
+            "$LIGHT_SHA256" star-history.svg \
+            "$DARK_SHA256" star-history-dark.svg \
+            "$SNAPSHOT_SHA256" stars.json \
+            | sha256sum --check --strict
 
       - name: Publish generated assets to the orphan branch
         env:

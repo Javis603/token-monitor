@@ -8,6 +8,28 @@ const EXPECTED_FILES = ['star-history-dark.svg', 'star-history.svg', 'stars.json
 const OFFICIAL_RENDERER_REPOSITORY = 'star-history/star-history';
 const MAX_SVG_BYTES = 2 * 1024 * 1024;
 const MAX_JSON_BYTES = 10 * 1024 * 1024;
+const XML_NAME_UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const XML_NAME_LOWER = 'abcdefghijklmnopqrstuvwxyz';
+const XML_POLICY_XPATH = `concat(
+  count(/*[local-name() = 'svg' and namespace-uri() = 'http://www.w3.org/2000/svg']),
+  '|',
+  count(//*[
+    translate(local-name(), '${XML_NAME_UPPER}', '${XML_NAME_LOWER}') = 'script' or
+    translate(local-name(), '${XML_NAME_UPPER}', '${XML_NAME_LOWER}') = 'foreignobject' or
+    translate(local-name(), '${XML_NAME_UPPER}', '${XML_NAME_LOWER}') = 'iframe' or
+    translate(local-name(), '${XML_NAME_UPPER}', '${XML_NAME_LOWER}') = 'object' or
+    translate(local-name(), '${XML_NAME_UPPER}', '${XML_NAME_LOWER}') = 'embed' or
+    translate(local-name(), '${XML_NAME_UPPER}', '${XML_NAME_LOWER}') = 'audio' or
+    translate(local-name(), '${XML_NAME_UPPER}', '${XML_NAME_LOWER}') = 'video'
+  ]),
+  '|',
+  count(//@*[starts-with(
+    translate(local-name(), '${XML_NAME_UPPER}', '${XML_NAME_LOWER}'),
+    'on'
+  )]),
+  '|',
+  count(//processing-instruction())
+)`.replace(/\s+/g, ' ');
 
 const fail = (message) => {
   throw new Error(`Invalid Star History artifact: ${message}`);
@@ -73,12 +95,21 @@ const validateSnapshot = (filename, { repository, rendererCommit }) => {
 };
 
 const validateXmlWithXmllint = (filename) => {
-  const result = spawnSync('xmllint', ['--noout', '--nonet', filename], {
+  const result = spawnSync('xmllint', ['--nonet', '--xpath', XML_POLICY_XPATH, filename], {
     encoding: 'utf8',
     windowsHide: true,
   });
   if (result.error) fail(`xmllint could not run: ${result.error.message}`);
   if (result.status !== 0) fail(`${path.basename(filename)} is not well-formed XML: ${(result.stderr || '').trim()}`);
+
+  const policy = (result.stdout || '').trim().split('|').map(Number);
+  if (policy.length !== 4 || policy.some((value) => !Number.isInteger(value) || value < 0)) {
+    fail(`${path.basename(filename)} produced an invalid XML policy result`);
+  }
+  if (policy[0] !== 1) fail(`${path.basename(filename)} does not have an SVG namespace root`);
+  if (policy[1] !== 0) fail(`${path.basename(filename)} contains active content`);
+  if (policy[2] !== 0) fail(`${path.basename(filename)} contains an event handler`);
+  if (policy[3] !== 0) fail(`${path.basename(filename)} contains a processing instruction`);
 };
 
 const validateSvg = (filename, { repository, validateXml = validateXmlWithXmllint }) => {
@@ -171,4 +202,5 @@ module.exports = {
   validateArtifact,
   validateSnapshot,
   validateSvg,
+  validateXmlWithXmllint,
 };

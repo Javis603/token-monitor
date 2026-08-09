@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const { validateArtifact } = require('../../scripts/validate-star-history-artifact');
@@ -11,6 +12,10 @@ const { validateArtifact } = require('../../scripts/validate-star-history-artifa
 const REPOSITORY = 'Javis603/token-monitor';
 const RENDERER_COMMIT = 'bcddc9d532b10bac7e0187a741288bf9cab17616';
 const harmlessXmlCheck = () => {};
+const hasXmllint = spawnSync('xmllint', ['--version'], {
+  encoding: 'utf8',
+  windowsHide: true,
+}).status === 0;
 
 const snapshot = () => ({
   repository: REPOSITORY,
@@ -92,6 +97,37 @@ test('rejects active SVG content and external resources', () => {
   assert.throws(
     () => validate(fixture({ light: svg({ extra: '<path onclick="alert(1)"/>' }) })),
     /event handler/,
+  );
+});
+
+test('rejects namespaced active elements through the real XML policy', { skip: !hasXmllint }, () => {
+  const namespacedScript = '<x:script xmlns:x="http://www.w3.org/2000/svg">alert(1)</x:script>';
+  assert.throws(
+    () => validateArtifact(fixture({ light: svg({ extra: namespacedScript }) }), {
+      repository: REPOSITORY,
+      rendererCommit: RENDERER_COMMIT,
+    }),
+    /active content/,
+  );
+
+  const namespacedForeignObject = '<x:foreignObject xmlns:x="http://www.w3.org/2000/svg"/>';
+  assert.throws(
+    () => validateArtifact(fixture({ dark: svg({ extra: namespacedForeignObject }) }), {
+      repository: REPOSITORY,
+      rendererCommit: RENDERER_COMMIT,
+    }),
+    /active content/,
+  );
+});
+
+test('requires the SVG namespace through the real XML policy', { skip: !hasXmllint }, () => {
+  const wrongNamespace = svg().replace('http://www.w3.org/2000/svg', 'urn:not-svg');
+  assert.throws(
+    () => validateArtifact(fixture({ light: wrongNamespace }), {
+      repository: REPOSITORY,
+      rendererCommit: RENDERER_COMMIT,
+    }),
+    /SVG namespace root/,
   );
 });
 

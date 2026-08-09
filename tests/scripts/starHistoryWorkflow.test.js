@@ -22,20 +22,38 @@ test('external generation is SHA-pinned and read-only', () => {
     workflow,
     /uses: Javis603\/star-history-action@[0-9a-f]{40}/,
   );
-  const generate = workflow.slice(workflow.indexOf('  generate:'), workflow.indexOf('  publish:'));
+  const generate = workflow.slice(workflow.indexOf('  generate:'), workflow.indexOf('  validate:'));
   assert.match(generate, /permissions:\s+contents: read/);
   assert.doesNotMatch(generate, /contents: write/);
+  assert.match(generate, /artifact-id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
   assert.match(generate, /retention-days: 1/);
   assert.doesNotMatch(workflow, /metadata: read/);
 });
 
-test('only the caller-owned publish job can write after validation', () => {
+test('validation parses artifacts without write permission', () => {
+  const validation = workflow.slice(workflow.indexOf('  validate:'), workflow.indexOf('  publish:'));
+  assert.match(validation, /permissions:\s+contents: read/);
+  assert.doesNotMatch(validation, /contents: write/);
+  assert.match(validation, /artifact-ids: \$\{\{ needs\.generate\.outputs\.artifact-id \}\}/);
+  assert.match(validation, /merge-multiple: true/);
+  assert.match(validation, /digest-mismatch: error/);
+  assert.match(validation, /libxml2-utils/);
+  assert.match(validation, /validate-star-history-artifact\.js/);
+  assert.match(validation, /light-sha256=/);
+  assert.match(validation, /dark-sha256=/);
+  assert.match(validation, /snapshot-sha256=/);
+});
+
+test('only the caller-owned publish job can write without parsing artifacts', () => {
   const publish = workflow.slice(workflow.indexOf('  publish:'));
   assert.match(publish, /permissions:\s+contents: write/);
-  assert.ok(
-    publish.indexOf('validate-star-history-artifact.js') < publish.indexOf('push origin HEAD:star-history'),
-    'artifact validation must precede the push',
-  );
+  assert.match(publish, /needs: \[generate, validate\]/);
+  assert.match(publish, /artifact-ids: \$\{\{ needs\.generate\.outputs\.artifact-id \}\}/);
+  assert.match(publish, /merge-multiple: true/);
+  assert.match(publish, /digest-mismatch: error/);
+  assert.match(publish, /sha256sum --check --strict/);
+  assert.doesNotMatch(publish, /validate-star-history-artifact\.js|xmllint|JSON\.parse/);
+  assert.doesNotMatch(publish, /actions\/checkout/);
   assert.match(publish, /install -m 0644 .*star-history\.svg/);
   assert.match(publish, /install -m 0644 .*star-history-dark\.svg/);
   assert.match(publish, /install -m 0644 .*stars\.json/);
