@@ -5,9 +5,9 @@ var languageStorageKey = "token-monitor-site-language";
 var translations = {
   en: {
     "meta.title": "Token Monitor: AI Tools usage at a glance",
-    "meta.description": "Token Monitor is a local-first desktop app for live tokens, cost, limits, sessions, and history across 28+ AI coding tools.",
+    "meta.description": "Token Monitor is a local-first desktop app for live tokens, cost, limits, sessions, and history across 29+ AI coding tools.",
     "meta.ogTitle": "Token Monitor",
-    "meta.ogDescription": "Live tokens, cost, limits, sessions, and history across 28+ AI coding tools.",
+    "meta.ogDescription": "Live tokens, cost, limits, sessions, and history across 29+ AI coding tools.",
     "nav.skip": "Skip to content",
     "nav.primary": "Primary",
     "nav.home": "Token Monitor home",
@@ -45,7 +45,7 @@ var translations = {
     "cta.download.aria.linux": "Download Token Monitor for Linux",
     "cta.github": "View on GitHub",
 
-    "tools.eyebrow": "28+ tools and providers",
+    "tools.eyebrow": "29+ tools and providers",
     "home.limits": "LIMITS",
     "home.models": "MODELS",
     "home.activity": "ACTIVITY",
@@ -163,9 +163,9 @@ var translations = {
 
   "zh-TW": {
     "meta.title": "Token Monitor：AI Tools 用量一眼看清",
-    "meta.description": "Token Monitor 是本地優先的桌面 App，可即時查看 28+ 種 AI coding 工具的 token、成本、限額、session 與歷史。",
+    "meta.description": "Token Monitor 是本地優先的桌面 App，可即時查看 29+ 種 AI coding 工具的 token、成本、限額、session 與歷史。",
     "meta.ogTitle": "Token Monitor",
-    "meta.ogDescription": "即時查看 28+ 種 AI coding 工具的 token、成本、限額、session 與歷史。",
+    "meta.ogDescription": "即時查看 29+ 種 AI coding 工具的 token、成本、限額、session 與歷史。",
     "nav.skip": "跳到內容",
     "nav.primary": "主要導覽",
     "nav.home": "Token Monitor 首頁",
@@ -203,7 +203,7 @@ var translations = {
     "cta.download.aria.linux": "下載 Linux 版 Token Monitor",
     "cta.github": "查看 GitHub",
 
-    "tools.eyebrow": "28+ 種工具與供應商",
+    "tools.eyebrow": "29+ 種工具與供應商",
     "home.limits": "額度",
     "home.models": "模型",
     "home.activity": "活動",
@@ -321,9 +321,9 @@ var translations = {
 
   "zh-CN": {
     "meta.title": "Token Monitor：AI Tools 用量一眼看清",
-    "meta.description": "Token Monitor 是本地优先的桌面 App，可实时查看 28+ 种 AI coding 工具的 token、成本、限额、session 与历史。",
+    "meta.description": "Token Monitor 是本地优先的桌面 App，可实时查看 29+ 种 AI coding 工具的 token、成本、限额、session 与历史。",
     "meta.ogTitle": "Token Monitor",
-    "meta.ogDescription": "实时查看 28+ 种 AI coding 工具的 token、成本、限额、session 与历史。",
+    "meta.ogDescription": "实时查看 29+ 种 AI coding 工具的 token、成本、限额、session 与历史。",
     "nav.skip": "跳到内容",
     "nav.primary": "主要导航",
     "nav.home": "Token Monitor 首页",
@@ -361,7 +361,7 @@ var translations = {
     "cta.download.aria.linux": "下载 Linux 版 Token Monitor",
     "cta.github": "查看 GitHub",
 
-    "tools.eyebrow": "28+ 种工具与提供商",
+    "tools.eyebrow": "29+ 种工具与提供商",
     "home.limits": "额度",
     "home.models": "模型",
     "home.activity": "活动",

@@ -13,7 +13,7 @@ const {
   trayProviderOpticalRatio
 } = require('../../src/electron/renderer/trayProviderIcons');
 
-const CURRENT_TOOLS = ['claude', 'codex', 'hermes', 'opencode', 'openclaw', 'cursor', 'antigravity', 'cline', 'grok'];
+const CURRENT_TOOLS = ['claude', 'codex', 'hermes', 'opencode', 'openclaw', 'cursor', 'antigravity', 'cline', 'grok', 'reasonix'];
 
 function assetPathFromRendererSource(source) {
   return path.resolve(__dirname, '..', '..', 'src', 'electron', 'renderer', source);

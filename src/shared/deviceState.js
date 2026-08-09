@@ -14,6 +14,8 @@ const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
   'allTimeProjectsIncomplete',
   'sessionDetailsOmitted',
   'periodProjectsOmitted',
+  'nativeSessions',
+  'nativeProjects',
   'syncUploadIntervalMs'
 ]);
 

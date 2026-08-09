@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="reasonix-title">
+  <title id="reasonix-title">Reasonix</title>
+  <path d="M 50 4 L 96 50 L 50 96 L 4 50 Z" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/>
+  <path d="M 50 24 L 76 50 L 50 76 L 24 50 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" opacity="0.7"/>
+  <path d="M 50 39 L 61 50 L 50 61 L 39 50 Z" fill="currentColor"/>
+</svg>

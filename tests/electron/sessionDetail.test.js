@@ -119,3 +119,10 @@ test('openSessionDetail ignores a stale period result that completes last', asyn
   assert.equal(state.openSession.detail.marker, 'month');
   assert.deepEqual(renders.filter((render) => render.detail).map((render) => render.detail.marker), ['month']);
 });
+
+test('Reasonix rows enter the shared detail navigation path instead of a native accordion', () => {
+  assert.match(rendererSource, /client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix'/);
+  assert.match(rendererSource, /const sessionId = client === 'reasonix' \? `reasonix:\$\{match\[2\]\}` : match\[2\];/);
+  assert.match(rendererSource, /state\.stats\?\.nativeSessions\?\.\[state\.period\]\?\.\[sessionId\]/);
+  assert.doesNotMatch(rendererSource, /nativeSessionBreakdown/);
+});

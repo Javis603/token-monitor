@@ -79,6 +79,24 @@
         }
       }
     }
+    for (const [rawKey, entry] of Object.entries(options.nativeProjects || {})) {
+      if (!entry || typeof entry !== 'object') continue;
+      const name = String(entry.label || rawKey || '').trim().normalize('NFC');
+      const key = canonicalProjectKey(name || rawKey);
+      if (!key || !name) continue;
+      if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
+      const project = projects.get(key);
+      project.name = deterministicProjectLabel(project.name, name);
+      project.value += Math.max(0, Number(entry.tokens || 0));
+      // Reasonix native project telemetry is local reference data only. Its
+      // reported session cost must never become generic project cost.
+      for (const [client, value] of Object.entries(entry.clients || {})) {
+        const tokens = Math.max(0, Number(value || 0));
+        if (tokens <= 0) continue;
+        project.clients.add(client);
+        project.clientTokens[client] = (project.clientTokens[client] || 0) + tokens;
+      }
+    }
     return Array.from(projects.values()).map((project) => {
       const color = options.stableColor ? options.stableColor(project.key, options.fallbackColors || ['#73bdf5']) : '#73bdf5';
       const clientColor = (client) => {

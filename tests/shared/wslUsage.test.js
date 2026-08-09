@@ -50,6 +50,12 @@ test('homeHasData returns empty array when no markers present', () => {
   assert.deepEqual(ids, []);
 });
 
+test('WSL marker discovery deliberately excludes Reasonix', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const reasonixStats = `${home}\\.reasonix\\stats`;
+  assert.deepEqual(homeHasData(home, (p) => p === reasonixStats), []);
+});
+
 test('isWslInstalled is false on non-win32 without calling exec', () => {
   let called = false;
   const ok = isWslInstalled({ platform: 'darwin', exec: () => { called = true; return ''; } });

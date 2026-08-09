@@ -103,9 +103,31 @@ function sessionsWithoutProjectMetadata(sessions) {
   return sanitized;
 }
 
+function sessionsWithoutReasonix(sessions) {
+  if (!sessions || typeof sessions !== 'object') return sessions;
+  const sanitized = {};
+  let removed = false;
+  for (const [key, session] of Object.entries(sessions)) {
+    const client = String(session?.client || '').trim().toLowerCase();
+    const sessionKey = String(key || '').trim().toLowerCase();
+    if (client === 'reasonix' || sessionKey.startsWith('reasonix:') || sessionKey.includes('reasonix-stats:')) {
+      removed = true;
+      continue;
+    }
+    sanitized[key] = session;
+  }
+  return removed ? sanitized : sessions;
+}
+
 function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
+  // Reasonix native sessions are a local-only view. They contain provider
+  // metadata and project labels that are intentionally not part of the device
+  // wire contract, and uploading them would also make local paths/preview text
+  // a hub concern. Tokscale remains the only aggregate/session authority.
+  delete payload.nativeSessions;
+  delete payload.nativeProjects;
   const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
   delete payload.allTimeProjectsIncomplete;
@@ -117,8 +139,9 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
     if (!period || typeof period !== 'object') continue;
     payload[periodName] = { ...period };
     delete payload[periodName].projects;
-    if (!projectsEnabled && hasOwn(payload[periodName], 'sessions')) {
-      payload[periodName].sessions = sessionsWithoutProjectMetadata(payload[periodName].sessions);
+    if (hasOwn(payload[periodName], 'sessions')) {
+      payload[periodName].sessions = sessionsWithoutReasonix(payload[periodName].sessions);
+      if (!projectsEnabled) payload[periodName].sessions = sessionsWithoutProjectMetadata(payload[periodName].sessions);
     }
   }
 

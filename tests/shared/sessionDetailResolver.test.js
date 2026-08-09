@@ -11,6 +11,7 @@ const {
   resolveSessionDetailForPlatform,
   runSessionDetailWorker
 } = require('../../src/shared/sessionDetailResolver');
+const { readSessionDetail: readNativeDetail } = require('../../src/shared/sessionDetail');
 
 function missing(args) {
   return { found: false, client: args.client, sessionId: args.sessionId, exchanges: [] };
@@ -113,6 +114,36 @@ test('returns a native Claude detail without enumerating WSL homes', () => {
   assert.equal(detail.found, true);
   assert.equal(detail.home, 'C:\\Users\\me');
   assert.equal(enumerated, false);
+});
+
+test('resolves a Reasonix native detail through the same platform resolver', () => {
+  const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-reasonix-detail-'));
+  const stateHome = path.join(nativeHome, 'state');
+  const sessions = path.join(stateHome, 'projects', 'opaque', 'sessions');
+  fs.mkdirSync(sessions, { recursive: true });
+  fs.writeFileSync(path.join(sessions, 'branch.jsonl.meta'), JSON.stringify({ id: 'resolver-id' }));
+  fs.writeFileSync(path.join(sessions, 'branch.events.jsonl'), [
+    JSON.stringify({ type: 'user.message', ts: '2026-08-08T00:00:00.000Z', text: 'resolver prompt' }),
+    JSON.stringify({ type: 'model.final', ts: '2026-08-08T00:00:01.000Z', usage: { prompt_tokens: 3, completion_tokens: 2 } })
+  ].join('\n'));
+  try {
+    const detail = resolveSessionDetailForPlatform(
+      { client: 'reasonix', sessionId: 'reasonix:resolver-id', period: 'total' },
+      {
+        platform: 'linux',
+        homedir: () => nativeHome,
+        readSessionDetail: (args) => readNativeDetail({
+          ...args,
+          deps: { platform: 'linux', env: { REASONIX_STATE_HOME: stateHome } }
+        })
+      }
+    );
+    assert.equal(detail.found, true);
+    assert.equal(detail.exchanges[0].promptPreview, 'resolver prompt');
+    assert.equal(detail.totals.totalTokens, 5);
+  } finally {
+    fs.rmSync(nativeHome, { recursive: true, force: true });
+  }
 });
 
 for (const client of ['claude', 'codex']) {

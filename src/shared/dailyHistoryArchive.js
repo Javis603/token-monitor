@@ -5,6 +5,7 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { num, sumTokens } = require('./history');
+const { REASONIX_CLIENT } = require('./reasonixPaths');
 
 const ARCHIVE_VERSION = 1;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -90,7 +91,7 @@ function observationsFromGraphs(graphs) {
       for (const raw of (Array.isArray(row?.clients) ? row.clients : [])) {
         const candidate = normalizeObservation({
           ...raw,
-          tokens: sumTokens(raw?.tokens),
+          tokens: sumTokens(raw?.tokens, raw?.client),
           reasoningTokens: raw?.tokens?.reasoning
         });
         if (!candidate) continue;
@@ -329,7 +330,10 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
             output: 0,
             cacheRead: 0,
             cacheWrite: 0,
-            reasoning: num(observation.reasoningTokens)
+            // Archive observations store one already-aggregated token total.
+            // Re-emitting Reasonix's additive reasoning beside that total would
+            // count it twice when history parses the reconstructed graph.
+            reasoning: observation.client === REASONIX_CLIENT ? 0 : num(observation.reasoningTokens)
           },
           cost: observation.cost,
           messages: observation.messages

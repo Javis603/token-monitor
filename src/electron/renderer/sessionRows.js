@@ -49,6 +49,7 @@
   function sessionIdLabel(id) {
     const raw = String(id || '').trim();
     if (!raw) return '';
+    if (raw.startsWith('reasonix:')) return raw.slice('reasonix:'.length);
     const rollout = raw.match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}[:-]\d{2}-(.+)$/);
     if (rollout) return rollout[1];
     if (/^\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}/.test(raw)) return '';
@@ -74,9 +75,63 @@
     return compactSessionTime(session?.lastUsedAt || session?.startedAt, now);
   }
 
+  function textValue(value) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function sessionTitleParts(session, labels, fallbackLabel = 'Session', explicitModel = '') {
+    const client = textValue(session?.client);
+    const clientLabel = labels[client] || client || fallbackLabel;
+    const modelLabel = textValue(explicitModel) || sessionModelLabel(session);
+    return {
+      client,
+      clientLabel,
+      modelLabel,
+      titleParts: [clientLabel, modelLabel].filter(Boolean)
+    };
+  }
+
   function messageLabel(session) {
     const count = finiteNumber(session?.messageCount);
     return count > 0 ? `${formatNumber(count)} msg${count === 1 ? '' : 's'}` : '';
+  }
+
+  function nativeSessionRow(session, key, options, now) {
+    const value = finiteNumber(session?.totalTokens);
+    const tokenDataUnavailable = session?.tokenDataUnavailable === true;
+    if (value <= 0 && !tokenDataUnavailable) return null;
+    const labels = options.clientLabels || {};
+    const colors = options.clientColors || {};
+    const stable = typeof options.stableColor === 'function' ? options.stableColor : stableColor;
+    const palette = options.fallbackColors || fallbackColors;
+    const client = textValue(session?.client) || 'reasonix';
+    const { clientLabel, titleParts } = sessionTitleParts(
+      { ...session, client },
+      labels,
+      'Reasonix',
+      session?.model
+    );
+    const subtitleParts = [
+      sessionActivityLabel(session, now),
+      messageLabel(session)
+    ].filter(Boolean);
+    return {
+      key: `session:${key}`,
+      kind: 'session',
+      name: titleParts.join(' · '),
+      subtitle: subtitleParts.join(' · '),
+      detail: sessionIdLabel(session?.sessionId || key),
+      value,
+      tokenDataUnavailable,
+      // Native telemetry cost is a Reasonix-reported detail value, not the
+      // Token Monitor aggregate cost authority used by generic rows.
+      cost: 0,
+      color: colors[client] || stable(key, palette),
+      stale: false,
+      client,
+      sortTime: sessionTimestampValue(session),
+      title: `${clientLabel} session ${sessionIdLabel(session?.sessionId || key)}`
+    };
   }
 
   function sessionRowsForPeriod(period, options = {}) {
@@ -91,10 +146,7 @@
       .map(([key, session]) => {
         const value = finiteNumber(session?.totalTokens);
         if (value <= 0) return null;
-        const client = session?.client || '';
-        const clientLabel = labels[client] || client || 'Session';
-        const modelLabel = sessionModelLabel(session);
-        const titleParts = [clientLabel, modelLabel].filter(Boolean);
+        const { client, titleParts, clientLabel, modelLabel } = sessionTitleParts(session, labels);
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
         const subtitleParts = [
@@ -119,6 +171,10 @@
         };
       })
       .filter(Boolean);
+    for (const [key, session] of Object.entries(options.nativeSessions || {})) {
+      const row = nativeSessionRow(session, key, options, now);
+      if (row) rows.push(row);
+    }
     return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
   }
 

@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const { resolveSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
+const { readReasonixSessionEvents } = require('./reasonixSessionDetail');
 
 function num(value) {
   const n = Number(value);
@@ -187,12 +188,23 @@ function addTokens(target, src) {
 }
 
 function newExchange(promptPreview, timestamp) {
-  return { promptPreview, startedAt: timestamp || '', endedAt: timestamp || '', turnCount: 0, tools: [], tokens: emptyTokens(), costEstimate: 0, turns: [] };
+  return {
+    promptPreview,
+    startedAt: timestamp || '',
+    endedAt: timestamp || '',
+    turnCount: 0,
+    tools: [],
+    tokens: emptyTokens(),
+    tokensAvailable: true,
+    costEstimate: 0,
+    turns: []
+  };
 }
 
 function finalizeExchange(ex) {
   ex.turnCount = ex.turns.length;
   ex.tools = uniqueTools(ex.turns.flatMap((t) => t.tools));
+  ex.tokensAvailable = ex.turns.every((turn) => turn.tokensAvailable !== false);
   return ex;
 }
 
@@ -207,7 +219,13 @@ function groupEvents(events) {
     } else if (event.kind === 'turn') {
       if (!current) { current = newExchange('', event.timestamp); exchanges.push(current); }
       // event.cost is set for OpenCode (real per-message cost); claude/codex leave it undefined → 0.
-      const turnEntry = { timestamp: event.timestamp, tokens: event.tokens, tools: event.tools, costEstimate: num(event.cost) };
+      const turnEntry = {
+        timestamp: event.timestamp,
+        tokens: event.tokens,
+        tokensAvailable: event.tokensAvailable !== false,
+        tools: event.tools,
+        costEstimate: num(event.cost)
+      };
       current.turns.push(turnEntry);
       addTokens(current.tokens, event.tokens);
       if (event.timestamp && (!current.startedAt || event.timestamp < current.startedAt)) current.startedAt = event.timestamp;
@@ -238,6 +256,7 @@ function filterExchangesByPeriod(exchanges, period, now = new Date()) {
     if (turns.length === 0) continue;
     const next = newExchange(ex.promptPreview, ex.startedAt);
     next.turns = turns;
+    next.tokensAvailable = turns.every((turn) => turn.tokensAvailable !== false);
     for (const t of turns) addTokens(next.tokens, t.tokens);
     next.startedAt = turns.reduce((min, t) => (t.timestamp && (!min || t.timestamp < min) ? t.timestamp : min), '');
     next.endedAt = turns.reduce((max, t) => (t.timestamp > max ? t.timestamp : max), '');
@@ -290,8 +309,38 @@ function readOpenCodeSessionDetail({ sessionId, period = 'total', deps = {} }) {
   return { found: true, client: 'opencode', sessionId, period, exchanges: grouped, totals: totalsOf(grouped, filteredCost) };
 }
 
+function readReasonixSessionDetail({ sessionId, period = 'total', home, deps = {} }) {
+  const result = readReasonixSessionEvents({
+    sessionId,
+    home,
+    env: deps.env || process.env,
+    platform: deps.platform || process.platform,
+    cwdDir: deps.cwdDir || process.cwd(),
+    fsModule: deps.fsModule,
+    pathModule: deps.pathModule
+  });
+  if (!result.found) return { found: false, client: 'reasonix', sessionId, period, exchanges: [], totals: totalsOf([], 0) };
+
+  const now = new Date(deps.now || Date.now());
+  const grouped = filterExchangesByPeriod(groupEvents(result.events), period, now);
+  // Reasonix's reported session cost belongs to the native-session sidecar.
+  // It is intentionally not promoted to the generic Session Detail cost.
+  const tokenDataAvailable = result.tokenDataAvailable === true;
+  return {
+    found: true,
+    client: 'reasonix',
+    sessionId,
+    period,
+    exchanges: grouped,
+    totals: totalsOf(grouped, 0),
+    tokensAvailable: tokenDataAvailable,
+    tokenDataUnavailable: !tokenDataAvailable
+  };
+}
+
 function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
+  if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
   const filePath = resolveSessionFile(client, sessionId, home);
   if (!filePath) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   let text;
@@ -304,4 +353,13 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   return { found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
 }
 
-module.exports = { parseClaudeTranscript, parseCodexTranscript, makeTokens, groupEvents, filterExchangesByPeriod, distributeCost, readSessionDetail };
+module.exports = {
+  parseClaudeTranscript,
+  parseCodexTranscript,
+  makeTokens,
+  groupEvents,
+  filterExchangesByPeriod,
+  distributeCost,
+  readReasonixSessionDetail,
+  readSessionDetail
+};

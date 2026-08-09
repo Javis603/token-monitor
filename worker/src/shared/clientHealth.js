@@ -28,6 +28,8 @@
 // Node-builtin-free: this module is vendored into worker/src/shared/ by
 // `npm run sync:worker`.
 
+const { REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
+
 const CLIENT_HEALTH_VERSION = 1;
 
 // healthy      — usage was observed for this client
@@ -194,6 +196,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'openclaw-agents',
   'pi-sessions',
   'proma-sessions',
+  REASONIX_SOURCE_CHECK_ID,
   'qwen-projects',
   'tokscale-antigravity-cache',
   'tokscale-cursor-cache',

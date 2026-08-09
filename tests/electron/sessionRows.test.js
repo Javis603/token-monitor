@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { archivedSessionCount, sessionBreakdownIncomplete, sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+const { archivedSessionCount, sessionBreakdownIncomplete, sessionIdLabel, sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
 
 const clientLabels = { claude: 'Claude Code', codex: 'Codex' };
 const clientColors = { claude: '#cc7c5e', codex: '#49a3b0', default: '#6ab4f0' };
@@ -83,6 +83,110 @@ test('session rows fall back to month and day for older activity', () => {
 
   assert.equal(rows[0].subtitle, '05/29 23:08');
   assert.equal(rows[0].detail, '214c24d5-aaaa-bbbb-cccc-f87e');
+});
+
+test('Reasonix native rows reuse the common session schema without a native accordion', () => {
+  const rows = sessionRowsForPeriod({ sessions: {} }, {
+    nativeSessions: {
+      'reasonix:ABC123': {
+        client: 'reasonix',
+        sessionId: 'reasonix:ABC123',
+        title: '测试一下',
+        model: 'deepseek/deepseek-v4-flash',
+        projectLabel: 'Qyen',
+        totalTokens: 15382,
+        promptTokens: 80,
+        completionTokens: 30,
+        reasoningTokens: 10,
+        cacheHitTokens: 20,
+        cacheMissTokens: 80,
+        requestCount: 4,
+        reportedCostUsd: 0.25,
+        messageCount: 2,
+        turns: 1,
+        lastUsedAt: localIso(2026, 8, 8, 14, 10)
+      }
+    },
+    clientLabels: { reasonix: 'Reasonix' },
+    clientColors: { reasonix: '#4d6bfe' },
+    now: new Date(2026, 7, 8, 14, 30)
+  });
+
+  assert.equal(rows.length, 1);
+  const [row] = rows;
+  assert.equal(row.kind, 'session');
+  assert.equal(row.key, 'session:reasonix:ABC123');
+  assert.equal(row.name, 'Reasonix · deepseek/deepseek-v4-flash');
+  assert.equal(row.subtitle, '14:10 · 2 msgs');
+  assert.equal(row.detail, 'ABC123');
+  assert.equal(row.value, 15382);
+  assert.equal(row.cost, 0);
+  assert.equal(row.client, 'reasonix');
+  assert.equal(row.sortTime, new Date(localIso(2026, 8, 8, 14, 10)).getTime());
+  assert.doesNotMatch(row.name, /测试一下/);
+  assert.doesNotMatch(row.subtitle, /Qyen/);
+  assert.doesNotMatch(row.detail, /reasonix:/);
+  assert.equal(Object.hasOwn(row, 'nativeSessionBreakdown'), false);
+  assert.equal(sessionIdLabel('reasonix:ABC123'), 'ABC123');
+
+  const ordinary = sessionRowsForPeriod({
+    sessions: {
+      'codex:ordinary': {
+        client: 'codex',
+        sessionId: 'ordinary',
+        totalTokens: 10,
+        models: { 'gpt-5.6-luna': 10 },
+        messageCount: 1,
+        lastUsedAt: localIso(2026, 8, 8, 14, 9)
+      }
+    }
+  }, { clientLabels, clientColors, now: new Date(2026, 7, 8, 14, 30) })[0];
+  for (const field of ['name', 'subtitle', 'detail', 'value', 'cost', 'client', 'sortTime']) {
+    assert.ok(Object.hasOwn(row, field), `Reasonix row is missing ${field}`);
+    assert.ok(Object.hasOwn(ordinary, field), `ordinary row is missing ${field}`);
+  }
+  assert.equal(ordinary.name, 'Codex · gpt-5.6-luna');
+  assert.equal(ordinary.subtitle, '14:09 · 1 msg');
+});
+
+test('Reasonix native rows omit turns from the compact subtitle when turns are unavailable', () => {
+  const [row] = sessionRowsForPeriod({ sessions: {} }, {
+    nativeSessions: {
+      'reasonix:no-turns': {
+        client: 'reasonix',
+        sessionId: 'reasonix:no-turns',
+        model: 'deepseek/deepseek-v4-flash',
+        totalTokens: 1,
+        lastUsedAt: localIso(2026, 8, 8, 14, 10)
+      }
+    },
+    clientLabels: { reasonix: 'Reasonix' },
+    now: new Date(2026, 7, 8, 14, 30)
+  });
+
+  assert.equal(row.subtitle, '14:10');
+  assert.doesNotMatch(row.subtitle, /request|msg|turn/i);
+});
+
+test('Reasonix native rows remain visible when official per-session tokens are unavailable', () => {
+  const [row] = sessionRowsForPeriod({ sessions: {} }, {
+    nativeSessions: {
+      'reasonix:official': {
+        client: 'reasonix',
+        sessionId: 'reasonix:official',
+        model: 'deepseek/deepseek-v4-flash',
+        tokenDataUnavailable: true,
+        messageCount: 2,
+        lastUsedAt: localIso(2026, 8, 8, 14, 10)
+      }
+    },
+    clientLabels: { reasonix: 'Reasonix' },
+    now: new Date(2026, 7, 8, 14, 30)
+  });
+
+  assert.equal(row.value, 0);
+  assert.equal(row.tokenDataUnavailable, true);
+  assert.equal(row.subtitle, '14:10 · 2 msgs');
 });
 
 test('session rows label archived sessions without claiming the source was deleted', () => {
