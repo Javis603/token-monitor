@@ -269,6 +269,28 @@ test('unsupported automatic download controls are off, disabled, and explain why
   }
 });
 
+test('a spent attempt stops the automatic downloader, and the control says so', () => {
+  // shouldDownloadAutomaticAppUpdate already refuses here, so left alone the switch
+  // sat on, enabled, promising background downloads that could not happen.
+  assert.deepEqual(automaticAppUpdateControlState({
+    preferenceEnabled: true,
+    updateState: { installSupported: true, installBusy: false, installRetryBlocked: true }
+  }), {
+    checked: true,
+    disabled: false,
+    unavailable: false,
+    descriptionKey: 'settings.appUpdate.automaticBlockedUntilRestart'
+  });
+
+  // Still on and still changeable: the preference is unaffected and outlives the
+  // process, so greying it would misreport a pause as a build that cannot update.
+  for (const locale of Object.keys(MESSAGES)) {
+    const key = 'settings.appUpdate.automaticBlockedUntilRestart';
+    assert.equal(typeof MESSAGES[locale][key], 'string', `${locale} is missing ${key}`);
+    assert.notEqual(MESSAGES[locale][key], MESSAGES[locale]['settings.appUpdate.automaticDescription']);
+  }
+});
+
 test('automatic download control fails closed until install support is known', () => {
   assert.deepEqual(automaticAppUpdateControlState({
     preferenceEnabled: true,

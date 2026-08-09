@@ -18,12 +18,19 @@
     const supportKnown = typeof updateState?.installSupported === 'boolean';
     const supported = supportKnown && updateState.installSupported;
     const busy = Boolean(updateState?.installBusy);
+    // A spent attempt stops the background downloader too, so the standing promise
+    // to fetch updates on its own is not true until the app restarts. Said in the
+    // description rather than by disabling the control: the preference itself is
+    // unaffected and still worth changing, and grey would read as unsupported here
+    // and invite toggling it off and on to no effect.
     const descriptionKey = !supportKnown
       ? 'settings.appUpdate.automaticCheckingSupport'
-      : supported
-        ? 'settings.appUpdate.automaticDescription'
-        : UNSUPPORTED_DESCRIPTION_KEYS[updateState.installSupportReason]
-          || 'settings.appUpdate.automaticUnsupported';
+      : !supported
+        ? UNSUPPORTED_DESCRIPTION_KEYS[updateState.installSupportReason]
+          || 'settings.appUpdate.automaticUnsupported'
+        : updateState.installRetryBlocked
+          ? 'settings.appUpdate.automaticBlockedUntilRestart'
+          : 'settings.appUpdate.automaticDescription';
 
     return {
       checked: Boolean(supported && preferenceEnabled),
