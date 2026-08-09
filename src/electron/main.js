@@ -4606,7 +4606,18 @@ function configureNativeAppUpdater() {
     // appUpdateLastError. Only a real download or install attempt owns installError.
     if (!appUpdateNativeBusy && !wasInstalling) return;
     appUpdateNativeBusy = false;
-    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: error?.message || String(error || 'Update failed'),
+      // Where the attempt was single-use, a failed install also closed the in-app
+      // path: the controls below now offer the release page instead of a retry, and
+      // a generic "couldn't install" leaves that looking like the end of the road.
+      // A restart is what brings the retry back, so the message has to say so.
+      // `wasInstalling` keeps a check failure arriving after an earlier spent
+      // attempt from borrowing the explanation.
+      errorKind: wasInstalling && updateInstallQuit.isSpent() ? 'install-spent-by-failure' : null
+    });
   });
 }
 

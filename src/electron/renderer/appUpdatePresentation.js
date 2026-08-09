@@ -59,11 +59,12 @@
   }
 
   // An install failure the updater merely reports has nothing to tell the user
-  // beyond "it failed". These two do: the app is still running and restarting is
-  // the only way to get another attempt, which a generic message cannot say.
+  // beyond "it failed". These have more: the app is still running, the in-app path
+  // is closed until it restarts, and a generic message cannot say either.
   function appUpdateInstallErrorMessageKey(kind) {
     const keys = {
       'installer-did-not-start': 'settings.appUpdate.installerDidNotStart',
+      'install-spent-by-failure': 'settings.appUpdate.installSpentByFailure',
       'attempt-spent': 'settings.appUpdate.installAttemptSpent'
     };
     return keys[kind] || 'settings.appUpdate.installError';

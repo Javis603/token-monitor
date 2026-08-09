@@ -67,16 +67,33 @@ test('update error presentation distinguishes actionable failure classes', () =>
   assert.equal(appUpdateErrorMessageKey('unknown'), 'settings.appUpdate.githubError');
 });
 
-test('the two install failures the user can act on get their own message', () => {
-  // Both mean the app is still running and only a restart yields another attempt,
-  // which the generic "couldn't install" cannot say.
+test('the install failures the user can act on get their own message', () => {
+  // All three mean the app is still running and only a restart yields another
+  // attempt, which the generic "couldn't install" cannot say.
   assert.equal(
     appUpdateInstallErrorMessageKey('installer-did-not-start'),
     'settings.appUpdate.installerDidNotStart'
   );
+  // The one an ordinary macOS install failure produces: the failure is reported and
+  // the attempt is gone with it, so this is the message that path actually shows.
+  assert.equal(
+    appUpdateInstallErrorMessageKey('install-spent-by-failure'),
+    'settings.appUpdate.installSpentByFailure'
+  );
   assert.equal(
     appUpdateInstallErrorMessageKey('attempt-spent'),
     'settings.appUpdate.installAttemptSpent'
+  );
+  // Each failure gets its own wording; sharing one would drop either the failure or
+  // the remedy.
+  assert.equal(
+    new Set([
+      appUpdateInstallErrorMessageKey('installer-did-not-start'),
+      appUpdateInstallErrorMessageKey('install-spent-by-failure'),
+      appUpdateInstallErrorMessageKey('attempt-spent'),
+      appUpdateInstallErrorMessageKey(null)
+    ]).size,
+    4
   );
   // Anything the updater merely reported stays generic.
   assert.equal(appUpdateInstallErrorMessageKey(null), 'settings.appUpdate.installError');
@@ -87,7 +104,7 @@ test('the two install failures the user can act on get their own message', () =>
 test('every locale can say how to recover from an install that never started', () => {
   // The renderer never shows the main process error text, so a message with no key
   // behind it reaches nobody.
-  for (const kind of ['installer-did-not-start', 'attempt-spent']) {
+  for (const kind of ['installer-did-not-start', 'install-spent-by-failure', 'attempt-spent']) {
     const key = appUpdateInstallErrorMessageKey(kind);
     for (const locale of Object.keys(MESSAGES)) {
       assert.equal(typeof MESSAGES[locale][key], 'string', `${locale} is missing ${key}`);

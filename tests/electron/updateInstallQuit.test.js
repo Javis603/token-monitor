@@ -421,3 +421,20 @@ test('an updater error aborts ahead of the download guard', () => {
   assert.ok(abortAt < guardAt, 'the abort has to come before the early return');
   assert.match(body, /const wasInstalling = updateInstallQuit\.abort\(\);/);
 });
+
+test('a failed install that spent the attempt says a restart brings it back', () => {
+  const handler = main.slice(main.indexOf("autoUpdater.on('error'"));
+  const body = handler.slice(0, handler.indexOf('\n  });'));
+  const kind = body.slice(body.indexOf('errorKind:'));
+  const expression = kind.slice(0, kind.indexOf('\n'));
+  // This is the message an ordinary macOS install failure produces, not a rare one:
+  // the abort above spends the attempt, so the controls have already dropped to the
+  // release page. Left generic, the user is told it failed and shown no way back.
+  assert.match(expression, /'install-spent-by-failure'/);
+  // Both conditions are load-bearing. Without isSpent() a platform that stays
+  // retryable would tell the user to restart for an install it is still offering;
+  // without wasInstalling a later check failure would borrow the explanation from
+  // an install attempt that ended long before it.
+  assert.match(expression, /wasInstalling/);
+  assert.match(expression, /updateInstallQuit\.isSpent\(\)/);
+});
