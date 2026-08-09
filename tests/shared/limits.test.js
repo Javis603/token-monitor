@@ -986,6 +986,36 @@ test('aggregateLimits merges legacy OpenCode Go and Zen identities into the cano
   }
 });
 
+test('aggregateLimits keeps merged OpenCode account aliases bounded and deterministic', () => {
+  const canonical = 'sha256:canonical-workspace';
+  const provider = (deviceId, aliases) => ({
+    deviceId,
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        accountKey: canonical,
+        webAccountKey: canonical,
+        accountKeyAliases: aliases,
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:02:00.000Z',
+        windows: [{ kind: 'session', source: 'web', usedPercent: 30 }]
+      }]
+    }
+  });
+  const firstAliases = Array.from({ length: 8 }, (_, index) => `sha256:legacy-${String(index).padStart(2, '0')}`);
+  const secondAliases = Array.from({ length: 8 }, (_, index) => `sha256:legacy-${String(index + 8).padStart(2, '0')}`);
+  const first = provider('first-device', firstAliases);
+  const second = provider('second-device', secondAliases);
+  const now = Date.parse('2026-08-09T08:03:00.000Z');
+  const forward = aggregateLimits([first, second], 0, now);
+  const reverse = aggregateLimits([second, first], 0, now);
+
+  assert.deepEqual(forward.providers[0].accountKeyAliases, firstAliases);
+  assert.equal(forward.providers[0].accountKeyAliases.length, 8);
+  assert.deepEqual(reverse, forward);
+});
+
 test('collectLimitsOnce flattens multiple providers returned by a provider fetcher', async () => {
   const summary = await collectLimitsOnce({ limitProviders: 'codex' }, {
     now: () => Date.parse('2026-06-14T10:02:00.000Z'),

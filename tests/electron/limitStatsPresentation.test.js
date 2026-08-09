@@ -10,6 +10,7 @@ const {
   projectLimitStatsForDisplay
 } = require('../../src/electron/limitStatsPresentation');
 const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
+const { collectLimitsOnce } = require('../../src/shared/limitCollector');
 const { aggregateLimits } = require('../../src/shared/limits');
 const { buildMacWidgetSnapshot } = require('../../src/shared/macWidgetSnapshot');
 const { formatTrayText } = require('../../src/shared/trayText');
@@ -68,6 +69,64 @@ function statsWithDevices(devices) {
     limits: aggregateLimits(devices, 0, Date.parse(updatedAt))
   };
 }
+
+// Snapshot of the limits fields retained by Hubs before component provenance
+// was added. Collector output is already normalized, so this executable
+// round-trip models the legacy schema boundary that stripped only the new
+// private identity fields and windows[].source.
+function roundTripThroughLegacyHub(summary) {
+  return {
+    ...summary,
+    providers: summary.providers.map((provider) => {
+      const { webAccountKey: _webAccountKey, accountKeyAliases: _accountKeyAliases, ...legacy } = provider;
+      return {
+        ...legacy,
+        windows: provider.windows.map(({ source: _source, ...window }) => window)
+      };
+    })
+  };
+}
+
+test('new pure-Web OpenCode quota survives a pre-provenance Hub round-trip', async () => {
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      now: () => Date.parse(updatedAt),
+      opencodeFetchGoWeb: async () => ({
+        status: 'ok',
+        workspaceId: 'workspace-web',
+        windows: [{ kind: 'session', usedPercent: 30 }]
+      }),
+      opencodeFetchZen: async () => ({
+        status: 'notConfigured',
+        workspaceId: '',
+        windows: [],
+        balanceUsd: null
+      })
+    }
+  );
+  const legacyLimits = roundTripThroughLegacyHub(summary);
+  const legacyProvider = legacyLimits.providers[0];
+  assert.equal(legacyProvider.source, 'web');
+  assert.equal(Object.hasOwn(legacyProvider.windows[0], 'source'), false);
+  assert.equal(Object.hasOwn(legacyProvider, 'webAccountKey'), false);
+  assert.equal(Object.hasOwn(legacyProvider, 'accountKeyAliases'), false);
+
+  const rawStats = statsWithDevices([
+    deviceWithProviders('local-device', legacyLimits.providers)
+  ]);
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'local-device',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false
+  });
+  const visible = visibleStats.limits.providers[0];
+
+  assert.equal(visible.status, 'ok');
+  assert.equal(visible.source, 'web');
+  assert.equal(visible.windows.length, 1);
+  assert.equal(visible.windows[0].remainingPercent, 70);
+});
 
 test('offline Hub cache filters local candidates before aggregation so a same-account remote estimate survives everywhere', () => {
   const remote = deviceWithProviders('remote-device', [opencodeProvider({
@@ -240,8 +299,8 @@ test('legacy Hub projection keeps interval-synced OpenCode fresh and preserves o
   assert.equal(visibleStats.limits.providers.find((provider) => provider.provider === 'codex'), originalCodex);
 });
 
-test('legacy untagged windows fail closed only for the local device record', () => {
-  const localLegacy = opencodeProvider({ remainingPercent: 25, source: 'web', windowSource: 'web' });
+test('legacy untagged windows fall back to provider source only for the local device record', () => {
+  const localLegacy = opencodeProvider({ remainingPercent: 25, source: 'local', windowSource: 'local' });
   const remoteLegacy = opencodeProvider({
     accountKey: 'remote-account',
     remainingPercent: 70,

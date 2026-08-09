@@ -34,9 +34,14 @@ function isLocalDeviceProvider(provider, options = {}) {
   return options.syncActive !== true;
 }
 
-function windowIsLocalOrUnknown(window) {
+function windowIsLocalOrUnknown(window, provider) {
   const source = normalizeEnumId(window?.source);
-  return source !== 'web';
+  if (source) return source !== 'web';
+  // Hubs released before component provenance preserve the provider source but
+  // strip windows[].source. Honor that legacy envelope so a pure Web quota is
+  // not mistaken for a local estimate; missing/unknown envelopes still fail
+  // closed because they cannot prove the window came from Web.
+  return normalizeEnumId(provider?.source) !== 'web';
 }
 
 function projectLimitProviderForDisplay(provider, options = {}) {
@@ -47,10 +52,10 @@ function projectLimitProviderForDisplay(provider, options = {}) {
     return provider;
   }
 
-  // New collectors identify every OpenCode window as Web or local. For an old
-  // local-device snapshot, an untagged window is ambiguous and must fail closed:
-  // retaining it could keep a disabled DB estimate visible while the Hub is down.
-  const windows = (provider.windows || []).filter((window) => !windowIsLocalOrUnknown(window));
+  // New collectors identify every OpenCode window as Web or local. Older Hubs
+  // strip that component provenance, so untagged windows fall back to the
+  // provider-level source retained by the legacy schema.
+  const windows = (provider.windows || []).filter((window) => !windowIsLocalOrUnknown(window, provider));
   const hasWebBalance = provider?.balance !== null && provider?.balance !== undefined
     || provider?.balanceUsd !== null && provider?.balanceUsd !== undefined;
   if (windows.length > 0 || hasWebBalance) {

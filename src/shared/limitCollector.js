@@ -3089,22 +3089,32 @@ async function fetchAntigravityLimits(_options = {}, deps = {}) {
 }
 
 function openCodeWebIdentity(goWeb, zen, cookie) {
-  const hasSuccessfulWebProbe = goWeb?.status === 'ok' || zen?.status === 'ok';
-  const workspaceId = goWeb?.workspaceId || zen?.workspaceId;
+  const goWorkspaceId = goWeb?.status === 'ok' ? String(goWeb.workspaceId || '') : '';
+  const zenWorkspaceId = zen?.status === 'ok' ? String(zen.workspaceId || '') : '';
+  const workspaceConflict = Boolean(
+    goWorkspaceId && zenWorkspaceId && goWorkspaceId !== zenWorkspaceId
+  );
+  const includeZen = zen?.status === 'ok' && !workspaceConflict;
+  const hasSuccessfulWebProbe = goWeb?.status === 'ok' || includeZen;
+  // Go is the quota authority when two successful probes unexpectedly resolve
+  // different workspaces. Exclude the Zen observation instead of attaching its
+  // balance/windows to the wrong account identity.
+  const workspaceId = goWorkspaceId || (includeZen ? zenWorkspaceId : '');
   if (hasSuccessfulWebProbe && workspaceId) {
     return {
       accountKey: hashKey('opencode', `workspace:${workspaceId}`),
       aliases: [
         hashKey('opencode', `go:${workspaceId}`),
         hashKey('opencode', `zen:${workspaceId}`)
-      ]
+      ],
+      includeZen
     };
   }
   if (cookie && hasSuccessfulWebProbe) {
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
-    return { accountKey: hashKey('opencode', `cookie:${cookieHash}`), aliases: [] };
+    return { accountKey: hashKey('opencode', `cookie:${cookieHash}`), aliases: [], includeZen };
   }
-  return { accountKey: '', aliases: [] };
+  return { accountKey: '', aliases: [], includeZen };
 }
 
 async function fetchOpenCodeLimits(options = {}, deps = {}) {
@@ -3179,7 +3189,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       status = 'unavailable';
     }
 
-    if (zen && zen.status === 'ok') {
+    if (zen && webIdentity.includeZen) {
       windows.push(...zen.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok'; source = 'web';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
@@ -3261,7 +3271,8 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       planLabel = 'Go';
     }
 
-    if (zen && zen.status === 'ok') {
+    const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
+    if (zen && webIdentity.includeZen) {
       windows.push(...zen.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok';
       if (!planLabel) planLabel = 'Zen';
@@ -3276,7 +3287,6 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     // Stable accountKey derived from workspaceId (preferred) or cookie hash,
     // not from the user-editable profile name — so the same account is
     // consistently identified across machines and renames.
-    const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
     let accountKey = webIdentity.accountKey;
     if (!accountKey) {
       const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);

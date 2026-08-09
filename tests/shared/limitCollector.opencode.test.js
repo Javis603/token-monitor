@@ -109,6 +109,61 @@ test('OpenCode Web identity stays stable when Go availability changes for the sa
   ], 0, now).providers.length, 1);
 });
 
+test('OpenCode Web identity ignores workspace ids from failed probes', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      now: () => now,
+      opencodeFetchGoWeb: async () => ({
+        status: 'unavailable',
+        workspaceId: 'workspace-failed-go',
+        windows: []
+      }),
+      opencodeFetchZen: async () => ({
+        status: 'ok',
+        workspaceId: 'workspace-successful-zen',
+        windows: [{ kind: 'weekly', usedPercent: 20 }],
+        balanceUsd: 5
+      })
+    }
+  );
+  const provider = summary.providers[0];
+
+  assert.equal(provider.accountKey, hashKey('opencode', 'workspace:workspace-successful-zen'));
+  assert.deepEqual(new Set(provider.accountKeyAliases), new Set([
+    hashKey('opencode', 'go:workspace-successful-zen'),
+    hashKey('opencode', 'zen:workspace-successful-zen')
+  ]));
+  assert.equal(provider.balanceUsd, 5);
+});
+
+test('OpenCode Web probes with conflicting successful workspaces do not merge components', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      now: () => now,
+      opencodeFetchGoWeb: async () => ({
+        status: 'ok',
+        workspaceId: 'workspace-go',
+        windows: [{ kind: 'session', usedPercent: 10 }]
+      }),
+      opencodeFetchZen: async () => ({
+        status: 'ok',
+        workspaceId: 'workspace-zen',
+        windows: [{ kind: 'weekly', usedPercent: 20 }],
+        balanceUsd: 5
+      })
+    }
+  );
+  const provider = summary.providers[0];
+
+  assert.equal(provider.accountKey, hashKey('opencode', 'workspace:workspace-go'));
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session']);
+  assert.equal(provider.balanceUsd, null);
+});
+
 test('fetchOpenCodeLimits surfaces Zen balance even with no usage windows', async () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
   const fakeZen = { status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 4.5 };

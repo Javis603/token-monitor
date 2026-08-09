@@ -14,6 +14,7 @@ const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
 const MAX_ACCOUNT_NAME_INPUT_LENGTH = 512;
+const MAX_OPENCODE_ACCOUNT_KEY_ALIASES = 8;
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -352,16 +353,23 @@ function normalizeWorkspaceKind(value) {
   return String(value || '').trim().toLowerCase() === 'personal' ? 'personal' : '';
 }
 
+function normalizeOpenCodeAccountKeyAliases(values, accountKey = '') {
+  if (!Array.isArray(values)) return [];
+  const canonical = String(accountKey || '').trim();
+  return [...new Set(values
+    .map((value) => String(value || '').trim())
+    .filter((value) => value && value !== canonical && value.length <= 128))]
+    .sort()
+    .slice(0, MAX_OPENCODE_ACCOUNT_KEY_ALIASES);
+}
+
 function normalizeLimitProvider(input) {
   if (!input || typeof input !== 'object') return null;
   const provider = normalizeProviderId(input.provider);
   if (!provider) return null;
   const accountKey = input.accountKey ? String(input.accountKey) : '';
-  const accountKeyAliases = provider === 'opencode' && Array.isArray(input.accountKeyAliases)
-    ? [...new Set(input.accountKeyAliases
-        .map((value) => String(value || '').trim())
-        .filter((value) => value && value !== accountKey && value.length <= 128))]
-        .slice(0, 8)
+  const accountKeyAliases = provider === 'opencode'
+    ? normalizeOpenCodeAccountKeyAliases(input.accountKeyAliases, accountKey)
     : [];
   const accountLabel = normalizeAccountLabel(input.accountLabel);
   const windows = Array.isArray(input.windows)
@@ -706,9 +714,10 @@ function mergeOpenCodeProviderComponents(candidates) {
     .map((provider) => String(provider.webAccountKey || '').trim())
     .filter(Boolean))].sort()[0] || '';
   const accountKey = canonicalWebAccountKey || winner.accountKey;
-  const accountKeyAliases = [...new Set(candidates.flatMap(openCodeIdentityKeys))]
-    .filter((key) => key !== accountKey)
-    .sort();
+  const accountKeyAliases = normalizeOpenCodeAccountKeyAliases(
+    candidates.flatMap(openCodeIdentityKeys),
+    accountKey
+  );
   return {
     ...winner,
     accountKey,
