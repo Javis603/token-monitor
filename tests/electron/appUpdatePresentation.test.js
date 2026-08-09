@@ -282,6 +282,18 @@ test('a spent attempt stops the automatic downloader, and the control says so', 
     descriptionKey: 'settings.appUpdate.automaticBlockedUntilRestart'
   });
 
+  // Switched off, there is no promise to suspend. Saying it resumes on restart
+  // would tell the user a setting they just turned off comes back with the app.
+  assert.deepEqual(automaticAppUpdateControlState({
+    preferenceEnabled: false,
+    updateState: { installSupported: true, installBusy: false, installRetryBlocked: true }
+  }), {
+    checked: false,
+    disabled: false,
+    unavailable: false,
+    descriptionKey: 'settings.appUpdate.automaticDescription'
+  });
+
   // Still on and still changeable: the preference is unaffected and outlives the
   // process, so greying it would misreport a pause as a build that cannot update.
   for (const locale of Object.keys(MESSAGES)) {

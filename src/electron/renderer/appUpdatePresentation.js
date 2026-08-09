@@ -23,12 +23,16 @@
     // description rather than by disabling the control: the preference itself is
     // unaffected and still worth changing, and grey would read as unsupported here
     // and invite toggling it off and on to no effect.
+    //
+    // Only while the preference is on, because that is the promise being suspended.
+    // Switched off there is nothing to resume, and saying so anyway would tell the
+    // user their restart will turn a setting back on that they just turned off.
     const descriptionKey = !supportKnown
       ? 'settings.appUpdate.automaticCheckingSupport'
       : !supported
         ? UNSUPPORTED_DESCRIPTION_KEYS[updateState.installSupportReason]
           || 'settings.appUpdate.automaticUnsupported'
-        : updateState.installRetryBlocked
+        : preferenceEnabled && updateState.installRetryBlocked
           ? 'settings.appUpdate.automaticBlockedUntilRestart'
           : 'settings.appUpdate.automaticDescription';
 
