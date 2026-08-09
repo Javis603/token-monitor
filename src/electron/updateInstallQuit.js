@@ -54,10 +54,16 @@ function createUpdateInstallQuitGuard({
     phase = 'requested';
     claim();
     clearTimer();
-    // Armed only when the hand-off can actually be observed. Without that
-    // listener an expiry would hand the flags back with nothing able to take them
-    // again, and a late hand-off would then race a forced exit. Holding the claim
-    // for the session is the lesser failure.
+    // Armed only when the hand-off can actually be observed. Without that listener
+    // an expiry would hand the flags back with nothing able to take them again, and
+    // a late hand-off would then race a forced exit.
+    //
+    // The install still goes ahead, because supervision is not what makes it work:
+    // this only gives up the recovery, leaving that case exactly where it stands
+    // today. Refusing outright would instead turn a rare failure a force quit gets
+    // the user out of into an app that can never update itself. It is also a state
+    // that cannot arise on the Electron we ship, which
+    // updateInstallQuitUpstream.test.js pins; if that goes red, weigh this again.
     if (!watchdogEnabled()) return true;
     timer = setTimeoutFn(() => {
       timer = null;

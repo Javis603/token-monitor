@@ -1,10 +1,14 @@
 'use strict';
 
-// The install-quit guard is built on four facts about electron-updater's own
-// implementation, not on its public API. They are load-bearing: get any of them
-// wrong and the app either cannot be quit or stacks install attempts. Upstream
-// owes us none of them, so this pins each one to the code we actually ship
-// against and fails the moment a bump changes it.
+// The install-quit guard rests on facts about its dependencies rather than on our
+// own code, so nothing in this repo fails when one of them changes. They are
+// load-bearing: get any wrong and the app either cannot be quit or stacks install
+// attempts. This pins each to what we actually ship against and fails the moment a
+// bump moves it.
+//
+// Most are electron-updater implementation details, which upstream owes us nothing
+// about. The last is Electron public API, pinned because a policy decision rests on
+// it rather than because it is fragile.
 //
 // A red test here is not a bug in our code. It means the assumptions below have
 // to be re-read against the new version before the guard can be trusted.
@@ -16,6 +20,7 @@ const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '../..');
 const OUT = path.join(ROOT, 'node_modules/electron-updater/out');
+const ELECTRON_TYPES = path.join(ROOT, 'node_modules/electron/electron.d.ts');
 const PINNED = '6.8.9';
 
 function upstream(file) {
@@ -102,4 +107,30 @@ test('MacUpdater leaves Squirrel untouched until the install is requested', (t) 
   assert.match(fn, /if \(this\.autoInstallOnAppQuit\) \{[\s\S]*?this\.nativeUpdater\.checkForUpdates\(\)/);
   const beforeGuard = fn.slice(0, fn.indexOf('if (this.autoInstallOnAppQuit)'));
   assert.doesNotMatch(beforeGuard, /nativeUpdater\.checkForUpdates\(\)/);
+});
+
+// The guard keeps updating when the hand-off cannot be observed, losing only the
+// recovery. That choice rests on one fact: on the Electron we ship, the emitter is
+// always there, so the branch describes a state that cannot occur rather than a
+// mode we run in. Refusing to install there would trade a rare, force-quittable
+// failure for an app that can never update itself.
+//
+// Unlike the assertions above these are public API, so any Electron carrying them
+// is fine and the version is deliberately not pinned here. If this goes red, the
+// branch became reachable and the fail-open choice has to be made again.
+test('Electron always exposes the hand-off emitter the recovery depends on', (t) => {
+  let types;
+  try {
+    types = fs.readFileSync(ELECTRON_TYPES, 'utf8');
+  } catch (_) {
+    return t.skip('electron is not installed');
+  }
+  // An EventEmitter, so observeUpdateInstallHandoff finds a callable `on`.
+  assert.match(types, /interface AutoUpdater extends NodeJS\.EventEmitter/);
+  // Carrying the event we listen for.
+  assert.match(types, /on\(event: 'before-quit-for-update', listener: \(\) => void\): this;/);
+  // And reachable unconditionally: a plain const, not optional and not declared
+  // per-platform, which is what makes the emitter present on every platform we
+  // install on rather than only the ones with a native updater.
+  assert.match(types, /^ {2}const autoUpdater: AutoUpdater;$/m);
 });
