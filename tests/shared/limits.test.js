@@ -816,6 +816,7 @@ test('OpenCode sync keeps the legacy profile label and explicit plan while publi
     providers: [{
       provider: 'opencode',
       accountKey: 'sha256:opencode-work',
+      webAccountKey: 'sha256:opencode-work',
       accountName: 'work',
       accountLabel: 'work',
       planLabel: 'Go',
@@ -830,11 +831,58 @@ test('OpenCode sync keeps the legacy profile label and explicit plan while publi
   assert.equal(synced.accountName, 'work');
   assert.equal(synced.accountLabel, 'work');
   assert.equal(synced.planLabel, 'Go');
+  assert.equal(synced.webAccountKey, 'sha256:opencode-work');
 
   const publicProvider = publicLimits(limits).providers[0];
   assert.equal(Object.hasOwn(publicProvider, 'accountName'), false);
   assert.equal(Object.hasOwn(publicProvider, 'accountLabel'), false);
   assert.equal(Object.hasOwn(publicProvider, 'planLabel'), false);
+  assert.equal(Object.hasOwn(publicProvider, 'webAccountKey'), false);
+});
+
+test('aggregateLimits merges complementary OpenCode components for one account', () => {
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'remote-device',
+      limits: {
+        updatedAt: '2026-08-09T08:01:00.000Z',
+        providers: [{
+          provider: 'opencode',
+          accountKey: 'sha256:shared',
+          webAccountKey: 'sha256:shared',
+          status: 'ok',
+          source: 'web',
+          updatedAt: '2026-08-09T08:01:00.000Z',
+          windows: [
+            { kind: 'session', source: 'local', usedPercent: 40 },
+            { kind: 'weekly', source: 'web', usedPercent: 20 }
+          ],
+          balanceUsd: 4
+        }]
+      }
+    },
+    {
+      deviceId: 'local-device',
+      limits: {
+        updatedAt: '2026-08-09T08:02:00.000Z',
+        providers: [{
+          provider: 'opencode',
+          accountKey: 'sha256:shared',
+          webAccountKey: 'sha256:shared',
+          status: 'ok',
+          source: 'web',
+          updatedAt: '2026-08-09T08:02:00.000Z',
+          windows: [{ kind: 'weekly', source: 'web', usedPercent: 10 }],
+          balanceUsd: 5
+        }]
+      }
+    }
+  ], 0, Date.parse('2026-08-09T08:03:00.000Z'));
+
+  assert.equal(aggregate.providers.length, 1);
+  assert.equal(aggregate.providers[0].balanceUsd, 5);
+  assert.equal(aggregate.providers[0].windows.find((window) => window.kind === 'session').remainingPercent, 60);
+  assert.equal(aggregate.providers[0].windows.find((window) => window.kind === 'weekly').remainingPercent, 90);
 });
 
 test('collectLimitsOnce flattens multiple providers returned by a provider fetcher', async () => {

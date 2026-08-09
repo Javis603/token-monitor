@@ -2,8 +2,14 @@
 
 const { aggregateLimits } = require('../shared/limits');
 
-function normalizeId(value) {
+const LEGACY_HUB_STALENESS_COMPATIBILITY_FLOOR_MS = 1;
+
+function normalizeEnumId(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function normalizeDeviceId(value) {
+  return String(value || '').trim();
 }
 
 function hasQuotaEstimate(provider) {
@@ -14,14 +20,14 @@ function hasQuotaEstimate(provider) {
 
 function hasLocalQuotaEstimate(provider) {
   if (!hasQuotaEstimate(provider)) return false;
-  if (normalizeId(provider?.source) === 'local') return true;
-  return (provider.windows || []).some((window) => normalizeId(window?.source) === 'local');
+  if (normalizeEnumId(provider?.source) === 'local') return true;
+  return (provider.windows || []).some((window) => normalizeEnumId(window?.source) === 'local');
 }
 
 function isLocalDeviceProvider(provider, options = {}) {
   if (typeof options.localDeviceProvider === 'boolean') return options.localDeviceProvider;
-  const sourceDeviceId = normalizeId(provider?.sourceDeviceId);
-  const localDeviceId = normalizeId(options.localDeviceId);
+  const sourceDeviceId = normalizeDeviceId(provider?.sourceDeviceId);
+  const localDeviceId = normalizeDeviceId(options.localDeviceId);
   if (sourceDeviceId) return Boolean(localDeviceId && sourceDeviceId === localDeviceId);
   // Older aggregate snapshots have no provenance. Preserve them in sync mode
   // rather than claiming they came from this device and hiding remote data.
@@ -29,12 +35,12 @@ function isLocalDeviceProvider(provider, options = {}) {
 }
 
 function windowIsLocalOrUnknown(window) {
-  const source = normalizeId(window?.source);
+  const source = normalizeEnumId(window?.source);
   return source !== 'web';
 }
 
 function projectLimitProviderForDisplay(provider, options = {}) {
-  if (normalizeId(provider?.provider) !== 'opencode'
+  if (normalizeEnumId(provider?.provider) !== 'opencode'
     || options.opencodeLocalLimitsEnabled === true
     || !isLocalDeviceProvider(provider, options)
     || !hasQuotaEstimate(provider)) {
@@ -48,11 +54,15 @@ function projectLimitProviderForDisplay(provider, options = {}) {
   const hasWebBalance = provider?.balance !== null && provider?.balance !== undefined
     || provider?.balanceUsd !== null && provider?.balanceUsd !== undefined;
   if (windows.length > 0 || hasWebBalance) {
-    if (windows.length === (provider.windows || []).length && normalizeId(provider.source) === 'web') {
+    if (windows.length === (provider.windows || []).length && normalizeEnumId(provider.source) === 'web') {
       return provider;
     }
     return {
       ...provider,
+      // Once the local component is gone, its DB-path hash is not a valid Web
+      // identity. Modern collectors preserve the Web identity independently;
+      // legacy mixed snapshots fail closed instead of mislabelling that hash.
+      accountKey: String(provider.webAccountKey || ''),
       source: 'web',
       windows
     };
@@ -69,8 +79,8 @@ function projectLimitProviderForDisplay(provider, options = {}) {
 }
 
 function isLocalDeviceRecord(device, options = {}) {
-  const localDeviceId = normalizeId(options.localDeviceId);
-  if (localDeviceId) return normalizeId(device?.deviceId) === localDeviceId;
+  const localDeviceId = normalizeDeviceId(options.localDeviceId);
+  if (localDeviceId) return normalizeDeviceId(device?.deviceId) === localDeviceId;
   return options.syncActive !== true;
 }
 
@@ -100,6 +110,31 @@ function projectionNowMs(stats, options = {}) {
   if (Number.isFinite(options.nowMs)) return options.nowMs;
   const timestamp = Date.parse(stats?.limits?.updatedAt || stats?.updatedAt || '');
   return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+function projectionStaleAfterMs(stats) {
+  if (Number.isFinite(stats?.staleAfterMs)) return stats.staleAfterMs;
+  // Old Hubs do not publish their threshold. A positive compatibility floor
+  // keeps per-device syncUploadIntervalMs active; zero would disable that
+  // extension and prematurely stale interval-synced OpenCode candidates.
+  return LEGACY_HUB_STALENESS_COMPATIBILITY_FLOOR_MS;
+}
+
+function replaceOpenCodeProviders(currentProviders, aggregateProviders) {
+  const replacements = (aggregateProviders || [])
+    .filter((provider) => normalizeEnumId(provider?.provider) === 'opencode');
+  const providers = [];
+  let inserted = false;
+  for (const provider of currentProviders || []) {
+    if (normalizeEnumId(provider?.provider) !== 'opencode') {
+      providers.push(provider);
+      continue;
+    }
+    if (!inserted) providers.push(...replacements);
+    inserted = true;
+  }
+  if (!inserted) providers.push(...replacements);
+  return providers;
 }
 
 function projectAggregateProviders(stats, options = {}) {
@@ -134,7 +169,7 @@ function projectLimitStatsForDisplay(stats, options = {}) {
 
   const limits = aggregateLimits(
     visibleDevices,
-    Number.isFinite(stats.staleAfterMs) ? stats.staleAfterMs : 0,
+    projectionStaleAfterMs(stats),
     projectionNowMs(stats, options)
   );
   return {
@@ -142,7 +177,8 @@ function projectLimitStatsForDisplay(stats, options = {}) {
     devices: visibleDevices,
     limits: {
       ...stats.limits,
-      ...limits
+      updatedAt: limits.updatedAt,
+      providers: replaceOpenCodeProviders(stats?.limits?.providers, limits.providers)
     }
   };
 }

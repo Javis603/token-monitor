@@ -93,7 +93,7 @@
   }
 
   function deviceKey(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '').trim();
   }
 
   function deviceLabel(deviceOrId) {

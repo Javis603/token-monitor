@@ -19,6 +19,7 @@ const updatedAt = '2026-08-09T08:03:00.000Z';
 
 function opencodeProvider({
   accountKey = 'shared-account',
+  webAccountKey = '',
   remainingPercent,
   source = 'local',
   windowSource = source,
@@ -30,6 +31,7 @@ function opencodeProvider({
     provider: 'opencode',
     source,
     accountKey,
+    webAccountKey,
     status,
     updatedAt: providerUpdatedAt,
     windows: remainingPercent === null ? [] : [{
@@ -41,11 +43,12 @@ function opencodeProvider({
   };
 }
 
-function deviceWithProviders(deviceId, providers) {
+function deviceWithProviders(deviceId, providers, extra = {}) {
   return {
     deviceId,
     updatedAt,
-    limits: { updatedAt, providers }
+    limits: { updatedAt, providers },
+    ...extra
   };
 }
 
@@ -80,7 +83,7 @@ test('offline Hub cache filters local candidates before aggregation so a same-ac
   assert.equal(cachedHubStats.limits.providers[0].windows[0].remainingPercent, 20);
 
   const visibleStats = projectLimitStatsForDisplay(cachedHubStats, {
-    localDeviceId: 'LOCAL-DEVICE',
+    localDeviceId: 'local-device',
     syncActive: true,
     opencodeLocalLimitsEnabled: false
   });
@@ -121,6 +124,8 @@ test('offline Hub cache filters local candidates before aggregation so a same-ac
 
 test('mixed local and Web OpenCode provider removes only local windows and keeps Web status actionable', () => {
   const mixed = opencodeProvider({
+    accountKey: 'local-db-key',
+    webAccountKey: 'zen-web-key',
     remainingPercent: 25,
     source: 'web',
     windowSource: 'local',
@@ -139,8 +144,98 @@ test('mixed local and Web OpenCode provider removes only local windows and keeps
   assert.equal(rawStats.devices[0].limits.providers[0].windows.length, 2);
   assert.equal(visible.status, 'ok');
   assert.equal(visible.source, 'web');
+  assert.equal(visible.accountKey, 'zen-web-key');
   assert.equal(visible.balanceUsd, 5);
   assert.deepEqual(visible.windows.map((window) => [window.kind, window.source]), [['weekly', 'web']]);
+});
+
+test('mixed same-account observations merge Web balance with a remote local quota', () => {
+  const local = opencodeProvider({
+    accountKey: 'zen-web-key',
+    webAccountKey: 'zen-web-key',
+    remainingPercent: 25,
+    source: 'web',
+    windowSource: 'local',
+    providerUpdatedAt: '2026-08-09T08:02:00.000Z',
+    balanceUsd: 5
+  });
+  local.windows.push({ kind: 'weekly', source: 'web', usedPercent: 10 });
+  const remote = opencodeProvider({
+    accountKey: 'zen-web-key',
+    webAccountKey: 'zen-web-key',
+    remainingPercent: 60,
+    source: 'web',
+    windowSource: 'local',
+    providerUpdatedAt: '2026-08-09T08:01:00.000Z',
+    balanceUsd: 4
+  });
+  remote.windows.push({ kind: 'weekly', source: 'web', usedPercent: 20 });
+  const rawStats = statsWithDevices([
+    deviceWithProviders('remote-device', [remote]),
+    deviceWithProviders('local-device', [local])
+  ]);
+
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'local-device',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false
+  });
+  const providers = visibleStats.limits.providers.filter((provider) => provider.provider === 'opencode');
+
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].accountKey, 'zen-web-key');
+  assert.equal(providers[0].balanceUsd, 5);
+  assert.equal(providers[0].windows.find((window) => window.kind === 'session').remainingPercent, 60);
+  assert.equal(providers[0].windows.find((window) => window.kind === 'weekly').remainingPercent, 90);
+});
+
+test('device identity stays case-sensitive so a differently-cased remote device is preserved', () => {
+  const rawStats = statsWithDevices([
+    deviceWithProviders('MacBook', [opencodeProvider({ accountKey: 'local', remainingPercent: 20 })]),
+    deviceWithProviders('macbook', [opencodeProvider({ accountKey: 'remote', remainingPercent: 70 })])
+  ]);
+
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'MacBook',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false
+  });
+
+  assert.equal(visibleStats.devices.find((device) => device.deviceId === 'MacBook').limits.providers[0].status, 'disabled');
+  assert.equal(visibleStats.devices.find((device) => device.deviceId === 'macbook').limits.providers[0].status, 'ok');
+  assert.equal(visibleStats.limits.providers.find((provider) => provider.accountKey === 'remote').windows[0].remainingPercent, 70);
+});
+
+test('legacy Hub projection keeps interval-synced OpenCode fresh and preserves other provider aggregates', () => {
+  const nowMs = Date.parse('2026-08-09T08:40:00.000Z');
+  const remoteOpenCode = opencodeProvider({
+    accountKey: 'remote',
+    remainingPercent: 60,
+    providerUpdatedAt: '2026-08-09T08:15:00.000Z'
+  });
+  const devices = [
+    deviceWithProviders('remote-device', [remoteOpenCode], {
+      updatedAt: '2026-08-09T08:15:00.000Z',
+      receivedAt: '2026-08-09T08:15:00.000Z',
+      syncUploadIntervalMs: 20 * 60 * 1000
+    }),
+    deviceWithProviders('local-device', [opencodeProvider({ accountKey: 'local', remainingPercent: 20 })])
+  ];
+  const rawStats = statsWithDevices(devices);
+  rawStats.limits = aggregateLimits(devices, 10 * 60 * 1000, nowMs);
+  rawStats.limits.providers.push({ provider: 'codex', status: 'ok', source: 'rpc', accountKey: 'unchanged' });
+  delete rawStats.staleAfterMs;
+  const originalCodex = rawStats.limits.providers.find((provider) => provider.provider === 'codex');
+
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'local-device',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false,
+    nowMs
+  });
+
+  assert.equal(visibleStats.limits.providers.find((provider) => provider.accountKey === 'remote').stale, false);
+  assert.equal(visibleStats.limits.providers.find((provider) => provider.provider === 'codex'), originalCodex);
 });
 
 test('legacy untagged windows fail closed only for the local device record', () => {

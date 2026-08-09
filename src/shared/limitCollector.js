@@ -3088,6 +3088,20 @@ async function fetchAntigravityLimits(_options = {}, deps = {}) {
   }
 }
 
+function openCodeWebAccountKey(goWeb, zen, cookie) {
+  if (goWeb?.status === 'ok' && goWeb.workspaceId) {
+    return hashKey('opencode', `go:${goWeb.workspaceId}`);
+  }
+  if (zen?.status === 'ok' && zen.workspaceId) {
+    return hashKey('opencode', `zen:${zen.workspaceId}`);
+  }
+  if (cookie && (goWeb?.status === 'ok' || zen?.status === 'ok')) {
+    const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
+    return hashKey('opencode', `cookie:${cookieHash}`);
+  }
+  return '';
+}
+
 async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
@@ -3138,6 +3152,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
           fetchZen(cookie, { now: () => nowMs, workspaceId: '' })
         ])
       : [null, null];
+    const webAccountKey = openCodeWebAccountKey(goWeb, zen, cookie);
 
     const windows = [];
     let status = 'notConfigured';
@@ -3171,7 +3186,18 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       if (surfaced) { status = surfaced; source = 'web'; }
     }
 
-    return normalizeLimitProvider({ provider: 'opencode', accountKey, accountLabel, source, status, updatedAt, windows, balanceUsd });
+    if (webAccountKey) accountKey = webAccountKey;
+    return normalizeLimitProvider({
+      provider: 'opencode',
+      accountKey,
+      webAccountKey,
+      accountLabel,
+      source,
+      status,
+      updatedAt,
+      windows,
+      balanceUsd
+    });
   }
 
   // ── Multi-account (2+ cookies): separate per-profile providers ────────────
@@ -3258,6 +3284,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     return normalizeLimitProvider({
       provider: 'opencode',
       accountKey,
+      webAccountKey: accountKey,
       accountName: name,
       // Keep accountLabel as the profile name for pre-accountName renderers.
       // New renderers use planLabel for Go/Zen and accountName for identity.
@@ -3274,6 +3301,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return normalizeLimitProvider({
       provider: 'opencode', accountKey: hashKey('opencode', `cookie:${cookieHash}`),
+      webAccountKey: hashKey('opencode', `cookie:${cookieHash}`),
       accountName: name, accountLabel: name, planLabel: '', source: 'web', status: 'unavailable',
       updatedAt, windows: [], balanceUsd: null
     });

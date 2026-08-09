@@ -43,9 +43,31 @@ test('fetchOpenCodeLimits merges Go(local) windows with Zen(web) balance', async
   const p = summary.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.status, 'ok');
   assert.strictEqual(p.source, 'web');
+  assert.strictEqual(p.accountKey, p.webAccountKey);
   assert.strictEqual(p.windows.find((w) => w.kind === 'session').source, 'local');
   assert.strictEqual(p.windows.find((w) => w.kind === 'weekly').source, 'web');
   assert.strictEqual(p.balanceUsd, 5);                     // Zen prepaid balance is surfaced, not dropped
+});
+
+test('mixed OpenCode identity follows the Web account instead of the device-local DB path', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const collect = async (identity) => collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1', opencodeLocalLimitsEnabled: true },
+    {
+      now: () => now,
+      opencodeCollectGo: () => ({ status: 'ok', identity, windows: [{ kind: 'session', usedPercent: 10 }] }),
+      opencodeFetchGoWeb: async () => ({ status: 'unavailable', windows: [], workspaceId: '' }),
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'same-zen-workspace', windows: [], balanceUsd: 5 })
+    }
+  );
+
+  const first = (await collect('go:/Users/one/opencode.db')).providers[0];
+  const second = (await collect('go:/Users/two/opencode.db')).providers[0];
+
+  assert.equal(first.accountKey, first.webAccountKey);
+  assert.equal(second.accountKey, second.webAccountKey);
+  assert.equal(first.accountKey, second.accountKey);
+  assert.equal(first.windows[0].source, 'local');
 });
 
 test('fetchOpenCodeLimits surfaces Zen balance even with no usage windows', async () => {
@@ -157,6 +179,7 @@ test('fetchOpenCodeLimits: falls back to local estimate when Go web fails', asyn
   const p = summary.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.status, 'ok');
   assert.strictEqual(p.source, 'local');
+  assert.strictEqual(Object.hasOwn(p, 'webAccountKey'), false);
   assert.strictEqual(p.windows.find((w) => w.kind === 'session').usedPercent, 8);
   assert.strictEqual(p.windows.find((w) => w.kind === 'session').source, 'local');
 });
@@ -229,6 +252,7 @@ test('fetchOpenCodeLimits keeps multi-account identity compatible with old rende
       { accountName: 'myWork', accountLabel: 'myWork', planLabel: 'Go' }
     ]
   );
+  assert.equal(summary.providers.every((provider) => provider.webAccountKey === provider.accountKey), true);
   // Renderers from before accountName existed read accountLabel as the row
   // title. New producers must therefore keep the profile name there too.
   assert.deepStrictEqual(

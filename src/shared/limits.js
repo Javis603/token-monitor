@@ -391,6 +391,9 @@ function normalizeLimitProvider(input) {
   return {
     provider,
     accountKey: input.accountKey ? String(input.accountKey) : '',
+    ...(provider === 'opencode' && input.webAccountKey
+      ? { webAccountKey: String(input.webAccountKey) }
+      : {}),
     accountLabel,
     planLabel: normalizeAccountLabel(input.planLabel),
     accountName: normalizeAccountName(input.accountName ?? input.accountLogin ?? input.login),
@@ -472,8 +475,10 @@ function providerCollapseKey(provider) {
 }
 
 function providerWindowRank(provider) {
-  if (provider?.provider !== 'codex') return 0;
-  return Array.isArray(provider.windows) && provider.windows.length > 0 ? 1 : 0;
+  const windowCount = Array.isArray(provider?.windows) ? provider.windows.length : 0;
+  if (provider?.provider === 'codex') return windowCount > 0 ? 1 : 0;
+  if (provider?.provider === 'opencode') return windowCount;
+  return 0;
 }
 
 function codexProviderIdentityKeys(provider) {
@@ -587,10 +592,66 @@ function carryProviderBalance(winner, loser) {
   return { ...winner, balance: loser.balance, windows };
 }
 
+function openCodeWindowKey(window) {
+  return [window?.kind, window?.metric, window?.label].map((value) => String(value || '')).join(':');
+}
+
+function openCodeWindowSourceRank(window) {
+  if (window?.source === 'web') return 2;
+  if (window?.source === 'local') return 1;
+  return 0;
+}
+
+function mergeOpenCodeProviderComponents(winner, current, candidate, winningInput) {
+  if (winner?.provider !== 'opencode'
+    || current?.provider !== 'opencode'
+    || candidate?.provider !== 'opencode'
+    || current.accountKey !== candidate.accountKey) {
+    return winner;
+  }
+
+  const entries = new Map();
+  for (const provider of [current, candidate]) {
+    // Never revive a stale or failed component beside a fresh successful row.
+    if (provider !== winningInput && ((provider.stale && !winner.stale)
+      || (provider.status !== 'ok' && winner.status === 'ok'))) continue;
+    for (const window of provider.windows || []) {
+      const key = openCodeWindowKey(window);
+      const existing = entries.get(key);
+      if (!existing
+        || openCodeWindowSourceRank(window) > openCodeWindowSourceRank(existing.window)
+        || (openCodeWindowSourceRank(window) === openCodeWindowSourceRank(existing.window)
+          && (provider === winningInput || timestampMs(provider.updatedAt) >= timestampMs(existing.provider.updatedAt)))) {
+        entries.set(key, { window, provider });
+      }
+    }
+  }
+
+  const windows = Array.from(entries.values())
+    .map((entry) => entry.window)
+    .sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind)
+      || String(a.label || '').localeCompare(String(b.label || '')));
+  const balanceProvider = [current, candidate]
+    .filter((provider) => provider.balanceUsd !== null && provider.balanceUsd !== undefined)
+    .filter((provider) => !(provider.stale && !winner.stale))
+    .filter((provider) => !(provider.status !== 'ok' && winner.status === 'ok'))
+    .sort((a, b) => timestampMs(b.updatedAt) - timestampMs(a.updatedAt))[0];
+  const balanceUsd = balanceProvider ? balanceProvider.balanceUsd : winner.balanceUsd;
+  const hasWebComponent = windows.some((window) => window.source === 'web')
+    || balanceUsd !== null && balanceUsd !== undefined;
+  return {
+    ...winner,
+    source: hasWebComponent ? 'web' : winner.source,
+    windows,
+    balanceUsd
+  };
+}
+
 function pickBetterProvider(current, candidate) {
   if (!current) return candidate;
   const winner = betterProvider(current, candidate);
-  return carryProviderBalance(winner, winner === current ? candidate : current);
+  const withBalance = carryProviderBalance(winner, winner === current ? candidate : current);
+  return mergeOpenCodeProviderComponents(withBalance, current, candidate, winner);
 }
 
 function betterProvider(current, candidate) {
@@ -660,6 +721,7 @@ function publicLimits(limits) {
     refreshMs: normalized.refreshMs,
     providers: normalized.providers.map(({
       accountKey,
+      webAccountKey,
       accountEmail,
       accountName,
       accountLabel,

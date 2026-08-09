@@ -461,6 +461,28 @@ test('remote synced provider tags show the selected source device and local avai
   assert.equal(limitProviderMainDeviceLabel(provenance, { showSource: true }), 'work-mac');
 });
 
+test('device provenance uses exact case-sensitive device identity', () => {
+  const provider = {
+    provider: 'opencode',
+    status: 'ok',
+    source: 'local',
+    accountKey: 'shared',
+    sourceDeviceId: 'macbook'
+  };
+  const provenance = limitProviderProvenance(provider, {
+    localDeviceId: 'MacBook',
+    syncActive: true,
+    devices: [
+      { deviceId: 'MacBook', limits: { providers: [{ ...provider, sourceDeviceId: undefined }] } },
+      { deviceId: 'macbook', limits: { providers: [{ ...provider, sourceDeviceId: undefined }] } }
+    ]
+  });
+
+  assert.equal(provenance.selectedIsLocal, false);
+  assert.equal(provenance.selectedIsRemote, true);
+  assert.equal(provenance.selectedDeviceLabel, 'macbook');
+});
+
 test('local provider tags show when synced devices also have provider data', () => {
   const provider = { provider: 'cursor', status: 'ok', source: 'web', sourceDeviceId: 'local-mac' };
   const provenance = limitProviderProvenance(provider, {
