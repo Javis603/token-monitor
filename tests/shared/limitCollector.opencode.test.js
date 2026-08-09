@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { collectLimitsOnce } = require('../../src/shared/limitCollector');
+const { aggregateLimits } = require('../../src/shared/limits');
 
 test('collectLimitsOnce includes opencode provider from injected Go data', async () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
@@ -68,6 +69,39 @@ test('mixed OpenCode identity follows the Web account instead of the device-loca
   assert.equal(second.accountKey, second.webAccountKey);
   assert.equal(first.accountKey, second.accountKey);
   assert.equal(first.windows[0].source, 'local');
+});
+
+test('OpenCode Web identity stays stable when Go availability changes for the same workspace', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const collect = async (goStatus) => collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      now: () => now,
+      opencodeFetchGoWeb: async () => ({
+        status: goStatus,
+        workspaceId: 'shared-workspace',
+        windows: goStatus === 'ok' ? [{ kind: 'session', usedPercent: 10 }] : []
+      }),
+      opencodeFetchZen: async () => ({
+        status: 'ok',
+        workspaceId: 'shared-workspace',
+        windows: [{ kind: 'weekly', usedPercent: 20 }],
+        balanceUsd: 5
+      })
+    }
+  );
+
+  const goAndZenSummary = await collect('ok');
+  const zenOnlySummary = await collect('unavailable');
+  const goAndZen = goAndZenSummary.providers[0];
+  const zenOnly = zenOnlySummary.providers[0];
+
+  assert.equal(goAndZen.webAccountKey, zenOnly.webAccountKey);
+  assert.equal(goAndZen.accountKey, zenOnly.accountKey);
+  assert.equal(aggregateLimits([
+    { deviceId: 'go-device', limits: goAndZenSummary },
+    { deviceId: 'zen-device', limits: zenOnlySummary }
+  ], 0, now).providers.length, 1);
 });
 
 test('fetchOpenCodeLimits surfaces Zen balance even with no usage windows', async () => {

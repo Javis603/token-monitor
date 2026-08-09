@@ -3089,13 +3089,12 @@ async function fetchAntigravityLimits(_options = {}, deps = {}) {
 }
 
 function openCodeWebAccountKey(goWeb, zen, cookie) {
-  if (goWeb?.status === 'ok' && goWeb.workspaceId) {
-    return hashKey('opencode', `go:${goWeb.workspaceId}`);
+  const hasSuccessfulWebProbe = goWeb?.status === 'ok' || zen?.status === 'ok';
+  const workspaceId = goWeb?.workspaceId || zen?.workspaceId;
+  if (hasSuccessfulWebProbe && workspaceId) {
+    return hashKey('opencode', `workspace:${workspaceId}`);
   }
-  if (zen?.status === 'ok' && zen.workspaceId) {
-    return hashKey('opencode', `zen:${zen.workspaceId}`);
-  }
-  if (cookie && (goWeb?.status === 'ok' || zen?.status === 'ok')) {
+  if (cookie && hasSuccessfulWebProbe) {
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return hashKey('opencode', `cookie:${cookieHash}`);
   }
@@ -3269,14 +3268,8 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     // Stable accountKey derived from workspaceId (preferred) or cookie hash,
     // not from the user-editable profile name — so the same account is
     // consistently identified across machines and renames.
-    const goWid = goWeb?.workspaceId || '';
-    const zenWid = zen?.workspaceId || '';
-    let accountKey;
-    if (goWeb && goWeb.status === 'ok' && goWid) {
-      accountKey = hashKey('opencode', `go:${goWid}`);
-    } else if (zen && zen.status === 'ok' && zenWid) {
-      accountKey = hashKey('opencode', `zen:${zenWid}`);
-    } else {
+    let accountKey = openCodeWebAccountKey(goWeb, zen, cookie);
+    if (!accountKey) {
       const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
       accountKey = hashKey('opencode', `cookie:${cookieHash}`);
     }

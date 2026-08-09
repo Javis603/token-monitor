@@ -602,28 +602,53 @@ function openCodeWindowSourceRank(window) {
   return 0;
 }
 
-function mergeOpenCodeProviderComponents(winner, current, candidate, winningInput) {
-  if (winner?.provider !== 'opencode'
-    || current?.provider !== 'opencode'
-    || candidate?.provider !== 'opencode'
-    || current.accountKey !== candidate.accountKey) {
-    return winner;
-  }
+function openCodeProviderTieBreakKey(provider) {
+  return JSON.stringify([
+    provider?.sourceDeviceId || '',
+    provider?.source || '',
+    provider?.accountLabel || '',
+    provider?.windows || [],
+    provider?.balanceUsd
+  ]);
+}
 
+function betterOpenCodeProvider(current, candidate) {
+  if (!current) return candidate;
+  if (current.stale !== candidate.stale) return current.stale ? candidate : current;
+  const rankDiff = statusRank(candidate.status) - statusRank(current.status);
+  if (rankDiff !== 0) return rankDiff > 0 ? candidate : current;
+  const windowRankDiff = providerWindowRank(candidate) - providerWindowRank(current);
+  if (windowRankDiff !== 0) return windowRankDiff > 0 ? candidate : current;
+  const timestampDiff = timestampMs(candidate.updatedAt) - timestampMs(current.updatedAt);
+  if (timestampDiff !== 0) return timestampDiff > 0 ? candidate : current;
+  return openCodeProviderTieBreakKey(candidate).localeCompare(openCodeProviderTieBreakKey(current)) > 0
+    ? candidate
+    : current;
+}
+
+function betterOpenCodeWindow(current, candidate) {
+  if (!current) return candidate;
+  const sourceRankDiff = openCodeWindowSourceRank(candidate.window) - openCodeWindowSourceRank(current.window);
+  if (sourceRankDiff !== 0) return sourceRankDiff > 0 ? candidate : current;
+  const timestampDiff = timestampMs(candidate.provider.updatedAt) - timestampMs(current.provider.updatedAt);
+  if (timestampDiff !== 0) return timestampDiff > 0 ? candidate : current;
+  const candidateKey = JSON.stringify([candidate.provider.sourceDeviceId || '', candidate.window]);
+  const currentKey = JSON.stringify([current.provider.sourceDeviceId || '', current.window]);
+  return candidateKey.localeCompare(currentKey) > 0 ? candidate : current;
+}
+
+function mergeOpenCodeProviderComponents(candidates) {
+  const winner = candidates.reduce(betterOpenCodeProvider, null);
+  if (!winner || winner.provider !== 'opencode') return winner;
+  const eligible = candidates.filter((provider) => !(
+    (provider.stale && !winner.stale)
+    || (provider.status !== 'ok' && winner.status === 'ok')
+  ));
   const entries = new Map();
-  for (const provider of [current, candidate]) {
-    // Never revive a stale or failed component beside a fresh successful row.
-    if (provider !== winningInput && ((provider.stale && !winner.stale)
-      || (provider.status !== 'ok' && winner.status === 'ok'))) continue;
+  for (const provider of eligible) {
     for (const window of provider.windows || []) {
       const key = openCodeWindowKey(window);
-      const existing = entries.get(key);
-      if (!existing
-        || openCodeWindowSourceRank(window) > openCodeWindowSourceRank(existing.window)
-        || (openCodeWindowSourceRank(window) === openCodeWindowSourceRank(existing.window)
-          && (provider === winningInput || timestampMs(provider.updatedAt) >= timestampMs(existing.provider.updatedAt)))) {
-        entries.set(key, { window, provider });
-      }
+      entries.set(key, betterOpenCodeWindow(entries.get(key), { window, provider }));
     }
   }
 
@@ -631,11 +656,10 @@ function mergeOpenCodeProviderComponents(winner, current, candidate, winningInpu
     .map((entry) => entry.window)
     .sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind)
       || String(a.label || '').localeCompare(String(b.label || '')));
-  const balanceProvider = [current, candidate]
+  const balanceProvider = eligible
     .filter((provider) => provider.balanceUsd !== null && provider.balanceUsd !== undefined)
-    .filter((provider) => !(provider.stale && !winner.stale))
-    .filter((provider) => !(provider.status !== 'ok' && winner.status === 'ok'))
-    .sort((a, b) => timestampMs(b.updatedAt) - timestampMs(a.updatedAt))[0];
+    .sort((a, b) => timestampMs(b.updatedAt) - timestampMs(a.updatedAt)
+      || openCodeProviderTieBreakKey(b).localeCompare(openCodeProviderTieBreakKey(a)))[0];
   const balanceUsd = balanceProvider ? balanceProvider.balanceUsd : winner.balanceUsd;
   const hasWebComponent = windows.some((window) => window.source === 'web')
     || balanceUsd !== null && balanceUsd !== undefined;
@@ -650,8 +674,7 @@ function mergeOpenCodeProviderComponents(winner, current, candidate, winningInpu
 function pickBetterProvider(current, candidate) {
   if (!current) return candidate;
   const winner = betterProvider(current, candidate);
-  const withBalance = carryProviderBalance(winner, winner === current ? candidate : current);
-  return mergeOpenCodeProviderComponents(withBalance, current, candidate, winner);
+  return carryProviderBalance(winner, winner === current ? candidate : current);
 }
 
 function betterProvider(current, candidate) {
@@ -666,6 +689,7 @@ function betterProvider(current, candidate) {
 function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
   const byKey = new Map();
+  const candidatesByKey = new Map();
   const providersWithConfiguredAccounts = new Set();
   const providersWithFreshConfiguredAccounts = new Set();
   const providersWithFreshObservations = new Set();
@@ -684,8 +708,16 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
         if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(provider.provider);
       }
       const key = providerAggregateKey(provider);
-      byKey.set(key, pickBetterProvider(byKey.get(key), candidate));
+      const candidates = candidatesByKey.get(key) || [];
+      candidates.push(candidate);
+      candidatesByKey.set(key, candidates);
     }
+  }
+
+  for (const [key, candidates] of candidatesByKey) {
+    byKey.set(key, candidates[0]?.provider === 'opencode'
+      ? mergeOpenCodeProviderComponents(candidates)
+      : candidates.reduce(pickBetterProvider, null));
   }
 
   // Second pass: collapse by provider name. Same OAuth account on Mac vs Windows

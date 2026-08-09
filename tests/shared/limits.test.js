@@ -885,6 +885,53 @@ test('aggregateLimits merges complementary OpenCode components for one account',
   assert.equal(aggregate.providers[0].windows.find((window) => window.kind === 'weekly').remainingPercent, 90);
 });
 
+test('aggregateLimits resolves OpenCode components independently of device order', () => {
+  const newer = {
+    deviceId: 'newer-device',
+    limits: {
+      updatedAt: '2026-08-09T08:02:00.000Z',
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'sha256:shared',
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:02:00.000Z',
+        windows: [
+          { kind: 'session', source: 'web', usedPercent: 30 },
+          { kind: 'weekly', source: 'web', usedPercent: 40 }
+        ]
+      }]
+    }
+  };
+  const older = {
+    deviceId: 'older-device',
+    limits: {
+      updatedAt: '2026-08-09T08:01:00.000Z',
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'sha256:shared',
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:01:00.000Z',
+        windows: [
+          { kind: 'session', source: 'web', usedPercent: 10 },
+          { kind: 'weekly', source: 'web', usedPercent: 20 },
+          { kind: 'monthly', source: 'web', usedPercent: 50 }
+        ]
+      }]
+    }
+  };
+  const now = Date.parse('2026-08-09T08:03:00.000Z');
+  const forward = aggregateLimits([newer, older], 0, now);
+  const reverse = aggregateLimits([older, newer], 0, now);
+  const percentages = (aggregate) => Object.fromEntries(
+    aggregate.providers[0].windows.map((window) => [window.kind, window.usedPercent])
+  );
+
+  assert.deepEqual(percentages(forward), { session: 30, weekly: 40, billing: 50 });
+  assert.deepEqual(reverse, forward);
+});
+
 test('collectLimitsOnce flattens multiple providers returned by a provider fetcher', async () => {
   const summary = await collectLimitsOnce({ limitProviders: 'codex' }, {
     now: () => Date.parse('2026-06-14T10:02:00.000Z'),
