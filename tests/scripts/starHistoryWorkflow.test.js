@@ -36,6 +36,7 @@ test('external generation is SHA-pinned, tokenless, and has no repository permis
   assert.match(generate, /permissions: \{\}/);
   assert.match(generate, /artifact-ids: \$\{\{ needs\.fetch\.outputs\.artifact-id \}\}/);
   assert.match(generate, /stars-file: \$\{\{ runner\.temp \}\}\/star-history-input\/stargazers\.json/);
+  assert.match(generate, /logo-url: \$\{\{ github\.server_url \}\}\/\$\{\{ github\.repository_owner \}\}\.png\?size=22/);
   assert.doesNotMatch(generate, /token:|contents: (?:read|write)/);
   assert.match(generate, /artifact-id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
   assert.match(generate, /retention-days: 1/);

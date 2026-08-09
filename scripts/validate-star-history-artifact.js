@@ -28,7 +28,9 @@ const XML_POLICY_XPATH = `concat(
     'on'
   )]),
   '|',
-  count(//processing-instruction())
+  count(//processing-instruction()),
+  '|',
+  count(//*[local-name() = 'text' and normalize-space(.) = 'star-history.com'])
 )`.replace(/\s+/g, ' ');
 
 const fail = (message) => {
@@ -103,13 +105,14 @@ const validateXmlWithXmllint = (filename) => {
   if (result.status !== 0) fail(`${path.basename(filename)} is not well-formed XML: ${(result.stderr || '').trim()}`);
 
   const policy = (result.stdout || '').trim().split('|').map(Number);
-  if (policy.length !== 4 || policy.some((value) => !Number.isInteger(value) || value < 0)) {
+  if (policy.length !== 5 || policy.some((value) => !Number.isInteger(value) || value < 0)) {
     fail(`${path.basename(filename)} produced an invalid XML policy result`);
   }
   if (policy[0] !== 1) fail(`${path.basename(filename)} does not have an SVG namespace root`);
   if (policy[1] !== 0) fail(`${path.basename(filename)} contains active content`);
   if (policy[2] !== 0) fail(`${path.basename(filename)} contains an event handler`);
   if (policy[3] !== 0) fail(`${path.basename(filename)} contains a processing instruction`);
+  if (policy[4] !== 0) fail(`${path.basename(filename)} contains the renderer watermark`);
 };
 
 const validateSvg = (filename, { repository, validateXml = validateXmlWithXmllint }) => {
@@ -148,6 +151,28 @@ const validateSvg = (filename, { repository, validateXml = validateXmlWithXmllin
   const externalUrls = svg.match(/https?:\/\/[^\s"')<]+/gi) || [];
   if (externalUrls.some((url) => url !== 'http://www.w3.org/2000/svg')) {
     fail(`${path.basename(filename)} contains an external URL`);
+  }
+
+  const embeddedImages = [...svg.matchAll(/<image\b[^>]*>/gi)];
+  const titleLogos = embeddedImages.filter((match) => {
+    const element = match[0];
+    const attribute = (name) => element.match(new RegExp('\\b' + name + '="([^"]*)"', 'i'))?.[1];
+    return attribute('width') === '22'
+      && attribute('height') === '22'
+      && attribute('y') === '12'
+      && attribute('clip-path') === 'url(#clip-circle-title)'
+      && /^data:image\/png;base64,[a-z0-9+/]+=*$/i.test(attribute('href') || '');
+  });
+  if (titleLogos.length !== 1) {
+    fail(path.basename(filename) + ' must contain exactly one embedded owner title icon');
+  }
+  if (embeddedImages.length !== 1) {
+    fail(`${path.basename(filename)} must not contain the renderer watermark`);
+  }
+
+  const renderedDots = (svg.match(/class="chart-tooltip-dot"/g) || []).length;
+  if (renderedDots !== 0) {
+    fail(`${path.basename(filename)} must not contain rendered chart dots`);
   }
 
   validateXml(filename);

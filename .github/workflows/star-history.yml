@@ -70,10 +70,11 @@ jobs:
 
       - name: Generate with the external read-only action
         id: generate
-        uses: Javis603/star-history-action@cfeb3776e57b39f075dc824235e826b4c5ba343b
+        uses: Javis603/star-history-action@c6ca634f7bad7354b05bf3d70c1c8a065374c7e1
         with:
           repository: ${{ github.repository }}
           stars-file: ${{ runner.temp }}/star-history-input/stargazers.json
+          logo-url: ${{ github.server_url }}/${{ github.repository_owner }}.png?size=22
 
       - name: Upload generated assets
         id: upload

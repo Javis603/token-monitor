@@ -34,6 +34,7 @@ const svg = ({ extra = '' } = {}) => `<svg xmlns="http://www.w3.org/2000/svg">
   <text>Star History</text>
   <text>GitHub Stars</text>
   <text>${REPOSITORY}</text>
+  <image width="22" height="22" x="316" y="12" clip-path="url(#clip-circle-title)" href="data:image/png;base64,QUJD"/>
   ${extra}
 </svg>\n`;
 
@@ -100,6 +101,47 @@ test('rejects active SVG content and external resources', () => {
   );
 });
 
+test('requires one embedded owner icon beside the chart title', () => {
+  const withoutIcon = svg().replace(/ {2}<image[^>]+>\n/, '');
+  assert.throws(
+    () => validate(fixture({ light: withoutIcon })),
+    /exactly one embedded owner title icon/,
+  );
+
+  const duplicateIcon = svg().replace('</svg>', '<image width="22" height="22" y="12" clip-path="url(#clip-circle-title)" href="data:image/png;base64,QUJD"/></svg>');
+  assert.throws(
+    () => validate(fixture({ dark: duplicateIcon })),
+    /exactly one embedded owner title icon/,
+  );
+});
+
+test('rejects rendered chart dots', () => {
+  const withDot = svg({ extra: '<circle class="chart-tooltip-dot"/>' });
+  assert.throws(
+    () => validate(fixture({ dark: withDot })),
+    /must not contain rendered chart dots/,
+  );
+});
+
+test('rejects the renderer watermark while retaining the owner title icon', () => {
+  const watermark = '<text>star-history.com</text><image width="20" height="20" href="data:image/png;base64,QUJD"/>';
+  assert.throws(
+    () => validate(fixture({ light: svg({ extra: watermark }) })),
+    /must not contain the renderer watermark/,
+  );
+});
+
+test('rejects a text-only renderer watermark through the XML policy', { skip: !hasXmllint }, () => {
+  const watermark = '<text><tspan>star-history.com</tspan></text>';
+  assert.throws(
+    () => validateArtifact(fixture({ light: svg({ extra: watermark }) }), {
+      repository: REPOSITORY,
+      rendererCommit: RENDERER_COMMIT,
+    }),
+    /contains the renderer watermark/,
+  );
+});
+
 test('rejects namespaced active elements through the real XML policy', { skip: !hasXmllint }, () => {
   const namespacedScript = '<x:script xmlns:x="http://www.w3.org/2000/svg">alert(1)</x:script>';
   assert.throws(
@@ -133,7 +175,7 @@ test('requires the SVG namespace through the real XML policy', { skip: !hasXmlli
 
 test('allows only the official renderer data URI forms', () => {
   const allowed = svg({
-    extra: '<style>@font-face{src:url(data:application/font-woff;charset=utf-8;base64,QUJD)}</style><image href="data:image/png;base64,QUJD"/>',
+    extra: '<style>@font-face{src:url(data:application/font-woff;charset=utf-8;base64,QUJD)}</style>',
   });
   assert.doesNotThrow(() => validate(fixture({ light: allowed, dark: allowed })));
   assert.throws(
