@@ -221,7 +221,13 @@ function parseZaiUsage(quotaBody, subscriptionBody = null) {
   for (const limit of limits) {
     if (!limit || typeof limit !== 'object') continue;
     const type = String(limit.type || limit.limit_type || '').trim().toUpperCase();
+    // GLM coding-plan windows can arrive as CREDIT_LIMIT in addition to the
+    // legacy TOKENS_LIMIT; both share the same fields and unit/number window
+    // encodings, so CREDIT_LIMIT is treated as a token-window type. MCP stays
+    // on the TIME_LIMIT path below.
     if (type === 'TOKENS_LIMIT' && zaiUsedPercent(limit) !== null) {
+      tokenLimits.push(limit);
+    } else if (type === 'CREDIT_LIMIT' && zaiUsedPercent(limit) !== null) {
       tokenLimits.push(limit);
     } else if (type === 'TIME_LIMIT' && zaiUsedPercent(limit) !== null) {
       timeLimit = limit;

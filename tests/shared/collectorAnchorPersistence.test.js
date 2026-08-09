@@ -477,3 +477,35 @@ function waitForCondition(predicate, timeoutMs = 4000) {
     }, 5);
   });
 }
+
+test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
+  // One policy, two consumers: startCollector reuses the periods and only loses
+  // its incremental shortcut when the capture time is unusable, while the
+  // widget's cold-start seed has nothing to stand on and declines. Keeping that
+  // split in one function is what stops the two from drifting apart.
+  const { collectorAnchorTrust, configFingerprint } = freshCollector();
+  const now = new Date(2026, 7, 8, 10, 0, 0);
+  const anchor = (overrides = {}) => ({
+    dateKey: '2026-08-08',
+    today: {}, month: {}, allTime: {},
+    configFingerprint: configFingerprint('claude', '2024-01-01', true),
+    fullScanAt: new Date(now.getTime() - 60_000).toISOString(),
+    ...overrides
+  });
+  const options = { clients: 'claude', allTimeSince: '2024-01-01', projectsEnabled: true, now };
+
+  assert.equal(collectorAnchorTrust(anchor(), options).capturedAtMs, now.getTime() - 60_000);
+
+  // Unusable outright.
+  assert.equal(collectorAnchorTrust(null, options), null);
+  assert.equal(collectorAnchorTrust(anchor({ dateKey: '2026-08-07' }), options), null);
+  assert.equal(collectorAnchorTrust(anchor({ allTime: null }), options), null);
+  assert.equal(collectorAnchorTrust(anchor(), { ...options, clients: 'claude,codex' }), null);
+  assert.equal(collectorAnchorTrust(anchor(), { ...options, projectsEnabled: false }), null);
+
+  // Usable, but undatable.
+  assert.equal(collectorAnchorTrust(anchor({ fullScanAt: undefined }), options).capturedAtMs, null);
+  assert.equal(collectorAnchorTrust(anchor({ fullScanAt: 'nope' }), options).capturedAtMs, null);
+  const future = new Date(now.getTime() + 60_000).toISOString();
+  assert.equal(collectorAnchorTrust(anchor({ fullScanAt: future }), options).capturedAtMs, null);
+});

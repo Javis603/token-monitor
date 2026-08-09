@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir } = require('../shared/config');
+const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
   CredentialStore,
   credentialSettingsForRenderer,
@@ -41,7 +41,9 @@ const {
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
+const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
+const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
+const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
@@ -181,6 +183,7 @@ const {
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
+  updateInstallQuitGraceMs,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
@@ -2182,24 +2185,29 @@ function updateSessionUsageArchive(summary, now) {
   return next;
 }
 
-function summaryWithArchivedClientUsage(summary) {
-  const now = sessionUsageArchiveDate(summary);
+// Read-only projection of both archives onto a summary. Un-tracked clients and
+// retained sessions add to the period totals, not just to the breakdowns, so
+// anything rendered without this reads low. Takes the session archive as an
+// argument because capturing into it is a separate decision, see below.
+function summaryWithArchivesApplied(summary, sessionArchive, now) {
   const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
     activeClients: settings?.clients,
     now
   });
-  let visibleSummary = withArchivedClients;
-  if (settings?.sessionUsageArchiveEnabled === false) {
-    return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
-  }
+  const visibleSummary = settings?.sessionUsageArchiveEnabled === false
+    ? withArchivedClients
+    : applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+}
+
+function summaryWithArchivedClientUsage(summary) {
+  const now = sessionUsageArchiveDate(summary);
+  if (settings?.sessionUsageArchiveEnabled === false) return summaryWithArchivesApplied(summary, null, now);
   if (isExternalAgentActive()) {
     sessionUsageArchive = null;
-    visibleSummary = applySessionUsageArchive(withArchivedClients, ensureSessionUsageArchiveLoaded(), { now });
-  } else {
-    const sessionArchive = updateSessionUsageArchive(summary, now);
-    visibleSummary = applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+    return summaryWithArchivesApplied(summary, ensureSessionUsageArchiveLoaded(), now);
   }
-  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+  return summaryWithArchivesApplied(summary, updateSessionUsageArchive(summary, now), now);
 }
 
 function applyMacActivationPolicy(state = {}) {
@@ -3188,8 +3196,10 @@ async function saveSubscriptions(list, base) {
   return settingsForRenderer();
 }
 
-function stopSyncCollector() {
-  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
+// `options` is forwarded verbatim to the runtime; the quit path passes
+// `skipCloseWatchers` (see stopAll).
+function stopSyncCollector(options = {}) {
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
 }
 
@@ -3480,7 +3490,14 @@ function scheduleMacWidgetSnapshot(stats) {
   });
 }
 
-function sendPush(payload) {
+// Two options, both for the cold-start seed and neither for live stats.
+// `skipExport` keeps a republished snapshot from spending the auto-export
+// interval that this run's first real scan needs. `deferToRenderer` waits for
+// the renderer to finish loading, and is deliberately not the default: a live
+// push that lands mid-load is already covered by the refreshStats() the renderer
+// runs on init, so deferring every one of them would only queue a listener per
+// frame against a slow load and then replay a burst of superseded stats.
+function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
@@ -3488,13 +3505,19 @@ function sendPush(payload) {
     scheduleMacWidgetSnapshot(latestStats);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
-    if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
+    if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
       writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
         .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
     }
   }
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (options.deferToRenderer) {
+    // Only while it is still the newest thing published. A slow load can outlast
+    // the first real collection, and delivering the queued snapshot then would
+    // walk the numbers backwards until the next push.
+    const deferred = payload?.data?.stats;
+    sendMainWindowEvent('stats:push', payload, () => !deferred || latestStats === deferred);
+  } else if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
   }
   if (payload?.data?.stats) {
@@ -3621,23 +3644,76 @@ function sendStatus(connected, extra) {
   sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
 }
 
-function stopLocalCollector() {
-  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
+// `options` is forwarded verbatim to the runtime; the quit path passes
+// `skipCloseWatchers` (see stopAll).
+function stopLocalCollector(options = {}) {
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   localDevice = null;
   localStats = null;
+}
+
+// Show the last full scan's totals while the first one of this run is still
+// going, instead of zeros for the tens of seconds it takes. deviceRecordFromAnchor
+// owns the trust rules; anything it rejects leaves the renderer on its normal
+// wait-for-real-data path.
+function primeLocalStatsFromAnchor(usageOptions) {
+  // Cold start only. startMode() re-enters here on structural settings changes
+  // as well, and there the numbers already collected are newer than any anchor.
+  if (lastCollectedDevice) return;
+  const deviceRecord = deviceRecordFromAnchor(
+    readJson(path.join(sharedDataDir(), 'collector-anchor.json'), null),
+    {
+      envelope: electronDeviceEnvelope(),
+      clients: usageOptions.clients,
+      allTimeSince: usageOptions.allTimeSince,
+      projectsEnabled: usageOptions.projectsEnabled,
+      wslScanEnabled: usageOptions.wslScanEnabled,
+      wslSupported: process.platform === 'win32',
+      hostname: os.hostname(),
+      platform: `${process.platform}-${process.arch}`
+    }
+  );
+  if (!deviceRecord) return;
+  // The anchor holds raw collector output, while everything the renderer is ever
+  // shown has been through the archives first. Project the same way or the seed
+  // reads low for anyone with an un-tracked client or retained sessions, and then
+  // jumps when the first scan lands. Read-only on purpose: the capture step
+  // records a fresh observation, and an anchor from hours ago is not one.
+  const visible = summaryWithArchivesApplied(
+    deviceRecord,
+    settings?.sessionUsageArchiveEnabled === false ? null : ensureSessionUsageArchiveLoaded(),
+    sessionUsageArchiveDate(deviceRecord)
+  );
+  localDevice = visible;
+  localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
+  // Through the normal publisher, not straight to the renderer: the tray reads
+  // what sendPush sets, and in tray mode the window is hidden, so a seed that
+  // only reached the renderer would leave the one visible surface on zero.
+  // This one waits for the renderer: it is the only stats push whose whole point
+  // is to be on screen before the first scan, so it cannot be left to the
+  // refreshStats() that covers the rest. It must also not spend the export
+  // interval this run's first live scan needs on a snapshot it is republishing.
+  sendPush({
+    event: 'stats',
+    data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
+  }, { skipExport: true, deferToRenderer: true });
 }
 
 function startLocalCollector() {
   stopLocalCollector();
   mode = 'local';
   sendStatus(false, { reason: 'collecting' });
+  // One config object for both, so the fingerprint the seed validates against
+  // cannot drift from the one the collector will compute.
+  const usageOptions = electronUsageConfig('collector');
+  primeLocalStatsFromAnchor(usageOptions);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('collector'),
+    usageOptions,
     progressive: true,
     onRecord: (summary, meta) => {
       const reason = meta.reason;
@@ -4047,14 +4123,11 @@ function trayMenuLocale() {
   return resolveLocale(settings?.language || 'auto', preferredLanguages);
 }
 
-function sendMainWindowEvent(channel, payload) {
+// `isStillCurrent`, when given, is re-checked after the wait: see
+// deferredWindowSend.js.
+function sendMainWindowEvent(channel, payload, isStillCurrent) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const send = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    try { mainWindow.webContents.send(channel, payload); } catch (_) {}
-  };
-  if (mainWindow.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', send);
-  else send();
+  sendWhenRendererReady(mainWindow.webContents, channel, payload, isStillCurrent);
 }
 
 async function refreshFromTray() {
@@ -4380,12 +4453,25 @@ function restartDeviceRuntimeForMode() {
   else startLocalCollector();
 }
 
+// Quit-path teardown. Every step here must be synchronous, because performQuit
+// exits on the next line and anything awaited in between is a chance to never
+// get there. `skipCloseWatchers` is what buys that: chokidar's close() returns a
+// promise, but not before an O(N) synchronous pass over every watched entry, and
+// on a tree the size of ~/.claude/projects that pass alone blocks the main
+// thread long enough to look like a hang. The descriptors go with the process.
+// Mode switches deliberately do NOT come through here: they keep the default
+// stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
+// really gone before a new one starts on the same paths.
 function stopAll() {
   stopPersistBoundsTimer();
-  stopLocalCollector();
+  stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
   stopHostStats();
-  stopSyncCollector();
+  stopSyncCollector({ skipCloseWatchers: true });
+  // Fire-and-forget on purpose. server.close() does not complete until every
+  // in-flight request does, so awaiting it hands a remote device on the embedded
+  // hub the power to hold our own exit open. The listening socket closes with
+  // the process, and a graceful hub close buys nothing on the way out.
   void stopEmbeddedHub();
   stopDiscordRpc();
   if (tray && !tray.isDestroyed()) tray.destroy();
@@ -4393,12 +4479,49 @@ function stopAll() {
 }
 
 let quitRequested = false;
+let quitInProgress = false;
+// Set only by installDownloadedAppUpdate: electron-updater restarts the process
+// itself, so the exit below has to stand down or the install never runs.
+let skipForcedQuit = false;
+
+// quitAndInstall() returns void: nothing reports back whether the installer
+// launched. If it did not, the process stays alive holding two flags that
+// between them make Exit a no-op and disable the forced exit for the rest of
+// the session. Every signal we do get releases them again: a synchronous throw,
+// an updater error, and where the failure would otherwise be silent, a grace
+// timer. One case is still uncovered, and predates all of this: a macOS
+// hand-off that stalls while reporting nothing, for which MacUpdater forwards
+// no terminal event. Closing that needs the flags claimed at the hand-off
+// itself rather than at the request, which is a lifecycle change of its own.
+let updateInstallQuitPending = false;
+let updateInstallQuitTimer = null;
+
+function releaseUpdateInstallQuit() {
+  if (!updateInstallQuitPending) return;
+  updateInstallQuitPending = false;
+  if (updateInstallQuitTimer) { clearTimeout(updateInstallQuitTimer); updateInstallQuitTimer = null; }
+  quitRequested = false;
+  skipForcedQuit = false;
+}
+
+// The single quit path. Teardown above is what used to hang, so it runs
+// synchronously and cheaply, and then app.exit() ends the process without
+// another trip through Electron's shutdown events.
+function performQuit() {
+  if (quitInProgress) return;
+  quitInProgress = true;
+  try {
+    stopAll();
+  } catch (error) {
+    console.log(`[quit] stopAll failed: ${error?.message || error}`);
+  }
+  app.exit(0);
+}
+
 function requestAppQuit() {
   if (quitRequested) return;
   quitRequested = true;
-  stopAll();
-  if (app.isReady()) app.quit();
-  else app.exit(0);
+  performQuit();
 }
 
 // Write the export file set (JSON + CSVs) into `dir`, atomically (temp + rename)
@@ -4622,9 +4745,15 @@ function configureNativeAppUpdater() {
     setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
   });
   autoUpdater.on('error', (error) => {
+    // Released before the busy guard below, deliberately: update-downloaded has
+    // already cleared appUpdateNativeBusy by the time an install can fail, so a
+    // rollback behind that guard would never run and the quit flags would stay
+    // stuck for the rest of the session.
+    const wasInstalling = updateInstallQuitPending;
+    releaseUpdateInstallQuit();
     // Availability checks use the same provider but report through
-    // appUpdateLastError. Only a real download attempt owns installError.
-    if (!appUpdateNativeBusy) return;
+    // appUpdateLastError. Only a real download or install attempt owns installError.
+    if (!appUpdateNativeBusy && !wasInstalling) return;
     appUpdateNativeBusy = false;
     setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
   });
@@ -4857,10 +4986,32 @@ function installDownloadedAppUpdate() {
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
+  // quitAndInstall goes through before-quit, and electron-updater owns the
+  // restart from there. Stand the forced exit down or the installer never runs.
+  // Both flags are claimed through the helper so every exit from this call
+  // releases them again; see releaseUpdateInstallQuit.
+  updateInstallQuitPending = true;
   quitRequested = true;
-  // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
-  // (per-user install needs no elevation); isForceRunAfter relaunches the app.
-  autoUpdater.quitAndInstall(true, true);
+  skipForcedQuit = true;
+  if (updateInstallQuitTimer) clearTimeout(updateInstallQuitTimer);
+  // On the platforms whose install path fails silently, still being here after the
+  // grace period is the only signal there is. Where the hand-off is unbounded
+  // instead, updateInstallQuitGraceMs returns null and we wait for the error
+  // event rather than race the installer. unref'd either way: the fallback must
+  // never be the reason we stay up.
+  const graceMs = updateInstallQuitGraceMs();
+  if (graceMs !== null) {
+    updateInstallQuitTimer = setTimeout(releaseUpdateInstallQuit, graceMs);
+    updateInstallQuitTimer.unref?.();
+  }
+  try {
+    // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
+    // (per-user install needs no elevation); isForceRunAfter relaunches the app.
+    autoUpdater.quitAndInstall(true, true);
+  } catch (error) {
+    releaseUpdateInstallQuit();
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
+  }
   return deriveAppUpdateState();
 }
 
@@ -5742,7 +5893,7 @@ app.whenReady().then(() => {
     if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
     try {
       const seen = new Set();
-      const all = (clientDiagnosticRoots(client)[client] || [])
+      const all = (visibleDiagnosticRoots(client)[client] || [])
         .filter((root) => {
           const key = `${root.id}\0${root.dir}`;
           return !seen.has(key) && seen.add(key);
@@ -5764,6 +5915,13 @@ app.whenReady().then(() => {
       const roots = clientDiagnosticRoots(client)[client] || [];
       const target = roots.find((root) => root.exists);
       if (!target) return false;
+      // An exact-file source would otherwise be handed to openPath, which opens
+      // the file in whatever app claims .db/.jsonl. Select it in its folder
+      // instead — the user asked where the data lives, not to open it.
+      if (target.sourcePath) {
+        shell.showItemInFolder(target.sourcePath);
+        return true;
+      }
       return await shell.openPath(target.dir) === '';
     } catch (_) {
       return false;
@@ -6496,7 +6654,19 @@ app.whenReady().then(() => {
 
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { quitRequested = true; resetMacWidgetReloadThrottle(); if (rateRefreshTimer) clearInterval(rateRefreshTimer); if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer); unregisterWindowToggleShortcut(); stopAll(); });
+// Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
+// performQuit is synchronous through to the exit, so there is nothing to wait
+// for and deliberately no preventDefault: taking the quit over would cancel an
+// OS-initiated logout or restart on macOS.
+app.on('before-quit', () => {
+  quitRequested = true;
+  resetMacWidgetReloadThrottle();
+  if (rateRefreshTimer) clearInterval(rateRefreshTimer);
+  if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
+  unregisterWindowToggleShortcut();
+  if (skipForcedQuit) return;
+  performQuit();
+});
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.once(signal, requestAppQuit);
 }

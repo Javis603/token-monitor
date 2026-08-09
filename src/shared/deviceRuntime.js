@@ -116,11 +116,14 @@ function createDeviceRuntime(options = {}, deps = {}) {
   const usageRuntime = makeUsageRuntime(usageOptions, deps.usageDeps || {});
   const limitsRuntime = makeLimitsRuntime(limitsOptions, limitsDeps);
 
-  function stop() {
+  // Clearing `active` first is what severs the downstream callbacks; the child
+  // stops are cleanup. `options` reaches the collector only: `skipCloseWatchers`
+  // is its concern, not part of a teardown protocol the other two share.
+  function stop(options = {}) {
     if (!active) return;
     active = false;
     deviceState.stop();
-    usageRuntime?.stop?.();
+    usageRuntime?.stop?.(options);
     limitsRuntime?.stop?.();
     sink?.stop?.();
   }

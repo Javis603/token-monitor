@@ -7,7 +7,8 @@ const {
   inUseModelIds,
   perMillionFromPricing,
   upsertOverride,
-  removeOverride
+  removeOverride,
+  hasUsableBasePrice
 } = require('../../src/electron/renderer/customPricingForm');
 
 test('inUseModelIds unions models across periods, sorted + deduped', () => {
@@ -36,6 +37,19 @@ test('perMillionFromPricing tolerates missing fields and bad input', () => {
   assert.deepEqual(perMillionFromPricing({ pricing: { outputCostPerToken: 1e-6 } }), { inputPerM: undefined, outputPerM: 1, cacheReadPerM: undefined });
   assert.deepEqual(perMillionFromPricing(null), { inputPerM: undefined, outputPerM: undefined, cacheReadPerM: undefined });
   assert.deepEqual(perMillionFromPricing({}), { inputPerM: undefined, outputPerM: undefined, cacheReadPerM: undefined });
+});
+
+test('hasUsableBasePrice accepts explicit free input/output and rejects invalid values', () => {
+  assert.equal(hasUsableBasePrice({ inputPerM: 0, outputPerM: 0 }), true);
+  assert.equal(hasUsableBasePrice({ outputPerM: 0 }), true);
+  assert.equal(hasUsableBasePrice({ inputPerM: -1, outputPerM: undefined }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: -1, outputPerM: 0 }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: Number.NaN, outputPerM: undefined }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: 1, outputPerM: 0, cacheReadPerM: -1 }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: false, outputPerM: 0 }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: '   ', outputPerM: 0 }), false);
+  assert.equal(hasUsableBasePrice({ inputPerM: [], outputPerM: 0 }), false);
+  assert.equal(hasUsableBasePrice({}), false);
 });
 
 test('upsertOverride replaces by modelId or appends, without mutating input', () => {

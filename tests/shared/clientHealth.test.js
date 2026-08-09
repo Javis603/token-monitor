@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 const {
   CLIENT_SYNC_DETAIL_CODES,
@@ -32,6 +33,8 @@ const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
 const { applySessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
 const { aggregateDevices, mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
+
+installSourceEnvGuard(test);
 
 const core = (overrides = {}) => ({
   source: { state: 'detected', detectedCount: 1, checkedCount: 1 },
@@ -318,7 +321,7 @@ test('every source-root id the collector emits is in the allowlist', () => {
   // And nothing in the allowlist is dead weight. Two ids are exempt because they
   // are discovered rather than constructed: `hermes-profile` comes from profiles
   // found on disk, and `wsl-home` only appears on Windows with a running distro.
-  const discoveryDependent = new Set(['hermes-profile', 'wsl-home']);
+  const discoveryDependent = new Set(['copilot-otel-exporter', 'hermes-profile', 'wsl-home']);
   const checked = new Set([...emitted, 'antigravity-ide-source', 'antigravity-cli-data']);
   for (const id of CLIENT_SOURCE_CHECK_IDS) {
     if (discoveryDependent.has(id)) continue;
@@ -326,12 +329,15 @@ test('every source-root id the collector emits is in the allowlist', () => {
   }
 });
 
-test('labelling the roots left the watcher its original path list', () => {
+test('labelling roots keeps diagnostics separate from watcher roots', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS);
   const candidates = clientWatchCandidates(KNOWN_CLIENTS);
   assert.deepEqual(Object.keys(candidates).sort(), Object.keys(roots).sort());
   for (const [client, dirs] of Object.entries(candidates)) {
-    assert.deepEqual(dirs, roots[client].map((root) => root.dir));
+    const expected = roots[client]
+      .filter((root) => !(client === 'copilot' && root.id === 'copilot-otel'))
+      .map((root) => root.dir);
+    assert.deepEqual(dirs, expected);
   }
 });
 
@@ -341,9 +347,9 @@ test('labelling the roots left the watcher its original path list', () => {
 test('clientSourceChecks collapses same-kind roots into one entry', () => {
   const checks = clientSourceChecks('copilot,zed,cline,antigravity');
   const ids = (client) => checks[client].map((check) => check.id);
-  assert.deepEqual(ids('copilot'), ['copilot-otel', 'vscode-workspace-storage']);
+  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'vscode-workspace-storage']);
   assert.deepEqual(ids('zed'), ['zed-threads']);
-  assert.deepEqual(ids('cline'), ['cline-tasks']);
+  assert.deepEqual(ids('cline'), ['cline-tasks', 'cline-cli-sessions']);
   // antigravity's watch candidate is only the tokscale cache; its two real
   // sources are separate checks so the record can tell them apart.
   assert.deepEqual(ids('antigravity'), ['tokscale-antigravity-cache', 'antigravity-ide-source', 'antigravity-cli-data']);
