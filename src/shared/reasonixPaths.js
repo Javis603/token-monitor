@@ -74,7 +74,7 @@ function normalizePosixPath(value) {
     }
   }
   const normalized = stack.join('/');
-  if (absolute) return `/${normalized}`.replace(/\/$/, '/') || '/';
+  if (absolute) return `/${normalized}`;
   return normalized || '.';
 }
 

@@ -24,6 +24,8 @@ const {
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   normalizeClientName,
+  normalizeModelName,
+  normalizeModelNameForClient,
   normalizePeriod
 } = require('../../src/shared/usage');
 const { parseGraphResult, normalizeHistory } = require('../../src/shared/history');
@@ -93,6 +95,7 @@ test('Reasonix path cleaning matches the official environment-directory forms', 
     cleanEnvDir('relative/./reasonix/../stats', { env: linuxEnv, platform: 'linux', cwdDir: '/workspace' }),
     '/workspace/relative/stats'
   );
+  assert.equal(cleanEnvDir('/', { env: linuxEnv, platform: 'linux', cwdDir: '/workspace' }), '/');
 
   const windowsEnv = { USERPROFILE: String.raw`C:\Users\alice` };
   assert.equal(
@@ -108,6 +111,33 @@ test('Reasonix path cleaning matches the official environment-directory forms', 
 test('Reasonix is a normalized tracked client', () => {
   assert.equal(normalizeClientName('Reasonix'), 'reasonix');
   assert.equal(normalizeClientName('reasonix-stats'), 'reasonix');
+});
+
+test('Reasonix model prefix normalization is scoped to explicit client context', () => {
+  assert.equal(normalizeModelName('deepseek/deepseek-v3'), 'deepseek/deepseek-v3');
+  assert.equal(normalizeModelNameForClient('deepseek/deepseek-v4-flash', 'reasonix'), 'deepseek-v4-flash');
+  assert.equal(normalizeModelNameForClient('deepseek-flash/deepseek-v4-flash', 'reasonix'), 'deepseek-v4-flash');
+  assert.equal(normalizeModelNameForClient('deepseek/deepseek-v3', 'codex'), 'deepseek/deepseek-v3');
+
+  const period = extractUsageFromTokscale({ entries: [{
+    client: 'codex',
+    model: 'deepseek/deepseek-v3',
+    input: 10,
+    output: 2
+  }] });
+  assert.equal(period.models['deepseek/deepseek-v3'], 12);
+  assert.equal(period.models['deepseek-v3'], undefined);
+
+  const normalized = normalizePeriod({
+    models: { 'deepseek/deepseek-v3': 1 },
+    clientModels: {
+      reasonix: { 'deepseek/deepseek-v4-flash': 2 },
+      codex: { 'deepseek/deepseek-v3': 3 }
+    }
+  });
+  assert.equal(normalized.models['deepseek/deepseek-v3'], 1);
+  assert.equal(normalized.clientModels.reasonix['deepseek-v4-flash'], 2);
+  assert.equal(normalized.clientModels.codex['deepseek/deepseek-v3'], 3);
 });
 
 test('Reasonix reasoning is additive without changing other client semantics', () => {

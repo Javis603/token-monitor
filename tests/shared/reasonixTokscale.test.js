@@ -40,6 +40,8 @@ test('Tokscale Reasonix rows use shared token, cost, model and privacy semantics
   assert.equal(period.cacheReadTokens, 20);
   assert.equal(period.models['deepseek-v4-flash'], 152);
   assert.equal(period.modelCosts['deepseek-v4-flash'], 0.35);
+  assert.equal(period.clientModels.reasonix['deepseek-v4-flash'], 140);
+  assert.equal(period.clientModelCosts.reasonix['deepseek-v4-flash'], 0.25);
   assert.equal(Object.hasOwn(period.sessions, 'reasonix:reasonix-stats:/Users/test/.reasonix/stats/2026-08-09.jsonl'), false);
   assert.equal(Object.hasOwn(period.sessions, 'hermes:hermes-1'), true);
   assert.equal(Object.hasOwn(period.models, 'deepseek-flash/deepseek-v4-flash'), false);

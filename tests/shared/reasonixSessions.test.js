@@ -131,6 +131,8 @@ test('Reasonix native adapter reads official cumulative telemetry without invent
     'reasonix:project-id'
   ]);
   assert.equal(allTime['reasonix:global-id'].title, 'My Reasonix session');
+  assert.equal(allTime['reasonix:global-id'].model, 'deepseek-v4-flash');
+  assert.deepEqual(allTime['reasonix:global-id'].models, { 'deepseek-v4-flash': 140 });
   assert.equal(allTime['reasonix:name-id'].title, 'Official branch name');
   assert.equal(allTime['reasonix:project-id'].title, 'Topic fallback');
   assert.equal(allTime['reasonix:preview-id'].title, 'Preview fallback');

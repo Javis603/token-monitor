@@ -13,7 +13,7 @@ const path = require('node:path');
 
 const { REASONIX_CLIENT, resolveReasonixHome } = require('./reasonixPaths');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
-const { normalizeModelName } = require('./usage');
+const { normalizeModelNameForClient } = require('./usage');
 const {
   parseReasonixEventLog,
   countReasonixProviderMessages,
@@ -354,7 +354,7 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
     ? projectIdentityFor(workspaceRoot, options.projectIdentity)
     : {};
   const rawModel = textValue(firstValue(meta, ['model']), 256);
-  const model = normalizeModelName(rawModel) || rawModel;
+  const model = normalizeModelNameForClient(rawModel, REASONIX_CLIENT) || rawModel;
   const totalTokens = usage ? Math.max(0, Math.round(firstNumber(usage, ['totalTokens', 'total_tokens']))) : 0;
   const reportedCost = reportedCostUsd(usage);
   const createdAt = firstTimestamp(meta, ['created_at', 'createdAt']);

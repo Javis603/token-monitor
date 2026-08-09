@@ -196,9 +196,14 @@ function detectClient(obj) {
 
 function normalizeModelName(value) {
   const raw = String(value || '').trim().toLowerCase();
-  const qualified = raw.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
-  if (qualified && qualified[1]) return qualified[1];
   return raw || null;
+}
+
+function normalizeModelNameForClient(value, client) {
+  const normalized = normalizeModelName(value);
+  if (!normalized || normalizeClientName(client) !== REASONIX_CLIENT) return normalized;
+  const qualified = normalized.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
+  return qualified?.[1] || normalized;
 }
 
 function normalizeSessionId(value) {
@@ -343,9 +348,12 @@ function normalizePeriodWindows(value) {
   return Object.keys(result).length ? result : null;
 }
 
-function detectModel(obj) {
+function detectModel(obj, client = detectClient(obj)) {
   if (!obj || typeof obj !== 'object') return null;
-  return normalizeModelName(obj.model || obj.modelName || obj.model_name || obj.deployment || obj.engine);
+  return normalizeModelNameForClient(
+    obj.model || obj.modelName || obj.model_name || obj.deployment || obj.engine,
+    client
+  );
 }
 
 function detectSessionId(obj) {
@@ -435,11 +443,11 @@ function mergeSession(target, source) {
     target.projectLabel = String(source.projectLabel);
   }
   for (const [model, tokens] of Object.entries(source.models || {})) {
-    const key = normalizeModelName(model);
+    const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
   }
   for (const [model, cost] of Object.entries(source.modelCosts || {})) {
-    const key = normalizeModelName(model);
+    const key = normalizeModelNameForClient(model, target.client);
     if (key) target.modelCosts[key] = (target.modelCosts[key] || 0) + asNumber(cost);
   }
   for (const [provider, tokens] of Object.entries(source.providers || {})) {
@@ -478,7 +486,7 @@ function sessionFromRow(row) {
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
-  let model = detectModel(row);
+  let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
@@ -506,13 +514,13 @@ function normalizeSession(input, fallbackKey) {
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
-      const key = normalizeModelName(model);
+      const key = normalizeModelNameForClient(model, client);
       if (key) session.models[key] = (session.models[key] || 0) + Math.max(0, Math.round(asNumber(value)));
     }
   }
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
-      const key = normalizeModelName(model);
+      const key = normalizeModelNameForClient(model, client);
       if (key) session.modelCosts[key] = (session.modelCosts[key] || 0) + asNumber(value);
     }
   }
@@ -584,7 +592,7 @@ function normalizePeriod(input, options = {}) {
       const clientKey = normalizeClientName(client);
       if (!clientKey || !models || typeof models !== 'object') continue;
       for (const [model, value] of Object.entries(models)) {
-        const modelKey = normalizeModelName(model);
+        const modelKey = normalizeModelNameForClient(model, clientKey);
         if (!modelKey) continue;
         if (!period.clientModels[clientKey]) period.clientModels[clientKey] = {};
         period.clientModels[clientKey][modelKey] = (period.clientModels[clientKey][modelKey] || 0) + Math.max(0, Math.round(asNumber(value)));
@@ -596,7 +604,7 @@ function normalizePeriod(input, options = {}) {
       const clientKey = normalizeClientName(client);
       if (!clientKey || !models || typeof models !== 'object') continue;
       for (const [model, value] of Object.entries(models)) {
-        const modelKey = normalizeModelName(model);
+        const modelKey = normalizeModelNameForClient(model, clientKey);
         if (!modelKey) continue;
         if (!period.clientModelCosts[clientKey]) period.clientModelCosts[clientKey] = {};
         period.clientModelCosts[clientKey][modelKey] = (period.clientModelCosts[clientKey][modelKey] || 0) + asNumber(value);
@@ -637,7 +645,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   // the denominator. Gating rather than scaling by tokscale's `tokenCoverage` keeps this a
   // plain counter, which is what lets it merge and delta like every other token field.
   const timedOutputTokens = timedDurationMs > 0 ? output : 0;
-  let model = detectModel(row);
+  let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
@@ -1212,6 +1220,7 @@ module.exports = {
   mergePeriods,
   normalizeClientName,
   normalizeModelName,
+  normalizeModelNameForClient,
   normalizeDeviceRecord,
   normalizePeriod,
   projectRollupFromSessions
