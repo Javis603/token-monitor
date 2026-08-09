@@ -128,6 +128,60 @@ test('new pure-Web OpenCode quota survives a pre-provenance Hub round-trip', asy
   assert.equal(visible.windows[0].remainingPercent, 70);
 });
 
+test('mixed local and Web OpenCode quota fails closed through a pre-provenance Hub', async () => {
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeCookie: 'sess=1',
+      opencodeLocalLimitsEnabled: true
+    },
+    {
+      now: () => Date.parse(updatedAt),
+      opencodeCollectGo: () => ({
+        status: 'ok',
+        identity: 'go:/local/opencode.db',
+        windows: [{ kind: 'session', usedPercent: 75 }]
+      }),
+      opencodeFetchGoWeb: async () => ({
+        status: 'unavailable',
+        workspaceId: '',
+        windows: []
+      }),
+      opencodeFetchZen: async () => ({
+        status: 'ok',
+        workspaceId: 'workspace-web',
+        windows: [{ kind: 'weekly', usedPercent: 10 }],
+        balanceUsd: 5
+      })
+    }
+  );
+  const collected = summary.providers[0];
+  assert.equal(collected.source, 'local');
+  assert.deepEqual(collected.windows.map((window) => window.source), ['local', 'web']);
+
+  const legacyLimits = roundTripThroughLegacyHub(summary);
+  assert.equal(legacyLimits.providers[0].source, 'local');
+  assert.equal(legacyLimits.providers[0].windows.every((window) => !Object.hasOwn(window, 'source')), true);
+
+  const rawStats = statsWithDevices([
+    deviceWithProviders('local-device', legacyLimits.providers)
+  ]);
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'local-device',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false
+  });
+  const visibleDeviceProvider = visibleStats.devices[0].limits.providers[0];
+  const visible = visibleStats.limits.providers[0];
+
+  assert.equal(visibleDeviceProvider.windows.length, 0);
+  assert.equal(visible.status, 'ok');
+  assert.equal(visible.source, 'web');
+  assert.equal(visible.windows.length, 0);
+  assert.equal(visible.balanceUsd, 5);
+});
+
 test('offline Hub cache filters local candidates before aggregation so a same-account remote estimate survives everywhere', () => {
   const remote = deviceWithProviders('remote-device', [opencodeProvider({
     remainingPercent: 60,

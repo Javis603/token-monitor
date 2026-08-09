@@ -3191,7 +3191,12 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
 
     if (zen && webIdentity.includeZen) {
       windows.push(...zen.windows.map((window) => ({ ...window, source: 'web' })));
-      status = 'ok'; source = 'web';
+      status = 'ok';
+      // The provider-level source is the compatibility envelope used by Hubs
+      // that predate windows[].source. It may claim Web only when every quota
+      // window is Web; otherwise an old Hub could turn a local estimate into a
+      // Web observation when it strips component provenance.
+      if (!windows.some((window) => window.source === 'local')) source = 'web';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
       if (!accountLabel) accountLabel = 'Zen';
       if (!accountKey) accountKey = hashKey('opencode', `zen:${zen.workspaceId || ''}`);
