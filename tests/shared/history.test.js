@@ -295,3 +295,17 @@ test('historyPreview keeps recent totals only (no per-client)', () => {
   assert.deepEqual(p.monthly[0], { month: '2026-05', tokens: 9, cost: 1, activeTimeMs: 0 });
   assert.deepEqual(p.summary, { totalTokens: 100 });
 });
+
+test('historyPreview defaults to the compact 30-day daily window', () => {
+  const history = {
+    daily: Array.from({ length: 31 }, (_, index) => ({
+      date: `2026-07-${String(index + 1).padStart(2, '0')}`,
+      tokens: index + 1
+    })),
+    monthly: [],
+    summary: {}
+  };
+  const preview = historyPreview(history);
+  assert.equal(preview.daily.length, 30);
+  assert.equal(preview.daily[0].date, '2026-07-02');
+});

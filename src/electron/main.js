@@ -148,8 +148,13 @@ const {
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
 const { historyPreview, historyRevision } = require('../shared/history');
+const { resolveCompleteHistory } = require('./historySource');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
+const { resolveMacWidgetSnapshotPath, updateMacWidgetSnapshot } = require('./macWidgetBridge');
+const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
+const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
+const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const linuxAutostart = require('./linuxAutostart');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
@@ -292,6 +297,16 @@ function normalizeHomeLimitAccountCount(value) {
   if (!Number.isFinite(count)) return HOME_LIMIT_ACCOUNT_COUNT_DEFAULT;
   return Math.max(1, Math.min(HOME_LIMIT_ACCOUNT_COUNT_MAX, count));
 }
+
+let pendingMacWidgetOpen = null;
+app.on('open-url', (event, url) => {
+  const urlScheme = macWidgetConfiguration()?.urlScheme || 'token-monitor';
+  const destination = parseMacWidgetDeepLink(url, urlScheme);
+  if (!destination) return;
+  event.preventDefault();
+  pendingMacWidgetOpen = destination;
+  if (app.isReady()) setImmediate(openMainWindowFromWidget);
+});
 
 function defaultSettings() {
   const envHubUrl = process.env.TOKEN_MONITOR_HUB_URL || '';
@@ -2309,6 +2324,12 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let pendingMacWidgetStats = null;
+let macWidgetWriteInFlight = false;
+let cachedMacWidgetHistory = null;
+let cachedMacWidgetHistoryKey = '';
+let macWidgetHistoryRequest = null;
+let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
@@ -3330,6 +3351,149 @@ function injectLocalDeviceStatus(stats) {
   return stats;
 }
 
+function macWidgetConfiguration() {
+  if (process.platform !== 'darwin') return null;
+  if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
+
+  let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
+  let urlScheme = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || 'token-monitor').trim();
+  let snapshotFileName = 'snapshot.json';
+  let widgetKind = DEFAULT_WIDGET_KIND;
+  const configCandidates = [
+    path.join(process.resourcesPath, 'token-monitor-widget.json'),
+    path.resolve(__dirname, '..', '..', 'build', 'macos-widget', 'widget-config.json')
+  ];
+  if (!appGroup) {
+    for (const configPath of configCandidates) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        appGroup = String(config.appGroup || '').trim();
+        urlScheme = String(config.urlScheme || urlScheme).trim();
+        widgetKind = String(config.widgetKind || widgetKind).trim();
+        snapshotFileName = String(config.snapshotFileName || snapshotFileName).trim();
+        if (appGroup) break;
+      } catch (_) {}
+    }
+  }
+  const snapshotPath = resolveMacWidgetSnapshotPath({
+    appGroup,
+    home: app.getPath('home'),
+    snapshotFileName
+  });
+  if (!snapshotPath) {
+    cachedMacWidgetConfiguration = null;
+    return cachedMacWidgetConfiguration;
+  }
+  cachedMacWidgetConfiguration = {
+    appGroup,
+    snapshotPath,
+    widgetKind,
+    urlScheme: (() => {
+      try { return normalizeWidgetURLScheme(urlScheme); } catch (_) { return 'token-monitor'; }
+    })()
+  };
+  return cachedMacWidgetConfiguration;
+}
+
+function historyResolverOptions() {
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  return {
+    aggregateHistory,
+    embeddedHub,
+    historyEnabled: settings?.historyEnabled !== false,
+    hubMode: settings?.hubMode,
+    hubUrl,
+    localDevice,
+    mode,
+    secret
+  };
+}
+
+function getCompleteHistory() {
+  return resolveCompleteHistory(historyResolverOptions());
+}
+
+async function getMacWidgetHistory(stats) {
+  const revision = String(stats?.historyRevision || '').trim();
+  const config = historyResolverOptions();
+  const key = [
+    config.mode,
+    config.hubMode,
+    config.historyEnabled,
+    config.hubUrl || '',
+    revision
+  ].join('|');
+  if (revision && cachedMacWidgetHistoryKey === key && cachedMacWidgetHistory) {
+    return cachedMacWidgetHistory;
+  }
+  if (macWidgetHistoryRequest?.key === key) return macWidgetHistoryRequest.promise;
+
+  const promise = getCompleteHistory()
+    .then((history) => {
+      if (revision) {
+        cachedMacWidgetHistory = history;
+        cachedMacWidgetHistoryKey = key;
+      }
+      return history;
+    })
+    .catch((error) => {
+      console.warn(`[mac-widget] complete history unavailable: ${error?.message || error}`);
+      return { daily: [], monthly: [], summary: {} };
+    });
+  macWidgetHistoryRequest = { key, promise };
+  try {
+    return await promise;
+  } finally {
+    if (macWidgetHistoryRequest?.promise === promise) macWidgetHistoryRequest = null;
+  }
+}
+
+function scheduleMacWidgetSnapshot(stats) {
+  if (process.platform !== 'darwin' || !stats) return;
+  pendingMacWidgetStats = stats;
+  if (macWidgetWriteInFlight) return;
+  macWidgetWriteInFlight = true;
+  setImmediate(async () => {
+    try {
+      while (pendingMacWidgetStats) {
+        const nextStats = pendingMacWidgetStats;
+        pendingMacWidgetStats = null;
+        const config = macWidgetConfiguration();
+        if (!config) break;
+        const history = await getMacWidgetHistory(nextStats);
+        const result = await updateMacWidgetSnapshot(nextStats, {
+          snapshotPath: config.snapshotPath,
+          snapshotOptions: {
+            presentation: {
+              defaultPeriod: settings?.lastViewState?.period,
+              currencyCode: settings?.currency,
+              currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
+              compactNumbers: settings?.showCompactTotalTokens !== false,
+              compactTokenUnits: settings?.compactTokenUnits,
+              showCost: true,
+              locale: settings?.language,
+              theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
+            },
+            history
+          },
+          logger: (message) => console.warn(message)
+        });
+        if (result.ok && result.changed !== false) {
+          requestMacWidgetReload({
+            widgetKind: config.widgetKind,
+            logger: (message) => console.warn(message)
+          });
+        }
+      }
+    } catch (error) {
+      console.warn(`[mac-widget] update failed: ${error?.message || error}`);
+    } finally {
+      macWidgetWriteInFlight = false;
+      if (pendingMacWidgetStats) scheduleMacWidgetSnapshot(pendingMacWidgetStats);
+    }
+  });
+}
+
 // Two options, both for the cold-start seed and neither for live stats.
 // `skipExport` keeps a republished snapshot from spending the auto-export
 // interval that this run's first real scan needs. `deferToRenderer` waits for
@@ -3342,6 +3506,7 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    scheduleMacWidgetSnapshot(latestStats);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
@@ -3670,6 +3835,37 @@ function showPopover() {
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
   setTimeout(() => { suppressNextBlurHide = false; }, 250);
+}
+
+function openMainWindowFromWidget() {
+  if (!app.isReady()) return;
+  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
+  pendingMacWidgetOpen = null;
+  updateRendererViewState({ breakdown: destination.view });
+  applyMacActivationPolicy({ mainWindowVisible: true });
+  // Closing the window with the tray icon off destroys it while macOS keeps the
+  // app alive, so a widget click has to be able to build one again — the same
+  // recovery focusExistingWindow() performs for the dock and the shortcut.
+  // Bailing out instead consumed the open-url event and left the widget dead
+  // for the rest of the session, since nothing else reads pendingMacWidgetOpen.
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const sendDestination = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (destination.settings) mainWindow.webContents.send('settings:open');
+    else mainWindow.webContents.send('view:open', destination.view);
+  };
+  if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendDestination);
+  else sendDestination();
+  if (settings?.trayMode && tray) {
+    showPopover();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  applyMacSpaceBehavior(false);
+  // A collapsed bubble would otherwise swallow the navigation we just sent.
+  if (floatingBubbleState.collapsed) expandFloatingBubble();
+  else mainWindow.show();
 }
 
 function hidePopover() {
@@ -5246,35 +5442,7 @@ function createDashboardWindow() {
 }
 
 async function getDashboardHistory() {
-  if (settings?.historyEnabled === false) return aggregateHistory([]);
-  if (mode === 'local') {
-    // The local collector keeps localDevice.history current (watch + interval
-    // ticks, with carry-forward), so read it directly — exactly as the hub
-    // branch reads /api/history. Forcing a full collection tick here made the
-    // fetch take seconds; on a quick close/reopen the response outlived the
-    // renderer and was dropped, stranding the dashboard on its empty state.
-    return aggregateHistory(localDevice ? [localDevice] : []);
-  }
-  if (settings.hubMode === 'host' && embeddedHub) {
-    // Host mode reads its own hub store in-process, so the dashboard history
-    // doesn't depend on a loopback fetch the local firewall/proxy might block.
-    return embeddedHub.hub.getHistory();
-  }
-  const { url: hubUrl, secret } = effectiveHubConfig();
-  if (!hubUrl) return aggregateHistory([]);
-  const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const response = await fetch(url, {
-      headers: secret ? { authorization: `Bearer ${secret}` } : {},
-      signal: controller.signal
-    });
-    if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-    return response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
+  return getCompleteHistory();
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -5331,6 +5499,7 @@ app.whenReady().then(() => {
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   ensureTray();
+  if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
   startMode();
@@ -6610,6 +6779,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
   unregisterWindowToggleShortcut();

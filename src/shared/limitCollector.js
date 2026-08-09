@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { appVersion } = require('./appVersion');
 const { BROWSER_USER_AGENT } = require('./browserUserAgent');
+const { LIMIT_PROVIDER_IDS } = require('./limitProviders');
 const {
   DEFAULT_LIMITS_REFRESH_MS,
   normalizeLimitProvider,
@@ -55,7 +56,6 @@ const {
   fetchGrokLimits
 } = grokLimits;
 
-const LIMIT_PROVIDER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'antigravity', 'kimi', 'grok', 'copilot', 'mimo', 'zai', 'zaiteam', 'kiro', 'deepseek', 'openrouter', 'minimax', 'volcengine', 'qoder', 'ollama', 'thirdparty'];
 const DEFAULT_PROVIDER_PHYSICAL_BOUND_MS = 120_000;
 const PROVIDER_CLEANUP_GRACE_MS = 5_000;
 const LIMIT_REFRESH_VALUES = new Set([60_000, 120_000, 300_000, 900_000, 1_800_000]);
@@ -3705,6 +3705,7 @@ async function fetchCursorLimits(_options = {}, deps = {}) {
 }
 
 module.exports = {
+  LIMIT_PROVIDER_IDS,
   DEFAULT_PROVIDER_PHYSICAL_BOUND_MS,
   PROVIDER_CLEANUP_GRACE_MS,
   collectLimitsOnce,

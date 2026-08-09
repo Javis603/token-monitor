@@ -4195,7 +4195,7 @@ test('an edit is saved against the version its form was opened on', async () => 
   context.nextVersion = 'v4';
   assert.equal(await vm.runInContext('saveSubscriptions([], subscriptionSettingsVersion());', context), true);
   assert.deepEqual(context.sent, ['v3']);
-  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v4' }); 
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v4' });
 
   // Switching hubs under an open form is the one case re-anchoring must not
   // handle: the fields hold an edit made for the hub the user left, and giving

@@ -135,6 +135,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
 - **Menu bar layout composer** — the menu bar and the floating bubble can use a built-in preset or a layout you build yourself: pick "Custom…" to add AI tool icons, quota bars, percentages, reset times, cost, or custom text, drag to reorder against a live preview, and give each item its own AI tool, account, quota window, and typeface
 - **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, and transparent window mode
+- **Experimental native macOS Widget** — macOS 14+ support in Small, Medium, and Large sizes, with Overview, Quota, Models, Activity, and Trend pages. This source-only preview is not yet promised in published releases.
 - **Customizable tool list** — hide, pin, and reorder tools in the main dashboard without changing what gets tracked
 - **Recordable global shortcut** — show or hide the window from anywhere
 - **Discord Rich Presence** — broadcast today's tokens, cost, and top client (opt-in)
