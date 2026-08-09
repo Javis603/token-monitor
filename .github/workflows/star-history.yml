@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Generate with the external read-only action
         id: generate
-        uses: Javis603/star-history-action@7eedfe3bfa6f651dc0796cb06ff4271e8a4e789e
+        uses: Javis603/star-history-action@6fa3ad0be57ee0010a5e48381d592a3437570ee6
         with:
           repository: ${{ github.repository }}
           token: ${{ github.token }}
