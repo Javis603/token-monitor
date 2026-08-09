@@ -103,6 +103,7 @@ const {
   checkLatestRelease,
   deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
+  installFailureErrorKind,
   latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
   providerUpdateCheckAvailability,
@@ -4315,14 +4316,14 @@ const updateInstallQuit = createUpdateInstallQuitGuard({
   onStalled: () => {
     // The bound is far enough out that reaching it means the install genuinely
     // stalled, which is exactly what the user is looking at: they pressed Install
-    // and the app neither restarted nor complained. Restarting is the only advice
-    // we can honestly give, since the guard cannot allow another attempt while the
-    // updater's own request may still be live.
+    // and the app neither restarted nor complained. What to do about it depends on
+    // whether the attempt survived: where the guard handed it back the update is
+    // still one press away, and only where it did not is a restart the way out.
     setNativeAppUpdateState({
       phase: 'error',
       progress: null,
       error: 'Update installer did not start',
-      errorKind: 'installer-did-not-start'
+      errorKind: installFailureErrorKind({ spent: updateInstallQuit.isSpent(), stalled: true })
     });
   },
   onHandoff: (afterStalledReport) => {
@@ -4614,9 +4615,11 @@ function configureNativeAppUpdater() {
       // path: the controls below now offer the release page instead of a retry, and
       // a generic "couldn't install" leaves that looking like the end of the road.
       // A restart is what brings the retry back, so the message has to say so.
-      // `wasInstalling` keeps a check failure arriving after an earlier spent
-      // attempt from borrowing the explanation.
-      errorKind: wasInstalling && updateInstallQuit.isSpent() ? 'install-spent-by-failure' : null
+      // `wasInstalling` is the part the helper cannot know: without it a check
+      // failure arriving after an earlier spent attempt borrows its explanation.
+      errorKind: wasInstalling
+        ? installFailureErrorKind({ spent: updateInstallQuit.isSpent() })
+        : null
     });
   });
 }
@@ -4884,8 +4887,16 @@ function installDownloadedAppUpdate() {
     // (per-user install needs no elevation); isForceRunAfter relaunches the app.
     autoUpdater.quitAndInstall(true, true);
   } catch (error) {
+    // The abort above ended the attempt this call had just made, so unlike the
+    // updater's own error handler there is nothing else this failure could belong
+    // to, and the same recovery applies.
     updateInstallQuit.abort();
-    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: error?.message || String(error || 'Update failed'),
+      errorKind: installFailureErrorKind({ spent: updateInstallQuit.isSpent() })
+    });
   }
   return deriveAppUpdateState();
 }

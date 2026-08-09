@@ -11,6 +11,7 @@ const {
   automaticAppUpdateControlState
 } = require('../../src/electron/renderer/appUpdatePresentation');
 const { MESSAGES } = require('../../src/electron/renderer/i18n');
+const { installFailureErrorKind, updateInstallQuitPolicy } = require('../../src/shared/appUpdater');
 
 test('failed checks mark cached versions as last known instead of up to date', () => {
   assert.deepEqual(appUpdateStatusPresentation({
@@ -68,11 +69,15 @@ test('update error presentation distinguishes actionable failure classes', () =>
 });
 
 test('the install failures the user can act on get their own message', () => {
-  // All three mean the app is still running and only a restart yields another
-  // attempt, which the generic "couldn't install" cannot say.
+  // Each says something the generic "couldn't install" cannot: what failed, and
+  // which of the two recoveries is the one that works.
   assert.equal(
     appUpdateInstallErrorMessageKey('installer-did-not-start'),
     'settings.appUpdate.installerDidNotStart'
+  );
+  assert.equal(
+    appUpdateInstallErrorMessageKey('installer-did-not-start-spent'),
+    'settings.appUpdate.installerDidNotStartSpent'
   );
   // The one an ordinary macOS install failure produces: the failure is reported and
   // the attempt is gone with it, so this is the message that path actually shows.
@@ -89,11 +94,12 @@ test('the install failures the user can act on get their own message', () => {
   assert.equal(
     new Set([
       appUpdateInstallErrorMessageKey('installer-did-not-start'),
+      appUpdateInstallErrorMessageKey('installer-did-not-start-spent'),
       appUpdateInstallErrorMessageKey('install-spent-by-failure'),
       appUpdateInstallErrorMessageKey('attempt-spent'),
       appUpdateInstallErrorMessageKey(null)
     ]).size,
-    4
+    5
   );
   // Anything the updater merely reported stays generic.
   assert.equal(appUpdateInstallErrorMessageKey(null), 'settings.appUpdate.installError');
@@ -104,12 +110,52 @@ test('the install failures the user can act on get their own message', () => {
 test('every locale can say how to recover from an install that never started', () => {
   // The renderer never shows the main process error text, so a message with no key
   // behind it reaches nobody.
-  for (const kind of ['installer-did-not-start', 'install-spent-by-failure', 'attempt-spent']) {
+  const kinds = ['installer-did-not-start', 'installer-did-not-start-spent', 'install-spent-by-failure', 'attempt-spent'];
+  for (const kind of kinds) {
     const key = appUpdateInstallErrorMessageKey(kind);
     for (const locale of Object.keys(MESSAGES)) {
       assert.equal(typeof MESSAGES[locale][key], 'string', `${locale} is missing ${key}`);
       assert.ok(MESSAGES[locale][key].length > 0, `${locale} has an empty ${key}`);
     }
+  }
+});
+
+test('the advice a terminal failure gives matches what its platform can do', () => {
+  // The gap this closes spanned three files: the guard decided retryability, the
+  // action policy offered a matching control, and the message advised a restart on
+  // every platform regardless. Walking the real path from policy to rendered string
+  // is the only place that disagreement is visible.
+  const retryable = MESSAGES.en[appUpdateInstallErrorMessageKey(
+    installFailureErrorKind({ spent: false, stalled: true })
+  )];
+  const spent = MESSAGES.en[appUpdateInstallErrorMessageKey(
+    installFailureErrorKind({ spent: true, stalled: true })
+  )];
+  assert.doesNotMatch(retryable, /[Rr]estart the app/);
+  assert.match(spent, /[Rr]estart the app/);
+
+  for (const platform of ['darwin', 'win32', 'linux']) {
+    const { singleUseAttempt } = updateInstallQuitPolicy(platform);
+    for (const stalled of [true, false]) {
+      const key = appUpdateInstallErrorMessageKey(
+        installFailureErrorKind({ spent: singleUseAttempt, stalled })
+      );
+      for (const locale of Object.keys(MESSAGES)) {
+        const message = MESSAGES[locale][key];
+        assert.equal(typeof message, 'string', `${locale} is missing ${key} for ${platform}`);
+        assert.ok(message.length > 0, `${locale} has an empty ${key}`);
+      }
+    }
+  }
+
+  // Per locale rather than in English only: a translation that pastes the restart
+  // wording into both slots restores the contradiction in that language alone.
+  for (const locale of Object.keys(MESSAGES)) {
+    assert.notEqual(
+      MESSAGES[locale]['settings.appUpdate.installerDidNotStart'],
+      MESSAGES[locale]['settings.appUpdate.installerDidNotStartSpent'],
+      `${locale} gives a retryable stall and a spent one the same advice`
+    );
   }
 });
 

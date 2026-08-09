@@ -64,6 +64,7 @@
   function appUpdateInstallErrorMessageKey(kind) {
     const keys = {
       'installer-did-not-start': 'settings.appUpdate.installerDidNotStart',
+      'installer-did-not-start-spent': 'settings.appUpdate.installerDidNotStartSpent',
       'install-spent-by-failure': 'settings.appUpdate.installSpentByFailure',
       'attempt-spent': 'settings.appUpdate.installAttemptSpent'
     };

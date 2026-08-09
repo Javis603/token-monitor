@@ -76,6 +76,20 @@ function updateInstallQuitPolicy(platform = process.platform) {
     : { graceMs: 10 * 1000, singleUseAttempt: false };
 }
 
+// Which recovery a terminal install failure can honestly advise. Three places ask
+// it -- the stall report, an updater error and a synchronous throw -- and letting
+// each answer separately is how a stall came to advise a restart on the platforms
+// where the guard had already handed the attempt back. Only the guard knows, and
+// only once it has ended the attempt, so `spent` is passed in rather than derived.
+//
+// Restarting is the recovery of last resort: it is the only one where the attempt
+// cannot be repeated, and offering it where an install is still one press away
+// sends the user the long way round.
+function installFailureErrorKind({ spent = false, stalled = false } = {}) {
+  if (stalled) return spent ? 'installer-did-not-start-spent' : 'installer-did-not-start';
+  return spent ? 'install-spent-by-failure' : null;
+}
+
 function parseTag(tag) {
   if (typeof tag !== 'string') return null;
   const trimmed = tag.trim();
@@ -610,6 +624,7 @@ async function checkLatestRelease(currentVersion) {
 
 module.exports = {
   appUpdateInstallSupport,
+  installFailureErrorKind,
   updateInstallQuitPolicy,
   parseTag,
   parseLatestReleasePayload,

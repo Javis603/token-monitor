@@ -13,7 +13,7 @@ const {
   createUpdateInstallQuitGuard,
   observeUpdateInstallHandoff
 } = require('../../src/electron/updateInstallQuit');
-const { updateInstallQuitPolicy } = require('../../src/shared/appUpdater');
+const { installFailureErrorKind, updateInstallQuitPolicy } = require('../../src/shared/appUpdater');
 
 const ROOT = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
@@ -289,6 +289,19 @@ test('macOS gets a long bound and a single-use attempt', () => {
   assert.ok(policy.graceMs > updateInstallQuitPolicy('win32').graceMs * 10);
 });
 
+test('a terminal failure advises a restart only where nothing else is left', () => {
+  // Restarting is the recovery of last resort. An attempt the guard handed back is
+  // one press from another install, and sending that user through a restart is the
+  // long way round to the same place.
+  assert.equal(installFailureErrorKind({ spent: false, stalled: true }), 'installer-did-not-start');
+  assert.equal(installFailureErrorKind({ spent: true, stalled: true }), 'installer-did-not-start-spent');
+  assert.equal(installFailureErrorKind({ spent: true }), 'install-spent-by-failure');
+  // A reported failure that left the attempt intact has nothing to add: the panel
+  // still offers the update, so the updater's own message is the whole story.
+  assert.equal(installFailureErrorKind({ spent: false }), null);
+  assert.equal(installFailureErrorKind(), null);
+});
+
 // The observer has to report a listener that is genuinely attached. Optional
 // chaining over a missing emitter no-ops in silence, and a watchdog armed on that
 // would release the quit flags with nothing able to reclaim them.
@@ -399,7 +412,32 @@ test('an in-flight install is reported as busy and its reason as a kind', () => 
   assert.match(handler, /error: null/);
 
   const stalled = main.slice(main.indexOf('onStalled: () => {'));
-  assert.match(stalled.slice(0, stalled.indexOf('\n  }')), /errorKind: 'installer-did-not-start'/);
+  // Not a fixed kind: a stall on a platform that handed the attempt back leaves the
+  // update one press away, and advising a restart there sends the user the long way
+  // round for no reason.
+  assert.match(
+    stalled.slice(0, stalled.indexOf('\n  }')),
+    /errorKind: installFailureErrorKind\(\{ spent: updateInstallQuit\.isSpent\(\), stalled: true \}\)/
+  );
+});
+
+test('all three terminal failures ask the same question the same way', () => {
+  // Three call sites answering "can this process try again" separately is how the
+  // stall report came to advise a restart on platforms the guard had already
+  // handed the attempt back to. The shared helper is what keeps them from drifting
+  // apart again, so each has to be seen using it.
+  const stalled = main.slice(main.indexOf('onStalled: () => {'));
+  assert.match(stalled.slice(0, stalled.indexOf('\n  }')), /installFailureErrorKind\(/);
+
+  const reported = main.slice(main.indexOf("autoUpdater.on('error'"));
+  assert.match(reported.slice(0, reported.indexOf('\n  });')), /installFailureErrorKind\(/);
+
+  // The synchronous throw is the one that was missed: the abort spends the attempt
+  // exactly as the reported error does, so it owes the user the same recovery.
+  const install = functionSource('function installDownloadedAppUpdate()');
+  const thrown = install.slice(install.indexOf('} catch (error) {'));
+  assert.match(thrown, /updateInstallQuit\.abort\(\);/);
+  assert.match(thrown, /errorKind: installFailureErrorKind\(\{ spent: updateInstallQuit\.isSpent\(\) \}\)/);
 });
 
 test('an error kind never outlives the error it arrived with', () => {
@@ -426,15 +464,11 @@ test('a failed install that spent the attempt says a restart brings it back', ()
   const handler = main.slice(main.indexOf("autoUpdater.on('error'"));
   const body = handler.slice(0, handler.indexOf('\n  });'));
   const kind = body.slice(body.indexOf('errorKind:'));
-  const expression = kind.slice(0, kind.indexOf('\n'));
-  // This is the message an ordinary macOS install failure produces, not a rare one:
-  // the abort above spends the attempt, so the controls have already dropped to the
-  // release page. Left generic, the user is told it failed and shown no way back.
-  assert.match(expression, /'install-spent-by-failure'/);
-  // Both conditions are load-bearing. Without isSpent() a platform that stays
-  // retryable would tell the user to restart for an install it is still offering;
-  // without wasInstalling a later check failure would borrow the explanation from
-  // an install attempt that ended long before it.
+  const expression = kind.slice(0, kind.indexOf('\n    });'));
+  // Both conditions are load-bearing, and they belong to different layers. Whether
+  // the attempt was spent decides the recovery, and the helper owns that; whether
+  // this failure belongs to an install at all is local, and without it a later
+  // check failure borrows the explanation from an attempt long since ended.
   assert.match(expression, /wasInstalling/);
-  assert.match(expression, /updateInstallQuit\.isSpent\(\)/);
+  assert.match(expression, /installFailureErrorKind\(\{ spent: updateInstallQuit\.isSpent\(\) \}\)/);
 });
