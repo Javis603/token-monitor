@@ -95,6 +95,9 @@ test('MacUpdater attaches an update-downloaded listener it never detaches', (t) 
     ['error'],
     'if upstream starts detaching update-downloaded, the single-use rule can be relaxed'
   );
+  // The scan above only sees a named event, so a bare removeAllListeners() would
+  // take update-downloaded off with everything else and leave this test green.
+  assert.doesNotMatch(source, /removeAllListeners\(\s*\)/);
 });
 
 test('MacUpdater leaves Squirrel untouched until the install is requested', (t) => {
