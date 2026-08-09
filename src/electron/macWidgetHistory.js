@@ -56,7 +56,7 @@ function macWidgetHistorySourceKey(config = {}) {
     config.mode,
     config.hubMode,
     config.historyEnabled,
-    config.hubUrl || ''
+    String(config.hubUrl || '').replace(/\/$/, '')
   ].join('|');
 }
 
@@ -99,7 +99,11 @@ async function resolveMacWidgetHistory(options = {}) {
   if (inFlight && inFlight.sourceKey === sourceKey) return inFlight.promise;
 
   const floorMs = cachedHistory ? minIntervalMs : retryIntervalMs;
-  if (lastAttemptAt !== null && now - lastAttemptAt < floorMs) {
+  const elapsedMs = lastAttemptAt === null ? null : now - lastAttemptAt;
+  // A wall-clock rollback makes the previous stamp meaningless. Treat a negative
+  // elapsed as due and re-anchor below instead of suppressing refreshes until the
+  // clock catches up, matching the collector's other wall-clock throttle.
+  if (elapsedMs !== null && elapsedMs >= 0 && elapsedMs < floorMs) {
     return cachedHistory || emptyHistory();
   }
 

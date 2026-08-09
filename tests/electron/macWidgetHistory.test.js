@@ -19,6 +19,10 @@ test.after(() => resetMacWidgetHistoryCache());
 test('the source key ignores the revision so a moving hash cannot invalidate the cache', () => {
   const config = { mode: 'client', hubMode: 'client', historyEnabled: true, hubUrl: 'http://hub' };
   assert.equal(macWidgetHistorySourceKey(config), macWidgetHistorySourceKey({ ...config }));
+  assert.equal(
+    macWidgetHistorySourceKey(config),
+    macWidgetHistorySourceKey({ ...config, hubUrl: 'http://hub/' })
+  );
   assert.notEqual(
     macWidgetHistorySourceKey(config),
     macWidgetHistorySourceKey({ ...config, hubUrl: 'http://other' })
@@ -61,6 +65,20 @@ test('a moving revision is throttled by the time floor', async () => {
   });
   assert.equal(calls, 2);
   assert.equal(afterFloor.summary.label, 'call-2');
+});
+
+test('a backwards clock step expires the warm-cache freshness floor', async () => {
+  let calls = 0;
+  const fetchHistory = () => { calls += 1; return history(`call-${calls}`); };
+  const minIntervalMs = 60_000;
+
+  await resolveMacWidgetHistory({ sourceKey: 's', revision: 'r1', fetchHistory, now: 600_000, minIntervalMs });
+  const afterRollback = await resolveMacWidgetHistory({
+    sourceKey: 's', revision: 'r2', fetchHistory, now: 300_000, minIntervalMs
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(afterRollback.summary.label, 'call-2');
 });
 
 test('a failed fetch keeps the last good history instead of blanking the heatmap', async () => {
@@ -109,6 +127,26 @@ test('a cold start failure is bounded by the retry floor instead of refetching p
     sourceKey: 's', revision: 'r99', fetchHistory, now: retryIntervalMs, minIntervalMs, retryIntervalMs
   });
   assert.equal(calls, 2, 'the retry floor expires on its own, without needing a new revision');
+});
+
+test('a backwards clock step expires the cold-failure retry floor', async () => {
+  let calls = 0;
+  const fetchHistory = () => {
+    calls += 1;
+    if (calls === 1) throw new Error('hub unreachable');
+    return history('recovered');
+  };
+  const retryIntervalMs = 30_000;
+
+  await resolveMacWidgetHistory({
+    sourceKey: 's', revision: 'r1', fetchHistory, now: 600_000, retryIntervalMs
+  });
+  const afterRollback = await resolveMacWidgetHistory({
+    sourceKey: 's', revision: 'r2', fetchHistory, now: 300_000, retryIntervalMs
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(afterRollback.summary.label, 'recovered');
 });
 
 test('recovery after a cold failure needs only the retry floor, not the freshness floor', async () => {
