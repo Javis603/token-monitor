@@ -35,7 +35,7 @@ function readReasonix(home, stateHome, sessionId, period = 'total', now = new Da
     home,
     deps: {
       env: { REASONIX_STATE_HOME: stateHome },
-      platform: 'linux',
+      platform: process.platform,
       now
     }
   });
@@ -182,7 +182,7 @@ test('Reasonix official schema replays replace/append, timestamps messages, and 
     sessionId: 'reasonix:snapshot-1',
     home: root,
     env: { REASONIX_STATE_HOME: stateHome },
-    platform: 'linux',
+    platform: process.platform,
     now: new Date(2026, 7, 8, 12, 0)
   });
   assert.equal(sessionEvents.messageCount, 3);

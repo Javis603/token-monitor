@@ -130,11 +130,11 @@ test('resolves a Reasonix native detail through the same platform resolver', () 
     const detail = resolveSessionDetailForPlatform(
       { client: 'reasonix', sessionId: 'reasonix:resolver-id', period: 'total' },
       {
-        platform: 'linux',
+        platform: process.platform,
         homedir: () => nativeHome,
         readSessionDetail: (args) => readNativeDetail({
           ...args,
-          deps: { platform: 'linux', env: { REASONIX_STATE_HOME: stateHome } }
+          deps: { platform: process.platform, env: { REASONIX_STATE_HOME: stateHome } }
         })
       }
     );

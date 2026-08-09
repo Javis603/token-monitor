@@ -28,6 +28,7 @@ const syntheticSession = {
   costUsd: 0.03
 };
 const syntheticKey = `reasonix:${syntheticSession.sessionId}`;
+const nativeSessionTime = new Date(2026, 7, 8, 14, 29, 0);
 const nativeSession = {
   native: true,
   client: 'reasonix',
@@ -35,7 +36,7 @@ const nativeSession = {
   model: 'deepseek/deepseek-v4-flash',
   totalTokens: 140,
   messageCount: 2,
-  lastUsedAt: '2026-08-08T06:29:00.000Z'
+  lastUsedAt: nativeSessionTime.toISOString()
 };
 
 function periodWithSynthetic(extra = {}) {
@@ -175,7 +176,7 @@ test('sync and renderer expose only native Reasonix and never serialize the stat
     nativeSessions: { [nativeSession.sessionId]: nativeSession },
     clientLabels: { reasonix: 'Reasonix' },
     clientColors: { reasonix: '#4d6bfe' },
-    now: new Date('2026-08-08T07:00:00.000Z')
+    now: new Date(2026, 7, 8, 14, 30, 0)
   });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].client, 'reasonix');

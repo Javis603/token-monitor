@@ -38,7 +38,7 @@ function cacheFor(stateHome, projectIdentity, allTimeSince) {
   return createReasonixNativeSessionCache({
     env: { REASONIX_STATE_HOME: stateHome },
     homeDir: path.dirname(stateHome),
-    platform: 'linux',
+    platform: process.platform,
     cwdDir: path.dirname(stateHome),
     projectIdentity,
     allTimeSince
@@ -490,7 +490,7 @@ test('Reasonix event updates invalidate only the corresponding native session', 
 });
 
 test('Reasonix native watcher roots share the resolved state home and keep stats/events live', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-watch-'));
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'reasonix-native-watch-'));
   const stateHome = path.join(root, 'state');
   const statsDir = path.join(stateHome, 'stats');
   const sessionsDir = path.join(stateHome, 'sessions');
@@ -501,7 +501,7 @@ test('Reasonix native watcher roots share the resolved state home and keep stats
   const previous = process.env.REASONIX_STATE_HOME;
   process.env.REASONIX_STATE_HOME = stateHome;
   try {
-    const roots = reasonixNativeSessionWatchRoots({ env: process.env, homeDir: root, platform: 'linux', cwdDir: root });
+    const roots = reasonixNativeSessionWatchRoots({ env: process.env, homeDir: root, platform: process.platform, cwdDir: root });
     assert.deepEqual(roots, [sessionsDir, projectsDir]);
     assert.equal(isReasonixNativeSessionPath(path.join(sessionsDir, 'a.jsonl.meta'), roots), true);
     assert.equal(isReasonixNativeSessionSidecar('a.jsonl.meta'), true);
