@@ -89,26 +89,37 @@ function resolveWidgetUrlScheme(env = process.env, root = path.resolve(__dirname
 function widgetMacBuildConfig(baseMac = {}, options = {}) {
   const env = options.env || process.env;
   const root = options.root || path.resolve(__dirname, '..');
-  const baseWithoutWidget = { ...baseMac };
-  delete baseWithoutWidget.entitlements;
-  delete baseWithoutWidget.sign;
-  delete baseWithoutWidget.extraFiles;
-  delete baseWithoutWidget.extraResources;
-  if (!widgetEnabled(env)) return baseWithoutWidget;
+  const base = { ...baseMac };
+  if (!widgetEnabled(env)) return base;
+
+  const conflictingKeys = ['entitlements', 'sign'].filter((key) => base[key] !== undefined);
+  if (conflictingKeys.length > 0) {
+    throw new Error(`Widget packaging owns ${conflictingKeys.join(' and ')}; compose the existing macOS configuration explicitly instead of replacing it.`);
+  }
 
   assertWidgetArtifacts(root, { env });
   const urlScheme = resolveWidgetUrlScheme(env, root);
   const localDevelopmentSigning = String(env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING || '').trim() === '1';
+  const extraFiles = Array.isArray(base.extraFiles)
+    ? base.extraFiles
+    : (base.extraFiles === undefined ? [] : [base.extraFiles]);
+  const extraResources = Array.isArray(base.extraResources)
+    ? base.extraResources
+    : (base.extraResources === undefined ? [] : [base.extraResources]);
   return {
-    ...baseWithoutWidget,
+    ...base,
     ...(localDevelopmentSigning ? { identity: '-' } : {}),
     entitlements: 'build/macos-widget/TokenMonitor.entitlements',
     sign: 'scripts/sign-macos-with-widget.js',
-    extraFiles: [{
-      from: 'build/macos-widget/TokenMonitorWidget.appex',
-      to: 'PlugIns/TokenMonitorWidget.appex'
-    }],
+    extraFiles: [
+      ...extraFiles,
+      {
+        from: 'build/macos-widget/TokenMonitorWidget.appex',
+        to: 'PlugIns/TokenMonitorWidget.appex'
+      }
+    ],
     extraResources: [
+      ...extraResources,
       {
         from: 'build/macos-widget/widget-config.json',
         to: 'token-monitor-widget.json'
@@ -119,10 +130,10 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
       }
     ],
     extendInfo: {
-      ...(baseWithoutWidget.extendInfo || {}),
+      ...(base.extendInfo || {}),
       CFBundleURLTypes: [
-        ...(Array.isArray(baseWithoutWidget.extendInfo?.CFBundleURLTypes)
-          ? baseWithoutWidget.extendInfo.CFBundleURLTypes
+        ...(Array.isArray(base.extendInfo?.CFBundleURLTypes)
+          ? base.extendInfo.CFBundleURLTypes
           : []),
         {
           CFBundleURLName: 'token-monitor-widget',

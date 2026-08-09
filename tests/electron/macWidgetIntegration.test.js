@@ -48,8 +48,18 @@ const {
 } = require('../../scripts/macos-packaging');
 const { normalizeWidgetURLScheme } = require('../../src/shared/macWidgetConfig');
 
+function createWidgetArtifactRoot() {
+  const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-widget-artifacts-'));
+  const paths = widgetArtifactPaths(artifactRoot);
+  fs.mkdirSync(path.dirname(paths.extensionExecutable), { recursive: true });
+  for (const filePath of [paths.entitlements, paths.extensionExecutable, paths.config, paths.reloader, paths.extensionEntitlements, paths.reloaderEntitlements]) {
+    fs.writeFileSync(filePath, 'test');
+  }
+  return artifactRoot;
+}
+
 test('publishes final stats to the macOS Widget from the single sendPush outlet', () => {
-  const start = mainSource.indexOf('function sendPush(payload)');
+  const start = mainSource.indexOf('function sendPush(payload, options = {})');
   const end = mainSource.indexOf('\nfunction statsHistoryRevision', start);
   assert.ok(start >= 0 && end > start, 'sendPush function should exist');
   const sendPush = mainSource.slice(start, end);
@@ -80,12 +90,7 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   }), /missing before electron-builder/);
   fs.rmSync(missingRoot, { recursive: true, force: true });
 
-  const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-widget-artifacts-'));
-  const paths = widgetArtifactPaths(artifactRoot);
-  fs.mkdirSync(path.dirname(paths.extensionExecutable), { recursive: true });
-  for (const filePath of [paths.entitlements, paths.extensionExecutable, paths.config, paths.reloader, paths.extensionEntitlements, paths.reloaderEntitlements]) {
-    fs.writeFileSync(filePath, 'test');
-  }
+  const artifactRoot = createWidgetArtifactRoot();
   const widget = createBuilderConfig({
     baseConfig: packageJson.build,
     env: { TOKEN_MONITOR_WIDGET_ENABLED: '1' },
@@ -104,6 +109,49 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   assert.match(packageJson.scripts['dist:mac:widget'], /TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 TOKEN_MONITOR_WIDGET_ARCH=arm64 electron-builder/);
   assert.match(packageJson.scripts['dist:mac:widget:x64'], /TOKEN_MONITOR_WIDGET_ARCH=x64/);
   assert.match(packageJson.scripts['pack:mac:widget:x64'], /--mac --x64 --dir/);
+});
+
+test('preserves generic macOS packaging config and fails fast on signing ownership conflicts', () => {
+  const baseMac = {
+    minimumSystemVersion: '14.0',
+    entitlements: 'build/base.entitlements',
+    sign: 'scripts/base-sign.js',
+    extraFiles: [{ from: 'base-file', to: 'base-file' }],
+    extraResources: [{ from: 'base-resource', to: 'base-resource' }],
+    extendInfo: { ExistingKey: 'kept' }
+  };
+  const disabled = createBuilderConfig({
+    baseConfig: { mac: baseMac },
+    env: { TOKEN_MONITOR_WIDGET_ENABLED: '0' },
+    root
+  }).mac;
+  assert.deepEqual(disabled, baseMac);
+
+  assert.throws(() => createBuilderConfig({
+    baseConfig: { mac: baseMac },
+    env: { TOKEN_MONITOR_WIDGET_ENABLED: '1' },
+    root
+  }), /owns entitlements and sign/);
+
+  const artifactRoot = createWidgetArtifactRoot();
+  try {
+    const enabled = createBuilderConfig({
+      baseConfig: {
+        mac: {
+          extraFiles: baseMac.extraFiles,
+          extraResources: baseMac.extraResources,
+          extendInfo: baseMac.extendInfo
+        }
+      },
+      env: { TOKEN_MONITOR_WIDGET_ENABLED: '1' },
+      root: artifactRoot
+    }).mac;
+    assert.equal(enabled.extendInfo.ExistingKey, 'kept');
+    assert.deepEqual(enabled.extraFiles.map((entry) => entry.to), ['base-file', 'PlugIns/TokenMonitorWidget.appex']);
+    assert.deepEqual(enabled.extraResources.map((entry) => entry.to), ['base-resource', 'token-monitor-widget.json', 'TokenMonitorWidgetReloader']);
+  } finally {
+    fs.rmSync(artifactRoot, { recursive: true, force: true });
+  }
 });
 
 test('supports an isolated local Widget URL scheme without changing the release default', () => {

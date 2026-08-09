@@ -100,6 +100,16 @@ enum WidgetPeriod: String, Codable, AppEnum, CaseIterable {
     }
 }
 
+enum WidgetPeriodPolicy {
+    static func isSelectable(on page: WidgetPage) -> Bool {
+        page == .overview || page == .models
+    }
+
+    static func effectivePeriod(for page: WidgetPage, selectedPeriod: WidgetPeriod) -> WidgetPeriod {
+        isSelectable(on: page) ? selectedPeriod : .day
+    }
+}
+
 enum WidgetFamilyScope: String, Codable, AppEnum, CaseIterable {
     case small
     case medium

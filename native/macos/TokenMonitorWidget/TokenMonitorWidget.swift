@@ -121,9 +121,10 @@ struct TokenMonitorWidgetView: View {
     @ViewBuilder
     private func content(_ snapshot: WidgetSnapshot) -> some View {
         if snapshot.isStale(at: entry.date) {
+            let updatedAt = WidgetStalePresentation.trustedUpdatedAt(for: snapshot)
             statusState(
                 title: WidgetL10n.text("Data may be stale"),
-                detail: WidgetL10n.format("Updated %@", snapshot.generatedAt.formatted(.relative(presentation: .named)))
+                detail: updatedAt.map { WidgetL10n.format("Updated %@", $0.formatted(.relative(presentation: .named))) }
             )
         } else {
             switch family {
@@ -136,7 +137,7 @@ struct TokenMonitorWidgetView: View {
 
     private func small(_ snapshot: WidgetSnapshot) -> some View {
         scaffold(
-            header: header(snapshot: snapshot, page: entry.page),
+            header: header(page: entry.page),
             content: pageBody(snapshot: snapshot, page: entry.page, layout: .small),
             footer: footer(page: entry.page, familyScope: familyScope),
             metrics: metrics
@@ -145,7 +146,7 @@ struct TokenMonitorWidgetView: View {
 
     private func medium(_ snapshot: WidgetSnapshot) -> some View {
         scaffold(
-            header: mediumHeader(snapshot: snapshot),
+            header: mediumHeader(page: entry.page),
             content: pageBody(snapshot: snapshot, page: entry.page, layout: .medium),
             footer: footer(page: entry.page, familyScope: familyScope),
             metrics: metrics
@@ -154,7 +155,7 @@ struct TokenMonitorWidgetView: View {
 
     private func large(_ snapshot: WidgetSnapshot) -> some View {
         scaffold(
-            header: mediumHeader(snapshot: snapshot),
+            header: mediumHeader(page: entry.page),
             content: pageBody(snapshot: snapshot, page: entry.page, layout: .large),
             footer: footer(page: entry.page, familyScope: familyScope),
             metrics: metrics
@@ -190,20 +191,24 @@ struct TokenMonitorWidgetView: View {
         WidgetFamilyScope(widgetFamily: family)
     }
 
-    private func header(snapshot: WidgetSnapshot, page: WidgetPage) -> some View {
+    private func header(page: WidgetPage) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             brand
             Spacer(minLength: 4)
-            WidgetPeriodControl(selection: entry.period, style: .compact)
+            if WidgetPeriodPolicy.isSelectable(on: page) {
+                WidgetPeriodControl(selection: entry.period, style: .compact)
+            }
         }
         .frame(height: metrics.headerHeight, alignment: .center)
     }
 
-    private func mediumHeader(snapshot: WidgetSnapshot) -> some View {
+    private func mediumHeader(page: WidgetPage) -> some View {
         HStack(spacing: 12) {
             brand
             Spacer(minLength: 6)
-            WidgetPeriodControl(selection: entry.period, style: .segmented)
+            if WidgetPeriodPolicy.isSelectable(on: page) {
+                WidgetPeriodControl(selection: entry.period, style: .segmented)
+            }
         }
         .frame(height: metrics.headerHeight, alignment: .center)
     }
@@ -386,16 +391,18 @@ struct TokenMonitorWidgetView: View {
         .frame(height: metrics.footerHeight)
     }
 
-    private func statusState(title: String, detail: String) -> some View {
+    private func statusState(title: String, detail: String?) -> some View {
         scaffold(
             header: brand,
             content: VStack(alignment: .leading, spacing: 6) {
                 Spacer(minLength: 0)
                 Text(title).font(.system(size: 13, weight: .semibold))
-                Text(detail)
-                    .font(.system(size: WidgetDesignTokens.secondarySize))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: WidgetDesignTokens.secondarySize))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
                 Spacer(minLength: 0)
             },
             footer: footer(page: entry.page, familyScope: familyScope),

@@ -112,6 +112,60 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertNil(window.remainingPercent)
     }
 
+    func testSourceUpdatedAtDecodesAndSurvivesEveryPeriodSelectionPath() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"totalTokens":1,"updatedAt":"2026-07-17T08:00:00.000Z"}},"month":{"overview":{"totalTokens":2,"updatedAt":"2026-07-17T08:00:00.000Z"}}},"status":{"isStale":true,"sourceStale":true,"sourceUpdatedAt":"2026-07-17T08:00:00.000Z","dataAgeSeconds":3600,"noData":false}}
+        """)
+        let sourceUpdatedAt = try XCTUnwrap(snapshot.status.sourceUpdatedAt)
+
+        XCTAssertEqual(snapshot.selecting(.day).status.sourceUpdatedAt, sourceUpdatedAt)
+        XCTAssertEqual(snapshot.selecting(.month).status.sourceUpdatedAt, sourceUpdatedAt)
+        XCTAssertEqual(snapshot.selecting(.total).status.sourceUpdatedAt, sourceUpdatedAt)
+    }
+
+    func testStalePresentationUsesSourceTimestampInsteadOfFreshSnapshotTime() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"updatedAt":"2026-07-17T08:00:00.000Z"}}},"status":{"isStale":true,"sourceUpdatedAt":"2026-07-17T08:00:00.000Z","dataAgeSeconds":3600,"noData":false}}
+        """)
+
+        XCTAssertEqual(WidgetStalePresentation.trustedUpdatedAt(for: snapshot), snapshot.status.sourceUpdatedAt)
+        XCTAssertNotEqual(WidgetStalePresentation.trustedUpdatedAt(for: snapshot), snapshot.generatedAt)
+    }
+
+    func testStalePresentationOmitsUntrustedGeneratedAtFallback() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"updatedAt":"2026-07-17T09:00:00.000Z"}}},"status":{"isStale":true,"sourceStale":true,"dataAgeSeconds":0,"noData":false}}
+        """)
+
+        XCTAssertNil(WidgetStalePresentation.trustedUpdatedAt(for: snapshot))
+    }
+
+    func testStalePresentationSupportsLegacyAgeAndOverviewTimestamps() throws {
+        let ageSnapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","status":{"isStale":true,"dataAgeSeconds":3600,"noData":false}}
+        """)
+        let ageUpdatedAt = try XCTUnwrap(WidgetStalePresentation.trustedUpdatedAt(for: ageSnapshot))
+        XCTAssertEqual(ageSnapshot.generatedAt.timeIntervalSince(ageUpdatedAt), 3600, accuracy: 0.001)
+
+        let overviewSnapshot = try decode("""
+        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","overview":{"updatedAt":"2026-07-17T08:00:00.000Z"},"status":{"isStale":true,"dataAgeSeconds":0,"noData":false}}
+        """)
+        XCTAssertEqual(WidgetStalePresentation.trustedUpdatedAt(for: overviewSnapshot), overviewSnapshot.overview.updatedAt)
+    }
+
+    func testPeriodPolicyLimitsGlobalSelectionToOverviewAndModels() {
+        for page in [WidgetPage.overview, .models] {
+            XCTAssertTrue(WidgetPeriodPolicy.isSelectable(on: page))
+            XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .month), .month)
+            XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .total), .total)
+        }
+        for page in [WidgetPage.quota, .activity, .trend] {
+            XCTAssertFalse(WidgetPeriodPolicy.isSelectable(on: page))
+            XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .month), .day)
+            XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .total), .day)
+        }
+    }
+
     func testMalformedQuotaEntryIsDroppedWithoutDroppingOtherPages() throws {
         let snapshot = try decode("""
         {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"totalTokens":12},"models":[{"id":"model-safe","displayName":"safe","totalTokens":12,"sharePercent":100}]}},"quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]},{"windows":42},{"provider":"openrouter","status":"ok","windows":[]}],"status":{"noData":false}}

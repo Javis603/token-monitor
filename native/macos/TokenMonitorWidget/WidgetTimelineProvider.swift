@@ -15,8 +15,8 @@ struct TokenMonitorTimelineProvider: AppIntentTimelineProvider {
 
     func snapshot(for configuration: TokenMonitorWidgetConfigurationIntent, in context: Context) async -> TokenMonitorEntry {
         let now = Date()
-        let period = currentPeriod()
         let page = effectivePage(for: configuration, family: context.family)
+        let period = WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: currentPeriod())
         let snapshot = currentSnapshot(period: period)
         let selectedActivityDate = selectedActivityDate(in: snapshot, family: context.family, referenceDate: now)
         return TokenMonitorEntry(date: now, snapshot: snapshot, page: page, period: period, selectedActivityDate: selectedActivityDate)
@@ -24,8 +24,8 @@ struct TokenMonitorTimelineProvider: AppIntentTimelineProvider {
 
     func timeline(for configuration: TokenMonitorWidgetConfigurationIntent, in context: Context) async -> Timeline<TokenMonitorEntry> {
         let now = Date()
-        let period = currentPeriod()
         let page = effectivePage(for: configuration, family: context.family)
+        let period = WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: currentPeriod())
         let snapshot = currentSnapshot(period: period)
         let selectedActivityDate = selectedActivityDate(in: snapshot, family: context.family, referenceDate: now)
         let entry = TokenMonitorEntry(date: now, snapshot: snapshot, page: page, period: period, selectedActivityDate: selectedActivityDate)

@@ -64,7 +64,7 @@ struct WidgetSnapshot: Decodable, Equatable {
             quota = normalizeQuotaProviders(decodedQuota?.values ?? [])
             presentation = try container.decodeIfPresent(WidgetPresentation.self, forKey: .presentation) ?? .default
             status = try container.decodeIfPresent(WidgetStatus.self, forKey: .status)
-                ?? WidgetStatus(isStale: false, dataAgeSeconds: 0, providerConfigured: !quota.isEmpty, providerNeedsLogin: false, noData: overview.totalTokens == 0 && models.isEmpty && activity.activeDays == 0)
+                ?? WidgetStatus(isStale: false, sourceUpdatedAt: nil, dataAgeSeconds: 0, providerConfigured: !quota.isEmpty, providerNeedsLogin: false, noData: overview.totalTokens == 0 && models.isEmpty && activity.activeDays == 0)
         } else {
             let today = try container.decodeIfPresent(LegacyToday.self, forKey: .today) ?? .empty
             let decodedLimits = (try? container.decodeIfPresent(WidgetQuotaProviderArray.self, forKey: .limits)) ?? nil
@@ -76,7 +76,7 @@ struct WidgetSnapshot: Decodable, Equatable {
             trend = .empty
             periods = [:]
             presentation = .default
-            status = WidgetStatus(isStale: false, dataAgeSeconds: 0, providerConfigured: !limits.isEmpty, providerNeedsLogin: limits.contains { $0.status == "unauthorized" }, noData: today.totalTokens == 0 && today.costUsd == 0 && limits.isEmpty)
+            status = WidgetStatus(isStale: false, sourceUpdatedAt: nil, dataAgeSeconds: 0, providerConfigured: !limits.isEmpty, providerNeedsLogin: limits.contains { $0.status == "unauthorized" }, noData: today.totalTokens == 0 && today.costUsd == 0 && limits.isEmpty)
         }
     }
 
@@ -106,7 +106,7 @@ struct WidgetSnapshot: Decodable, Equatable {
                 trend: .empty,
                 periods: periods,
                 presentation: presentation,
-                status: WidgetStatus(isStale: status.isStale, sourceStale: status.sourceStale, dataAgeSeconds: status.dataAgeSeconds, providerConfigured: status.providerConfigured, providerNeedsLogin: status.providerNeedsLogin, noData: true)
+                status: WidgetStatus(isStale: status.isStale, sourceStale: status.sourceStale, sourceUpdatedAt: status.sourceUpdatedAt, dataAgeSeconds: status.dataAgeSeconds, providerConfigured: status.providerConfigured, providerNeedsLogin: status.providerNeedsLogin, noData: true)
             )
         }
         return WidgetSnapshot(
@@ -122,6 +122,7 @@ struct WidgetSnapshot: Decodable, Equatable {
             status: WidgetStatus(
                 isStale: status.isStale,
                 sourceStale: status.sourceStale,
+                sourceUpdatedAt: status.sourceUpdatedAt,
                 dataAgeSeconds: status.dataAgeSeconds,
                 providerConfigured: status.providerConfigured,
                 providerNeedsLogin: status.providerNeedsLogin,
@@ -364,18 +365,37 @@ struct WidgetPresentation: Decodable, Equatable {
 struct WidgetStatus: Decodable, Equatable {
     let isStale: Bool
     let sourceStale: Bool
+    let sourceUpdatedAt: Date?
     let dataAgeSeconds: Int
     let providerConfigured: Bool
     let providerNeedsLogin: Bool
     let noData: Bool
 
-    init(isStale: Bool, sourceStale: Bool = false, dataAgeSeconds: Int, providerConfigured: Bool, providerNeedsLogin: Bool, noData: Bool) {
+    init(isStale: Bool, sourceStale: Bool = false, sourceUpdatedAt: Date? = nil, dataAgeSeconds: Int, providerConfigured: Bool, providerNeedsLogin: Bool, noData: Bool) {
         self.isStale = isStale
         self.sourceStale = sourceStale
+        self.sourceUpdatedAt = sourceUpdatedAt
         self.dataAgeSeconds = dataAgeSeconds
         self.providerConfigured = providerConfigured
         self.providerNeedsLogin = providerNeedsLogin
         self.noData = noData
+    }
+}
+
+enum WidgetStalePresentation {
+    static func trustedUpdatedAt(for snapshot: WidgetSnapshot) -> Date? {
+        if let sourceUpdatedAt = snapshot.status.sourceUpdatedAt {
+            return sourceUpdatedAt
+        }
+        if snapshot.status.dataAgeSeconds > 0 {
+            return snapshot.generatedAt.addingTimeInterval(-TimeInterval(snapshot.status.dataAgeSeconds))
+        }
+        let overviewUpdatedAt = snapshot.overview.updatedAt
+        guard overviewUpdatedAt.timeIntervalSince1970 > 0,
+              snapshot.generatedAt.timeIntervalSince(overviewUpdatedAt) > 1 else {
+            return nil
+        }
+        return overviewUpdatedAt
     }
 }
 
@@ -566,11 +586,12 @@ extension WidgetPresentation {
 }
 
 extension WidgetStatus {
-    private enum CodingKeys: String, CodingKey { case isStale, sourceStale, dataAgeSeconds, providerConfigured, providerNeedsLogin, noData }
+    private enum CodingKeys: String, CodingKey { case isStale, sourceStale, sourceUpdatedAt, dataAgeSeconds, providerConfigured, providerNeedsLogin, noData }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         isStale = c.bool(.isStale)
         sourceStale = c.bool(.sourceStale, default: false)
+        sourceUpdatedAt = try? c.decodeIfPresent(Date.self, forKey: .sourceUpdatedAt)
         dataAgeSeconds = c.int(.dataAgeSeconds)
         providerConfigured = c.bool(.providerConfigured)
         providerNeedsLogin = c.bool(.providerNeedsLogin)
