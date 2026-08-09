@@ -3117,6 +3117,8 @@ function openCodeWebIdentity(goWeb, zen, cookie) {
   return { accountKey: '', aliases: [], includeZen };
 }
 
+const OPENCODE_COMPONENT_PROVENANCE_DETAIL = 'managed';
+
 async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
@@ -3215,6 +3217,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       accountKeyAliases: webIdentity.aliases,
       accountLabel,
       source,
+      sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
       status,
       updatedAt,
       windows,
@@ -3309,6 +3312,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       accountLabel: name,
       planLabel,
       source: 'web',
+      sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
       status,
       updatedAt,
       windows,
@@ -3320,7 +3324,8 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     return normalizeLimitProvider({
       provider: 'opencode', accountKey: hashKey('opencode', `cookie:${cookieHash}`),
       webAccountKey: hashKey('opencode', `cookie:${cookieHash}`),
-      accountName: name, accountLabel: name, planLabel: '', source: 'web', status: 'unavailable',
+      accountName: name, accountLabel: name, planLabel: '', source: 'web',
+      sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL, status: 'unavailable',
       updatedAt, windows: [], balanceUsd: null
     });
   }

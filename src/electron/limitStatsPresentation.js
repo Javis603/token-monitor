@@ -3,6 +3,7 @@
 const { aggregateLimits } = require('../shared/limits');
 
 const LEGACY_HUB_STALENESS_COMPATIBILITY_FLOOR_MS = 1;
+const OPENCODE_COMPONENT_PROVENANCE_DETAIL = 'managed';
 
 function normalizeEnumId(value) {
   return String(value || '').trim().toLowerCase();
@@ -38,10 +39,12 @@ function windowIsLocalOrUnknown(window, provider) {
   const source = normalizeEnumId(window?.source);
   if (source) return source !== 'web';
   // Hubs released before component provenance preserve the provider source but
-  // strip windows[].source. Honor that legacy envelope so a pure Web quota is
-  // not mistaken for a local estimate; missing/unknown envelopes still fail
-  // closed because they cannot prove the window came from Web.
-  return normalizeEnumId(provider?.source) !== 'web';
+  // strip windows[].source. Only collectors carrying the compatibility marker
+  // may use that envelope: pre-marker collectors emitted source:web for mixed
+  // local/Web rows, so trusting their source would leak the local estimate.
+  const hasCompatibilityMarker = normalizeEnumId(provider?.sourceDetail)
+    === OPENCODE_COMPONENT_PROVENANCE_DETAIL;
+  return !hasCompatibilityMarker || normalizeEnumId(provider?.source) !== 'web';
 }
 
 function projectLimitProviderForDisplay(provider, options = {}) {

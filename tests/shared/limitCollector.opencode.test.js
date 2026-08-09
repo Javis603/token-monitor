@@ -45,6 +45,7 @@ test('fetchOpenCodeLimits merges Go(local) windows with Zen(web) balance', async
   const p = summary.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.status, 'ok');
   assert.strictEqual(p.source, 'local');
+  assert.strictEqual(p.sourceDetail, 'managed');
   assert.strictEqual(p.accountKey, p.webAccountKey);
   assert.strictEqual(p.windows.find((w) => w.kind === 'session').source, 'local');
   assert.strictEqual(p.windows.find((w) => w.kind === 'weekly').source, 'web');

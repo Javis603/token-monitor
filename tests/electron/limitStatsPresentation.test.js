@@ -108,6 +108,7 @@ test('new pure-Web OpenCode quota survives a pre-provenance Hub round-trip', asy
   const legacyLimits = roundTripThroughLegacyHub(summary);
   const legacyProvider = legacyLimits.providers[0];
   assert.equal(legacyProvider.source, 'web');
+  assert.equal(legacyProvider.sourceDetail, 'managed');
   assert.equal(Object.hasOwn(legacyProvider.windows[0], 'source'), false);
   assert.equal(Object.hasOwn(legacyProvider, 'webAccountKey'), false);
   assert.equal(Object.hasOwn(legacyProvider, 'accountKeyAliases'), false);
@@ -162,6 +163,7 @@ test('mixed local and Web OpenCode quota fails closed through a pre-provenance H
 
   const legacyLimits = roundTripThroughLegacyHub(summary);
   assert.equal(legacyLimits.providers[0].source, 'local');
+  assert.equal(legacyLimits.providers[0].sourceDetail, 'managed');
   assert.equal(legacyLimits.providers[0].windows.every((window) => !Object.hasOwn(window, 'source')), true);
 
   const rawStats = statsWithDevices([
@@ -176,6 +178,40 @@ test('mixed local and Web OpenCode quota fails closed through a pre-provenance H
   const visible = visibleStats.limits.providers[0];
 
   assert.equal(visibleDeviceProvider.windows.length, 0);
+  assert.equal(visible.status, 'ok');
+  assert.equal(visible.source, 'web');
+  assert.equal(visible.windows.length, 0);
+  assert.equal(visible.balanceUsd, 5);
+});
+
+test('pre-marker legacy mixed OpenCode record never trusts provider-level Web source', () => {
+  // Shape captured from the pre-provenance collector: local Go won the quota
+  // fallback, Zen added Web data, and the provider envelope became source:web.
+  // The old schema has neither windows[].source nor the compatibility marker.
+  const legacyMixed = {
+    provider: 'opencode',
+    accountKey: 'legacy-device-local-key',
+    accountLabel: 'Go',
+    source: 'web',
+    sourceDetail: '',
+    status: 'ok',
+    updatedAt,
+    windows: [
+      { kind: 'session', usedPercent: 75 },
+      { kind: 'weekly', usedPercent: 10 }
+    ],
+    balanceUsd: 5
+  };
+  const rawStats = statsWithDevices([
+    deviceWithProviders('local-device', [legacyMixed])
+  ]);
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'local-device',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false
+  });
+  const visible = visibleStats.limits.providers[0];
+
   assert.equal(visible.status, 'ok');
   assert.equal(visible.source, 'web');
   assert.equal(visible.windows.length, 0);
