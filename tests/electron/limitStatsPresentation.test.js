@@ -10,54 +10,74 @@ const {
   projectLimitStatsForDisplay
 } = require('../../src/electron/limitStatsPresentation');
 const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
-const { formatTrayText } = require('../../src/shared/trayText');
+const { aggregateLimits } = require('../../src/shared/limits');
 const { buildMacWidgetSnapshot } = require('../../src/shared/macWidgetSnapshot');
+const { formatTrayText } = require('../../src/shared/trayText');
 
 const projectRoot = path.join(__dirname, '..', '..');
+const updatedAt = '2026-08-09T08:03:00.000Z';
 
-function statsWithProviders(providers) {
-  const updatedAt = '2026-08-09T08:00:00.000Z';
+function opencodeProvider({
+  accountKey = 'shared-account',
+  remainingPercent,
+  source = 'local',
+  windowSource = source,
+  status = 'ok',
+  providerUpdatedAt = updatedAt,
+  balanceUsd = null
+}) {
+  return {
+    provider: 'opencode',
+    source,
+    accountKey,
+    status,
+    updatedAt: providerUpdatedAt,
+    windows: remainingPercent === null ? [] : [{
+      kind: 'session',
+      source: windowSource,
+      usedPercent: 100 - remainingPercent
+    }],
+    balanceUsd
+  };
+}
+
+function deviceWithProviders(deviceId, providers) {
+  return {
+    deviceId,
+    updatedAt,
+    limits: { updatedAt, providers }
+  };
+}
+
+function statsWithDevices(devices) {
   const emptyPeriod = { totalTokens: 0, costUsd: 0, clients: {}, clientCosts: {}, models: {}, modelCosts: {} };
   return {
     updatedAt,
+    staleAfterMs: 0,
     periods: {
       today: { ...emptyPeriod },
       month: { ...emptyPeriod },
       allTime: { ...emptyPeriod }
     },
-    limits: { updatedAt, providers }
+    devices,
+    limits: aggregateLimits(devices, 0, Date.parse(updatedAt))
   };
 }
 
-function opencodeProvider({ deviceId, accountKey, remainingPercent, status = 'ok', stale = false }) {
-  return {
-    provider: 'opencode',
-    source: 'local',
-    sourceDeviceId: deviceId,
-    accountKey,
-    status,
-    stale,
-    windows: remainingPercent === null ? [] : [{
-      kind: 'session',
-      remainingPercent,
-      usedPercent: 100 - remainingPercent
-    }]
-  };
-}
+test('offline Hub cache filters local candidates before aggregation so a same-account remote estimate survives everywhere', () => {
+  const remote = deviceWithProviders('remote-device', [opencodeProvider({
+    remainingPercent: 60,
+    providerUpdatedAt: '2026-08-09T08:01:00.000Z'
+  })]);
+  const local = deviceWithProviders('local-device', [opencodeProvider({
+    remainingPercent: 20,
+    providerUpdatedAt: '2026-08-09T08:02:00.000Z'
+  })]);
+  const cachedHubStats = statsWithDevices([remote, local]);
 
-test('offline Hub cache hides only this device local estimate across every Electron surface', () => {
-  const local = opencodeProvider({
-    deviceId: 'local-device',
-    accountKey: 'local-account',
-    remainingPercent: 75,
-    stale: true
-  });
-  const remote = opencodeProvider({
-    deviceId: 'remote-device',
-    accountKey: 'remote-account',
-    remainingPercent: 40
-  });
-  const cachedHubStats = statsWithProviders([local, remote]);
+  assert.equal(cachedHubStats.limits.providers.length, 1);
+  assert.equal(cachedHubStats.limits.providers[0].sourceDeviceId, 'local-device');
+  assert.equal(cachedHubStats.limits.providers[0].windows[0].remainingPercent, 20);
 
   const visibleStats = projectLimitStatsForDisplay(cachedHubStats, {
     localDeviceId: 'LOCAL-DEVICE',
@@ -66,17 +86,13 @@ test('offline Hub cache hides only this device local estimate across every Elect
   });
 
   assert.notEqual(visibleStats, cachedHubStats);
-  assert.equal(cachedHubStats.limits.providers[0].status, 'ok');
-  assert.equal(cachedHubStats.limits.providers[0].windows[0].remainingPercent, 75);
-  assert.deepEqual(visibleStats.limits.providers[0], {
-    ...local,
-    status: 'disabled',
-    stale: false,
-    windows: [],
-    balance: null,
-    balanceUsd: null
-  });
-  assert.equal(visibleStats.limits.providers[1], remote);
+  assert.equal(cachedHubStats.devices[1].limits.providers[0].status, 'ok');
+  assert.equal(cachedHubStats.devices[1].limits.providers[0].windows.length, 1);
+  assert.equal(visibleStats.devices[1].limits.providers[0].status, 'disabled');
+  assert.equal(visibleStats.devices[1].limits.providers[0].windows.length, 0);
+  assert.equal(visibleStats.limits.providers.length, 1);
+  assert.equal(visibleStats.limits.providers[0].sourceDeviceId, 'remote-device');
+  assert.equal(visibleStats.limits.providers[0].windows[0].remainingPercent, 60);
 
   const homeRows = homeLimitAccountsForProviders({
     providers: visibleStats.limits.providers,
@@ -86,47 +102,84 @@ test('offline Hub cache hides only this device local estimate across every Elect
     limit: 5
   });
   assert.equal(homeRows.length, 1);
-  assert.equal(homeRows[0].providerId, 'opencode');
-  assert.equal(homeRows[0].lowestRemaining, 40);
+  assert.equal(homeRows[0].lowestRemaining, 60);
 
   assert.equal(formatTrayText(visibleStats, 'limitsAllSessions', 'USD', {
     limitProviderOrder: 'opencode',
     limitProviders: 'opencode',
     showLimitUsed: false
-  }), '40%');
+  }), '60%');
 
   const snapshot = buildMacWidgetSnapshot(visibleStats, {
-    now: '2026-08-09T08:00:01.000Z'
+    now: '2026-08-09T08:03:01.000Z'
   });
   const widgetWindows = snapshot.quota
     .filter((provider) => provider.provider === 'opencode')
     .flatMap((provider) => provider.windows);
-  assert.deepEqual(widgetWindows.map((window) => window.remainingPercent), [40]);
-  assert.equal(snapshot.quota.some((provider) => provider.status === 'disabled'), true);
+  assert.deepEqual(widgetWindows.map((window) => window.remainingPercent), [60]);
+});
+
+test('mixed local and Web OpenCode provider removes only local windows and keeps Web status actionable', () => {
+  const mixed = opencodeProvider({
+    remainingPercent: 25,
+    source: 'web',
+    windowSource: 'local',
+    balanceUsd: 5
+  });
+  mixed.windows.push({ kind: 'weekly', source: 'web', usedPercent: 10 });
+  const rawStats = statsWithDevices([deviceWithProviders('local-device', [mixed])]);
+
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'local-device',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false
+  });
+  const visible = visibleStats.limits.providers[0];
+
+  assert.equal(rawStats.devices[0].limits.providers[0].windows.length, 2);
+  assert.equal(visible.status, 'ok');
+  assert.equal(visible.source, 'web');
+  assert.equal(visible.balanceUsd, 5);
+  assert.deepEqual(visible.windows.map((window) => [window.kind, window.source]), [['weekly', 'web']]);
+});
+
+test('legacy untagged windows fail closed only for the local device record', () => {
+  const localLegacy = opencodeProvider({ remainingPercent: 25, source: 'web', windowSource: 'web' });
+  const remoteLegacy = opencodeProvider({
+    accountKey: 'remote-account',
+    remainingPercent: 70,
+    source: 'web',
+    windowSource: 'web'
+  });
+  delete localLegacy.windows[0].source;
+  delete remoteLegacy.windows[0].source;
+  const rawStats = statsWithDevices([
+    deviceWithProviders('local-device', [localLegacy]),
+    deviceWithProviders('remote-device', [remoteLegacy])
+  ]);
+
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'local-device',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false
+  });
+
+  assert.equal(visibleStats.devices[0].limits.providers[0].status, 'disabled');
+  assert.equal(visibleStats.devices[1], rawStats.devices[1]);
+  assert.equal(visibleStats.limits.providers.some((provider) => provider.accountKey === 'remote-account'), true);
 });
 
 test('empty local notConfigured sentinel stays actionable instead of becoming Disabled', () => {
-  const provider = opencodeProvider({
-    deviceId: 'local-device',
-    accountKey: 'local-account',
-    remainingPercent: null,
-    status: 'notConfigured'
-  });
+  const provider = opencodeProvider({ remainingPercent: null, status: 'notConfigured' });
 
   assert.equal(projectLimitProviderForDisplay(provider, {
-    localDeviceId: 'local-device',
-    syncActive: true,
+    localDeviceProvider: true,
     opencodeLocalLimitsEnabled: false
   }), provider);
 });
 
-test('legacy provenance is conservative in sync mode and local in standalone mode', () => {
-  const provider = opencodeProvider({
-    deviceId: '',
-    accountKey: 'legacy-account',
-    remainingPercent: 62
-  });
-  delete provider.sourceDeviceId;
+test('legacy aggregate provenance is conservative in sync mode and local in standalone mode', () => {
+  const provider = opencodeProvider({ remainingPercent: 62 });
 
   assert.equal(projectLimitProviderForDisplay(provider, {
     localDeviceId: 'local-device',
@@ -141,11 +194,9 @@ test('legacy provenance is conservative in sync mode and local in standalone mod
 });
 
 test('enabled fallback returns the original stats object without cloning', () => {
-  const stats = statsWithProviders([opencodeProvider({
-    deviceId: 'local-device',
-    accountKey: 'local-account',
+  const stats = statsWithDevices([deviceWithProviders('local-device', [opencodeProvider({
     remainingPercent: 75
-  })]);
+  })])]);
   assert.equal(projectLimitStatsForDisplay(stats, {
     localDeviceId: 'local-device',
     syncActive: true,

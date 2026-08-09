@@ -939,6 +939,13 @@ test('normalizeLimitWindow normalizes the window currency', () => {
   assert.equal(normalizeLimitWindow({ kind: 'billing' }).currency, null);
 });
 
+test('normalizeLimitWindow preserves only documented component sources', () => {
+  assert.equal(normalizeLimitWindow({ kind: 'session', source: ' local ' }).source, 'local');
+  assert.equal(normalizeLimitWindow({ kind: 'weekly', source: 'WEB' }).source, 'web');
+  assert.equal('source' in normalizeLimitWindow({ kind: 'session', source: 'oauth' }), false);
+  assert.equal('source' in normalizeLimitWindow({ kind: 'session' }), false);
+});
+
 test('normalizeLimitProvider restores a balance window for pre-credits-window devices', () => {
   // An older device posts DeepSeek as a balance with no windows at all.
   const legacy = normalizeLimitProvider({

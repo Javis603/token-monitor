@@ -19,6 +19,7 @@ test('collectLimitsOnce includes opencode provider from injected Go data', async
   assert.strictEqual(provider.status, 'ok');
   assert.strictEqual(provider.source, 'local');
   assert.strictEqual(provider.windows[0].kind, 'session');
+  assert.strictEqual(provider.windows[0].source, 'local');
 });
 
 test('collectLimitsOnce marks opencode notConfigured when no Go usage', async () => {
@@ -41,8 +42,9 @@ test('fetchOpenCodeLimits merges Go(local) windows with Zen(web) balance', async
   );
   const p = summary.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.status, 'ok');
-  assert.ok(p.windows.some((w) => w.kind === 'session'));  // from Go
-  assert.ok(p.windows.some((w) => w.kind === 'weekly'));   // from Zen
+  assert.strictEqual(p.source, 'web');
+  assert.strictEqual(p.windows.find((w) => w.kind === 'session').source, 'local');
+  assert.strictEqual(p.windows.find((w) => w.kind === 'weekly').source, 'web');
   assert.strictEqual(p.balanceUsd, 5);                     // Zen prepaid balance is surfaced, not dropped
 });
 
@@ -109,6 +111,7 @@ test('fetchOpenCodeLimits: Go web windows win over the local estimate', async ()
   assert.strictEqual(p.status, 'ok');
   assert.strictEqual(p.source, 'web');
   assert.strictEqual(p.windows.find((w) => w.kind === 'session').usedPercent, 40); // web, not local 8
+  assert.strictEqual(p.windows.find((w) => w.kind === 'session').source, 'web');
   assert.ok(p.windows.find((w) => w.kind === 'billing'), 'monthly normalizes to billing');
 });
 
@@ -155,6 +158,7 @@ test('fetchOpenCodeLimits: falls back to local estimate when Go web fails', asyn
   assert.strictEqual(p.status, 'ok');
   assert.strictEqual(p.source, 'local');
   assert.strictEqual(p.windows.find((w) => w.kind === 'session').usedPercent, 8);
+  assert.strictEqual(p.windows.find((w) => w.kind === 'session').source, 'local');
 });
 
 test('fetchOpenCodeLimits: no cookie means no web calls (local only)', async () => {
@@ -183,6 +187,7 @@ test('fetchOpenCodeLimits: Go web ok + Zen ok shows Go windows and Zen balance',
   const p = summary.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.source, 'web');
   assert.strictEqual(p.windows.find((w) => w.kind === 'session').usedPercent, 40);
+  assert.strictEqual(p.windows.find((w) => w.kind === 'session').source, 'web');
   assert.strictEqual(p.balanceUsd, 9.5);
 });
 

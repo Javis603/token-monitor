@@ -3147,11 +3147,11 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     let balanceUsd = null;
 
     if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
-      windows.push(...goWeb.windows);
+      windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok'; source = 'web'; accountLabel = 'Go';
       accountKey = hashKey('opencode', `go:${goWeb.workspaceId || ''}`);
     } else if (goLocal.status === 'ok') {
-      windows.push(...goLocal.windows);
+      windows.push(...goLocal.windows.map((window) => ({ ...window, source: 'local' })));
       status = 'ok'; accountLabel = 'Go';
       accountKey = hashKey('opencode', goLocal.identity || 'go');
     } else if (goLocal.status === 'unavailable') {
@@ -3159,7 +3159,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     }
 
     if (zen && zen.status === 'ok') {
-      windows.push(...zen.windows);
+      windows.push(...zen.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok'; source = 'web';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
       if (!accountLabel) accountLabel = 'Zen';
@@ -3223,13 +3223,13 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     let balanceUsd = null;
 
     if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
-      windows.push(...goWeb.windows);
+      windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok';
       planLabel = 'Go';
     }
 
     if (zen && zen.status === 'ok') {
-      windows.push(...zen.windows);
+      windows.push(...zen.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok';
       if (!planLabel) planLabel = 'Zen';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
