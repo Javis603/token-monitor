@@ -62,8 +62,9 @@ function createUpdateInstallQuitGuard({
     // this only gives up the recovery, leaving that case exactly where it stands
     // today. Refusing outright would instead turn a rare failure a force quit gets
     // the user out of into an app that can never update itself. It is also a state
-    // that cannot arise on the Electron we ship, which
-    // updateInstallQuitUpstream.test.js pins; if that goes red, weigh this again.
+    // that cannot arise where an install is supported at all, since electron-updater
+    // emits the hand-off on that emitter unguarded and would throw first;
+    // updateInstallQuitUpstream.test.js pins it. If that goes red, weigh this again.
     if (!watchdogEnabled()) return true;
     timer = setTimeoutFn(() => {
       timer = null;

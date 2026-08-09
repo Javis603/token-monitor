@@ -110,27 +110,39 @@ test('MacUpdater leaves Squirrel untouched until the install is requested', (t) 
 });
 
 // The guard keeps updating when the hand-off cannot be observed, losing only the
-// recovery. That choice rests on one fact: on the Electron we ship, the emitter is
-// always there, so the branch describes a state that cannot occur rather than a
-// mode we run in. Refusing to install there would trade a rare, force-quittable
-// failure for an app that can never update itself.
+// recovery. That choice rests on the emitter always being there, so the branch
+// describes a state that cannot occur rather than a mode we run in. Refusing to
+// install there would trade a rare, force-quittable failure for an app that can
+// never update itself.
 //
-// Unlike the assertions above these are public API, so any Electron carrying them
-// is fine and the version is deliberately not pinned here. If this goes red, the
-// branch became reachable and the fail-open choice has to be made again.
-test('Electron always exposes the hand-off emitter the recovery depends on', (t) => {
+// The two tests below pin different halves of that, and only one is about Electron.
+test('the hand-off event is part of Electron public API, not something we inferred', (t) => {
   let types;
   try {
     types = fs.readFileSync(ELECTRON_TYPES, 'utf8');
   } catch (_) {
     return t.skip('electron is not installed');
   }
-  // An EventEmitter, so observeUpdateInstallHandoff finds a callable `on`.
+  // An EventEmitter, so observeUpdateInstallHandoff finds a callable `on`, carrying
+  // the event we listen for. This is the type surface and nothing more: Electron
+  // documents the built-in updater as macOS and Windows only, so a declaration here
+  // is not evidence that the Linux runtime registers the binding.
   assert.match(types, /interface AutoUpdater extends NodeJS\.EventEmitter/);
-  // Carrying the event we listen for.
   assert.match(types, /on\(event: 'before-quit-for-update', listener: \(\) => void\): this;/);
-  // And reachable unconditionally: a plain const, not optional and not declared
-  // per-platform, which is what makes the emitter present on every platform we
-  // install on rather than only the ones with a native updater.
   assert.match(types, /^ {2}const autoUpdater: AutoUpdater;$/m);
+});
+
+test('the Linux install path in electron-updater needs that emitter to exist', (t) => {
+  const base = upstream('BaseUpdater.js');
+  const appImage = upstream('AppImageUpdater.js');
+  if (!base || !appImage) return t.skip('electron-updater is not installed');
+  // This is the part that actually establishes the runtime, and it is upstream's
+  // own code rather than our inference. AppImageUpdater extends BaseUpdater, and
+  // BaseUpdater emits on require("electron").autoUpdater with no platform guard, so
+  // an Electron that did not register the emitter on Linux would throw inside
+  // upstream's Linux install rather than merely cost us the recovery.
+  assert.match(appImage, /class AppImageUpdater extends BaseUpdater_1\.BaseUpdater/);
+  const fn = slice(base, 'quitAndInstall(isSilent', '\n    executeDownload(');
+  assert.match(fn, /require\("electron"\)\.autoUpdater\.emit\("before-quit-for-update"\)/);
+  assert.doesNotMatch(fn, /process\.platform/);
 });
