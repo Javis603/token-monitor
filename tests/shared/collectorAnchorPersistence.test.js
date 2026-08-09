@@ -60,14 +60,17 @@ test('configFingerprint handles undefined and empty clients', () => {
 });
 
 test('configFingerprint labels the Qoder CN database path explicitly', () => {
+  const dbPath = path.join(os.tmpdir(), 'QoderCN', 'SharedClientCache', 'cache', 'db', 'local.db');
   const fingerprint = configFingerprint(
     'claude,qodercn',
     '2024-01-01',
     true,
-    '/tmp/QoderCN/SharedClientCache/cache/db/local.db'
+    dbPath
   );
-  assert.match(fingerprint, /\|qodercn:\/tmp\/QoderCN\//);
-  assert.doesNotMatch(fingerprint, /\|qoder:/);
+  assert.equal(
+    fingerprint,
+    `claude,qodercn|2024-01-01|projects:on|qodercn:${path.resolve(dbPath)}`
+  );
 });
 
 test('anchored tick with valid anchor runs todayOnly scan and derives month/allTime', async () => {
