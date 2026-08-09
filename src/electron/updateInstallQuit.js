@@ -115,15 +115,22 @@ function createUpdateInstallQuitGuard({
     noteHandoff,
     abort,
     phase: () => phase,
-    isOutstanding: () => phase !== 'idle',
     // An install this process is still trying to complete, which is what makes the
-    // Install control busy. Deliberately not `spent`: that one is over, and
-    // treating it as busy would disable checking for updates for the session.
+    // Install control busy. Deliberately not `spent`: that one is over rather than
+    // busy, and the controls it leaves working -- the release page above all --
+    // would be disabled along with it.
     isInstalling: () => phase === 'requested' || phase === 'handoff',
     // An attempt that ended without a hand-off on a platform that cannot make
     // another. Nothing this process does can produce an install now, so the whole
     // in-app update path has to stand down, not just the Install control.
-    isSpent: () => phase === 'spent'
+    isSpent: () => phase === 'spent',
+    // Anything the guard has not finished with, which is what decides whether some
+    // other updater operation may start. Wider than `isInstalling` on purpose:
+    // `spent` still answers true, because it is not terminal -- a late hand-off
+    // promotes it back and re-claims the flags, and an operation begun in that
+    // window would be in flight during a real hand-off with its failures
+    // indistinguishable from the install's.
+    isOutstanding: () => phase !== 'idle'
   };
 }
 

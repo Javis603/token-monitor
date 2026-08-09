@@ -268,6 +268,30 @@ test('only an install this process can still finish counts as busy', () => {
   assert.equal(stalled.guard.isOutstanding(), true);
 });
 
+test('a spent attempt still holds the updater, because it can come back', () => {
+  // The sequence this rules out, all of it reachable: an install stalls past the
+  // bound and goes `spent`, a check starts because the install looks over, the slow
+  // Squirrel finally answers and the late hand-off re-claims the flags, and then
+  // the check fails. Its failure arrives on the same event an install failure does,
+  // so it aborts a hand-off that was real and releases skipForcedQuit with the
+  // installer owning the exit.
+  const { guard, events, fire } = harness();
+  guard.request();
+  fire();
+  assert.equal(guard.phase(), 'spent');
+  assert.equal(guard.isInstalling(), false, 'the install is over as far as the UI goes');
+  // But not as far as the updater goes, which is the distinction the gate needs.
+  assert.equal(guard.isOutstanding(), true, 'a check must not start here');
+
+  guard.noteHandoff();
+  assert.equal(guard.phase(), 'handoff');
+  assert.deepEqual(events.slice(-1), ['claim'], 'the late hand-off takes the flags back');
+
+  // And this is what a check error would have done to it.
+  assert.equal(guard.abort(), true);
+  assert.deepEqual(events.slice(-1), ['release']);
+});
+
 test('the same-tick install paths get a short bound and stay retryable', () => {
   // NsisUpdater and AppImageUpdater run install() synchronously and emit the
   // hand-off from a setImmediate, so a working install is gone within a tick, and
@@ -459,7 +483,7 @@ test('an outstanding install is the only thing driving the updater', () => {
   assert.deepEqual([...new Set(callers)], ['runAppUpdateCheck']);
 
   const check = functionSource('async function runAppUpdateCheck(');
-  const gate = check.indexOf('if (updateInstallQuit.isInstalling()) return deriveAppUpdateState();');
+  const gate = check.indexOf('if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();');
   assert.ok(gate >= 0, 'a check must not start while an install is outstanding');
   // Ahead of the in-flight join, or a check already running would be awaited and
   // its result reported as though this call had made it.
@@ -472,9 +496,11 @@ test('an outstanding install is the only thing driving the updater', () => {
   // ended arrives here regardless -- this is the boundary, they are the policy.
   const download = functionSource('async function downloadAndPrepareAppUpdate()');
   assert.match(download, /if \(updateInstallQuit\.isOutstanding\(\)\) return deriveAppUpdateState\(\);/);
-  // And the check deliberately does not, or a spent attempt would cost the user
-  // update checking for the rest of the session.
-  assert.doesNotMatch(check, /isOutstanding\(\)|isSpent\(\)/);
+  // Both use the same predicate. An earlier revision let the check through on
+  // `spent`, to keep checking available for the session, and that is the hole the
+  // test below describes: `spent` is not terminal, so "the install is over" and
+  // "the updater is free" are not the same statement.
+  assert.doesNotMatch(check, /isInstalling\(\)/);
 
   // And the other direction: refusing new work only holds the boundary if nothing
   // was already running when the install began. This one waits instead of

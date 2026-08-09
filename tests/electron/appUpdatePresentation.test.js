@@ -159,6 +159,22 @@ test('the advice a terminal failure gives matches what its platform can do', () 
   }
 });
 
+test('the check control goes down with the checks the main process stops running', () => {
+  const app = require('node:fs').readFileSync(
+    require('node:path').resolve(__dirname, '../../src/electron/renderer/app.js'),
+    'utf8'
+  );
+  // The last of two: the first is the no-state-yet branch, where nothing is spent.
+  const line = app.slice(app.lastIndexOf('els.appUpdateCheckButton.disabled'));
+  // runAppUpdateCheck refuses while the guard holds anything, a spent attempt
+  // included, so a button reading only installBusy would stay live and do nothing.
+  assert.match(line.slice(0, line.indexOf('\n')), /s\.installRetryBlocked/);
+  // Via its own condition, not by folding spent into installBusy: that one also
+  // disables View release, which is the single path a spent attempt leaves open.
+  const releaseButton = app.slice(app.indexOf('els.appUpdateViewReleaseButton.disabled'));
+  assert.doesNotMatch(releaseButton.slice(0, releaseButton.indexOf('\n')), /installRetryBlocked/);
+});
+
 test('the hand-off window has its own message, ahead of ready to install', () => {
   const app = require('node:fs').readFileSync(
     require('node:path').resolve(__dirname, '../../src/electron/renderer/app.js'),

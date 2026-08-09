@@ -4717,15 +4717,23 @@ function sendAppUpdatePush() {
 }
 
 async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {}) {
-  // An outstanding install owns the updater until it hands off or the guard ends
-  // it. electron-updater reports a failed check by emitting on the same global
-  // 'error' event an install failure arrives on -- checkForUpdates() emits there
-  // and rethrows -- and the handler below has nothing to tell them apart. Treating
-  // a check's failure as the install's would spend the attempt and hand the quit
-  // flags back while Squirrel may still be staging, which is the state `spent`
-  // exists to prevent. The hourly check makes this an ordinary overlap on macOS,
-  // where an install is outstanding for as long as minutes.
-  if (updateInstallQuit.isInstalling()) return deriveAppUpdateState();
+  // An outstanding install owns the updater until the guard is idle again.
+  // electron-updater reports a failed check by emitting on the same global 'error'
+  // event an install failure arrives on -- checkForUpdates() emits there and
+  // rethrows -- and the handler below has nothing to tell them apart. Treating a
+  // check's failure as the install's would tear down the install, which is what the
+  // hourly check made an ordinary overlap on macOS, where an install is outstanding
+  // for as long as minutes.
+  //
+  // `isOutstanding` rather than `isInstalling`, so this covers a spent attempt too.
+  // Spent is not terminal: the bound is only where we stopped waiting, and a late
+  // hand-off still promotes it back to `handoff` and re-claims the flags. A check
+  // allowed to start in the meantime would then be in flight during a genuine
+  // hand-off, and its failure would release `skipForcedQuit` with the installer
+  // owning the exit -- the one outcome this whole path exists to prevent. Checking
+  // is worth less than that: after a spent attempt it can only find a version this
+  // process is already refusing to download.
+  if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
   if (appUpdateCheckPromise) {
     if (force) sendAppUpdatePush();
     const activeResult = await appUpdateCheckPromise;
@@ -4837,8 +4845,9 @@ async function downloadAndPrepareAppUpdate() {
   // the automatic downloader stands down, but neither of those is the boundary --
   // this is, and an IPC action queued before the attempt ended still arrives here.
   //
-  // Checking stays available through a spent attempt (see runAppUpdateCheck): it
-  // touches none of that, and losing it for the session is the worse trade.
+  // Every entry point uses the same rule, for the same reason (see
+  // runAppUpdateCheck): while the guard holds anything, nothing else drives the
+  // updater.
   if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
   if (appUpdateCheckPromise) await appUpdateCheckPromise;
   if (appUpdateNativeBusy) return deriveAppUpdateState();
