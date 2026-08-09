@@ -91,7 +91,7 @@ test('a superseded history result cannot publish before queued current work', as
   const ownerA = controller.captureProducerOwner();
   controller.enqueue({ stats: { source: 'hub-a' }, producerOwner: ownerA });
   await new Promise((resolve) => setImmediate(resolve));
-  controller.advanceSourceEpoch();
+  controller.advanceProducerAndSourceEpoch();
   const ownerB = controller.captureProducerOwner();
   controller.enqueue({ stats: { source: 'hub-b' }, producerOwner: ownerB });
   oldHistory.resolve(history('hub-a'));

@@ -72,7 +72,7 @@ test('queued stats cannot acquire a newer source owner before the lane starts', 
   const ownerA = harness.controller.captureProducerOwner();
 
   assert.equal(harness.controller.enqueue({ stats: { source: 'hub-a' }, producerOwner: ownerA }), true);
-  harness.controller.advanceSourceEpoch();
+  harness.controller.advanceProducerAndSourceEpoch();
   const ownerB = harness.controller.captureProducerOwner();
   assert.equal(harness.controller.enqueue({ stats: { source: 'hub-b' }, producerOwner: ownerB }), true);
 
@@ -83,10 +83,30 @@ test('queued stats cannot acquire a newer source owner before the lane starts', 
   assert.equal(harness.captures.length, 2);
 });
 
-test('a late producer callback is rejected instead of being relabeled with the current epoch', async () => {
+test('a source-only transition keeps the producer valid and captures the new source epoch', async () => {
+  const oldHistory = deferred();
+  const harness = createHarness({
+    resolveHistory(work) {
+      return work.stats.source === 'before' ? oldHistory.promise : history(work.stats.source);
+    }
+  });
+  const producer = harness.controller.captureProducerOwner();
+  assert.equal(harness.controller.enqueue({ stats: { source: 'before' }, producerOwner: producer }), true);
+  await nextTurn();
+
+  harness.controller.advanceSourceEpoch();
+  assert.equal(harness.controller.enqueue({ stats: { source: 'after' }, producerOwner: producer }), true);
+  oldHistory.resolve(history('stale-before'));
+  await harness.controller.whenIdle();
+
+  assert.deepEqual(harness.captures.map((capture) => capture.owner.epoch), [1, 2]);
+  assert.deepEqual(harness.published, [{ source: 'after', history: 'after' }]);
+});
+
+test('a late producer callback is rejected after a producer and source transition', async () => {
   const harness = createHarness();
   const ownerA = harness.controller.captureProducerOwner();
-  harness.controller.advanceSourceEpoch();
+  harness.controller.advanceProducerAndSourceEpoch();
 
   assert.equal(harness.controller.enqueue({ stats: { source: 'hub-a' }, producerOwner: ownerA }), false);
   await nextTurn();
@@ -104,20 +124,19 @@ test('an on-off-on source transition isolates old same-source history completion
       return historyCalls === 1 ? oldHistory.promise : history(`current-${work.owner.epoch}`);
     }
   });
-  const ownerOne = harness.controller.captureProducerOwner();
-  harness.controller.enqueue({ stats: { source: 'enabled' }, producerOwner: ownerOne });
+  const producer = harness.controller.captureProducerOwner();
+  harness.controller.enqueue({ stats: { source: 'enabled' }, producerOwner: producer });
   await nextTurn();
 
   harness.controller.advanceSourceEpoch();
   harness.controller.advanceSourceEpoch();
-  const ownerThree = harness.controller.captureProducerOwner();
-  harness.controller.enqueue({ stats: { source: 'enabled' }, producerOwner: ownerThree });
+  harness.controller.enqueue({ stats: { source: 'enabled' }, producerOwner: producer });
   oldHistory.resolve(history('stale-epoch-one'));
 
   await harness.controller.whenIdle();
 
   assert.equal(historyCalls, 2);
-  assert.deepEqual(harness.published, [{ source: 'enabled', history: `current-${ownerThree.epoch}` }]);
+  assert.deepEqual(harness.published, [{ source: 'enabled', history: 'current-3' }]);
 });
 
 test('latest work supersedes an active prepared snapshot and removes its temp file', async () => {

@@ -85,14 +85,18 @@ test('Widget producers carry lifetime ownership through the sendPush outlet', ()
   }
 });
 
-test('Widget source ownership advances for mode and history-policy transitions', () => {
+test('Widget ownership advances producer lifetime only for mode transitions', () => {
   assert.match(
     mainSource,
-    /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*advanceMacWidgetSourceEpoch\(\);/
+    /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);/
   );
   assert.match(
     mainSource,
     /const widgetHistorySourceChanged = previousRuntimeSettings\.historyEnabled !== settings\.historyEnabled;\s*if \(widgetHistorySourceChanged && !runtimeChange\.modeStructural\) \{\s*advanceMacWidgetSourceEpoch\(\);\s*scheduleMacWidgetSnapshot\(latestStats, captureMacWidgetProducerOwner\(\)\);/
+  );
+  assert.match(
+    mainSource,
+    /reloadSnapshot: \(work, options\) => requestMacWidgetReload\(\{\s*widgetKind: work\.widgetKind,\s*isCurrent: options\.isCurrent,/
   );
 });
 

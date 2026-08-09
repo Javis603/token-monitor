@@ -3476,8 +3476,9 @@ function ensureMacWidgetSnapshotController() {
       fs: prepared?.fs
     }),
     discardSnapshot: discardMacWidgetSnapshot,
-    reloadSnapshot: (work) => requestMacWidgetReload({
+    reloadSnapshot: (work, options) => requestMacWidgetReload({
       widgetKind: work.widgetKind,
+      isCurrent: options.isCurrent,
       logger: (message) => console.warn(message)
     }),
     logger: (message) => console.warn(message)
@@ -3487,6 +3488,10 @@ function ensureMacWidgetSnapshotController() {
 
 function captureMacWidgetProducerOwner() {
   return ensureMacWidgetSnapshotController()?.captureProducerOwner() || null;
+}
+
+function advanceMacWidgetProducerAndSourceEpoch() {
+  ensureMacWidgetSnapshotController()?.advanceProducerAndSourceEpoch();
 }
 
 function advanceMacWidgetSourceEpoch() {
@@ -4395,7 +4400,7 @@ function exitTrayMode() {
 
 function startMode() {
   hubModeGeneration += 1;
-  advanceMacWidgetSourceEpoch();
+  advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued.

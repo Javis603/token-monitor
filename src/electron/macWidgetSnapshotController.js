@@ -15,6 +15,7 @@ function createMacWidgetSnapshotController(options = {}) {
   const logger = options.logger;
   const schedule = options.schedule || setImmediate;
 
+  let producerEpoch = 1;
   let sourceEpoch = 1;
   let nextSequence = 0;
   let latestSequence = 0;
@@ -28,6 +29,10 @@ function createMacWidgetSnapshotController(options = {}) {
     const waiters = idleWaiters;
     idleWaiters = [];
     for (const resolve of waiters) resolve();
+  }
+
+  function producerIsCurrent(owner) {
+    return !stopped && owner?.epoch === producerEpoch;
   }
 
   function ownerIsCurrent(owner) {
@@ -79,7 +84,11 @@ function createMacWidgetSnapshotController(options = {}) {
       } catch (error) {
         safeLog(logger, `[mac-widget] snapshot directory sync failed: ${error?.message || error}`);
       }
-      if (workIsCurrent(work) && committed.changed !== false) reloadSnapshot?.(work);
+      if (workIsCurrent(work) && committed.changed !== false) {
+        reloadSnapshot?.(work, {
+          isCurrent: () => workIsCurrent(work)
+        });
+      }
     } catch (error) {
       await discard(prepared);
       safeLog(logger, `[mac-widget] update failed: ${error?.message || error}`);
@@ -108,17 +117,18 @@ function createMacWidgetSnapshotController(options = {}) {
 
   function captureProducerOwner() {
     if (stopped) return null;
-    return Object.freeze({ epoch: sourceEpoch });
+    return Object.freeze({ epoch: producerEpoch });
   }
 
   function enqueue(input = {}) {
-    if (!input.stats || !ownerIsCurrent(input.producerOwner) || typeof captureWork !== 'function') return false;
+    if (!input.stats || !producerIsCurrent(input.producerOwner) || typeof captureWork !== 'function') return false;
     const sequence = ++nextSequence;
+    const sourceOwner = Object.freeze({ epoch: sourceEpoch });
     let captured;
     try {
       captured = captureWork({
         stats: input.stats,
-        owner: input.producerOwner
+        owner: sourceOwner
       });
     } catch (error) {
       safeLog(logger, `[mac-widget] work capture failed: ${error?.message || error}`);
@@ -141,8 +151,15 @@ function createMacWidgetSnapshotController(options = {}) {
     return sourceEpoch;
   }
 
+  function advanceProducerAndSourceEpoch() {
+    if (stopped) return sourceEpoch;
+    producerEpoch += 1;
+    return advanceSourceEpoch();
+  }
+
   function stop() {
     if (stopped) return;
+    producerEpoch += 1;
     sourceEpoch += 1;
     latestSequence = ++nextSequence;
     pendingWork = null;
@@ -156,6 +173,7 @@ function createMacWidgetSnapshotController(options = {}) {
   }
 
   return {
+    advanceProducerAndSourceEpoch,
     advanceSourceEpoch,
     captureProducerOwner,
     enqueue,
