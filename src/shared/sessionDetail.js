@@ -299,7 +299,8 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
     return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   }
   const events = parseByClient(client, text);
-  const grouped = filterExchangesByPeriod(groupEvents(events), period, new Date());
+  const now = new Date((deps.now || Date.now)());
+  const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
   distributeCost(grouped, sessionCost);
   return { found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
 }
