@@ -1643,6 +1643,19 @@ test('OpenCode local DB fallback is off by default and hides an old local result
   assert.equal(rendered.status, 'disabled');
   assert.equal(rendered.windows.length, 0);
   assert.equal(rendered.stale, false);
+  const localSourceRendered = vm.runInNewContext(
+    `${displayProvider}\nresult = displayLimitProvider({ provider: 'opencode', source: 'local', sourceDeviceId: 'LOCAL-DEVICE', status: 'ok', stale: true, windows: [{ kind: 'session' }] });`,
+    { state: { mode: 'sync', settings: { deviceId: 'local-device', opencodeLocalLimitsEnabled: false } } }
+  );
+  assert.equal(localSourceRendered.status, 'disabled');
+  assert.equal(localSourceRendered.windows.length, 0);
+  const remoteRendered = vm.runInNewContext(
+    `${displayProvider}\nresult = displayLimitProvider({ provider: 'opencode', source: 'local', sourceDeviceId: 'remote-device', status: 'ok', stale: true, windows: [{ kind: 'session' }] });`,
+    { state: { mode: 'sync', settings: { deviceId: 'local-device', opencodeLocalLimitsEnabled: false } } }
+  );
+  assert.equal(remoteRendered.status, 'ok');
+  assert.equal(remoteRendered.windows.length, 1);
+  assert.equal(remoteRendered.stale, true);
   assert.match(defaults, /opencodeLocalLimitsEnabled:\s*false/);
   assert.match(updateHandler, /opencodeLocalLimitsEnabled:\s*parseBoolean\(patch\.opencodeLocalLimitsEnabled \?\? settings\.opencodeLocalLimitsEnabled, false\)/);
 });
@@ -1653,11 +1666,32 @@ test('provider option rerenders reuse the existing switch DOM', () => {
   const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
 
   assert.match(renderRows, /const reusableSettingInputs = new Map\(\);/);
+  assert.match(renderRows, /state\.limitProviderRenderSignature === renderSignature/);
   assert.match(renderRows, /row\.querySelectorAll\?\.\(/);
   assert.match(renderRows, /limitProviderSettingsList\(id, settings, reusableSettingInputs\)/);
   assert.match(renderList, /const existingInput = reusableInputs\?\.get\(inputKey\);/);
   assert.match(renderList, /if \(!existingInput\) \{\s*input\.addEventListener\('change'/);
   assert.doesNotMatch(renderList, /renderLimits\(\);/);
+});
+
+test('settings pushes do not trigger a second full settings sync after save', () => {
+  const app = readRendererFile('app.js');
+  const save = functionBody(app, 'saveSettings', 'renderHomeIfVisible');
+  const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+
+  assert.match(save, /const settingsPushRevision = state\.settingsPushRevision;/);
+  assert.match(save, /if \(state\.settingsPushRevision === settingsPushRevision\) \{\s*preserveSettingsPanelScroll\(syncSettingsForm\);/);
+  assert.match(settingsPush, /state\.settingsPushRevision \+= 1;/);
+});
+
+test('main limits rerenders coalesce identical visible provider data', () => {
+  const app = readRendererFile('app.js');
+  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+
+  assert.match(renderLimits, /const renderSignature = JSON\.stringify\(\{/);
+  assert.match(renderLimits, /state\.limitPanelRenderSignature === renderSignature/);
+  assert.match(renderLimits, /els\.limitsPanel\.children\.length === orderedProviders\.length/);
+  assert.match(renderLimits, /state\.limitPanelRenderSignature = renderSignature;/);
 });
 
 test('successful providers use a green dot while preserving source and account labels', () => {
