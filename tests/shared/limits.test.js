@@ -13,6 +13,7 @@ const {
 } = require('../../src/shared/limits');
 const { collectLimitsOnce } = require('../../src/shared/limitCollector');
 const { codexAccountKey } = require('../../src/shared/codexAuth');
+const { hashKey } = require('../../src/shared/hashKey');
 
 function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
   return {
@@ -817,6 +818,7 @@ test('OpenCode sync keeps the legacy profile label and explicit plan while publi
       provider: 'opencode',
       accountKey: 'sha256:opencode-work',
       webAccountKey: 'sha256:opencode-work',
+      accountKeyAliases: ['sha256:opencode-work-legacy'],
       accountName: 'work',
       accountLabel: 'work',
       planLabel: 'Go',
@@ -832,12 +834,14 @@ test('OpenCode sync keeps the legacy profile label and explicit plan while publi
   assert.equal(synced.accountLabel, 'work');
   assert.equal(synced.planLabel, 'Go');
   assert.equal(synced.webAccountKey, 'sha256:opencode-work');
+  assert.deepEqual(synced.accountKeyAliases, ['sha256:opencode-work-legacy']);
 
   const publicProvider = publicLimits(limits).providers[0];
   assert.equal(Object.hasOwn(publicProvider, 'accountName'), false);
   assert.equal(Object.hasOwn(publicProvider, 'accountLabel'), false);
   assert.equal(Object.hasOwn(publicProvider, 'planLabel'), false);
   assert.equal(Object.hasOwn(publicProvider, 'webAccountKey'), false);
+  assert.equal(Object.hasOwn(publicProvider, 'accountKeyAliases'), false);
 });
 
 test('aggregateLimits merges complementary OpenCode components for one account', () => {
@@ -932,6 +936,54 @@ test('aggregateLimits resolves OpenCode components independently of device order
   assert.equal(forward.providers[0].updatedAt, '2026-08-09T08:02:00.000Z');
   assert.equal(forward.providers[0].sourceDeviceId, 'newer-device');
   assert.deepEqual(reverse, forward);
+});
+
+test('aggregateLimits merges legacy OpenCode Go and Zen identities into the canonical workspace account', () => {
+  const workspaceId = 'wrk_rolling_upgrade';
+  const canonical = hashKey('opencode', `workspace:${workspaceId}`);
+  const legacyKeys = [
+    hashKey('opencode', `go:${workspaceId}`),
+    hashKey('opencode', `zen:${workspaceId}`)
+  ];
+  const current = {
+    deviceId: 'current-device',
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        accountKey: canonical,
+        webAccountKey: canonical,
+        accountKeyAliases: legacyKeys,
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:02:00.000Z',
+        windows: [{ kind: 'session', source: 'web', usedPercent: 30 }]
+      }]
+    }
+  };
+
+  for (const [index, legacyKey] of legacyKeys.entries()) {
+    const legacy = {
+      deviceId: `legacy-device-${index}`,
+      limits: {
+        providers: [{
+          provider: 'opencode',
+          accountKey: legacyKey,
+          status: 'ok',
+          source: 'web',
+          updatedAt: '2026-08-09T08:01:00.000Z',
+          windows: [{ kind: 'monthly', source: 'web', usedPercent: 50 }]
+        }]
+      }
+    };
+    const forward = aggregateLimits([current, legacy], 0, Date.parse('2026-08-09T08:03:00.000Z'));
+    const reverse = aggregateLimits([legacy, current], 0, Date.parse('2026-08-09T08:03:00.000Z'));
+
+    assert.equal(forward.providers.length, 1);
+    assert.equal(forward.providers[0].accountKey, canonical);
+    assert.equal(forward.providers[0].windows.find((window) => window.kind === 'session').usedPercent, 30);
+    assert.equal(forward.providers[0].windows.find((window) => window.kind === 'billing').usedPercent, 50);
+    assert.deepEqual(reverse, forward);
+  }
 });
 
 test('collectLimitsOnce flattens multiple providers returned by a provider fetcher', async () => {

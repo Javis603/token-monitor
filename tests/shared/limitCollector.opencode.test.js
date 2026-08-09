@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { collectLimitsOnce } = require('../../src/shared/limitCollector');
+const { hashKey } = require('../../src/shared/hashKey');
 const { aggregateLimits } = require('../../src/shared/limits');
 
 test('collectLimitsOnce includes opencode provider from injected Go data', async () => {
@@ -98,6 +99,10 @@ test('OpenCode Web identity stays stable when Go availability changes for the sa
 
   assert.equal(goAndZen.webAccountKey, zenOnly.webAccountKey);
   assert.equal(goAndZen.accountKey, zenOnly.accountKey);
+  assert.deepEqual(new Set(goAndZen.accountKeyAliases), new Set([
+    hashKey('opencode', 'go:shared-workspace'),
+    hashKey('opencode', 'zen:shared-workspace')
+  ]));
   assert.equal(aggregateLimits([
     { deviceId: 'go-device', limits: goAndZenSummary },
     { deviceId: 'zen-device', limits: zenOnlySummary }

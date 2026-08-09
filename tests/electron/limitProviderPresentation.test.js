@@ -540,6 +540,32 @@ test('multi-account Codex provenance matches synced candidates by account key', 
   );
 });
 
+test('OpenCode provenance matches a legacy device through canonical account aliases', () => {
+  const provider = {
+    provider: 'opencode',
+    status: 'ok',
+    source: 'web',
+    accountKey: 'sha256:canonical',
+    accountKeyAliases: ['sha256:legacy-go'],
+    sourceDeviceId: 'current-device'
+  };
+  const provenance = limitProviderProvenance(provider, {
+    localDeviceId: 'current-device',
+    syncActive: true,
+    devices: [
+      { deviceId: 'current-device', limits: { providers: [provider] } },
+      {
+        deviceId: 'legacy-device',
+        limits: { providers: [{ provider: 'opencode', status: 'ok', source: 'web', accountKey: 'sha256:legacy-go' }] }
+      }
+    ]
+  });
+
+  assert.equal(provenance.hasLocalCandidate, true);
+  assert.equal(provenance.remoteCount, 1);
+  assert.equal(provenance.candidateCount, 2);
+});
+
 test('single local synced provider tags identify local provenance without main panel noise', () => {
   const provider = { provider: 'opencode', status: 'ok', source: 'web', sourceDeviceId: 'local-mac' };
   const provenance = limitProviderProvenance(provider, {

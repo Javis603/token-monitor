@@ -3088,17 +3088,23 @@ async function fetchAntigravityLimits(_options = {}, deps = {}) {
   }
 }
 
-function openCodeWebAccountKey(goWeb, zen, cookie) {
+function openCodeWebIdentity(goWeb, zen, cookie) {
   const hasSuccessfulWebProbe = goWeb?.status === 'ok' || zen?.status === 'ok';
   const workspaceId = goWeb?.workspaceId || zen?.workspaceId;
   if (hasSuccessfulWebProbe && workspaceId) {
-    return hashKey('opencode', `workspace:${workspaceId}`);
+    return {
+      accountKey: hashKey('opencode', `workspace:${workspaceId}`),
+      aliases: [
+        hashKey('opencode', `go:${workspaceId}`),
+        hashKey('opencode', `zen:${workspaceId}`)
+      ]
+    };
   }
   if (cookie && hasSuccessfulWebProbe) {
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
-    return hashKey('opencode', `cookie:${cookieHash}`);
+    return { accountKey: hashKey('opencode', `cookie:${cookieHash}`), aliases: [] };
   }
-  return '';
+  return { accountKey: '', aliases: [] };
 }
 
 async function fetchOpenCodeLimits(options = {}, deps = {}) {
@@ -3151,7 +3157,8 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
           fetchZen(cookie, { now: () => nowMs, workspaceId: '' })
         ])
       : [null, null];
-    const webAccountKey = openCodeWebAccountKey(goWeb, zen, cookie);
+    const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
+    const webAccountKey = webIdentity.accountKey;
 
     const windows = [];
     let status = 'notConfigured';
@@ -3190,6 +3197,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       provider: 'opencode',
       accountKey,
       webAccountKey,
+      accountKeyAliases: webIdentity.aliases,
       accountLabel,
       source,
       status,
@@ -3268,7 +3276,8 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     // Stable accountKey derived from workspaceId (preferred) or cookie hash,
     // not from the user-editable profile name — so the same account is
     // consistently identified across machines and renames.
-    let accountKey = openCodeWebAccountKey(goWeb, zen, cookie);
+    const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
+    let accountKey = webIdentity.accountKey;
     if (!accountKey) {
       const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
       accountKey = hashKey('opencode', `cookie:${cookieHash}`);
@@ -3278,6 +3287,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       provider: 'opencode',
       accountKey,
       webAccountKey: accountKey,
+      accountKeyAliases: webIdentity.aliases,
       accountName: name,
       // Keep accountLabel as the profile name for pre-accountName renderers.
       // New renderers use planLabel for Go/Zen and accountName for identity.

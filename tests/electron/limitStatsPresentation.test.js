@@ -20,6 +20,7 @@ const updatedAt = '2026-08-09T08:03:00.000Z';
 function opencodeProvider({
   accountKey = 'shared-account',
   webAccountKey = '',
+  accountKeyAliases = [],
   remainingPercent,
   source = 'local',
   windowSource = source,
@@ -32,6 +33,7 @@ function opencodeProvider({
     source,
     accountKey,
     webAccountKey,
+    accountKeyAliases,
     status,
     updatedAt: providerUpdatedAt,
     windows: remainingPercent === null ? [] : [{
@@ -151,8 +153,9 @@ test('mixed local and Web OpenCode provider removes only local windows and keeps
 
 test('mixed same-account observations merge Web balance with a remote local quota', () => {
   const local = opencodeProvider({
-    accountKey: 'zen-web-key',
-    webAccountKey: 'zen-web-key',
+    accountKey: 'workspace-web-key',
+    webAccountKey: 'workspace-web-key',
+    accountKeyAliases: ['legacy-go-key', 'legacy-zen-key'],
     remainingPercent: 25,
     source: 'web',
     windowSource: 'local',
@@ -161,8 +164,7 @@ test('mixed same-account observations merge Web balance with a remote local quot
   });
   local.windows.push({ kind: 'weekly', source: 'web', usedPercent: 10 });
   const remote = opencodeProvider({
-    accountKey: 'zen-web-key',
-    webAccountKey: 'zen-web-key',
+    accountKey: 'legacy-go-key',
     remainingPercent: 60,
     source: 'web',
     windowSource: 'local',
@@ -183,7 +185,7 @@ test('mixed same-account observations merge Web balance with a remote local quot
   const providers = visibleStats.limits.providers.filter((provider) => provider.provider === 'opencode');
 
   assert.equal(providers.length, 1);
-  assert.equal(providers[0].accountKey, 'zen-web-key');
+  assert.equal(providers[0].accountKey, 'workspace-web-key');
   assert.equal(providers[0].balanceUsd, 5);
   assert.equal(providers[0].windows.find((window) => window.kind === 'session').remainingPercent, 60);
   assert.equal(providers[0].windows.find((window) => window.kind === 'weekly').remainingPercent, 90);

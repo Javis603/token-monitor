@@ -359,6 +359,13 @@ function normalizeLimitProvider(input) {
   if (!input || typeof input !== 'object') return null;
   const provider = normalizeProviderId(input.provider);
   if (!provider) return null;
+  const accountKey = input.accountKey ? String(input.accountKey) : '';
+  const accountKeyAliases = provider === 'opencode' && Array.isArray(input.accountKeyAliases)
+    ? [...new Set(input.accountKeyAliases
+        .map((value) => String(value || '').trim())
+        .filter((value) => value && value !== accountKey && value.length <= 128))]
+        .slice(0, 8)
+    : [];
   const accountLabel = normalizeAccountLabel(input.accountLabel);
   const windows = Array.isArray(input.windows)
     ? input.windows.map(normalizeLimitWindow).filter(Boolean)
@@ -393,10 +400,11 @@ function normalizeLimitProvider(input) {
   }
   return {
     provider,
-    accountKey: input.accountKey ? String(input.accountKey) : '',
+    accountKey,
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
       : {}),
+    ...(accountKeyAliases.length > 0 ? { accountKeyAliases } : {}),
     accountLabel,
     planLabel: normalizeAccountLabel(input.planLabel),
     accountName: normalizeAccountName(input.accountName ?? input.accountLogin ?? input.login),
@@ -605,6 +613,37 @@ function openCodeWindowSourceRank(window) {
   return 0;
 }
 
+function openCodeIdentityKeys(provider) {
+  if (provider?.provider !== 'opencode') return [];
+  return [...new Set([
+    provider.accountKey,
+    provider.webAccountKey,
+    ...(Array.isArray(provider.accountKeyAliases) ? provider.accountKeyAliases : [])
+  ].map((value) => String(value || '').trim()).filter(Boolean))];
+}
+
+function groupOpenCodeCandidates(candidates) {
+  const groups = [];
+  for (const candidate of candidates) {
+    const identityKeys = new Set(openCodeIdentityKeys(candidate));
+    const matching = groups.filter((group) => [...identityKeys].some((key) => group.identityKeys.has(key)));
+    if (matching.length === 0) {
+      groups.push({ candidates: [candidate], identityKeys });
+      continue;
+    }
+    const merged = {
+      candidates: [candidate, ...matching.flatMap((group) => group.candidates)],
+      identityKeys: new Set([
+        ...identityKeys,
+        ...matching.flatMap((group) => [...group.identityKeys])
+      ])
+    };
+    for (const group of matching) groups.splice(groups.indexOf(group), 1);
+    groups.push(merged);
+  }
+  return groups.map((group) => group.candidates);
+}
+
 function openCodeProviderTieBreakKey(provider) {
   return JSON.stringify([
     provider?.sourceDeviceId || '',
@@ -666,8 +705,18 @@ function mergeOpenCodeProviderComponents(candidates) {
   const balanceUsd = balanceProvider ? balanceProvider.balanceUsd : winner.balanceUsd;
   const hasWebComponent = windows.some((window) => window.source === 'web')
     || balanceUsd !== null && balanceUsd !== undefined;
+  const canonicalWebAccountKey = [...new Set(candidates
+    .map((provider) => String(provider.webAccountKey || '').trim())
+    .filter(Boolean))].sort()[0] || '';
+  const accountKey = canonicalWebAccountKey || winner.accountKey;
+  const accountKeyAliases = [...new Set(candidates.flatMap(openCodeIdentityKeys))]
+    .filter((key) => key !== accountKey)
+    .sort();
   return {
     ...winner,
+    accountKey,
+    ...(canonicalWebAccountKey ? { webAccountKey: canonicalWebAccountKey } : {}),
+    ...(accountKeyAliases.length > 0 ? { accountKeyAliases } : {}),
     source: hasWebComponent ? 'web' : winner.source,
     windows,
     balanceUsd
@@ -693,6 +742,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
   const byKey = new Map();
   const candidatesByKey = new Map();
+  const openCodeCandidates = [];
   const providersWithConfiguredAccounts = new Set();
   const providersWithFreshConfiguredAccounts = new Set();
   const providersWithFreshObservations = new Set();
@@ -711,6 +761,10 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
         if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(provider.provider);
       }
       const key = providerAggregateKey(provider);
+      if (candidate.provider === 'opencode' && isConfiguredProvider(candidate)) {
+        openCodeCandidates.push(candidate);
+        continue;
+      }
       const candidates = candidatesByKey.get(key) || [];
       candidates.push(candidate);
       candidatesByKey.set(key, candidates);
@@ -718,9 +772,11 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   }
 
   for (const [key, candidates] of candidatesByKey) {
-    byKey.set(key, candidates[0]?.provider === 'opencode'
-      ? mergeOpenCodeProviderComponents(candidates)
-      : candidates.reduce(pickBetterProvider, null));
+    byKey.set(key, candidates.reduce(pickBetterProvider, null));
+  }
+  for (const candidates of groupOpenCodeCandidates(openCodeCandidates)) {
+    const provider = mergeOpenCodeProviderComponents(candidates);
+    byKey.set(providerAggregateKey(provider), provider);
   }
 
   // Second pass: collapse by provider name. Same OAuth account on Mac vs Windows
@@ -757,6 +813,7 @@ function publicLimits(limits) {
     providers: normalized.providers.map(({
       accountKey,
       webAccountKey,
+      accountKeyAliases,
       accountEmail,
       accountName,
       accountLabel,
