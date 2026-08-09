@@ -50,6 +50,7 @@ async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
 
   const snapshotPath = String(options.snapshotPath || '').trim();
   if (!snapshotPath) return { ok: false, reason: 'not-configured' };
+  if (options.isCurrent && !options.isCurrent()) return { ok: false, reason: 'superseded' };
 
   const fsApi = options.fs || fs;
   const logger = options.logger;
@@ -78,6 +79,10 @@ async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
     await handle.sync();
     await handle.close();
     handle = null;
+    if (options.isCurrent && !options.isCurrent()) {
+      await fsApi.unlink(tempPath);
+      return { ok: false, reason: 'superseded' };
+    }
     await fsApi.rename(tempPath, snapshotPath);
     await syncDirectory(fsApi, directory);
     return { ok: true, path: snapshotPath, changed: true };

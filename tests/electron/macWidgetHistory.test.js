@@ -227,6 +227,29 @@ test('a stale source failure cannot return the active source cache', async () =>
   assert.deepEqual(staleResult, { daily: [], monthly: [], summary: {} });
 });
 
+test('a stale source success is discarded instead of reaching its caller', async () => {
+  let releaseSourceA;
+  let markSourceAStarted;
+  const sourceAStarted = new Promise((resolve) => { markSourceAStarted = resolve; });
+  const sourceAResult = resolveMacWidgetHistory({
+    sourceKey: 'hub-a',
+    revision: 'a1',
+    now: 0,
+    fetchHistory: () => {
+      markSourceAStarted();
+      return new Promise((resolve) => { releaseSourceA = resolve; });
+    }
+  });
+  await sourceAStarted;
+
+  await resolveMacWidgetHistory({
+    sourceKey: 'hub-b', revision: 'b1', now: 1, fetchHistory: () => history('hub-b')
+  });
+  releaseSourceA(history('hub-a'));
+
+  assert.deepEqual(await sourceAResult, { daily: [], monthly: [], summary: {} });
+});
+
 test('an in-process source opts out of the freshness floor but keeps the retry floor', async () => {
   let calls = 0;
   const fetchHistory = () => { calls += 1; return history(`call-${calls}`); };

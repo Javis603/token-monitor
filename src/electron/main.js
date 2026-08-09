@@ -3411,10 +3411,16 @@ function getCompleteHistory() {
 
 function getMacWidgetHistory(stats) {
   const config = historyResolverOptions();
+  const sourceToken = {
+    generation: hubModeGeneration,
+    sourceKey: macWidgetHistorySourceKey(config)
+  };
   return resolveMacWidgetHistory({
-    sourceKey: macWidgetHistorySourceKey(config),
+    sourceKey: sourceToken.sourceKey,
     revision: stats?.historyRevision,
-    fetchHistory: getCompleteHistory,
+    // The key and fetch must describe the same immutable source snapshot. Reading
+    // live settings again after an await could label a Hub B response as Hub A.
+    fetchHistory: () => resolveCompleteHistory(config),
     // Only a remote hub read is worth trading freshness for: it is an HTTP round
     // trip with a 15s timeout, and `historyRevision` moves on every ingest from
     // every device. Local and embedded-host history is an in-process
@@ -3422,7 +3428,12 @@ function getMacWidgetHistory(stats) {
     // heatmap lag. The failure retry floor still applies to every source.
     minIntervalMs: completeHistorySource(config) === 'remote' ? undefined : 0,
     logger: (message) => console.warn(message)
-  });
+  }).then((history) => ({ history, sourceToken }));
+}
+
+function macWidgetHistorySourceIsCurrent(sourceToken) {
+  if (!sourceToken || sourceToken.generation !== hubModeGeneration) return false;
+  return sourceToken.sourceKey === macWidgetHistorySourceKey(historyResolverOptions());
 }
 
 function scheduleMacWidgetSnapshot(stats) {
@@ -3437,9 +3448,14 @@ function scheduleMacWidgetSnapshot(stats) {
         pendingMacWidgetStats = null;
         const config = macWidgetConfiguration();
         if (!config) break;
-        const history = await getMacWidgetHistory(nextStats);
+        const { history, sourceToken } = await getMacWidgetHistory(nextStats);
+        // A mode/settings change can finish while a remote history request is on
+        // the wire. The queued latest stats own the new generation; never publish
+        // this old generation between the switch and that catch-up write.
+        if (!macWidgetHistorySourceIsCurrent(sourceToken)) continue;
         const result = await updateMacWidgetSnapshot(nextStats, {
           snapshotPath: config.snapshotPath,
+          isCurrent: () => macWidgetHistorySourceIsCurrent(sourceToken),
           snapshotOptions: {
             presentation: {
               currencyCode: settings?.currency,

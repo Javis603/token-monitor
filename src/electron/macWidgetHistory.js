@@ -120,9 +120,9 @@ async function resolveMacWidgetHistory(options = {}) {
     .then((history) => {
       if (!history || typeof history !== 'object') throw new Error('history resolver returned no data');
       // A source change while this was in flight makes the answer belong to a
-      // hub nobody is asking about any more; publishing it would reintroduce the
-      // exact mixing the invalidation above exists to prevent.
-      if (sourceKey !== activeSourceKey) return history;
+      // hub nobody is asking about any more. It can neither populate the active
+      // cache nor escape to a caller that may publish it.
+      if (sourceKey !== activeSourceKey) return emptyHistory();
       cachedHistory = history;
       cachedRevision = revision;
       lastAttemptFailed = false;
@@ -153,6 +153,7 @@ function resetMacWidgetHistoryCache() {
   activeSourceKey = '';
   cachedRevision = '';
   lastAttemptAt = null;
+  lastAttemptFailed = false;
   inFlight = null;
 }
 

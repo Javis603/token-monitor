@@ -43,6 +43,30 @@ test('atomically replaces the snapshot and removes temporary files', async () =>
   });
 });
 
+test('discards a snapshot whose source generation expires before atomic publish', async () => {
+  await withTempDirectory(async (directory) => {
+    const snapshotPath = path.join(directory, 'snapshot.json');
+    let checks = 0;
+
+    const result = await updateMacWidgetSnapshot({
+      periods: { today: { totalTokens: 42, costUsd: 0.5 } }
+    }, {
+      platform: 'darwin',
+      snapshotPath,
+      isCurrent: () => {
+        checks += 1;
+        return checks === 1;
+      }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'superseded');
+    assert.equal(checks, 2);
+    await assert.rejects(fs.access(snapshotPath));
+    assert.deepEqual(await fs.readdir(directory), []);
+  });
+});
+
 test('keeps the previous snapshot and reports a controlled failure when rename fails', async () => {
   await withTempDirectory(async (directory) => {
     const snapshotPath = path.join(directory, 'snapshot.json');
