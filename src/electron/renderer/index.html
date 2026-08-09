@@ -944,7 +944,7 @@
                         <strong>3.</strong> Click the button below to upload the file.
                       </p>
                       <div class="settings-actions">
-                        <input type="file" id="ollamaCookieUploadFile" accept=".txt" hidden="hidden" style="display: none !important; position: absolute; width: 0; height: 0;" />
+                        <input type="file" id="ollamaCookieUploadFile" accept=".txt" multiple hidden="hidden" style="display: none !important; position: absolute; width: 0; height: 0;" />
                         <button id="ollamaCookieUploadButtonDirect" type="button">Choose file to upload</button>
                       </div>
                     </div>
@@ -1328,6 +1328,8 @@
                     <label class="settings-field"><span>Ollama API key</span><input id="freeLlmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste API key" /></label>
                     <div class="settings-actions">
                       <button id="freeLlmAddKey" type="button">Add API key</button>
+                      <input type="file" id="freeLlmBulkUploadFile" accept=".txt" multiple hidden style="display:none!important;position:absolute;width:0;height:0;" />
+                      <button id="freeLlmBulkUploadButton" type="button">Upload API keys from file</button>
                     </div>
                   </div>
                 </div>

@@ -14113,19 +14113,75 @@ function setupCursorAccountUI() {
     });
 
     document.getElementById('ollamaCookieUploadFile').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const text = await file.text();
-      const lines = text.split('\n');
-      const cookieLine = lines.find(line => line.includes('aid=') && line.includes('__Secure-session='));
-      if (cookieLine) {
-        document.getElementById('ollamaCookieInput').value = cookieLine.trim();
-        document.getElementById('ollamaSaveAccountButton').click();
-      } else {
-        state.ollamaAccountError = 'Could not find a valid Ollama cookie in the uploaded file.';
-        renderOllamaStatus();
-      }
+      const files = Array.from(e.target.files);
       e.target.value = '';
+      if (!files.length) return;
+
+      let addedCount = 0;
+      let failedCookies = [];
+
+      for (const file of files) {
+        const text = await file.text();
+        // Split on blank lines so each "block" is treated as one cookie entry,
+        // then also handle plain newline-separated lines within a block.
+        const blocks = text.split(/\n\s*\n/);
+        const cookieLines = [];
+        for (const block of blocks) {
+          const trimmed = block.trim();
+          if (!trimmed) continue;
+          // A block may itself be a multi-line cookie header — join it into one line.
+          const joined = trimmed.replace(/\n/g, ' ').trim();
+          if (joined.includes('aid=') && joined.includes('__Secure-session=')) {
+            cookieLines.push(joined);
+          }
+        }
+
+        if (!cookieLines.length) {
+          failedCookies.push(`${file.name}: no valid Ollama cookie found`);
+          continue;
+        }
+
+        for (const cookieValue of cookieLines) {
+          const saveButton = document.getElementById('ollamaSaveAccountButton');
+          saveButton.disabled = true;
+          saveButton.textContent = t('settings.ollama.checking');
+          let result;
+          try {
+            result = await window.tokenMonitor.ollama.addAccount(cookieValue);
+          } catch (_) {
+            result = { ok: false, errorCode: 'validationUnavailable' };
+          } finally {
+            saveButton.disabled = false;
+            saveButton.textContent = t('settings.ollama.saveAccount');
+          }
+          if (result?.ok) {
+            addedCount++;
+            state.settings.ollamaManagedAccounts = await window.tokenMonitor.ollama.accounts();
+          } else {
+            const errMsg = result?.errorCode === 'missingRequiredCookies'
+              ? t('settings.ollama.missingCookies', { cookies: (result.missingCookies || []).join(', ') })
+              : result?.errorCode === 'invalidCookie' ? t('settings.ollama.invalidCookie')
+              : result?.errorCode === 'validationRateLimited' ? t('settings.ollama.validationRateLimited')
+              : result?.errorCode === 'validationUnavailable' ? t('settings.ollama.validationUnavailable')
+              : result?.errorCode === 'credentialStorageUnavailable' ? t('settings.ollama.credentialStorageUnavailable')
+              : result?.error || t('settings.ollama.addFailed');
+            failedCookies.push(`${file.name}: ${errMsg}`);
+          }
+        }
+      }
+
+      if (failedCookies.length && addedCount === 0) {
+        state.ollamaAccountError = failedCookies[0];
+      } else {
+        state.ollamaAccountError = '';
+      }
+
+      if (addedCount > 0) {
+        setOllamaAddExpanded(false);
+        await saveSettings({ limitProviders: limitProviderSelectionIncluding('ollama'), limitsEnabled: true });
+        await refreshStats({ force: true });
+      }
+      renderOllamaStatus();
     });
   }
 
@@ -14161,6 +14217,96 @@ function setupCursorAccountUI() {
         state.settings.freeLlmRoutingKeys = result.keys || [];
         state.settings.freeLlmRoutingStatus = result.status || {};
       }
+      renderFreeLlmRouting();
+      renderSettingsSummaries();
+    });
+
+    document.getElementById('freeLlmBulkUploadButton').addEventListener('click', () => {
+      document.getElementById('freeLlmBulkUploadFile').click();
+    });
+
+    document.getElementById('freeLlmBulkUploadFile').addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      e.target.value = '';
+      if (!files.length) return;
+
+      function parseKeys(text) {
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const results = [];
+        let currentUsername = null;
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          // If it ends with '-', it's a username in the image's format
+          if (line.endsWith('-')) {
+            currentUsername = line.slice(0, -1).trim().toLowerCase();
+          } else if (line.includes('@') && !line.includes(' ')) {
+            // It's an email format
+            currentUsername = line.toLowerCase();
+          } else if (currentUsername) {
+            // It must be a key
+            results.push({ username: currentUsername, apiKey: line });
+            currentUsername = null;
+          } else {
+            // Could be a username without a hyphen, let's assume it is if the next line looks like a key
+            if (i + 1 < lines.length && lines[i+1].length > 10 && !lines[i+1].includes(' ')) {
+               currentUsername = line.toLowerCase();
+            }
+          }
+        }
+        return results;
+      }
+
+      const accounts = state.settings?.ollamaManagedAccounts || [];
+      let addedCount = 0;
+      const errors = [];
+
+      for (const file of files) {
+        const text = await file.text();
+        const parsedKeys = parseKeys(text);
+
+        for (const parsed of parsedKeys) {
+          // Match to a linked Ollama managed account by email or username
+          const match = accounts.find((acct) => {
+            const acctEmail = String(acct.accountEmail || '').trim().toLowerCase();
+            return acctEmail === parsed.username || acctEmail.startsWith(parsed.username + '@');
+          });
+
+          if (!match) {
+            errors.push(`No linked Ollama account found for ${parsed.username} — add that cookie account first.`);
+            continue;
+          }
+
+          if (match.enabled === false) {
+            errors.push(`Account ${parsed.username} is disabled — enable it first.`);
+            continue;
+          }
+
+          const result = await window.tokenMonitor.freellm.addKey({
+            apiKey: parsed.apiKey,
+            ollamaAccountId: match.id,
+            label: match.accountEmail || match.accountLabel || ''
+          });
+
+          if (result?.ok) {
+            addedCount++;
+            state.settings.freeLlmRoutingKeys = result.keys || [];
+            state.settings.freeLlmRoutingStatus = result.status || {};
+          } else {
+            errors.push(`${parsed.username}: ${result?.error || 'Could not add key.'}`);
+          }
+        }
+      }
+
+      if (errors.length > 0 && addedCount === 0) {
+        state.freeLlmRoutingError = errors[0];
+      } else if (errors.length > 0) {
+        // Some succeeded — show partial error note but don't block
+        state.freeLlmRoutingError = `${addedCount} key(s) added. ${errors.length} skipped: ${errors[0]}`;
+      } else {
+        state.freeLlmRoutingError = '';
+      }
+
       renderFreeLlmRouting();
       renderSettingsSummaries();
     });

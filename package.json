@@ -1,7 +1,7 @@
 {
   "name": "routed-monitoring",
   "productName": "Routed Monitoring",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
