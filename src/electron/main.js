@@ -3834,10 +3834,18 @@ function showPopover() {
 }
 
 function openMainWindowFromWidget() {
-  if (!app.isReady() || !mainWindow || mainWindow.isDestroyed()) return;
+  if (!app.isReady()) return;
   const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
   pendingMacWidgetOpen = null;
   updateRendererViewState({ breakdown: destination.view });
+  applyMacActivationPolicy({ mainWindowVisible: true });
+  // Closing the window with the tray icon off destroys it while macOS keeps the
+  // app alive, so a widget click has to be able to build one again — the same
+  // recovery focusExistingWindow() performs for the dock and the shortcut.
+  // Bailing out instead consumed the open-url event and left the widget dead
+  // for the rest of the session, since nothing else reads pendingMacWidgetOpen.
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   const sendDestination = () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (destination.settings) mainWindow.webContents.send('settings:open');
@@ -3851,7 +3859,9 @@ function openMainWindowFromWidget() {
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
   applyMacSpaceBehavior(false);
-  mainWindow.show();
+  // A collapsed bubble would otherwise swallow the navigation we just sent.
+  if (floatingBubbleState.collapsed) expandFloatingBubble();
+  else mainWindow.show();
 }
 
 function hidePopover() {

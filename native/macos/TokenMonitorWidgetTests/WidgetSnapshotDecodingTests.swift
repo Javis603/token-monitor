@@ -597,7 +597,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
                 days: days,
                 family: .medium,
                 referenceDate: reference,
-                store: store
+                store: store,
+                timeZone: .gmt
             ),
             date
         )
@@ -612,7 +613,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
                 days: days,
                 family: .large,
                 referenceDate: reference,
-                store: store
+                store: store,
+                timeZone: .gmt
             )
         )
         XCTAssertNil(store.selectedActivityDay(for: .large))
@@ -622,7 +624,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
                 days: days,
                 family: .small,
                 referenceDate: reference,
-                store: store
+                store: store,
+                timeZone: .gmt
             )
         )
     }
@@ -725,7 +728,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             maxWeeks: 6,
             minCellSize: 5,
             maxCellSize: 9,
-            spacing: 2
+            spacing: 2,
+            timeZone: .gmt
         )
 
         XCTAssertEqual(layout.weekCount, 1)
@@ -759,7 +763,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
                 maxWeeks: scenario.maxWeeks,
                 minCellSize: scenario.minCell,
                 maxCellSize: scenario.maxCell,
-                spacing: 2
+                spacing: 2,
+                timeZone: .gmt
             )
             XCTAssertGreaterThanOrEqual(layout.weekCount, scenario.minWeeks)
             XCTAssertLessThanOrEqual(layout.weekCount, scenario.maxWeeks)
@@ -782,7 +787,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             maxWeeks: 14,
             minCellSize: 5,
             maxCellSize: 10,
-            spacing: 2
+            spacing: 2,
+            timeZone: .gmt
         )
         XCTAssertEqual(empty.weekCount, 0)
         XCTAssertTrue(empty.cells.isEmpty)
@@ -799,7 +805,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             maxWeeks: 14,
             minCellSize: 5,
             maxCellSize: 10,
-            spacing: 2
+            spacing: 2,
+            timeZone: .gmt
         )
         XCTAssertGreaterThan(baseline.cells.filter { !$0.isFuture && $0.intensity == 0 }.count, 0)
 
@@ -811,7 +818,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
                 maxWeeks: 14,
                 minCellSize: 5,
                 maxCellSize: 10,
-                spacing: 2
+                spacing: 2,
+                timeZone: .gmt
             )
             XCTAssertEqual(themed, baseline)
         }
@@ -955,7 +963,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             maxWeeks: 26,
             minCellSize: 5,
             maxCellSize: 22,
-            spacing: 2
+            spacing: 2,
+            timeZone: .gmt
         )
         XCTAssertGreaterThan(layout.cellSize, 12)
         XCTAssertEqual(layout.cellWidth, layout.cellHeight)
@@ -972,7 +981,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             maxWeeks: 26,
             minCellSize: 5,
             maxCellSize: 22,
-            spacing: 2
+            spacing: 2,
+            timeZone: .gmt
         )
         if layout.weekCount > 0 {
             XCTAssertEqual(layout.cells.count, layout.weekCount * 7)
@@ -992,7 +1002,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             maxWeeks: 26,
             minCellSize: 5,
             maxCellSize: 22,
-            spacing: 2
+            spacing: 2,
+            timeZone: .gmt
         )
         // With limited history and large available space, cells should be large
         XCTAssertGreaterThan(layout.cellSize, 14)
@@ -1123,7 +1134,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             maxWeeks: 14,
             minCellSize: 5,
             maxCellSize: 20,
-            spacing: 2
+            spacing: 2,
+            timeZone: .gmt
         )
         XCTAssertEqual(layout.weekCount, 10)
         XCTAssertLessThanOrEqual(layout.weekCount, 14)
@@ -1147,11 +1159,97 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             maxWeeks: 16,
             minCellSize: 5,
             maxCellSize: 16,
-            spacing: 2
+            spacing: 2,
+            timeZone: .gmt
         )
         XCTAssertGreaterThan(layout.weekCount, 6) // More than old 6-week cap
         XCTAssertEqual(layout.cellWidth, layout.cellHeight)
         XCTAssertLessThanOrEqual(layout.renderedWidth, 155.001)
         XCTAssertEqual(layout.cells.count, layout.weekCount * 7)
+    }
+
+    // Day keys are local wall-clock dates, so the grid has to decide "today" in
+    // the same zone. Resolving it in UTC put the whole heatmap one day off for
+    // anyone whose local date differed from UTC at render time.
+    func testHeatmapResolvesTodayInTheLocalZoneNotUTC() throws {
+        let taipei = try XCTUnwrap(TimeZone(identifier: "Asia/Taipei"))
+        // 00:30 on 07-18 in Taipei is still 07-17 in UTC.
+        let justAfterLocalMidnight = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-07-17T16:30:00Z")
+        )
+        let days = [
+            WidgetActivityDay(date: "2026-07-17", intensity: 2, totalTokens: 12_000_000),
+            WidgetActivityDay(date: "2026-07-18", intensity: 3, totalTokens: 5_000_000)
+        ]
+        let layout = WidgetHeatmapLayoutCalculator.make(
+            days: days,
+            referenceDate: justAfterLocalMidnight,
+            availableSize: CGSize(width: 260, height: 90),
+            maxWeeks: 14,
+            minCellSize: 5,
+            maxCellSize: 12,
+            spacing: 2,
+            timeZone: taipei
+        )
+
+        let today = try XCTUnwrap(layout.cells.first(where: { $0.date == "2026-07-18" }))
+        XCTAssertFalse(today.isFuture, "the local current day must not be classified as future")
+        XCTAssertTrue(today.isSelectable)
+        XCTAssertEqual(today.totalTokens, 5_000_000)
+        XCTAssertEqual(layout.endDate, "2026-07-18")
+    }
+
+    // The mirror image: west of UTC the reference instant already belongs to the
+    // next UTC day, which used to append a trailing day nobody has reached yet.
+    func testHeatmapDoesNotAppendAPhantomDayWestOfUTC() throws {
+        let newYork = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        // 22:30 on 07-17 in New York is already 07-18 in UTC.
+        let lateLocalEvening = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-07-18T02:30:00Z")
+        )
+        let layout = WidgetHeatmapLayoutCalculator.make(
+            days: [WidgetActivityDay(date: "2026-07-17", intensity: 2, totalTokens: 12_000_000)],
+            referenceDate: lateLocalEvening,
+            availableSize: CGSize(width: 260, height: 90),
+            maxWeeks: 14,
+            minCellSize: 5,
+            maxCellSize: 12,
+            spacing: 2,
+            timeZone: newYork
+        )
+
+        XCTAssertEqual(layout.endDate, "2026-07-17")
+        let tomorrow = try XCTUnwrap(layout.cells.first(where: { $0.date == "2026-07-18" }))
+        XCTAssertTrue(tomorrow.isFuture)
+        XCTAssertFalse(tomorrow.isSelectable)
+    }
+
+    // resolvedDate applies the same reference-day comparison, so a selection made
+    // on the local current day was being cleared for the same reason.
+    func testActivitySelectionKeepsTodayInTheLocalZone() throws {
+        let suite = "token-monitor-widget-local-zone-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WidgetPresentationStateStore(defaults: defaults)
+        let taipei = try XCTUnwrap(TimeZone(identifier: "Asia/Taipei"))
+        let justAfterLocalMidnight = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-07-17T16:30:00Z")
+        )
+        let days = [
+            WidgetActivityDay(date: "2026-07-17", intensity: 2, totalTokens: 12_000_000),
+            WidgetActivityDay(date: "2026-07-18", intensity: 3, totalTokens: 5_000_000)
+        ]
+
+        store.setSelectedActivityDay("2026-07-18", for: .medium)
+        XCTAssertEqual(
+            WidgetActivitySelection.resolvedDate(
+                days: days,
+                family: .medium,
+                referenceDate: justAfterLocalMidnight,
+                store: store,
+                timeZone: taipei
+            ),
+            "2026-07-18"
+        )
     }
 }

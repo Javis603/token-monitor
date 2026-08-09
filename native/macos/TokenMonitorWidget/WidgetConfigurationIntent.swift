@@ -299,17 +299,30 @@ final class WidgetPresentationStateStore: WidgetPresentationStateStoring {
 }
 
 enum WidgetActivityDate {
-    private static let calendar: Calendar = {
+    // Day keys reach the widget as local wall-clock dates (localDayKey in
+    // macWidgetSnapshot.js), so "which day does this key name" and "which day
+    // is it now" have to be asked in the same zone. Pinning UTC here put the
+    // grid one day off for every user whose local date differed from UTC at
+    // render time: east of UTC today was classified as future — drawn as zero,
+    // not selectable, and dropped by resolvedDate — while west of UTC the grid
+    // grew a phantom trailing day. The zone stays a parameter so tests pin one
+    // instead of inheriting whatever the machine happens to be set to.
+    static func calendar(timeZone: TimeZone = .current) -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        calendar.timeZone = timeZone
         return calendar
-    }()
-
-    static func isValid(_ value: String) -> Bool {
-        date(from: value) != nil
     }
 
-    static func date(from value: String) -> Date? {
+    static func isValid(_ value: String, timeZone: TimeZone = .current) -> Bool {
+        date(from: value, timeZone: timeZone) != nil
+    }
+
+    static func date(from value: String, timeZone: TimeZone = .current) -> Date? {
+        date(from: value, calendar: calendar(timeZone: timeZone))
+    }
+
+    static func date(from value: String, calendar: Calendar) -> Date? {
         let parts = value.split(separator: "-", omittingEmptySubsequences: false)
         guard parts.count == 3,
               parts[0].count == 4,
@@ -324,18 +337,19 @@ enum WidgetActivityDate {
         return date
     }
 
-    static func startOfDay(_ date: Date) -> Date {
-        calendar.startOfDay(for: date)
+    static func startOfDay(_ date: Date, timeZone: TimeZone = .current) -> Date {
+        calendar(timeZone: timeZone).startOfDay(for: date)
     }
 
-    static func sunday(for date: Date) -> Date {
-        let normalized = startOfDay(date)
+    static func sunday(for date: Date, timeZone: TimeZone = .current) -> Date {
+        let calendar = calendar(timeZone: timeZone)
+        let normalized = calendar.startOfDay(for: date)
         let weekday = calendar.component(.weekday, from: normalized)
         return calendar.date(byAdding: .day, value: -(weekday - 1), to: normalized) ?? normalized
     }
 
-    static func addingDays(_ days: Int, to date: Date) -> Date {
-        calendar.date(byAdding: .day, value: days, to: date) ?? date
+    static func addingDays(_ days: Int, to date: Date, timeZone: TimeZone = .current) -> Date {
+        calendar(timeZone: timeZone).date(byAdding: .day, value: days, to: date) ?? date
     }
 }
 
@@ -344,21 +358,24 @@ enum WidgetActivitySelection {
         days: [WidgetActivityDay],
         family: WidgetFamilyScope?,
         referenceDate: Date,
-        store: WidgetPresentationStateStoring
+        store: WidgetPresentationStateStoring,
+        timeZone: TimeZone = .current
     ) -> String? {
         guard let family, family != .small else { return nil }
-        let datedDays = days.compactMap { WidgetActivityDate.date(from: $0.date) }
+        let calendar = WidgetActivityDate.calendar(timeZone: timeZone)
+        let datedDays = days.compactMap { WidgetActivityDate.date(from: $0.date, calendar: calendar) }
         guard let selectedDate = store.selectedActivityDay(for: family),
-              let selected = WidgetActivityDate.date(from: selectedDate),
+              let selected = WidgetActivityDate.date(from: selectedDate, calendar: calendar),
               let earliest = datedDays.min() else {
             store.clearSelectedActivityDay(for: family)
             return nil
         }
         let maxWeeks = family == .medium ? 14 : 26
-        let reference = WidgetActivityDate.startOfDay(referenceDate)
+        let reference = WidgetActivityDate.startOfDay(referenceDate, timeZone: timeZone)
         let gridStart = WidgetActivityDate.addingDays(
             -(maxWeeks - 1) * 7,
-            to: WidgetActivityDate.sunday(for: reference)
+            to: WidgetActivityDate.sunday(for: reference, timeZone: timeZone),
+            timeZone: timeZone
         )
         guard selected >= max(earliest, gridStart), selected <= reference else {
             store.clearSelectedActivityDay(for: family)

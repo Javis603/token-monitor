@@ -607,3 +607,23 @@ test('fingerprints business content while ignoring snapshot clock fields', () =>
   });
   assert.notEqual(macWidgetSnapshotFingerprint(first), macWidgetSnapshotFingerprint(presentationChange));
 });
+
+// The snapshot re-declares the supported UI locales as a literal instead of
+// importing them, and an unrecognized one silently degrades to 'auto' — so a
+// newly added language would reach the widget with the wrong number and unit
+// formatting and nothing would fail. AGENTS.md's "Adding a UI locale" checklist
+// is guard-test enforced everywhere else; this keeps the widget on that list.
+test('the Widget presentation accepts exactly the shipped UI locales', () => {
+  const { LANGUAGE_OPTIONS } = require('../../src/electron/renderer/i18n');
+  const stats = sampleStats();
+
+  for (const { value } of LANGUAGE_OPTIONS) {
+    const snapshot = buildSnapshot(stats, { now: NOW, presentation: { locale: value } });
+    assert.equal(snapshot.presentation.locale, value, `locale ${value} should survive`);
+  }
+
+  for (const unsupported of ['de', 'zh', 'en-US', '', 'auto ']) {
+    const snapshot = buildSnapshot(stats, { now: NOW, presentation: { locale: unsupported } });
+    assert.equal(snapshot.presentation.locale, 'auto');
+  }
+});

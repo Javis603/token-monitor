@@ -258,26 +258,29 @@ function buildQuota(limits) {
   }).map(({ _providerOrdinal, ...provider }) => provider).slice(0, 10);
 }
 
+// Mirrors LIMIT_PROVIDERS in src/electron/renderer/app.js: this is the name the
+// widget actually shows, since buildQuota stamps it onto every row as
+// displayName and the Swift side prefers that over its own fallback map.
 const PROVIDER_LABELS = Object.freeze({
   antigravity: 'Antigravity',
   claude: 'Claude',
   codex: 'Codex',
-  copilot: 'Copilot',
+  copilot: 'GitHub Copilot',
   cursor: 'Cursor',
   deepseek: 'DeepSeek',
   grok: 'Grok',
   kiro: 'Kiro',
   kimi: 'Kimi',
-  minimax: 'MiniMax',
+  minimax: 'Minimax',
   mimo: 'MiMo',
   ollama: 'Ollama',
   opencode: 'OpenCode',
   openrouter: 'OpenRouter',
   qoder: 'Qoder',
-  thirdparty: 'Third-party',
+  thirdparty: 'Third-party APIs',
   volcengine: 'Volcengine',
-  zai: 'Z.ai',
-  zaiteam: 'Z.ai Team'
+  zai: 'GLM',
+  zaiteam: 'GLM Team'
 });
 
 function providerLabel(provider) {

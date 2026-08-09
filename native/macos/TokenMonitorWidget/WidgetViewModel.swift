@@ -377,7 +377,8 @@ enum WidgetHeatmapLayoutCalculator {
         maxWeeks: Int,
         minCellSize: CGFloat,
         maxCellSize: CGFloat,
-        spacing: CGFloat
+        spacing: CGFloat,
+        timeZone: TimeZone = .current
     ) -> WidgetHeatmapLayout {
         make(
             days: days,
@@ -390,7 +391,8 @@ enum WidgetHeatmapLayoutCalculator {
             maxCellHeight: maxCellSize,
             spacing: spacing,
             minimumWidthRatio: nil,
-            allowsVerticalOverflow: false
+            allowsVerticalOverflow: false,
+            timeZone: timeZone
         )
     }
 
@@ -405,7 +407,8 @@ enum WidgetHeatmapLayoutCalculator {
         maxCellHeight: CGFloat,
         spacing: CGFloat,
         minimumWidthRatio: CGFloat?,
-        allowsVerticalOverflow: Bool
+        allowsVerticalOverflow: Bool,
+        timeZone: TimeZone = .current
     ) -> WidgetHeatmapLayout {
         let normalizedSpacing = max(0, spacing)
         let normalizedMaxWeeks = max(0, maxWeeks)
@@ -413,9 +416,13 @@ enum WidgetHeatmapLayoutCalculator {
             return empty(spacing: normalizedSpacing)
         }
 
+        // One calendar for the whole grid: the keys, "today" and every cell
+        // offset have to agree on a zone. See WidgetActivityDate for why it is
+        // the local one and not UTC.
+        let calendar = WidgetActivityDate.calendar(timeZone: timeZone)
         var values: [Date: WidgetActivityDay] = [:]
         for day in days {
-            guard let date = parse(day.date) else { continue }
+            guard let date = parse(day.date, calendar: calendar) else { continue }
             let existing = values[date]
             values[date] = WidgetActivityDay(
                 date: day.date,
@@ -426,8 +433,8 @@ enum WidgetHeatmapLayoutCalculator {
         guard let earliest = values.keys.min() else { return empty(spacing: normalizedSpacing) }
 
         let reference = calendar.startOfDay(for: referenceDate)
-        let referenceSunday = sunday(for: reference)
-        let earliestSunday = sunday(for: min(earliest, reference))
+        let referenceSunday = sunday(for: reference, calendar: calendar)
+        let earliestSunday = sunday(for: min(earliest, reference), calendar: calendar)
         let coverageDays = max(0, calendar.dateComponents([.day], from: earliestSunday, to: referenceSunday).day ?? 0)
         let coverageWeeks = max(1, coverageDays / 7 + 1)
         let widthCapacity = maxWeekCapacity(
@@ -454,7 +461,8 @@ enum WidgetHeatmapLayoutCalculator {
                 values: values,
                 earliest: earliest,
                 reference: reference,
-                referenceSunday: referenceSunday
+                referenceSunday: referenceSunday,
+                calendar: calendar
             )
         }
         let targetWidthFit: CGFloat
@@ -477,7 +485,8 @@ enum WidgetHeatmapLayoutCalculator {
             values: values,
             earliest: earliest,
             reference: reference,
-            referenceSunday: referenceSunday
+            referenceSunday: referenceSunday,
+            calendar: calendar
         )
     }
 
@@ -489,7 +498,8 @@ enum WidgetHeatmapLayoutCalculator {
         values: [Date: WidgetActivityDay],
         earliest: Date,
         reference: Date,
-        referenceSunday: Date
+        referenceSunday: Date,
+        calendar: Calendar
     ) -> WidgetHeatmapLayout {
         let gridStart = calendar.date(byAdding: .day, value: -(weekCount - 1) * 7, to: referenceSunday) ?? referenceSunday
         var cells: [WidgetHeatmapCell] = []
@@ -499,7 +509,7 @@ enum WidgetHeatmapLayoutCalculator {
             let isFuture = date > reference
             let activityDay = values[date]
             cells.append(WidgetHeatmapCell(
-                date: format(date),
+                date: format(date, calendar: calendar),
                 intensity: isFuture ? 0 : activityDay?.intensity ?? 0,
                 totalTokens: isFuture ? 0 : activityDay?.totalTokens ?? 0,
                 isSelectable: !isFuture && date >= earliest,
@@ -524,12 +534,12 @@ enum WidgetHeatmapLayoutCalculator {
         return max(0, Int(floor((width + spacing) / pitch)))
     }
 
-    private static func sunday(for date: Date) -> Date {
+    private static func sunday(for date: Date, calendar: Calendar) -> Date {
         let weekday = calendar.component(.weekday, from: date)
         return calendar.date(byAdding: .day, value: -(weekday - 1), to: date) ?? date
     }
 
-    private static func parse(_ value: String) -> Date? {
+    private static func parse(_ value: String, calendar: Calendar) -> Date? {
         let parts = value.split(separator: "-", omittingEmptySubsequences: false)
         guard parts.count == 3,
               parts[0].count == 4,
@@ -539,11 +549,11 @@ enum WidgetHeatmapLayoutCalculator {
               let month = Int(parts[1]),
               let day = Int(parts[2]),
               let date = calendar.date(from: DateComponents(year: year, month: month, day: day)),
-              format(date) == value else { return nil }
+              format(date, calendar: calendar) == value else { return nil }
         return date
     }
 
-    private static func format(_ date: Date) -> String {
+    private static func format(_ date: Date, calendar: Calendar) -> String {
         let components = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
     }
@@ -560,13 +570,6 @@ enum WidgetHeatmapLayoutCalculator {
         )
     }
 
-    private static var calendar: Calendar = {
-        var value = Calendar(identifier: .gregorian)
-        value.locale = Locale(identifier: "en_US_POSIX")
-        value.timeZone = TimeZone(secondsFromGMT: 0)!
-        value.firstWeekday = 1
-        return value
-    }()
 }
 
 struct WidgetViewModel: Equatable {
@@ -701,23 +704,33 @@ enum WidgetFormat {
         return "\(presentation.currencySymbol)\(String(format: "%.2f", converted))"
     }
 
+    // Mirrors LIMIT_PROVIDERS in src/electron/renderer/app.js — the widget must
+    // name a provider exactly the way the app does. Kept complete rather than
+    // leaning on the `default` branch: `.capitalized` happens to be right for a
+    // few ids and silently wrong for the rest, and it collapsed zai/zaiteam
+    // onto one label. tests/electron/macWidgetProviderLabels.test.js fails when
+    // this list and the renderer's drift apart.
     static func provider(_ value: String) -> String {
         switch value.lowercased() {
-        case "codex": "Codex"
         case "claude": "Claude"
-        case "antigravity": "Antigravity"
+        case "codex": "Codex"
         case "opencode": "OpenCode"
-        case "openrouter": "OpenRouter"
-        case "thirdparty": "Thirdparty"
-        case "deepseek": "DeepSeek"
-        case "minimax": "MiniMax"
+        case "cursor": "Cursor"
+        case "antigravity": "Antigravity"
+        case "kimi": "Kimi"
+        case "grok": "Grok"
+        case "copilot": "GitHub Copilot"
         case "mimo": "MiMo"
-        case "copilot": "Copilot"
-        case "zai", "zaiteam": "Z.ai"
+        case "zai": "GLM"
+        case "zaiteam": "GLM Team"
+        case "kiro": "Kiro"
+        case "deepseek": "DeepSeek"
+        case "openrouter": "OpenRouter"
+        case "minimax": "Minimax"
         case "volcengine": "Volcengine"
         case "qoder": "Qoder"
-        case "kimi": "Kimi"
         case "ollama": "Ollama"
+        case "thirdparty": "Third-party APIs"
         default: value.capitalized
         }
     }
