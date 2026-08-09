@@ -63,9 +63,37 @@ test('publishes final stats to the macOS Widget from the single sendPush outlet'
   const end = mainSource.indexOf('\nfunction statsHistoryRevision', start);
   assert.ok(start >= 0 && end > start, 'sendPush function should exist');
   const sendPush = mainSource.slice(start, end);
-  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+scheduleMacWidgetSnapshot\(latestStats\);/);
-  assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(latestStats\)/g) || []).length, 1);
+  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+scheduleMacWidgetSnapshot\(latestStats, options\.widgetProducerOwner\);/);
+  assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(latestStats, options\.widgetProducerOwner\)/g) || []).length, 1);
   assert.match(mainSource, /compactTokenUnits: settings\?\.compactTokenUnits/);
+});
+
+test('Widget producers carry lifetime ownership through the sendPush outlet', () => {
+  for (const signature of [
+    'function startSyncCollector()',
+    'function startHostStats()',
+    'function startLocalCollector()',
+    'async function startStatsStream(options = {})',
+    'async function refreshFromTray()'
+  ]) {
+    const start = mainSource.indexOf(signature);
+    const end = mainSource.indexOf('\nfunction ', start + signature.length);
+    assert.ok(start >= 0, `${signature} should exist`);
+    const source = mainSource.slice(start, end === -1 ? mainSource.length : end);
+    assert.match(source, /const widgetProducerOwner = captureMacWidgetProducerOwner\(\);/);
+    assert.match(source, /sendPush\([\s\S]*\{ widgetProducerOwner \}\)/);
+  }
+});
+
+test('Widget source ownership advances for mode and history-policy transitions', () => {
+  assert.match(
+    mainSource,
+    /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*advanceMacWidgetSourceEpoch\(\);/
+  );
+  assert.match(
+    mainSource,
+    /const widgetHistorySourceChanged = previousRuntimeSettings\.historyEnabled !== settings\.historyEnabled;\s*if \(widgetHistorySourceChanged && !runtimeChange\.modeStructural\) \{\s*advanceMacWidgetSourceEpoch\(\);\s*scheduleMacWidgetSnapshot\(latestStats, captureMacWidgetProducerOwner\(\)\);/
+  );
 });
 
 test('keeps Widget packaging opt-in and injects artifacts only after a successful build', () => {

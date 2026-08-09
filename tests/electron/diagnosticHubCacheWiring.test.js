@@ -16,7 +16,7 @@ test('late Hub responses cannot replace the active mode cache', () => {
     mainSource,
     /function hubModeRequestIsCurrent\(generation, expectedMode, expectedIdentity = null\)[\s\S]*generation === hubModeGeneration[\s\S]*currentHubStatsIdentity\(expectedMode\) === expectedIdentity/
   );
-  assert.match(mainSource, /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*clearLatestHubStatsCache\(\);/);
+  assert.match(mainSource, /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*advanceMacWidgetSourceEpoch\(\);\s*clearLatestHubStatsCache\(\);/);
   assert.match(mainSource, /function setLatestHubStatsCache\(stats, source, generation, identity\)/);
   assert.match(
     mainSource,

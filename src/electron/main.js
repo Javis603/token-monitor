@@ -151,7 +151,14 @@ const { historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory } = require('./historySource');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
-const { resolveMacWidgetSnapshotPath, updateMacWidgetSnapshot } = require('./macWidgetBridge');
+const {
+  commitMacWidgetSnapshot,
+  discardMacWidgetSnapshot,
+  prepareMacWidgetSnapshotUpdate,
+  resolveMacWidgetSnapshotPath,
+  syncMacWidgetSnapshotDirectory
+} = require('./macWidgetBridge');
+const { createMacWidgetSnapshotController } = require('./macWidgetSnapshotController');
 const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
@@ -2323,8 +2330,7 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
-let pendingMacWidgetStats = null;
-let macWidgetWriteInFlight = false;
+let macWidgetSnapshotController = null;
 let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
@@ -3206,6 +3212,7 @@ function stopSyncCollector(options = {}) {
 function startSyncCollector() {
   stopSyncCollector();
   if (!effectiveHubConfig().url) return;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
   const syncUploadScheduler = createSyncUploadScheduler({
     intervalMs: syncUploadIntervalMs(),
     upload: postToHub,
@@ -3222,7 +3229,7 @@ function startSyncCollector() {
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
         updateDiscordRpcDisplay(displayStats);
-        sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
+        sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } }, { widgetProducerOwner });
       }
       await syncUploadScheduler.enqueue(visibleSummary, revision);
     },
@@ -3298,6 +3305,7 @@ function startHostStats() {
   stopHostStats();
   if (!embeddedHub) return;
   const generation = hubModeGeneration;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
   const cacheIdentity = currentHubStatsIdentity('host');
   // Host mode presents the same multi-device hub aggregate as connecting to a
   // remote hub, so it reuses the renderer's 'sync' status path (Live / synced
@@ -3308,7 +3316,7 @@ function startHostStats() {
     if (!hubModeRequestIsCurrent(generation, 'host', cacheIdentity)) return;
     setLatestHubStatsCache(stats, 'host', generation, cacheIdentity);
     updateDiscordRpcDisplay(stats);
-    sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
+    sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } }, { widgetProducerOwner });
   };
   embeddedHubUnsub = embeddedHub.hub.onStats((stats, reason) => emit(stats, reason || 'hub'));
   // Prime the renderer with the current snapshot so it isn't blank until the
@@ -3409,82 +3417,85 @@ function getCompleteHistory() {
   return resolveCompleteHistory(historyResolverOptions());
 }
 
-function getMacWidgetHistory(stats) {
-  const config = historyResolverOptions();
-  const sourceToken = {
-    generation: hubModeGeneration,
-    sourceKey: macWidgetHistorySourceKey(config)
-  };
-  return resolveMacWidgetHistory({
-    generation: sourceToken.generation,
-    sourceKey: sourceToken.sourceKey,
-    revision: stats?.historyRevision,
-    // The key and fetch must describe the same immutable source snapshot. Reading
-    // live settings again after an await could label a Hub B response as Hub A.
-    fetchHistory: () => resolveCompleteHistory(config),
-    // Only a remote hub read is worth trading freshness for: it is an HTTP round
-    // trip with a 15s timeout, and `historyRevision` moves on every ingest from
-    // every device. Local and embedded-host history is an in-process
-    // aggregation, so throttling it would buy nothing and only let the Activity
-    // heatmap lag. The failure retry floor still applies to every source.
-    minIntervalMs: completeHistorySource(config) === 'remote' ? undefined : 0,
-    logger: (message) => console.warn(message)
-  }).then((history) => ({ history, sourceToken }));
-}
-
-function macWidgetHistorySourceIsCurrent(sourceToken) {
-  if (!sourceToken || sourceToken.generation !== hubModeGeneration) return false;
-  return sourceToken.sourceKey === macWidgetHistorySourceKey(historyResolverOptions());
-}
-
-function scheduleMacWidgetSnapshot(stats) {
-  if (process.platform !== 'darwin' || !stats) return;
-  pendingMacWidgetStats = stats;
-  if (macWidgetWriteInFlight) return;
-  macWidgetWriteInFlight = true;
-  setImmediate(async () => {
-    try {
-      while (pendingMacWidgetStats) {
-        const nextStats = pendingMacWidgetStats;
-        pendingMacWidgetStats = null;
-        const config = macWidgetConfiguration();
-        if (!config) break;
-        const { history, sourceToken } = await getMacWidgetHistory(nextStats);
-        // A mode/settings change can finish while a remote history request is on
-        // the wire. The queued latest stats own the new generation; never publish
-        // this old generation between the switch and that catch-up write.
-        if (!macWidgetHistorySourceIsCurrent(sourceToken)) continue;
-        const result = await updateMacWidgetSnapshot(nextStats, {
-          snapshotPath: config.snapshotPath,
-          isCurrent: () => macWidgetHistorySourceIsCurrent(sourceToken),
-          snapshotOptions: {
-            presentation: {
-              currencyCode: settings?.currency,
-              currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
-              compactNumbers: settings?.showCompactTotalTokens !== false,
-              compactTokenUnits: settings?.compactTokenUnits,
-              showCost: true,
-              locale: settings?.language,
-              theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
-            },
-            history
-          },
-          logger: (message) => console.warn(message)
-        });
-        if (result.ok && result.changed !== false) {
-          requestMacWidgetReload({
-            widgetKind: config.widgetKind,
-            logger: (message) => console.warn(message)
-          });
-        }
-      }
-    } catch (error) {
-      console.warn(`[mac-widget] update failed: ${error?.message || error}`);
-    } finally {
-      macWidgetWriteInFlight = false;
-      if (pendingMacWidgetStats) scheduleMacWidgetSnapshot(pendingMacWidgetStats);
-    }
+function macWidgetPresentation() {
+  return Object.freeze({
+    currencyCode: settings?.currency,
+    currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
+    compactNumbers: settings?.showCompactTotalTokens !== false,
+    compactTokenUnits: settings?.compactTokenUnits,
+    showCost: true,
+    locale: settings?.language,
+    theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
   });
+}
+
+function captureMacWidgetWork({ stats, owner }) {
+  const widget = macWidgetConfiguration();
+  if (!widget) return null;
+  const resolverConfig = Object.freeze({ ...historyResolverOptions() });
+  return {
+    stats,
+    owner: Object.freeze({
+      epoch: owner.epoch,
+      sourceKey: macWidgetHistorySourceKey(resolverConfig)
+    }),
+    resolverConfig,
+    presentation: macWidgetPresentation(),
+    snapshotPath: widget.snapshotPath,
+    widgetKind: widget.widgetKind
+  };
+}
+
+function ensureMacWidgetSnapshotController() {
+  if (process.platform !== 'darwin') return null;
+  if (macWidgetSnapshotController) return macWidgetSnapshotController;
+  macWidgetSnapshotController = createMacWidgetSnapshotController({
+    captureWork: captureMacWidgetWork,
+    resolveHistory: (work) => resolveMacWidgetHistory({
+      generation: work.owner.epoch,
+      sourceKey: work.owner.sourceKey,
+      revision: work.stats?.historyRevision,
+      fetchHistory: () => resolveCompleteHistory(work.resolverConfig),
+      minIntervalMs: completeHistorySource(work.resolverConfig) === 'remote' ? undefined : 0,
+      logger: (message) => console.warn(message)
+    }),
+    prepareSnapshot: (work, history) => prepareMacWidgetSnapshotUpdate(work.stats, {
+      snapshotPath: work.snapshotPath,
+      snapshotOptions: {
+        presentation: work.presentation,
+        history
+      },
+      logger: (message) => console.warn(message)
+    }),
+    commitSnapshot: (prepared, options) => commitMacWidgetSnapshot(prepared, {
+      isCurrent: options.isCurrent,
+      logger: (message) => console.warn(message)
+    }),
+    syncSnapshot: (_work, committed, prepared) => syncMacWidgetSnapshotDirectory({
+      ...committed,
+      fs: prepared?.fs
+    }),
+    discardSnapshot: discardMacWidgetSnapshot,
+    reloadSnapshot: (work) => requestMacWidgetReload({
+      widgetKind: work.widgetKind,
+      logger: (message) => console.warn(message)
+    }),
+    logger: (message) => console.warn(message)
+  });
+  return macWidgetSnapshotController;
+}
+
+function captureMacWidgetProducerOwner() {
+  return ensureMacWidgetSnapshotController()?.captureProducerOwner() || null;
+}
+
+function advanceMacWidgetSourceEpoch() {
+  ensureMacWidgetSnapshotController()?.advanceSourceEpoch();
+}
+
+function scheduleMacWidgetSnapshot(stats, producerOwner) {
+  if (process.platform !== 'darwin' || !stats) return false;
+  return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
 }
 
 // Two options, both for the cold-start seed and neither for live stats.
@@ -3499,7 +3510,7 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
-    scheduleMacWidgetSnapshot(latestStats);
+    scheduleMacWidgetSnapshot(latestStats, options.widgetProducerOwner);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
@@ -3654,7 +3665,7 @@ function stopLocalCollector(options = {}) {
 // going, instead of zeros for the tens of seconds it takes. deviceRecordFromAnchor
 // owns the trust rules; anything it rejects leaves the renderer on its normal
 // wait-for-real-data path.
-function primeLocalStatsFromAnchor(usageOptions) {
+function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   // Cold start only. startMode() re-enters here on structural settings changes
   // as well, and there the numbers already collected are newer than any anchor.
   if (lastCollectedDevice) return;
@@ -3694,17 +3705,18 @@ function primeLocalStatsFromAnchor(usageOptions) {
   sendPush({
     event: 'stats',
     data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
-  }, { skipExport: true, deferToRenderer: true });
+  }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
 }
 
 function startLocalCollector() {
   stopLocalCollector();
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
   mode = 'local';
   sendStatus(false, { reason: 'collecting' });
   // One config object for both, so the fingerprint the seed validates against
   // cannot drift from the one the collector will compute.
   const usageOptions = electronUsageConfig('collector');
-  primeLocalStatsFromAnchor(usageOptions);
+  primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -3719,7 +3731,7 @@ function startLocalCollector() {
       lastCollectedDevice = localDevice;
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
       updateDiscordRpcDisplay(localStats);
-      sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
+      sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } }, { widgetProducerOwner });
       sendStatus(true, { reason });
     },
     onDiagnosticEvent: recordDiagnosticEvent,
@@ -3756,6 +3768,7 @@ function parseSseChunk(chunk) {
 async function startStatsStream(options = {}) {
   stopStatsStream();
   const generation = hubModeGeneration;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
   if (settings?.hubMode !== 'client') return;
   const cacheIdentity = currentHubStatsIdentity('client');
   if (options.resetSnapshot) {
@@ -3800,7 +3813,7 @@ async function startStatsStream(options = {}) {
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
             updateDiscordRpcDisplay(displayStats);
           }
-          sendPush(parsed);
+          sendPush(parsed, { widgetProducerOwner });
         }
       }
     }
@@ -4139,6 +4152,7 @@ function sendMainWindowEvent(channel, payload, isStillCurrent) {
 
 async function refreshFromTray() {
   if (trayRefreshInFlight) return;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
   trayRefreshInFlight = true;
   try {
     const stats = await fetchStats({ force: true });
@@ -4146,7 +4160,7 @@ async function refreshFromTray() {
     // result when fetchStats returned a different object (for example, a remote hub
     // fetch while an external headless agent owns collection).
     if (stats && stats !== latestStats) {
-      sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } });
+      sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } }, { widgetProducerOwner });
     }
   } catch (error) {
     console.warn(`[tray] refresh failed: ${error.message}`);
@@ -4381,6 +4395,7 @@ function exitTrayMode() {
 
 function startMode() {
   hubModeGeneration += 1;
+  advanceMacWidgetSourceEpoch();
   clearLatestHubStatsCache();
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued.
@@ -4475,6 +4490,7 @@ function stopAll() {
   stopStatsStream();
   stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
+  macWidgetSnapshotController?.stop();
   // Fire-and-forget on purpose. server.close() does not complete until every
   // in-flight request does, so awaiting it hands a remote device on the embedded
   // hub the power to hold our own exit open. The listening socket closes with
@@ -5764,6 +5780,11 @@ app.whenReady().then(() => {
       applyNativeMaterial();
     }
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
+    const widgetHistorySourceChanged = previousRuntimeSettings.historyEnabled !== settings.historyEnabled;
+    if (widgetHistorySourceChanged && !runtimeChange.modeStructural) {
+      advanceMacWidgetSourceEpoch();
+      scheduleMacWidgetSnapshot(latestStats, captureMacWidgetProducerOwner());
+    }
     const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
     if (runtimeChange.modeStructural) {
       for (const { scope, reason, options } of limitInvalidations) {

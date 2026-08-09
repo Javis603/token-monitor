@@ -1,5 +1,6 @@
 'use strict';
 
+const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -44,7 +45,12 @@ async function syncDirectory(fsApi, directory) {
   }
 }
 
-async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
+async function discardMacWidgetSnapshot(prepared) {
+  if (!prepared?.tempPath) return;
+  try { await (prepared.fs || fs).unlink(prepared.tempPath); } catch (_) {}
+}
+
+async function prepareMacWidgetSnapshot(serializedSnapshot, options = {}) {
   const platform = options.platform || process.platform;
   if (platform !== 'darwin') return { ok: false, reason: 'unsupported-platform' };
 
@@ -79,13 +85,11 @@ async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
     await handle.sync();
     await handle.close();
     handle = null;
-    if (options.isCurrent && !options.isCurrent()) {
-      await fsApi.unlink(tempPath);
-      return { ok: false, reason: 'superseded' };
-    }
-    await fsApi.rename(tempPath, snapshotPath);
-    await syncDirectory(fsApi, directory);
-    return { ok: true, path: snapshotPath, changed: true };
+    return {
+      ok: true,
+      changed: true,
+      prepared: { directory, fs: fsApi, snapshotPath, tempPath }
+    };
   } catch (error) {
     try { await handle?.close(); } catch (_) {}
     try { await fsApi.unlink(tempPath); } catch (_) {}
@@ -94,7 +98,56 @@ async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
   }
 }
 
-async function updateMacWidgetSnapshot(stats, options = {}) {
+function createCommitMacWidgetSnapshot(renameSync) {
+  return function commitPreparedSnapshot(prepared, options = {}) {
+    if (!prepared?.tempPath || !prepared?.snapshotPath) {
+      return { ok: false, reason: 'not-prepared' };
+    }
+    try {
+      if (options.isCurrent && !options.isCurrent()) return { ok: false, reason: 'superseded' };
+      renameSync(prepared.tempPath, prepared.snapshotPath);
+      return {
+        ok: true,
+        path: prepared.snapshotPath,
+        changed: true,
+        directory: prepared.directory
+      };
+    } catch (error) {
+      safeLog(options.logger, `[mac-widget] snapshot write failed: ${error?.message || error}`);
+      return { ok: false, reason: 'write-failed', error };
+    }
+  };
+}
+
+const commitMacWidgetSnapshot = createCommitMacWidgetSnapshot(fsSync.renameSync);
+
+async function syncMacWidgetSnapshotDirectory(result, options = {}) {
+  const directory = result?.directory;
+  if (!directory) return;
+  await syncDirectory(options.fs || result.fs || fs, directory);
+}
+
+async function writeMacWidgetSnapshot(serializedSnapshot, options = {}) {
+  const result = await prepareMacWidgetSnapshot(serializedSnapshot, options);
+  if (!result.ok || result.changed === false) return result;
+
+  const prepared = result.prepared;
+  const commitSnapshot = options.renameSync
+    ? createCommitMacWidgetSnapshot(options.renameSync)
+    : commitMacWidgetSnapshot;
+  const committed = commitSnapshot(prepared, {
+    isCurrent: options.isCurrent,
+    logger: options.logger
+  });
+  if (!committed.ok) {
+    await discardMacWidgetSnapshot(prepared);
+    return committed;
+  }
+  await syncMacWidgetSnapshotDirectory({ ...committed, fs: prepared.fs });
+  return { ok: true, path: committed.path, changed: true };
+}
+
+async function prepareMacWidgetSnapshotUpdate(stats, options = {}) {
   let snapshot;
   let serialized;
   const snapshotOptions = options.snapshotOptions || {};
@@ -105,15 +158,40 @@ async function updateMacWidgetSnapshot(stats, options = {}) {
     safeLog(options.logger, `[mac-widget] snapshot serialization failed: ${error?.message || error}`);
     return { ok: false, reason: 'serialization-failed', error };
   }
-  return writeMacWidgetSnapshot(serialized, {
+  return prepareMacWidgetSnapshot(serialized, {
     ...options,
     fingerprint: macWidgetSnapshotFingerprint(snapshot),
     freshnessNow: options.freshnessNow || snapshotOptions.now || snapshot.generatedAt
   });
 }
 
+async function updateMacWidgetSnapshot(stats, options = {}) {
+  const result = await prepareMacWidgetSnapshotUpdate(stats, options);
+  if (!result.ok || result.changed === false) return result;
+  const prepared = result.prepared;
+  const commitSnapshot = options.renameSync
+    ? createCommitMacWidgetSnapshot(options.renameSync)
+    : commitMacWidgetSnapshot;
+  const committed = commitSnapshot(prepared, {
+    isCurrent: options.isCurrent,
+    logger: options.logger
+  });
+  if (!committed.ok) {
+    await discardMacWidgetSnapshot(prepared);
+    return committed;
+  }
+  await syncMacWidgetSnapshotDirectory({ ...committed, fs: prepared.fs });
+  return { ok: true, path: committed.path, changed: true };
+}
+
 module.exports = {
+  commitMacWidgetSnapshot,
+  createCommitMacWidgetSnapshot,
+  discardMacWidgetSnapshot,
+  prepareMacWidgetSnapshot,
+  prepareMacWidgetSnapshotUpdate,
   resolveMacWidgetSnapshotPath,
+  syncMacWidgetSnapshotDirectory,
   updateMacWidgetSnapshot,
   writeMacWidgetSnapshot
 };
