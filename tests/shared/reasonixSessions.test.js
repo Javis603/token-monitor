@@ -449,6 +449,67 @@ test('Reasonix native telemetry uses direct total, skips invalid sidecars, and i
   assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:stable-id'), false);
 });
 
+test('Reasonix native cache discovers a session root created after an empty scan', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-root-discovery-'));
+  const stateHome = path.join(root, 'state');
+  const projectSessionsDir = path.join(stateHome, 'projects', 'token-monitor', 'sessions');
+  const workspaceRoot = path.join(root, 'workspace');
+  const now = new Date(2026, 7, 8, 12, 0, 0, 0);
+  let projectIdentityCalls = 0;
+  const projectIdentityForTest = (workspace) => {
+    projectIdentityCalls += 1;
+    assert.equal(workspace, workspaceRoot);
+    return { projectId: 'token-monitor-project', projectLabel: 'Token Monitor' };
+  };
+  const cache = cacheFor(stateHome, projectIdentityForTest);
+
+  assert.equal(fs.existsSync(projectSessionsDir), false);
+  let view = cache.getView({ now });
+  assert.deepEqual(Object.keys(view.sessions.allTime), []);
+  assert.deepEqual(Object.keys(view.projects.allTime), []);
+  assert.equal(cache.isDirty(), false);
+
+  const sessionTime = new Date(2026, 7, 8, 10, 0, 0, 0);
+  const paths = sidecars(projectSessionsDir, 'created-after-empty', {
+    id: 'created-after-empty',
+    scope: 'project',
+    workspace_root: workspaceRoot,
+    schema_version: 1,
+    created_at: sessionTime.toISOString(),
+    updated_at: sessionTime.toISOString(),
+    model: 'deepseek/deepseek-v4-flash'
+  }, nativeTelemetry({ totalTokens: 321 }));
+  const eventsPath = path.join(projectSessionsDir, 'created-after-empty.events.jsonl');
+  fs.writeFileSync(eventsPath, `${JSON.stringify({
+    schema_version: 1,
+    type: 'replace',
+    created_at: sessionTime.toISOString(),
+    messages: [
+      { role: 'user', raw_content: 'create the project', createdAt: sessionTime.getTime() },
+      { role: 'assistant', createdAt: sessionTime.getTime() + 1000 }
+    ]
+  })}\n`);
+
+  view = cache.getView({ now });
+  const session = view.sessions.today['reasonix:created-after-empty'];
+  assert.ok(session);
+  assert.equal(session.sessionId, 'reasonix:created-after-empty');
+  assert.equal(session.totalTokens, 321);
+  assert.equal(session.messageCount, 1);
+  assert.equal(session.projectLabel, 'Token Monitor');
+  assert.equal(view.projects.today['token monitor'].tokens, 321);
+  assert.deepEqual(view.projects.today['token monitor'].sessionIds, ['reasonix:created-after-empty']);
+  assert.equal(cache.isDirty(), false);
+  assert.equal(JSON.stringify(view).includes(stateHome), false);
+  assert.equal(JSON.stringify(view).includes(workspaceRoot), false);
+  assert.equal(fs.existsSync(paths.metaPath), true);
+
+  const scansAfterDiscovery = projectIdentityCalls;
+  const cachedView = cache.getView({ now });
+  assert.equal(cachedView, view);
+  assert.equal(projectIdentityCalls, scansAfterDiscovery);
+});
+
 test('Reasonix event updates invalidate only the corresponding native session', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-event-cache-'));
   const stateHome = path.join(root, 'state');

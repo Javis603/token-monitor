@@ -174,6 +174,10 @@ function reasonixSessionDirectories(options = {}) {
   return uniquePaths(directories);
 }
 
+function sessionRootSignature(directories) {
+  return uniquePaths(directories).join('\0');
+}
+
 function isReasonixNativeSessionSidecar(filePath) {
   const normalized = String(filePath || '').replace(/\\/g, '/');
   const name = normalized.slice(normalized.lastIndexOf('/') + 1);
@@ -541,9 +545,9 @@ function buildNativeView(entries, options = {}) {
   return view;
 }
 
-function scanEntries(options = {}, cache = new Map()) {
-  const directories = reasonixSessionDirectories(options);
-  const candidates = sidecarCandidates(directories, options.pathModule || path);
+function scanEntries(options = {}, cache = new Map(), directories = null) {
+  const sessionDirectories = directories || reasonixSessionDirectories(options);
+  const candidates = sidecarCandidates(sessionDirectories, options.pathModule || path);
   const seen = new Set();
   const next = new Map();
 
@@ -573,6 +577,10 @@ function createReasonixNativeSessionCache(options = {}) {
   let cachedView = null;
   let cachedViewKey = '';
   let invalidatedEventKeys = new Set();
+  // A native session root may be created after the initial empty scan. Track the
+  // roots that scanEntries actually used so a later refresh can recover without
+  // relying on a watcher that was never registered for the missing directory.
+  let scannedRootSignature = null;
 
   function invalidate(filePath) {
     if (!filePath) {
@@ -604,10 +612,18 @@ function createReasonixNativeSessionCache(options = {}) {
       ? viewOptions.allTimeSince
       : resolvedOptions.allTimeSince;
     const viewKey = `${localDayKey(now)}|${localMonthKey(now)}|${projectsEnabled ? 'projects' : 'no-projects'}|${String(allTimeSince ?? '')}`;
+    const sessionDirectories = reasonixSessionDirectories(resolvedOptions);
+    const rootSignature = sessionRootSignature(sessionDirectories);
+    if (rootSignature !== scannedRootSignature) {
+      dirty = true;
+      cachedView = null;
+      cachedViewKey = '';
+    }
     if (dirty) {
-      const scanned = scanEntries({ ...resolvedOptions, projectIdentity: options.projectIdentity }, entries);
+      const scanned = scanEntries({ ...resolvedOptions, projectIdentity: options.projectIdentity }, entries, sessionDirectories);
       entries = scanned.entries;
       dirty = false;
+      scannedRootSignature = rootSignature;
       invalidatedEventKeys = new Set();
       cachedView = null;
       cachedViewKey = '';
