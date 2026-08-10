@@ -48,7 +48,7 @@ test('only the seed waits for the renderer, so the deferral cannot queue up', ()
 
 test('the seed runs before the collector and only on a cold start', () => {
   const localCollector = functionSource('function startLocalCollector()');
-  const seedAt = localCollector.indexOf('primeLocalStatsFromAnchor(usageOptions);');
+  const seedAt = localCollector.indexOf('primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);');
   const runtimeAt = localCollector.indexOf('createDeviceRuntime(');
   assert.ok(seedAt >= 0, 'the seed has to run');
   assert.ok(runtimeAt > seedAt, 'the seed has to land before the first scan starts');

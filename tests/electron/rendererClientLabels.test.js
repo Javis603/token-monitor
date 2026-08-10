@@ -80,6 +80,15 @@ test('renderer wires the Doubao vendor icon for Doubao model rows', () => {
   assert.match(styles, /\.row-icon-doubao\s*\{[^}]*assets\/icons\/doubao\.svg/s);
 });
 
+test('renderer wires the Hunyuan vendor icon for Hunyuan model rows', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+
+  assert.match(source, /clientsWithIcon = new Set\(\[[\s\S]*'hunyuan'/);
+  assert.match(styles, /\.row-icon-hunyuan\s*\{[^}]*assets\/icons\/hunyuan\.svg/s);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'hunyuan.svg')), true);
+});
+
 test('renderer maps MiMo provider rows to the Xiaomi brand icon', () => {
   const source = rendererSource();
   const styles = rendererStyles();

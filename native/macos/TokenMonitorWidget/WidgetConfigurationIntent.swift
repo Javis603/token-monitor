@@ -108,6 +108,21 @@ enum WidgetPeriodPolicy {
     static func effectivePeriod(for page: WidgetPage, selectedPeriod: WidgetPeriod) -> WidgetPeriod {
         isSelectable(on: page) ? selectedPeriod : .day
     }
+
+    // The gallery renders an entry for every family at once, before the app has
+    // necessarily written a snapshot and before the user has committed to
+    // anything. A nil snapshot there draws the redacted placeholder skeleton,
+    // which reads as a broken widget rather than one that is still loading, so a
+    // preview falls back to representative sample data. A placed widget keeps
+    // nil: inventing numbers on a real instance would be a lie.
+    static func previewAwareSnapshot(
+        loaded: WidgetSnapshot?,
+        period: WidgetPeriod,
+        isPreview: Bool
+    ) -> WidgetSnapshot? {
+        if let loaded { return loaded }
+        return isPreview ? WidgetSnapshot.placeholder.selecting(period) : nil
+    }
 }
 
 enum WidgetFamilyScope: String, Codable, AppEnum, CaseIterable {

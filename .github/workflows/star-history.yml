@@ -1,0 +1,211 @@
+name: Star History
+
+on:
+  schedule:
+    # 03:17 in Hong Kong; a non-zero minute avoids GitHub's top-of-hour peak.
+    - cron: '17 19 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Generate and retain the validated artifact without publishing it
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: star-history
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    # GitHub's stargazer listing maps collaborator access to contents: write for
+    # GITHUB_TOKEN. Keep this job caller-owned and never run the generator here.
+    permissions:
+      contents: write
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout trusted fetcher
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fetch identity-free stargazer timestamps
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_DIRECTORY: ${{ runner.temp }}/star-history-input
+        run: >-
+          node scripts/fetch-star-history-stargazers.js
+          --repository "$GITHUB_REPOSITORY"
+          --output "$INPUT_DIRECTORY/stargazers.json"
+
+      - name: Upload identity-free input
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: star-history-input
+          path: ${{ runner.temp }}/star-history-input/stargazers.json
+          if-no-files-found: error
+          retention-days: 1
+
+  generate:
+    needs: fetch
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Download identity-free input
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.fetch.outputs.artifact-id }}
+          path: ${{ runner.temp }}/star-history-input
+          merge-multiple: true
+          digest-mismatch: error
+
+      - name: Generate with the external read-only action
+        id: generate
+        uses: Javis603/star-history-action@c6ca634f7bad7354b05bf3d70c1c8a065374c7e1
+        with:
+          repository: ${{ github.repository }}
+          stars-file: ${{ runner.temp }}/star-history-input/stargazers.json
+          logo-url: ${{ github.server_url }}/${{ github.repository_owner }}.png?size=22
+
+      - name: Upload generated assets
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: star-history-output
+          path: ${{ steps.generate.outputs.output-directory }}
+          if-no-files-found: error
+          retention-days: 1
+
+  validate:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      light-sha256: ${{ steps.validate.outputs.light-sha256 }}
+      dark-sha256: ${{ steps.validate.outputs.dark-sha256 }}
+      snapshot-sha256: ${{ steps.validate.outputs.snapshot-sha256 }}
+    steps:
+      - name: Checkout trusted validator
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download generated assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.generate.outputs.artifact-id }}
+          path: ${{ runner.temp }}/star-history-output
+          merge-multiple: true
+          digest-mismatch: error
+
+      - name: Install the XML validator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libxml2-utils
+
+      - name: Validate generated assets
+        id: validate
+        env:
+          GENERATED_DIRECTORY: ${{ runner.temp }}/star-history-output
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node scripts/validate-star-history-artifact.js \
+            --directory "$GENERATED_DIRECTORY" \
+            --repository "$GITHUB_REPOSITORY" \
+            --renderer-commit bcddc9d532b10bac7e0187a741288bf9cab17616
+
+          light_digest="$(sha256sum "$GENERATED_DIRECTORY/star-history.svg")"
+          dark_digest="$(sha256sum "$GENERATED_DIRECTORY/star-history-dark.svg")"
+          snapshot_digest="$(sha256sum "$GENERATED_DIRECTORY/stars.json")"
+          echo "light-sha256=${light_digest%% *}" >> "$GITHUB_OUTPUT"
+          echo "dark-sha256=${dark_digest%% *}" >> "$GITHUB_OUTPUT"
+          echo "snapshot-sha256=${snapshot_digest%% *}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
+    needs: [generate, validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.generate.outputs.artifact-id }}
+          path: ${{ runner.temp }}/star-history-output
+          merge-multiple: true
+          digest-mismatch: error
+
+      - name: Verify validated asset hashes
+        env:
+          GENERATED_DIRECTORY: ${{ runner.temp }}/star-history-output
+          LIGHT_SHA256: ${{ needs.validate.outputs.light-sha256 }}
+          DARK_SHA256: ${{ needs.validate.outputs.dark-sha256 }}
+          SNAPSHOT_SHA256: ${{ needs.validate.outputs.snapshot-sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ "$LIGHT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DARK_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SNAPSHOT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          cd "$GENERATED_DIRECTORY"
+          printf '%s  %s\n' \
+            "$LIGHT_SHA256" star-history.svg \
+            "$DARK_SHA256" star-history-dark.svg \
+            "$SNAPSHOT_SHA256" stars.json \
+            | sha256sum --check --strict
+
+      - name: Publish generated assets to the orphan branch
+        env:
+          GENERATED_DIRECTORY: ${{ runner.temp }}/star-history-output
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_TERMINAL_PROMPT: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          publish_dir="$(mktemp -d "$RUNNER_TEMP/star-history-publish.XXXXXX")"
+          git -C "$publish_dir" init --quiet
+          git -C "$publish_dir" config user.name 'github-actions[bot]'
+          git -C "$publish_dir" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$publish_dir" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
+          if git -C "$publish_dir" ls-remote --exit-code --heads origin star-history >/dev/null 2>&1; then
+            git -C "$publish_dir" fetch --depth=1 origin star-history
+            git -C "$publish_dir" checkout --quiet -B star-history FETCH_HEAD
+          else
+            git -C "$publish_dir" checkout --quiet --orphan star-history
+          fi
+
+          git -C "$publish_dir" clean -fdx
+          git -C "$publish_dir" rm -rf --ignore-unmatch .
+          install -m 0644 "$GENERATED_DIRECTORY/star-history.svg" "$publish_dir/star-history.svg"
+          install -m 0644 "$GENERATED_DIRECTORY/star-history-dark.svg" "$publish_dir/star-history-dark.svg"
+          install -m 0644 "$GENERATED_DIRECTORY/stars.json" "$publish_dir/stars.json"
+
+          git -C "$publish_dir" add star-history.svg star-history-dark.svg stars.json
+          if git -C "$publish_dir" diff --cached --quiet; then
+            echo 'Star History output is unchanged; no commit needed.'
+            exit 0
+          fi
+
+          git -C "$publish_dir" commit --quiet -m 'chore: update star history'
+          git -C "$publish_dir" \
+            -c credential.helper= \
+            -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f' \
+            push origin HEAD:star-history

@@ -1,12 +1,17 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
+  commitMacWidgetSnapshot,
+  createCommitMacWidgetSnapshot,
+  prepareMacWidgetSnapshot,
   resolveMacWidgetSnapshotPath,
+  syncMacWidgetSnapshotDirectory,
   updateMacWidgetSnapshot,
   writeMacWidgetSnapshot
 } = require('../../src/electron/macWidgetBridge');
@@ -43,20 +48,95 @@ test('atomically replaces the snapshot and removes temporary files', async () =>
   });
 });
 
+test('final owner check and formal rename run in one non-yielding commit stack', async () => {
+  await withTempDirectory(async (directory) => {
+    const snapshotPath = path.join(directory, 'snapshot.json');
+    await fs.writeFile(snapshotPath, 'last good snapshot', 'utf8');
+    const prepared = await prepareMacWidgetSnapshot('new snapshot', {
+      platform: 'darwin',
+      snapshotPath
+    });
+    const events = [];
+    let current = true;
+
+    const commitSnapshot = createCommitMacWidgetSnapshot((from, to) => {
+      events.push('rename');
+      fsSync.renameSync(from, to);
+    });
+    const result = commitSnapshot(prepared.prepared, {
+      isCurrent() {
+        events.push('check');
+        queueMicrotask(() => {
+          current = false;
+          events.push('transition');
+        });
+        return current;
+      }
+    });
+    events.push('returned');
+    await Promise.resolve();
+
+    assert.deepEqual(events, ['check', 'rename', 'returned', 'transition']);
+    assert.deepEqual(result, { ok: true, path: snapshotPath, changed: true, directory });
+    assert.equal(await fs.readFile(snapshotPath, 'utf8'), 'new snapshot');
+    await syncMacWidgetSnapshotDirectory(result);
+  });
+});
+
+test('a superseded prepared snapshot is discarded before formal publish', async () => {
+  await withTempDirectory(async (directory) => {
+    const snapshotPath = path.join(directory, 'snapshot.json');
+    const prepared = await prepareMacWidgetSnapshot('new snapshot', {
+      platform: 'darwin',
+      snapshotPath
+    });
+
+    const result = commitMacWidgetSnapshot(prepared.prepared, {
+      isCurrent: () => false
+    });
+
+    assert.deepEqual(result, { ok: false, reason: 'superseded' });
+    await fs.unlink(prepared.prepared.tempPath);
+    await assert.rejects(fs.access(snapshotPath));
+  });
+});
+
+test('discards a snapshot whose source generation expires before atomic publish', async () => {
+  await withTempDirectory(async (directory) => {
+    const snapshotPath = path.join(directory, 'snapshot.json');
+    let checks = 0;
+
+    const result = await updateMacWidgetSnapshot({
+      periods: { today: { totalTokens: 42, costUsd: 0.5 } }
+    }, {
+      platform: 'darwin',
+      snapshotPath,
+      isCurrent: () => {
+        checks += 1;
+        return checks === 1;
+      }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'superseded');
+    assert.equal(checks, 2);
+    await assert.rejects(fs.access(snapshotPath));
+    assert.deepEqual(await fs.readdir(directory), []);
+  });
+});
+
 test('keeps the previous snapshot and reports a controlled failure when rename fails', async () => {
   await withTempDirectory(async (directory) => {
     const snapshotPath = path.join(directory, 'snapshot.json');
     await fs.writeFile(snapshotPath, 'last good snapshot', 'utf8');
     const messages = [];
-    const failingFs = {
-      ...fs,
-      async rename() { throw new Error('simulated rename failure'); }
-    };
+    const failingFs = { ...fs };
 
     const result = await writeMacWidgetSnapshot('new snapshot', {
       platform: 'darwin',
       snapshotPath,
       fs: failingFs,
+      renameSync() { throw new Error('simulated rename failure'); },
       logger: (message) => messages.push(message)
     });
 
@@ -211,8 +291,18 @@ test('compares stable snapshot content instead of rewriting for clock-only chang
 
     assert.equal((await updateMacWidgetSnapshot(limitsChanged, {
       ...options,
-      snapshotOptions: { ...options.snapshotOptions, presentation: { defaultPeriod: 'month' } }
+      snapshotOptions: { ...options.snapshotOptions, presentation: { currencyCode: 'CNY', currencyRate: 7.1 } }
     })).changed, true);
+
+    // The app's own period tab is deliberately not part of the snapshot, so
+    // switching it must not reach disk or spend a WidgetKit reload.
+    assert.equal((await updateMacWidgetSnapshot(limitsChanged, {
+      ...options,
+      snapshotOptions: {
+        ...options.snapshotOptions,
+        presentation: { currencyCode: 'CNY', currencyRate: 7.1, defaultPeriod: 'month' }
+      }
+    })).changed, false);
   });
 });
 
@@ -222,10 +312,6 @@ test('does not rewrite production-shaped aggregate stats when only updatedAt adv
     const counters = { rename: 0, tempSync: 0 };
     const trackingFs = {
       ...fs,
-      async rename(...args) {
-        counters.rename += 1;
-        return fs.rename(...args);
-      },
       async open(...args) {
         const handle = await fs.open(...args);
         const originalSync = handle.sync.bind(handle);
@@ -245,6 +331,10 @@ test('does not rewrite production-shaped aggregate stats when only updatedAt adv
       platform: 'darwin',
       snapshotPath,
       fs: trackingFs,
+      renameSync(...args) {
+        counters.rename += 1;
+        return fsSync.renameSync(...args);
+      },
       snapshotOptions: {
         now: '2026-07-16T09:00:05Z',
         history: { daily: [], monthly: [], summary: {} }
