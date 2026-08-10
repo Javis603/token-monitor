@@ -12,6 +12,7 @@ const {
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
 } = require('../../src/electron/deviceRuntimeCoordinator');
+const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
 
 function deferred() {
   let resolve;
@@ -180,6 +181,20 @@ test('settings changes plan scoped clear-before-refresh invalidations', () => {
   assert.deepEqual(settingsLimitInvalidationPlan(), []);
 });
 
+test('headless agent exposes OpenCode local limits as a default-off opt-in', () => {
+  const root = path.join(__dirname, '..', '..');
+  const agent = fs.readFileSync(path.join(root, 'src', 'agent', 'agent.js'), 'utf8');
+  const envExample = fs.readFileSync(path.join(root, '.env.example'), 'utf8');
+  const limitsOptions = agent.slice(agent.indexOf('const limitsOptions = {'), agent.indexOf('let sessionUsageArchive;'));
+
+  assert.match(
+    agent,
+    /const opencodeLocalLimitsEnabled = parseBoolean\([\s\S]*TOKEN_MONITOR_OPENCODE_LOCAL_LIMITS,[\s\S]*false\s*\);/
+  );
+  assert.match(limitsOptions, /opencodeLocalLimitsEnabled/);
+  assert.match(envExample, /TOKEN_MONITOR_OPENCODE_LOCAL_LIMITS=/);
+});
+
 test('limit invalidation clears the scoped lane before refreshing it', async () => {
   const calls = [];
   const scope = { provider: 'deepseek' };
@@ -200,6 +215,63 @@ test('limit invalidation clears the scoped lane before refreshing it', async () 
     ['refresh', scope, 'settings-change']
   ]);
   assert.deepEqual(result, { refreshed: true });
+});
+
+test('disabling OpenCode local fallback clears last-good before a failed Web refresh', async (t) => {
+  const snapshots = [];
+  const runtime = createLimitsRuntime({
+    limitsEnabled: true,
+    limitProviders: ['opencode'],
+    opencodeLocalLimitsEnabled: true
+  }, {
+    autoRetry: false,
+    probeProvider: async (_provider, config) => config.opencodeLocalLimitsEnabled === true
+      ? [{
+          provider: 'opencode',
+          accountKey: 'local-go',
+          accountLabel: 'Go',
+          source: 'local',
+          status: 'ok',
+          updatedAt: '2026-08-09T00:00:00.000Z',
+          windows: [{ kind: 'billing', label: 'Monthly', usedPercent: 25 }]
+        }]
+      : [{
+          provider: 'opencode',
+          accountKey: '',
+          accountLabel: '',
+          source: 'web',
+          status: 'unavailable',
+          updatedAt: '2026-08-09T00:01:00.000Z',
+          windows: []
+        }],
+    onUpdate: (summary) => snapshots.push(summary.providers)
+  });
+  t.after(() => runtime.stop());
+
+  await runtime.refresh({ provider: 'opencode' }, 'manual');
+  runtime.reconfigure({ opencodeLocalLimitsEnabled: false });
+  await runLimitInvalidation({
+    clearLimits: runtime.clear,
+    refreshLimits: runtime.refresh
+  }, { provider: 'opencode' }, 'settings-change', { clear: true });
+
+  const localIndex = snapshots.findIndex((providers) => providers.some(
+    (provider) => provider.source === 'local' && provider.windows.length === 1
+  ));
+  const clearedIndex = snapshots.findIndex((providers, index) => index > localIndex && providers.length === 0);
+  const failedIndex = snapshots.findIndex((providers, index) => index > clearedIndex && providers.some(
+    (provider) => provider.source === 'web'
+      && provider.status === 'unavailable'
+      && provider.windows.length === 0
+  ));
+  assert.ok(localIndex >= 0, 'local last-good should be established first');
+  assert.ok(clearedIndex > localIndex, 'settings invalidation should publish an empty OpenCode lane');
+  assert.ok(failedIndex > clearedIndex, 'failed Web refresh should publish without restoring local windows');
+  assert.deepEqual(runtime.getSnapshot().providers.map(({ source, status, windows }) => ({
+    source,
+    status,
+    windows: windows.length
+  })), [{ source: 'web', status: 'unavailable', windows: 0 }]);
 });
 
 test('limit invalidation can clear without scheduling a refresh', async () => {

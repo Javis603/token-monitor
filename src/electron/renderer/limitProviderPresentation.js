@@ -93,7 +93,7 @@
   }
 
   function deviceKey(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '').trim();
   }
 
   function deviceLabel(deviceOrId) {
@@ -310,11 +310,19 @@
     return String(value || '').trim();
   }
 
+  function accountIdentityKeys(value) {
+    return new Set([
+      value?.accountKey,
+      value?.webAccountKey,
+      ...(Array.isArray(value?.accountKeyAliases) ? value.accountKeyAliases : [])
+    ].map(accountKey).filter(Boolean));
+  }
+
   function providerMatchesTarget(candidate, target) {
     if (providerId(candidate) !== providerId(target)) return false;
-    const targetAccountKey = accountKey(target?.accountKey);
-    if (!targetAccountKey) return true;
-    return accountKey(candidate?.accountKey) === targetAccountKey;
+    const targetAccountKeys = accountIdentityKeys(target);
+    if (targetAccountKeys.size === 0) return true;
+    return [...accountIdentityKeys(candidate)].some((key) => targetAccountKeys.has(key));
   }
 
   function deviceProviderCandidate(device, target) {

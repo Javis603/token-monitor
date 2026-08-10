@@ -39,9 +39,9 @@ test('no recognizable signal falls back to network with the message as detail', 
   assert.deepEqual(classifyStreamFailure({}), { reason: 'network', detail: null });
 });
 
-test('local stats overlays do not clear a disconnected Hub stream state', () => {
+test('local and presentation-only stats overlays do not clear a disconnected Hub stream state', () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
 
-  assert.match(statsPush, /if \(payload\.data\?\.reason !== 'local'\) \{\s*state\.streamConnected = true;\s*state\.streamFailure = null;\s*\}/);
+  assert.match(statsPush, /if \(payload\.data\?\.reason !== 'local' && payload\.data\?\.reason !== 'presentation'\) \{\s*state\.streamConnected = true;\s*state\.streamFailure = null;\s*\}/);
 });

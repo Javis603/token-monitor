@@ -302,6 +302,9 @@ state.clientRescans = clientRescanStateApi.createClientRescanState({
 state.toolPreferenceRenderSignature = '';
 state.toolPreferenceDetailSignature = '';
 state.toolPreferenceSourceSignature = '';
+state.limitProviderRenderSignature = '';
+state.limitPanelRenderSignature = '';
+state.settingsPushRevision = 0;
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -4988,22 +4991,54 @@ function renderLimits() {
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
   const providers = providersByLimitProviderId(state.stats?.limits?.providers || []);
-  const nodes = [];
-  const rows = limitProviderOrderApi
+  const orderedProviders = limitProviderOrderApi
     .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
     .filter(({ id }) => limitsEnabled && enabled.has(id));
+  const visibleProviderEntries = new Map(orderedProviders.map(({ id }) => {
+    const providerEntries = limitsEnabled && enabled.has(id)
+      ? (providers.get(id) || [{ provider: id, status: state.stats ? missingLimitProviderStatus() : 'unavailable', windows: [] }])
+      : [{ provider: id, status: 'disabled', windows: [] }];
+    return [id, providerEntries];
+  }));
+  const renderSignature = JSON.stringify({
+    locale: currentLocale(),
+    minute: Math.floor(Date.now() / 60000),
+    mode: state.mode,
+    hubUrl: state.settings?.hubUrl || '',
+    deviceId: state.settings?.deviceId || '',
+    settings: [
+      state.settings?.showLimitSource === true,
+      state.settings?.maskLimitAccountEmails === true,
+      state.settings?.showLimitUsed === true,
+      state.settings?.showToolIcons !== false,
+      state.settings?.claudePrepaidBalanceEnabled !== false,
+      state.settings?.currency || '',
+      state.settings?.currencyRatesEffective || null,
+      state.settings?.subscriptions || [],
+      state.settings?.codexManagedAccounts || [],
+      state.codexActiveAccount || null,
+      state.codexSystemSwitchingAccountId || '',
+      state.codexSystemSwitchErrorAccountId || '',
+      state.codexSystemSwitchError || ''
+    ],
+    providerOrder: orderedProviders.map(({ id }) => id),
+    providers: [...visibleProviderEntries.entries()]
+  });
+  if (
+    state.limitPanelRenderSignature === renderSignature
+    && els.limitsPanel.children.length === orderedProviders.length
+  ) {
+    return;
+  }
+  state.limitPanelRenderSignature = renderSignature;
+  const nodes = [];
+  const rows = orderedProviders;
   if (rows.length === 0) {
     els.limitsPanel.replaceChildren();
     return;
   }
   for (const { id, label } of rows) {
-    const providerEnabled = limitsEnabled && enabled.has(id);
-    const providerEntries = providerEnabled
-      ? (providers.get(id) || [{ provider: id, status: state.stats ? missingLimitProviderStatus() : 'unavailable', windows: [] }])
-      : [{ provider: id, status: 'disabled', windows: [] }];
-    const visibleProviders = providerEntries.length > 0
-      ? providerEntries
-      : { provider: id, status: 'disabled', windows: [] };
+    const visibleProviders = visibleProviderEntries.get(id) || [{ provider: id, status: 'disabled', windows: [] }];
     const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
     if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderClaudeAccountGroup(label, visibleProviders, color));
@@ -9313,8 +9348,27 @@ function renderLimitProviderCheckboxes() {
 }
 
 function renderLimitProviderCheckboxesNow() {
+  const renderSignature = limitProviderSettingsRenderSignature();
+  if (
+    state.limitProviderRenderSignature === renderSignature
+    && els.limitProviderCheckboxes.children.length === LIMIT_PROVIDERS.length
+  ) {
+    return;
+  }
   const previousRows = Array.from(els.limitProviderCheckboxes.children);
   const focusedId = document.activeElement?.id || '';
+  const reusableSettingInputs = new Map();
+  for (const row of previousRows) {
+    const providerId = row.dataset?.provider || '';
+    const settings = LIMIT_PROVIDER_SETTINGS[providerId] || [];
+    const inputs = row.querySelectorAll?.(
+      ':scope > .accordion-animated-container .limit-provider-settings-list > .settings-item > input[type="checkbox"]'
+    ) || [];
+    settings.forEach((setting, index) => {
+      const input = inputs[index];
+      if (input) reusableSettingInputs.set(`${providerId}:${setting.key}`, input);
+    });
+  }
   const enabled = enabledLimitProviderSet();
   const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
@@ -9417,7 +9471,7 @@ function renderLimitProviderCheckboxesNow() {
         accountGroup.classList.add('limit-provider-account-group');
       }
       if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
-      if (settings) optionsInner.append(limitProviderSettingsList(id, settings));
+      if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -9449,6 +9503,7 @@ function renderLimitProviderCheckboxesNow() {
   if (focusedId && document.activeElement === document.body) {
     document.getElementById(focusedId)?.focus({ preventScroll: true });
   }
+  state.limitProviderRenderSignature = renderSignature;
 }
 
 function limitProviderAccountGroup(providerId) {
@@ -9500,10 +9555,60 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.prepaidBalanceDesc',
     requiresConfiguredKey: 'claudeWebCookieConfigured',
     defaultValue: true
+  }],
+  opencode: [{
+    key: 'opencodeLocalLimitsEnabled',
+    titleKey: 'settings.limits.opencodeLocalLimits',
+    descKey: 'settings.limits.opencodeLocalLimitsDesc',
+    defaultValue: false
   }]
 };
 
-function limitProviderSettingsList(providerId, settings) {
+function limitProviderSettingsRenderSignature() {
+  const settings = state.settings || {};
+  const providerSignature = (provider) => {
+    return [
+      provider?.provider || '',
+      provider?.status || '',
+      Boolean(provider?.stale),
+      provider?.source || '',
+      provider?.sourceDetail || '',
+      provider?.sourceDeviceId || '',
+      provider?.accountKey || ''
+    ];
+  };
+  const deviceSignature = (device) => [
+    device?.deviceId || '',
+    device?.hostname || '',
+    (device?.limits?.providers || []).map((provider) => [
+      provider?.provider || '',
+      provider?.status || '',
+      provider?.accountKey || ''
+    ])
+  ];
+  const settingValues = Object.values(LIMIT_PROVIDER_SETTINGS).flatMap((entries) => entries.map((setting) => [
+    setting.key,
+    settings[setting.key],
+    setting.requiresConfiguredKey ? Boolean(settings[setting.requiresConfiguredKey]) : true
+  ]));
+  return JSON.stringify({
+    locale: currentLocale(),
+    mode: state.mode,
+    hubUrl: settings.hubUrl || '',
+    settings: [
+      settings.limitsEnabled !== false,
+      [...enabledLimitProviderSet()].sort(),
+      limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, settings.limitProviderOrder).map(({ id }) => id),
+      settings.deviceId || '',
+      settingValues,
+      state.limitProviderSettingsExpanded
+    ],
+    providers: (state.stats?.limits?.providers || []).map(providerSignature),
+    devices: (state.stats?.devices || []).map(deviceSignature)
+  });
+}
+
+function limitProviderSettingsList(providerId, settings, reusableInputs = null) {
   const list = document.createElement('div');
   list.className = 'settings-nested-list limit-provider-settings-list';
   for (const setting of settings) {
@@ -9519,18 +9624,21 @@ function limitProviderSettingsList(providerId, settings) {
     title.className = 'settings-item-title';
     title.textContent = t(setting.titleKey);
     copy.append(title);
-    const input = document.createElement('input');
+    const inputKey = `${providerId}:${setting.key}`;
+    const existingInput = reusableInputs?.get(inputKey);
+    const input = existingInput || document.createElement('input');
     input.type = 'checkbox';
     const available = !setting.requiresConfiguredKey || Boolean(state.settings?.[setting.requiresConfiguredKey]);
-    input.checked = available && state.settings?.[setting.key] !== false;
+    const storedValue = state.settings?.[setting.key];
+    const defaultValue = setting.defaultValue !== false;
+    input.checked = available && (storedValue === undefined ? defaultValue : storedValue !== false);
     input.disabled = !available;
     item.classList.toggle('is-disabled', !available);
-    input.addEventListener('change', async () => {
-      await saveSettings({ [setting.key]: input.checked });
-      // Switching this off hides the row immediately; the request it also stops
-      // would otherwise only be skipped on the next refresh.
-      renderLimits();
-    });
+    if (!existingInput) {
+      input.addEventListener('change', async () => {
+        await saveSettings({ [setting.key]: input.checked });
+      });
+    }
     const desc = document.createElement('span');
     desc.className = 'settings-note settings-item-desc';
     desc.textContent = t(setting.descKey);
@@ -9839,6 +9947,7 @@ function preserveSettingsPanelScroll(callback) {
 }
 
 async function saveSettings(patch) {
+  const settingsPushRevision = state.settingsPushRevision;
   try {
     state.settings = await window.tokenMonitor.updateSettings(patch);
   } catch (error) {
@@ -9851,7 +9960,13 @@ async function saveSettings(patch) {
     throw error;
   }
   applyEffectiveCurrencyRates();
-  preserveSettingsPanelScroll(syncSettingsForm);
+  // settings:update broadcasts the normalized settings before resolving the
+  // IPC request. The push already ran the full sync; repeating it when the
+  // promise resolves rebuilds the provider rows a second time and restarts
+  // their accordion/switch layout transition.
+  if (state.settingsPushRevision === settingsPushRevision) {
+    preserveSettingsPanelScroll(syncSettingsForm);
+  }
   restartTimer();
   maybeUpdateBarsIcon();
   if (patch.showTrayProviderBadge !== undefined) {
@@ -10485,6 +10600,7 @@ els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
 
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
+  state.settingsPushRevision += 1;
   const prevMetric = state.settings?.heatmapMetric;
   const prevLanguage = state.settings?.language;
   const prevCompactTokenUnits = state.settings?.compactTokenUnits;
@@ -10577,7 +10693,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     // Local collector overlays update client-mode data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
-    if (payload.data?.reason !== 'local') {
+    if (payload.data?.reason !== 'local' && payload.data?.reason !== 'presentation') {
       state.streamConnected = true;
       state.streamFailure = null;
     }

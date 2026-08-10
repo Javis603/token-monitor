@@ -11,7 +11,8 @@ const { LIMIT_PROVIDER_IDS } = require('./limitProviders');
 const {
   DEFAULT_LIMITS_REFRESH_MS,
   normalizeLimitProvider,
-  normalizeLimitsSummary
+  normalizeLimitsSummary,
+  openCodeWindowKey
 } = require('./limits');
 const { parseRetryAfterHeader } = require('./limitsRetryPolicy');
 const { abortError } = require('./probeDeadline');
@@ -3088,6 +3089,49 @@ async function fetchAntigravityLimits(_options = {}, deps = {}) {
   }
 }
 
+function openCodeWebIdentity(goWeb, zen, cookie) {
+  const goWorkspaceId = goWeb?.status === 'ok' ? String(goWeb.workspaceId || '') : '';
+  const zenWorkspaceId = zen?.status === 'ok' ? String(zen.workspaceId || '') : '';
+  const workspaceConflict = Boolean(
+    goWorkspaceId && zenWorkspaceId && goWorkspaceId !== zenWorkspaceId
+  );
+  const includeZen = zen?.status === 'ok' && !workspaceConflict;
+  const hasSuccessfulWebProbe = goWeb?.status === 'ok' || includeZen;
+  // Go is the quota authority when two successful probes unexpectedly resolve
+  // different workspaces. Exclude the Zen observation instead of attaching its
+  // balance/windows to the wrong account identity.
+  const workspaceId = goWorkspaceId || (includeZen ? zenWorkspaceId : '');
+  if (hasSuccessfulWebProbe && workspaceId) {
+    return {
+      accountKey: hashKey('opencode', `workspace:${workspaceId}`),
+      aliases: [
+        hashKey('opencode', `go:${workspaceId}`),
+        hashKey('opencode', `zen:${workspaceId}`)
+      ],
+      includeZen
+    };
+  }
+  if (cookie && hasSuccessfulWebProbe) {
+    const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
+    return { accountKey: hashKey('opencode', `cookie:${cookieHash}`), aliases: [], includeZen };
+  }
+  return { accountKey: '', aliases: [], includeZen };
+}
+
+const OPENCODE_COMPONENT_PROVENANCE_DETAIL = 'managed';
+
+function openCodeSupplementalZenWindows(goWeb, zen) {
+  const goWindowKeys = new Set(
+    (goWeb?.status === 'ok' ? goWeb.windows || [] : [])
+      .map(openCodeWindowKey)
+      .filter(Boolean)
+  );
+  return (zen?.windows || []).filter((window) => {
+    const key = openCodeWindowKey(window);
+    return !key || !goWindowKeys.has(key);
+  });
+}
+
 async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
@@ -3126,7 +3170,11 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
 
   // ── Single account (0 or 1 cookie): existing merged behavior ─────────────
   if (!multiAccountMode) {
-    const goLocal = collectGo({ env: deps.env || process.env, now: () => nowMs });
+    // The database is device-wide and has no stable account identity, so every
+    // caller must opt in explicitly before this process reads it.
+    const goLocal = options.opencodeLocalLimitsEnabled === true
+      ? collectGo({ env: deps.env || process.env, now: () => nowMs })
+      : { status: 'notConfigured', windows: [] };
     const cookie = cookies[0]?.cookie;
     const [goWeb, zen] = cookie
       ? await Promise.all([
@@ -3134,6 +3182,8 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
           fetchZen(cookie, { now: () => nowMs, workspaceId: '' })
         ])
       : [null, null];
+    const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
+    const webAccountKey = webIdentity.accountKey;
 
     const windows = [];
     let status = 'notConfigured';
@@ -3143,20 +3193,26 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     let balanceUsd = null;
 
     if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
-      windows.push(...goWeb.windows);
+      windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok'; source = 'web'; accountLabel = 'Go';
       accountKey = hashKey('opencode', `go:${goWeb.workspaceId || ''}`);
     } else if (goLocal.status === 'ok') {
-      windows.push(...goLocal.windows);
+      windows.push(...goLocal.windows.map((window) => ({ ...window, source: 'local' })));
       status = 'ok'; accountLabel = 'Go';
       accountKey = hashKey('opencode', goLocal.identity || 'go');
     } else if (goLocal.status === 'unavailable') {
       status = 'unavailable';
     }
 
-    if (zen && zen.status === 'ok') {
-      windows.push(...zen.windows);
-      status = 'ok'; source = 'web';
+    if (zen && webIdentity.includeZen) {
+      windows.push(...openCodeSupplementalZenWindows(goWeb, zen)
+        .map((window) => ({ ...window, source: 'web' })));
+      status = 'ok';
+      // The provider-level source is the compatibility envelope used by Hubs
+      // that predate windows[].source. It may claim Web only when every quota
+      // window is Web; otherwise an old Hub could turn a local estimate into a
+      // Web observation when it strips component provenance.
+      if (!windows.some((window) => window.source === 'local')) source = 'web';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
       if (!accountLabel) accountLabel = 'Zen';
       if (!accountKey) accountKey = hashKey('opencode', `zen:${zen.workspaceId || ''}`);
@@ -3167,7 +3223,20 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       if (surfaced) { status = surfaced; source = 'web'; }
     }
 
-    return normalizeLimitProvider({ provider: 'opencode', accountKey, accountLabel, source, status, updatedAt, windows, balanceUsd });
+    if (webAccountKey) accountKey = webAccountKey;
+    return normalizeLimitProvider({
+      provider: 'opencode',
+      accountKey,
+      webAccountKey,
+      accountKeyAliases: webIdentity.aliases,
+      accountLabel,
+      source,
+      sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
+      status,
+      updatedAt,
+      windows,
+      balanceUsd
+    });
   }
 
   // ── Multi-account (2+ cookies): separate per-profile providers ────────────
@@ -3219,13 +3288,15 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     let balanceUsd = null;
 
     if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
-      windows.push(...goWeb.windows);
+      windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok';
       planLabel = 'Go';
     }
 
-    if (zen && zen.status === 'ok') {
-      windows.push(...zen.windows);
+    const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
+    if (zen && webIdentity.includeZen) {
+      windows.push(...openCodeSupplementalZenWindows(goWeb, zen)
+        .map((window) => ({ ...window, source: 'web' })));
       status = 'ok';
       if (!planLabel) planLabel = 'Zen';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
@@ -3239,14 +3310,8 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     // Stable accountKey derived from workspaceId (preferred) or cookie hash,
     // not from the user-editable profile name — so the same account is
     // consistently identified across machines and renames.
-    const goWid = goWeb?.workspaceId || '';
-    const zenWid = zen?.workspaceId || '';
-    let accountKey;
-    if (goWeb && goWeb.status === 'ok' && goWid) {
-      accountKey = hashKey('opencode', `go:${goWid}`);
-    } else if (zen && zen.status === 'ok' && zenWid) {
-      accountKey = hashKey('opencode', `zen:${zenWid}`);
-    } else {
+    let accountKey = webIdentity.accountKey;
+    if (!accountKey) {
       const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
       accountKey = hashKey('opencode', `cookie:${cookieHash}`);
     }
@@ -3254,12 +3319,15 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     return normalizeLimitProvider({
       provider: 'opencode',
       accountKey,
+      webAccountKey: accountKey,
+      accountKeyAliases: webIdentity.aliases,
       accountName: name,
       // Keep accountLabel as the profile name for pre-accountName renderers.
       // New renderers use planLabel for Go/Zen and accountName for identity.
       accountLabel: name,
       planLabel,
       source: 'web',
+      sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
       status,
       updatedAt,
       windows,
@@ -3270,7 +3338,9 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return normalizeLimitProvider({
       provider: 'opencode', accountKey: hashKey('opencode', `cookie:${cookieHash}`),
-      accountName: name, accountLabel: name, planLabel: '', source: 'web', status: 'unavailable',
+      webAccountKey: hashKey('opencode', `cookie:${cookieHash}`),
+      accountName: name, accountLabel: name, planLabel: '', source: 'web',
+      sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL, status: 'unavailable',
       updatedAt, windows: [], balanceUsd: null
     });
   }

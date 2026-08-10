@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..', '..');
 const mainSource = fs.readFileSync(path.join(root, 'src', 'electron', 'main.js'), 'utf8');
@@ -51,6 +52,14 @@ const {
   widgetArtifactPaths
 } = require('../../scripts/macos-packaging');
 const { normalizeWidgetURLScheme } = require('../../src/shared/macWidgetConfig');
+const { projectLimitStatsForDisplay } = require('../../src/electron/limitStatsPresentation');
+
+function functionSource(name, nextName) {
+  const start = mainSource.indexOf(`function ${name}(`);
+  const end = mainSource.indexOf(`\nfunction ${nextName}(`, start);
+  assert.ok(start >= 0 && end > start, `${name} should precede ${nextName}`);
+  return mainSource.slice(start, end);
+}
 
 function createWidgetArtifactRoot() {
   const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-widget-artifacts-'));
@@ -62,13 +71,21 @@ function createWidgetArtifactRoot() {
   return artifactRoot;
 }
 
-test('publishes final stats to the macOS Widget from the single sendPush outlet', () => {
+test('publishes projected stats to the macOS Widget on collection and presentation changes', () => {
   const start = mainSource.indexOf('function sendPush(payload, options = {})');
   const end = mainSource.indexOf('\nfunction statsHistoryRevision', start);
   assert.ok(start >= 0 && end > start, 'sendPush function should exist');
   const sendPush = mainSource.slice(start, end);
-  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+scheduleMacWidgetSnapshot\(latestStats, options\.widgetProducerOwner\);/);
-  assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(latestStats, options\.widgetProducerOwner\)/g) || []).length, 1);
+  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+const visibleStats = electronPresentationStats\(latestStats\);/);
+  assert.match(sendPush, /scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\);/);
+  assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\)/g) || []).length, 1);
+  const refreshStart = mainSource.indexOf('function refreshLimitStatsPresentation()');
+  const refreshEnd = mainSource.indexOf('\nfunction sendMimoAccountsPush', refreshStart);
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart, 'presentation refresh function should exist');
+  assert.match(
+    mainSource.slice(refreshStart, refreshEnd),
+    /scheduleMacWidgetSnapshot\(visibleStats, captureMacWidgetProducerOwner\(\)\);/
+  );
   assert.match(mainSource, /compactTokenUnits: settings\?\.compactTokenUnits/);
 });
 
@@ -96,7 +113,7 @@ test('Widget ownership advances producer lifetime only for mode transitions', ()
   );
   assert.match(
     mainSource,
-    /const widgetHistorySourceChanged = previousRuntimeSettings\.historyEnabled !== settings\.historyEnabled;\s*if \(widgetHistorySourceChanged && !runtimeChange\.modeStructural\) \{\s*advanceMacWidgetSourceEpoch\(\);\s*scheduleMacWidgetSnapshot\(latestStats, captureMacWidgetProducerOwner\(\)\);/
+    /const widgetHistorySourceChanged = previousRuntimeSettings\.historyEnabled !== settings\.historyEnabled;\s*if \(widgetHistorySourceChanged && !runtimeChange\.modeStructural\) \{\s*refreshMacWidgetHistorySource\(\);/
   );
   assert.match(
     mainSource,
@@ -147,6 +164,46 @@ test('LaunchServices recovery delegates current-host registration to the public 
   assert.match(widgetReloaderSource, /Array\(CommandLine\.arguments\.dropFirst\(\)\) == \["--mode", "register-host"\]/);
   assert.match(widgetReloaderSource, /resourcesURL\.lastPathComponent == "Resources"/);
   assert.match(widgetReloaderSource, /contentsURL\.lastPathComponent == "Contents"/);
+});
+
+test('a history setting refresh projects local OpenCode quota before scheduling the Widget', () => {
+  const rawStats = {
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'local-db',
+        source: 'local',
+        sourceDeviceId: 'local-device',
+        status: 'ok',
+        updatedAt: '2026-08-10T00:00:00.000Z',
+        windows: [{ kind: 'session', source: 'local', usedPercent: 25 }]
+      }]
+    }
+  };
+  const owner = { epoch: 7 };
+  let scheduled;
+  const context = vm.createContext({
+    advanceMacWidgetSourceEpoch() {},
+    captureMacWidgetProducerOwner: () => owner,
+    electronPresentationStats: (stats) => projectLimitStatsForDisplay(stats, {
+      localDeviceId: 'local-device',
+      syncActive: true,
+      opencodeLocalLimitsEnabled: false
+    }),
+    latestStats: rawStats,
+    scheduleMacWidgetSnapshot: (stats, producerOwner) => {
+      scheduled = { stats, producerOwner };
+    }
+  });
+  vm.runInContext(
+    functionSource('refreshMacWidgetHistorySource', 'scheduleMacWidgetSnapshot'),
+    context
+  );
+  vm.runInContext('refreshMacWidgetHistorySource()', context);
+
+  assert.equal(scheduled.producerOwner, owner);
+  assert.equal(scheduled.stats.limits.providers[0].status, 'disabled');
+  assert.deepEqual(scheduled.stats.limits.providers[0].windows, []);
 });
 
 test('keeps Widget packaging opt-in and injects artifacts only after a successful build', () => {

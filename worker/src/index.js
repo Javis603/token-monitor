@@ -2,6 +2,7 @@ import { publicLimits } from './shared/limits.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
 import { aggregateDevices, mergeDeviceRecord, aggregateHistory } from './shared/usage.js';
+import { DEFAULT_STALE_AFTER_MS } from './shared/syncUploadInterval.js';
 import { historyPreview, historyRevision } from './shared/history.js';
 
 const CORS_HEADERS = {
@@ -66,7 +67,7 @@ export class HubDO {
   }
 
   get staleAfterMs() {
-    return Number(this.env.STALE_AFTER_MS || 10 * 60 * 1000);
+    return Number(this.env.STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
   }
 
   get publicStatsEnabled() {

@@ -162,6 +162,7 @@ const { createMacWidgetSnapshotController } = require('./macWidgetSnapshotContro
 const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
+const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const linuxAutostart = require('./linuxAutostart');
@@ -395,6 +396,7 @@ function defaultSettings() {
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
+    opencodeLocalLimitsEnabled: false,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     // Manual subscription metadata. Plain preferences, not credentials, so they
     // live in settings.json and cross to the renderer unredacted.
@@ -1999,6 +2001,7 @@ function readSettings() {
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
@@ -2338,6 +2341,14 @@ let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
+
+function electronPresentationStats(stats) {
+  return projectLimitStatsForDisplay(stats, {
+    localDeviceId: settings?.deviceId,
+    syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
+    opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
+  });
+}
 let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
@@ -3502,6 +3513,12 @@ function advanceMacWidgetSourceEpoch() {
   ensureMacWidgetSnapshotController()?.advanceSourceEpoch();
 }
 
+function refreshMacWidgetHistorySource() {
+  advanceMacWidgetSourceEpoch();
+  const visibleStats = electronPresentationStats(latestStats);
+  scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
+}
+
 function scheduleMacWidgetSnapshot(stats, producerOwner) {
   if (process.platform !== 'darwin' || !stats) return false;
   return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
@@ -3516,10 +3533,16 @@ function scheduleMacWidgetSnapshot(stats, producerOwner) {
 // frame against a slow load and then replay a burst of superseded stats.
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
+  let rendererPayload = payload;
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
-    scheduleMacWidgetSnapshot(latestStats, options.widgetProducerOwner);
+    const visibleStats = electronPresentationStats(latestStats);
+    rendererPayload = {
+      ...payload,
+      data: { ...payload.data, stats: visibleStats }
+    };
+    scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
@@ -3533,9 +3556,9 @@ function sendPush(payload, options = {}) {
     // the first real collection, and delivering the queued snapshot then would
     // walk the numbers backwards until the next push.
     const deferred = payload?.data?.stats;
-    sendMainWindowEvent('stats:push', payload, () => !deferred || latestStats === deferred);
+    sendMainWindowEvent('stats:push', rendererPayload, () => !deferred || latestStats === deferred);
   } else if (mainWindow && !mainWindow.isDestroyed()) {
-    try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
+    try { mainWindow.webContents.send('stats:push', rendererPayload); } catch (_) {}
   }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
@@ -3605,10 +3628,11 @@ function updateDiscordRpcDisplay(stats) {
 
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
+  const visibleStats = electronPresentationStats(latestStats);
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);
   const compactOptions = compactTokenDisplayOptions();
-  const limitText = formatTrayText(latestStats, mode, currency, {
+  const limitText = formatTrayText(visibleStats, mode, currency, {
     limitProviderOrder: settings?.limitProviderOrder,
     limitProviders: settings?.limitProviders,
     showLimitUsed: settings?.showLimitUsed,
@@ -3623,14 +3647,14 @@ function updateTrayDisplay() {
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
-  const tip = formatTrayText(latestStats, 'both', currency, compactOptions);
+  const tip = formatTrayText(visibleStats, 'both', currency, compactOptions);
   tray.setToolTip(`Token Monitor - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
   if (barsImageMode || trayImageMode || customImageMode) {
     icon = providerTrayIcons[mode];
   } else {
-    const usageIconId = pickUsageTrayIconId(latestStats, mode, Object.keys(providerTrayIcons));
+    const usageIconId = pickUsageTrayIconId(visibleStats, mode, Object.keys(providerTrayIcons));
     if (usageIconId) icon = providerTrayIcons[usageIconId];
   }
   tray.setImage(icon || getDefaultTrayIcon());
@@ -4109,6 +4133,21 @@ function pushSettingsToRenderer() {
   // refresh or manual override until it is reopened.
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     try { dashboardWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
+}
+
+function refreshLimitStatsPresentation() {
+  if (!latestStats) return;
+  const visibleStats = electronPresentationStats(latestStats);
+  scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
+  updateTrayDisplay();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send('stats:push', {
+        event: 'stats',
+        data: { type: 'stats', reason: 'presentation', mode, stats: visibleStats }
+      });
+    } catch (_) {}
   }
 }
 
@@ -5603,6 +5642,7 @@ app.whenReady().then(() => {
     const previousTrayCustomLayout = JSON.stringify(settings.trayCustomLayout || {});
     const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
+    const previousOpenCodeLocalLimitsEnabled = settings.opencodeLocalLimitsEnabled === true;
     const previousCurrency = settings.currency;
     const previousCompactTokenUnits = settings.compactTokenUnits;
     const previousLanguage = settings.language;
@@ -5723,6 +5763,7 @@ app.whenReady().then(() => {
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
       windowMaximized: parseBoolean(settings.windowMaximized, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
@@ -5809,8 +5850,7 @@ app.whenReady().then(() => {
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
     const widgetHistorySourceChanged = previousRuntimeSettings.historyEnabled !== settings.historyEnabled;
     if (widgetHistorySourceChanged && !runtimeChange.modeStructural) {
-      advanceMacWidgetSourceEpoch();
-      scheduleMacWidgetSnapshot(latestStats, captureMacWidgetProducerOwner());
+      refreshMacWidgetHistorySource();
     }
     const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
     if (runtimeChange.modeStructural) {
@@ -5856,6 +5896,11 @@ app.whenReady().then(() => {
       updateTrayDisplay();
       if (settings.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
       refreshExchangeRates();              // async: fetch if stale, then re-push
+    }
+    if ((settings.opencodeLocalLimitsEnabled === true) !== previousOpenCodeLocalLimitsEnabled) {
+      // Re-project the cached aggregate immediately. The Hub can be offline and
+      // therefore may not send another frame after this local-only setting changes.
+      refreshLimitStatsPresentation();
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
@@ -5971,7 +6016,7 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    return stats;
+    return electronPresentationStats(stats);
   });
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({

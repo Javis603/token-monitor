@@ -4,6 +4,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { URL } = require('node:url');
 const { aggregateDevices, mergeDeviceRecord, aggregateHistory } = require('../shared/usage');
+const { DEFAULT_STALE_AFTER_MS } = require('../shared/syncUploadInterval');
 const { historyPreview, historyRevision } = require('../shared/history');
 const {
   emptySubscriptionDocument,
@@ -30,7 +31,7 @@ function createHub({
   port = 17321,
   host = '0.0.0.0',
   secret = '',
-  staleAfterMs = 10 * 60 * 1000,
+  staleAfterMs = DEFAULT_STALE_AFTER_MS,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
   logger = console
 } = {}) {
@@ -293,7 +294,7 @@ if (require.main === module) {
   const port = Number(args.port || process.env.TOKEN_MONITOR_PORT || 17321);
   const host = String(args.host || process.env.TOKEN_MONITOR_HOST || '0.0.0.0');
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
-  const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || 10 * 60 * 1000);
+  const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
 
   const hub = createHub({ port, host, secret, staleAfterMs, dataFile });

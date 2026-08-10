@@ -29,12 +29,13 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
   'limitProviders',
-  'limitsRefreshMs'
+  'limitsRefreshMs',
+  'opencodeLocalLimitsEnabled'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   claude: ['claudeWebCookie'],
-  opencode: ['opencodeCookie', 'opencodeProfiles'],
+  opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
   openrouter: ['openrouterProfiles'],
   deepseek: ['deepseekApiKey'],
   minimax: ['minimaxApiKey'],
@@ -106,6 +107,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
       || env.CLAUDE_WEB_COOKIE
       || '',
     claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
+    opencodeLocalLimitsEnabled: settings.opencodeLocalLimitsEnabled === true,
     opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     openrouterProfiles: settings.openrouterProfiles || {},

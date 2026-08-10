@@ -514,6 +514,14 @@
     return (providers || []).filter((provider) => cleanText(provider?.provider).toLowerCase() === id);
   }
 
+  function accountIdentityKeys(account) {
+    return new Set([
+      account?.accountKey,
+      account?.webAccountKey,
+      ...(Array.isArray(account?.accountKeyAliases) ? account.accountKeyAliases : [])
+    ].map(cleanText).filter(Boolean));
+  }
+
   function matchProviderAccount(subscription, providers) {
     const accounts = providerAccounts(providers, subscription?.provider);
     if (accounts.length === 0) return null;
@@ -524,7 +532,7 @@
     // unaffected — but while a precise identifier is available it has to win, or
     // two accounts sharing a profile name bind to whichever happens to be first.
     if (binding.accountKey) {
-      const byKey = accounts.find((account) => cleanText(account?.accountKey) === binding.accountKey);
+      const byKey = accounts.find((account) => accountIdentityKeys(account).has(binding.accountKey));
       if (byKey) return byKey;
     }
     if (binding.accountEmail) {

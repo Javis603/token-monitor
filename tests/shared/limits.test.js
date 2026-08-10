@@ -13,6 +13,7 @@ const {
 } = require('../../src/shared/limits');
 const { collectLimitsOnce } = require('../../src/shared/limitCollector');
 const { codexAccountKey } = require('../../src/shared/codexAuth');
+const { hashKey } = require('../../src/shared/hashKey');
 
 function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
   return {
@@ -816,6 +817,8 @@ test('OpenCode sync keeps the legacy profile label and explicit plan while publi
     providers: [{
       provider: 'opencode',
       accountKey: 'sha256:opencode-work',
+      webAccountKey: 'sha256:opencode-work',
+      accountKeyAliases: ['sha256:opencode-work-legacy'],
       accountName: 'work',
       accountLabel: 'work',
       planLabel: 'Go',
@@ -830,11 +833,227 @@ test('OpenCode sync keeps the legacy profile label and explicit plan while publi
   assert.equal(synced.accountName, 'work');
   assert.equal(synced.accountLabel, 'work');
   assert.equal(synced.planLabel, 'Go');
+  assert.equal(synced.webAccountKey, 'sha256:opencode-work');
+  assert.deepEqual(synced.accountKeyAliases, ['sha256:opencode-work-legacy']);
 
   const publicProvider = publicLimits(limits).providers[0];
   assert.equal(Object.hasOwn(publicProvider, 'accountName'), false);
   assert.equal(Object.hasOwn(publicProvider, 'accountLabel'), false);
   assert.equal(Object.hasOwn(publicProvider, 'planLabel'), false);
+  assert.equal(Object.hasOwn(publicProvider, 'webAccountKey'), false);
+  assert.equal(Object.hasOwn(publicProvider, 'accountKeyAliases'), false);
+});
+
+test('aggregateLimits merges complementary OpenCode components for one account', () => {
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'remote-device',
+      limits: {
+        updatedAt: '2026-08-09T08:01:00.000Z',
+        providers: [{
+          provider: 'opencode',
+          accountKey: 'sha256:shared',
+          webAccountKey: 'sha256:shared',
+          status: 'ok',
+          source: 'web',
+          updatedAt: '2026-08-09T08:01:00.000Z',
+          windows: [
+            { kind: 'session', source: 'local', usedPercent: 40 },
+            { kind: 'weekly', source: 'web', usedPercent: 20 }
+          ],
+          balanceUsd: 4
+        }]
+      }
+    },
+    {
+      deviceId: 'local-device',
+      limits: {
+        updatedAt: '2026-08-09T08:02:00.000Z',
+        providers: [{
+          provider: 'opencode',
+          accountKey: 'sha256:shared',
+          webAccountKey: 'sha256:shared',
+          status: 'ok',
+          source: 'web',
+          updatedAt: '2026-08-09T08:02:00.000Z',
+          windows: [{ kind: 'weekly', source: 'web', usedPercent: 10 }],
+          balanceUsd: 5
+        }]
+      }
+    }
+  ], 0, Date.parse('2026-08-09T08:03:00.000Z'));
+
+  assert.equal(aggregate.providers.length, 1);
+  assert.equal(aggregate.providers[0].balanceUsd, 5);
+  assert.equal(aggregate.providers[0].windows.find((window) => window.kind === 'session').remainingPercent, 60);
+  assert.equal(aggregate.providers[0].windows.find((window) => window.kind === 'weekly').remainingPercent, 90);
+});
+
+test('aggregateLimits resolves OpenCode components independently of device order', () => {
+  const newer = {
+    deviceId: 'newer-device',
+    limits: {
+      updatedAt: '2026-08-09T08:02:00.000Z',
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'sha256:shared',
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:02:00.000Z',
+        windows: [
+          { kind: 'session', source: 'web', usedPercent: 30 },
+          { kind: 'weekly', source: 'web', usedPercent: 40 }
+        ]
+      }]
+    }
+  };
+  const older = {
+    deviceId: 'older-device',
+    limits: {
+      updatedAt: '2026-08-09T08:01:00.000Z',
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'sha256:shared',
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:01:00.000Z',
+        windows: [
+          { kind: 'session', source: 'web', usedPercent: 10 },
+          { kind: 'weekly', source: 'web', usedPercent: 20 },
+          { kind: 'monthly', source: 'web', usedPercent: 50 }
+        ]
+      }]
+    }
+  };
+  const now = Date.parse('2026-08-09T08:03:00.000Z');
+  const forward = aggregateLimits([newer, older], 0, now);
+  const reverse = aggregateLimits([older, newer], 0, now);
+  const percentages = (aggregate) => Object.fromEntries(
+    aggregate.providers[0].windows.map((window) => [window.kind, window.usedPercent])
+  );
+
+  assert.deepEqual(percentages(forward), { session: 30, weekly: 40, billing: 50 });
+  assert.equal(forward.providers[0].updatedAt, '2026-08-09T08:02:00.000Z');
+  assert.equal(forward.providers[0].sourceDeviceId, 'newer-device');
+  assert.deepEqual(reverse, forward);
+});
+
+test('aggregateLimits preserves Go authority within one legacy OpenCode observation', () => {
+  const aggregateLegacy = (windows) => aggregateLimits([{
+    deviceId: 'legacy-device',
+    limits: {
+      updatedAt: '2026-08-09T08:00:00.000Z',
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'sha256:legacy',
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:00:00.000Z',
+        windows
+      }]
+    }
+  }], 0, Date.parse('2026-08-09T08:01:00.000Z')).providers[0];
+
+  const largerSubscriptionDuplicate = aggregateLegacy([
+    // Released collectors appended Go Web first, then subscription.get.
+    { kind: 'session', usedPercent: 40 },
+    { kind: 'session', usedPercent: 90 },
+    // A non-overlapping subscription window must remain available as a supplement.
+    { kind: 'weekly', usedPercent: 25 }
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(largerSubscriptionDuplicate.windows.map((window) => [window.kind, window.usedPercent])),
+    { session: 40, weekly: 25 }
+  );
+
+  const smallerSubscriptionDuplicates = aggregateLegacy([
+    { kind: 'session', usedPercent: 80 },
+    { kind: 'weekly', usedPercent: 70 },
+    { kind: 'session', usedPercent: 9 },
+    { kind: 'weekly', usedPercent: 6 }
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(smallerSubscriptionDuplicates.windows.map((window) => [window.kind, window.usedPercent])),
+    { session: 80, weekly: 70 }
+  );
+});
+
+test('aggregateLimits merges legacy OpenCode Go and Zen identities into the canonical workspace account', () => {
+  const workspaceId = 'wrk_rolling_upgrade';
+  const canonical = hashKey('opencode', `workspace:${workspaceId}`);
+  const legacyKeys = [
+    hashKey('opencode', `go:${workspaceId}`),
+    hashKey('opencode', `zen:${workspaceId}`)
+  ];
+  const current = {
+    deviceId: 'current-device',
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        accountKey: canonical,
+        webAccountKey: canonical,
+        accountKeyAliases: legacyKeys,
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:02:00.000Z',
+        windows: [{ kind: 'session', source: 'web', usedPercent: 30 }]
+      }]
+    }
+  };
+
+  for (const [index, legacyKey] of legacyKeys.entries()) {
+    const legacy = {
+      deviceId: `legacy-device-${index}`,
+      limits: {
+        providers: [{
+          provider: 'opencode',
+          accountKey: legacyKey,
+          status: 'ok',
+          source: 'web',
+          updatedAt: '2026-08-09T08:01:00.000Z',
+          windows: [{ kind: 'monthly', source: 'web', usedPercent: 50 }]
+        }]
+      }
+    };
+    const forward = aggregateLimits([current, legacy], 0, Date.parse('2026-08-09T08:03:00.000Z'));
+    const reverse = aggregateLimits([legacy, current], 0, Date.parse('2026-08-09T08:03:00.000Z'));
+
+    assert.equal(forward.providers.length, 1);
+    assert.equal(forward.providers[0].accountKey, canonical);
+    assert.equal(forward.providers[0].windows.find((window) => window.kind === 'session').usedPercent, 30);
+    assert.equal(forward.providers[0].windows.find((window) => window.kind === 'billing').usedPercent, 50);
+    assert.deepEqual(reverse, forward);
+  }
+});
+
+test('aggregateLimits keeps merged OpenCode account aliases bounded and deterministic', () => {
+  const canonical = 'sha256:canonical-workspace';
+  const provider = (deviceId, aliases) => ({
+    deviceId,
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        accountKey: canonical,
+        webAccountKey: canonical,
+        accountKeyAliases: aliases,
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:02:00.000Z',
+        windows: [{ kind: 'session', source: 'web', usedPercent: 30 }]
+      }]
+    }
+  });
+  const firstAliases = Array.from({ length: 8 }, (_, index) => `sha256:legacy-${String(index).padStart(2, '0')}`);
+  const secondAliases = Array.from({ length: 8 }, (_, index) => `sha256:legacy-${String(index + 8).padStart(2, '0')}`);
+  const first = provider('first-device', firstAliases);
+  const second = provider('second-device', secondAliases);
+  const now = Date.parse('2026-08-09T08:03:00.000Z');
+  const forward = aggregateLimits([first, second], 0, now);
+  const reverse = aggregateLimits([second, first], 0, now);
+
+  assert.deepEqual(forward.providers[0].accountKeyAliases, firstAliases);
+  assert.equal(forward.providers[0].accountKeyAliases.length, 8);
+  assert.deepEqual(reverse, forward);
 });
 
 test('collectLimitsOnce flattens multiple providers returned by a provider fetcher', async () => {
@@ -937,6 +1156,13 @@ test('normalizeLimitWindow normalizes the window currency', () => {
   assert.equal(normalizeLimitWindow({ kind: 'billing', currency: 'verylongcurrencycode' }).currency, 'VERYLONG');
   assert.equal(normalizeLimitWindow({ kind: 'billing', currency: '   ' }).currency, null);
   assert.equal(normalizeLimitWindow({ kind: 'billing' }).currency, null);
+});
+
+test('normalizeLimitWindow preserves only documented component sources', () => {
+  assert.equal(normalizeLimitWindow({ kind: 'session', source: ' local ' }).source, 'local');
+  assert.equal(normalizeLimitWindow({ kind: 'weekly', source: 'WEB' }).source, 'web');
+  assert.equal('source' in normalizeLimitWindow({ kind: 'session', source: 'oauth' }), false);
+  assert.equal('source' in normalizeLimitWindow({ kind: 'session' }), false);
 });
 
 test('normalizeLimitProvider restores a balance window for pre-credits-window devices', () => {
