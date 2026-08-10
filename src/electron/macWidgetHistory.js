@@ -68,9 +68,11 @@ function isHistoryDocument(value) {
   );
 }
 
-// The resolver configuration, without the revision. A change here means the
-// cached history describes a different source (another hub, history switched
-// off) and must not be served, however fresh it is.
+// The resolver configuration, without the revision or bearer secret. A change
+// here means the cached history describes a different source (another hub, or
+// history switched off) and must not be served, however fresh it is. The Hub
+// secret gates one shared data store; it does not select a tenant, and including
+// it would discard a valid last-good copy on routine credential rotation.
 function macWidgetHistorySourceKey(config = {}) {
   return [
     config.mode,

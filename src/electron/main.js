@@ -147,7 +147,7 @@ const {
   fetchMimoLimits,
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
-const { coerceHistory, historyPreview, historyRevision } = require('../shared/history');
+const { historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory } = require('./historySource');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
@@ -159,7 +159,12 @@ const {
   syncMacWidgetSnapshotDirectory
 } = require('./macWidgetBridge');
 const { createMacWidgetSnapshotController } = require('./macWidgetSnapshotController');
-const { isHistoryDocument, macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
+const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
+const {
+  macWidgetHistoryCachePath,
+  readMacWidgetHistoryCache,
+  writeMacWidgetHistoryCache
+} = require('./macWidgetHistoryStore');
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
@@ -3427,51 +3432,6 @@ function historyResolverOptions() {
   };
 }
 
-const MAC_WIDGET_HISTORY_CACHE_VERSION = 1;
-
-function macWidgetHistoryCacheFingerprint(sourceKey) {
-  return crypto.createHash('sha256').update(String(sourceKey || '')).digest('hex');
-}
-
-function macWidgetHistoryCachePath(sourceKey) {
-  return path.join(
-    app.getPath('userData'),
-    'mac-widget-history',
-    `${macWidgetHistoryCacheFingerprint(sourceKey)}.json`
-  );
-}
-
-function readMacWidgetHistoryCache(cachePath, sourceKey) {
-  try {
-    const raw = readRegularFileNoFollow(cachePath, {
-      description: 'macOS Widget history cache',
-      encoding: 'utf8',
-      mode: 0o600
-    });
-    const document = JSON.parse(raw);
-    if (
-      document?.version !== MAC_WIDGET_HISTORY_CACHE_VERSION
-      || document.source !== macWidgetHistoryCacheFingerprint(sourceKey)
-      || !isHistoryDocument(document.history)
-    ) return null;
-    return coerceHistory(document.history);
-  } catch (error) {
-    if (error?.code !== 'ENOENT') {
-      console.warn(`[mac-widget] history cache read failed: ${error?.message || error}`);
-    }
-    return null;
-  }
-}
-
-function writeMacWidgetHistoryCache(cachePath, sourceKey, history) {
-  if (!cachePath || !isHistoryDocument(history)) return;
-  writePrivateJsonAtomic(cachePath, {
-    version: MAC_WIDGET_HISTORY_CACHE_VERSION,
-    source: macWidgetHistoryCacheFingerprint(sourceKey),
-    history: coerceHistory(history)
-  });
-}
-
 function getCompleteHistory() {
   return resolveCompleteHistory(historyResolverOptions());
 }
@@ -3501,7 +3461,7 @@ function captureMacWidgetWork({ stats, owner }) {
     }),
     resolverConfig,
     historyCachePath: completeHistorySource(resolverConfig) === 'remote'
-      ? macWidgetHistoryCachePath(sourceKey)
+      ? macWidgetHistoryCachePath(app.getPath('userData'), sourceKey)
       : null,
     presentation: macWidgetPresentation(),
     snapshotPath: widget.snapshotPath,

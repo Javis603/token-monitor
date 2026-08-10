@@ -33,6 +33,14 @@ test('the source key ignores the revision so a moving hash cannot invalidate the
   );
 });
 
+test('the source key identifies the Hub data store, not its bearer secret', () => {
+  const config = { mode: 'client', hubMode: 'client', historyEnabled: true, hubUrl: 'http://hub' };
+  assert.equal(
+    macWidgetHistorySourceKey({ ...config, secret: 'old-secret' }),
+    macWidgetHistorySourceKey({ ...config, secret: 'rotated-secret' })
+  );
+});
+
 test('an unchanged revision is served from cache without refetching', async () => {
   let calls = 0;
   const fetchHistory = () => { calls += 1; return history('a'); };
