@@ -11,7 +11,7 @@ const {
 
 const MARKER_FILE_NAME = 'mac-widget-launchservices-registration.json';
 const REGISTER_HOST_ARGUMENTS = Object.freeze(['--mode', 'register-host']);
-const MARKER_SCHEMA_VERSION = 1;
+const MARKER_SCHEMA_VERSION = 2;
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_REVALIDATE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RECOVERY_FILE_BYTES = 64 * 1024;
@@ -49,21 +49,19 @@ function normalizedIdentityConfig(config) {
   return normalized;
 }
 
-function isDirectory(fsApi, candidate) {
+function installationArtifact(fsApi, candidate, expectedType) {
   try {
-    const stat = fsApi.lstatSync(candidate);
-    return stat.isDirectory() && !stat.isSymbolicLink();
+    const stat = fsApi.lstatSync(candidate, { bigint: true });
+    const validType = expectedType === 'directory'
+      ? stat.isDirectory()
+      : stat.isFile();
+    if (!validType || stat.isSymbolicLink()) return null;
+    const values = [stat.dev, stat.ino, stat.birthtimeNs, stat.ctimeNs];
+    if (values.some((value) => typeof value !== 'bigint')) return null;
+    const [dev, ino, birthtimeNs, ctimeNs] = values.map(String);
+    return { dev, ino, birthtimeNs, ctimeNs };
   } catch (_) {
-    return false;
-  }
-}
-
-function isRegularFile(fsApi, candidate) {
-  try {
-    const stat = fsApi.lstatSync(candidate);
-    return stat.isFile() && !stat.isSymbolicLink();
-  } catch (_) {
-    return false;
+    return null;
   }
 }
 
@@ -71,10 +69,11 @@ function log(logger, message) {
   try { logger?.(message); } catch (_) {}
 }
 
-function registrationIdentity(config, hostAppPath) {
+function registrationIdentity(config, hostAppPath, installation) {
   return crypto.createHash('sha256').update(JSON.stringify({
     recoverySchemaVersion: MARKER_SCHEMA_VERSION,
     hostAppPath,
+    installation,
     config
   })).digest('hex');
 }
@@ -161,12 +160,15 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
       const contentsPath = path.resolve(resourcesPath, '..');
       const appexPath = path.join(contentsPath, 'PlugIns', 'TokenMonitorWidget.appex');
       const hostAppPath = path.resolve(contentsPath, '..');
-      if (
-        !hostAppPath.endsWith('.app')
-        || !isDirectory(fsApi, hostAppPath)
-        || !isDirectory(fsApi, appexPath)
-        || !isRegularFile(fsApi, helperPath)
-      ) {
+      if (!hostAppPath.endsWith('.app')) {
+        return { status: 'skipped', reason: 'artifacts-missing' };
+      }
+      const installation = {
+        host: installationArtifact(fsApi, hostAppPath, 'directory'),
+        appex: installationArtifact(fsApi, appexPath, 'directory'),
+        helper: installationArtifact(fsApi, helperPath, 'file')
+      };
+      if (Object.values(installation).some((artifact) => !artifact)) {
         return { status: 'skipped', reason: 'artifacts-missing' };
       }
 
@@ -191,7 +193,7 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
         return { status: 'failed', reason: 'invalid-config' };
       }
 
-      const identity = registrationIdentity(config, hostAppPath);
+      const identity = registrationIdentity(config, hostAppPath, installation);
       const markerPath = path.join(String(input.userDataPath || ''), MARKER_FILE_NAME);
       const marker = readMarker(markerPath, fsApi, readPrivateFile, input.logger);
       const completedAt = Date.parse(marker?.completedAt || '');

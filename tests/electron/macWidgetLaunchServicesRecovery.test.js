@@ -123,6 +123,40 @@ test('missing packaged Widget artifacts do not launch or create marker state', a
   }
 });
 
+test('symlinked packaged Widget artifacts never launch or create marker state', async () => {
+  for (const artifact of ['host', 'appex', 'helper']) {
+    const setup = fixture();
+    try {
+      const target = artifact === 'host'
+        ? setup.appPath
+        : artifact === 'appex'
+          ? setup.appexPath
+          : path.join(setup.resourcesPath, 'TokenMonitorWidgetReloader');
+      const realTarget = `${target}.real`;
+      fs.renameSync(target, realTarget);
+      const linkType = artifact === 'helper'
+        ? 'file'
+        : process.platform === 'win32'
+          ? 'junction'
+          : 'dir';
+      fs.symlinkSync(realTarget, target, linkType);
+      let launches = 0;
+      const recover = createMacWidgetLaunchServicesRecovery({
+        execFile: () => { launches += 1; }
+      });
+
+      assert.deepEqual(await run(recover, setup), {
+        status: 'skipped',
+        reason: 'artifacts-missing'
+      });
+      assert.equal(launches, 0);
+      assert.equal(fs.existsSync(setup.userDataPath), false);
+    } finally {
+      setup.cleanup();
+    }
+  }
+});
+
 test('malformed or incomplete packaged config fails open without registration', async () => {
   for (const config of [{ ...CONFIG, packageVersion: '' }, '{bad json']) {
     const setup = fixture({ config: typeof config === 'string' ? false : config });
@@ -186,6 +220,7 @@ test('writes a private marker after success and a fresh process skips a recent m
       'registrationIdentity',
       'schemaVersion'
     ]);
+    assert.equal(marker.schemaVersion, 2);
     assert.equal(marker.completedAt, '2026-08-10T00:00:00.000Z');
     assert.match(marker.registrationIdentity, /^[a-f0-9]{64}$/);
     if (process.platform !== 'win32') {
@@ -202,6 +237,97 @@ test('writes a private marker after success and a fresh process skips a recent m
       reason: 'already-completed'
     });
     assert.equal(calls.length, 1);
+  } finally {
+    setup.cleanup();
+  }
+});
+
+test('an identical build reinstalled at the same path invalidates the retained marker', async () => {
+  const setup = fixture();
+  const calls = [];
+  const now = Date.parse('2026-08-10T00:00:00Z');
+  try {
+    const first = createMacWidgetLaunchServicesRecovery({
+      execFile: successfulExec(calls),
+      now: () => now
+    });
+    assert.deepEqual(await run(first, setup), { status: 'completed' });
+
+    const previousAppPath = `${setup.appPath}.previous`;
+    fs.renameSync(setup.appPath, previousAppPath);
+    fs.mkdirSync(setup.resourcesPath, { recursive: true });
+    fs.mkdirSync(setup.appexPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(setup.resourcesPath, 'TokenMonitorWidgetReloader'),
+      'test'
+    );
+    fs.writeFileSync(
+      path.join(setup.resourcesPath, 'token-monitor-widget.json'),
+      `${JSON.stringify(CONFIG)}\n`
+    );
+
+    const reinstalled = createMacWidgetLaunchServicesRecovery({
+      execFile: successfulExec(calls),
+      now: () => now + 1
+    });
+    assert.deepEqual(await run(reinstalled, setup), { status: 'completed' });
+    assert.equal(calls.length, 2);
+  } finally {
+    setup.cleanup();
+  }
+});
+
+test('changed installation metadata invalidates the marker using bigint stats', async () => {
+  const setup = fixture();
+  const calls = [];
+  const now = Date.parse('2026-08-10T00:00:00Z');
+  let generation = 0n;
+  const privateInoOffset = 9_007_199_254_740_993n;
+  const lstatOptions = [];
+  const fsApi = {
+    ...fs,
+    lstatSync(filePath, options) {
+      lstatOptions.push(options);
+      const stat = fs.lstatSync(filePath, { bigint: true });
+      return {
+        isDirectory: () => stat.isDirectory(),
+        isFile: () => stat.isFile(),
+        isSymbolicLink: () => stat.isSymbolicLink(),
+        dev: stat.dev,
+        ino: stat.ino + privateInoOffset,
+        birthtimeNs: stat.birthtimeNs + generation,
+        ctimeNs: stat.ctimeNs + generation
+      };
+    }
+  };
+  try {
+    const first = createMacWidgetLaunchServicesRecovery({
+      fs: fsApi,
+      execFile: successfulExec(calls),
+      now: () => now
+    });
+    assert.deepEqual(await run(first, setup), { status: 'completed' });
+    const firstMarker = fs.readFileSync(
+      path.join(setup.userDataPath, MARKER_FILE_NAME),
+      'utf8'
+    );
+
+    generation = 1n;
+    const changed = createMacWidgetLaunchServicesRecovery({
+      fs: fsApi,
+      execFile: successfulExec(calls),
+      now: () => now + 1
+    });
+    assert.deepEqual(await run(changed, setup), { status: 'completed' });
+    assert.equal(calls.length, 2);
+    assert.ok(lstatOptions.every((options) => options?.bigint === true));
+    const marker = fs.readFileSync(
+      path.join(setup.userDataPath, MARKER_FILE_NAME),
+      'utf8'
+    );
+    assert.equal(firstMarker.includes(setup.root), false);
+    assert.equal(marker.includes(setup.root), false);
+    assert.equal(marker.includes(String(privateInoOffset)), false);
   } finally {
     setup.cleanup();
   }
