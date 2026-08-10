@@ -3509,6 +3509,12 @@ function advanceMacWidgetSourceEpoch() {
   ensureMacWidgetSnapshotController()?.advanceSourceEpoch();
 }
 
+function refreshMacWidgetHistorySource() {
+  advanceMacWidgetSourceEpoch();
+  const visibleStats = electronPresentationStats(latestStats);
+  scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
+}
+
 function scheduleMacWidgetSnapshot(stats, producerOwner) {
   if (process.platform !== 'darwin' || !stats) return false;
   return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
@@ -5822,8 +5828,7 @@ app.whenReady().then(() => {
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
     const widgetHistorySourceChanged = previousRuntimeSettings.historyEnabled !== settings.historyEnabled;
     if (widgetHistorySourceChanged && !runtimeChange.modeStructural) {
-      advanceMacWidgetSourceEpoch();
-      scheduleMacWidgetSnapshot(latestStats, captureMacWidgetProducerOwner());
+      refreshMacWidgetHistorySource();
     }
     const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
     if (runtimeChange.modeStructural) {
