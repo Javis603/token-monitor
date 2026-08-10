@@ -938,6 +938,46 @@ test('aggregateLimits resolves OpenCode components independently of device order
   assert.deepEqual(reverse, forward);
 });
 
+test('aggregateLimits preserves Go authority within one legacy OpenCode observation', () => {
+  const aggregateLegacy = (windows) => aggregateLimits([{
+    deviceId: 'legacy-device',
+    limits: {
+      updatedAt: '2026-08-09T08:00:00.000Z',
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'sha256:legacy',
+        status: 'ok',
+        source: 'web',
+        updatedAt: '2026-08-09T08:00:00.000Z',
+        windows
+      }]
+    }
+  }], 0, Date.parse('2026-08-09T08:01:00.000Z')).providers[0];
+
+  const largerSubscriptionDuplicate = aggregateLegacy([
+    // Released collectors appended Go Web first, then subscription.get.
+    { kind: 'session', usedPercent: 40 },
+    { kind: 'session', usedPercent: 90 },
+    // A non-overlapping subscription window must remain available as a supplement.
+    { kind: 'weekly', usedPercent: 25 }
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(largerSubscriptionDuplicate.windows.map((window) => [window.kind, window.usedPercent])),
+    { session: 40, weekly: 25 }
+  );
+
+  const smallerSubscriptionDuplicates = aggregateLegacy([
+    { kind: 'session', usedPercent: 80 },
+    { kind: 'weekly', usedPercent: 70 },
+    { kind: 'session', usedPercent: 9 },
+    { kind: 'weekly', usedPercent: 6 }
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(smallerSubscriptionDuplicates.windows.map((window) => [window.kind, window.usedPercent])),
+    { session: 80, weekly: 70 }
+  );
+});
+
 test('aggregateLimits merges legacy OpenCode Go and Zen identities into the canonical workspace account', () => {
   const workspaceId = 'wrk_rolling_upgrade';
   const canonical = hashKey('opencode', `workspace:${workspaceId}`);

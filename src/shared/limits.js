@@ -681,6 +681,15 @@ function betterOpenCodeWindow(current, candidate) {
   if (!current) return candidate;
   const sourceRankDiff = openCodeWindowSourceRank(candidate.window) - openCodeWindowSourceRank(current.window);
   if (sourceRankDiff !== 0) return sourceRankDiff > 0 ? candidate : current;
+  // Released collectors appended Go Web windows before subscription.get
+  // windows without component provenance. Preserve that authority only within
+  // the same legacy observation; cross-device candidates still use freshness
+  // and the deterministic tie-break below.
+  if (
+    current.provider === candidate.provider
+    && openCodeWindowSourceRank(current.window) === 0
+    && openCodeWindowSourceRank(candidate.window) === 0
+  ) return current;
   const timestampDiff = timestampMs(candidate.provider.updatedAt) - timestampMs(current.provider.updatedAt);
   if (timestampDiff !== 0) return timestampDiff > 0 ? candidate : current;
   const candidateKey = JSON.stringify([candidate.provider.sourceDeviceId || '', candidate.window]);
