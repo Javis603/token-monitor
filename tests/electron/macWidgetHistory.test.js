@@ -201,6 +201,63 @@ test('a warm-cache failure uses the retry floor even when freshness is immediate
   assert.equal(calls, 3, 'the bounded retry becomes due without discarding last-good history');
 });
 
+test('a cold start can serve source-keyed persisted history while the remote fetch fails', async () => {
+  let loads = 0;
+  let fetches = 0;
+  const persisted = history('persisted');
+  const result = await resolveMacWidgetHistory({
+    generation: 1,
+    sourceKey: 'hub-a',
+    revision: 'r1',
+    loadCachedHistory: () => {
+      loads += 1;
+      return persisted;
+    },
+    fetchHistory: () => {
+      fetches += 1;
+      throw new Error('hub unreachable');
+    },
+    now: 0,
+    logger: () => {}
+  });
+
+  assert.equal(loads, 1);
+  assert.equal(fetches, 1);
+  assert.equal(result.summary.label, 'persisted');
+  assert.equal(result.daily.length, 1);
+});
+
+test('successful history refreshes persist the new last-good value', async () => {
+  let saved = null;
+  const refreshed = history('refreshed');
+  const result = await resolveMacWidgetHistory({
+    sourceKey: 'hub-a',
+    revision: 'r1',
+    fetchHistory: () => refreshed,
+    saveCachedHistory: (value) => { saved = value; },
+    now: 0
+  });
+
+  assert.deepEqual(saved, refreshed);
+  assert.deepEqual(result, refreshed);
+});
+
+test('a persisted cache failure does not hide a successful remote refresh', async () => {
+  const warnings = [];
+  const refreshed = history('refreshed');
+  const result = await resolveMacWidgetHistory({
+    sourceKey: 'hub-a',
+    revision: 'r1',
+    fetchHistory: () => refreshed,
+    saveCachedHistory: () => { throw new Error('cache read-only'); },
+    logger: (message) => warnings.push(message),
+    now: 0
+  });
+
+  assert.deepEqual(result, refreshed);
+  assert.ok(warnings.some((message) => /persisted history cache write failed/.test(message)));
+});
+
 test('a stale source failure cannot return the active source cache', async () => {
   let rejectSourceA;
   let markSourceAStarted;

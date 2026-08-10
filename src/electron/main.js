@@ -147,7 +147,7 @@ const {
   fetchMimoLimits,
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
-const { historyPreview, historyRevision } = require('../shared/history');
+const { coerceHistory, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory } = require('./historySource');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
@@ -159,7 +159,7 @@ const {
   syncMacWidgetSnapshotDirectory
 } = require('./macWidgetBridge');
 const { createMacWidgetSnapshotController } = require('./macWidgetSnapshotController');
-const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
+const { isHistoryDocument, macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
@@ -3427,6 +3427,51 @@ function historyResolverOptions() {
   };
 }
 
+const MAC_WIDGET_HISTORY_CACHE_VERSION = 1;
+
+function macWidgetHistoryCacheFingerprint(sourceKey) {
+  return crypto.createHash('sha256').update(String(sourceKey || '')).digest('hex');
+}
+
+function macWidgetHistoryCachePath(sourceKey) {
+  return path.join(
+    app.getPath('userData'),
+    'mac-widget-history',
+    `${macWidgetHistoryCacheFingerprint(sourceKey)}.json`
+  );
+}
+
+function readMacWidgetHistoryCache(cachePath, sourceKey) {
+  try {
+    const raw = readRegularFileNoFollow(cachePath, {
+      description: 'macOS Widget history cache',
+      encoding: 'utf8',
+      mode: 0o600
+    });
+    const document = JSON.parse(raw);
+    if (
+      document?.version !== MAC_WIDGET_HISTORY_CACHE_VERSION
+      || document.source !== macWidgetHistoryCacheFingerprint(sourceKey)
+      || !isHistoryDocument(document.history)
+    ) return null;
+    return coerceHistory(document.history);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn(`[mac-widget] history cache read failed: ${error?.message || error}`);
+    }
+    return null;
+  }
+}
+
+function writeMacWidgetHistoryCache(cachePath, sourceKey, history) {
+  if (!cachePath || !isHistoryDocument(history)) return;
+  writePrivateJsonAtomic(cachePath, {
+    version: MAC_WIDGET_HISTORY_CACHE_VERSION,
+    source: macWidgetHistoryCacheFingerprint(sourceKey),
+    history: coerceHistory(history)
+  });
+}
+
 function getCompleteHistory() {
   return resolveCompleteHistory(historyResolverOptions());
 }
@@ -3447,13 +3492,17 @@ function captureMacWidgetWork({ stats, owner }) {
   const widget = macWidgetConfiguration();
   if (!widget) return null;
   const resolverConfig = Object.freeze({ ...historyResolverOptions() });
+  const sourceKey = macWidgetHistorySourceKey(resolverConfig);
   return {
     stats,
     owner: Object.freeze({
       epoch: owner.epoch,
-      sourceKey: macWidgetHistorySourceKey(resolverConfig)
+      sourceKey
     }),
     resolverConfig,
+    historyCachePath: completeHistorySource(resolverConfig) === 'remote'
+      ? macWidgetHistoryCachePath(sourceKey)
+      : null,
     presentation: macWidgetPresentation(),
     snapshotPath: widget.snapshotPath,
     widgetKind: widget.widgetKind
@@ -3471,6 +3520,14 @@ function ensureMacWidgetSnapshotController() {
       sourceKey: work.owner.sourceKey,
       revision: work.stats?.historyRevision,
       fetchHistory: () => resolveCompleteHistory(work.resolverConfig),
+      ...(work.historyCachePath ? {
+        loadCachedHistory: () => readMacWidgetHistoryCache(work.historyCachePath, work.owner.sourceKey),
+        saveCachedHistory: (history) => writeMacWidgetHistoryCache(
+          work.historyCachePath,
+          work.owner.sourceKey,
+          history
+        )
+      } : {}),
       minIntervalMs: completeHistorySource(work.resolverConfig) === 'remote' ? undefined : 0,
       logger: (message) => console.warn(message)
     }),
