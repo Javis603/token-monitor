@@ -286,8 +286,18 @@ test('changed installation metadata invalidates the marker using bigint stats', 
   const lstatOptions = [];
   const fsApi = {
     ...fs,
+    // Force the non-O_NOFOLLOW branch of readRegularFileNoFollow (what Windows
+    // hits, since it lacks O_NOFOLLOW) so this test is platform-independent and
+    // cannot silently pass only on macOS/Linux.
+    constants: { ...fs.constants, O_NOFOLLOW: 0 },
     lstatSync(filePath, options) {
       lstatOptions.push(options);
+      if (options?.bigint !== true) {
+        // readRegularFileNoFollow stats the path without bigint and compares
+        // dev/ino strictly against the descriptor stat, so keep real (non-bigint)
+        // metadata here; only the installation fingerprint requests bigint.
+        return fs.lstatSync(filePath, { bigint: false });
+      }
       const stat = fs.lstatSync(filePath, { bigint: true });
       return {
         isDirectory: () => stat.isDirectory(),
@@ -320,7 +330,8 @@ test('changed installation metadata invalidates the marker using bigint stats', 
     });
     assert.deepEqual(await run(changed, setup), { status: 'completed' });
     assert.equal(calls.length, 2);
-    assert.ok(lstatOptions.every((options) => options?.bigint === true));
+    const bigintStats = lstatOptions.filter((options) => options?.bigint === true);
+    assert.equal(bigintStats.length, 6, 'host, appex, and helper should be fingerprinted with bigint stats on both runs');
     const marker = fs.readFileSync(
       path.join(setup.userDataPath, MARKER_FILE_NAME),
       'utf8'
