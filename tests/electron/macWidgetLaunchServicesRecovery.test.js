@@ -156,7 +156,7 @@ test('launches the packaged native helper in host-registration mode with bounded
       calls[0].file,
       path.join(setup.resourcesPath, 'TokenMonitorWidgetReloader')
     );
-    assert.deepEqual(calls[0].args, ['--register-host']);
+    assert.deepEqual(calls[0].args, ['--mode', 'register-host']);
     assert.equal(calls[0].args.includes(setup.appPath), false);
     assert.equal(calls[0].args.includes(setup.appexPath), false);
     assert.equal(calls[0].options.shell, false);

@@ -10,7 +10,7 @@ const {
 } = require('../shared/credentialStore');
 
 const MARKER_FILE_NAME = 'mac-widget-launchservices-registration.json';
-const REGISTER_HOST_ARGUMENT = '--register-host';
+const REGISTER_HOST_ARGUMENTS = Object.freeze(['--mode', 'register-host']);
 const MARKER_SCHEMA_VERSION = 1;
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_REVALIDATE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
@@ -112,7 +112,7 @@ function runRegistration(execFileImpl, helperPath, timeoutMs, signal) {
     try {
       execFileImpl(
         helperPath,
-        [REGISTER_HOST_ARGUMENT],
+        REGISTER_HOST_ARGUMENTS,
         {
           shell: false,
           timeout: timeoutMs,

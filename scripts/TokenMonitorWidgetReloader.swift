@@ -23,7 +23,7 @@ private func registerContainingHost() -> Never {
     exit(status == noErr ? EXIT_SUCCESS : EXIT_FAILURE)
 }
 
-if CommandLine.arguments.dropFirst().first == "--register-host" {
+if Array(CommandLine.arguments.dropFirst()) == ["--mode", "register-host"] {
     registerContainingHost()
 }
 

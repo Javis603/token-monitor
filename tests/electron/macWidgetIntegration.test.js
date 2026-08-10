@@ -140,11 +140,11 @@ test('LaunchServices recovery delegates current-host registration to the public 
     path.join(root, 'src', 'electron', 'macWidgetLaunchServicesRecovery.js'),
     'utf8'
   );
-  assert.match(recoverySource, /const REGISTER_HOST_ARGUMENT = '--register-host';/);
-  assert.match(recoverySource, /\[REGISTER_HOST_ARGUMENT\]/);
+  assert.match(recoverySource, /const REGISTER_HOST_ARGUMENTS = Object\.freeze\(\['--mode', 'register-host'\]\);/);
+  assert.match(recoverySource, /REGISTER_HOST_ARGUMENTS/);
   assert.doesNotMatch(recoverySource, /lsregister|chronod|killall|pkill|\['-u'|\b-reset\b|\b-kill\b/);
   assert.match(widgetReloaderSource, /LSRegisterURL\(hostAppURL as CFURL, true\)/);
-  assert.match(widgetReloaderSource, /CommandLine\.arguments\.dropFirst\(\)\.first == "--register-host"/);
+  assert.match(widgetReloaderSource, /Array\(CommandLine\.arguments\.dropFirst\(\)\) == \["--mode", "register-host"\]/);
   assert.match(widgetReloaderSource, /resourcesURL\.lastPathComponent == "Resources"/);
   assert.match(widgetReloaderSource, /contentsURL\.lastPathComponent == "Contents"/);
 });
