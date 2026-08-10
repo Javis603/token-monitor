@@ -3481,7 +3481,11 @@ function ensureMacWidgetSnapshotController() {
       revision: work.stats?.historyRevision,
       fetchHistory: () => resolveCompleteHistory(work.resolverConfig),
       ...(work.historyCachePath ? {
-        loadCachedHistory: () => readMacWidgetHistoryCache(work.historyCachePath, work.owner.sourceKey),
+        loadCachedHistory: () => readMacWidgetHistoryCache(
+          work.historyCachePath,
+          work.owner.sourceKey,
+          { logger: (message) => console.warn(message) }
+        ),
         saveCachedHistory: (history) => writeMacWidgetHistoryCache(
           work.historyCachePath,
           work.owner.sourceKey,

@@ -121,6 +121,17 @@ test('Widget ownership advances producer lifetime only for mode transitions', ()
   );
 });
 
+test('production persisted history reads forward store warnings to the main-process logger', () => {
+  const start = mainSource.indexOf('resolveHistory: (work) => resolveMacWidgetHistory({');
+  const end = mainSource.indexOf('\n    prepareSnapshot:', start);
+  assert.ok(start >= 0 && end > start, 'Widget history resolver wiring should exist');
+  const resolverSource = mainSource.slice(start, end);
+  assert.match(
+    resolverSource,
+    /loadCachedHistory: \(\) => readMacWidgetHistoryCache\(\s*work\.historyCachePath,\s*work\.owner\.sourceKey,\s*\{ logger: \(message\) => console\.warn\(message\) \}\s*\),/
+  );
+});
+
 test('starts the runtime immediately and holds only Widget publication until host registration settles', () => {
   const readyStart = mainSource.indexOf('app.whenReady().then(() => {');
   const readyEnd = mainSource.indexOf("ipcMain.handle('settings:get'", readyStart);
