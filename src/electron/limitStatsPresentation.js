@@ -1,8 +1,8 @@
 'use strict';
 
 const { aggregateLimits } = require('../shared/limits');
+const { DEFAULT_STALE_AFTER_MS } = require('../shared/syncUploadInterval');
 
-const LEGACY_HUB_STALENESS_COMPATIBILITY_FLOOR_MS = 1;
 const OPENCODE_COMPONENT_PROVENANCE_DETAIL = 'managed';
 
 function normalizeEnumId(value) {
@@ -122,10 +122,10 @@ function projectionNowMs(stats, options = {}) {
 
 function projectionStaleAfterMs(stats) {
   if (Number.isFinite(stats?.staleAfterMs)) return stats.staleAfterMs;
-  // Old Hubs do not publish their threshold. A positive compatibility floor
-  // keeps per-device syncUploadIntervalMs active; zero would disable that
-  // extension and prematurely stale interval-synced OpenCode candidates.
-  return LEGACY_HUB_STALENESS_COMPATIBILITY_FLOOR_MS;
+  // Old Hubs do not publish their threshold. Reuse the shared Hub default so
+  // re-aggregation cannot stale a candidate sooner than the Hub that supplied
+  // it; interval-synced devices can still extend this floor independently.
+  return DEFAULT_STALE_AFTER_MS;
 }
 
 function replaceOpenCodeProviders(currentProviders, aggregateProviders) {

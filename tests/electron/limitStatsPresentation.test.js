@@ -357,6 +357,44 @@ test('device identity stays case-sensitive so a differently-cased remote device 
   assert.equal(visibleStats.limits.providers.find((provider) => provider.accountKey === 'remote').windows[0].remainingPercent, 70);
 });
 
+test('legacy Hub projection keeps default-threshold OpenCode fresh without an upload interval', () => {
+  const nowMs = Date.parse('2026-08-09T08:40:00.000Z');
+  const remoteUpdatedAt = '2026-08-09T08:35:00.000Z';
+  const devices = [
+    deviceWithProviders('remote-device', [opencodeProvider({
+      accountKey: 'remote',
+      remainingPercent: 60,
+      providerUpdatedAt: remoteUpdatedAt
+    })], {
+      updatedAt: remoteUpdatedAt,
+      receivedAt: remoteUpdatedAt
+    }),
+    deviceWithProviders('local-device', [opencodeProvider({
+      accountKey: 'local',
+      remainingPercent: 20,
+      providerUpdatedAt: new Date(nowMs).toISOString()
+    })], {
+      updatedAt: new Date(nowMs).toISOString(),
+      receivedAt: new Date(nowMs).toISOString()
+    })
+  ];
+  devices[0].limits.refreshMs = 60 * 1000;
+  const rawStats = statsWithDevices(devices);
+  rawStats.limits = aggregateLimits(devices, 10 * 60 * 1000, nowMs);
+  delete rawStats.staleAfterMs;
+
+  const visibleStats = projectLimitStatsForDisplay(rawStats, {
+    localDeviceId: 'local-device',
+    syncActive: true,
+    opencodeLocalLimitsEnabled: false,
+    nowMs
+  });
+
+  const remote = visibleStats.limits.providers.find((provider) => provider.accountKey === 'remote');
+  assert.equal(remote?.stale, false);
+  assert.equal(remote?.windows[0].remainingPercent, 60);
+});
+
 test('legacy Hub projection keeps interval-synced OpenCode fresh and preserves other provider aggregates', () => {
   const nowMs = Date.parse('2026-08-09T08:40:00.000Z');
   const remoteOpenCode = opencodeProvider({
