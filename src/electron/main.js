@@ -161,6 +161,7 @@ const {
 const { createMacWidgetSnapshotController } = require('./macWidgetSnapshotController');
 const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
+const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const linuxAutostart = require('./linuxAutostart');
@@ -290,6 +291,7 @@ let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
 const diagnosticJournal = createDiagnosticJournal();
+const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServicesRecovery();
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
@@ -5499,6 +5501,17 @@ function rebuildWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
+  const widgetRecoveryAbort = new AbortController();
+  const abortWidgetRecovery = () => widgetRecoveryAbort.abort();
+  app.once('before-quit', abortWidgetRecovery);
+  const widgetRecovery = recoverMacWidgetLaunchServicesRegistration({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    userDataPath: app.getPath('userData'),
+    signal: widgetRecoveryAbort.signal,
+    logger: (message) => console.warn(message)
+  });
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -5516,7 +5529,10 @@ app.whenReady().then(() => {
   if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
-  startMode();
+  void widgetRecovery.finally(() => {
+    app.removeListener('before-quit', abortWidgetRecovery);
+    if (!widgetRecoveryAbort.signal.aborted) startMode();
+  });
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();

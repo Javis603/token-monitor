@@ -100,6 +100,38 @@ test('Widget ownership advances producer lifetime only for mode transitions', ()
   );
 });
 
+test('shows the app without awaiting Widget host registration and delays producers until it settles', () => {
+  const readyStart = mainSource.indexOf('app.whenReady().then(() => {');
+  const readyEnd = mainSource.indexOf("ipcMain.handle('settings:get'", readyStart);
+  assert.ok(readyStart >= 0 && readyEnd > readyStart, 'ready callback should exist');
+  const readySource = mainSource.slice(readyStart, readyEnd);
+  const settingsIndex = readySource.indexOf('ensureSettingsLoaded();');
+  const recoveryStartIndex = readySource.indexOf(
+    'const widgetRecovery = recoverMacWidgetLaunchServicesRegistration({'
+  );
+  const windowIndex = readySource.indexOf('createWindow();');
+  const recoveryCompletionIndex = readySource.indexOf('void widgetRecovery.finally(() => {');
+  const modeIndex = readySource.indexOf('startMode();');
+  assert.ok(settingsIndex >= 0 && recoveryStartIndex > settingsIndex);
+  assert.ok(windowIndex > recoveryStartIndex);
+  assert.ok(recoveryCompletionIndex > windowIndex && modeIndex > recoveryCompletionIndex);
+  assert.doesNotMatch(readySource, /await widgetRecovery/);
+  assert.match(readySource, /if \(!widgetRecoveryAbort\.signal\.aborted\) startMode\(\);/);
+  assert.match(readySource, /platform: process\.platform/);
+  assert.match(readySource, /isPackaged: app\.isPackaged/);
+  assert.match(readySource, /resourcesPath: process\.resourcesPath/);
+  assert.match(readySource, /userDataPath: app\.getPath\('userData'\)/);
+});
+
+test('LaunchServices recovery only force-registers the current host app', () => {
+  const recoverySource = fs.readFileSync(
+    path.join(root, 'src', 'electron', 'macWidgetLaunchServicesRecovery.js'),
+    'utf8'
+  );
+  assert.match(recoverySource, /\['-f', hostAppPath\]/);
+  assert.doesNotMatch(recoverySource, /chronod|killall|pkill|\['-u'|\b-reset\b|\b-kill\b/);
+});
+
 test('keeps Widget packaging opt-in and injects artifacts only after a successful build', () => {
   const normal = createBuilderConfig({
     baseConfig: packageJson.build,

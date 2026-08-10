@@ -187,6 +187,59 @@ test('reads private files through a validated descriptor', (t) => {
   assert.equal(typeof readTarget, 'number');
 });
 
+test('rejects private files larger than the configured read limit', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'oversized.json');
+  fs.writeFileSync(filePath, 'x'.repeat(33), 'utf8');
+  const fsApi = Object.create(fs);
+  let readCalls = 0;
+  fsApi.readFileSync = (...args) => {
+    readCalls += 1;
+    return fs.readFileSync(...args);
+  };
+
+  assert.throws(() => readRegularFileNoFollow(filePath, {
+    fs: fsApi,
+    description: 'Private file',
+    maxBytes: 32
+  }), /exceeds 32 bytes/);
+  assert.equal(readCalls, 0);
+});
+
+test('keeps bounded private reads bounded when the file grows after fstat', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'growing.json');
+  fs.writeFileSync(filePath, 'small', 'utf8');
+  const fsApi = Object.create(fs);
+  fsApi.fstatSync = (descriptor) => {
+    const stat = fs.fstatSync(descriptor);
+    fs.appendFileSync(filePath, 'x'.repeat(64), 'utf8');
+    return stat;
+  };
+
+  assert.throws(() => readRegularFileNoFollow(filePath, {
+    fs: fsApi,
+    description: 'Private file',
+    maxBytes: 16
+  }), /exceeds 16 bytes/);
+});
+
+test('bounded private reads continue after a short descriptor read', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'short-read.json');
+  fs.writeFileSync(filePath, 'complete', 'utf8');
+  const fsApi = Object.create(fs);
+  fsApi.readSync = (descriptor, buffer, offset, length, position) => (
+    fs.readSync(descriptor, buffer, offset, Math.min(length, 2), position)
+  );
+
+  assert.equal(readRegularFileNoFollow(filePath, {
+    fs: fsApi,
+    description: 'Private file',
+    maxBytes: 16
+  }), 'complete');
+});
+
 test('does not overwrite a corrupt credential store', (t) => {
   const dataDir = tempDataDir(t);
   const filePath = path.join(dataDir, 'credentials.json');
