@@ -100,7 +100,7 @@ test('Widget ownership advances producer lifetime only for mode transitions', ()
   );
 });
 
-test('shows the app without awaiting Widget host registration and delays producers until it settles', () => {
+test('starts the runtime immediately and holds only Widget publication until host registration settles', () => {
   const readyStart = mainSource.indexOf('app.whenReady().then(() => {');
   const readyEnd = mainSource.indexOf("ipcMain.handle('settings:get'", readyStart);
   assert.ok(readyStart >= 0 && readyEnd > readyStart, 'ready callback should exist');
@@ -110,13 +110,21 @@ test('shows the app without awaiting Widget host registration and delays produce
     'const widgetRecovery = recoverMacWidgetLaunchServicesRegistration({'
   );
   const windowIndex = readySource.indexOf('createWindow();');
-  const recoveryCompletionIndex = readySource.indexOf('void widgetRecovery.finally(() => {');
   const modeIndex = readySource.indexOf('startMode();');
+  const recoveryCompletionIndex = readySource.indexOf('void widgetRecovery.finally(() => {');
   assert.ok(settingsIndex >= 0 && recoveryStartIndex > settingsIndex);
   assert.ok(windowIndex > recoveryStartIndex);
-  assert.ok(recoveryCompletionIndex > windowIndex && modeIndex > recoveryCompletionIndex);
+  assert.ok(modeIndex > windowIndex && recoveryCompletionIndex > modeIndex);
   assert.doesNotMatch(readySource, /await widgetRecovery/);
-  assert.match(readySource, /if \(!widgetRecoveryAbort\.signal\.aborted\) startMode\(\);/);
+  assert.match(
+    readySource,
+    /startMode\(\);\s*void widgetRecovery\.finally\(\(\) => \{\s*app\.removeListener\('before-quit', abortWidgetRecovery\);\s*if \(!widgetRecoveryAbort\.signal\.aborted\) \{\s*macWidgetPublicationReady = true;\s*macWidgetSnapshotController\?\.resume\(\);\s*\}\s*\}\);/
+  );
+  assert.match(mainSource, /let macWidgetPublicationReady = false;/);
+  assert.match(
+    mainSource,
+    /createMacWidgetSnapshotController\(\{\s*startPaused: !macWidgetPublicationReady,/
+  );
   assert.match(readySource, /platform: process\.platform/);
   assert.match(readySource, /isPackaged: app\.isPackaged/);
   assert.match(readySource, /resourcesPath: process\.resourcesPath/);

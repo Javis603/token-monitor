@@ -20,6 +20,7 @@ const MAX_CONFIG_VALUE_LENGTH = 256;
 const IDENTITY_FIELDS = Object.freeze([
   'schemaVersion',
   'appGroup',
+  'urlScheme',
   'widgetKind',
   'widgetUIVersion',
   'widgetSchemaVersion',

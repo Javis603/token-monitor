@@ -21,6 +21,7 @@ function createMacWidgetSnapshotController(options = {}) {
   let latestSequence = 0;
   let pendingWork = null;
   let running = false;
+  let paused = options.startPaused === true;
   let stopped = false;
   let idleWaiters = [];
 
@@ -110,9 +111,15 @@ function createMacWidgetSnapshotController(options = {}) {
   }
 
   function startDrain() {
-    if (running || stopped || !pendingWork) return;
+    if (running || paused || stopped || !pendingWork) return;
     running = true;
     schedule(() => { void drain(); });
+  }
+
+  function resume() {
+    if (stopped || !paused) return;
+    paused = false;
+    startDrain();
   }
 
   function captureProducerOwner() {
@@ -178,6 +185,7 @@ function createMacWidgetSnapshotController(options = {}) {
     captureProducerOwner,
     enqueue,
     isCurrent: ownerIsCurrent,
+    resume,
     stop,
     whenIdle
   };

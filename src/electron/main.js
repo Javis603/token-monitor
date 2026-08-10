@@ -2333,6 +2333,7 @@ let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
 let macWidgetSnapshotController = null;
+let macWidgetPublicationReady = false;
 let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
@@ -3452,6 +3453,7 @@ function ensureMacWidgetSnapshotController() {
   if (process.platform !== 'darwin') return null;
   if (macWidgetSnapshotController) return macWidgetSnapshotController;
   macWidgetSnapshotController = createMacWidgetSnapshotController({
+    startPaused: !macWidgetPublicationReady,
     captureWork: captureMacWidgetWork,
     resolveHistory: (work) => resolveMacWidgetHistory({
       generation: work.owner.epoch,
@@ -5529,9 +5531,13 @@ app.whenReady().then(() => {
   if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
+  startMode();
   void widgetRecovery.finally(() => {
     app.removeListener('before-quit', abortWidgetRecovery);
-    if (!widgetRecoveryAbort.signal.aborted) startMode();
+    if (!widgetRecoveryAbort.signal.aborted) {
+      macWidgetPublicationReady = true;
+      macWidgetSnapshotController?.resume();
+    }
   });
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
