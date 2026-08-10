@@ -242,7 +242,7 @@ test('successful history refreshes persist the new last-good value', async () =>
   assert.deepEqual(result, refreshed);
 });
 
-test('a persisted cache failure does not hide a successful remote refresh', async () => {
+test('a persisted cache write failure does not hide a successful remote refresh', async () => {
   const warnings = [];
   const refreshed = history('refreshed');
   const result = await resolveMacWidgetHistory({
@@ -256,6 +256,27 @@ test('a persisted cache failure does not hide a successful remote refresh', asyn
 
   assert.deepEqual(result, refreshed);
   assert.ok(warnings.some((message) => /persisted history cache write failed/.test(message)));
+});
+
+test('a persisted cache read failure does not hide a successful remote refresh', async () => {
+  let fetches = 0;
+  const warnings = [];
+  const refreshed = history('refreshed');
+  const result = await resolveMacWidgetHistory({
+    sourceKey: 'hub-a',
+    revision: 'r1',
+    loadCachedHistory: () => { throw new Error('cache corrupt'); },
+    fetchHistory: () => {
+      fetches += 1;
+      return refreshed;
+    },
+    logger: (message) => warnings.push(message),
+    now: 0
+  });
+
+  assert.equal(fetches, 1);
+  assert.deepEqual(result, refreshed);
+  assert.ok(warnings.some((message) => /persisted history cache read failed/.test(message)));
 });
 
 test('a stale source failure cannot return the active source cache', async () => {
