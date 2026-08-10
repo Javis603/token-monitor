@@ -152,6 +152,84 @@ test('starts the runtime immediately and holds only Widget publication until hos
   assert.match(readySource, /userDataPath: app\.getPath\('userData'\)/);
 });
 
+function executeMacWidgetRecoveryWiring() {
+  const bootstrapStart = mainSource.indexOf('const widgetRecoveryAbort = new AbortController();');
+  const loggerIndex = mainSource.indexOf('logger: (message) => console.warn(message)', bootstrapStart);
+  const recoveryCallEnd = mainSource.indexOf('});', loggerIndex) + 3;
+  assert.ok(bootstrapStart >= 0 && loggerIndex > bootstrapStart && recoveryCallEnd > loggerIndex, 'recovery bootstrap should exist');
+  const finallyStart = mainSource.indexOf('void widgetRecovery.finally(() => {');
+  const finallyEnd = mainSource.indexOf('\n  });', finallyStart) + '\n  });'.length;
+  assert.ok(finallyStart >= 0 && finallyEnd > finallyStart, 'recovery settle should exist');
+  const script = `${mainSource.slice(bootstrapStart, recoveryCallEnd)}\n${mainSource.slice(finallyStart, finallyEnd)}`;
+
+  let resolveRecovery;
+  const recoveryPromise = new Promise((resolve) => { resolveRecovery = resolve; });
+  const calls = { once: [], removeListener: [], resumed: 0 };
+  let beforeQuitHandler;
+  const context = vm.createContext({
+    AbortController,
+    console: { warn() {} },
+    process: { platform: 'darwin', resourcesPath: '/acceptance/resources' },
+    app: {
+      isPackaged: true,
+      getPath: (name) => (name === 'userData' ? '/acceptance/user-data' : undefined),
+      once: (event, handler) => { calls.once.push(event); beforeQuitHandler = handler; },
+      removeListener: (event) => { calls.removeListener.push(event); }
+    },
+    recoverMacWidgetLaunchServicesRegistration: (options) => {
+      calls.recoveryOptions = options;
+      return recoveryPromise;
+    },
+    macWidgetPublicationReady: false,
+    macWidgetSnapshotController: { resume: () => { calls.resumed += 1; } }
+  });
+  vm.runInContext(script, context);
+  return {
+    calls,
+    context,
+    fireBeforeQuit: () => beforeQuitHandler(),
+    resolveRecovery,
+    assertRecoveryOptions() {
+      const options = calls.recoveryOptions;
+      assert.ok(options, 'recovery should be invoked with the packaged wiring options');
+      assert.equal(options.platform, 'darwin');
+      assert.equal(options.isPackaged, true);
+      assert.equal(options.resourcesPath, '/acceptance/resources');
+      assert.equal(options.userDataPath, '/acceptance/user-data');
+      assert.ok(options.signal instanceof AbortSignal);
+      assert.equal(typeof options.logger, 'function');
+    }
+  };
+}
+
+test('main wiring resumes Widget publication when host registration settles on any outcome', async () => {
+  for (const outcome of [
+    { status: 'completed' },
+    { status: 'failed', reason: 'launch-failed' },
+    { status: 'failed', reason: 'timed-out' },
+    { status: 'skipped', reason: 'already-completed' }
+  ]) {
+    const execution = executeMacWidgetRecoveryWiring();
+    execution.assertRecoveryOptions();
+    assert.deepEqual(execution.calls.once, ['before-quit']);
+    execution.resolveRecovery(outcome);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(execution.context.macWidgetPublicationReady, true, `${outcome.status} settle should unblock Widget publication`);
+    assert.equal(execution.calls.resumed, 1, `${outcome.status} settle should resume the snapshot controller`);
+    assert.deepEqual(execution.calls.removeListener, ['before-quit']);
+  }
+});
+
+test('main wiring holds Widget publication when the app quits before registration settles', async () => {
+  const execution = executeMacWidgetRecoveryWiring();
+  execution.fireBeforeQuit();
+  execution.resolveRecovery({ status: 'completed' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(execution.context.macWidgetPublicationReady, false);
+  assert.equal(execution.calls.resumed, 0);
+  assert.deepEqual(execution.calls.removeListener, ['before-quit']);
+});
+
 test('LaunchServices recovery delegates current-host registration to the public native API', () => {
   const recoverySource = fs.readFileSync(
     path.join(root, 'src', 'electron', 'macWidgetLaunchServicesRecovery.js'),
