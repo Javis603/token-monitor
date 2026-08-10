@@ -914,6 +914,82 @@
                 <div id="qoderErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="workbuddyAccountGroup" class="settings-group cursor-account-group">
+              <button id="workbuddySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="workbuddySettingsDetails">
+                <span data-i18n="settings.workbuddy.title">WorkBuddy Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="workbuddyAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="workbuddySettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="workbuddyLogoutButton" class="hidden" data-i18n="settings.workbuddy.clearToken">Clear token</button>
+                  <button id="workbuddyRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="workbuddyManualPanel">
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.workbuddy.step1">Open codebuddy.cn in a browser and sign in (button below).</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.workbuddy.step2">Open DevTools (F12) -> Network, reload, then select the get-user-resource request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.workbuddy.step3">Copy the Authorization value without the "Bearer " prefix into the token field.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.workbuddy.step4">Copy the X-User-Id header value into the UID field and click Save.</span>
+                  </p>
+                  <div class="settings-actions">
+                    <button id="workbuddyOpenBrowser" data-i18n="settings.workbuddy.openBrowser">Open codebuddy.cn</button>
+                  </div>
+                  <div class="settings-row">
+                    <label for="workbuddyTokenInput" data-i18n="settings.workbuddy.token">Access token</label>
+                    <input id="workbuddyTokenInput" type="password" spellcheck="false" placeholder="eyJ..." data-i18n-placeholder="settings.workbuddy.tokenPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="workbuddyUidInput" data-i18n="settings.workbuddy.uid">User ID</label>
+                    <input id="workbuddyUidInput" type="text" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" data-i18n-placeholder="settings.workbuddy.uidPlaceholder" />
+                  </div>
+                  <div class="settings-actions">
+                    <button id="workbuddyTokenSubmit" data-i18n="settings.workbuddy.saveToken">Save token</button>
+                  </div>
+                </div>
+                <div id="workbuddyErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="traeworkAccountGroup" class="settings-group cursor-account-group">
+              <button id="traeworkSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="traeworkSettingsDetails">
+                <span data-i18n="settings.traework.title">Trae Work Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="traeworkAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="traeworkSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="traeworkLogoutButton" class="hidden" data-i18n="settings.traework.clearToken">Clear token</button>
+                  <button id="traeworkRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="traeworkManualPanel">
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.traework.step1">Sign in to trae.cn and open the usage page (button below).</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.traework.step2">Open DevTools (F12) -> Network, reload, then select the ide_user_ent_usage request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.traework.step3">Copy the Authorization value without the "Cloud-IDE-JWT " prefix into the token field.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.traework.step4">Paste it below and click Save token.</span>
+                  </p>
+                  <div class="settings-actions">
+                    <button id="traeworkOpenBrowser" data-i18n="settings.traework.openBrowser">Open trae.cn</button>
+                  </div>
+                  <div class="settings-row">
+                    <label for="traeworkTokenInput" data-i18n="settings.traework.token">Access token</label>
+                    <input id="traeworkTokenInput" type="password" spellcheck="false" placeholder="eyJ..." data-i18n-placeholder="settings.traework.tokenPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="traeworkDeviceIdInput" data-i18n="settings.traework.deviceId">Device ID (optional)</label>
+                    <input id="traeworkDeviceIdInput" type="text" spellcheck="false" placeholder="device-..." data-i18n-placeholder="settings.traework.deviceIdPlaceholder" />
+                  </div>
+                  <div class="settings-actions">
+                    <button id="traeworkTokenSubmit" data-i18n="settings.traework.saveToken">Save token</button>
+                  </div>
+                </div>
+                <div id="traeworkErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="ollamaAccountGroup" class="settings-group cursor-account-group">
               <button id="ollamaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="ollamaSettingsDetails">
                 <span data-i18n="settings.ollama.title">Ollama Account</span>

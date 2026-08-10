@@ -43,6 +43,10 @@ const volcengineLimits = require('./volcengineLimits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('./qoderLimits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
+const workbuddyLimits = require('./workbuddyLimits');
+const { workbuddyAccessToken, workbuddyUid, fetchWorkbuddyLimits } = workbuddyLimits;
+const traeWorkLimits = require('./traeWorkLimits');
+const { traeWorkAccessToken, traeWorkDeviceId, fetchTraeWorkLimits } = traeWorkLimits;
 const ollamaLimits = require('./ollamaLimits');
 const { ollamaSessionCookie, fetchOllamaLimits } = ollamaLimits;
 const kimiLimits = require('./kimiLimits');
@@ -3474,6 +3478,8 @@ function providerFetchers(deps = {}) {
     zaiteam: (providerOptions, probeDeps) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, probeDeps),
     volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
+    workbuddy: (providerOptions, probeDeps) => workbuddyLimits.fetchWorkbuddyLimits(providerOptions, probeDeps),
+    traework: (providerOptions, probeDeps) => traeWorkLimits.fetchTraeWorkLimits(providerOptions, probeDeps),
     ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
     thirdparty: (providerOptions, probeDeps) => thirdPartyLimits.fetchThirdPartyLimits(providerOptions, probeDeps),
@@ -3824,6 +3830,12 @@ module.exports = {
   fetchVolcengineLimits,
   qoderCookie,
   fetchQoderLimits,
+  workbuddyAccessToken,
+  workbuddyUid,
+  fetchWorkbuddyLimits,
+  traeWorkAccessToken,
+  traeWorkDeviceId,
+  fetchTraeWorkLimits,
   ollamaSessionCookie,
   fetchOllamaLimits,
   kimiToken,

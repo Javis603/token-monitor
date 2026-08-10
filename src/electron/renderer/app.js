@@ -11,7 +11,7 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma',
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'traework', 'proma',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 
@@ -87,6 +87,8 @@ const LIMIT_PROVIDERS = [
   { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'qoder', label: 'Qoder' },
+  { id: 'workbuddy', label: 'WorkBuddy' },
+  { id: 'traework', label: 'Trae Work' },
   { id: 'ollama', label: 'Ollama' },
   { id: 'thirdparty', label: 'Third-party APIs' }
 ];
@@ -105,6 +107,8 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
   qoder: 'qoderAccountGroup',
+  workbuddy: 'workbuddyAccountGroup',
+  traework: 'traeworkAccountGroup',
   ollama: 'ollamaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
 };
@@ -123,6 +127,8 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
   qoder: 'qoderAccountStatus',
+  workbuddy: 'workbuddyAccountStatus',
+  traework: 'traeworkAccountStatus',
   ollama: 'ollamaAccountStatus',
   thirdparty: 'thirdpartyStatus'
 };
@@ -293,7 +299,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, workbuddyAccountExpanded: false, workbuddyPendingCheckSince: 0, traeworkAccountExpanded: false, traeworkPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -7755,6 +7761,8 @@ function syncSettingsForm() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('workbuddy');
+  renderExternalProviderStatus('traework');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
   renderMimoStatus();
@@ -10669,6 +10677,8 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('workbuddy');
+  renderExternalProviderStatus('traework');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
   renderCopilotStatus();
@@ -12354,6 +12364,16 @@ const externalLimitAccountConfig = {
     configuredKey: 'qoderCookieConfigured',
     sourceKey: 'qoderCookieSource',
     pendingKey: 'qoderPendingCheckSince'
+  },
+  workbuddy: {
+    configuredKey: 'workbuddyAccessTokenConfigured',
+    sourceKey: 'workbuddyAccessTokenSource',
+    pendingKey: 'workbuddyPendingCheckSince'
+  },
+  traework: {
+    configuredKey: 'traeWorkAccessTokenConfigured',
+    sourceKey: 'traeWorkAccessTokenSource',
+    pendingKey: 'traeworkPendingCheckSince'
   },
   kimi: {
     configuredKey: 'kimiCredentialConfigured',
@@ -14204,6 +14224,103 @@ function setupCursorAccountUI() {
       } catch (err) {
         clearExternalProviderCheckPending('qoder');
         errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const workbuddyToggle = document.getElementById('workbuddySettingsToggle');
+  if (workbuddyToggle) {
+    workbuddyToggle.addEventListener('click', () => setExternalAccountExpanded('workbuddy', !state.workbuddyAccountExpanded));
+    setExternalAccountExpanded('workbuddy', false);
+    renderExternalProviderStatus('workbuddy');
+
+    document.getElementById('workbuddyOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal('https://www.codebuddy.cn');
+    });
+    document.getElementById('workbuddyLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ workbuddyAccessToken: '', workbuddyUid: '' });
+      clearExternalProviderCheckPending('workbuddy');
+      clearExternalProviderPendingStatus('workbuddy');
+      renderExternalProviderStatus('workbuddy');
+      await refreshStats({ force: true });
+    });
+    document.getElementById('workbuddyRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('workbuddyTokenSubmit').addEventListener('click', async () => {
+      const tokenInput = document.getElementById('workbuddyTokenInput');
+      const uidInput = document.getElementById('workbuddyUidInput');
+      const errorEl = document.getElementById('workbuddyErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(tokenInput.value || '').trim() || !String(uidInput.value || '').trim()) {
+        errorEl.textContent = t('settings.workbuddy.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('workbuddy');
+        await saveSettings({ workbuddyAccessToken: tokenInput.value.trim(), workbuddyUid: uidInput.value.trim() });
+        tokenInput.value = '';
+        uidInput.value = '';
+        renderExternalProviderStatus('workbuddy');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('workbuddy', !externalProviderAccountLinked('workbuddy'));
+        renderExternalProviderStatus('workbuddy');
+      } catch (err) {
+        clearExternalProviderCheckPending('workbuddy');
+        errorEl.textContent = t('settings.workbuddy.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const traeworkToggle = document.getElementById('traeworkSettingsToggle');
+  if (traeworkToggle) {
+    traeworkToggle.addEventListener('click', () => setExternalAccountExpanded('traework', !state.traeworkAccountExpanded));
+    setExternalAccountExpanded('traework', false);
+    renderExternalProviderStatus('traework');
+
+    document.getElementById('traeworkOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal('https://www.trae.cn');
+    });
+    document.getElementById('traeworkLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ traeWorkAccessToken: '', traeWorkDeviceId: '' });
+      clearExternalProviderCheckPending('traework');
+      clearExternalProviderPendingStatus('traework');
+      renderExternalProviderStatus('traework');
+      await refreshStats({ force: true });
+    });
+    document.getElementById('traeworkRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('traeworkTokenSubmit').addEventListener('click', async () => {
+      const tokenInput = document.getElementById('traeworkTokenInput');
+      const deviceIdInput = document.getElementById('traeworkDeviceIdInput');
+      const errorEl = document.getElementById('traeworkErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(tokenInput.value || '').trim()) {
+        errorEl.textContent = t('settings.traework.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('traework');
+        await saveSettings({
+          traeWorkAccessToken: tokenInput.value.trim(),
+          traeWorkDeviceId: String(deviceIdInput.value || '').trim()
+        });
+        tokenInput.value = '';
+        deviceIdInput.value = '';
+        renderExternalProviderStatus('traework');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('traework', !externalProviderAccountLinked('traework'));
+        renderExternalProviderStatus('traework');
+      } catch (err) {
+        clearExternalProviderCheckPending('traework');
+        errorEl.textContent = t('settings.traework.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }
     });

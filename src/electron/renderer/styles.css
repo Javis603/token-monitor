@@ -3335,6 +3335,7 @@ html.is-windows .settings-panel select option {
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
+.row-icon-traework   { -webkit-mask-image: url(../../../assets/icons/trae.svg);           mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/newapi.svg);         mask-image: url(../../../assets/icons/newapi.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }

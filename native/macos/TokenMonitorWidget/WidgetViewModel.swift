@@ -729,6 +729,8 @@ enum WidgetFormat {
         case "minimax": "Minimax"
         case "volcengine": "Volcengine"
         case "qoder": "Qoder"
+        case "workbuddy": "WorkBuddy"
+        case "traework": "Trae Work"
         case "ollama": "Ollama"
         case "thirdparty": "Third-party APIs"
         default: value.capitalized

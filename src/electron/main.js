@@ -51,7 +51,7 @@ const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocal
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, workbuddyAccessToken, workbuddyUid, traeWorkAccessToken, traeWorkDeviceId, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -441,6 +441,10 @@ function defaultSettings() {
     volcengineRegion: '',
     qoderCookie: '',
     qoderSite: 'global',
+    workbuddyAccessToken: '',
+    workbuddyUid: '',
+    traeWorkAccessToken: '',
+    traeWorkDeviceId: '',
     kimiApiKey: '',
     kimiWebAccessToken: '',
     ollamaCookie: '',
@@ -672,6 +676,38 @@ function normalizeQoderSite(value) {
 
 function currentQoderCookie() {
   return settings?.qoderCookie || qoderCookie(process.env);
+}
+
+function normalizeWorkbuddyAccessToken(value) {
+  return workbuddyAccessToken({}, { workbuddyAccessToken: String(value || '') });
+}
+
+function normalizeWorkbuddyUid(value) {
+  return workbuddyUid({}, { workbuddyUid: String(value || '') });
+}
+
+function currentWorkbuddyAccessToken() {
+  return settings?.workbuddyAccessToken || workbuddyAccessToken(process.env);
+}
+
+function currentWorkbuddyUid() {
+  return settings?.workbuddyUid || workbuddyUid(process.env);
+}
+
+function normalizeTraeWorkAccessToken(value) {
+  return traeWorkAccessToken({}, { traeWorkAccessToken: String(value || '') });
+}
+
+function normalizeTraeWorkDeviceId(value) {
+  return traeWorkDeviceId({}, { traeWorkDeviceId: String(value || '') });
+}
+
+function currentTraeWorkAccessToken() {
+  return settings?.traeWorkAccessToken || traeWorkAccessToken(process.env);
+}
+
+function currentTraeWorkDeviceId() {
+  return settings?.traeWorkDeviceId || traeWorkDeviceId(process.env);
 }
 
 function normalizeOllamaCookie(value) {
@@ -4033,6 +4069,21 @@ function settingsForRenderer() {
     : qoderCookie(process.env)
       ? 'env'
       : '';
+  const workbuddyAccessTokenSource = settings?.workbuddyAccessToken
+    ? 'settings'
+    : workbuddyAccessToken(process.env)
+      ? 'env'
+      : '';
+  const workbuddyUidSource = settings?.workbuddyUid
+    ? 'settings'
+    : workbuddyUid(process.env)
+      ? 'env'
+      : '';
+  const traeWorkAccessTokenSource = settings?.traeWorkAccessToken
+    ? 'settings'
+    : traeWorkAccessToken(process.env)
+      ? 'env'
+      : '';
   const ollamaCookieSource = settings?.ollamaCookie
     ? 'settings'
     : ollamaSessionCookie(process.env)
@@ -4075,6 +4126,9 @@ function settingsForRenderer() {
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
     claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
     qoderCookie: settings?.qoderCookie ? 'set' : '',
+    workbuddyAccessToken: settings?.workbuddyAccessToken ? 'set' : '',
+    workbuddyUid: settings?.workbuddyUid ? 'set' : '',
+    traeWorkAccessToken: settings?.traeWorkAccessToken ? 'set' : '',
     ollamaCookie: settings?.ollamaCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
     // know whether a cookie is configured, not its value.
@@ -4108,6 +4162,11 @@ function settingsForRenderer() {
     volcengineCredentialsSource,
     qoderCookieConfigured: Boolean(currentQoderCookie()),
     qoderCookieSource,
+    workbuddyAccessTokenConfigured: Boolean(currentWorkbuddyAccessToken()) && Boolean(currentWorkbuddyUid()),
+    workbuddyAccessTokenSource,
+    workbuddyUidSource,
+    traeWorkAccessTokenConfigured: Boolean(currentTraeWorkAccessToken()),
+    traeWorkAccessTokenSource,
     ollamaCookieConfigured: Boolean(currentOllamaCookie()),
     ollamaCookieSource,
     kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
@@ -5687,6 +5746,10 @@ app.whenReady().then(() => {
     if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
+    if (patch.workbuddyAccessToken !== undefined) normalizedPatch.workbuddyAccessToken = normalizeWorkbuddyAccessToken(patch.workbuddyAccessToken);
+    if (patch.workbuddyUid !== undefined) normalizedPatch.workbuddyUid = normalizeWorkbuddyUid(patch.workbuddyUid);
+    if (patch.traeWorkAccessToken !== undefined) normalizedPatch.traeWorkAccessToken = normalizeTraeWorkAccessToken(patch.traeWorkAccessToken);
+    if (patch.traeWorkDeviceId !== undefined) normalizedPatch.traeWorkDeviceId = normalizeTraeWorkDeviceId(patch.traeWorkDeviceId);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
     if (patch.ollamaCookie !== undefined) normalizedPatch.ollamaCookie = normalizeOllamaCookie(patch.ollamaCookie);
@@ -5799,6 +5862,10 @@ app.whenReady().then(() => {
       volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
       qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
+      workbuddyAccessToken: patch.workbuddyAccessToken !== undefined ? normalizeWorkbuddyAccessToken(patch.workbuddyAccessToken) : (settings.workbuddyAccessToken || ''),
+      workbuddyUid: patch.workbuddyUid !== undefined ? normalizeWorkbuddyUid(patch.workbuddyUid) : (settings.workbuddyUid || ''),
+      traeWorkAccessToken: patch.traeWorkAccessToken !== undefined ? normalizeTraeWorkAccessToken(patch.traeWorkAccessToken) : (settings.traeWorkAccessToken || ''),
+      traeWorkDeviceId: patch.traeWorkDeviceId !== undefined ? normalizeTraeWorkDeviceId(patch.traeWorkDeviceId) : (settings.traeWorkDeviceId || ''),
       ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
