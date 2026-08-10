@@ -135,7 +135,7 @@ function executeMacWidgetDemandWiring() {
   const calls = { scheduled: [] };
   const context = vm.createContext({
     process: { platform: 'darwin' },
-    path,
+    path: path.posix,
     WIDGET_DEMAND_MARKER: require('../../src/electron/macWidgetDemand').WIDGET_DEMAND_MARKER,
     macWidgetDemand: null,
     macWidgetConfiguration: () => ({
