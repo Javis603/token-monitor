@@ -133,10 +133,15 @@ function executeMacWidgetDemandWiring() {
   };
   const captured = [];
   const calls = { scheduled: [] };
+  const {
+    WIDGET_DEMAND_MARKER,
+    WIDGET_DEMAND_PROVISIONAL_MARKER
+  } = require('../../src/electron/macWidgetDemand');
   const context = vm.createContext({
     process: { platform: 'darwin' },
     path: path.posix,
-    WIDGET_DEMAND_MARKER: require('../../src/electron/macWidgetDemand').WIDGET_DEMAND_MARKER,
+    WIDGET_DEMAND_MARKER,
+    WIDGET_DEMAND_PROVISIONAL_MARKER,
     macWidgetDemand: null,
     macWidgetConfiguration: () => ({
       snapshotPath: '/Users/acceptance/Library/Group Containers/group.com.tokenmonitor/snapshot.json'
@@ -163,6 +168,10 @@ test('main wiring arms Widget demand from the app-group marker and gates snapsho
     execution.captured[0].markerPath,
     '/Users/acceptance/Library/Group Containers/group.com.tokenmonitor/widget-demand'
   );
+  assert.equal(
+    execution.captured[0].provisionalMarkerPath,
+    '/Users/acceptance/Library/Group Containers/group.com.tokenmonitor/widget-demand-provisional'
+  );
   assert.equal(execution.state.startCalls, 1);
 
   vm.runInContext('ensureMacWidgetDemand()', execution.context);
@@ -183,9 +192,14 @@ test('Widget demand gate, startup arm and quit stop are wired into the snapshot 
   const demandStart = mainSource.indexOf('function ensureMacWidgetDemand()');
   const demandEnd = mainSource.indexOf('\nfunction captureMacWidgetWork', demandStart);
   const demandSource = mainSource.slice(demandStart, demandEnd);
+  assert.match(demandSource, /const markerDirectory = path\.dirname\(widget\.snapshotPath\);/);
   assert.match(
     demandSource,
-    /markerPath: path\.join\(path\.dirname\(widget\.snapshotPath\), WIDGET_DEMAND_MARKER\)/
+    /markerPath: path\.join\(markerDirectory, WIDGET_DEMAND_MARKER\),/
+  );
+  assert.match(
+    demandSource,
+    /provisionalMarkerPath: path\.join\(markerDirectory, WIDGET_DEMAND_PROVISIONAL_MARKER\),/
   );
   assert.match(
     demandSource,
@@ -322,16 +336,23 @@ test('Widget demand lease marker contract stays aligned between Swift and Electr
     path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'WidgetTimelineProvider.swift'),
     'utf8'
   );
-  const { WIDGET_DEMAND_MARKER } = require('../../src/electron/macWidgetDemand');
+  const {
+    WIDGET_DEMAND_MARKER,
+    WIDGET_DEMAND_PROVISIONAL_MARKER
+  } = require('../../src/electron/macWidgetDemand');
 
-  // The marker filename is the one cross-process contract: Electron lstat's it
-  // from the app group container and the extension writes it. They may not drift.
+  // The marker filenames are the one cross-process contract: Electron lstat's
+  // them from the app group container and the extension writes them. They may
+  // not drift.
   assert.match(widgetDemandSource, /static let fileName = "widget-demand"/);
   assert.equal(WIDGET_DEMAND_MARKER, 'widget-demand');
+  assert.match(widgetDemandSource, /static let provisionalFileName = "widget-demand-provisional"/);
+  assert.equal(WIDGET_DEMAND_PROVISIONAL_MARKER, 'widget-demand-provisional');
 
-  // timeline() always records demand; snapshot() only outside the gallery
-  // preview; placeholder() must never write demand or a gallery browse would
-  // keep a nonexistent Widget's pipeline warm forever.
+  // timeline() always records the full lease; snapshot() only writes the short
+  // provisional lease outside the gallery preview; placeholder() must never
+  // write either or a gallery browse would keep a nonexistent Widget's pipeline
+  // warm forever.
   const placeholder = providerSource.slice(
     providerSource.indexOf('func placeholder('),
     providerSource.indexOf('func snapshot(')
@@ -345,8 +366,9 @@ test('Widget demand lease marker contract stays aligned between Swift and Electr
     providerSource.indexOf('private func currentPeriod()')
   );
   assert.doesNotMatch(placeholder, /WidgetDemandMarker/);
-  assert.match(snapshot, /if !context\.isPreview \{[\s\S]*WidgetDemandMarker\.noteRequested\(/);
+  assert.match(snapshot, /if !context\.isPreview \{[\s\S]*WidgetDemandMarker\.noteRequested\([\s\S]*WidgetDemandMarker\.provisionalFileName/);
   assert.match(timeline, /WidgetDemandMarker\.noteRequested\(/);
+  assert.doesNotMatch(timeline, /provisionalFileName/);
 
   // The marker compiles into both the extension and its test target.
   assert.match(widgetProject, /100000000000000000000010 \/\* WidgetDemandMarker\.swift in Sources \*\//);

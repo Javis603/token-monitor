@@ -4,23 +4,30 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   DEFAULT_DEMAND_LEASE_MS,
+  DEFAULT_PROVISIONAL_LEASE_MS,
   DEFAULT_RECONCILE_MS,
   createMacWidgetDemandState
 } = require('../../src/electron/macWidgetDemand');
 
 const BASE_CLOCK = 1_000_000;
 const MARKER_PATH = '/home/Library/Group Containers/group.com.tokenmonitor/widget-demand';
+const PROVISIONAL_MARKER_PATH = '/home/Library/Group Containers/group.com.tokenmonitor/widget-demand-provisional';
 
-function createHarness(options = {}, initialMtime = null) {
+function createHarness(options = {}, initialMarkers = {}) {
   let clock = BASE_CLOCK;
   let activations = 0;
   let intervalCallback = null;
   let watcherCallback = null;
   let watchCalls = 0;
-  let markerMtime = initialMtime;
+  const markerMtime = {
+    full: initialMarkers.full ?? null,
+    provisional: initialMarkers.provisional ?? null
+  };
   const state = createMacWidgetDemandState({
     markerPath: MARKER_PATH,
+    provisionalMarkerPath: PROVISIONAL_MARKER_PATH,
     leaseMs: DEFAULT_DEMAND_LEASE_MS,
+    provisionalLeaseMs: DEFAULT_PROVISIONAL_LEASE_MS,
     reconcileMs: DEFAULT_RECONCILE_MS,
     now: () => clock,
     setInterval: (callback) => {
@@ -36,9 +43,11 @@ function createHarness(options = {}, initialMtime = null) {
       return { close: () => { watcherCallback = null; }, on: () => {} };
     },
     fs: {
-      lstatSync: () => {
-        if (markerMtime === null) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-        return { mtimeMs: markerMtime };
+      lstatSync: (targetPath) => {
+        const which = targetPath === MARKER_PATH ? 'full' : 'provisional';
+        const mtime = markerMtime[which];
+        if (mtime === null) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        return { mtimeMs: mtime };
       }
     },
     onActivation: () => {
@@ -54,9 +63,14 @@ function createHarness(options = {}, initialMtime = null) {
     state,
     clock: { advance: (milliseconds) => { clock += milliseconds; } },
     marker: {
-      touch: () => { markerMtime = clock; },
-      age: (milliseconds) => { markerMtime = clock - milliseconds; },
-      remove: () => { markerMtime = null; }
+      touch: () => { markerMtime.full = clock; },
+      age: (milliseconds) => { markerMtime.full = clock - milliseconds; },
+      remove: () => { markerMtime.full = null; }
+    },
+    provisional: {
+      touch: () => { markerMtime.provisional = clock; },
+      age: (milliseconds) => { markerMtime.provisional = clock - milliseconds; },
+      remove: () => { markerMtime.provisional = null; }
     },
     activations: () => activations,
     watchCalls: () => watchCalls,
@@ -76,14 +90,14 @@ test('a never-existing marker closes the gate from the first probe', () => {
 });
 
 test('a fresh marker keeps the gate open', () => {
-  const harness = createHarness({}, BASE_CLOCK - 1_000);
+  const harness = createHarness({}, { full: BASE_CLOCK - 1_000 });
   assert.equal(harness.state.isInstalled(), true);
 });
 
 test('a marker as old as the lease closes the gate', () => {
-  const stale = createHarness({}, BASE_CLOCK - DEFAULT_DEMAND_LEASE_MS);
+  const stale = createHarness({}, { full: BASE_CLOCK - DEFAULT_DEMAND_LEASE_MS });
   assert.equal(stale.state.isInstalled(), false);
-  const fresh = createHarness({}, BASE_CLOCK - (DEFAULT_DEMAND_LEASE_MS - 1));
+  const fresh = createHarness({}, { full: BASE_CLOCK - (DEFAULT_DEMAND_LEASE_MS - 1) });
   assert.equal(fresh.state.isInstalled(), true);
 });
 
@@ -110,7 +124,7 @@ test('a missed watcher event is caught by the reconcile poll', async () => {
 });
 
 test('a stale→fresh transition fires activation', async () => {
-  const harness = createHarness({}, BASE_CLOCK - (DEFAULT_DEMAND_LEASE_MS + 1));
+  const harness = createHarness({}, { full: BASE_CLOCK - (DEFAULT_DEMAND_LEASE_MS + 1) });
   assert.equal(harness.state.isInstalled(), false);
   harness.state.start();
   harness.marker.touch();
@@ -121,7 +135,7 @@ test('a stale→fresh transition fires activation', async () => {
 });
 
 test('removal closes the gate without firing activation', async () => {
-  const harness = createHarness({}, BASE_CLOCK - 1_000);
+  const harness = createHarness({}, { full: BASE_CLOCK - 1_000 });
   assert.equal(harness.state.isInstalled(), true);
   harness.state.start();
   harness.marker.remove();
@@ -166,10 +180,69 @@ test('start is idempotent and attaches a single watcher', () => {
 });
 
 test('an already-fresh marker at start does not re-fire activation', async () => {
-  const harness = createHarness({}, BASE_CLOCK - 1_000);
+  const harness = createHarness({}, { full: BASE_CLOCK - 1_000 });
   harness.state.start();
   harness.fireInterval();
   await harness.flush();
   assert.equal(harness.activations(), 0);
   assert.equal(harness.state.isInstalled(), true);
+});
+
+test('a provisional-only signal opens the gate without the full lease', () => {
+  const harness = createHarness({}, { provisional: BASE_CLOCK - 1_000 });
+  assert.equal(harness.state.isInstalled(), true);
+});
+
+test('a provisional signal as old as its short lease closes the gate', () => {
+  const stale = createHarness({}, { provisional: BASE_CLOCK - DEFAULT_PROVISIONAL_LEASE_MS });
+  assert.equal(stale.state.isInstalled(), false);
+  const fresh = createHarness({}, { provisional: BASE_CLOCK - (DEFAULT_PROVISIONAL_LEASE_MS - 1) });
+  assert.equal(fresh.state.isInstalled(), true);
+});
+
+test('a full lease overrides a stale provisional signal', () => {
+  const harness = createHarness({}, {
+    full: BASE_CLOCK - 1_000,
+    provisional: BASE_CLOCK - DEFAULT_PROVISIONAL_LEASE_MS
+  });
+  assert.equal(harness.state.isInstalled(), true);
+});
+
+test('a cancelled add flow expires and a later timeline reopens the gate', async () => {
+  const harness = createHarness({}, { provisional: BASE_CLOCK - 1_000 });
+  assert.equal(harness.state.isInstalled(), true);
+  harness.state.start();
+
+  // The user cancels placement: the provisional signal expires on its own.
+  harness.provisional.remove();
+  harness.clock.advance(DEFAULT_RECONCILE_MS);
+  harness.fireInterval();
+  await harness.flush();
+  assert.equal(harness.state.isInstalled(), false);
+
+  // A real placement is then confirmed: the first timeline() writes the full
+  // marker, which must reopen the gate immediately.
+  harness.marker.touch();
+  harness.fireWatcher();
+  await harness.flush();
+  assert.equal(harness.state.isInstalled(), true);
+  assert.equal(harness.activations(), 1);
+});
+
+test('snapshot-only demand keeps the full lease idle so a no-widget user pays little', async () => {
+  const harness = createHarness();
+  harness.state.start();
+  harness.provisional.touch();
+  harness.fireWatcher();
+  await harness.flush();
+  assert.equal(harness.state.isInstalled(), true);
+  assert.equal(harness.activations(), 1);
+
+  // The provisional lease is short: after it expires with no full marker, the
+  // gate closes and a no-widget user is back to zero pipeline cost.
+  harness.provisional.age(DEFAULT_PROVISIONAL_LEASE_MS);
+  harness.clock.advance(DEFAULT_RECONCILE_MS);
+  harness.fireInterval();
+  await harness.flush();
+  assert.equal(harness.state.isInstalled(), false);
 });

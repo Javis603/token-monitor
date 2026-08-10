@@ -1293,6 +1293,26 @@ final class WidgetDemandMarkerTests: XCTestCase {
         ))
     }
 
+    func testProvisionalSignalWritesItsOwnFileOnly() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let full = directory.appendingPathComponent(WidgetDemandMarker.fileName)
+        let provisional = directory.appendingPathComponent(WidgetDemandMarker.provisionalFileName)
+
+        WidgetDemandMarker.noteRequested(
+            fileName: WidgetDemandMarker.provisionalFileName,
+            container: directory,
+            now: Date(timeIntervalSince1970: 1_000_000)
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: full.path),
+                       "snapshot demand must not touch the full lease")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: provisional.path))
+        let attributes = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: provisional.path))
+        XCTAssertEqual(try XCTUnwrap(attributes[.size] as? Int), 0)
+        XCTAssertEqual(try XCTUnwrap(attributes[.modificationDate] as? Date), Date(timeIntervalSince1970: 1_000_000))
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("demand-marker-\(UUID().uuidString)")

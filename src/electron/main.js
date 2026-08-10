@@ -165,7 +165,7 @@ const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServ
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
-const { WIDGET_DEMAND_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
+const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
 const linuxAutostart = require('./linuxAutostart');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
@@ -3450,13 +3450,16 @@ function ensureMacWidgetDemand() {
   if (macWidgetDemand) return macWidgetDemand;
   const widget = macWidgetConfiguration();
   if (!widget) return null;
-  // The demand lease lives beside the snapshot in the app group container. The
-  // widget extension touches it whenever WidgetKit genuinely asks for data, so
-  // a fresh marker here means "a Widget is on screen and wants updates". The
+  // The demand leases live beside the snapshot in the app group container. The
+  // widget extension touches the full marker on every timeline() request and
+  // the short provisional marker on a non-gallery snapshot() (the add flow),
+  // so a fresh marker here means "a Widget is on screen or being placed". The
   // watcher arms immediately so a first placement primes the initial snapshot
   // within moments; the reconcile poll catches anything the watcher missed.
+  const markerDirectory = path.dirname(widget.snapshotPath);
   macWidgetDemand = createMacWidgetDemandState({
-    markerPath: path.join(path.dirname(widget.snapshotPath), WIDGET_DEMAND_MARKER),
+    markerPath: path.join(markerDirectory, WIDGET_DEMAND_MARKER),
+    provisionalMarkerPath: path.join(markerDirectory, WIDGET_DEMAND_PROVISIONAL_MARKER),
     onActivation: () => {
       const visibleStats = electronPresentationStats(latestStats);
       scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());

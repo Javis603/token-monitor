@@ -16,7 +16,11 @@ struct TokenMonitorTimelineProvider: AppIntentTimelineProvider {
     func snapshot(for configuration: TokenMonitorWidgetConfigurationIntent, in context: Context) async -> TokenMonitorEntry {
         let now = Date()
         if !context.isPreview {
-            WidgetDemandMarker.noteRequested(appGroup: TokenMonitorWidgetConfiguration.appGroup, now: now)
+            WidgetDemandMarker.noteRequested(
+                fileName: WidgetDemandMarker.provisionalFileName,
+                appGroup: TokenMonitorWidgetConfiguration.appGroup,
+                now: now
+            )
         }
         let page = effectivePage(for: configuration, family: context.family)
         let period = WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: currentPeriod())

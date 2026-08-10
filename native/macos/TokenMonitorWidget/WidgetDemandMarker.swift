@@ -12,9 +12,18 @@ import Foundation
 // resolve it to the same path, and it is touched by updating mtime only (never
 // content), matching the host's `lstatSync`-based lease check.
 enum WidgetDemandMarker {
+    /// Touched by timeline(): a placed Widget asks for its next update. Fresh
+    /// means "a Widget is on screen and wants updates", so this is the full lease.
     static let fileName = "widget-demand"
 
+    /// Touched by snapshot() outside the gallery. WidgetKit calls snapshot() for
+    /// transient situations that include the add flow, before the user confirms
+    /// placement, so this signal only warms up a possible first placement and
+    /// must grant a short lease, never the full one.
+    static let provisionalFileName = "widget-demand-provisional"
+
     static func noteRequested(
+        fileName: String = Self.fileName,
         appGroup: String = "",
         container: URL? = nil,
         fileManager: FileManager = .default,
