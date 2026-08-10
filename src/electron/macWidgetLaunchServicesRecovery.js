@@ -9,8 +9,8 @@ const {
   writePrivateJsonAtomic
 } = require('../shared/credentialStore');
 
-const LSREGISTER_PATH = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister';
 const MARKER_FILE_NAME = 'mac-widget-launchservices-registration.json';
+const REGISTER_HOST_ARGUMENT = '--register-host';
 const MARKER_SCHEMA_VERSION = 1;
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_REVALIDATE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
@@ -58,6 +58,15 @@ function isDirectory(fsApi, candidate) {
   }
 }
 
+function isRegularFile(fsApi, candidate) {
+  try {
+    const stat = fsApi.lstatSync(candidate);
+    return stat.isFile() && !stat.isSymbolicLink();
+  } catch (_) {
+    return false;
+  }
+}
+
 function log(logger, message) {
   try { logger?.(message); } catch (_) {}
 }
@@ -98,12 +107,12 @@ function readMarker(markerPath, fsApi, readPrivateFile, logger) {
   return null;
 }
 
-function runRegistration(execFileImpl, hostAppPath, timeoutMs, signal) {
+function runRegistration(execFileImpl, helperPath, timeoutMs, signal) {
   return new Promise((resolve) => {
     try {
       execFileImpl(
-        LSREGISTER_PATH,
-        ['-f', hostAppPath],
+        helperPath,
+        [REGISTER_HOST_ARGUMENT],
         {
           shell: false,
           timeout: timeoutMs,
@@ -148,6 +157,7 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
     try {
       const resourcesPath = path.resolve(String(input.resourcesPath || ''));
       const configPath = path.join(resourcesPath, 'token-monitor-widget.json');
+      const helperPath = path.join(resourcesPath, 'TokenMonitorWidgetReloader');
       const contentsPath = path.resolve(resourcesPath, '..');
       const appexPath = path.join(contentsPath, 'PlugIns', 'TokenMonitorWidget.appex');
       const hostAppPath = path.resolve(contentsPath, '..');
@@ -155,6 +165,7 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
         !hostAppPath.endsWith('.app')
         || !isDirectory(fsApi, hostAppPath)
         || !isDirectory(fsApi, appexPath)
+        || !isRegularFile(fsApi, helperPath)
       ) {
         return { status: 'skipped', reason: 'artifacts-missing' };
       }
@@ -196,7 +207,7 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
         return { status: 'skipped', reason: 'cancelled' };
       }
 
-      const error = await runRegistration(execFileImpl, hostAppPath, timeoutMs, input.signal);
+      const error = await runRegistration(execFileImpl, helperPath, timeoutMs, input.signal);
       if (input.signal?.aborted || error?.code === 'ABORT_ERR') {
         log(input.logger, '[mac-widget] LaunchServices registration refresh cancelled');
         return { status: 'failed', reason: 'cancelled' };
@@ -238,7 +249,6 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
 }
 
 module.exports = {
-  LSREGISTER_PATH,
   MARKER_FILE_NAME,
   createMacWidgetLaunchServicesRecovery
 };

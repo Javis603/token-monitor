@@ -7,7 +7,6 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
-  LSREGISTER_PATH,
   MARKER_FILE_NAME,
   createMacWidgetLaunchServicesRecovery
 } = require('../../src/electron/macWidgetLaunchServicesRecovery');
@@ -33,9 +32,11 @@ function fixture(options = {}) {
   const contentsPath = path.join(appPath, 'Contents');
   const resourcesPath = path.join(contentsPath, 'Resources');
   const appexPath = path.join(contentsPath, 'PlugIns', 'TokenMonitorWidget.appex');
+  const helperPath = path.join(resourcesPath, 'TokenMonitorWidgetReloader');
   const userDataPath = path.join(root, 'user-data');
   fs.mkdirSync(resourcesPath, { recursive: true });
   if (options.appex !== false) fs.mkdirSync(appexPath, { recursive: true });
+  if (options.helper !== false) fs.writeFileSync(helperPath, 'test');
   if (options.config !== false) {
     const config = options.config || CONFIG;
     fs.writeFileSync(
@@ -103,7 +104,7 @@ test('skips unsupported and unpackaged processes before filesystem access', asyn
 });
 
 test('missing packaged Widget artifacts do not launch or create marker state', async () => {
-  for (const missing of ['config', 'appex']) {
+  for (const missing of ['config', 'appex', 'helper']) {
     const setup = fixture({ [missing]: false });
     try {
       let launches = 0;
@@ -144,16 +145,20 @@ test('malformed or incomplete packaged config fails open without registration', 
   }
 });
 
-test('force-registers the containing host app with a bounded no-shell command', async () => {
+test('launches the packaged native helper in host-registration mode with bounded options', async () => {
   const setup = fixture();
   const calls = [];
   try {
     const recover = createMacWidgetLaunchServicesRecovery({ execFile: successfulExec(calls) });
     assert.deepEqual(await run(recover, setup), { status: 'completed' });
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].file, LSREGISTER_PATH);
-    assert.deepEqual(calls[0].args, ['-f', setup.appPath]);
-    assert.notEqual(calls[0].args[1], setup.appexPath);
+    assert.equal(
+      calls[0].file,
+      path.join(setup.resourcesPath, 'TokenMonitorWidgetReloader')
+    );
+    assert.deepEqual(calls[0].args, ['--register-host']);
+    assert.equal(calls[0].args.includes(setup.appPath), false);
+    assert.equal(calls[0].args.includes(setup.appexPath), false);
     assert.equal(calls[0].options.shell, false);
     assert.equal(calls[0].options.timeout, 5_000);
     assert.equal(calls[0].options.killSignal, 'SIGKILL');
