@@ -11,7 +11,8 @@ const { LIMIT_PROVIDER_IDS } = require('./limitProviders');
 const {
   DEFAULT_LIMITS_REFRESH_MS,
   normalizeLimitProvider,
-  normalizeLimitsSummary
+  normalizeLimitsSummary,
+  openCodeWindowKey
 } = require('./limits');
 const { parseRetryAfterHeader } = require('./limitsRetryPolicy');
 const { abortError } = require('./probeDeadline');
@@ -3119,6 +3120,18 @@ function openCodeWebIdentity(goWeb, zen, cookie) {
 
 const OPENCODE_COMPONENT_PROVENANCE_DETAIL = 'managed';
 
+function openCodeSupplementalZenWindows(goWeb, zen) {
+  const goWindowKeys = new Set(
+    (goWeb?.status === 'ok' ? goWeb.windows || [] : [])
+      .map(openCodeWindowKey)
+      .filter(Boolean)
+  );
+  return (zen?.windows || []).filter((window) => {
+    const key = openCodeWindowKey(window);
+    return !key || !goWindowKeys.has(key);
+  });
+}
+
 async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
@@ -3192,7 +3205,8 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     }
 
     if (zen && webIdentity.includeZen) {
-      windows.push(...zen.windows.map((window) => ({ ...window, source: 'web' })));
+      windows.push(...openCodeSupplementalZenWindows(goWeb, zen)
+        .map((window) => ({ ...window, source: 'web' })));
       status = 'ok';
       // The provider-level source is the compatibility envelope used by Hubs
       // that predate windows[].source. It may claim Web only when every quota
@@ -3281,7 +3295,8 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
 
     const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
     if (zen && webIdentity.includeZen) {
-      windows.push(...zen.windows.map((window) => ({ ...window, source: 'web' })));
+      windows.push(...openCodeSupplementalZenWindows(goWeb, zen)
+        .map((window) => ({ ...window, source: 'web' })));
       status = 'ok';
       if (!planLabel) planLabel = 'Zen';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;

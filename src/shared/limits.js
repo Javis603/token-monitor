@@ -609,7 +609,11 @@ function carryProviderBalance(winner, loser) {
 }
 
 function openCodeWindowKey(window) {
-  return [window?.kind, window?.metric, window?.label].map((value) => String(value || '')).join(':');
+  const normalized = normalizeLimitWindow(window);
+  if (!normalized) return '';
+  return [normalized.kind, normalized.metric, normalized.label]
+    .map((value) => String(value || ''))
+    .join(':');
 }
 
 function openCodeWindowSourceRank(window) {
@@ -857,6 +861,7 @@ module.exports = {
   normalizeLimitProvider,
   normalizeLimitsSummary,
   normalizeLimitWindow,
+  openCodeWindowKey,
   publicLimits,
   syncLimits
 };

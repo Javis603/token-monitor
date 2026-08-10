@@ -309,6 +309,76 @@ test('fetchOpenCodeLimits: Go web ok + Zen ok shows Go windows and Zen balance',
   assert.strictEqual(p.balanceUsd, 9.5);
 });
 
+test('fetchOpenCodeLimits: Go Web owns overlapping Zen quota windows', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const resetsAt = new Date(now).toISOString();
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      now: () => now,
+      opencodeFetchGoWeb: async () => ({
+        status: 'ok',
+        workspaceId: 'wrk_1',
+        windows: [
+          { kind: 'session', usedPercent: 40, resetsAt },
+          { kind: 'weekly', usedPercent: 50, resetsAt }
+        ]
+      }),
+      opencodeFetchZen: async () => ({
+        status: 'ok',
+        workspaceId: 'wrk_1',
+        windows: [
+          { kind: 'session', usedPercent: 18, resetsAt },
+          { kind: 'weekly', usedPercent: 20, resetsAt },
+          { kind: 'monthly', usedPercent: 30, resetsAt }
+        ],
+        balanceUsd: 9.5
+      })
+    }
+  );
+  const provider = summary.providers[0];
+
+  assert.equal(provider.windows.find((window) => window.kind === 'session').usedPercent, 40);
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly').usedPercent, 50);
+  assert.equal(provider.windows.find((window) => window.kind === 'billing').usedPercent, 30);
+  assert.equal(provider.balanceUsd, 9.5);
+});
+
+test('OpenCode profiles apply Go Web authority independently per account', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const summary = await collectLimitsOnce({
+    limitProviders: 'opencode',
+    limitsEnabled: true,
+    opencodeProfiles: {
+      personal: { enabled: true, cookie: 'personal-cookie' },
+      work: { enabled: true, cookie: 'work-cookie' }
+    }
+  }, {
+    now: () => now,
+    opencodeFetchGoWeb: async (cookie) => ({
+      status: 'ok',
+      workspaceId: cookie,
+      windows: [{ kind: 'session', usedPercent: 40 }]
+    }),
+    opencodeFetchZen: async (cookie) => ({
+      status: 'ok',
+      workspaceId: cookie,
+      windows: [
+        { kind: 'session', usedPercent: 18 },
+        { kind: 'weekly', usedPercent: 20 }
+      ],
+      balanceUsd: 5
+    })
+  });
+
+  assert.equal(summary.providers.length, 2);
+  for (const provider of summary.providers) {
+    assert.equal(provider.windows.find((window) => window.kind === 'session').usedPercent, 40);
+    assert.equal(provider.windows.find((window) => window.kind === 'weekly').usedPercent, 20);
+    assert.equal(provider.balanceUsd, 5);
+  }
+});
+
 test('fetchOpenCodeLimits: surfaces unauthorized when no source has data', async () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
   const summary = await collectLimitsOnce(
