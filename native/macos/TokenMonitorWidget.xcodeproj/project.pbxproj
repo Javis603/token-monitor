@@ -22,6 +22,8 @@
 		10000000000000000000000D /* WidgetConfigurationIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* WidgetConfigurationIntent.swift */; };
 		10000000000000000000000E /* WidgetViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* WidgetViewModel.swift */; };
 		10000000000000000000000F /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* Localizable.xcstrings */; };
+		100000000000000000000010 /* WidgetDemandMarker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* WidgetDemandMarker.swift */; };
+		100000000000000000000011 /* WidgetDemandMarker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* WidgetDemandMarker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +43,7 @@
 		20000000000000000000000E /* WidgetConfigurationIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfigurationIntent.swift; sourceTree = "<group>"; };
 		20000000000000000000000F /* WidgetViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetViewModel.swift; sourceTree = "<group>"; };
 		200000000000000000000010 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		200000000000000000000011 /* WidgetDemandMarker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetDemandMarker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,6 +84,7 @@
 				200000000000000000000002 /* TokenMonitorWidgetBundle.swift */,
 				200000000000000000000003 /* WidgetSnapshot.swift */,
 				200000000000000000000004 /* WidgetTimelineProvider.swift */,
+				200000000000000000000011 /* WidgetDemandMarker.swift */,
 				20000000000000000000000E /* WidgetConfigurationIntent.swift */,
 				20000000000000000000000F /* WidgetViewModel.swift */,
 				200000000000000000000010 /* Localizable.xcstrings */,
@@ -208,6 +212,7 @@
 				100000000000000000000002 /* TokenMonitorWidgetBundle.swift in Sources */,
 				100000000000000000000003 /* WidgetSnapshot.swift in Sources */,
 				100000000000000000000004 /* WidgetTimelineProvider.swift in Sources */,
+				100000000000000000000010 /* WidgetDemandMarker.swift in Sources */,
 				10000000000000000000000B /* WidgetConfigurationIntent.swift in Sources */,
 				10000000000000000000000C /* WidgetViewModel.swift in Sources */,
 			);
@@ -218,6 +223,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000008 /* WidgetSnapshotDecodingTests.swift in Sources */,
+				100000000000000000000011 /* WidgetDemandMarker.swift in Sources */,
 				100000000000000000000009 /* WidgetSnapshot.swift in Sources */,
 				10000000000000000000000D /* WidgetConfigurationIntent.swift in Sources */,
 				10000000000000000000000E /* WidgetViewModel.swift in Sources */,

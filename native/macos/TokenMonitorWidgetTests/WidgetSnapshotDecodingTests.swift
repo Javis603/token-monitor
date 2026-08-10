@@ -1254,6 +1254,53 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     }
 }
 
+final class WidgetDemandMarkerTests: XCTestCase {
+    func testFirstRequestCreatesAZeroContentMarkerAtTheGivenTime() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let marker = directory.appendingPathComponent(WidgetDemandMarker.fileName)
+        let requestedAt = Date(timeIntervalSince1970: 1_000_000)
+
+        WidgetDemandMarker.noteRequested(container: directory, now: requestedAt)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+        let attributes = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: marker.path))
+        XCTAssertEqual(try XCTUnwrap(attributes[.size] as? Int), 0)
+        XCTAssertEqual(try XCTUnwrap(attributes[.modificationDate] as? Date), requestedAt)
+    }
+
+    func testLaterRequestRenewsOnlyTheMtimeNotTheContent() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let marker = directory.appendingPathComponent(WidgetDemandMarker.fileName)
+
+        WidgetDemandMarker.noteRequested(container: directory, now: Date(timeIntervalSince1970: 1_000_000))
+        WidgetDemandMarker.noteRequested(container: directory, now: Date(timeIntervalSince1970: 1_000_600))
+
+        let attributes = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: marker.path))
+        XCTAssertEqual(try XCTUnwrap(attributes[.size] as? Int), 0)
+        XCTAssertEqual(try XCTUnwrap(attributes[.modificationDate] as? Date), Date(timeIntervalSince1970: 1_000_600))
+    }
+
+    func testUnresolvableContainerIsANoOp() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        WidgetDemandMarker.noteRequested(appGroup: "", container: nil, now: Date())
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent(WidgetDemandMarker.fileName).path
+        ))
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("demand-marker-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+}
+
 final class WidgetTimelineProviderPreviewTests: XCTestCase {
     // The gallery is where someone decides whether the widget is worth adding.
     // Before this fallback existed it rendered the redacted placeholder skeleton
