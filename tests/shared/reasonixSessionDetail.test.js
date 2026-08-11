@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
+const { REASONIX_META_MAX_BYTES } = require('../../src/shared/reasonixFileIo');
 const {
   countReasonixProviderMessages,
   parseReasonixEventLog,
@@ -19,6 +20,12 @@ const {
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(value));
+}
+
+function paddedJson(value, size) {
+  const json = Buffer.from(JSON.stringify(value));
+  assert.ok(json.length <= size);
+  return Buffer.concat([json, Buffer.alloc(size - json.length, 0x20)]);
 }
 
 function writeSidecarSession(stateHome, directoryName, stem, meta, lines) {
@@ -461,4 +468,21 @@ test('Reasonix detail skips missing or corrupt identity/transcript files', () =>
   assert.equal(readReasonix(root, stateHome, 'reasonix:missing-id').found, false);
   assert.equal(readReasonix(root, stateHome, 'reasonix:corrupt').found, false);
   assert.equal(readReasonix(root, stateHome, 'reasonix:no-events').found, false);
+});
+
+test('Reasonix detail bounds metadata lookup before opening the event log', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-detail-meta-bound-'));
+  const stateHome = path.join(root, 'state');
+  const sessions = path.join(stateHome, 'sessions');
+  fs.mkdirSync(sessions, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessions, 'oversized.jsonl.meta'),
+    paddedJson({ id: 'oversized' }, REASONIX_META_MAX_BYTES + 1)
+  );
+  fs.writeFileSync(
+    path.join(sessions, 'oversized.events.jsonl'),
+    `${JSON.stringify({ type: 'user.message', text: 'must not be reached' })}\n`
+  );
+
+  assert.equal(readReasonix(root, stateHome, 'reasonix:oversized').found, false);
 });

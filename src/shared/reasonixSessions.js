@@ -12,6 +12,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { REASONIX_CLIENT, resolveReasonixHome } = require('./reasonixPaths');
+const {
+  readBoundedJson,
+  REASONIX_META_MAX_BYTES,
+  REASONIX_TELEMETRY_MAX_BYTES
+} = require('./reasonixFileIo');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeModelNameForClient } = require('./usage');
 const {
@@ -25,9 +30,6 @@ const TELEMETRY_SUFFIX = '.jsonl.telemetry.json';
 const EVENTS_SUFFIX = '.events.jsonl';
 const NATIVE_SESSION_PREFIX = `${REASONIX_CLIENT}:`;
 const BRANCH_META_COUNTS_VERSION = 1;
-const REASONIX_META_MAX_BYTES = 1 << 20;
-const REASONIX_TELEMETRY_MAX_BYTES = 4 << 20;
-const REASONIX_SIDECAR_READ_CHUNK_BYTES = 64 << 10;
 
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value || {}, key);
@@ -98,37 +100,6 @@ function firstTimestamp(source, keys) {
     date = /^[-+]?\d+$/.test(text) ? new Date(Number(text)) : new Date(text);
   }
   return date && !Number.isNaN(date.getTime()) ? date.toISOString() : '';
-}
-
-function readBoundedJson(filePath, maxBytes, fsApi = fs) {
-  if (!filePath || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) return null;
-  let fileDescriptor;
-  try {
-    const initialStat = fsApi.statSync(filePath);
-    if (!initialStat.isFile() || initialStat.size > maxBytes) return null;
-    fileDescriptor = fsApi.openSync(filePath, 'r');
-    const openedStat = fsApi.fstatSync(fileDescriptor);
-    if (!openedStat.isFile() || openedStat.size > maxBytes) return null;
-
-    const chunks = [];
-    const buffer = Buffer.allocUnsafe(Math.min(REASONIX_SIDECAR_READ_CHUNK_BYTES, maxBytes + 1));
-    let totalBytes = 0;
-    while (true) {
-      const bytesRead = fsApi.readSync(fileDescriptor, buffer, 0, buffer.length, null);
-      if (bytesRead === 0) break;
-      totalBytes += bytesRead;
-      if (totalBytes > maxBytes) return null;
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
-    }
-    const value = JSON.parse(Buffer.concat(chunks, totalBytes).toString('utf8'));
-    return objectValue(value);
-  } catch (_) {
-    return null;
-  } finally {
-    if (fileDescriptor !== undefined) {
-      try { fsApi.closeSync(fileDescriptor); } catch (_) {}
-    }
-  }
 }
 
 function dirExists(dir) {

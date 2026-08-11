@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { StringDecoder } = require('node:string_decoder');
 
+const { readBoundedJson, REASONIX_META_MAX_BYTES } = require('./reasonixFileIo');
 const { resolveReasonixHome } = require('./reasonixPaths');
 
 const SESSION_PREFIX = 'reasonix:';
@@ -830,15 +831,6 @@ function tokenDataAvailable(events) {
   return turns.length > 0 && turns.every((event) => event.tokensAvailable !== false);
 }
 
-function readJson(fsApi, filePath) {
-  try {
-    const value = JSON.parse(fsApi.readFileSync(filePath, 'utf8'));
-    return objectValue(value);
-  } catch (_) {
-    return null;
-  }
-}
-
 function isFile(fsApi, filePath) {
   try { return fsApi.statSync(filePath).isFile(); } catch (_) { return false; }
 }
@@ -892,7 +884,7 @@ function findSessionEventFile({ sessionId, home, options = {} } = {}) {
       .sort((left, right) => left.name.localeCompare(right.name) || left.priority - right.priority);
     for (const candidate of candidates) {
       const metaPath = pathApi.join(directory, candidate.name);
-      const meta = readJson(fsApi, metaPath);
+      const meta = readBoundedJson(metaPath, REASONIX_META_MAX_BYTES, fsApi);
       if (stableId(meta) !== id) continue;
       const eventsPath = pathApi.join(directory, `${candidate.stem}${EVENTS_SUFFIX}`);
       if (isFile(fsApi, eventsPath)) return eventsPath;
