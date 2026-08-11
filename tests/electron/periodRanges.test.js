@@ -124,7 +124,7 @@ test('remote device ranges advance only with a reliable device calendar', () => 
   } }, now), '');
 });
 
-test('offline device does not patch an expired today snapshot onto the next local day', () => {
+test('offline device restores a newer expired today snapshot onto its original local day', () => {
   const snapshot = deriveRangeSnapshot([{
     periodWindows: { today: {
       key: '2026-08-11',
@@ -132,7 +132,7 @@ test('offline device does not patch an expired today snapshot onto the next loca
       timeZone: 'Asia/Hong_Kong'
     } },
     history: { daily: [{
-      date: '2026-08-11', tokens: 100, cost: 1,
+      date: '2026-08-11', tokens: 80, cost: 0.8,
       capabilities: { tokenComponents: true, clientModels: true }
     }] },
     nativeToday: {
@@ -149,6 +149,25 @@ test('offline device does not patch an expired today snapshot onto the next loca
   assert.equal(snapshot.status, 'ready');
   assert.equal(snapshot.period.totalTokens, 100);
   assert.deepEqual(snapshot.daily.map((row) => [row.date, row.tokens]), [['2026-08-11', 100]]);
+});
+
+test('offline device keeps a more complete history row than its stale today snapshot', () => {
+  const snapshot = deriveRangeSnapshot([{
+    periodWindows: { today: {
+      key: '2026-08-11',
+      endsAt: '2026-08-11T16:00:00.000Z',
+      timeZone: 'Asia/Hong_Kong'
+    } },
+    history: { daily: [{ date: '2026-08-11', tokens: 120, cost: 1.2 }] },
+    nativeToday: { totalTokens: 100, costUsd: 1 }
+  }], {
+    status: 'ready',
+    selection: 'last7',
+    now: new Date('2026-08-11T16:30:00.000Z')
+  });
+
+  assert.equal(snapshot.period.totalTokens, 120);
+  assert.deepEqual(snapshot.daily.map((row) => [row.date, row.tokens]), [['2026-08-11', 120]]);
 });
 
 test('expired legacy device calendar fails closed instead of switching to UTC', () => {
@@ -171,6 +190,27 @@ test('expired legacy device calendar fails closed instead of switching to UTC', 
     daily: [],
     summary: null
   });
+});
+
+test('historical custom range does not require a current legacy device calendar', () => {
+  const snapshot = deriveRangeSnapshot([{
+    periodWindows: { today: {
+      key: '2026-08-11',
+      endsAt: '2026-08-11T16:00:00.000Z'
+    } },
+    history: { daily: [{ date: '2026-07-05', tokens: 50, cost: 5 }] },
+    nativeToday: { totalTokens: 100, costUsd: 10 }
+  }], {
+    status: 'ready',
+    selection: 'range',
+    rangeStart: '2026-07-01',
+    rangeEnd: '2026-07-10',
+    now: new Date('2026-08-11T16:30:00.000Z')
+  });
+
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.period.totalTokens, 50);
+  assert.deepEqual(snapshot.daily.map((row) => [row.date, row.tokens]), [['2026-07-05', 50]]);
 });
 
 test('derived periods patch today from live stats and retain client/model attribution', () => {

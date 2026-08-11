@@ -267,15 +267,24 @@
     };
   }
 
-  function patchToday(daily, todayKey, nativeToday) {
+  function patchToday(daily, todayKey, nativeToday, options = {}) {
     const rows = Array.isArray(daily) ? daily.map((row) => ({ ...row })) : [];
     const date = normalizeDateKey(todayKey);
     if (!date || !nativeToday) return rows;
     const index = rows.findIndex((row) => normalizeDateKey(row?.date) === date);
     const previous = index >= 0 ? rows[index] : {};
     const next = dailyRowFromPeriod(nativeToday, date, previous);
-    if (index >= 0) rows[index] = next;
-    else rows.push(next);
+    const previousTokens = finiteNumber(previous?.tokens);
+    const nextTokens = finiteNumber(next?.tokens);
+    const previousCost = finiteNumber(previous?.cost);
+    const nextCost = finiteNumber(next?.cost);
+    const staleSnapshotIsNewer = nextTokens > previousTokens
+      || (nextTokens === previousTokens && nextCost > previousCost);
+    if (index >= 0) {
+      if (options.current === true || staleSnapshotIsNewer) rows[index] = next;
+    } else {
+      rows.push(next);
+    }
     return rows.sort((a, b) => String(a?.date || '').localeCompare(String(b?.date || '')));
   }
 
@@ -283,7 +292,12 @@
     const selection = options.selection;
     const range = rangeForSelection(selection, options);
     if (!range) return [];
-    return patchToday(daily, options.todayKey, options.nativeToday).filter((row) => {
+    return patchToday(
+      daily,
+      options.nativeTodayKey || options.todayKey,
+      options.nativeToday,
+      { current: options.nativeTodayCurrent === true }
+    ).filter((row) => {
       const date = normalizeDateKey(row?.date);
       return date && date >= range.start && date <= range.end;
     });
@@ -483,18 +497,32 @@
     const periods = [];
     const rowGroups = [];
     const rangeEnds = [];
+    const explicitRange = options.selection === 'range'
+      ? normalizeDateRange(options.rangeStart, options.rangeEnd)
+      : null;
     for (const source of sources || []) {
       const explicitTodayKey = normalizeDateKey(source?.todayKey);
-      const dayState = explicitTodayKey
+      const resolvedDayState = explicitTodayKey
         ? { status: 'ready', key: explicitTodayKey, nativeTodayCurrent: source?.nativeTodayCurrent === true }
         : currentDayState(source?.periodWindows, options.now);
+      // An explicit historical range does not need a reliable present-day
+      // calendar. When one exists we still use it so a range containing today
+      // receives the authoritative live snapshot; otherwise the range remains
+      // valid and only a dated stale snapshot can be reconciled below.
+      const dayState = options.selection === 'range' && explicitRange && resolvedDayState.status !== 'ready'
+        ? { status: 'ready', key: explicitRange.end, nativeTodayCurrent: false }
+        : resolvedDayState;
       if (dayState.status !== 'ready') {
         return { status: 'unavailable', period: null, daily: [], summary: null };
       }
+      const snapshotDayKey = normalizeDateKey(source?.periodWindows?.today?.key);
+      const nativeTodayKey = dayState.nativeTodayCurrent ? dayState.key : snapshotDayKey;
       const sourceOptions = {
         ...options,
         todayKey: dayState.key,
-        nativeToday: dayState.nativeTodayCurrent ? source?.nativeToday : null
+        nativeToday: nativeTodayKey ? source?.nativeToday : null,
+        nativeTodayKey,
+        nativeTodayCurrent: dayState.nativeTodayCurrent
       };
       const daily = source?.history?.daily || [];
       periods.push(derivePeriod(daily, sourceOptions));

@@ -76,6 +76,20 @@ test('composeLocalSyncStats can render a local device before the first hub snaps
   assert.equal(result.devices[0].deviceId, 'local');
 });
 
+test('composeLocalSyncStats invalidates history when the local overlay advances first', () => {
+  const hubStats = aggregateDevices([
+    device('local', 80, { history: { daily: [{ date: '2026-07-16', tokens: 80 }] } })
+  ], 0, Date.parse('2026-07-16T00:01:00.000Z'));
+  hubStats.historyRevision = 'hub-revision';
+  const result = composeLocalSyncStats(hubStats, device('local', 100, {
+    history: { daily: [{ date: '2026-07-16', tokens: 100 }] },
+    historyAvailable: true
+  }));
+
+  assert.match(result.historyRevision, /^hub-revision:/);
+  assert.notEqual(result.historyRevision, hubStats.historyRevision);
+});
+
 test('the local cold-start presentation restores native views from the anchor seed', () => {
   const nativeSessions = { today: { session: { client: 'reasonix', totalTokens: 25 } }, month: {}, allTime: {} };
   const nativeProjects = { today: { project: { label: 'Project', tokens: 25 } }, month: {}, allTime: {} };

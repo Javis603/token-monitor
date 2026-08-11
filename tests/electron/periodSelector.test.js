@@ -35,6 +35,9 @@ test('period selector keeps three equal slots and opens one shared popover witho
   assert.match(css, /\.period-popover-copy\s*\{[\s\S]*text-align:\s*left/);
   assert.doesNotMatch(app, /period-popover-check/);
   assert.doesNotMatch(css, /\.period-popover-check/);
+  assert.match(app, /tab\.setAttribute\('aria-expanded',[\s\S]*state\.periodPopoverAnchor === tab/);
+  assert.match(app, /event\.newState === 'closed'[\s\S]*anchor\.focus\(\)/);
+  assert.match(app, /window\.addEventListener\('resize',[\s\S]*positionPeriodPopover\(state\.periodPopoverAnchor\)/);
 });
 
 test('rolling and custom range modes persist as normalized settings', () => {
@@ -71,10 +74,14 @@ test('derived device rows load per-device histories instead of falling back to t
   const main = read('src', 'electron', 'main.js');
 
   assert.match(app, /state\.deviceHistories\[deviceId\]/);
+  assert.match(app, /filter\(\(device\) => homeOverviewApi\.deviceParticipatesInUsage\(device\)\)/);
   assert.match(app, /window\.tokenMonitor\.getDeviceHistories\(\)/);
   assert.match(app, /loadedSignature: state\.deviceHistoriesLoadedSignature/);
   assert.match(preload, /dashboard:getDeviceHistories/);
   assert.match(main, /resolveDeviceHistories\(historyResolverOptions\(\)\)/);
+  assert.match(app, /loadDeviceHistories\(\)[\s\S]*periodRangesApi\.isDerived\(effectivePeriodSelection\(\)\)[\s\S]*render\(\)/);
+  assert.match(app, /!periodRangesApi\.supportsBreakdown\(selection, 'session'\)[\s\S]*dismissSessionDetail\(\)/);
+  assert.match(app, /const historyEnabledChanged =[\s\S]*syncPeriodTabs\(\)[\s\S]*render\(\)/);
 });
 
 test('Main settings expose the global Month and Total ranges outside Home customization', () => {

@@ -377,13 +377,16 @@
     return 'loading';
   }
 
+  function deviceParticipatesInUsage(device) {
+    const periods = device?.periods || device || {};
+    return ['today', 'month', 'allTime']
+      .some((period) => Number(periods?.[period]?.totalTokens || 0) > 0);
+  }
+
   function deviceHistoriesCoverUsage(devices, histories) {
     return (devices || []).every((device) => {
       const deviceId = String(device?.deviceId || device?.id || '').trim();
-      const periods = device?.periods || device || {};
-      const participates = ['today', 'month', 'allTime']
-        .some((period) => Number(periods?.[period]?.totalTokens || 0) > 0);
-      return !participates || histories?.[deviceId]?.available === true;
+      return !deviceParticipatesInUsage(device) || histories?.[deviceId]?.available === true;
     });
   }
 
@@ -436,6 +439,7 @@
     shouldRetryHomeHistory,
     homeHistoryFetchOutcome,
     historyLoadStatus,
+    deviceParticipatesInUsage,
     deviceHistoriesCoverUsage,
     homeActivityHeatmapLayout,
     homeActivityWheelRoute,

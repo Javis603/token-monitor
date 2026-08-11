@@ -297,12 +297,31 @@ function liveDayIsGreater(incoming, previous) {
   return dayCost(incoming) > dayCost(previous);
 }
 
+function mergeLiveObservationMetadata(liveObservation, previousObservation) {
+  if (!previousObservation || liveObservation.tokenComponents === true) return liveObservation;
+  if (previousObservation.tokenComponents !== true || previousObservation.tokens > liveObservation.tokens) {
+    return liveObservation;
+  }
+  if (previousObservation.tokens < liveObservation.tokens) {
+    return mergeObservation(liveObservation, previousObservation);
+  }
+  // Equal usage can carry corrected live pricing while the graph retains the
+  // richer component split. Keep those two concerns separate so metadata
+  // enrichment cannot put an older cost back onto the authoritative snapshot.
+  return normalizeObservation({
+    ...previousObservation,
+    providerId: liveObservation.providerId || previousObservation.providerId,
+    cost: liveObservation.cost,
+    messages: Math.max(liveObservation.messages, previousObservation.messages)
+  });
+}
+
 function mergeLiveDayMetadata(liveDay, previousDay) {
   if (!previousDay) return liveDay;
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
-    return [key, mergeObservation(observation, previous)];
+    return [key, mergeLiveObservationMetadata(observation, previous)];
   }));
   return {
     ...liveDay,

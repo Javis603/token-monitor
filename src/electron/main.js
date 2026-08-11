@@ -3445,7 +3445,7 @@ function historyResolverOptions() {
     historyEnabled: settings?.historyEnabled !== false,
     hubMode: settings?.hubMode,
     hubUrl,
-    localDevice,
+    localDevice: localDevice || lastCollectedDevice,
     mode,
     secret
   };

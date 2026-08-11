@@ -155,7 +155,18 @@ function emptyWslBundle() {
 }
 
 function mkPeriod() {
-  return { totalTokens: 50, costUsd: 0, clients: { claude: 50 }, clientCosts: {}, models: {}, modelCosts: {}, clientModels: {}, clientModelCosts: {}, sessions: {} };
+  return {
+    totalTokens: 50,
+    costUsd: 0,
+    capabilities: { tokenComponents: true, clientModels: true },
+    clients: { claude: 50 },
+    clientCosts: {},
+    models: {},
+    modelCosts: {},
+    clientModels: {},
+    clientModelCosts: {},
+    sessions: {}
+  };
 }
 
 test('restart reuse: anchor file on disk enables todayOnly on first interval tick', async () => {
@@ -527,7 +538,7 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   const now = new Date(2026, 7, 8, 10, 0, 0);
   const anchor = (overrides = {}) => ({
     dateKey: '2026-08-08',
-    today: {}, month: {}, allTime: {},
+    today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
     configFingerprint: configFingerprint('claude', '2024-01-01', true),
     fullScanAt: new Date(now.getTime() - 60_000).toISOString(),
     ...overrides
@@ -540,6 +551,11 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(null, options), null);
   assert.equal(collectorAnchorTrust(anchor({ dateKey: '2026-08-07' }), options), null);
   assert.equal(collectorAnchorTrust(anchor({ allTime: null }), options), null);
+  assert.equal(collectorAnchorTrust(anchor({
+    today: { totalTokens: 10 },
+    month: { totalTokens: 10 },
+    allTime: { totalTokens: 10 }
+  }), options), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, clients: 'claude,codex' }), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, projectsEnabled: false }), null);
 

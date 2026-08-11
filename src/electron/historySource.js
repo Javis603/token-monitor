@@ -31,6 +31,20 @@ function parseDeviceHistories(payload) {
   return histories;
 }
 
+function devicesWithLocalHistory(payload, localDevice) {
+  const devices = Array.isArray(payload) ? payload : payload?.devices;
+  const list = Array.isArray(devices) ? devices : [];
+  const localId = String(localDevice?.deviceId || localDevice?.id || '').trim();
+  const localHasHistory = localId && (
+    Object.prototype.hasOwnProperty.call(localDevice || {}, 'history')
+    || Object.prototype.hasOwnProperty.call(localDevice || {}, 'historyAvailable')
+  );
+  if (!localHasHistory) return list;
+  return list
+    .filter((device) => String(device?.deviceId || device?.id || '').trim() !== localId)
+    .concat(localDevice);
+}
+
 // Which of the four resolutions below a configuration selects. Callers that need
 // to know how expensive a history read will be ask this rather than re-deriving
 // the branches, so the cost model cannot drift from the resolver: only 'remote'
@@ -112,7 +126,7 @@ async function resolveDeviceHistories(options = {}) {
       signal: controller.signal
     });
     if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-    return parseDeviceHistories(await response.json());
+    return parseDeviceHistories(devicesWithLocalHistory(await response.json(), localDevice));
   } finally {
     clearTimeout(timeout);
   }
@@ -122,6 +136,7 @@ module.exports = {
   completeHistorySource,
   parseCompleteHistory,
   parseDeviceHistories,
+  devicesWithLocalHistory,
   resolveCompleteHistory,
   resolveDeviceHistories
 };

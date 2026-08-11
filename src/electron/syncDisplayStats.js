@@ -1,6 +1,7 @@
 'use strict';
 
 const { aggregateDevices } = require('../shared/usage');
+const { historyRevision } = require('../shared/history');
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -9,6 +10,10 @@ function hasOwn(object, key) {
 function nonNegativeNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+}
+
+function hasHistoryState(device) {
+  return hasOwn(device, 'history') || hasOwn(device, 'historyAvailable');
 }
 
 function attachLocalNativeViews(stats, localDevice) {
@@ -66,6 +71,11 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     projectsIncomplete: aggregate.projectsIncomplete,
     limits: hasHubStaleAfterMs || !hasOwn(hubStats, 'limits') ? aggregate.limits : hubStats.limits
   };
+  if (hasHistoryState(localDevice)) {
+    const hubRevision = String(hubStats?.historyRevision || '').trim();
+    const localRevision = historyRevision([localDevice]);
+    displayStats.historyRevision = hubRevision ? `${hubRevision}:${localRevision}` : localRevision;
+  }
   attachLocalNativeViews(displayStats, localDevice);
 
   for (const key of ['sessionDetailsOmitted', 'periodProjectsOmitted']) {

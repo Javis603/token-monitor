@@ -24,6 +24,7 @@ const {
   shouldRetryHomeHistory,
   homeHistoryFetchOutcome,
   historyLoadStatus,
+  deviceParticipatesInUsage,
   deviceHistoriesCoverUsage
 } = require('../../src/electron/renderer/homeOverview');
 
@@ -685,6 +686,7 @@ test('device histories fail closed when one participating device disables histor
     mac: { available: true, daily: [{ date: '2026-08-11', tokens: 100 }] },
     linux: { available: true, daily: [] }
   }), true);
+  assert.equal(deviceParticipatesInUsage(devices[2]), false);
 });
 
 test('shouldFetchHomeHistory never polls a zero-usage account', () => {

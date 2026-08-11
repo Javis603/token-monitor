@@ -2105,6 +2105,14 @@ function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
+  const hasCapabilityProvenance = [saved.today, saved.month, saved.allTime].every((period) => (
+    typeof period?.capabilities?.tokenComponents === 'boolean'
+    && typeof period?.capabilities?.clientModels === 'boolean'
+  ));
+  // Anchors written before component capabilities existed cannot participate in
+  // an exact warm delta: absent cache/output fields would otherwise be promoted
+  // to measured zero by the fresh --today scan. A full scan replaces them once.
+  if (!hasCapabilityProvenance) return null;
   if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;

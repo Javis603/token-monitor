@@ -143,3 +143,35 @@ test('fetches authenticated raw device histories from the existing hub endpoint'
   assert.equal(request.url, 'https://hub.example/api/devices');
   assert.equal(request.options.headers.authorization, 'Bearer test-secret');
 });
+
+test('remote device histories prefer a newer local history before Hub upload', async () => {
+  const result = await resolveDeviceHistories({
+    hubUrl: 'https://hub.example/',
+    localDevice: {
+      deviceId: 'mac',
+      periods: { allTime: { totalTokens: 100 } },
+      historyAvailable: true,
+      history: { daily: [{ date: '2026-08-11', tokens: 100 }] }
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return { devices: [
+          {
+            deviceId: 'mac',
+            periods: { allTime: { totalTokens: 80 } },
+            history: { daily: [{ date: '2026-08-11', tokens: 80 }] }
+          },
+          {
+            deviceId: 'remote',
+            periods: { allTime: { totalTokens: 25 } },
+            history: { daily: [{ date: '2026-08-10', tokens: 25 }] }
+          }
+        ] };
+      }
+    })
+  });
+
+  assert.equal(result.mac.daily[0].tokens, 100);
+  assert.equal(result.remote.daily[0].tokens, 25);
+});

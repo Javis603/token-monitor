@@ -323,6 +323,7 @@ state.homeReturnVisible = false;
 state.appUpdateNotesPresentedVersion = '';
 state.periodMotionActive = false;
 state.periodPopoverSlot = '';
+state.periodPopoverAnchor = null;
 state.animateBarsFromZero = false;
 state.animateChartsOnRender = true;
 let directBreakdownOverride = null;
@@ -816,14 +817,16 @@ function currentDerivedRangeSnapshot() {
     if (status === 'ready' && !homeOverviewApi.deviceHistoriesCoverUsage(devices, state.deviceHistories)) {
       status = 'unavailable';
     }
-    const sources = status === 'ready' ? devices.map((device) => {
-      const deviceId = String(device?.deviceId || device?.id || '').trim();
-      return {
-        history: state.deviceHistories?.[deviceId] || { daily: [] },
-        periodWindows: device?.periodWindows,
-        nativeToday: device?.periods?.today || device?.today
-      };
-    }) : [];
+    const sources = status === 'ready' ? devices
+      .filter((device) => homeOverviewApi.deviceParticipatesInUsage(device))
+      .map((device) => {
+        const deviceId = String(device?.deviceId || device?.id || '').trim();
+        return {
+          history: state.deviceHistories?.[deviceId] || { daily: [] },
+          periodWindows: device?.periodWindows,
+          nativeToday: device?.periods?.today || device?.today
+        };
+      }) : [];
     return periodRangesApi.deriveRangeSnapshot(sources, derivedRangeOptions(status));
   }
   const status = homeHistoryStatus();
@@ -5502,12 +5505,16 @@ function toggleDetailSort() {
   if (state.openSession && state.openSession.detail) renderSessionDetail({ detail: state.openSession.detail });
 }
 
-function closeSessionDetail() {
+function dismissSessionDetail() {
   state.openSession = null;
   els.sessionDetail.classList.add('hidden');
   els.sessionDetail.replaceChildren();
   els.sessionDetailHead.classList.add('hidden');
   els.sessionDetailHead.replaceChildren();
+}
+
+function closeSessionDetail() {
+  dismissSessionDetail();
   render();
 }
 
@@ -5881,7 +5888,11 @@ async function loadDeviceHistories() {
       } else {
         state.deviceHistoriesFailedSignature = requestSignature;
       }
-      if (state.breakdown === 'home' || state.breakdown === 'device') render();
+      if (
+        state.breakdown === 'home'
+        || state.breakdown === 'device'
+        || periodRangesApi.isDerived(effectivePeriodSelection())
+      ) render();
     }
   }
 }
@@ -8034,6 +8045,10 @@ function positionPeriodPopover(anchor) {
 function renderPeriodSelectionChange(slot) {
   const snapshot = captureBreakdownMotion();
   setPeriod(slot);
+  const selection = effectivePeriodSelection();
+  if (state.openSession && !periodRangesApi.supportsBreakdown(selection, 'session')) {
+    dismissSessionDetail();
+  }
   syncPeriodTabs();
   if (state.openSession) openSessionDetail(state.openSession);
   state.rowSignature = '';
@@ -8044,7 +8059,7 @@ function renderPeriodSelectionChange(slot) {
     state.periodMotionActive = false;
   }
   animateBreakdownFrom(snapshot, { duration: 800 });
-  if (periodRangesApi.isDerived(effectivePeriodSelection())) {
+  if (periodRangesApi.isDerived(selection)) {
     void loadHomeHistory();
     void loadDeviceHistories();
   }
@@ -8191,7 +8206,14 @@ function openPeriodPopover(slot, anchor) {
     els.periodPopover.append(note);
   }
   state.periodPopoverSlot = slot;
-  try { els.periodPopover.showPopover(); } catch (_) { return; }
+  state.periodPopoverAnchor = anchor;
+  try { els.periodPopover.showPopover(); } catch (_) {
+    state.periodPopoverSlot = '';
+    state.periodPopoverAnchor = null;
+    syncPeriodTabs();
+    return;
+  }
+  syncPeriodTabs();
   requestAnimationFrame(() => {
     positionPeriodPopover(anchor);
     els.periodPopover.querySelector('[aria-checked="true"]')?.focus();
@@ -8211,6 +8233,15 @@ function syncPeriodTabs() {
     tab.setAttribute('aria-label', fullLabel);
     if (hasOptions) tab.setAttribute('aria-haspopup', 'menu');
     else tab.removeAttribute('aria-haspopup');
+    if (hasOptions) {
+      tab.setAttribute('aria-controls', 'periodPopover');
+      tab.setAttribute('aria-expanded', String(
+        els.periodPopover?.matches(':popover-open') && state.periodPopoverAnchor === tab
+      ));
+    } else {
+      tab.removeAttribute('aria-controls');
+      tab.removeAttribute('aria-expanded');
+    }
     const active = tab.dataset.period === state.period;
     tab.classList.toggle('active', active);
     tab.setAttribute('aria-pressed', String(active));
@@ -9244,7 +9275,8 @@ function renderTrendSettingsList() {
     intervalRow.classList.toggle('hidden', !enabling);
     await setTrendEnabled(enabling);
     state.trendsActivating = enabling;
-    renderHomeIfVisible();
+    syncPeriodTabs();
+    render();
   });
 
   return wrap;
@@ -10783,7 +10815,18 @@ for (const tab of document.querySelectorAll('.tab')) {
 }
 
 els.periodPopover?.addEventListener('toggle', (event) => {
-  if (event.newState === 'closed') state.periodPopoverSlot = '';
+  const anchor = state.periodPopoverAnchor;
+  if (event.newState === 'closed') {
+    state.periodPopoverSlot = '';
+    state.periodPopoverAnchor = null;
+    const active = document.activeElement;
+    if (anchor?.isConnected && (
+      active === document.body
+      || active === els.periodPopover
+      || els.periodPopover.contains(active)
+    )) anchor.focus();
+  }
+  syncPeriodTabs();
 });
 els.periodPopover?.addEventListener('keydown', (event) => {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -11315,6 +11358,7 @@ els.appUpdatePopoverRelease.addEventListener('click', async () => {
 
 window.addEventListener('resize', () => {
   if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
+  if (els.periodPopover?.matches(':popover-open')) positionPeriodPopover(state.periodPopoverAnchor);
 });
 
 els.appUpdateCheckButton.addEventListener('click', async () => {
@@ -11339,14 +11383,20 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   const prevLanguage = state.settings?.language;
   const prevCompactTokenUnits = state.settings?.compactTokenUnits;
   const prevShowCompactTotalTokens = state.settings?.showCompactTotalTokens;
+  const prevHistoryEnabled = state.settings?.historyEnabled;
   const prevPeriodSettings = JSON.stringify(periodRangesApi.normalizedSettings(state.settings || {}));
   state.settings = next;
   applyEffectiveCurrencyRates();
   preserveSettingsPanelScroll(syncSettingsForm);
   maybeUpdateBarsIcon();
   const periodSettingsChanged = prevPeriodSettings !== JSON.stringify(periodRangesApi.normalizedSettings(next));
-  if (periodSettingsChanged) syncPeriodTabs();
-  if ((prevMetric || 'cost') !== (next.heatmapMetric || 'cost') || periodSettingsChanged) {
+  const historyEnabledChanged = prevHistoryEnabled !== next.historyEnabled;
+  if (periodSettingsChanged || historyEnabledChanged) syncPeriodTabs();
+  if (
+    (prevMetric || 'cost') !== (next.heatmapMetric || 'cost')
+    || periodSettingsChanged
+    || historyEnabledChanged
+  ) {
     render();
   } else if (
     prevLanguage !== next.language
