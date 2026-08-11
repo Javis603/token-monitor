@@ -34,6 +34,7 @@
     zaiteam: { api: 'API' },
     volcengine: { api: 'API' },
     qoder: { web: 'Web' },
+    workbuddy: { local: 'Local', api: 'API' },
     kimi: { api: 'API', web: 'Web' },
     ollama: { web: 'Web' },
     thirdparty: { api: 'API' }
@@ -63,6 +64,7 @@
     zaiteam: ['Team Plan', 'API key'],
     volcengine: ['Coding Plan', 'API key'],
     qoder: ['Manual login', 'Web'],
+    workbuddy: ['Desktop app', 'Local'],
     kimi: ['Coding Plan', 'Web/API'],
     ollama: ['Manual login', 'Web'],
     thirdparty: ['Relay', 'API']
@@ -240,7 +242,8 @@
     return (providerName === 'claude' && source === 'web')
       || providerName === 'cursor'
       || (providerName === 'opencode' && source === 'web')
-      || (providerName === 'mimo' && source === 'web');
+      || (providerName === 'mimo' && source === 'web')
+      || (providerName === 'workbuddy' && source === 'local');
   }
 
   function limitProviderStatusLabel(provider = {}) {
@@ -254,6 +257,7 @@
     if (status === 'unauthorized') {
       if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
+      if (providerName === 'workbuddy') return { label: 'Sign in again', tone: 'setup' };
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder'
@@ -269,6 +273,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
+      if (providerName === 'workbuddy') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };

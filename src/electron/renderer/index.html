@@ -914,6 +914,35 @@
                 <div id="qoderErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="workbuddyAccountGroup" class="settings-group cursor-account-group">
+              <button id="workbuddySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="workbuddySettingsDetails">
+                <span data-i18n="settings.workbuddy.title">WorkBuddy Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="workbuddyAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="workbuddySettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-item workbuddy-opt-in-row">
+                  <span class="settings-item-text">
+                    <span class="settings-item-title" data-i18n="settings.workbuddy.optInTitle">Use local WorkBuddy account</span>
+                  </span>
+                  <div class="settings-actions workbuddy-opt-in-actions">
+                    <button id="workbuddyLocalAppToggle" type="button" data-i18n="settings.workbuddy.enable">Enable</button>
+                  </div>
+                </div>
+                <p id="workbuddyOptInNote" class="settings-note" data-i18n="settings.workbuddy.optInNote">Token Monitor will read the sign-in session owned by the local WorkBuddy app only to query Credits. Credentials stay in WorkBuddy and are never stored by Token Monitor or sent to the hub.</p>
+                <div id="workbuddyLocalAppControls" class="hidden">
+                  <div class="settings-actions">
+                    <button id="workbuddyOpenButton" type="button" data-i18n="settings.workbuddy.signIn">Open WorkBuddy</button>
+                    <button id="workbuddyRefreshButton" type="button" data-i18n="settings.common.refresh">Refresh</button>
+                  </div>
+                  <p id="workbuddyLoginStatus" class="settings-note">Token Monitor reads the sign-in state owned by the WorkBuddy app on this device. Sign in inside WorkBuddy; no credential is stored here or sent to the hub.</p>
+                </div>
+                <p id="workbuddyPrivacyNote" class="settings-note workbuddy-privacy-note" data-i18n="settings.workbuddy.privacyNote">“Open WorkBuddy” only launches the native WorkBuddy app. Sign-in and authorization remain managed by WorkBuddy; Token Monitor does not require manual account configuration or persist a separate credential, and only queries balance data in main-process memory. Credentials are never written to Token Monitor settings or sent to the hub.</p>
+                <div id="workbuddyErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="ollamaAccountGroup" class="settings-group cursor-account-group">
               <button id="ollamaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="ollamaSettingsDetails">
                 <span data-i18n="settings.ollama.title">Ollama Account</span>

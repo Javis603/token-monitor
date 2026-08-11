@@ -188,6 +188,9 @@ function runProviderSpendNode(source, balance) {
   const spendNode = functionBody(source, 'providerSpendNode', 'thirdPartySpendNode');
   const context = {
     formatMoney: (value, currency) => `${currency} ${Number(value).toFixed(2)}`,
+    formatBalanceSpendAmount: (value, balance) => balance?.unit === 'credits'
+      ? `${Number(value).toFixed(2)} credits`
+      : `${balance?.currency || ''} ${Number(value).toFixed(2)}`.trim(),
     limitNoteRowNode: (options) => options
   };
   vm.runInNewContext(
@@ -1040,8 +1043,9 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.match(homeModule, /value\.textContent = window\.value \|\| formatHomeLimitWindowValue\(window, showUsed\);/);
   assert.match(homeModule, /limitProviderCompactWindowPeriodLabel\(row\.providerId, window, row\.windows\)/);
   assert.match(homeModule, /`\$\{periodLabel\} · \$\{resetLabel\}`/);
-  assert.match(valueFormatter, /if \(window\?\.metric === 'credits'\) \{/);
-  assert.match(valueFormatter, /return formatCompactMoney\(window\.remaining, window\.currency\);/);
+  assert.match(valueFormatter, /if \(isBalanceWindow\(window\)\) \{/);
+  assert.match(valueFormatter, /window\.unit === 'credits'/);
+  assert.match(valueFormatter, /formatCompactMoney\(window\.remaining, window\.currency\)/);
   assert.match(valueFormatter, /`\$\{formatPercent\(percent\)\} \$\{limitModeSuffix\(showUsed\)\}`/);
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);
 });
@@ -1114,6 +1118,7 @@ test('shared spend presentation preserves zeroes and omits missing periods', () 
   assert.equal(missingWeek.summary, 'Today CNY 0.00 · Month CNY 2.50');
   assert.deepEqual(missingWeek.detailEntries.map(([label]) => label), ['Today', 'Month', 'All time']);
   assert.equal(missingWeek.ariaParts.some((part) => part.startsWith('Week ')), false);
+
 });
 
 test('Balance and token quota values omit the redundant left suffix', () => {
@@ -1360,6 +1365,7 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     ['minimax', 'minimaxAccountGroup', 'minimaxApiKeyStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
     ['qoder', 'qoderAccountGroup', 'qoderAccountStatus'],
+    ['workbuddy', 'workbuddyAccountGroup', 'workbuddyAccountStatus'],
     ['ollama', 'ollamaAccountGroup', 'ollamaAccountStatus'],
     ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
   ];
@@ -1528,6 +1534,7 @@ test('dynamic account summaries are never reset by the static translation pass',
     'zaiteamAccountStatus',
     'volcengineAccountStatus',
     'qoderAccountStatus',
+    'workbuddyAccountStatus',
     'ollamaAccountStatus',
     'kimiAccountStatus',
     'mimoAccountStatus',
@@ -1961,14 +1968,16 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
   );
 });
 
-test('Z.ai, Volcengine, Qoder, and Ollama source labels and setup statuses', () => {
+test('Z.ai, Volcengine, Qoder, WorkBuddy, and Ollama source labels and setup statuses', () => {
   assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Coding Plan', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Coding Plan', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Desktop app', 'Local']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'qoder', source: 'web' }), 'Web');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'web' }), 'Web');
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'zai', status: 'notConfigured' }),
@@ -1984,6 +1993,14 @@ test('Z.ai, Volcengine, Qoder, and Ollama source labels and setup statuses', () 
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'qoder', status: 'unauthorized' }),
+    { label: 'Sign in again', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'workbuddy', status: 'notConfigured' }),
+    { label: 'Sign in', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'workbuddy', status: 'unauthorized' }),
     { label: 'Sign in again', tone: 'setup' }
   );
   assert.deepEqual(

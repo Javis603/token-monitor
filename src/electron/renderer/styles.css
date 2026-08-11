@@ -1294,6 +1294,7 @@ span.settings-note.settings-item-desc {
 #codexLoginUrlActions.hidden,
 #codexLoginStatus.hidden { display: none; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.workbuddy-privacy-note { margin-top: 4px; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
 .kimi-cookie-steps { text-wrap: pretty; }
 .kimi-api-fallback {
@@ -3412,6 +3413,10 @@ html.is-windows .settings-panel select option {
 .limit-icon-qoder {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);
   mask-image: url(../../../assets/icons/qoder.svg);
+}
+.limit-icon-workbuddy {
+  -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);
+  mask-image: url(../../../assets/icons/workbuddy.svg);
 }
 
 .limit-icon-ollama {

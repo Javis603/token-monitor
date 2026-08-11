@@ -87,6 +87,7 @@ const LIMIT_PROVIDERS = [
   { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'qoder', label: 'Qoder' },
+  { id: 'workbuddy', label: 'WorkBuddy' },
   { id: 'ollama', label: 'Ollama' },
   { id: 'thirdparty', label: 'Third-party APIs' }
 ];
@@ -105,6 +106,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
   qoder: 'qoderAccountGroup',
+  workbuddy: 'workbuddyAccountGroup',
   ollama: 'ollamaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
 };
@@ -123,6 +125,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
   qoder: 'qoderAccountStatus',
+  workbuddy: 'workbuddyAccountStatus',
   ollama: 'ollamaAccountStatus',
   thirdparty: 'thirdpartyStatus'
 };
@@ -293,7 +296,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -3597,6 +3600,23 @@ function formatLimitAmount(value) {
   return `$${number.toFixed(2)}`;
 }
 
+function formatCreditsAmount(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '';
+  return number.toFixed(2);
+}
+
+function formatBalanceAmount(value, source) {
+  return source?.unit === 'credits'
+    ? formatCreditsAmount(value)
+    : formatMoney(value, source?.currency);
+}
+
+function formatBalanceSpendAmount(value, balance) {
+  const formatted = formatBalanceAmount(value, balance);
+  return balance?.unit === 'credits' && formatted ? `${formatted} credits` : formatted;
+}
+
 // Absolute count for windows that expose units (credits). It follows the same
 // display mode as percent bars: remaining/total in quota mode, used/total in
 // used mode.
@@ -3826,14 +3846,13 @@ function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
 function providerSpendNode(balance) {
   const entries = providerSpendEntries(balance);
   if (entries.length === 0) return null;
-  const currency = balance?.currency || 'USD';
   const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
   const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
-  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatMoney(value, currency)]);
+  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
   return limitNoteRowNode({
     label: 'Spend',
     summary: summaryEntries
-      .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
+      .map(([label, value]) => `${label} ${formatBalanceSpendAmount(value, balance)}`)
       .join(' · '),
     // Only worth a tooltip when it would say more than the summary already does.
     detailEntries: entries.length > summaryEntries.length ? formatted : null,
@@ -3917,10 +3936,12 @@ function claudeBalanceNode(provider) {
 }
 
 const {
+  balanceAmount,
   creditsAmount,
   creditsMeterPercent,
   formatCompactMoney,
   formatMoney,
+  isBalanceWindow,
   isCreditsWindow,
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
@@ -3959,15 +3980,18 @@ function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
 
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
-  // A credits window's headline value is money. Its percentage denominator is
-  // lifetime spend, which reads as a quota but isn't one.
-  if (window?.metric === 'credits') {
+  // Balance windows keep their absolute value as the headline. A monetary
+  // credits window uses the provider currency; WorkBuddy supplies credits as
+  // a unit and deliberately has no currency symbol.
+  if (isBalanceWindow(window)) {
     if (window.remaining == null) {
       return String(window.detail || '').toLowerCase() === 'unlimited'
         ? t('settings.thirdparty.unlimited')
         : (window.detail || '--');
     }
-    return formatCompactMoney(window.remaining, window.currency);
+    return window.unit === 'credits'
+      ? formatCreditsAmount(window.remaining)
+      : formatCompactMoney(window.remaining, window.currency);
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
@@ -4678,6 +4702,30 @@ function renderProviderWindows(provider, color) {
       );
       node.classList.add('limit-window-wide');
       windows.append(node);
+    }
+  } else if (provider.provider === 'workbuddy') {
+    windows.classList.add('limit-windows-workbuddy');
+    const credits = windowForKind(provider, 'billing');
+    const balance = provider.balance || null;
+    const amount = balanceAmount(provider, credits);
+    if (credits && amount !== null) {
+      const displayWindow = {
+        ...credits,
+        label: credits.label || 'Credits',
+        resetsAt: null,
+        resetDescription: ''
+      };
+      const node = limitWindowNode(
+        displayWindow.label,
+        displayWindow,
+        color,
+        0.95,
+        formatBalanceAmount(amount, balance || displayWindow)
+      );
+      node.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(node);
+      const spendNode = providerSpendNode(balance);
+      if (spendNode) windows.append(spendNode);
     }
   } else if (provider.provider === 'kimi') {
     const fiveHour = windowForKind(provider, 'session');
@@ -7758,6 +7806,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
   renderMimoStatus();
+  renderWorkbuddyStatus();
   renderCopilotStatus();
   renderViewPreferences();
   renderToolPreferences();
@@ -10671,6 +10720,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
+  renderWorkbuddyStatus();
   renderCopilotStatus();
 }
 
@@ -11937,6 +11987,10 @@ function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
 }
 
+function setWorkbuddyAccountExpanded(expanded) {
+  setAccountGroupExpanded('workbuddy', expanded, 'workbuddyAccountExpanded');
+}
+
 function setCopilotAccountExpanded(expanded) {
   setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
 }
@@ -12260,6 +12314,67 @@ function renderMimoStatus() {
       listEl.append(row);
     }
   }
+  renderSettingsSummaries();
+}
+
+function renderWorkbuddyStatus() {
+  const statusEl = document.getElementById('workbuddyAccountStatus');
+  const localAppToggle = document.getElementById('workbuddyLocalAppToggle');
+  const optInNoteEl = document.getElementById('workbuddyOptInNote');
+  const localAppControls = document.getElementById('workbuddyLocalAppControls');
+  const openButton = document.getElementById('workbuddyOpenButton');
+  const refreshButton = document.getElementById('workbuddyRefreshButton');
+  const loginStatusEl = document.getElementById('workbuddyLoginStatus');
+  const privacyNoteEl = document.getElementById('workbuddyPrivacyNote');
+  const errorEl = document.getElementById('workbuddyErrorMessage');
+  if (!statusEl || !localAppToggle || !optInNoteEl || !localAppControls || !openButton || !refreshButton || !loginStatusEl || !privacyNoteEl || !errorEl) return;
+
+  const enabled = state.settings?.workbuddyLocalAppEnabled === true;
+  const localApp = state.settings?.workbuddyLocalApp || {};
+  const provider = localProviderStatus('workbuddy');
+  const pending = state.workbuddySignInBusy || Number(state.workbuddyPendingCheckSince || 0) > 0;
+  localAppToggle.textContent = t(enabled ? 'settings.workbuddy.disable' : 'settings.workbuddy.enable');
+  localAppControls.classList.toggle('hidden', !enabled);
+  optInNoteEl.textContent = t('settings.workbuddy.optInNote');
+  if (!enabled) {
+    setCursorStatusText(statusEl, t('settings.workbuddy.statusDisabled'));
+    openButton.disabled = true;
+    refreshButton.disabled = true;
+    loginStatusEl.textContent = '';
+    privacyNoteEl.textContent = t('settings.workbuddy.privacyNote');
+    errorEl.textContent = state.workbuddyAccountError || '';
+    errorEl.classList.toggle('hidden', !state.workbuddyAccountError);
+    renderSettingsSummaries();
+    return;
+  }
+  const linked = localApp.authenticated === true && provider?.status === 'ok' && !provider?.stale;
+  const unsupported = localApp.status === 'unsupported';
+  const notDetected = localApp.status === 'notDetected';
+  const signInRequired = localApp.status === 'signInRequired' || provider?.status === 'unauthorized';
+  const statusText = pending
+    ? t('settings.common.checking')
+    : unsupported
+      ? t('settings.workbuddy.statusUnsupported')
+    : linked
+      ? t('settings.workbuddy.statusConnected')
+      : notDetected
+        ? t('settings.workbuddy.statusNotSet')
+        : signInRequired
+          ? t('settings.workbuddy.statusSignInAgain')
+          : localApp.authenticated === true
+            ? t('settings.workbuddy.statusReady')
+            : t('settings.workbuddy.statusNotSet');
+  setCursorStatusText(statusEl, statusText);
+  openButton.disabled = state.workbuddySignInBusy || unsupported;
+  refreshButton.disabled = state.workbuddySignInBusy || unsupported || Boolean(state.workbuddyPendingCheckSince);
+  loginStatusEl.textContent = unsupported
+    ? t('settings.workbuddy.unsupported')
+    : linked
+      ? t('settings.workbuddy.statusConnected')
+      : t('settings.workbuddy.description');
+  privacyNoteEl.textContent = t('settings.workbuddy.privacyNote');
+  errorEl.textContent = state.workbuddyAccountError || '';
+  errorEl.classList.toggle('hidden', !state.workbuddyAccountError);
   renderSettingsSummaries();
 }
 
@@ -14417,6 +14532,75 @@ function setupCursorAccountUI() {
       setMimoAddExpanded(false);
       await refreshStats({ force: true });
     });
+  }
+  const workbuddyToggle = document.getElementById('workbuddySettingsToggle');
+  if (workbuddyToggle) {
+    workbuddyToggle.addEventListener('click', () => setWorkbuddyAccountExpanded(!state.workbuddyAccountExpanded));
+    setWorkbuddyAccountExpanded(false);
+    renderWorkbuddyStatus();
+
+    window.tokenMonitor.workbuddy.status().then((status) => {
+      state.settings.workbuddyLocalApp = status || {};
+      renderWorkbuddyStatus();
+    }).catch(() => {});
+
+    document.getElementById('workbuddyLocalAppToggle').addEventListener('click', async () => {
+      if (state.workbuddySignInBusy) return;
+      state.workbuddySignInBusy = true;
+      state.workbuddyAccountError = '';
+      renderWorkbuddyStatus();
+      try {
+        await saveSettings({ workbuddyLocalAppEnabled: state.settings?.workbuddyLocalAppEnabled !== true });
+        if (state.settings?.workbuddyLocalAppEnabled !== true) state.settings.workbuddyLocalApp = {};
+      } catch (error) {
+        state.workbuddyAccountError = error?.message || t('settings.workbuddy.enableFailed');
+      } finally {
+        state.workbuddySignInBusy = false;
+        renderWorkbuddyStatus();
+      }
+    });
+
+    document.getElementById('workbuddyOpenButton').addEventListener('click', async () => {
+      if (state.workbuddySignInBusy) return;
+      state.workbuddySignInBusy = true;
+      state.workbuddyAccountError = '';
+      renderWorkbuddyStatus();
+      try {
+        const result = await window.tokenMonitor.workbuddy.open();
+        if (!result?.ok) {
+          state.workbuddyAccountError = result?.error || t('settings.workbuddy.signInFailed');
+        } else {
+          state.settings.workbuddyLocalApp = result.status || {};
+        }
+      } catch (error) {
+        state.workbuddyAccountError = error?.message || t('settings.workbuddy.signInFailed');
+      } finally {
+        state.workbuddySignInBusy = false;
+        renderWorkbuddyStatus();
+      }
+    });
+
+    document.getElementById('workbuddyRefreshButton').addEventListener('click', async () => {
+      if (state.workbuddyPendingCheckSince) return;
+      state.workbuddyPendingCheckSince = Date.now();
+      state.workbuddyAccountError = '';
+      renderWorkbuddyStatus();
+      try {
+        const result = await window.tokenMonitor.workbuddy.refresh();
+        if (!result?.ok) {
+          state.workbuddyAccountError = result?.error || t('settings.workbuddy.refreshFailed');
+        } else {
+          state.settings.workbuddyLocalApp = result.status || state.settings.workbuddyLocalApp || {};
+          await refreshStats({ force: false });
+        }
+      } catch (error) {
+        state.workbuddyAccountError = error?.message || t('settings.workbuddy.refreshFailed');
+      } finally {
+        state.workbuddyPendingCheckSince = 0;
+        renderWorkbuddyStatus();
+      }
+    });
+
   }
   const copilotToggle = document.getElementById('copilotSettingsToggle');
   if (copilotToggle) {

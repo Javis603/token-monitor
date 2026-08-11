@@ -711,6 +711,44 @@ test('Home no longer synthesizes a balance window for DeepSeek', () => {
   assert.equal(row.windows[0].remaining, 4);
 });
 
+test('Home shows WorkBuddy credits as an absolute balance with its points unit', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'workbuddy',
+    providerId: 'workbuddy',
+    name: 'WorkBuddy',
+    windows: [{
+      kind: 'billing',
+      label: 'Credits',
+      displayRole: 'balance',
+      unit: 'credits',
+      remaining: 1069.59,
+      limit: 1650,
+      used: 580.41,
+      usedPercent: 35.176,
+      remainingPercent: 64.824
+    }],
+    balance: { amount: 1069.59, unit: 'credits' }
+  }]);
+
+  assert.equal(row.windows.length, 1);
+  assert.deepEqual(row.windows[0], {
+    kind: 'billing',
+    metric: '',
+    displayRole: 'balance',
+    unit: 'credits',
+    label: 'Credits',
+    remainingPercent: 64.824,
+    remaining: 1069.59,
+    currency: '',
+    resetsAt: undefined,
+    resetDescription: '',
+    value: '',
+    planStatus: '',
+    showMeter: true,
+    detail: ''
+  });
+});
+
 test('Home shows a MiMo token plan and balance side by side', () => {
   const [row] = homeLimitAccounts([{
     key: 'mimo',

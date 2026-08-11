@@ -83,6 +83,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       return () => ipcRenderer.removeListener('mimo:accounts', handler);
     }
   },
+  workbuddy: {
+    status: () => ipcRenderer.invoke('workbuddy:status'),
+    open: () => ipcRenderer.invoke('workbuddy:open'),
+    refresh: () => ipcRenderer.invoke('workbuddy:refresh')
+  },
   exportNow: () => ipcRenderer.invoke('export:now'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),

@@ -29,6 +29,13 @@
     return window?.metric === 'credits';
   }
 
+  // Balance-style windows may carry a real non-currency unit, such as
+  // WorkBuddy's credits. Keep that display role separate from `metric:
+  // credits`, which existing balance providers use for monetary balances.
+  function isBalanceWindow(window) {
+    return isCreditsWindow(window) || window?.displayRole === 'balance';
+  }
+
   // The spend meter: money already consumed, the mirror of a `credits` window.
   // A hub older than the `spend` metric drops it during normalization while
   // keeping the window itself, so a metric-less billing window carrying the
@@ -45,6 +52,11 @@
   }
 
   function creditsAmount(provider, window) {
+    const fromWindow = finiteNumber(window?.remaining);
+    return fromWindow === null ? finiteNumber(provider?.balance?.amount) : fromWindow;
+  }
+
+  function balanceAmount(provider, window) {
     const fromWindow = finiteNumber(window?.remaining);
     return fromWindow === null ? finiteNumber(provider?.balance?.amount) : fromWindow;
   }
@@ -77,6 +89,14 @@
     return clampPercent((funds / (funds + spend)) * 100);
   }
 
+  function balanceMeterPercent(provider, window) {
+    if (isCreditsWindow(window)) return creditsMeterPercent(provider, window);
+    const remaining = finiteNumber(window?.remainingPercent);
+    if (remaining !== null) return clampPercent(remaining);
+    const used = finiteNumber(window?.usedPercent);
+    return used === null ? null : clampPercent(100 - used);
+  }
+
   function formatMoney(value, currency) {
     const number = finiteNumber(value);
     if (number === null) return '';
@@ -101,9 +121,12 @@
     creditsAmount,
     creditsCurrency,
     creditsMeterPercent,
+    balanceAmount,
+    balanceMeterPercent,
     formatCompactMoney,
     formatMoney,
     isCreditsWindow,
+    isBalanceWindow,
     spendWindow
   };
 });

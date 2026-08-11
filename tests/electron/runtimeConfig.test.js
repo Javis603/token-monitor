@@ -130,6 +130,67 @@ test('limits config resolves managed credentials at dispatch time through contex
   assert.deepEqual(limits.mimoManagedAccounts, [{ id: 'mimo', cookieHeader: 'allowlisted' }]);
 });
 
+test('desktop WorkBuddy Local App monitoring is opt-in by default', () => {
+  const limits = limitsConfigFromSettings({}, { env: {}, workbuddyDesktopSessionOnly: true });
+  assert.equal(limits.workbuddyLocalAppEnabled, false);
+  assert.equal(limits.workbuddyAccessToken, '');
+  assert.equal(Object.hasOwn(limits, 'workbuddyEndpoint'), false);
+});
+
+test('desktop WorkBuddy Local App monitoring resolves session metadata only when enabled', () => {
+  const limits = limitsConfigFromSettings({}, {
+    env: {},
+    workbuddyDesktopSessionOnly: true,
+    workbuddyLocalAppEnabled: true,
+    workbuddyLocalSession: {
+      userId: 'local-user',
+      enterpriseId: 'local-enterprise',
+      accountType: 'enterprise'
+    }
+  });
+  assert.equal(limits.workbuddyLocalAppEnabled, true);
+  assert.equal(limits.workbuddyUserId, 'local-user');
+  assert.equal(limits.workbuddyEnterpriseId, 'local-enterprise');
+  assert.equal(limits.workbuddyAccountType, 'enterprise');
+  assert.equal(limits.workbuddyAccessToken, '');
+});
+
+test('desktop WorkBuddy auth reads can be disabled without enabling fallback credentials', () => {
+  const limits = limitsConfigFromSettings({
+    workbuddyAccessToken: 'legacy-settings-token',
+    workbuddyUserId: 'legacy-user'
+  }, {
+    env: {
+      TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'env-token',
+      TOKEN_MONITOR_WORKBUDDY_USER_ID: 'env-user'
+    },
+    workbuddyDesktopSessionOnly: true,
+    workbuddyLocalAppEnabled: false,
+    workbuddyLocalSession: { userId: 'local-user', accountType: 'personal' }
+  });
+  assert.equal(limits.workbuddyLocalAppEnabled, false);
+  assert.equal(limits.workbuddyAccessToken, '');
+  assert.equal(limits.workbuddyUserId, '');
+  assert.equal(limits.workbuddyAccountType, '');
+});
+
+test('desktop WorkBuddy config ignores legacy settings and environment credentials', () => {
+  const limits = limitsConfigFromSettings({
+    workbuddyAccessToken: 'legacy-settings-token',
+    workbuddyUserId: 'legacy-user',
+  }, {
+    env: {
+      TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'env-token',
+      TOKEN_MONITOR_WORKBUDDY_USER_ID: 'env-user'
+    },
+    workbuddyDesktopSessionOnly: true,
+    workbuddyLocalAppEnabled: false
+  });
+  assert.equal(limits.workbuddyAccessToken, '');
+  assert.equal(limits.workbuddyUserId, '');
+  assert.equal(limits.workbuddyLocalAppEnabled, false);
+});
+
 test('settings classifier separates structural, limits reconfigure, sink, and provider invalidation changes', () => {
   const previous = {
     hubMode: 'local',
@@ -171,6 +232,14 @@ test('OpenRouter profile changes invalidate only the OpenRouter limits lane', ()
     { openrouterProfiles: { work: { apiKey: 'new', enabled: true } } }
   );
   assert.deepEqual(classification.limitScopes, [{ provider: 'openrouter' }]);
+});
+
+test('WorkBuddy Local App opt-in changes invalidate only the WorkBuddy limits lane', () => {
+  const classification = classifySettingsChange(
+    { workbuddyLocalAppEnabled: false },
+    { workbuddyLocalAppEnabled: true }
+  );
+  assert.deepEqual(classification.limitScopes, [{ provider: 'workbuddy' }]);
 });
 
 test('Claude Web cookie falls back to env and invalidates only the Claude limits lane', () => {

@@ -44,6 +44,10 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
   qoder: ['qoderCookie', 'qoderSite'],
+  // WorkBuddy's desktop widget reads the session owned by the WorkBuddy app
+  // only after the user explicitly enables local-app monitoring. Token and
+  // metadata fields remain available to headless/CLI deployments.
+  workbuddy: ['workbuddyLocalAppEnabled', 'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   ollama: ['ollamaCookie'],
   codex: ['codexManagedAccounts'],
@@ -99,6 +103,14 @@ function usageConfigFromSettings(settings = {}, context = {}) {
 
 function limitsConfigFromSettings(settings = {}, context = {}) {
   const env = context.env || process.env;
+  // The Electron widget uses the WorkBuddy app's local sign-in state. Keep the
+  // raw token fallback available to the headless agent, but never let a desktop
+  // .env or legacy settings value silently bypass the app-owned session.
+  const workbuddySettings = context.workbuddyDesktopSessionOnly === true ? {} : settings;
+  const workbuddyEnv = context.workbuddyDesktopSessionOnly === true ? {} : env;
+  const workbuddyLocalSession = context.workbuddyLocalSession && typeof context.workbuddyLocalSession === 'object'
+    ? context.workbuddyLocalSession
+    : {};
   return {
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
@@ -125,6 +137,38 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
+    workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN
+      || workbuddyEnv.WORKBUDDY_ACCESS_TOKEN
+      || '',
+    workbuddyUserId: workbuddySettings.workbuddyUserId
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_USER_ID
+      || workbuddyEnv.WORKBUDDY_USER_ID
+      || (context.workbuddyLocalAppEnabled === true ? workbuddyLocalSession.userId : '')
+      || '',
+    workbuddyEnterpriseId: workbuddySettings.workbuddyEnterpriseId
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ENTERPRISE_ID
+      || workbuddyEnv.WORKBUDDY_ENTERPRISE_ID
+      || (context.workbuddyLocalAppEnabled === true ? workbuddyLocalSession.enterpriseId : '')
+      || '',
+    workbuddyDomain: workbuddySettings.workbuddyDomain
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_DOMAIN
+      || workbuddyEnv.WORKBUDDY_DOMAIN
+      || (context.workbuddyLocalAppEnabled === true ? workbuddyLocalSession.domain : '')
+      || '',
+    workbuddyDepartmentInfo: workbuddySettings.workbuddyDepartmentInfo
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_DEPARTMENT_INFO
+      || workbuddyEnv.WORKBUDDY_DEPARTMENT_INFO
+      || (context.workbuddyLocalAppEnabled === true ? workbuddyLocalSession.departmentInfo : '')
+      || '',
+    workbuddyAccountType: context.workbuddyLocalAppEnabled === true
+      ? workbuddyLocalSession.accountType || ''
+      : '',
+    workbuddyLocale: workbuddySettings.workbuddyLocale
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_LOCALE
+      || workbuddyEnv.WORKBUDDY_LOCALE
+      || '',
+    workbuddyLocalAppEnabled: context.workbuddyLocalAppEnabled === true,
     kimiApiKey: settings.kimiApiKey || '',
     kimiWebAccessToken: settings.kimiWebAccessToken || '',
     ollamaCookie: settings.ollamaCookie || '',

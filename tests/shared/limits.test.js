@@ -1165,6 +1165,23 @@ test('normalizeLimitWindow preserves only documented component sources', () => {
   assert.equal('source' in normalizeLimitWindow({ kind: 'session' }), false);
 });
 
+test('normalizeLimitWindow preserves non-currency balance display semantics', () => {
+  const window = normalizeLimitWindow({
+    kind: 'billing',
+    label: 'Credits',
+    displayRole: 'balance',
+    unit: 'credits',
+    used: 580.41,
+    limit: 1650,
+    remaining: 1069.59
+  });
+
+  assert.equal(window.displayRole, 'balance');
+  assert.equal(window.unit, 'credits');
+  assert.equal(window.remaining, 1069.59);
+  assert.equal(window.remainingPercent, 64.824);
+});
+
 test('normalizeLimitProvider restores a balance window for pre-credits-window devices', () => {
   // An older device posts DeepSeek as a balance with no windows at all.
   const legacy = normalizeLimitProvider({
@@ -1199,6 +1216,30 @@ test('normalizeLimitProvider never duplicates an existing credits window', () =>
 
   assert.equal(current.windows.length, 1);
   assert.equal(current.windows[0].label, 'Token quota');
+});
+
+test('normalizeLimitProvider never duplicates a WorkBuddy balance window', () => {
+  const current = normalizeLimitProvider({
+    provider: 'workbuddy',
+    accountKey: 'wb1',
+    status: 'ok',
+    updatedAt: '2026-07-26T00:00:00.000Z',
+    windows: [{
+      kind: 'billing',
+      label: 'Credits',
+      displayRole: 'balance',
+      unit: 'credits',
+      remaining: 1069.59,
+      limit: 1650,
+      used: 580.41
+    }],
+    balance: { amount: 1069.59, unit: 'credits' }
+  });
+
+  assert.equal(current.windows.length, 1);
+  assert.equal(current.windows[0].displayRole, 'balance');
+  assert.equal(current.windows[0].unit, 'credits');
+  assert.equal(current.balance.unit, 'credits');
 });
 
 test('normalizeLimitProvider leaves percentage-only providers alone', () => {

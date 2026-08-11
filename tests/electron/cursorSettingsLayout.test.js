@@ -982,6 +982,15 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  assert.match(body, /'workbuddyAccessToken',[\s\S]*'workbuddyDepartmentInfo'/);
+  assert.match(body, /workbuddyLocalApp: workbuddyStatusForRenderer\(\)/);
+  assert.doesNotMatch(main, /workbuddySession|workbuddyBrowserSession/);
+  assert.doesNotMatch(body, /workbuddyBrowserSessionEnabled: settings\?\.workbuddyBrowserSessionEnabled/);
+  const settingsUpdate = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('appearance:preview'")
+  );
+  assert.match(settingsUpdate, /delete normalizedPatch\.workbuddyLocalApp;/);
   assert.match(credentialStore, /kimiWebAccessToken: \['providers', 'kimi', 'webAccessToken'\]/);
   assert.match(body, /kimiWebAccessTokenConfigured: Boolean\(currentKimiWebAccessToken\(\)\)/);
   const mimoRendererShape = main.slice(
@@ -998,6 +1007,40 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(main, /migrateLegacyMimoCredentialFiles\(merged\.mimoManagedAccounts\)/);
   assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
   assert.match(main, /delete result\.account\.cookieHeader/);
+});
+
+test('WorkBuddy settings delegates sign-in to the local app and never offers Token Monitor logout', () => {
+  const html = readRendererFile('index.html');
+  const details = html.match(/<div id="workbuddySettingsDetails"[\s\S]*?<div id="workbuddyErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(details, /<button id="workbuddyOpenButton"[^>]*data-i18n="settings\.workbuddy\.signIn">/);
+  assert.match(details, /id="workbuddyRefreshButton"/);
+  assert.match(details, /<div class="settings-actions workbuddy-opt-in-actions">\s*<button id="workbuddyLocalAppToggle"/);
+  assert.match(details, /id="workbuddyLocalAppToggle"[^>]*data-i18n="settings\.workbuddy\.enable">/);
+  assert.match(details, /id="workbuddyOptInNote"[^>]*data-i18n="settings\.workbuddy\.optInNote"/);
+  assert.match(details, /id="workbuddyLocalAppControls" class="hidden"/);
+  assert.match(details, /id="workbuddyPrivacyNote"[^>]*data-i18n="settings\.workbuddy\.privacyNote"/);
+  assert.doesNotMatch(details, /workbuddyLogoutButton|data-i18n="settings\.workbuddy\.logout"/);
+  assert.match(details, /WorkBuddy app on this device/);
+
+  const app = readRendererFile('app.js');
+  assert.match(app, /state\.settings\.workbuddyLocalApp = status \|\| \{\};/);
+  assert.match(app, /saveSettings\(\{ workbuddyLocalAppEnabled:/);
+  assert.match(app, /privacyNoteEl\.textContent = t\('settings\.workbuddy\.privacyNote'\)/);
+  assert.match(app, /window\.tokenMonitor\.workbuddy\.open\(\)/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.workbuddy\.(signIn|logout)\(\)/);
+
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  assert.match(preload, /open: \(\) => ipcRenderer\.invoke\('workbuddy:open'\)/);
+  assert.doesNotMatch(preload, /workbuddy:(signIn|logout)/);
+});
+
+test('WorkBuddy auth is resolved only when its enabled local provider is active', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const limitsConfig = functionBody(main, 'electronLimitsConfig', 'defaultLimitProviders');
+  assert.match(limitsConfig, /settings\?\.limitsEnabled !== false/);
+  assert.match(limitsConfig, /parseLimitProviders\(settings\?\.limitProviders\)\.includes\('workbuddy'\)/);
+  assert.match(limitsConfig, /settings\?\.workbuddyLocalAppEnabled === true/);
+  assert.match(limitsConfig, /workbuddyLocalSession: workbuddyLocalAppEnabled \? workbuddyLocalAccess\.getSessionInfo\(\) : \{\}/);
 });
 
 test('legacy credential cleanup retries independently from the migration marker', () => {
@@ -1253,6 +1296,13 @@ test('main collectors share one live GUI limit credential resolver in every widg
     'claudeWebCookie', 'zaiApiKey', 'zaiApiRegion', 'volcengineAccessKeyId', 'volcengineSecretAccessKey',
     'volcengineRegion', 'qoderCookie', 'qoderSite', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
   ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
+});
+
+test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
+  assert.match(limitsDeps, /json: \(\) => result\.json\(\)/);
+  assert.doesNotMatch(limitsDeps, /result\.body/);
 });
 
 test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {

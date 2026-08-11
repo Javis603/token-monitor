@@ -22,6 +22,8 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
+const { createWorkbuddyLocalAuth } = require('./workbuddyLocalAuth');
+const { createWorkbuddyLocalAccess } = require('./workbuddyLocalAccess');
 const {
   expandedBoundsForCollapse,
   normalWindowBounds,
@@ -40,6 +42,19 @@ const {
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
+const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
+  fetch: typeof net.fetch === 'function'
+    ? net.fetch.bind(net)
+    : typeof globalThis.fetch === 'function'
+      ? globalThis.fetch.bind(globalThis)
+      : undefined,
+  openPath: (target) => shell.openPath(target),
+  openExternal: (url) => shell.openExternal(url)
+});
+const workbuddyLocalAccess = createWorkbuddyLocalAccess({
+  auth: electronWorkbuddyLocalAuth,
+  isEnabled: () => settings?.workbuddyLocalAppEnabled === true
+});
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
@@ -399,6 +414,7 @@ function defaultSettings() {
     hiddenHomeLimitProviders: '',
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
+    workbuddyLocalAppEnabled: false,
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
@@ -544,8 +560,14 @@ function electronUsageConfig(errorPrefix) {
 }
 
 function electronLimitsConfig() {
+  const workbuddyEnabled = settings?.limitsEnabled !== false
+    && parseLimitProviders(settings?.limitProviders).includes('workbuddy');
+  const workbuddyLocalAppEnabled = workbuddyEnabled && settings?.workbuddyLocalAppEnabled === true;
   return limitsConfigFromSettings(settings, {
     env: process.env,
+    workbuddyDesktopSessionOnly: true,
+    workbuddyLocalAppEnabled,
+    workbuddyLocalSession: workbuddyLocalAppEnabled ? workbuddyLocalAccess.getSessionInfo() : {},
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector()
@@ -596,9 +618,31 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
 function electronLimitsDeps() {
   return {
     claudeWebFetch: electronClaudeWebFetch,
+    workbuddyFetch: async (url, init = {}, expectedSession = null) => {
+      const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
+      return {
+        status: result.status,
+        ok: result.ok,
+        json: () => result.json()
+      };
+    },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal
   };
+}
+
+async function openWorkbuddyApp() {
+  try {
+    await workbuddyLocalAccess.openApp();
+    pushSettingsToRenderer();
+    return { ok: true, status: workbuddyStatusForRenderer() };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
+function workbuddyStatusForRenderer() {
+  return workbuddyLocalAccess.status();
 }
 
 function normalizeDeepSeekApiKey(value) {
@@ -2008,6 +2052,7 @@ function readSettings() {
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
+    merged.workbuddyLocalAppEnabled = parseBoolean(merged.workbuddyLocalAppEnabled, false);
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
@@ -2060,6 +2105,7 @@ function readSettings() {
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
+    delete merged.workbuddyEndpoint;
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
     delete merged.edgeDrawerEnabled;
@@ -4109,8 +4155,17 @@ function settingsForRenderer() {
   const redactedCredentials = credentialSettingsForRenderer(settings, {
     expose: ['hubHostSecret', 'secret']
   });
+  const rendererSettings = { ...settings };
+  for (const key of [
+    'workbuddyAccessToken',
+    'workbuddyUserId',
+    'workbuddyEnterpriseId',
+    'workbuddyLocale',
+    'workbuddyDomain',
+    'workbuddyDepartmentInfo'
+  ]) delete rendererSettings[key];
   return {
-    ...settings,
+    ...rendererSettings,
     locale: trayMenuLocale(),
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
@@ -4147,6 +4202,7 @@ function settingsForRenderer() {
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
+    workbuddyLocalApp: workbuddyStatusForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
@@ -5714,6 +5770,14 @@ app.whenReady().then(() => {
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
+    delete normalizedPatch.workbuddyLocalApp;
+    delete normalizedPatch.workbuddyAccessToken;
+    delete normalizedPatch.workbuddyUserId;
+    delete normalizedPatch.workbuddyEnterpriseId;
+    delete normalizedPatch.workbuddyEndpoint;
+    delete normalizedPatch.workbuddyLocale;
+    delete normalizedPatch.workbuddyDomain;
+    delete normalizedPatch.workbuddyDepartmentInfo;
     delete normalizedPatch.openrouterProfiles;
     delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
@@ -5824,6 +5888,7 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
+      workbuddyLocalAppEnabled: parseBoolean(patch.workbuddyLocalAppEnabled ?? settings.workbuddyLocalAppEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
       windowMaximized: parseBoolean(settings.windowMaximized, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
@@ -6219,6 +6284,16 @@ app.whenReady().then(() => {
     .catch((error) => ({ ok: false, error: error.message })));
   ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
   ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
+  ipcMain.handle('workbuddy:status', () => workbuddyStatusForRenderer());
+  ipcMain.handle('workbuddy:open', () => openWorkbuddyApp());
+  ipcMain.handle('workbuddy:refresh', async () => {
+    try {
+      await queueLimitInvalidation({ provider: 'workbuddy' }, 'manual-refresh', { clear: true });
+      return { ok: true, status: workbuddyStatusForRenderer() };
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) };
+    }
+  });
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());
@@ -6928,6 +7003,7 @@ app.on('before-quit', () => {
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
   unregisterWindowToggleShortcut();
+  electronWorkbuddyLocalAuth.dispose();
   if (skipForcedQuit) return;
   performQuit();
 });
