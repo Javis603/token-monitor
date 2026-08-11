@@ -335,7 +335,10 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
   assert.deepEqual(Object.keys(candidates).sort(), Object.keys(roots).sort());
   for (const [client, dirs] of Object.entries(candidates)) {
     const expected = roots[client]
-      .filter((root) => !(client === 'copilot' && root.id === 'copilot-otel'))
+      .filter((root) => (
+        !(client === 'copilot' && root.id === 'copilot-otel')
+        && root.id !== 'kiro-ide-globalstorage'
+      ))
       .map((root) => root.dir);
     assert.deepEqual(dirs, expected);
   }

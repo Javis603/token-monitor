@@ -1131,8 +1131,9 @@ function hasCopilotChatSessions(workspaceRoot) {
 }
 
 // Per-client data-dir candidates, keyed by client. Drives the detection-status
-// derivation and (minus the self-synced clients below) the chokidar watch list;
-// Antigravity's read-only source roots are added back explicitly below.
+// derivation and, after the interval-only/self-synced projections below, the
+// chokidar watch list; Antigravity's read-only source roots are added back
+// explicitly below.
 // The watched roots, each tagged with a stable id for its *kind*. One id may
 // cover several paths: Copilot's workspaceStorage has a variant per platform and
 // Kiro's IDE globalStorage has four, but "the VS Code workspace storage is
@@ -1299,9 +1300,10 @@ function clientSourceRoots(clientsCsv) {
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
-  // path under --home
-  // (unlike Zed), so all are safe to watch cross-platform for seconds-level
-  // refresh and a correct waiting/missing status.
+  // path under --home (unlike Zed), so every root remains a valid source and
+  // presence signal. The globalStorage kind is deliberately interval-only in
+  // clientWatchCandidates() because real trees can contain tens of thousands of
+  // files; the sessions and sqlite roots retain seconds-level refresh.
   //
   // Note the deliberate Kiro-vs-kiro casing asymmetry below (do not "fix" it to
   // list both cases everywhere): tokscale scans both `Kiro` and `kiro` cased
@@ -1339,6 +1341,15 @@ function clientSourceRoots(clientsCsv) {
   return byClient;
 }
 
+// Sources that remain part of collection, health, and diagnostics but are too
+// broad for a persistent recursive watcher. Kiro globalStorage accepts every
+// `.chat`, `.json`, and extensionless file at any depth in tokscale, so a real
+// tree can require thousands of native directory watches; after descriptor
+// exhaustion the same tree becomes an even more expensive 2-second polling
+// watch. Regular interval ticks (five minutes by default), manual refreshes, and
+// hourly full reconciliation still scan it through the unchanged Kiro client.
+const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage']);
+
 // The watcher only ever wants paths, so it keeps its original shape rather than
 // learning about check ids it would immediately discard.
 function clientWatchCandidates(clientsCsv) {
@@ -1349,7 +1360,10 @@ function clientWatchCandidates(clientsCsv) {
     // hand both nested paths to chokidar or it may install two native watches
     // over the same tree.
     byClient[client] = roots
-      .filter((root) => !(client === 'copilot' && root.id === 'copilot-otel'))
+      .filter((root) => (
+        !(client === 'copilot' && root.id === 'copilot-otel')
+        && !INTERVAL_ONLY_SOURCE_CHECK_IDS.has(root.id)
+      ))
       .map((root) => root.dir);
   }
   return byClient;

@@ -1746,7 +1746,7 @@ test('clientDataDirPresence requires an actual VS Code Copilot chat source', () 
   }
 });
 
-test('watchPathsForClients watches Pi (incl. Oh My Pi), Zed (incl. native macOS), Kilo Code (only tokscale-scanned roots), and Kiro (CLI + IDE + kiro-cli roots)', () => {
+test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalStorage to interval scans', () => {
   const tmp = withTmpHome([
     path.join('.pi', 'agent', 'sessions'),
     path.join('.omp', 'agent', 'sessions'),
@@ -1779,11 +1779,11 @@ test('watchPathsForClients watches Pi (incl. Oh My Pi), Zed (incl. native macOS)
     assert.ok(!dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, '.zcode', 'projects')));
-    // Kiro: tokscale reads the sessions tree for both CLI and IDE, the Kiro IDE
-    // globalStorage root, and the kiro-cli sqlite dir — all home-relative, so we
-    // watch each.
+    // Kiro sessions and the bounded kiro-cli database keep seconds-level
+    // refresh. The unbounded IDE globalStorage source remains present and
+    // collectable, but never enters chokidar's native or 2-second polling tree.
     assert.ok(dirs.includes(path.join(tmp, '.kiro', 'sessions')));
-    assert.ok(dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')));
+    assert.ok(!dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'kiro-cli')));
     // CodeBuddy/WorkBuddy: assert the platform-agnostic roots. CodeBuddy's
     // extension-log root is process.platform-specific, so it's covered by the
@@ -1793,6 +1793,26 @@ test('watchPathsForClients watches Pi (incl. Oh My Pi), Zed (incl. native macOS)
     assert.deepEqual(clientDataDirPresence('pi,zed,kilocode,micode,zcode,kiro,codebuddy,workbuddy'), {
       pi: true, zed: true, kilocode: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Kiro IDE globalStorage stays a health source when it is the only Kiro root', () => {
+  const globalStorage = path.join('Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent');
+  const tmp = withTmpHome([globalStorage]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientDataDirPresence, clientSourceChecks, watchPathsForClients } = freshCollector();
+    assert.deepEqual(watchPathsForClients('kiro'), []);
+    assert.deepEqual(clientDataDirPresence('kiro'), { kiro: true });
+    assert.deepEqual(
+      clientSourceChecks('kiro').kiro.find((check) => check.id === 'kiro-ide-globalstorage'),
+      { id: 'kiro-ide-globalstorage', exists: true }
+    );
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
