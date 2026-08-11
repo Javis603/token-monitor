@@ -28,6 +28,12 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, JSON.stringify(value));
 }
 
+function paddedJson(value, size) {
+  const json = Buffer.from(JSON.stringify(value));
+  assert.ok(json.length <= size);
+  return Buffer.concat([json, Buffer.alloc(size - json.length, 0x20)]);
+}
+
 function sidecars(directory, id, meta, telemetry) {
   const metaPath = path.join(directory, `${id}.jsonl.meta`);
   const telemetryPath = path.join(directory, `${id}.jsonl.telemetry.json`);
@@ -894,11 +900,14 @@ test('readReasonixNativeSession bounds metadata and telemetry to regular files',
   writeJson(telemetryPath, nativeTelemetry());
   assert.notEqual(readReasonixNativeSession(metaPath, telemetryPath), null);
 
-  fs.writeFileSync(metaPath, Buffer.alloc(REASONIX_META_MAX_BYTES + 1, 0x20));
+  fs.writeFileSync(metaPath, paddedJson({ id: 'oversized-meta' }, REASONIX_META_MAX_BYTES + 1));
   assert.equal(readReasonixNativeSession(metaPath, telemetryPath), null);
 
   writeJson(metaPath, { id: 'bounded' });
-  fs.writeFileSync(telemetryPath, Buffer.alloc(REASONIX_TELEMETRY_MAX_BYTES + 1, 0x20));
+  fs.writeFileSync(
+    telemetryPath,
+    paddedJson(nativeTelemetry(), REASONIX_TELEMETRY_MAX_BYTES + 1)
+  );
   assert.equal(readReasonixNativeSession(metaPath, telemetryPath), null);
 
   const metaDirectory = path.join(root, 'meta-directory');
@@ -910,20 +919,28 @@ test('readReasonixNativeSession bounds metadata and telemetry to regular files',
   writeJson(metaPath, { id: 'bounded' });
   assert.equal(readReasonixNativeSession(metaPath, telemetryDirectory), null);
 
-  let growingBytes = REASONIX_META_MAX_BYTES + 1;
+  const growingContent = paddedJson({ id: 'grew-after-fstat' }, REASONIX_META_MAX_BYTES * 2);
+  let readOffset = 0;
+  let totalReadBytes = 0;
+  let readCalls = 0;
   let closed = false;
   const growingFs = {
     statSync: () => ({ isFile: () => true, size: 2 }),
     openSync: () => 1,
     fstatSync: () => ({ isFile: () => true, size: 2 }),
     readSync: (_descriptor, buffer, offset, length) => {
-      const bytesRead = Math.min(length, growingBytes);
-      if (bytesRead > 0) buffer.fill(0x20, offset, offset + bytesRead);
-      growingBytes -= bytesRead;
+      readCalls += 1;
+      const bytesRead = Math.min(length, growingContent.length - readOffset);
+      if (bytesRead > 0) growingContent.copy(buffer, offset, readOffset, readOffset + bytesRead);
+      readOffset += bytesRead;
+      totalReadBytes += bytesRead;
       return bytesRead;
     },
     closeSync: () => { closed = true; }
   };
   assert.equal(readReasonixNativeSession('growing.json', 'unused.json', { fsModule: growingFs }), null);
+  assert.ok(totalReadBytes > REASONIX_META_MAX_BYTES);
+  assert.ok(totalReadBytes < growingContent.length);
+  assert.ok(readCalls < Math.ceil(growingContent.length / (64 * 1024)));
   assert.equal(closed, true);
 });
