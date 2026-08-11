@@ -108,6 +108,13 @@ test('renderer uses the Reasonix icon for the Reasonix tool row', () => {
   assert.match(styles, /\.row-icon-reasonix\s*\{[^}]*assets\/icons\/reasonix\.svg/s);
 });
 
+test('Reasonix icon uses a filled mask-safe SVG path', () => {
+  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'reasonix.svg'), 'utf8');
+  assert.match(icon, /fill="currentColor"/);
+  assert.match(icon, /fill-rule="evenodd"/);
+  assert.doesNotMatch(icon, /stroke=/);
+});
+
 test('Reasonix native session keeps presentation identity for the brand icon path', () => {
   const source = rendererSource();
   assert.match(source, /clientsWithIcon = new Set\([\s\S]*'reasonix'/);

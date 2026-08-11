@@ -97,6 +97,29 @@
         project.clientTokens[client] = (project.clientTokens[client] || 0) + tokens;
       }
     }
+    // Native project rollups are local-only and may be absent from an older
+    // snapshot while the corresponding native sessions are already present.
+    // Rebuild only from exact, period-safe native sessions; never infer a
+    // project from aggregate Reasonix totals or from an unreliable period.
+    if (Object.keys(options.nativeProjects || {}).length === 0) {
+      for (const session of Object.values(options.nativeSessions || {})) {
+        if (session?.client !== 'reasonix'
+          || !session.projectId
+          || !session.projectLabel
+          || session.tokenDataUnavailable === true
+          || session.periodTokenDataUnavailable === true) continue;
+        const name = String(session.projectLabel).trim().normalize('NFC');
+        const key = canonicalProjectKey(name);
+        const tokens = Math.max(0, Number(session.totalTokens || 0));
+        if (!key || !name || tokens <= 0) continue;
+        if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
+        const project = projects.get(key);
+        project.name = deterministicProjectLabel(project.name, name);
+        project.value += tokens;
+        project.clients.add('reasonix');
+        project.clientTokens.reasonix = (project.clientTokens.reasonix || 0) + tokens;
+      }
+    }
     return Array.from(projects.values()).map((project) => {
       const color = options.stableColor ? options.stableColor(project.key, options.fallbackColors || ['#73bdf5']) : '#73bdf5';
       const clientColor = (client) => {

@@ -703,6 +703,7 @@ test('Reasonix native view stays outside aggregate, history, archive and sync pa
     sessions: { today: { [nativeSession.sessionId]: nativeSession }, month: {}, allTime: { [nativeSession.sessionId]: nativeSession } },
     projects: { today: {}, month: {}, allTime: {} }
   };
+  let capturedAnchor;
   const nativeCache = {
     getView: (options) => {
       assert.equal(options.allTimeSince, '2026-01-01');
@@ -734,7 +735,8 @@ test('Reasonix native view stays outside aggregate, history, archive and sync pa
     historyEnabled: false,
     wslScanEnabled: false,
     reasonixNativeSessionsEnabled: true,
-    reasonixNativeSessionCache: nativeCache
+    reasonixNativeSessionCache: nativeCache,
+    onAnchorComputed: (capture) => { capturedAnchor = capture; }
   });
 
   assert.equal(summary.today.totalTokens, 140);
@@ -743,6 +745,8 @@ test('Reasonix native view stays outside aggregate, history, archive and sync pa
   assert.equal(summary.today.clients.reasonix, 140);
   assert.deepEqual(summary.today.sessions, {});
   assert.equal(summary.nativeSessions.today[nativeSession.sessionId].totalTokens, 999);
+  assert.deepEqual(capturedAnchor.nativeSessions, nativeView.sessions);
+  assert.deepEqual(capturedAnchor.nativeProjects, nativeView.projects);
   assert.equal(summary.history, null);
   const archive = captureSessionUsageArchive({}, {
     nativeSessions: summary.nativeSessions,

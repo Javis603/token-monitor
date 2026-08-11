@@ -8,7 +8,7 @@ const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
 const { coerceHistory, mergeHistories } = require('./history');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
-const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
+const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
@@ -1168,7 +1168,14 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
 // Recurses over the union of keys so it covers every numeric field a period may
 // grow (clients/models/clientModels/sessions/...) without per-field bookkeeping.
 function applyPeriodDelta(base, freshToday, anchorToday) {
-  return deltaValue(base, freshToday, anchorToday, '');
+  const result = deltaValue(base, freshToday, anchorToday, '');
+  // Older anchors may still contain the pre-native Reasonix stats-path rows.
+  // They are not authoritative session detail and must not survive a warm tick
+  // merely because the aggregate totals remain valid.
+  if (result && typeof result === 'object' && Object.prototype.hasOwnProperty.call(result, 'sessions')) {
+    result.sessions = filterReasonixSyntheticSessions(result.sessions);
+  }
+  return result;
 }
 
 function deltaValue(base, fresh, anchor, key) {

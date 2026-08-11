@@ -217,6 +217,27 @@ test('Reasonix native rows show cumulative totals for an unreliable bounded peri
   assert.equal(row.periodTokenDataUnavailable, true);
 });
 
+test('Reasonix native rows hide legacy stats paths while keeping the compact message parameter', () => {
+  const leakedPath = 'REASONIX:reasonix-stats:/Users/sunricardo/.reasonix/stats/2026-08-09.jsonl';
+  const [row] = sessionRowsForPeriod({ sessions: {} }, {
+    nativeSessions: {
+      'reasonix:legacy-path': {
+        client: 'reasonix',
+        sessionId: leakedPath,
+        model: 'deepseek-v4-flash',
+        totalTokens: 123,
+        messageCount: 6
+      }
+    },
+    clientLabels: { reasonix: 'Reasonix' }
+  });
+
+  assert.equal(row.subtitle, '6 msgs');
+  assert.equal(row.detail, '');
+  assert.doesNotMatch(row.title, /reasonix-stats|\/Users\//i);
+  assert.equal(sessionIdLabel(leakedPath), '');
+});
+
 test('session rows label archived sessions without claiming the source was deleted', () => {
   const rows = sessionRowsForPeriod({
     sessions: {

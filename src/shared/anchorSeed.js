@@ -2,6 +2,7 @@
 
 const { collectorAnchorTrust, computePeriodWindows } = require('./collector');
 const { mergePeriods } = require('./usage');
+const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
 
 // The collector persists every full scan to collector-anchor.json so it can
 // derive month/allTime from a `--today` scan after a restart. A widget cold
@@ -40,7 +41,12 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // collectUsageOnce does before summing them. Same local day is established
   // above, so all three windows are safe to merge.
   const wsl = wslScanEnabled !== false ? saved.wslBundle : null;
-  const withWsl = (period, wslPeriod) => (wslPeriod ? mergePeriods(period, wslPeriod) : period);
+  const cleanPeriod = (period) => {
+    if (!period || typeof period !== 'object' || !Object.prototype.hasOwnProperty.call(period, 'sessions')) return period;
+    const sessions = filterReasonixSyntheticSessions(period.sessions);
+    return sessions === period.sessions ? period : { ...period, sessions };
+  };
+  const withWsl = (period, wslPeriod) => cleanPeriod(wslPeriod ? mergePeriods(period, wslPeriod) : period);
   // Mirrors collectUsageOnce: a non-Windows host reports no WSL status at all,
   // a Windows host with scanning off reports it as disabled rather than absent,
   // and otherwise the anchor's own snapshot stands until the first scan. Absent
@@ -71,7 +77,9 @@ function deviceRecordFromAnchor(saved, options = {}) {
     periodWindows: computePeriodWindows(now),
     today: withWsl(saved.today, wsl?.today),
     month: withWsl(saved.month, wsl?.month),
-    allTime: withWsl(saved.allTime, wsl?.allTime)
+    allTime: withWsl(saved.allTime, wsl?.allTime),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: saved.nativeSessions } : {}),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: saved.nativeProjects } : {})
   };
 }
 

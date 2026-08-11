@@ -2040,7 +2040,8 @@ function projectRowsForPeriod(period) {
     stableColor,
     fallbackColors: fallbackModelColors,
     unknownClientLabel: t('projects.unknownTool'),
-    nativeProjects: state.stats?.nativeProjects?.[state.period] || {}
+    nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
+    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
 }
 

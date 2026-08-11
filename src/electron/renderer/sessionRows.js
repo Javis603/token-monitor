@@ -53,9 +53,10 @@
   function sessionIdLabel(id) {
     const raw = String(id || '').trim();
     if (!raw) return '';
-    const reasonixLabel = raw.startsWith('reasonix:') ? raw.slice('reasonix:'.length) : raw;
+    const reasonixPrefix = raw.match(/^reasonix:/i);
+    const reasonixLabel = reasonixPrefix ? raw.slice(reasonixPrefix[0].length) : raw;
     if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return '';
-    if (raw.startsWith('reasonix:')) return reasonixLabel;
+    if (reasonixPrefix) return reasonixLabel;
     if (raw.toLowerCase().startsWith('reasonix-stats:')) return '';
     const rollout = raw.match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}[:-]\d{2}-(.+)$/);
     if (rollout) return rollout[1];
@@ -183,7 +184,7 @@
           archived: archived || undefined,
           client,
           sortTime: sessionTimestampValue(session),
-          title: `${clientLabel} session ${sessionId}`
+          title: `${clientLabel} session${sessionIdLabel(sessionId) ? ` ${sessionIdLabel(sessionId)}` : ''}`
         };
       })
       .filter(Boolean);

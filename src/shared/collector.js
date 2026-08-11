@@ -1000,10 +1000,6 @@ async function collectUsageOnce(options) {
     }
   }
 
-  if (typeof options.onAnchorComputed === 'function') {
-    options.onAnchorComputed({ windowsPeriods, todayPartitions, wslBundle, wslStatus });
-  }
-
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
   // including the per-workspace walk Copilot needs — and let one snapshot report
@@ -1046,6 +1042,16 @@ async function collectUsageOnce(options) {
       summary.nativeSessions = empty.sessions;
       summary.nativeProjects = empty.projects;
     }
+  }
+  if (typeof options.onAnchorComputed === 'function') {
+    options.onAnchorComputed({
+      windowsPeriods,
+      todayPartitions,
+      wslBundle,
+      wslStatus,
+      ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
+      ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
+    });
   }
   if (options.historyEnabled === false) {
     summary.history = null;
@@ -2465,7 +2471,9 @@ function startCollector(options) {
           today: captured.windowsPeriods.today,
           month: captured.windowsPeriods.month,
           allTime: captured.windowsPeriods.allTime,
-          todayPartitions: captured.todayPartitions
+          todayPartitions: captured.todayPartitions,
+          ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
+          ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
@@ -2480,6 +2488,8 @@ function startCollector(options) {
               allTime: anchor.allTime,
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
+              ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
+              ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
               configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
               fullScanAt: new Date().toISOString()
             }));
@@ -2489,6 +2499,8 @@ function startCollector(options) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
+        if (captured.nativeSessions) anchor.nativeSessions = captured.nativeSessions;
+        if (captured.nativeProjects) anchor.nativeProjects = captured.nativeProjects;
         if (refreshWsl) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
