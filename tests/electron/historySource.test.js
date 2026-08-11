@@ -59,13 +59,15 @@ test('projects per-device histories and preserves explicit availability', () => 
   assert.deepEqual(parseDeviceHistories({
     devices: [
       { deviceId: 'mac', history: { daily: [{ date: '2026-08-11', tokens: 9 }] } },
-      { id: 'win', history: { monthly: [{ month: '2026-08', tokens: 5 }] } },
+      { id: 'win', historyAvailable: true, history: { monthly: [{ month: '2026-08', tokens: 5 }] }, allTime: { totalTokens: 5 } },
+      { id: 'idle', historyAvailable: true, history: { daily: [], monthly: [] }, allTime: { totalTokens: 0 } },
       { deviceId: 'disabled', historyAvailable: false, history: null, allTime: { totalTokens: 50 } },
       { deviceId: 'legacy', allTime: { totalTokens: 0 } }
     ]
   }), {
     mac: { available: true, daily: [{ date: '2026-08-11', tokens: 9 }], monthly: [], summary: {} },
-    win: { available: true, daily: [], monthly: [{ month: '2026-08', tokens: 5 }], summary: {} },
+    win: { available: false, daily: [], monthly: [{ month: '2026-08', tokens: 5 }], summary: {} },
+    idle: { available: true, daily: [], monthly: [], summary: {} },
     disabled: { available: false, daily: [], monthly: [], summary: {} },
     legacy: { available: false, daily: [], monthly: [], summary: {} }
   });
@@ -174,4 +176,55 @@ test('remote device histories prefer a newer local history before Hub upload', a
 
   assert.equal(result.mac.daily[0].tokens, 100);
   assert.equal(result.remote.daily[0].tokens, 25);
+});
+
+test('remote device histories retain Hub last-good data for a capability-only local snapshot', async () => {
+  const result = await resolveDeviceHistories({
+    hubUrl: 'https://hub.example/',
+    localDevice: {
+      deviceId: 'mac',
+      periods: { allTime: { totalTokens: 100 } },
+      historyAvailable: true
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return { devices: [{
+          deviceId: 'mac',
+          periods: { allTime: { totalTokens: 80 } },
+          historyAvailable: true,
+          history: { daily: [{ date: '2026-08-11', tokens: 80 }] }
+        }] };
+      }
+    })
+  });
+
+  assert.equal(result.mac.available, true);
+  assert.equal(result.mac.daily[0].tokens, 80);
+});
+
+test('an explicit local disabled state overrides Hub last-good history', async () => {
+  const result = await resolveDeviceHistories({
+    hubUrl: 'https://hub.example/',
+    localDevice: {
+      deviceId: 'mac',
+      periods: { allTime: { totalTokens: 100 } },
+      historyAvailable: false,
+      history: null
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return { devices: [{
+          deviceId: 'mac',
+          periods: { allTime: { totalTokens: 80 } },
+          historyAvailable: true,
+          history: { daily: [{ date: '2026-08-11', tokens: 80 }] }
+        }] };
+      }
+    })
+  });
+
+  assert.equal(result.mac.available, false);
+  assert.deepEqual(result.mac.daily, []);
 });

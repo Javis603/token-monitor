@@ -38,6 +38,7 @@ test('period selector keeps three equal slots and opens one shared popover witho
   assert.match(app, /tab\.setAttribute\('aria-expanded',[\s\S]*state\.periodPopoverAnchor === tab/);
   assert.match(app, /event\.newState === 'closed'[\s\S]*anchor\.focus\(\)/);
   assert.match(app, /window\.addEventListener\('resize',[\s\S]*positionPeriodPopover\(state\.periodPopoverAnchor\)/);
+  assert.doesNotMatch(app, /if \(!numberAnimHandle\) fitTotalNumber\(\);\s*closePeriodPopover\(\)/);
 });
 
 test('rolling and custom range modes persist as normalized settings', () => {
@@ -81,6 +82,8 @@ test('derived device rows load per-device histories instead of falling back to t
   assert.match(main, /resolveDeviceHistories\(historyResolverOptions\(\)\)/);
   assert.match(app, /loadDeviceHistories\(\)[\s\S]*periodRangesApi\.isDerived\(effectivePeriodSelection\(\)\)[\s\S]*render\(\)/);
   assert.match(app, /!periodRangesApi\.supportsBreakdown\(selection, 'session'\)[\s\S]*dismissSessionDetail\(\)/);
+  const selector = app.slice(app.indexOf('function selectPeriodMode'), app.indexOf('function periodOption'));
+  assert.match(selector, /options\.activate === false[\s\S]*supportsBreakdown\(selection, 'session'\)[\s\S]*dismissSessionDetail\(\)/);
   assert.match(app, /const historyEnabledChanged =[\s\S]*syncPeriodTabs\(\)[\s\S]*render\(\)/);
 });
 

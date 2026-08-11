@@ -8072,6 +8072,10 @@ function selectPeriodMode(slot, mode, extraPatch = {}, options = {}) {
   state.settings = { ...(state.settings || {}), ...patch };
   closePeriodPopover();
   if (options.activate === false) {
+    const selection = effectivePeriodSelection();
+    if (state.openSession && !periodRangesApi.supportsBreakdown(selection, 'session')) {
+      dismissSessionDetail();
+    }
     syncPeriodTabs();
     render();
   } else {
@@ -11181,7 +11185,6 @@ els.compactTokenUnitsInput?.addEventListener('change', async () => {
 });
 window.addEventListener('resize', () => {
   if (!numberAnimHandle) fitTotalNumber();
-  closePeriodPopover();
 });
 els.swapSettingsRefreshInput.addEventListener('change', () => {
   applyControlLayout(els.swapSettingsRefreshInput.checked);

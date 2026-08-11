@@ -6,6 +6,15 @@ function parseCompleteHistory(payload) {
   return coerceHistory(payload);
 }
 
+// `historyAvailable: true` is only a capability statement. Collector snapshots
+// carry it even on ticks that did not publish a History payload, so it cannot
+// displace a Hub record's last-good history. An actual payload, or an explicit
+// disabled state, is authoritative.
+function hasAuthoritativeHistoryState(device) {
+  return Object.prototype.hasOwnProperty.call(device || {}, 'history')
+    || device?.historyAvailable === false;
+}
+
 function parseDeviceHistories(payload) {
   const devices = Array.isArray(payload) ? payload : payload?.devices;
   const histories = {};
@@ -16,16 +25,15 @@ function parseDeviceHistories(payload) {
     const rawHistory = hasHistory ? device.history : null;
     const hasHistoryPayload = Boolean(rawHistory && typeof rawHistory === 'object');
     const history = coerceHistory(rawHistory);
-    const hasRows = history.daily.length > 0 || history.monthly.length > 0;
+    const hasDailyRows = history.daily.length > 0;
     const allTimeTokens = Number(device?.periods?.allTime?.totalTokens ?? device?.allTime?.totalTokens ?? 0);
-    const explicitlyAvailable = device?.historyAvailable === true;
     const explicitlyUnavailable = device?.historyAvailable === false || rawHistory === null;
     // A legacy Hub may already have normalized `history: null` into an empty object.
     // Treat an empty, unmarked history on a device with lifetime usage as unknown;
     // a genuinely zero-usage legacy device is still a valid empty history.
     const available = hasHistoryPayload
       && !explicitlyUnavailable
-      && (explicitlyAvailable || hasRows || !(allTimeTokens > 0));
+      && (hasDailyRows || !(allTimeTokens > 0));
     histories[deviceId] = { ...history, available };
   }
   return histories;
@@ -35,10 +43,7 @@ function devicesWithLocalHistory(payload, localDevice) {
   const devices = Array.isArray(payload) ? payload : payload?.devices;
   const list = Array.isArray(devices) ? devices : [];
   const localId = String(localDevice?.deviceId || localDevice?.id || '').trim();
-  const localHasHistory = localId && (
-    Object.prototype.hasOwnProperty.call(localDevice || {}, 'history')
-    || Object.prototype.hasOwnProperty.call(localDevice || {}, 'historyAvailable')
-  );
+  const localHasHistory = localId && hasAuthoritativeHistoryState(localDevice);
   if (!localHasHistory) return list;
   return list
     .filter((device) => String(device?.deviceId || device?.id || '').trim() !== localId)
@@ -137,6 +142,7 @@ module.exports = {
   parseCompleteHistory,
   parseDeviceHistories,
   devicesWithLocalHistory,
+  hasAuthoritativeHistoryState,
   resolveCompleteHistory,
   resolveDeviceHistories
 };
