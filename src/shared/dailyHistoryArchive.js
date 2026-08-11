@@ -25,8 +25,11 @@ function normalizeObservation(value) {
   const outputTokens = Math.max(0, Math.round(num(value.outputTokens ?? value.output_tokens)));
   const cacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
   const cacheWriteTokens = Math.max(0, Math.round(num(value.cacheWriteTokens ?? value.cache_write_tokens)));
+  const unclassifiedTokens = tokenComponents
+    ? Math.max(0, Math.round(num(value.unclassifiedTokens ?? value.unclassified_tokens)))
+    : 0;
   const tokens = tokenComponents
-    ? inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
+    ? inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + unclassifiedTokens
     : Math.max(0, Math.round(num(value.tokens)));
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
@@ -46,7 +49,8 @@ function normalizeObservation(value) {
       inputTokens,
       outputTokens,
       cacheReadTokens,
-      cacheWriteTokens
+      cacheWriteTokens,
+      ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {})
     } : {}),
     ...(reasoningTokens > 0 ? { reasoningTokens } : {})
   };
@@ -148,6 +152,24 @@ function shouldReplaceObservation(previous, incoming) {
   return true;
 }
 
+function mergeObservation(previous, incoming) {
+  if (!previous || shouldReplaceObservation(previous, incoming)) return incoming;
+  if (incoming.tokenComponents !== true || observationHasTokenComponents(previous)) return previous;
+
+  // A fresh graph can still describe the source records that remain on disk
+  // even when the retained total is larger. Keep the durable total/cost, adopt
+  // the exact component subset, and isolate only the residual as unavailable.
+  return normalizeObservation({
+    ...incoming,
+    providerId: incoming.providerId || previous.providerId,
+    cost: previous.cost,
+    messages: Math.max(incoming.messages, previous.messages),
+    tokenComponents: true,
+    unclassifiedTokens: Math.max(0, previous.tokens - incoming.tokens),
+    reasoningTokens: Math.max(num(incoming.reasoningTokens), num(previous.reasoningTokens))
+  });
+}
+
 function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   const archive = normalizeDailyHistoryArchive(existingArchive);
   const todayKey = String(options.todayKey || '').slice(0, 10);
@@ -163,9 +185,7 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
       observations: { ...previous.observations }
     };
     for (const [key, observation] of Object.entries(incoming.observations)) {
-      if (shouldReplaceObservation(previous.observations[key], observation)) {
-        next.observations[key] = observation;
-      }
+      next.observations[key] = mergeObservation(previous.observations[key], observation);
     }
     const normalized = normalizeDay(next, date);
     if (normalized) archive.days[date] = normalized;
@@ -261,6 +281,13 @@ function dayCost(day) {
   return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.cost), 0);
 }
 
+function observationHasTokenComponents(observation) {
+  // Legacy synthetic rows can carry only message counts. With no tokens there
+  // is no missing token split, so they must not make the whole day unavailable.
+  return (observation?.tokenComponents === true && num(observation?.unclassifiedTokens) === 0)
+    || num(observation?.tokens) === 0;
+}
+
 function liveDayIsGreater(incoming, previous) {
   const incomingTokens = dayTokens(incoming);
   const previousTokens = dayTokens(previous);
@@ -273,13 +300,7 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
-    return [key, {
-      ...observation,
-      messages: Math.max(observation.messages, previous.messages),
-      ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
-        ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
-        : {})
-    }];
+    return [key, mergeObservation(observation, previous)];
   }));
   return {
     ...liveDay,
@@ -338,15 +359,14 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   }
 
   const tokenComponents = [...currentDays.values()].every((day) => Object.values(day.observations)
-    .every((observation) => observation.tokenComponents === true));
+    .every(observationHasTokenComponents));
   const contributions = [...currentDays.values()]
     .sort((left, right) => left.date.localeCompare(right.date))
     .map((day) => ({
       date: day.date,
       activeTimeMs: day.activeTimeMs,
       capabilities: {
-        tokenComponents: Object.values(day.observations)
-          .every((observation) => observation.tokenComponents === true),
+        tokenComponents: Object.values(day.observations).every(observationHasTokenComponents),
         clientModels: true
       },
       clients: Object.values(day.observations)
@@ -355,8 +375,12 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
           client: observation.client,
           modelId: observation.modelId,
           ...(observation.providerId ? { providerId: observation.providerId } : {}),
+          capabilities: { tokenComponents: observationHasTokenComponents(observation) },
+          unclassifiedTokens: observation.tokenComponents === true
+            ? num(observation.unclassifiedTokens)
+            : observation.tokens,
           tokens: {
-            input: observation.tokenComponents === true ? observation.inputTokens : observation.tokens,
+            input: observation.tokenComponents === true ? observation.inputTokens : 0,
             output: observation.tokenComponents === true ? observation.outputTokens : 0,
             cacheRead: observation.tokenComponents === true ? observation.cacheReadTokens : 0,
             cacheWrite: observation.tokenComponents === true ? observation.cacheWriteTokens : 0,

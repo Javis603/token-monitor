@@ -84,11 +84,11 @@ test('capture updates identities independently without synthesizing token and co
   assert.equal(restored.daily[0].tokens, 160);
   assert.deepEqual(restored.daily[0].perClient.claude, {
     tokens: 100, cost: 4, messages: 5,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0
   });
   assert.deepEqual(restored.daily[0].perClient.codex, {
     tokens: 60, cost: 2.5, messages: 4,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0
   });
 });
 
@@ -108,6 +108,35 @@ test('capture replaces the whole observation when usage grows and refreshes equa
     tokenComponents: true, inputTokens: 120, outputTokens: 0,
     cacheReadTokens: 0, cacheWriteTokens: 0
   });
+});
+
+test('capture keeps a larger legacy total while adopting the fresh component subset', () => {
+  const legacy = normalizeDailyHistoryArchive({
+    version: 1,
+    days: {
+      '2026-07-17': {
+        date: '2026-07-17',
+        observations: [{ client: 'claude', modelId: 'opus', tokens: 100, cost: 4, messages: 5 }]
+      }
+    }
+  });
+  const next = captureDailyHistoryArchive(legacy, graph('2026-07-17', [{
+    client: 'claude', modelId: 'opus',
+    tokens: { input: 10, output: 20, cacheRead: 50, cacheWrite: 10 },
+    cost: 3.5, messages: 5
+  }]), { todayKey: '2026-07-18' });
+  const [stored] = Object.values(next.days['2026-07-17'].observations);
+  const history = historyFrom(graphFromDailyHistoryArchive([], next, { todayKey: '2026-07-18' }));
+
+  assert.equal(stored.tokens, 100);
+  assert.equal(stored.cost, 4);
+  assert.equal(stored.cacheReadTokens, 50);
+  assert.equal(stored.outputTokens, 20);
+  assert.equal(stored.unclassifiedTokens, 10);
+  assert.equal(history.daily[0].tokens, 100);
+  assert.equal(history.daily[0].cacheReadTokens, 50);
+  assert.equal(history.daily[0].unclassifiedTokens, 10);
+  assert.equal(history.daily[0].capabilities.tokenComponents, false);
 });
 
 test('archive v2 preserves token components while legacy rows stay explicitly incomplete', () => {
@@ -140,6 +169,46 @@ test('archive v2 preserves token components while legacy rows stay explicitly in
   assert.equal(legacyHistory.daily[0].tokens, 50);
 });
 
+test('legacy days do not erase exact capabilities from unrelated v2 days', () => {
+  const archive = normalizeDailyHistoryArchive({
+    version: 1,
+    days: {
+      '2026-07-16': {
+        date: '2026-07-16',
+        observations: [{ client: 'codex', modelId: 'gpt', tokens: 50, cost: 2, messages: 1 }]
+      }
+    }
+  });
+  const mixed = captureDailyHistoryArchive(archive, graph('2026-07-17', [{
+    client: 'claude', modelId: 'opus',
+    tokens: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 },
+    cost: 1, messages: 2
+  }]), { todayKey: '2026-07-18' });
+  const mixedGraph = graphFromDailyHistoryArchive([], mixed, { todayKey: '2026-07-18' });
+  const history = historyFrom(mixedGraph);
+
+  assert.equal(mixedGraph.capabilities.tokenComponents, false);
+  assert.equal(history.daily.find((day) => day.date === '2026-07-16').capabilities.tokenComponents, false);
+  assert.equal(history.daily.find((day) => day.date === '2026-07-17').capabilities.tokenComponents, true);
+});
+
+test('legacy message-only observations do not make token components unavailable', () => {
+  const archive = normalizeDailyHistoryArchive({
+    version: 1,
+    days: {
+      '2026-07-17': {
+        date: '2026-07-17',
+        observations: [{ client: 'claude', modelId: '<synthetic>', tokens: 0, cost: 0, messages: 2 }]
+      }
+    }
+  });
+  const retained = graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' });
+  const history = historyFrom(retained);
+
+  assert.equal(retained.capabilities.tokenComponents, true);
+  assert.equal(history.daily[0].capabilities.tokenComponents, true);
+});
+
 test('live today snapshot wins over a smaller graph value after date rollover', () => {
   const archive = captureLiveDailyHistory({}, livePeriod(645_957_554, 62.42), {
     todayKey: '2026-08-05'
@@ -152,6 +221,8 @@ test('live today snapshot wins over a smaller graph value after date rollover', 
   assert.equal(restored.daily[0].date, '2026-08-05');
   assert.equal(restored.daily[0].tokens, 645_957_554);
   assert.equal(restored.daily[0].perClient.claude.tokens, 645_957_554);
+  assert.equal(restored.daily[0].unclassifiedTokens, 138_157_554);
+  assert.equal(restored.daily[0].perClient.claude.unclassifiedTokens, 138_157_554);
 
   const lowerLive = captureLiveDailyHistory(archive, livePeriod(507_800_000, 40), {
     todayKey: '2026-08-05'

@@ -1787,15 +1787,16 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
   accordionInner.dataset.signature = signature;
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens }) {
+function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens }) {
   const width = rowWidth(value, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
   row.title = local ? 'This device' : '';
   
-  if (cacheReadTokens !== undefined || outputTokens !== undefined) {
+  if (cacheReadTokens !== undefined || outputTokens !== undefined || unclassifiedTokens !== undefined) {
     row.dataset.cacheRead = cacheReadTokens || 0;
     row.dataset.outputTokens = outputTokens || 0;
+    row.dataset.unclassifiedTokens = unclassifiedTokens || 0;
     row.dataset.totalTokens = value || 0;
     row.dataset.name = name || '';
   }
@@ -1862,18 +1863,19 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
     }
     row.classList.add('has-accordion');
     if (isExpanded) row.classList.add('expanded');
-  } else if ((cacheReadTokens !== undefined || outputTokens !== undefined) && value > 0 && kind !== 'session') {
+  } else if ((cacheReadTokens !== undefined || outputTokens !== undefined || unclassifiedTokens !== undefined) && value > 0 && kind !== 'session') {
     const cacheRead = cacheReadTokens || 0;
     const output = outputTokens || 0;
     const totalTokens = value || 0;
-    const cacheMiss = Math.max(0, totalTokens - cacheRead - output);
+    const unclassified = Math.min(totalTokens, Math.max(0, unclassifiedTokens || 0));
+    const classifiedTokens = Math.max(0, totalTokens - unclassified);
+    const cacheMiss = Math.max(0, classifiedTokens - cacheRead - output);
     const inputTokens = cacheRead + cacheMiss;
     const hitPct = inputTokens > 0 ? Math.round((cacheRead / inputTokens) * 100) : 0;
     const missPct = inputTokens > 0 ? 100 - hitPct : 0;
     
     delete accordionInner.dataset.signature;
-    accordionInner.innerHTML = `
-      <div class="accordion-content">
+    const classifiedRows = classifiedTokens > 0 ? `
         <div class="accordion-row">
           <div class="accordion-label">${t('dashboard.tooltip.inputCacheHit')} <span class="accordion-pct">${hitPct}%</span></div>
           <div class="accordion-value">${formatNumber(cacheRead)}</div>
@@ -1885,7 +1887,16 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
         <div class="accordion-row">
           <div class="accordion-label">${t('dashboard.tooltip.output')}</div>
           <div class="accordion-value">${formatNumber(output)}</div>
-        </div>
+        </div>` : '';
+    const unavailableRow = unclassified > 0 ? `
+        <div class="accordion-row">
+          <div class="accordion-label">${t('dashboard.tooltip.unclassified')}</div>
+          <div class="accordion-value">${formatNumber(unclassified)}</div>
+        </div>` : '';
+    accordionInner.innerHTML = `
+      <div class="accordion-content">
+        ${classifiedRows}
+        ${unavailableRow}
       </div>
     `;
     row.classList.add('has-accordion');
@@ -2058,7 +2069,7 @@ function deviceRowsForPeriod() {
 
 function toolRowsForPeriod(period) {
   const componentsAvailable = !periodRangesApi.isDerived(effectivePeriodSelection())
-    || period?.capabilities?.tokenComponents === true;
+    || Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens');
   const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({
     key: client,
     name: clientLabels[client] || client,
@@ -2069,7 +2080,8 @@ function toolRowsForPeriod(period) {
     ...(componentsAvailable ? {
       cacheReadTokens: Number(period?.clientCacheReads?.[client] || 0),
       cacheWriteTokens: Number(period?.clientCacheWrites?.[client] || 0),
-      outputTokens: Number(period?.clientOutputs?.[client] || 0)
+      outputTokens: Number(period?.clientOutputs?.[client] || 0),
+      unclassifiedTokens: Number(period?.clientUnclassifiedTokens?.[client] || 0)
     } : {})
   }));
   if (clientRows.length > 0) {
@@ -2082,7 +2094,7 @@ function toolRowsForPeriod(period) {
 
 function modelRowsForPeriod(period) {
   const componentsAvailable = !periodRangesApi.isDerived(effectivePeriodSelection())
-    || period?.capabilities?.tokenComponents === true;
+    || Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens');
   const modelRows = Object.entries(period?.models || {}).filter(([, value]) => Number(value) > 0).map(([model, value]) => ({
     key: model,
     name: model,
@@ -2093,7 +2105,8 @@ function modelRowsForPeriod(period) {
     ...(componentsAvailable ? {
       cacheReadTokens: Number(period?.modelCacheReads?.[model] || 0),
       cacheWriteTokens: Number(period?.modelCacheWrites?.[model] || 0),
-      outputTokens: Number(period?.modelOutputs?.[model] || 0)
+      outputTokens: Number(period?.modelOutputs?.[model] || 0),
+      unclassifiedTokens: Number(period?.modelUnclassifiedTokens?.[model] || 0)
     } : {})
   }));
   if (modelRows.length > 0) return modelRows.sort((a, b) => b.value - a.value);

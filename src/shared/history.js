@@ -46,6 +46,18 @@ function sumTokens(breakdown) {
     + num(breakdown.cacheRead) + num(breakdown.cacheWrite);
 }
 
+function rowCapability(raw, row, key) {
+  const rowValue = row?.capabilities?.[key];
+  if (typeof rowValue === 'boolean') return rowValue;
+  return raw?.capabilities?.[key] !== false;
+}
+
+function entryCapability(raw, row, entry, key) {
+  const entryValue = entry?.capabilities?.[key];
+  if (typeof entryValue === 'boolean') return entryValue;
+  return rowCapability(raw, row, key);
+}
+
 // Folds tokscale `graph` output (contributions[].clients[]) into a per-day shape where a
 // day's total always equals the sum of its perClient and perModel stacks.
 function parseGraphResult(raw) {
@@ -64,33 +76,47 @@ function parseGraphResult(raw) {
     let cacheReadTokens = 0;
     let cacheWriteTokens = 0;
     let outputTokens = 0;
+    let unclassifiedTokens = 0;
     const clientRows = Array.isArray(row.clients) ? row.clients : [];
     for (const c of clientRows) {
       if (!c || typeof c !== 'object') continue;
       const client = String(c.client || 'unknown');
       const model = String(c.modelId || c.model || c.model_id || 'unknown');
-      const t = sumTokens(c.tokens);
+      const classified = sumTokens(c.tokens);
+      const declaredUnclassified = Math.max(0, num(c.unclassifiedTokens ?? c.unclassified_tokens));
+      const t = classified + declaredUnclassified;
       const cst = num(c.cost);
       const msg = num(c.messages);
       const cacheRead = num(c.tokens?.cacheRead);
       const cacheWrite = num(c.tokens?.cacheWrite);
       const output = num(c.tokens?.output);
+      const unclassified = entryCapability(raw, row, c, 'tokenComponents')
+        ? 0
+        : (Object.prototype.hasOwnProperty.call(c, 'unclassifiedTokens')
+            || Object.prototype.hasOwnProperty.call(c, 'unclassified_tokens')
+          ? declaredUnclassified
+          : t);
       tokens += t;
       cost += cst;
       messages += msg;
       cacheReadTokens += cacheRead;
       cacheWriteTokens += cacheWrite;
       outputTokens += output;
+      unclassifiedTokens += unclassified;
       const pc = ownEntry(perClient, client, () => ({
-        tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+        tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+        outputTokens: 0, unclassifiedTokens: 0
       }));
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
       pc.cacheReadTokens += cacheRead; pc.cacheWriteTokens += cacheWrite; pc.outputTokens += output;
+      pc.unclassifiedTokens += unclassified;
       const pm = ownEntry(perModel, model, () => ({
-        tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+        tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+        outputTokens: 0, unclassifiedTokens: 0
       }));
       pm.tokens += t; pm.cost += cst;
       pm.cacheReadTokens += cacheRead; pm.cacheWriteTokens += cacheWrite; pm.outputTokens += output;
+      pm.unclassifiedTokens += unclassified;
       const clientModels = ownEntry(perClientModel, client, () => ({}));
       const pcm = ownEntry(clientModels, model, () => ({ tokens: 0, cost: 0 }));
       pcm.tokens += t; pcm.cost += cst;
@@ -103,12 +129,14 @@ function parseGraphResult(raw) {
       cacheReadTokens,
       cacheWriteTokens,
       outputTokens,
+      unclassifiedTokens,
       activeTimeMs: num(row.activeTimeMs ?? row.active_time_ms),
       capabilities: {
-        tokenComponents: row?.capabilities?.tokenComponents !== false
-          && raw?.capabilities?.tokenComponents !== false,
-        clientModels: row?.capabilities?.clientModels !== false
-          && raw?.capabilities?.clientModels !== false
+        // An aggregate graph can be incomplete because of a legacy day outside
+        // this row. Prefer an explicit per-day capability so one old archive
+        // entry does not make every newer day look incomplete.
+        tokenComponents: rowCapability(raw, row, 'tokenComponents'),
+        clientModels: rowCapability(raw, row, 'clientModels')
       },
       perClient,
       perModel,
@@ -184,24 +212,28 @@ function computeStreaks(days, todayKey) {
 function addPerClient(target, source) {
   for (const [client, v] of Object.entries(source || {})) {
     const t = ownEntry(target, client, () => ({
-      tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+      tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+      outputTokens: 0, unclassifiedTokens: 0
     }));
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
     t.cacheReadTokens += num(v.cacheReadTokens);
     t.cacheWriteTokens += num(v.cacheWriteTokens);
     t.outputTokens += num(v.outputTokens);
+    t.unclassifiedTokens += num(v.unclassifiedTokens);
   }
 }
 
 function addPerModel(target, source) {
   for (const [model, v] of Object.entries(source || {})) {
     const t = ownEntry(target, model, () => ({
-      tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+      tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+      outputTokens: 0, unclassifiedTokens: 0
     }));
     t.tokens += num(v.tokens); t.cost += num(v.cost);
     t.cacheReadTokens += num(v.cacheReadTokens);
     t.cacheWriteTokens += num(v.cacheWriteTokens);
     t.outputTokens += num(v.outputTokens);
+    t.unclassifiedTokens += num(v.unclassifiedTokens);
   }
 }
 
@@ -226,12 +258,13 @@ function monthlyRollup(days) {
     if (month.length !== 7) continue;
     const m = byMonth.get(month) || {
       month, tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
-      outputTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {}
+      outputTokens: 0, unclassifiedTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {}
     };
     m.tokens += num(d.tokens); m.cost += num(d.cost); m.activeTimeMs += num(d.activeTimeMs);
     m.cacheReadTokens += num(d.cacheReadTokens);
     m.cacheWriteTokens += num(d.cacheWriteTokens);
     m.outputTokens += num(d.outputTokens);
+    m.unclassifiedTokens += num(d.unclassifiedTokens);
     addPerClient(m.perClient, d.perClient);
     addPerModel(m.perModel, d.perModel);
     byMonth.set(month, m);
@@ -314,13 +347,19 @@ function mergeDailyMaps(histories) {
       const cur = byDate.get(d.date)
         || {
           date: d.date, tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0,
-          cacheWriteTokens: 0, outputTokens: 0, activeTimeMs: 0,
+          cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0, activeTimeMs: 0,
+          capabilities: { tokenComponents: true, clientModels: true },
           perClient: {}, perModel: {}, perClientModel: {}
         };
       cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
       cur.cacheReadTokens += num(d.cacheReadTokens);
       cur.cacheWriteTokens += num(d.cacheWriteTokens);
       cur.outputTokens += num(d.outputTokens);
+      cur.unclassifiedTokens += num(d.unclassifiedTokens);
+      cur.capabilities.tokenComponents = cur.capabilities.tokenComponents
+        && d?.capabilities?.tokenComponents === true;
+      cur.capabilities.clientModels = cur.capabilities.clientModels
+        && d?.capabilities?.clientModels === true;
       addPerClient(cur.perClient, d.perClient);
       addPerModel(cur.perModel, d.perModel);
       addPerClientModel(cur.perClientModel, d.perClientModel);
@@ -336,12 +375,13 @@ function mergeMonthlyMaps(histories) {
     for (const m of (h && Array.isArray(h.monthly) ? h.monthly : [])) {
       const cur = byMonth.get(m.month) || {
         month: m.month, tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
-        outputTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {}
+        outputTokens: 0, unclassifiedTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {}
       };
       cur.tokens += num(m.tokens); cur.cost += num(m.cost); cur.activeTimeMs += num(m.activeTimeMs);
       cur.cacheReadTokens += num(m.cacheReadTokens);
       cur.cacheWriteTokens += num(m.cacheWriteTokens);
       cur.outputTokens += num(m.outputTokens);
+      cur.unclassifiedTokens += num(m.unclassifiedTokens);
       addPerClient(cur.perClient, m.perClient);
       addPerModel(cur.perModel, m.perModel);
       byMonth.set(m.month, cur);

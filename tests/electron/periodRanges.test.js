@@ -162,7 +162,9 @@ test('derived periods retain cache/output and client-to-model dimensions when hi
   const period = derivePeriod(history, {
     selection: 'last7',
     todayKey: '2026-08-11',
-    capabilities: { tokenComponents: true, clientModels: true }
+    // An incomplete day elsewhere in the retained archive must not suppress
+    // the exact rows selected here.
+    capabilities: { tokenComponents: false, clientModels: false }
   });
   assert.deepEqual(period.capabilities, { tokenComponents: true, clientModels: true });
   assert.equal(period.cacheReadTokens, 60);
@@ -179,7 +181,56 @@ test('derived periods mark legacy token components unavailable instead of treati
     nativeToday,
     capabilities: { clientModels: true }
   });
+  assert.deepEqual(period.capabilities, { tokenComponents: false, clientModels: false });
+});
+
+test('derived capabilities require every selected history row to be explicitly complete', () => {
+  const period = derivePeriod([
+    {
+      date: '2026-08-10', tokens: 10, cost: 1,
+      capabilities: { tokenComponents: true, clientModels: true }
+    },
+    {
+      date: '2026-08-11', tokens: 20, cost: 2,
+      capabilities: { tokenComponents: false, clientModels: true }
+    }
+  ], {
+    selection: 'last7',
+    todayKey: '2026-08-11',
+    capabilities: { tokenComponents: true, clientModels: true }
+  });
+
   assert.deepEqual(period.capabilities, { tokenComponents: false, clientModels: true });
+});
+
+test('derived periods preserve classified components and isolate the unavailable remainder', () => {
+  const period = derivePeriod([{
+    date: '2026-08-10', tokens: 100, cost: 5,
+    cacheReadTokens: 30, cacheWriteTokens: 0, outputTokens: 20,
+    unclassifiedTokens: 10,
+    capabilities: { tokenComponents: false, clientModels: true },
+    perClient: {
+      codex: {
+        tokens: 100, cost: 5, cacheReadTokens: 30, cacheWriteTokens: 0,
+        outputTokens: 20, unclassifiedTokens: 10
+      }
+    },
+    perModel: {
+      'gpt-5': {
+        tokens: 100, cost: 5, cacheReadTokens: 30, cacheWriteTokens: 0,
+        outputTokens: 20, unclassifiedTokens: 10
+      }
+    }
+  }], {
+    selection: 'last7',
+    todayKey: '2026-08-11'
+  });
+
+  assert.equal(period.unclassifiedTokens, 10);
+  assert.equal(period.clientUnclassifiedTokens.codex, 10);
+  assert.equal(period.modelUnclassifiedTokens['gpt-5'], 10);
+  assert.equal(period.cacheReadTokens, 30);
+  assert.equal(period.outputTokens, 20);
 });
 
 test('period aggregation preserves per-device range results and rejects prototype keys', () => {

@@ -172,6 +172,7 @@
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       outputTokens: 0,
+      unclassifiedTokens: 0,
       timedTokens: 0,
       timedOutputTokens: 0,
       timedDurationMs: 0,
@@ -180,11 +181,13 @@
       clientCacheReads: {},
       clientCacheWrites: {},
       clientOutputs: {},
+      clientUnclassifiedTokens: {},
       models: {},
       modelCosts: {},
       modelCacheReads: {},
       modelCacheWrites: {},
       modelOutputs: {},
+      modelUnclassifiedTokens: {},
       clientModels: {},
       clientModelCosts: {},
       projects: {},
@@ -201,7 +204,8 @@
         messages: finiteNumber(previous?.perClient?.[client]?.messages),
         cacheReadTokens: finiteNumber(period?.clientCacheReads?.[client]),
         cacheWriteTokens: finiteNumber(period?.clientCacheWrites?.[client]),
-        outputTokens: finiteNumber(period?.clientOutputs?.[client])
+        outputTokens: finiteNumber(period?.clientOutputs?.[client]),
+        unclassifiedTokens: 0
       });
     }
     const perModel = {};
@@ -211,7 +215,8 @@
         cost: finiteNumber(period?.modelCosts?.[model]),
         cacheReadTokens: finiteNumber(period?.modelCacheReads?.[model]),
         cacheWriteTokens: finiteNumber(period?.modelCacheWrites?.[model]),
-        outputTokens: finiteNumber(period?.modelOutputs?.[model])
+        outputTokens: finiteNumber(period?.modelOutputs?.[model]),
+        unclassifiedTokens: 0
       });
     }
     const perClientModel = {};
@@ -233,6 +238,7 @@
       cacheReadTokens: finiteNumber(period?.cacheReadTokens),
       cacheWriteTokens: finiteNumber(period?.cacheWriteTokens),
       outputTokens: finiteNumber(period?.outputTokens),
+      unclassifiedTokens: 0,
       capabilities: { tokenComponents: true, clientModels: true },
       perClient,
       perModel,
@@ -278,14 +284,23 @@
     addMapValue(inner, innerKey, value);
   }
 
+  function unclassifiedValue(value, exact) {
+    if (Object.prototype.hasOwnProperty.call(value || {}, 'unclassifiedTokens')) {
+      return finiteNumber(value.unclassifiedTokens);
+    }
+    return exact ? 0 : finiteNumber(value?.tokens);
+  }
+
   function derivePeriod(daily, options = {}) {
     const period = emptyPeriod();
     const rows = dailyRowsForSelection(daily, options);
     period.capabilities = {
-      tokenComponents: rows.every((row) => row?.capabilities?.tokenComponents !== false)
-        && options.capabilities?.tokenComponents === true,
-      clientModels: rows.every((row) => row?.capabilities?.clientModels !== false)
-        && options.capabilities?.clientModels === true
+      // Capability is selection-local. The history-wide summary can be false
+      // because of an unrelated legacy day outside the requested range.
+      tokenComponents: rows.length > 0
+        && rows.every((row) => row?.capabilities?.tokenComponents === true),
+      clientModels: rows.length > 0
+        && rows.every((row) => row?.capabilities?.clientModels === true)
     };
     for (const row of rows) {
       period.totalTokens += finiteNumber(row?.tokens);
@@ -293,12 +308,15 @@
       period.cacheReadTokens += finiteNumber(row?.cacheReadTokens);
       period.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
       period.outputTokens += finiteNumber(row?.outputTokens);
+      const rowExact = row?.capabilities?.tokenComponents === true;
+      period.unclassifiedTokens += unclassifiedValue(row, rowExact);
       for (const [client, value] of Object.entries(row?.perClient || {})) {
         addMapValue(period.clients, client, value?.tokens);
         addMapValue(period.clientCosts, client, value?.cost);
         addMapValue(period.clientCacheReads, client, value?.cacheReadTokens);
         addMapValue(period.clientCacheWrites, client, value?.cacheWriteTokens);
         addMapValue(period.clientOutputs, client, value?.outputTokens);
+        addMapValue(period.clientUnclassifiedTokens, client, unclassifiedValue(value, rowExact));
       }
       for (const [model, value] of Object.entries(row?.perModel || {})) {
         addMapValue(period.models, model, value?.tokens);
@@ -306,6 +324,7 @@
         addMapValue(period.modelCacheReads, model, value?.cacheReadTokens);
         addMapValue(period.modelCacheWrites, model, value?.cacheWriteTokens);
         addMapValue(period.modelOutputs, model, value?.outputTokens);
+        addMapValue(period.modelUnclassifiedTokens, model, unclassifiedValue(value, rowExact));
       }
       for (const [client, models] of Object.entries(row?.perClientModel || {})) {
         for (const [model, value] of Object.entries(models || {})) {
@@ -315,10 +334,12 @@
       }
     }
     period.totalTokens = Math.max(0, Math.round(period.totalTokens));
+    period.unclassifiedTokens = Math.max(0, Math.round(period.unclassifiedTokens));
     period.costUsd = Number(period.costUsd.toFixed(6));
     for (const map of [
       period.clients, period.clientCacheReads, period.clientCacheWrites, period.clientOutputs,
-      period.models, period.modelCacheReads, period.modelCacheWrites, period.modelOutputs
+      period.clientUnclassifiedTokens, period.models, period.modelCacheReads,
+      period.modelCacheWrites, period.modelOutputs, period.modelUnclassifiedTokens
     ]) {
       for (const key of Object.keys(map)) map[key] = Math.max(0, Math.round(map[key]));
     }
@@ -342,12 +363,13 @@
       clientModels: list.length > 0 && list.every((period) => period.capabilities?.clientModels === true)
     };
     for (const period of list) {
-      for (const key of ['totalTokens', 'costUsd', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens']) {
+      for (const key of ['totalTokens', 'costUsd', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens', 'unclassifiedTokens']) {
         merged[key] += finiteNumber(period[key]);
       }
       for (const key of [
         'clients', 'clientCosts', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs',
-        'models', 'modelCosts', 'modelCacheReads', 'modelCacheWrites', 'modelOutputs'
+        'clientUnclassifiedTokens', 'models', 'modelCosts', 'modelCacheReads',
+        'modelCacheWrites', 'modelOutputs', 'modelUnclassifiedTokens'
       ]) {
         for (const [name, value] of Object.entries(period[key] || {})) addMapValue(merged[key], name, value);
       }
@@ -360,10 +382,12 @@
       }
     }
     merged.totalTokens = Math.max(0, Math.round(merged.totalTokens));
+    merged.unclassifiedTokens = Math.max(0, Math.round(merged.unclassifiedTokens));
     merged.costUsd = Number(merged.costUsd.toFixed(6));
     for (const map of [
       merged.clients, merged.clientCacheReads, merged.clientCacheWrites, merged.clientOutputs,
-      merged.models, merged.modelCacheReads, merged.modelCacheWrites, merged.modelOutputs
+      merged.clientUnclassifiedTokens, merged.models, merged.modelCacheReads,
+      merged.modelCacheWrites, merged.modelOutputs, merged.modelUnclassifiedTokens
     ]) {
       for (const key of Object.keys(map)) map[key] = Math.max(0, Math.round(map[key]));
     }

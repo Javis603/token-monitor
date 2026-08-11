@@ -72,17 +72,19 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
   assert.equal(day.activeTimeMs, 3600000);
   assert.deepEqual(day.perClient.claude, {
     tokens: 30, cost: 1.0, messages: 3,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 20
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 20, unclassifiedTokens: 0
   });
   assert.deepEqual(day.perClient.codex, {
     tokens: 10, cost: 0.5, messages: 1,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 5
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 5, unclassifiedTokens: 0
   });
   assert.deepEqual(day.perModel.opus, {
-    tokens: 30, cost: 1.0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 20
+    tokens: 30, cost: 1.0, cacheReadTokens: 0, cacheWriteTokens: 0,
+    outputTokens: 20, unclassifiedTokens: 0
   });
   assert.deepEqual(day.perModel.gpt, {
-    tokens: 10, cost: 0.5, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 5
+    tokens: 10, cost: 0.5, cacheReadTokens: 0, cacheWriteTokens: 0,
+    outputTokens: 5, unclassifiedTokens: 0
   });
   assert.deepEqual(day.perClientModel.claude.opus, { tokens: 30, cost: 1.0 });
 });
@@ -95,10 +97,38 @@ test('parseGraphResult is defensive about missing/garbage input', () => {
   const out = parseGraphResult({ contributions: [{ date: '2026-01-01' }] });
   assert.deepEqual(out.contributions[0], {
     date: '2026-01-01', tokens: 0, cost: 0, messages: 0,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, activeTimeMs: 0,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0, activeTimeMs: 0,
     capabilities: { tokenComponents: true, clientModels: true },
     perClient: {}, perModel: {}, perClientModel: {}
   });
+});
+
+test('parseGraphResult preserves exact components beside an explicitly unclassified observation', () => {
+  const parsed = parseGraphResult({
+    capabilities: { tokenComponents: false, clientModels: true },
+    contributions: [{
+      date: '2026-01-01',
+      capabilities: { tokenComponents: false, clientModels: true },
+      clients: [
+        {
+          client: 'codex', modelId: 'gpt', capabilities: { tokenComponents: true },
+          tokens: { input: 10, output: 20, cacheRead: 30, cacheWrite: 0 }, cost: 1, messages: 1
+        },
+        {
+          client: 'claude', modelId: 'opus', capabilities: { tokenComponents: false },
+          tokens: { input: 40, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 2, messages: 2
+        }
+      ]
+    }]
+  });
+  const [day] = parsed.contributions;
+
+  assert.equal(day.tokens, 100);
+  assert.equal(day.cacheReadTokens, 30);
+  assert.equal(day.outputTokens, 20);
+  assert.equal(day.unclassifiedTokens, 40);
+  assert.equal(day.perClient.codex.unclassifiedTokens, 0);
+  assert.equal(day.perClient.claude.unclassifiedTokens, 40);
 });
 
 test('parseGraphResult rejects impossible dates and safely aggregates prototype-shaped ids', () => {
@@ -200,14 +230,15 @@ test('monthlyRollup sums tokens/cost and merges perClient/perModel by month', ()
   assert.equal(out[1].tokens, 12);
   assert.deepEqual(out[1].perClient.claude, {
     tokens: 5, cost: 0.5, messages: 1,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0
   });
   assert.deepEqual(out[1].perClient.codex, {
     tokens: 7, cost: 0.7, messages: 1,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0
   });
   assert.deepEqual(out[1].perModel.opus, {
-    tokens: 5, cost: 0.5, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    tokens: 5, cost: 0.5, cacheReadTokens: 0, cacheWriteTokens: 0,
+    outputTokens: 0, unclassifiedTokens: 0
   });
 });
 
@@ -271,11 +302,11 @@ test('mergeHistories sums daily across devices and recomputes derived fields', (
   assert.equal(d7.activeTimeMs, 150000);                // 120000 + 30000
   assert.deepEqual(d7.perClient.claude, {
     tokens: 20, cost: 2, messages: 1,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0
   });
   assert.deepEqual(d7.perClient.codex, {
     tokens: 5, cost: 0.5, messages: 1,
-    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0
   });
   assert.equal(d7.intensity, 4);                       // highest-cost merged day
   assert.equal(m.summary.totalTokens, 35);
