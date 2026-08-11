@@ -14,8 +14,9 @@ const path = require('node:path');
 const { REASONIX_CLIENT, resolveReasonixHome } = require('./reasonixPaths');
 const {
   readBoundedJson,
+  readReasonixTelemetryUsage,
   REASONIX_META_MAX_BYTES,
-  REASONIX_TELEMETRY_MAX_BYTES
+  REASONIX_TELEMETRY_USAGE_MAX_BYTES
 } = require('./reasonixFileIo');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeModelNameForClient } = require('./usage');
@@ -247,12 +248,6 @@ function sessionTitle(meta, { trustedPreview = '' } = {}) {
     || 'Reasonix Session';
 }
 
-function telemetryUsage(telemetry) {
-  const usage = objectValue(telemetry?.usage) || telemetry;
-  if (!usage || !hasFiniteNumber(firstValue(usage, ['totalTokens', 'total_tokens']))) return null;
-  return usage;
-}
-
 function reportedCostUsd(usage) {
   const explicitUsd = firstValue(usage, ['sessionCostUsd', 'session_cost_usd']);
   if (hasFiniteNumber(explicitUsd)) return Math.max(0, finiteNumber(explicitUsd));
@@ -326,8 +321,10 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
   // Desktop's official trusted cumulative session usage, not authoritative
   // per-turn usage. Without reliable per-turn usage/cost, Session Detail remains
   // closed.
-  const telemetry = readBoundedJson(telemetryPath, REASONIX_TELEMETRY_MAX_BYTES, fsApi);
-  const usage = telemetryUsage(telemetry);
+  const telemetryUsage = readReasonixTelemetryUsage(telemetryPath, fsApi);
+  const usage = telemetryUsage && hasFiniteNumber(firstValue(telemetryUsage, ['totalTokens', 'total_tokens']))
+    ? telemetryUsage
+    : null;
   const eventFilePresent = Boolean(fileSignature(options.eventPath));
   const transcript = readTranscriptInfo(options.eventPath, options.replayLimits);
   if (eventFilePresent && !transcript) return null;
@@ -655,7 +652,7 @@ module.exports = {
   META_SUFFIX,
   NATIVE_SESSION_PREFIX,
   REASONIX_META_MAX_BYTES,
-  REASONIX_TELEMETRY_MAX_BYTES,
+  REASONIX_TELEMETRY_USAGE_MAX_BYTES,
   TELEMETRY_SUFFIX,
   EVENTS_SUFFIX,
   buildNativeView,
