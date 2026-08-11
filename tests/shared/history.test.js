@@ -322,7 +322,11 @@ test('mergeHistories handles empty list', () => {
   assert.equal(m.summary.totalTokens, 0);
 });
 
-const { coerceHistory, historyPreview, historyRevision } = require('../../src/shared/history');
+const {
+  coerceHistory,
+  historyPreview,
+  historyRevision
+} = require('../../src/shared/history');
 
 test('mergeHistories re-caps stale device daily rows without losing lifetime totals', () => {
   const history = {
@@ -343,12 +347,31 @@ test('mergeHistories re-caps stale device daily rows without losing lifetime tot
   assert.equal(merged.summary.totalTokens, 110);
 });
 
-test('historyRevision is key-order stable and tracks breakdown changes', () => {
+test('historyRevision is key-order stable and tracks device attribution', () => {
   const first = { daily: [{ date: '2026-06-07', tokens: 10, perClient: { codex: { tokens: 10 } } }], monthly: [], summary: { totalTokens: 10 } };
   const reordered = { summary: { totalTokens: 10 }, monthly: [], daily: [{ perClient: { codex: { tokens: 10 } }, tokens: 10, date: '2026-06-07' }] };
   const changed = { ...first, daily: [{ date: '2026-06-07', tokens: 10, perClient: { claude: { tokens: 10 } } }] };
-  assert.equal(historyRevision(first), historyRevision(reordered));
-  assert.notEqual(historyRevision(first), historyRevision(changed));
+  assert.equal(
+    historyRevision([{ deviceId: 'alpha', history: first }]),
+    historyRevision([{ deviceId: 'alpha', history: reordered }])
+  );
+  assert.notEqual(
+    historyRevision([{ deviceId: 'alpha', history: first }]),
+    historyRevision([{ deviceId: 'alpha', history: changed }])
+  );
+
+  const original = [
+    { deviceId: 'alpha', history: first },
+    { deviceId: 'beta', history: changed }
+  ];
+  const reorderedDevices = [original[1], original[0]];
+  const swapped = [
+    { deviceId: 'alpha', history: changed },
+    { deviceId: 'beta', history: first }
+  ];
+
+  assert.equal(historyRevision(original), historyRevision(reorderedDevices));
+  assert.notEqual(historyRevision(original), historyRevision(swapped));
 });
 
 test('coerceHistory normalizes shape and drops garbage', () => {

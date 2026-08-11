@@ -473,11 +473,8 @@ function stableJson(value) {
   return `{${entries.join(',')}}`;
 }
 
-// Compact, deterministic invalidation token for the full history payload. This
-// includes daily/monthly breakdowns (not just headline totals), stays portable
-// to the Worker runtime, and keeps /api/stats small.
-function historyRevision(history) {
-  const source = stableJson(coerceHistory(history));
+function revisionFor(value) {
+  const source = stableJson(value);
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
   for (let i = 0; i < source.length; i += 1) {
@@ -486,6 +483,29 @@ function historyRevision(history) {
     second = Math.imul(second ^ code, 0x85ebca6b);
   }
   return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+// Device-derived ranges need the identity attached to each history. Hashing only
+// the aggregate lets two devices exchange equal-sized histories without changing
+// the revision, leaving the renderer's per-device cache assigned to the wrong
+// machines. Sort by id so storage/list iteration order remains irrelevant. The
+// returned value remains an opaque compact token on the existing wire field.
+function historyRevision(devices) {
+  const entries = (Array.isArray(devices) ? devices : [])
+    .map((device) => {
+      const deviceId = String(device?.deviceId || device?.id || '').trim();
+      if (!deviceId) return null;
+      const hasHistory = Object.prototype.hasOwnProperty.call(device || {}, 'history');
+      const unavailable = device?.historyAvailable === false || (hasHistory && device.history === null);
+      return {
+        deviceId,
+        state: unavailable ? 'unavailable' : (hasHistory ? 'available' : 'missing'),
+        history: hasHistory && device.history !== null ? coerceHistory(device.history) : null
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.deviceId.localeCompare(right.deviceId));
+  return revisionFor(entries);
 }
 
 module.exports = {

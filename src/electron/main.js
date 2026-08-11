@@ -2332,7 +2332,7 @@ function applyNativeMaterial(source = settings) {
 function withHistoryPreview(stats, devices) {
   const history = settings?.historyEnabled === false ? aggregateHistory([]) : aggregateHistory(devices);
   stats.historyPreview = historyPreview(history);
-  stats.historyRevision = historyRevision(history);
+  stats.historyRevision = historyRevision(devices);
   return stats;
 }
 

@@ -55,7 +55,7 @@ function createHub({
     stats.staleAfterMs = staleAfterMs;
     const history = aggregateHistory(Object.values(store.devices));
     stats.historyPreview = historyPreview(history);
-    stats.historyRevision = historyRevision(history);
+    stats.historyRevision = historyRevision(Object.values(store.devices));
     // The version of the shared subscription list, never the list itself. A
     // device compares it against the copy it holds and re-reads only when it has
     // been overtaken, so learning about another device's edit costs nothing in

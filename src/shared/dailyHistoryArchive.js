@@ -5,6 +5,7 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { num, sumTokens } = require('./history');
+const { REASONIX_CLIENT } = require('./reasonixPaths');
 
 const ARCHIVE_VERSION = 2;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -25,15 +26,16 @@ function normalizeObservation(value) {
   const outputTokens = Math.max(0, Math.round(num(value.outputTokens ?? value.output_tokens)));
   const cacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
   const cacheWriteTokens = Math.max(0, Math.round(num(value.cacheWriteTokens ?? value.cache_write_tokens)));
+  const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
   const unclassifiedTokens = tokenComponents
     ? Math.max(0, Math.round(num(value.unclassifiedTokens ?? value.unclassified_tokens)))
     : 0;
   const tokens = tokenComponents
     ? inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + unclassifiedTokens
+      + (client.trim().toLowerCase() === REASONIX_CLIENT ? reasoningTokens : 0)
     : Math.max(0, Math.round(num(value.tokens)));
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
-  const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
   if (tokens === 0 && cost === 0 && messages === 0) return null;
   return {
     client,

@@ -92,7 +92,7 @@ export class HubDO {
     stats.staleAfterMs = this.staleAfterMs;
     const history = aggregateHistory(devices);
     stats.historyPreview = historyPreview(history);
-    stats.historyRevision = historyRevision(history);
+    stats.historyRevision = historyRevision(devices);
     return stats;
   }
 

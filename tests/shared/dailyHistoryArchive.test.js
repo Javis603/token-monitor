@@ -139,6 +139,34 @@ test('capture keeps a larger legacy total while adopting the fresh component sub
   assert.equal(history.daily[0].capabilities.tokenComponents, false);
 });
 
+test('Reasonix v1 enrichment counts additive reasoning exactly once', () => {
+  const legacy = normalizeDailyHistoryArchive({
+    version: 1,
+    days: {
+      '2026-07-17': {
+        date: '2026-07-17',
+        observations: [{
+          client: 'reasonix', modelId: 'reasonix-model', tokens: 130,
+          cost: 1, messages: 0, reasoningTokens: 30
+        }]
+      }
+    }
+  });
+  const next = captureDailyHistoryArchive(legacy, graph('2026-07-17', [{
+    client: 'reasonix', modelId: 'reasonix-model',
+    tokens: { input: 100, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 30 },
+    cost: 1, messages: 0
+  }]), { todayKey: '2026-07-18' });
+  const [stored] = Object.values(next.days['2026-07-17'].observations);
+  const history = historyFrom(graphFromDailyHistoryArchive([], next, { todayKey: '2026-07-18' }));
+
+  assert.equal(stored.tokens, 130);
+  assert.equal(stored.reasoningTokens, 30);
+  assert.equal(stored.unclassifiedTokens, undefined);
+  assert.equal(history.daily[0].tokens, 130);
+  assert.equal(history.daily[0].unclassifiedTokens, 0);
+});
+
 test('archive v2 preserves token components while legacy rows stay explicitly incomplete', () => {
   const exact = captureDailyHistoryArchive({}, graph('2026-07-17', [{
     client: 'claude', modelId: 'opus',
