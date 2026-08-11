@@ -11,6 +11,8 @@ const {
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
   readReasonixNativeSession,
+  REASONIX_META_MAX_BYTES,
+  REASONIX_TELEMETRY_MAX_BYTES,
   reasonixNativeSessionWatchRoots
 } = require('../../src/shared/reasonixSessions');
 const { collectUsageOnce, projectIdentity, watchIgnoreMatcher, watchPathsForClients } = require('../../src/shared/collector');
@@ -879,4 +881,49 @@ test('readReasonixNativeSession skips missing stable ID and missing/corrupt tele
   assert.equal(readReasonixNativeSession(metaPath, path.join(root, 'missing')), null);
   fs.writeFileSync(telemetryPath, '{bad');
   assert.equal(readReasonixNativeSession(metaPath, telemetryPath), null);
+});
+
+test('readReasonixNativeSession bounds metadata and telemetry to regular files', () => {
+  assert.equal(REASONIX_META_MAX_BYTES, 1 * 1024 * 1024);
+  assert.equal(REASONIX_TELEMETRY_MAX_BYTES, 4 * 1024 * 1024);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-sidecar-bounds-'));
+  const metaPath = path.join(root, 'session.jsonl.meta');
+  const telemetryPath = path.join(root, 'session.jsonl.telemetry.json');
+  writeJson(metaPath, { id: 'bounded' });
+  writeJson(telemetryPath, nativeTelemetry());
+  assert.notEqual(readReasonixNativeSession(metaPath, telemetryPath), null);
+
+  fs.writeFileSync(metaPath, Buffer.alloc(REASONIX_META_MAX_BYTES + 1, 0x20));
+  assert.equal(readReasonixNativeSession(metaPath, telemetryPath), null);
+
+  writeJson(metaPath, { id: 'bounded' });
+  fs.writeFileSync(telemetryPath, Buffer.alloc(REASONIX_TELEMETRY_MAX_BYTES + 1, 0x20));
+  assert.equal(readReasonixNativeSession(metaPath, telemetryPath), null);
+
+  const metaDirectory = path.join(root, 'meta-directory');
+  const telemetryDirectory = path.join(root, 'telemetry-directory');
+  fs.mkdirSync(metaDirectory);
+  fs.mkdirSync(telemetryDirectory);
+  writeJson(telemetryPath, nativeTelemetry());
+  assert.equal(readReasonixNativeSession(metaDirectory, telemetryPath), null);
+  writeJson(metaPath, { id: 'bounded' });
+  assert.equal(readReasonixNativeSession(metaPath, telemetryDirectory), null);
+
+  let growingBytes = REASONIX_META_MAX_BYTES + 1;
+  let closed = false;
+  const growingFs = {
+    statSync: () => ({ isFile: () => true, size: 2 }),
+    openSync: () => 1,
+    fstatSync: () => ({ isFile: () => true, size: 2 }),
+    readSync: (_descriptor, buffer, offset, length) => {
+      const bytesRead = Math.min(length, growingBytes);
+      if (bytesRead > 0) buffer.fill(0x20, offset, offset + bytesRead);
+      growingBytes -= bytesRead;
+      return bytesRead;
+    },
+    closeSync: () => { closed = true; }
+  };
+  assert.equal(readReasonixNativeSession('growing.json', 'unused.json', { fsModule: growingFs }), null);
+  assert.equal(closed, true);
 });

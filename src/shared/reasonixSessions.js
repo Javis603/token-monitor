@@ -25,6 +25,9 @@ const TELEMETRY_SUFFIX = '.jsonl.telemetry.json';
 const EVENTS_SUFFIX = '.events.jsonl';
 const NATIVE_SESSION_PREFIX = `${REASONIX_CLIENT}:`;
 const BRANCH_META_COUNTS_VERSION = 1;
+const REASONIX_META_MAX_BYTES = 1 << 20;
+const REASONIX_TELEMETRY_MAX_BYTES = 4 << 20;
+const REASONIX_SIDECAR_READ_CHUNK_BYTES = 64 << 10;
 
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value || {}, key);
@@ -97,14 +100,34 @@ function firstTimestamp(source, keys) {
   return date && !Number.isNaN(date.getTime()) ? date.toISOString() : '';
 }
 
-function readJson(filePath) {
-  let text;
+function readBoundedJson(filePath, maxBytes, fsApi = fs) {
+  if (!filePath || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) return null;
+  let fileDescriptor;
   try {
-    text = fs.readFileSync(filePath, 'utf8');
-    const value = JSON.parse(text);
+    const initialStat = fsApi.statSync(filePath);
+    if (!initialStat.isFile() || initialStat.size > maxBytes) return null;
+    fileDescriptor = fsApi.openSync(filePath, 'r');
+    const openedStat = fsApi.fstatSync(fileDescriptor);
+    if (!openedStat.isFile() || openedStat.size > maxBytes) return null;
+
+    const chunks = [];
+    const buffer = Buffer.allocUnsafe(Math.min(REASONIX_SIDECAR_READ_CHUNK_BYTES, maxBytes + 1));
+    let totalBytes = 0;
+    while (true) {
+      const bytesRead = fsApi.readSync(fileDescriptor, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      totalBytes += bytesRead;
+      if (totalBytes > maxBytes) return null;
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+    const value = JSON.parse(Buffer.concat(chunks, totalBytes).toString('utf8'));
     return objectValue(value);
   } catch (_) {
     return null;
+  } finally {
+    if (fileDescriptor !== undefined) {
+      try { fsApi.closeSync(fileDescriptor); } catch (_) {}
+    }
   }
 }
 
@@ -318,7 +341,8 @@ function validWorkspaceRoot(value) {
 }
 
 function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
-  const meta = readJson(metaPath);
+  const fsApi = options.fsModule || fs;
+  const meta = readBoundedJson(metaPath, REASONIX_META_MAX_BYTES, fsApi);
   if (!meta) return null;
   const branchMeta = objectValue(firstValue(meta, ['BranchMeta', 'branchMeta', 'branch_meta', 'branch']));
   const id = textValue(firstValue(meta, ['id', 'ID']), 256)
@@ -331,7 +355,7 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
   // Desktop's official trusted cumulative session usage, not authoritative
   // per-turn usage. Without reliable per-turn usage/cost, Session Detail remains
   // closed.
-  const telemetry = readJson(telemetryPath);
+  const telemetry = readBoundedJson(telemetryPath, REASONIX_TELEMETRY_MAX_BYTES, fsApi);
   const usage = telemetryUsage(telemetry);
   const eventFilePresent = Boolean(fileSignature(options.eventPath));
   const transcript = readTranscriptInfo(options.eventPath, options.replayLimits);
@@ -659,6 +683,8 @@ function readReasonixNativeSessions(options = {}) {
 module.exports = {
   META_SUFFIX,
   NATIVE_SESSION_PREFIX,
+  REASONIX_META_MAX_BYTES,
+  REASONIX_TELEMETRY_MAX_BYTES,
   TELEMETRY_SUFFIX,
   EVENTS_SUFFIX,
   buildNativeView,
