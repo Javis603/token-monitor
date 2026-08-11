@@ -510,6 +510,61 @@ test('Reasonix native cache discovers a session root created after an empty scan
   assert.equal(projectIdentityCalls, scansAfterDiscovery);
 });
 
+test('Reasonix native cache refreshes sidecar candidates without explicit invalidation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-candidate-refresh-'));
+  const stateHome = path.join(root, 'state');
+  const sessionsDir = path.join(stateHome, 'sessions');
+  const now = new Date(2026, 7, 8, 12, 0, 0, 0);
+  const cache = cacheFor(stateHome, () => ({}));
+
+  let view = cache.getView({ now });
+  assert.deepEqual(Object.keys(view.sessions.allTime), []);
+
+  const added = sidecars(sessionsDir, 'added', {
+    id: 'added',
+    created_at: '2026-08-08T02:00:00.000Z'
+  }, nativeTelemetry({ totalTokens: 11 }));
+  view = cache.getView({ now });
+  assert.equal(view.sessions.allTime['reasonix:added'].totalTokens, 11);
+
+  fs.rmSync(added.telemetryPath);
+  view = cache.getView({ now });
+  assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:added'), false);
+
+  const before = sidecars(sessionsDir, 'before-rename', {
+    id: 'before-rename',
+    created_at: '2026-08-08T03:00:00.000Z'
+  }, nativeTelemetry({ totalTokens: 22 }));
+  view = cache.getView({ now });
+  assert.equal(view.sessions.allTime['reasonix:before-rename'].totalTokens, 22);
+
+  const afterMetaPath = path.join(sessionsDir, 'after-rename.jsonl.meta');
+  const afterTelemetryPath = path.join(sessionsDir, 'after-rename.jsonl.telemetry.json');
+  fs.renameSync(before.metaPath, afterMetaPath);
+  fs.renameSync(before.telemetryPath, afterTelemetryPath);
+  fs.writeFileSync(afterMetaPath, JSON.stringify({
+    id: 'after-rename',
+    created_at: '2026-08-08T03:00:00.000Z'
+  }));
+  view = cache.getView({ now });
+  assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:before-rename'), false);
+  assert.equal(view.sessions.allTime['reasonix:after-rename'].totalTokens, 22);
+
+  const eventOnlyMetaPath = path.join(sessionsDir, 'event-only.jsonl.meta');
+  const eventOnlyPath = path.join(sessionsDir, 'event-only.events.jsonl');
+  writeJson(eventOnlyMetaPath, { id: 'event-only', created_at: '2026-08-08T04:00:00.000Z' });
+  fs.writeFileSync(eventOnlyPath, `${JSON.stringify({
+    schema_version: 1,
+    type: 'replace',
+    messages: [{ role: 'assistant' }]
+  })}\n`);
+  view = cache.getView({ now });
+  assert.equal(view.sessions.allTime['reasonix:event-only'].messageCount, 1);
+  fs.rmSync(eventOnlyPath);
+  view = cache.getView({ now });
+  assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:event-only'), false);
+});
+
 test('Reasonix event updates invalidate only the corresponding native session', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-event-cache-'));
   const stateHome = path.join(root, 'state');
@@ -672,6 +727,45 @@ test('Reasonix native view stays outside aggregate, history, archive and sync pa
   deviceState.updateUsage({ month: {}, allTime: {}, nativeSessions: nativeView.sessions, nativeProjects: nativeView.projects });
   deviceState.updateUsage({ today: {} }, 'preview', { preview: true });
   assert.equal(records.at(-1).nativeSessions.today[nativeSession.sessionId].totalTokens, 999);
+});
+
+test('bounded native replay failure does not suppress Tokscale aggregate usage', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-replay-failure-'));
+  const stateHome = path.join(root, 'state');
+  const sessionsDir = path.join(stateHome, 'sessions');
+  const paths = sidecars(sessionsDir, 'broken', {
+    id: 'broken',
+    created_at: '2026-08-08T02:00:00.000Z'
+  }, nativeTelemetry({ totalTokens: 999 }));
+  fs.writeFileSync(path.join(sessionsDir, 'broken.events.jsonl'), 'not-json\n');
+
+  const runTokscale = async () => ({ entries: [{
+    client: 'reasonix',
+    model: 'deepseek-v4',
+    input: 80,
+    output: 30,
+    cacheRead: 20,
+    reasoning: 10,
+    cost: 0.25
+  }] });
+  const summary = await collectUsageOnce({
+    clients: 'reasonix',
+    allTimeSince: '2026-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'native-replay-failure-test',
+    runTokscale,
+    platform: 'linux',
+    historyEnabled: false,
+    wslScanEnabled: false,
+    reasonixNativeSessionsEnabled: true,
+    env: { REASONIX_STATE_HOME: stateHome },
+    homeDir: root,
+    cwdDir: root
+  });
+
+  assert.equal(summary.today.totalTokens, 140);
+  assert.deepEqual(Object.keys(summary.nativeSessions.today), []);
+  assert.equal(fs.existsSync(paths.metaPath), true);
 });
 
 test('Reasonix native rows use the common session formatter and merge project attribution', () => {

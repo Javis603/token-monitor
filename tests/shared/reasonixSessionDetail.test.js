@@ -10,7 +10,9 @@ const { readSessionDetail } = require('../../src/shared/sessionDetail');
 const {
   countReasonixProviderMessages,
   parseReasonixEventLog,
-  readReasonixSessionEvents
+  readReasonixSessionEvents,
+  REASONIX_EVENT_REPLAY_LIMITS,
+  REASONIX_EVENT_REPLAY_PROBE_MAX_BYTES
 } = require('../../src/shared/reasonixSessionDetail');
 
 function writeJson(filePath, value) {
@@ -242,6 +244,53 @@ test('Reasonix replay retains the last trusted state after illegal append, unsup
   const unsupported = parseReasonixEventLog(`${JSON.stringify(replace)}\n${JSON.stringify({ schema_version: 2, type: 'replace', messages: [] })}`);
   assert.equal(unsupported.filter((event) => event.kind === 'prompt').length, 1);
   assert.equal(unsupported.filter((event) => event.kind === 'turn').length, 1);
+});
+
+test('Reasonix event replay fails closed at the official resource boundaries', () => {
+  assert.deepEqual(REASONIX_EVENT_REPLAY_LIMITS, {
+    maxBytes: 128 * 1024 * 1024,
+    maxRecords: 100_000,
+    maxMessages: 100_000,
+    maxCollectionItems: 100_000
+  });
+  assert.equal(REASONIX_EVENT_REPLAY_PROBE_MAX_BYTES, 4 * 1024);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-replay-limits-'));
+  const stateHome = path.join(root, 'state');
+  const directory = path.join(stateHome, 'sessions');
+  fs.mkdirSync(directory, { recursive: true });
+  writeJson(path.join(directory, 'bounded.jsonl.meta'), { id: 'bounded' });
+  const eventsPath = path.join(directory, 'bounded.events.jsonl');
+  const read = (replayLimits) => readReasonixSessionEvents({
+    sessionId: 'reasonix:bounded',
+    home: root,
+    env: { REASONIX_STATE_HOME: stateHome },
+    platform: process.platform,
+    replayLimits
+  });
+
+  fs.writeFileSync(eventsPath, `${JSON.stringify({
+    schema_version: 1,
+    type: 'replace',
+    messages: [
+      { role: 'user', raw_content: 'one' },
+      { role: 'assistant', tool_calls: [{ name: 'search' }, { name: 'read_file' }] }
+    ]
+  })}\n`);
+  assert.equal(read({ maxMessages: 1 }).found, false);
+  assert.equal(read({ maxCollectionItems: 1 }).found, false);
+  assert.equal(read({ maxMessages: 2, maxCollectionItems: 2 }).found, true);
+
+  fs.writeFileSync(eventsPath, `${JSON.stringify({ type: 'user.message', text: 'one' })}\n${JSON.stringify({ type: 'model.final' })}\n`);
+  assert.equal(read({ maxRecords: 1 }).found, false);
+  assert.equal(read({ maxRecords: 2 }).found, true);
+
+  fs.writeFileSync(eventsPath, '{"type":"user.message","text":"too large"}\n');
+  assert.equal(read({ maxBytes: 8 }).found, false);
+  assert.equal(read({ maxBytes: Buffer.byteLength(fs.readFileSync(eventsPath)) }).found, true);
+
+  fs.writeFileSync(eventsPath, 'not-json\n');
+  assert.equal(read().found, false);
 });
 
 test('Reasonix detail skips missing or corrupt identity/transcript files', () => {

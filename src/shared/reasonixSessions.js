@@ -15,7 +15,7 @@ const { REASONIX_CLIENT, resolveReasonixHome } = require('./reasonixPaths');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeModelNameForClient } = require('./usage');
 const {
-  parseReasonixEventLog,
+  readReasonixEventLog,
   countReasonixProviderMessages,
   tokenDataAvailable: reasonixTokenDataAvailable
 } = require('./reasonixSessionDetail');
@@ -192,21 +192,6 @@ function sessionMetaPathForEvents(filePath, pathApi = path) {
   return pathApi.join(pathApi.dirname(String(filePath)), `${stem}${META_SUFFIX}`);
 }
 
-function candidateForMetaPath(metaPath, pathApi = path) {
-  const name = pathApi.basename(String(metaPath || ''));
-  if (!name.endsWith(META_SUFFIX)) return null;
-  const stem = name.slice(0, -META_SUFFIX.length);
-  if (!stem) return null;
-  const directory = pathApi.dirname(String(metaPath));
-  return {
-    stem,
-    directory,
-    metaPath: String(metaPath),
-    telemetryPath: pathApi.join(directory, `${stem}${TELEMETRY_SUFFIX}`),
-    eventPath: pathApi.join(directory, `${stem}${EVENTS_SUFFIX}`)
-  };
-}
-
 function isPathInside(filePath, root, pathApi = path) {
   const resolved = pathApi.resolve(String(filePath || ''));
   const resolvedRoot = pathApi.resolve(String(root || ''));
@@ -284,10 +269,12 @@ function reportedCostUsd(usage) {
   return undefined;
 }
 
-function readTranscriptInfo(eventPath) {
+function readTranscriptInfo(eventPath, replayLimits) {
   if (!eventPath) return null;
   try {
-    const events = parseReasonixEventLog(fs.readFileSync(eventPath, 'utf8'));
+    const replay = readReasonixEventLog(eventPath, { replayLimits });
+    if (!replay.ok) return null;
+    const events = replay.events || [];
     let latestMessageMs = 0;
     for (const event of events || []) {
       const timestamp = Date.parse(event?.timestamp || '');
@@ -346,7 +333,9 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
   // closed.
   const telemetry = readJson(telemetryPath);
   const usage = telemetryUsage(telemetry);
-  const transcript = readTranscriptInfo(options.eventPath);
+  const eventFilePresent = Boolean(fileSignature(options.eventPath));
+  const transcript = readTranscriptInfo(options.eventPath, options.replayLimits);
+  if (eventFilePresent && !transcript) return null;
   if (!usage && !transcript) return null;
 
   const rawSchemaVersion = firstValue(meta, ['schema_version', 'schemaVersion']);
@@ -545,7 +534,7 @@ function buildNativeView(entries, options = {}) {
   return view;
 }
 
-function scanEntries(options = {}, cache = new Map(), directories = null) {
+function scanEntries(options = {}, cache = new Map(), directories = null, forcedKeys = new Set()) {
   const sessionDirectories = directories || reasonixSessionDirectories(options);
   const candidates = sidecarCandidates(sessionDirectories, options.pathModule || path);
   const seen = new Set();
@@ -558,7 +547,7 @@ function scanEntries(options = {}, cache = new Map(), directories = null) {
     const signature = candidateSignature(candidate);
     if (!signature) continue;
     const previous = cache.get(key);
-    if (previous?.signature === signature) {
+    if (previous?.signature === signature && !forcedKeys.has(key)) {
       next.set(key, previous);
       continue;
     }
@@ -566,7 +555,16 @@ function scanEntries(options = {}, cache = new Map(), directories = null) {
     if (session) next.set(key, { signature, session });
   }
 
-  return { entries: next, seen };
+  let changed = next.size !== cache.size;
+  if (!changed) {
+    for (const [key, entry] of next) {
+      if (cache.get(key) !== entry) {
+        changed = true;
+        break;
+      }
+    }
+  }
+  return { entries: next, seen, changed };
 }
 
 function createReasonixNativeSessionCache(options = {}) {
@@ -619,31 +617,20 @@ function createReasonixNativeSessionCache(options = {}) {
       cachedView = null;
       cachedViewKey = '';
     }
-    if (dirty) {
-      const scanned = scanEntries({ ...resolvedOptions, projectIdentity: options.projectIdentity }, entries, sessionDirectories);
-      entries = scanned.entries;
-      dirty = false;
-      scannedRootSignature = rootSignature;
-      invalidatedEventKeys = new Set();
-      cachedView = null;
-      cachedViewKey = '';
-    } else if (invalidatedEventKeys.size > 0) {
-      for (const metaPath of invalidatedEventKeys) {
-        const candidate = candidateForMetaPath(metaPath, pathApi);
-        const signature = candidateSignature(candidate);
-        if (!candidate || !signature) {
-          entries.delete(metaPath);
-          continue;
-        }
-        const session = readReasonixNativeSession(candidate.metaPath, candidate.telemetryPath, {
-          ...resolvedOptions,
-          projectIdentity: options.projectIdentity,
-          eventPath: candidate.eventPath
-        });
-        if (session) entries.set(metaPath, { signature, session });
-        else entries.delete(metaPath);
-      }
-      invalidatedEventKeys = new Set();
+    // Re-enumerate candidates on every reconciliation tick. `scanEntries` keeps
+    // unchanged sidecars by signature, so this notices add/delete/rename while
+    // preserving the per-entry read/parse cache.
+    const scanned = scanEntries(
+      { ...resolvedOptions, projectIdentity: options.projectIdentity },
+      entries,
+      sessionDirectories,
+      invalidatedEventKeys
+    );
+    entries = scanned.entries;
+    dirty = false;
+    scannedRootSignature = rootSignature;
+    invalidatedEventKeys = new Set();
+    if (scanned.changed) {
       cachedView = null;
       cachedViewKey = '';
     }

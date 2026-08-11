@@ -28,17 +28,10 @@ function homeDirFor({ env = {}, homeDir = '', platform = '' } = {}) {
 }
 
 function expandEnvReferences(value, env) {
-  let expanded = value;
-  for (let pass = 0; pass < 8; pass += 1) {
-    let matched = false;
-    expanded = expanded.replace(ENV_REFERENCE, (match, name, fallback) => {
-      matched = true;
-      const configured = nonEmpty(env?.[name]);
-      return configured || (fallback === undefined ? '' : fallback);
-    });
-    if (!matched || !ENV_REFERENCE.test(expanded)) break;
-    ENV_REFERENCE.lastIndex = 0;
-  }
+  const expanded = String(value ?? '').replace(ENV_REFERENCE, (match, name, fallback) => {
+    const configured = nonEmpty(env?.[name]);
+    return configured || (fallback === undefined ? '' : fallback);
+  });
   ENV_REFERENCE.lastIndex = 0;
   return expanded;
 }

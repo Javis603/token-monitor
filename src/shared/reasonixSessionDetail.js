@@ -8,6 +8,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 
 const { resolveReasonixHome } = require('./reasonixPaths');
 
@@ -15,6 +16,14 @@ const SESSION_PREFIX = 'reasonix:';
 const META_SUFFIX = '.jsonl.meta';
 const LEGACY_META_SUFFIX = '.meta.json';
 const EVENTS_SUFFIX = '.events.jsonl';
+const REASONIX_EVENT_REPLAY_LIMITS = Object.freeze({
+  maxBytes: 128 << 20,
+  maxRecords: 100_000,
+  maxMessages: 100_000,
+  maxCollectionItems: 100_000
+});
+const REASONIX_EVENT_REPLAY_PROBE_MAX_BYTES = 4 << 10;
+const REASONIX_EVENT_READ_CHUNK_BYTES = 64 << 10;
 const TRANSIENT_USER_BLOCK_TAGS = [
   'response-language',
   'reasoning-language',
@@ -314,37 +323,7 @@ function messageToolNames(message) {
   ]);
 }
 
-function snapshotMessages(records) {
-  let messages = [];
-  let sawSnapshot = false;
-  let appliedSnapshot = false;
-  for (const { record, timestamp: recordTimestamp } of records) {
-    const type = eventType(record, record);
-    if (type !== 'replace' && type !== 'append') {
-      // Once a native snapshot stream starts, an unknown record is damage, not
-      // a reason to reinterpret the remainder as a different transcript format.
-      if (sawSnapshot || Object.prototype.hasOwnProperty.call(record, 'schema_version')) break;
-      continue;
-    }
-    sawSnapshot = true;
-    const payload = eventPayload(record);
-    const schemaVersion = firstValue([payload, record], ['schema_version', 'schemaVersion']);
-    if (typeof schemaVersion !== 'number' || !Number.isInteger(schemaVersion) || schemaVersion !== 1) break;
-    if (payload?.messages !== undefined && !Array.isArray(payload.messages)) break;
-    const incoming = Array.isArray(payload?.messages) ? payload.messages : [];
-    if (type === 'replace') {
-      messages = incoming.map((message) => ({ message, fallback: '' }));
-      appliedSnapshot = true;
-      continue;
-    }
-    const index = firstValue([payload, record], ['message_index']);
-    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index !== messages.length) break;
-    messages.push(...incoming.map((message) => ({ message, fallback: recordTimestamp || '' })));
-    appliedSnapshot = true;
-  }
-  if (!sawSnapshot) return null;
-  if (!appliedSnapshot) return [];
-
+function snapshotEvents(messages) {
   const events = [];
   for (const { message, fallback } of messages) {
     const source = objectValue(message);
@@ -370,10 +349,16 @@ function snapshotMessages(records) {
   return events;
 }
 
-function typedEvents(records) {
-  const events = [];
-  const toolsByTurn = new Map();
-  const pendingTools = [];
+function createTypedReplayState() {
+  return {
+    events: [],
+    toolsByTurn: new Map(),
+    pendingTools: []
+  };
+}
+
+function consumeTypedRecord(state, record, recordTimestamp) {
+  const { events, toolsByTurn, pendingTools } = state;
 
   function addTools(turn, names) {
     const clean = uniqueTools(names);
@@ -384,65 +369,401 @@ function typedEvents(records) {
     if (!turn) pendingTools.push(...clean);
   }
 
-  for (const { record, timestamp: recordTimestamp } of records) {
-    const payload = eventPayload(record);
-    const type = eventType(record, payload);
-    const timestamp = timestampOf(record, payload, recordTimestamp || '');
-    const turn = eventTurn(record, payload);
+  const payload = eventPayload(record);
+  const type = eventType(record, payload);
+  const timestamp = timestampOf(record, payload, recordTimestamp || '');
+  const turn = eventTurn(record, payload);
 
-    if (type === 'user.message' || type === 'user_message') {
-      const rawText = firstValue([payload, record], ['raw_content', 'rawContent', 'content', 'text', 'message']);
-      const text = cleanPromptText(typeof rawText === 'string' ? rawText : messageText(rawText));
-      if (text && payload.internal !== true && payload.synthetic !== true && !isSyntheticPrompt(text)) {
-        events.push({ kind: 'prompt', timestamp, text });
+  if (type === 'user.message' || type === 'user_message') {
+    const rawText = firstValue([payload, record], ['raw_content', 'rawContent', 'content', 'text', 'message']);
+    const text = cleanPromptText(typeof rawText === 'string' ? rawText : messageText(rawText));
+    if (text && payload.internal !== true && payload.synthetic !== true && !isSyntheticPrompt(text)) {
+      events.push({ kind: 'prompt', timestamp, text });
+    }
+    return;
+  }
+
+  if (type.startsWith('tool.')) {
+    addTools(turn, [toolName(payload), toolName(payload.toolCall), toolName(payload.tool_call)]);
+    return;
+  }
+
+  if (type === 'model.final' || type === 'model_final') {
+    const finalTools = [
+      ...toolNames(firstValue([payload, record], ['toolCalls', 'tool_calls', 'tools'])),
+      ...((toolName(payload.toolCall) || toolName(payload.tool_call)) ? [toolName(payload.toolCall) || toolName(payload.tool_call)] : [])
+    ];
+    const turnTools = toolsByTurn.get(turn || '__pending__') || [];
+    events.push({
+      kind: 'turn',
+      timestamp,
+      tokens: reasonixTokens(record, payload),
+      tokensAvailable: hasUsageData(record, payload),
+      tools: uniqueTools(turnTools.concat(pendingTools, finalTools))
+    });
+    if (turn) toolsByTurn.delete(turn);
+    toolsByTurn.delete('__pending__');
+    pendingTools.length = 0;
+  }
+}
+
+function normalizeReplayLimits(overrides = {}) {
+  const limits = { ...REASONIX_EVENT_REPLAY_LIMITS };
+  for (const key of Object.keys(limits)) {
+    const value = Number(overrides[key]);
+    if (Number.isFinite(value) && value >= 0) limits[key] = Math.floor(value);
+  }
+  return limits;
+}
+
+class ReplayLimitExceeded extends Error {
+  constructor(resource, value, limit) {
+    super(`Reasonix event replay ${resource} limit exceeded`);
+    this.name = 'ReplayLimitExceeded';
+    this.resource = resource;
+    this.value = value;
+    this.limit = limit;
+  }
+}
+
+function skipJsonWhitespace(text, state) {
+  while (state.index < text.length && /\s/.test(text[state.index])) state.index += 1;
+}
+
+function parseJsonString(text, state) {
+  if (text[state.index] !== '"') throw new SyntaxError('JSON string expected');
+  state.index += 1;
+  while (state.index < text.length) {
+    const code = text.charCodeAt(state.index);
+    const character = text[state.index];
+    state.index += 1;
+    if (character === '"') return;
+    if (character === '\\') {
+      if (state.index >= text.length) throw new SyntaxError('JSON escape is truncated');
+      const escape = text[state.index];
+      state.index += 1;
+      if (escape === 'u') {
+        if (!/^[0-9a-fA-F]{4}$/.test(text.slice(state.index, state.index + 4))) {
+          throw new SyntaxError('JSON unicode escape is invalid');
+        }
+        state.index += 4;
+      } else if (!'"\\/bfnrt'.includes(escape)) {
+        throw new SyntaxError('JSON escape is invalid');
       }
-      continue;
-    }
-
-    if (type.startsWith('tool.')) {
-      addTools(turn, [toolName(payload), toolName(payload.toolCall), toolName(payload.tool_call)]);
-      continue;
-    }
-
-    if (type === 'model.final' || type === 'model_final') {
-      const finalTools = [
-        ...toolNames(firstValue([payload, record], ['toolCalls', 'tool_calls', 'tools'])),
-        ...((toolName(payload.toolCall) || toolName(payload.tool_call)) ? [toolName(payload.toolCall) || toolName(payload.tool_call)] : [])
-      ];
-      const turnTools = toolsByTurn.get(turn || '__pending__') || [];
-      events.push({
-        kind: 'turn',
-        timestamp,
-        tokens: reasonixTokens(record, payload),
-        tokensAvailable: hasUsageData(record, payload),
-        tools: uniqueTools(turnTools.concat(pendingTools, finalTools))
-      });
-      if (turn) toolsByTurn.delete(turn);
-      toolsByTurn.delete('__pending__');
-      pendingTools.length = 0;
+    } else if (code < 0x20) {
+      throw new SyntaxError('JSON string contains a control character');
     }
   }
-  return events;
+  throw new SyntaxError('JSON string is truncated');
 }
 
-function parseReasonixEventLog(text) {
-  const records = [];
-  for (const line of String(text || '').split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const record = JSON.parse(trimmed);
-      if (!objectValue(record)) break;
-      records.push({ record, timestamp: timestampOf(record, record, '') });
-    } catch (_) {
-      // Match Reasonix replay: a torn/corrupt line ends the trusted prefix.
-      break;
+function parseJsonNumber(text, state) {
+  const start = state.index;
+  if (text[state.index] === '-') state.index += 1;
+  if (text[state.index] === '0') {
+    state.index += 1;
+  } else {
+    if (!/[1-9]/.test(text[state.index] || '')) throw new SyntaxError('JSON number is invalid');
+    while (/[0-9]/.test(text[state.index] || '')) state.index += 1;
+  }
+  if (text[state.index] === '.') {
+    state.index += 1;
+    if (!/[0-9]/.test(text[state.index] || '')) throw new SyntaxError('JSON number fraction is invalid');
+    while (/[0-9]/.test(text[state.index] || '')) state.index += 1;
+  }
+  if (text[state.index] === 'e' || text[state.index] === 'E') {
+    state.index += 1;
+    if (text[state.index] === '+' || text[state.index] === '-') state.index += 1;
+    if (!/[0-9]/.test(text[state.index] || '')) throw new SyntaxError('JSON number exponent is invalid');
+    while (/[0-9]/.test(text[state.index] || '')) state.index += 1;
+  }
+  if (state.index === start) throw new SyntaxError('JSON number is empty');
+}
+
+function preflightJsonValue(text, limits) {
+  const state = { index: 0, messageCount: 0, collectionItems: 0 };
+
+  function parseValue({ insideMessage = false, messageArray = false } = {}) {
+    skipJsonWhitespace(text, state);
+    const character = text[state.index];
+    if (character === '"') {
+      parseJsonString(text, state);
+      return;
+    }
+    if (character === '{') {
+      state.index += 1;
+      skipJsonWhitespace(text, state);
+      if (text[state.index] === '}') {
+        state.index += 1;
+        return;
+      }
+      while (state.index < text.length) {
+        skipJsonWhitespace(text, state);
+        const keyStart = state.index + 1;
+        parseJsonString(text, state);
+        const key = text.slice(keyStart, state.index - 1);
+        skipJsonWhitespace(text, state);
+        if (text[state.index] !== ':') throw new SyntaxError('JSON object colon is missing');
+        state.index += 1;
+        parseValue({ insideMessage, messageArray: key === 'messages' && !insideMessage });
+        skipJsonWhitespace(text, state);
+        if (text[state.index] === '}') {
+          state.index += 1;
+          return;
+        }
+        if (text[state.index] !== ',') throw new SyntaxError('JSON object separator is missing');
+        state.index += 1;
+      }
+      throw new SyntaxError('JSON object is truncated');
+    }
+    if (character === '[') {
+      state.index += 1;
+      skipJsonWhitespace(text, state);
+      if (text[state.index] === ']') {
+        state.index += 1;
+        return;
+      }
+      while (state.index < text.length) {
+        if (messageArray && !insideMessage) {
+          state.messageCount += 1;
+          if (state.messageCount > limits.maxMessages) {
+            throw new ReplayLimitExceeded('messages', state.messageCount, limits.maxMessages);
+          }
+          parseValue({ insideMessage: true });
+        } else {
+          state.collectionItems += 1;
+          if (state.collectionItems > limits.maxCollectionItems) {
+            throw new ReplayLimitExceeded('message_collection_items', state.collectionItems, limits.maxCollectionItems);
+          }
+          parseValue({ insideMessage });
+        }
+        skipJsonWhitespace(text, state);
+        if (text[state.index] === ']') {
+          state.index += 1;
+          return;
+        }
+        if (text[state.index] !== ',') throw new SyntaxError('JSON array separator is missing');
+        state.index += 1;
+      }
+      throw new SyntaxError('JSON array is truncated');
+    }
+    if (text.startsWith('true', state.index)) {
+      state.index += 4;
+      return;
+    }
+    if (text.startsWith('false', state.index)) {
+      state.index += 5;
+      return;
+    }
+    if (text.startsWith('null', state.index)) {
+      state.index += 4;
+      return;
+    }
+    parseJsonNumber(text, state);
+  }
+
+  parseValue();
+  skipJsonWhitespace(text, state);
+  if (state.index !== text.length) throw new SyntaxError('JSON has trailing data');
+  return state;
+}
+
+function createReplayState() {
+  return {
+    sawData: false,
+    records: 0,
+    damaged: false,
+    unsafe: false,
+    snapshot: {
+      saw: false,
+      applied: false,
+      stopped: false,
+      messages: [],
+      collectionItems: 0
+    },
+    typed: createTypedReplayState()
+  };
+}
+
+function consumeReplayLine(state, line, limits) {
+  const trimmed = line.trim();
+  if (!trimmed || state.damaged || state.unsafe) return null;
+  state.sawData = true;
+  if (state.records >= limits.maxRecords) {
+    return new ReplayLimitExceeded('event_records', state.records + 1, limits.maxRecords);
+  }
+
+  let preflight;
+  try {
+    preflight = preflightJsonValue(trimmed, limits);
+  } catch (error) {
+    if (error instanceof ReplayLimitExceeded) return error;
+    state.damaged = true;
+    return null;
+  }
+
+  let record;
+  try {
+    record = JSON.parse(trimmed);
+  } catch (_) {
+    state.damaged = true;
+    return null;
+  }
+  if (!objectValue(record)) {
+    state.damaged = true;
+    return null;
+  }
+  state.records += 1;
+  if (state.snapshot.stopped) return null;
+
+  const recordTimestamp = timestampOf(record, record, '');
+  const type = eventType(record, record);
+  if (type === 'replace' || type === 'append') {
+    const snapshot = state.snapshot;
+    snapshot.saw = true;
+    const payload = eventPayload(record);
+    const schemaVersion = firstValue([payload, record], ['schema_version', 'schemaVersion']);
+    if (schemaVersion !== 1 || !Number.isInteger(schemaVersion)) {
+      state.unsafe = true;
+      snapshot.stopped = true;
+      return null;
+    }
+    if (payload.messages !== undefined && !Array.isArray(payload.messages)) {
+      state.damaged = true;
+      snapshot.stopped = true;
+      return null;
+    }
+    const incoming = Array.isArray(payload.messages) ? payload.messages : [];
+    if (type === 'replace') {
+      snapshot.messages = incoming.map((message) => ({ message, fallback: '' }));
+      snapshot.collectionItems = preflight.collectionItems;
+      snapshot.applied = true;
+      return null;
+    }
+    const index = firstValue([payload, record], ['message_index']);
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index !== snapshot.messages.length) {
+      state.damaged = true;
+      snapshot.stopped = true;
+      return null;
+    }
+    if (snapshot.messages.length + incoming.length > limits.maxMessages) {
+      return new ReplayLimitExceeded('messages', snapshot.messages.length + incoming.length, limits.maxMessages);
+    }
+    if (snapshot.collectionItems + preflight.collectionItems > limits.maxCollectionItems) {
+      return new ReplayLimitExceeded(
+        'message_collection_items',
+        snapshot.collectionItems + preflight.collectionItems,
+        limits.maxCollectionItems
+      );
+    }
+    snapshot.messages.push(...incoming.map((message) => ({ message, fallback: recordTimestamp || '' })));
+    snapshot.collectionItems += preflight.collectionItems;
+    snapshot.applied = true;
+    return null;
+  }
+
+  if (state.snapshot.saw) {
+    state.damaged = true;
+    state.snapshot.stopped = true;
+    return null;
+  }
+  consumeTypedRecord(state.typed, record, recordTimestamp);
+  return null;
+}
+
+function replayResult(state, failure = null) {
+  const events = state.snapshot.saw
+    ? state.snapshot.applied ? snapshotEvents(state.snapshot.messages) : []
+    : state.typed.events;
+  const damagedWithoutPrefix = state.damaged && state.records === 0;
+  return {
+    ok: !failure && !state.unsafe && !damagedWithoutPrefix,
+    events,
+    records: state.records,
+    damaged: state.damaged,
+    ...(failure ? {
+      reason: 'limit',
+      resource: failure.resource,
+      value: failure.value,
+      limit: failure.limit
+    } : {})
+  };
+}
+
+function replayText(text, limits) {
+  const state = createReplayState();
+  const source = String(text || '');
+  let start = 0;
+  for (let index = 0; index <= source.length; index += 1) {
+    if (index !== source.length && source[index] !== '\n') continue;
+    const failure = consumeReplayLine(state, source.slice(start, index), limits);
+    if (failure || state.damaged || state.unsafe) return replayResult(state, failure);
+    start = index + 1;
+  }
+  return replayResult(state);
+}
+
+function parseReasonixEventLog(text, options = {}) {
+  const limits = normalizeReplayLimits(options.limits || options.replayLimits);
+  if (Buffer.byteLength(String(text || ''), 'utf8') > limits.maxBytes) return [];
+  return replayText(text, limits).events;
+}
+
+function readReasonixEventLog(filePath, options = {}) {
+  const limits = normalizeReplayLimits(options.replayLimits || options.limits);
+  const fsApi = options.fsModule || fs;
+  let stat;
+  try {
+    stat = fsApi.statSync(filePath);
+    if (!stat.isFile()) return { ok: false, events: [] };
+    if (stat.size > limits.maxBytes) {
+      return replayResult(createReplayState(), new ReplayLimitExceeded('encoded_bytes', stat.size, limits.maxBytes));
+    }
+  } catch (_) {
+    return { ok: false, events: [] };
+  }
+  if (typeof fsApi.openSync !== 'function' || typeof fsApi.readSync !== 'function') {
+    return { ok: false, events: [] };
+  }
+
+  const state = createReplayState();
+  const decoder = new StringDecoder('utf8');
+  const buffer = Buffer.allocUnsafe(REASONIX_EVENT_READ_CHUNK_BYTES);
+  let pending = '';
+  let encodedBytes = 0;
+  let fileDescriptor;
+  try {
+    fileDescriptor = fsApi.openSync(filePath, 'r');
+    while (!state.damaged && !state.unsafe) {
+      const bytesRead = fsApi.readSync(fileDescriptor, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      encodedBytes += bytesRead;
+      if (encodedBytes > limits.maxBytes) {
+        return replayResult(state, new ReplayLimitExceeded('encoded_bytes', encodedBytes, limits.maxBytes));
+      }
+      pending += decoder.write(buffer.subarray(0, bytesRead));
+      let newline;
+      while ((newline = pending.indexOf('\n')) >= 0) {
+        const failure = consumeReplayLine(state, pending.slice(0, newline), limits);
+        pending = pending.slice(newline + 1);
+        if (failure) return replayResult(state, failure);
+        if (state.damaged || state.unsafe) break;
+      }
+    }
+    if (!state.damaged && !state.unsafe) {
+      pending += decoder.end();
+      const failure = consumeReplayLine(state, pending, limits);
+      if (failure) return replayResult(state, failure);
+    }
+    return replayResult(state);
+  } catch (_) {
+    return { ok: false, events: [] };
+  } finally {
+    if (fileDescriptor !== undefined) {
+      try { fsApi.closeSync(fileDescriptor); } catch (_) {}
     }
   }
-  const snapshot = snapshotMessages(records);
-  return snapshot || typedEvents(records);
 }
-
 function countReasonixProviderMessages(events) {
   // Token Monitor's native session `messageCount` is the provider-message
   // count, not BranchMeta's user-turn count: snapshot replay emits one turn
@@ -531,8 +852,12 @@ function readReasonixSessionEvents({ sessionId, home, ...options } = {}) {
   const eventsPath = findSessionEventFile({ sessionId, home, options });
   if (!eventsPath) return { found: false, events: [] };
   try {
-    const text = (options.fsModule || fs).readFileSync(eventsPath, 'utf8');
-    const events = parseReasonixEventLog(text);
+    const replay = readReasonixEventLog(eventsPath, {
+      fsModule: options.fsModule,
+      replayLimits: options.replayLimits
+    });
+    if (!replay.ok) return { found: false, events: [] };
+    const events = replay.events;
     return {
       found: true,
       events,
@@ -547,7 +872,10 @@ function readReasonixSessionEvents({ sessionId, home, ...options } = {}) {
 module.exports = {
   findSessionEventFile,
   parseReasonixEventLog,
+  readReasonixEventLog,
   readReasonixSessionEvents,
+  REASONIX_EVENT_REPLAY_LIMITS,
+  REASONIX_EVENT_REPLAY_PROBE_MAX_BYTES,
   reasonixTokens,
   stableId,
   countReasonixProviderMessages,

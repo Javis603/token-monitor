@@ -108,6 +108,17 @@ test('Reasonix path cleaning matches the official environment-directory forms', 
   );
 });
 
+test('Reasonix environment references expand only the original value once', () => {
+  assert.equal(
+    cleanEnvDir('${REASONIX_HOME}', {
+      env: { REASONIX_HOME: '${REASONIX_ROOT}', REASONIX_ROOT: '/srv/reasonix' },
+      platform: 'linux',
+      cwdDir: '/workspace'
+    }),
+    '/workspace/${REASONIX_ROOT}'
+  );
+});
+
 test('Reasonix is a normalized tracked client', () => {
   assert.equal(normalizeClientName('Reasonix'), 'reasonix');
   assert.equal(normalizeClientName('reasonix-stats'), 'reasonix');
