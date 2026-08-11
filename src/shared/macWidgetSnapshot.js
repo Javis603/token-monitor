@@ -334,6 +334,7 @@ function normalizedDaily(history) {
   return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
 }
 
+const MAC_WIDGET_ACTIVITY_DAYS = 182;
 const TREND_WINDOW_DAYS = 7;
 
 function localDayKey(date) {
@@ -349,7 +350,7 @@ function addCalendarDays(day, delta) {
 }
 
 function buildActivity(history, period) {
-  const daily = normalizedDaily(history).slice(-182);
+  const daily = normalizedDaily(history).slice(-MAC_WIDGET_ACTIVITY_DAYS);
   const peak = daily.reduce((max, day) => Math.max(max, day.totalTokens), 0);
   return {
     currentPeriod: period,
@@ -584,6 +585,7 @@ function serializeMacWidgetSnapshot(stats, options = {}) {
 }
 
 module.exports = {
+  MAC_WIDGET_ACTIVITY_DAYS,
   MAC_WIDGET_SCHEMA_VERSION,
   MAC_WIDGET_FRESHNESS_HEARTBEAT_MS,
   buildMacWidgetSnapshot,

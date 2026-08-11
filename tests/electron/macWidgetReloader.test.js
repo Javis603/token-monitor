@@ -57,6 +57,33 @@ test('requests a throttled Widget timeline reload through the helper', () => {
   }
 });
 
+test('a Widget kind matching the legacy registration flag still uses timeline reload mode', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-reloader-'));
+  try {
+    resetMacWidgetReloadThrottle();
+    const helper = path.join(root, 'TokenMonitorWidgetReloader');
+    fs.writeFileSync(helper, '');
+    const calls = [];
+
+    const result = requestMacWidgetReload({
+      platform: 'darwin',
+      helperPath: helper,
+      widgetKind: '--register-host',
+      now: 1_000_000,
+      execFile: (file, args, callback) => {
+        calls.push([file, args]);
+        callback(null);
+      }
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, [[helper, ['--register-host']]]);
+  } finally {
+    resetMacWidgetReloadThrottle();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function fakeScheduler(start = 1_000_000) {
   let now = start;
   let nextId = 1;

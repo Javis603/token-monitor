@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..', '..');
 const mainSource = fs.readFileSync(path.join(root, 'src', 'electron', 'main.js'), 'utf8');
@@ -29,6 +30,10 @@ const widgetProject = fs.readFileSync(
   'utf8'
 );
 const widgetBuildSource = fs.readFileSync(path.join(root, 'scripts', 'build-macos-widget.js'), 'utf8');
+const widgetReloaderSource = fs.readFileSync(
+  path.join(root, 'scripts', 'TokenMonitorWidgetReloader.swift'),
+  'utf8'
+);
 const widgetLocalization = JSON.parse(fs.readFileSync(
   path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'Localizable.xcstrings'),
   'utf8'
@@ -47,6 +52,14 @@ const {
   widgetArtifactPaths
 } = require('../../scripts/macos-packaging');
 const { normalizeWidgetURLScheme } = require('../../src/shared/macWidgetConfig');
+const { projectLimitStatsForDisplay } = require('../../src/electron/limitStatsPresentation');
+
+function functionSource(name, nextName) {
+  const start = mainSource.indexOf(`function ${name}(`);
+  const end = mainSource.indexOf(`\nfunction ${nextName}(`, start);
+  assert.ok(start >= 0 && end > start, `${name} should precede ${nextName}`);
+  return mainSource.slice(start, end);
+}
 
 function createWidgetArtifactRoot() {
   const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-widget-artifacts-'));
@@ -58,13 +71,21 @@ function createWidgetArtifactRoot() {
   return artifactRoot;
 }
 
-test('publishes final stats to the macOS Widget from the single sendPush outlet', () => {
+test('publishes projected stats to the macOS Widget on collection and presentation changes', () => {
   const start = mainSource.indexOf('function sendPush(payload, options = {})');
   const end = mainSource.indexOf('\nfunction statsHistoryRevision', start);
   assert.ok(start >= 0 && end > start, 'sendPush function should exist');
   const sendPush = mainSource.slice(start, end);
-  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+scheduleMacWidgetSnapshot\(latestStats, options\.widgetProducerOwner\);/);
-  assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(latestStats, options\.widgetProducerOwner\)/g) || []).length, 1);
+  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+const visibleStats = electronPresentationStats\(latestStats\);/);
+  assert.match(sendPush, /scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\);/);
+  assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\)/g) || []).length, 1);
+  const refreshStart = mainSource.indexOf('function refreshLimitStatsPresentation()');
+  const refreshEnd = mainSource.indexOf('\nfunction sendMimoAccountsPush', refreshStart);
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart, 'presentation refresh function should exist');
+  assert.match(
+    mainSource.slice(refreshStart, refreshEnd),
+    /scheduleMacWidgetSnapshot\(visibleStats, captureMacWidgetProducerOwner\(\)\);/
+  );
   assert.match(mainSource, /compactTokenUnits: settings\?\.compactTokenUnits/);
 });
 
@@ -92,12 +113,335 @@ test('Widget ownership advances producer lifetime only for mode transitions', ()
   );
   assert.match(
     mainSource,
-    /const widgetHistorySourceChanged = previousRuntimeSettings\.historyEnabled !== settings\.historyEnabled;\s*if \(widgetHistorySourceChanged && !runtimeChange\.modeStructural\) \{\s*advanceMacWidgetSourceEpoch\(\);\s*scheduleMacWidgetSnapshot\(latestStats, captureMacWidgetProducerOwner\(\)\);/
+    /const widgetHistorySourceChanged = previousRuntimeSettings\.historyEnabled !== settings\.historyEnabled;\s*if \(widgetHistorySourceChanged && !runtimeChange\.modeStructural\) \{\s*refreshMacWidgetHistorySource\(\);/
   );
   assert.match(
     mainSource,
     /reloadSnapshot: \(work, options\) => requestMacWidgetReload\(\{\s*widgetKind: work\.widgetKind,\s*isCurrent: options\.isCurrent,/
   );
+});
+
+test('production persisted history I/O forwards store warnings to the main-process logger', () => {
+  const start = mainSource.indexOf('resolveHistory: (work) => resolveMacWidgetHistory({');
+  const end = mainSource.indexOf('\n    prepareSnapshot:', start);
+  assert.ok(start >= 0 && end > start, 'Widget history resolver wiring should exist');
+  const resolverSource = mainSource.slice(start, end);
+  assert.match(
+    resolverSource,
+    /loadCachedHistory: \(\) => readMacWidgetHistoryCache\(\s*work\.historyCachePath,\s*work\.owner\.sourceKey,\s*\{ logger: \(message\) => console\.warn\(message\) \}\s*\),/
+  );
+  assert.match(
+    resolverSource,
+    /saveCachedHistory: \(history\) => writeMacWidgetHistoryCache\(\s*work\.historyCachePath,\s*work\.owner\.sourceKey,\s*history,\s*\{ logger: \(message\) => console\.warn\(message\) \}\s*\)/
+  );
+});
+
+function executeMacWidgetDemandWiring() {
+  const demandStart = mainSource.indexOf('function ensureMacWidgetDemand()');
+  const demandEnd = mainSource.indexOf('\nfunction captureMacWidgetWork(', demandStart);
+  assert.ok(demandStart >= 0 && demandEnd > demandStart, 'ensureMacWidgetDemand should exist');
+  const demandSource = mainSource.slice(demandStart, demandEnd);
+
+  const state = {
+    startCalls: 0,
+    start() { this.startCalls += 1; }
+  };
+  const captured = [];
+  const calls = { scheduled: [] };
+  const {
+    WIDGET_DEMAND_MARKER,
+    WIDGET_DEMAND_PROVISIONAL_MARKER
+  } = require('../../src/electron/macWidgetDemand');
+  const context = vm.createContext({
+    process: { platform: 'darwin' },
+    path: path.posix,
+    WIDGET_DEMAND_MARKER,
+    WIDGET_DEMAND_PROVISIONAL_MARKER,
+    macWidgetDemand: null,
+    macWidgetConfiguration: () => ({
+      snapshotPath: '/Users/acceptance/Library/Group Containers/group.com.tokenmonitor/snapshot.json'
+    }),
+    createMacWidgetDemandState: (options) => {
+      captured.push(options);
+      return state;
+    },
+    electronPresentationStats: (stats) => ({ projected: true, ...stats }),
+    latestStats: { limits: { providers: [] } },
+    scheduleMacWidgetSnapshot: (stats, producerOwner) => { calls.scheduled.push({ stats, producerOwner }); },
+    captureMacWidgetProducerOwner: () => ({ epoch: 7 }),
+    console
+  });
+  vm.runInContext(demandSource, context);
+  vm.runInContext('ensureMacWidgetDemand()', context);
+  return { context, captured, calls, state };
+}
+
+test('main wiring arms Widget demand from the app-group marker and gates snapshot work', () => {
+  const execution = executeMacWidgetDemandWiring();
+  assert.equal(execution.captured.length, 1);
+  assert.equal(
+    execution.captured[0].markerPath,
+    '/Users/acceptance/Library/Group Containers/group.com.tokenmonitor/widget-demand'
+  );
+  assert.equal(
+    execution.captured[0].provisionalMarkerPath,
+    '/Users/acceptance/Library/Group Containers/group.com.tokenmonitor/widget-demand-provisional'
+  );
+  assert.equal(execution.state.startCalls, 1);
+
+  vm.runInContext('ensureMacWidgetDemand()', execution.context);
+  assert.equal(execution.captured.length, 1, 'second ensure must reuse the armed state');
+
+  execution.captured[0].onActivation();
+  assert.equal(execution.calls.scheduled.length, 1);
+  assert.deepEqual(execution.calls.scheduled[0].producerOwner, { epoch: 7 });
+  assert.equal(execution.calls.scheduled[0].stats.projected, true);
+});
+
+test('Widget demand gate, startup arm and quit stop are wired into the snapshot path', () => {
+  const captureStart = mainSource.indexOf('function captureMacWidgetWork(');
+  const captureEnd = mainSource.indexOf('\nfunction ensureMacWidgetSnapshotController', captureStart);
+  const captureSource = mainSource.slice(captureStart, captureEnd);
+  assert.match(captureSource, /if \(macWidgetDemand && !macWidgetDemand\.isInstalled\(\)\) return null;/);
+
+  const demandStart = mainSource.indexOf('function ensureMacWidgetDemand()');
+  const demandEnd = mainSource.indexOf('\nfunction captureMacWidgetWork', demandStart);
+  const demandSource = mainSource.slice(demandStart, demandEnd);
+  assert.match(demandSource, /const markerDirectory = path\.dirname\(widget\.snapshotPath\);/);
+  assert.match(
+    demandSource,
+    /markerPath: path\.join\(markerDirectory, WIDGET_DEMAND_MARKER\),/
+  );
+  assert.match(
+    demandSource,
+    /provisionalMarkerPath: path\.join\(markerDirectory, WIDGET_DEMAND_PROVISIONAL_MARKER\),/
+  );
+  assert.match(
+    demandSource,
+    /onActivation: \(\) => \{\s*const visibleStats = electronPresentationStats\(latestStats\);\s*scheduleMacWidgetSnapshot\(visibleStats, captureMacWidgetProducerOwner\(\)\);/
+  );
+  assert.match(demandSource, /macWidgetDemand\.start\(\);/);
+
+  const readyStart = mainSource.indexOf('app.whenReady().then(() => {');
+  const readyEnd = mainSource.indexOf("ipcMain.handle('settings:get'", readyStart);
+  const readySource = mainSource.slice(readyStart, readyEnd);
+  assert.match(readySource, /ensureMacWidgetDemand\(\);\s*startMode\(\);/);
+
+  const stopStart = mainSource.indexOf('function stopAll()');
+  const stopEnd = mainSource.indexOf('\nfunction ', stopStart + 'function stopAll()'.length);
+  const stopSource = mainSource.slice(stopStart, stopEnd === -1 ? mainSource.length : stopEnd);
+  assert.match(stopSource, /macWidgetDemand\.stop\(\);\s*macWidgetDemand = null;/);
+});
+
+test('starts the runtime immediately and holds only Widget publication until host registration settles', () => {
+  const readyStart = mainSource.indexOf('app.whenReady().then(() => {');
+  const readyEnd = mainSource.indexOf("ipcMain.handle('settings:get'", readyStart);
+  assert.ok(readyStart >= 0 && readyEnd > readyStart, 'ready callback should exist');
+  const readySource = mainSource.slice(readyStart, readyEnd);
+  const settingsIndex = readySource.indexOf('ensureSettingsLoaded();');
+  const recoveryStartIndex = readySource.indexOf(
+    'const widgetRecovery = recoverMacWidgetLaunchServicesRegistration({'
+  );
+  const windowIndex = readySource.indexOf('createWindow();');
+  const modeIndex = readySource.indexOf('startMode();');
+  const recoveryCompletionIndex = readySource.indexOf('void widgetRecovery.finally(() => {');
+  assert.ok(settingsIndex >= 0 && recoveryStartIndex > settingsIndex);
+  assert.ok(windowIndex > recoveryStartIndex);
+  assert.ok(modeIndex > windowIndex && recoveryCompletionIndex > modeIndex);
+  assert.doesNotMatch(readySource, /await widgetRecovery/);
+  assert.match(
+    readySource,
+    /startMode\(\);\s*void widgetRecovery\.finally\(\(\) => \{\s*app\.removeListener\('before-quit', abortWidgetRecovery\);\s*if \(!widgetRecoveryAbort\.signal\.aborted\) \{\s*macWidgetPublicationReady = true;\s*macWidgetSnapshotController\?\.resume\(\);\s*\}\s*\}\);/
+  );
+  assert.match(mainSource, /let macWidgetPublicationReady = false;/);
+  assert.match(
+    mainSource,
+    /createMacWidgetSnapshotController\(\{\s*startPaused: !macWidgetPublicationReady,/
+  );
+  assert.match(readySource, /platform: process\.platform/);
+  assert.match(readySource, /isPackaged: app\.isPackaged/);
+  assert.match(readySource, /resourcesPath: process\.resourcesPath/);
+  assert.match(readySource, /userDataPath: app\.getPath\('userData'\)/);
+});
+
+function executeMacWidgetRecoveryWiring() {
+  const bootstrapStart = mainSource.indexOf('const widgetRecoveryAbort = new AbortController();');
+  const loggerIndex = mainSource.indexOf('logger: (message) => console.warn(message)', bootstrapStart);
+  const recoveryCallEnd = mainSource.indexOf('});', loggerIndex) + 3;
+  assert.ok(bootstrapStart >= 0 && loggerIndex > bootstrapStart && recoveryCallEnd > loggerIndex, 'recovery bootstrap should exist');
+  const finallyStart = mainSource.indexOf('void widgetRecovery.finally(() => {');
+  const finallyEnd = mainSource.indexOf('\n  });', finallyStart) + '\n  });'.length;
+  assert.ok(finallyStart >= 0 && finallyEnd > finallyStart, 'recovery settle should exist');
+  const script = `${mainSource.slice(bootstrapStart, recoveryCallEnd)}\n${mainSource.slice(finallyStart, finallyEnd)}`;
+
+  let resolveRecovery;
+  const recoveryPromise = new Promise((resolve) => { resolveRecovery = resolve; });
+  const calls = { once: [], removeListener: [], resumed: 0 };
+  let beforeQuitHandler;
+  const context = vm.createContext({
+    AbortController,
+    console: { warn() {} },
+    process: { platform: 'darwin', resourcesPath: '/acceptance/resources' },
+    app: {
+      isPackaged: true,
+      getPath: (name) => (name === 'userData' ? '/acceptance/user-data' : undefined),
+      once: (event, handler) => { calls.once.push(event); beforeQuitHandler = handler; },
+      removeListener: (event) => { calls.removeListener.push(event); }
+    },
+    recoverMacWidgetLaunchServicesRegistration: (options) => {
+      calls.recoveryOptions = options;
+      return recoveryPromise;
+    },
+    macWidgetPublicationReady: false,
+    macWidgetSnapshotController: { resume: () => { calls.resumed += 1; } }
+  });
+  vm.runInContext(script, context);
+  return {
+    calls,
+    context,
+    fireBeforeQuit: () => beforeQuitHandler(),
+    resolveRecovery,
+    assertRecoveryOptions() {
+      const options = calls.recoveryOptions;
+      assert.ok(options, 'recovery should be invoked with the packaged wiring options');
+      assert.equal(options.platform, 'darwin');
+      assert.equal(options.isPackaged, true);
+      assert.equal(options.resourcesPath, '/acceptance/resources');
+      assert.equal(options.userDataPath, '/acceptance/user-data');
+      assert.ok(options.signal instanceof AbortSignal);
+      assert.equal(typeof options.logger, 'function');
+    }
+  };
+}
+
+test('main wiring resumes Widget publication when host registration settles on any outcome', async () => {
+  for (const outcome of [
+    { status: 'completed' },
+    { status: 'failed', reason: 'launch-failed' },
+    { status: 'failed', reason: 'timed-out' },
+    { status: 'skipped', reason: 'already-completed' }
+  ]) {
+    const execution = executeMacWidgetRecoveryWiring();
+    execution.assertRecoveryOptions();
+    assert.deepEqual(execution.calls.once, ['before-quit']);
+    execution.resolveRecovery(outcome);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(execution.context.macWidgetPublicationReady, true, `${outcome.status} settle should unblock Widget publication`);
+    assert.equal(execution.calls.resumed, 1, `${outcome.status} settle should resume the snapshot controller`);
+    assert.deepEqual(execution.calls.removeListener, ['before-quit']);
+  }
+});
+
+test('main wiring holds Widget publication when the app quits before registration settles', async () => {
+  const execution = executeMacWidgetRecoveryWiring();
+  execution.fireBeforeQuit();
+  execution.resolveRecovery({ status: 'completed' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(execution.context.macWidgetPublicationReady, false);
+  assert.equal(execution.calls.resumed, 0);
+  assert.deepEqual(execution.calls.removeListener, ['before-quit']);
+});
+
+test('Widget demand lease marker contract stays aligned between Swift and Electron', () => {
+  const widgetDemandSource = fs.readFileSync(
+    path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'WidgetDemandMarker.swift'),
+    'utf8'
+  );
+  const providerSource = fs.readFileSync(
+    path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'WidgetTimelineProvider.swift'),
+    'utf8'
+  );
+  const {
+    WIDGET_DEMAND_MARKER,
+    WIDGET_DEMAND_PROVISIONAL_MARKER
+  } = require('../../src/electron/macWidgetDemand');
+
+  // The marker filenames are the one cross-process contract: Electron lstat's
+  // them from the app group container and the extension writes them. They may
+  // not drift.
+  assert.match(widgetDemandSource, /static let fileName = "widget-demand"/);
+  assert.equal(WIDGET_DEMAND_MARKER, 'widget-demand');
+  assert.match(widgetDemandSource, /static let provisionalFileName = "widget-demand-provisional"/);
+  assert.equal(WIDGET_DEMAND_PROVISIONAL_MARKER, 'widget-demand-provisional');
+
+  // timeline() always records the full lease; snapshot() only writes the short
+  // provisional lease outside the gallery preview; placeholder() must never
+  // write either or a gallery browse would keep a nonexistent Widget's pipeline
+  // warm forever.
+  const placeholder = providerSource.slice(
+    providerSource.indexOf('func placeholder('),
+    providerSource.indexOf('func snapshot(')
+  );
+  const snapshot = providerSource.slice(
+    providerSource.indexOf('func snapshot('),
+    providerSource.indexOf('func timeline(')
+  );
+  const timeline = providerSource.slice(
+    providerSource.indexOf('func timeline('),
+    providerSource.indexOf('private func currentPeriod()')
+  );
+  assert.doesNotMatch(placeholder, /WidgetDemandMarker/);
+  assert.match(snapshot, /if !context\.isPreview \{[\s\S]*WidgetDemandMarker\.noteRequested\([\s\S]*WidgetDemandMarker\.provisionalFileName/);
+  assert.match(timeline, /WidgetDemandMarker\.noteRequested\(/);
+  assert.doesNotMatch(timeline, /provisionalFileName/);
+
+  // The marker compiles into both the extension and its test target.
+  assert.match(widgetProject, /100000000000000000000010 \/\* WidgetDemandMarker\.swift in Sources \*\//);
+  assert.match(widgetProject, /100000000000000000000011 \/\* WidgetDemandMarker\.swift in Sources \*\//);
+});
+
+test('LaunchServices recovery delegates current-host registration to the public native API', () => {
+  const recoverySource = fs.readFileSync(
+    path.join(root, 'src', 'electron', 'macWidgetLaunchServicesRecovery.js'),
+    'utf8'
+  );
+  assert.match(recoverySource, /const REGISTER_HOST_ARGUMENTS = Object\.freeze\(\['--mode', 'register-host'\]\);/);
+  assert.match(recoverySource, /REGISTER_HOST_ARGUMENTS/);
+  assert.doesNotMatch(recoverySource, /lsregister|chronod|killall|pkill|\['-u'|\b-reset\b|\b-kill\b/);
+  assert.match(widgetReloaderSource, /LSRegisterURL\(hostAppURL as CFURL, true\)/);
+  assert.match(widgetReloaderSource, /Array\(CommandLine\.arguments\.dropFirst\(\)\) == \["--mode", "register-host"\]/);
+  assert.match(widgetReloaderSource, /resourcesURL\.lastPathComponent == "Resources"/);
+  assert.match(widgetReloaderSource, /contentsURL\.lastPathComponent == "Contents"/);
+});
+
+test('a history setting refresh projects local OpenCode quota before scheduling the Widget', () => {
+  const rawStats = {
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        accountKey: 'local-db',
+        source: 'local',
+        sourceDeviceId: 'local-device',
+        status: 'ok',
+        updatedAt: '2026-08-10T00:00:00.000Z',
+        windows: [{ kind: 'session', source: 'local', usedPercent: 25 }]
+      }]
+    }
+  };
+  const owner = { epoch: 7 };
+  let scheduled;
+  const context = vm.createContext({
+    advanceMacWidgetSourceEpoch() {},
+    captureMacWidgetProducerOwner: () => owner,
+    electronPresentationStats: (stats) => projectLimitStatsForDisplay(stats, {
+      localDeviceId: 'local-device',
+      syncActive: true,
+      opencodeLocalLimitsEnabled: false
+    }),
+    latestStats: rawStats,
+    scheduleMacWidgetSnapshot: (stats, producerOwner) => {
+      scheduled = { stats, producerOwner };
+    }
+  });
+  vm.runInContext(
+    functionSource('refreshMacWidgetHistorySource', 'scheduleMacWidgetSnapshot'),
+    context
+  );
+  vm.runInContext('refreshMacWidgetHistorySource()', context);
+
+  assert.equal(scheduled.producerOwner, owner);
+  assert.equal(scheduled.stats.limits.providers[0].status, 'disabled');
+  assert.deepEqual(scheduled.stats.limits.providers[0].windows, []);
 });
 
 test('keeps Widget packaging opt-in and injects artifacts only after a successful build', () => {

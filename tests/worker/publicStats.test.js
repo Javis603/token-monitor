@@ -35,6 +35,8 @@ test('Worker public stats strip every account identity and plan field', async ()
       providers: [{
         provider: 'opencode',
         accountKey: 'sha256:private',
+        webAccountKey: 'sha256:private-web',
+        accountKeyAliases: ['sha256:private-legacy'],
         accountEmail: 'work@example.com',
         accountName: 'work',
         accountLabel: 'work',
@@ -64,7 +66,7 @@ test('Worker public stats strip every account identity and plan field', async ()
   const payload = await response.json();
   const provider = payload.limits.providers[0];
   assert.equal(provider.provider, 'opencode');
-  for (const field of ['accountKey', 'accountEmail', 'accountName', 'accountLabel', 'planLabel', 'workspaceKind']) {
+  for (const field of ['accountKey', 'webAccountKey', 'accountKeyAliases', 'accountEmail', 'accountName', 'accountLabel', 'planLabel', 'workspaceKind']) {
     assert.equal(Object.hasOwn(provider, field), false, `${field} should stay private`);
   }
   assert.equal(Object.hasOwn(payload, 'devices'), false);

@@ -61,8 +61,10 @@ jobs:
           tests/electron/macWidgetBridge.test.js
           tests/electron/macWidgetDeepLink.test.js
           tests/electron/macWidgetHistory.test.js
+          tests/electron/macWidgetHistoryStore.test.js
           tests/electron/macWidgetSnapshotController.test.js
           tests/electron/macWidgetSnapshotLane.test.js
+          tests/electron/macWidgetLaunchServicesRecovery.test.js
           tests/electron/macWidgetReloader.test.js
           tests/electron/macWidgetSigning.test.js
           tests/electron/macosProvisioning.test.js

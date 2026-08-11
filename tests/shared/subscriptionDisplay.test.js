@@ -520,6 +520,25 @@ test('an exact identifier beats a shared profile name', () => {
   );
 });
 
+test('an OpenCode subscription bound to a legacy account key follows its canonical workspace account', () => {
+  const accounts = [
+    {
+      provider: 'opencode',
+      accountKey: 'sha256:canonical',
+      accountKeyAliases: ['sha256:legacy-go', 'sha256:legacy-zen'],
+      accountName: 'work'
+    },
+    { provider: 'opencode', accountKey: 'sha256:other', accountName: 'personal' }
+  ];
+  const subscription = {
+    provider: 'opencode',
+    binding: { accountKey: 'sha256:legacy-go' }
+  };
+
+  assert.equal(subscriptions.matchProviderAccount(subscription, accounts).accountKey, 'sha256:canonical');
+  assert.equal(subscriptions.needsRebinding(subscription, accounts), false);
+});
+
 test('two writes in the same millisecond cannot share a concurrency token', () => {
   const first = subscriptions.subscriptionDocument([], { updatedAt: '2026-08-02T09:00:00.000Z' });
   // updatedAt IS the token, so a second write landing in the same millisecond

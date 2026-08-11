@@ -461,6 +461,28 @@ test('remote synced provider tags show the selected source device and local avai
   assert.equal(limitProviderMainDeviceLabel(provenance, { showSource: true }), 'work-mac');
 });
 
+test('device provenance uses exact case-sensitive device identity', () => {
+  const provider = {
+    provider: 'opencode',
+    status: 'ok',
+    source: 'local',
+    accountKey: 'shared',
+    sourceDeviceId: 'macbook'
+  };
+  const provenance = limitProviderProvenance(provider, {
+    localDeviceId: 'MacBook',
+    syncActive: true,
+    devices: [
+      { deviceId: 'MacBook', limits: { providers: [{ ...provider, sourceDeviceId: undefined }] } },
+      { deviceId: 'macbook', limits: { providers: [{ ...provider, sourceDeviceId: undefined }] } }
+    ]
+  });
+
+  assert.equal(provenance.selectedIsLocal, false);
+  assert.equal(provenance.selectedIsRemote, true);
+  assert.equal(provenance.selectedDeviceLabel, 'macbook');
+});
+
 test('local provider tags show when synced devices also have provider data', () => {
   const provider = { provider: 'cursor', status: 'ok', source: 'web', sourceDeviceId: 'local-mac' };
   const provenance = limitProviderProvenance(provider, {
@@ -516,6 +538,32 @@ test('multi-account Codex provenance matches synced candidates by account key', 
     limitProviderSettingsTags(provider, provenance).map((tag) => tag.key || tag.label),
     ['Live', 'Managed', 'settings.limits.device.from']
   );
+});
+
+test('OpenCode provenance matches a legacy device through canonical account aliases', () => {
+  const provider = {
+    provider: 'opencode',
+    status: 'ok',
+    source: 'web',
+    accountKey: 'sha256:canonical',
+    accountKeyAliases: ['sha256:legacy-go'],
+    sourceDeviceId: 'current-device'
+  };
+  const provenance = limitProviderProvenance(provider, {
+    localDeviceId: 'current-device',
+    syncActive: true,
+    devices: [
+      { deviceId: 'current-device', limits: { providers: [provider] } },
+      {
+        deviceId: 'legacy-device',
+        limits: { providers: [{ provider: 'opencode', status: 'ok', source: 'web', accountKey: 'sha256:legacy-go' }] }
+      }
+    ]
+  });
+
+  assert.equal(provenance.hasLocalCandidate, true);
+  assert.equal(provenance.remoteCount, 1);
+  assert.equal(provenance.candidateCount, 2);
 });
 
 test('single local synced provider tags identify local provenance without main panel noise', () => {
@@ -1589,6 +1637,88 @@ test('Claude prepaid balance stays off and disabled until Web login is configure
   const loggedInInput = loggedInContext.result?.children?.[0]?.children?.[1];
   assert.equal(loggedInInput?.checked, true);
   assert.equal(loggedInInput?.disabled, false);
+});
+
+test('OpenCode local DB fallback is off by default', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
+  const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
+  const updateHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('settings:openConfig'")
+  );
+  const settings = [{
+    key: 'opencodeLocalLimitsEnabled',
+    titleKey: 'settings.limits.opencodeLocalLimits',
+    descKey: 'settings.limits.opencodeLocalLimitsDesc',
+    defaultValue: false
+  }];
+
+  class FakeElement {
+    constructor(tagName) {
+      this.tagName = tagName;
+      this.children = [];
+      this.className = '';
+      this.classList = {
+        toggle: (name, enabled) => {
+          if (enabled) this.className = `${this.className} ${name}`.trim();
+        }
+      };
+    }
+    append(...children) { this.children.push(...children); }
+    addEventListener() {}
+  }
+
+  const context = {
+    document: { createElement: (tagName) => new FakeElement(tagName) },
+    state: { settings: {} },
+    t: (key) => key
+  };
+  const settingsContext = { ...context, settings };
+  vm.runInNewContext(
+    `${renderList}\nresult = limitProviderSettingsList('opencode', settings);`,
+    settingsContext
+  );
+  const input = settingsContext.result?.children?.[0]?.children?.[1];
+  assert.equal(input?.checked, false);
+
+  assert.match(defaults, /opencodeLocalLimitsEnabled:\s*false/);
+  assert.match(updateHandler, /opencodeLocalLimitsEnabled:\s*parseBoolean\(patch\.opencodeLocalLimitsEnabled \?\? settings\.opencodeLocalLimitsEnabled, false\)/);
+});
+
+test('provider option rerenders reuse the existing switch DOM', () => {
+  const app = readRendererFile('app.js');
+  const renderRows = functionBody(app, 'renderLimitProviderCheckboxesNow', 'limitProviderAccountGroup');
+  const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
+
+  assert.match(renderRows, /const reusableSettingInputs = new Map\(\);/);
+  assert.match(renderRows, /state\.limitProviderRenderSignature === renderSignature/);
+  assert.match(renderRows, /row\.querySelectorAll\?\.\(/);
+  assert.match(renderRows, /limitProviderSettingsList\(id, settings, reusableSettingInputs\)/);
+  assert.match(renderList, /const existingInput = reusableInputs\?\.get\(inputKey\);/);
+  assert.match(renderList, /if \(!existingInput\) \{\s*input\.addEventListener\('change'/);
+  assert.doesNotMatch(renderList, /renderLimits\(\);/);
+});
+
+test('settings pushes do not trigger a second full settings sync after save', () => {
+  const app = readRendererFile('app.js');
+  const save = functionBody(app, 'saveSettings', 'renderHomeIfVisible');
+  const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+
+  assert.match(save, /const settingsPushRevision = state\.settingsPushRevision;/);
+  assert.match(save, /if \(state\.settingsPushRevision === settingsPushRevision\) \{\s*preserveSettingsPanelScroll\(syncSettingsForm\);/);
+  assert.match(settingsPush, /state\.settingsPushRevision \+= 1;/);
+});
+
+test('main limits rerenders coalesce identical visible provider data', () => {
+  const app = readRendererFile('app.js');
+  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+
+  assert.match(renderLimits, /const renderSignature = JSON\.stringify\(\{/);
+  assert.match(renderLimits, /state\.limitPanelRenderSignature === renderSignature/);
+  assert.match(renderLimits, /els\.limitsPanel\.children\.length === orderedProviders\.length/);
+  assert.match(renderLimits, /state\.limitPanelRenderSignature = renderSignature;/);
 });
 
 test('successful providers use a green dot while preserving source and account labels', () => {

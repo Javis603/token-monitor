@@ -67,6 +67,61 @@ function createHarness(overrides = {}) {
   return { captures, controller, discarded, prepared, published, reloaded };
 }
 
+test('a paused controller captures work immediately and publishes only the latest item after resume', async () => {
+  const harness = createHarness({ startPaused: true });
+  const owner = harness.controller.captureProducerOwner();
+
+  assert.equal(harness.controller.enqueue({ stats: { source: 'first', currency: 'USD' }, producerOwner: owner }), true);
+  assert.equal(harness.controller.enqueue({ stats: { source: 'latest', currency: 'EUR' }, producerOwner: owner }), true);
+  await nextTurn();
+
+  assert.deepEqual(harness.captures.map((capture) => ({
+    source: capture.resolverConfig.source,
+    currency: capture.presentation.currencyCode
+  })), [
+    { source: 'first', currency: 'USD' },
+    { source: 'latest', currency: 'EUR' }
+  ]);
+  assert.deepEqual(harness.prepared, []);
+  assert.deepEqual(harness.published, []);
+  assert.deepEqual(harness.reloaded, []);
+
+  harness.controller.resume();
+  await harness.controller.whenIdle();
+
+  assert.deepEqual(harness.published, [{ source: 'latest', history: 'latest' }]);
+  assert.deepEqual(harness.reloaded, ['latest']);
+});
+
+test('producer and source transitions invalidate paused work before resume', async () => {
+  const harness = createHarness({ startPaused: true });
+  const staleOwner = harness.controller.captureProducerOwner();
+  harness.controller.enqueue({ stats: { source: 'stale' }, producerOwner: staleOwner });
+  harness.controller.advanceProducerAndSourceEpoch();
+  const currentOwner = harness.controller.captureProducerOwner();
+  harness.controller.enqueue({ stats: { source: 'current' }, producerOwner: currentOwner });
+
+  harness.controller.resume();
+  await harness.controller.whenIdle();
+
+  assert.deepEqual(harness.published, [{ source: 'current', history: 'current' }]);
+  assert.deepEqual(harness.reloaded, ['current']);
+});
+
+test('stopping a paused controller prevents resume from publishing pending work', async () => {
+  const harness = createHarness({ startPaused: true });
+  const owner = harness.controller.captureProducerOwner();
+  harness.controller.enqueue({ stats: { source: 'pending' }, producerOwner: owner });
+
+  harness.controller.stop();
+  harness.controller.resume();
+  await harness.controller.whenIdle();
+
+  assert.deepEqual(harness.prepared, []);
+  assert.deepEqual(harness.published, []);
+  assert.deepEqual(harness.reloaded, []);
+});
+
 test('queued stats cannot acquire a newer source owner before the lane starts', async () => {
   const harness = createHarness();
   const ownerA = harness.controller.captureProducerOwner();

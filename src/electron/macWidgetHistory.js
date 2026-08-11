@@ -16,7 +16,9 @@
 //     succeed, which reads as data loss rather than a transient network error.
 //
 // So the revision is treated as a freshness *signal* gated by a time floor, and
-// the last good history is retained across failures.
+// the last good history is retained across failures. A remote source also gets
+// a source-keyed persisted cache from the caller, because this module-level
+// cache disappears when Electron restarts.
 //
 // Two floors, because the two states are not the same risk. With a cached copy
 // to serve, the floor is about freshness and can be long. With none — a cold
@@ -44,6 +46,7 @@ let cachedRevision = '';
 let lastAttemptAt = null;
 let lastAttemptFailed = false;
 let inFlight = null;
+let persistedLoad = null;
 
 function log(logger, message) {
   try { logger?.(message); } catch (_) {}
@@ -53,9 +56,23 @@ function emptyHistory() {
   return { daily: [], monthly: [], summary: {} };
 }
 
-// The resolver configuration, without the revision. A change here means the
-// cached history describes a different source (another hub, history switched
-// off) and must not be served, however fresh it is.
+function isHistoryDocument(value) {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && Array.isArray(value.daily)
+    && Array.isArray(value.monthly)
+    && value.summary
+    && typeof value.summary === 'object'
+    && !Array.isArray(value.summary)
+  );
+}
+
+// The resolver configuration, without the revision or bearer secret. A change
+// here means the cached history describes a different source (another hub, or
+// history switched off) and must not be served, however fresh it is. The Hub
+// secret gates one shared data store; it does not select a tenant, and including
+// it would discard a valid last-good copy on routine credential rotation.
 function macWidgetHistorySourceKey(config = {}) {
   return [
     config.mode,
@@ -70,6 +87,8 @@ async function resolveMacWidgetHistory(options = {}) {
   const sourceKey = String(options.sourceKey || '');
   const revision = String(options.revision || '').trim();
   const fetchHistory = options.fetchHistory;
+  const loadCachedHistory = options.loadCachedHistory;
+  const saveCachedHistory = options.saveCachedHistory;
   const logger = options.logger;
   const now = Number.isFinite(options.now) ? options.now : Date.now();
   const minIntervalMs = Number.isFinite(options.minIntervalMs)
@@ -94,6 +113,30 @@ async function resolveMacWidgetHistory(options = {}) {
     lastAttemptAt = null;
     lastAttemptFailed = false;
     inFlight = null;
+    persistedLoad = null;
+
+    if (typeof loadCachedHistory === 'function') {
+      let loadPromise;
+      loadPromise = Promise.resolve()
+        .then(() => loadCachedHistory())
+        .then((history) => {
+          if (generation !== activeGeneration || sourceKey !== activeSourceKey) return;
+          if (isHistoryDocument(history)) cachedHistory = history;
+        })
+        .catch((error) => {
+          log(logger, `[mac-widget] persisted history cache read failed: ${error?.message || error}`);
+        })
+        .finally(() => {
+          if (persistedLoad?.promise === loadPromise) persistedLoad = null;
+        });
+      persistedLoad = { generation, sourceKey, promise: loadPromise };
+    }
+  }
+
+  const activePersistedLoad = persistedLoad;
+  if (activePersistedLoad && activePersistedLoad.generation === generation && activePersistedLoad.sourceKey === sourceKey) {
+    await activePersistedLoad.promise;
+    if (generation !== activeGeneration || sourceKey !== activeSourceKey) return emptyHistory();
   }
 
   // An exact revision hit is served whatever the floors say: it is the answer,
@@ -125,7 +168,7 @@ async function resolveMacWidgetHistory(options = {}) {
 
   const promise = Promise.resolve()
     .then(() => fetchHistory())
-    .then((history) => {
+    .then(async (history) => {
       if (!history || typeof history !== 'object') throw new Error('history resolver returned no data');
       // An owner change while this was in flight makes the answer belong to a
       // mode lifetime nobody is asking about any more. It can neither populate
@@ -134,6 +177,13 @@ async function resolveMacWidgetHistory(options = {}) {
       cachedHistory = history;
       cachedRevision = revision;
       lastAttemptFailed = false;
+      if (typeof saveCachedHistory === 'function') {
+        try {
+          await saveCachedHistory(history);
+        } catch (error) {
+          log(logger, `[mac-widget] persisted history cache write failed: ${error?.message || error}`);
+        }
+      }
       return history;
     })
     .catch((error) => {
@@ -164,12 +214,14 @@ function resetMacWidgetHistoryCache() {
   lastAttemptAt = null;
   lastAttemptFailed = false;
   inFlight = null;
+  persistedLoad = null;
 }
 
 module.exports = {
   DEFAULT_MIN_INTERVAL_MS,
   DEFAULT_RETRY_INTERVAL_MS,
   EMPTY_HISTORY,
+  isHistoryDocument,
   macWidgetHistorySourceKey,
   resetMacWidgetHistoryCache,
   resolveMacWidgetHistory

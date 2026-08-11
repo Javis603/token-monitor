@@ -6,6 +6,7 @@ const SYNC_UPLOAD_INTERVAL_OPTIONS = Object.freeze([
   20 * 60 * 1000,
   30 * 60 * 1000
 ]);
+const DEFAULT_STALE_AFTER_MS = 10 * 60 * 1000;
 const DEFAULT_SYNC_UPLOAD_INTERVAL_MS = 0;
 
 function normalizeSyncUploadIntervalMs(value, fallback = DEFAULT_SYNC_UPLOAD_INTERVAL_MS) {
@@ -28,6 +29,7 @@ function staleAfterMsForSyncUpload(value, staleAfterMs = 0) {
 }
 
 module.exports = {
+  DEFAULT_STALE_AFTER_MS,
   DEFAULT_SYNC_UPLOAD_INTERVAL_MS,
   SYNC_UPLOAD_INTERVAL_OPTIONS,
   normalizeSyncUploadIntervalMs,

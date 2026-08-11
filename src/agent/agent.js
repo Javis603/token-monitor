@@ -36,6 +36,13 @@ const historyEnabled = parseBoolean(args.history ?? args.historyEnabled ?? proce
 const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
+const opencodeLocalLimitsEnabled = parseBoolean(
+  args['opencode-local-limits']
+    ?? args.opencodeLocalLimits
+    ?? args.opencodeLocalLimitsEnabled
+    ?? process.env.TOKEN_MONITOR_OPENCODE_LOCAL_LIMITS,
+  false
+);
 const opencodeCookie = String(process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '').trim();
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
@@ -65,6 +72,7 @@ const limitsOptions = {
   limitProviders,
   limitsRefreshMs,
   claudeWebCookie: '',
+  opencodeLocalLimitsEnabled,
   opencodeCookie
 };
 let sessionUsageArchive;
