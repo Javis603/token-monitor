@@ -1978,7 +1978,11 @@ async function touchClaudeAuthPath(deps = {}) {
 
 function codexWindowKind(name, window) {
   const mins = Number(window?.windowDurationMins || window?.window_duration_mins || 0);
-  if (mins >= 7 * 24 * 60) return 'weekly';
+  // Monthly quotas use the shared wire contract's billing lane. The display
+  // label below keeps the cadence explicit instead of presenting it as money.
+  if (mins === 30 * 24 * 60) return 'billing';
+  if (mins === 7 * 24 * 60) return 'weekly';
+  if (mins === 5 * 60) return 'session';
   if (String(name).toLowerCase() === 'secondary') return 'weekly';
   return 'session';
 }
@@ -2278,8 +2282,10 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
   for (const key of ['primary', 'secondary']) {
     const window = rateLimits[key];
     if (!window) continue;
+    const kind = codexWindowKind(key, window);
     windows.push({
-      kind: codexWindowKind(key, window),
+      kind,
+      ...(kind === 'billing' ? { label: 'Monthly' } : {}),
       usedPercent: window.usedPercent ?? window.used_percent,
       resetsAt: window.resetsAt ?? window.resets_at,
       windowMinutes: window.windowDurationMins ?? window.window_duration_mins
@@ -2912,7 +2918,7 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
     return mapCodexRateLimitsToProvider(payload, {
       accountKey: managedCodexAccountKey(account, authIdentity, email),
       accountEmail: email,
-      accountLabel: account.accountLabel || codexAccountLabel(payload),
+      accountLabel: codexAccountLabel(payload) || account.accountLabel,
       accountName: account.workspaceLabel,
       workspaceKind: account.workspaceKind,
       updatedAt: nowIso(nowMs),
