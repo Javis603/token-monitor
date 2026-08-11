@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   getDashboardHistory: () => ipcRenderer.invoke('dashboard:getHistory'),
+  getDeviceHistories: () => ipcRenderer.invoke('dashboard:getDeviceHistories'),
   onDashboardHistoryChanged: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
     ipcRenderer.on('dashboard:historyChanged', listener);

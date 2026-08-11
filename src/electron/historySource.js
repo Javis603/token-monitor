@@ -6,6 +6,17 @@ function parseCompleteHistory(payload) {
   return coerceHistory(payload);
 }
 
+function parseDeviceHistories(payload) {
+  const devices = Array.isArray(payload) ? payload : payload?.devices;
+  const histories = {};
+  for (const device of Array.isArray(devices) ? devices : []) {
+    const deviceId = String(device?.deviceId || device?.id || '').trim();
+    if (!deviceId || !Object.prototype.hasOwnProperty.call(device, 'history')) continue;
+    histories[deviceId] = coerceHistory(device.history);
+  }
+  return histories;
+}
+
 // Which of the four resolutions below a configuration selects. Callers that need
 // to know how expensive a history read will be ask this rather than re-deriving
 // the branches, so the cost model cannot drift from the resolver: only 'remote'
@@ -57,8 +68,46 @@ async function resolveCompleteHistory(options = {}) {
   }
 }
 
+async function resolveDeviceHistories(options = {}) {
+  const {
+    embeddedHub,
+    fetchImpl = globalThis.fetch,
+    hubUrl,
+    localDevice,
+    secret,
+    timeoutMs = 15_000
+  } = options;
+  switch (completeHistorySource(options)) {
+    case 'empty':
+      return {};
+    case 'local':
+      return parseDeviceHistories(localDevice ? [localDevice] : []);
+    case 'embedded':
+      return parseDeviceHistories(embeddedHub.hub.getDevices());
+    default:
+      break;
+  }
+  if (typeof fetchImpl !== 'function') throw new Error('Device history fetch is unavailable');
+
+  const url = `${String(hubUrl).replace(/\/$/, '')}/api/devices`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    return parseDeviceHistories(await response.json());
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 module.exports = {
   completeHistorySource,
   parseCompleteHistory,
-  resolveCompleteHistory
+  parseDeviceHistories,
+  resolveCompleteHistory,
+  resolveDeviceHistories
 };

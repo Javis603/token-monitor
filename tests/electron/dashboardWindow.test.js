@@ -13,6 +13,7 @@ test('preload exposes the dashboard IPC surface', () => {
   const preload = read('src', 'electron', 'preload.js');
   assert.match(preload, /openDashboard: \(\) => ipcRenderer\.invoke\('dashboard:open'\)/);
   assert.match(preload, /getDashboardHistory: \(\) => ipcRenderer\.invoke\('dashboard:getHistory'\)/);
+  assert.match(preload, /getDeviceHistories: \(\) => ipcRenderer\.invoke\('dashboard:getDeviceHistories'\)/);
   assert.match(preload, /ipcRenderer\.on\('dashboard:historyChanged', listener\)/);
   assert.match(preload, /dashboard: \{/);
   assert.match(preload, /ready: \(\) => ipcRenderer\.send\('dashboard:ready'\)/);
@@ -24,11 +25,13 @@ test('main registers dashboard handlers and a sender-scoped close', () => {
   const main = read('src', 'electron', 'main.js');
   assert.match(main, /ipcMain\.handle\('dashboard:open'/);
   assert.match(main, /ipcMain\.handle\('dashboard:getHistory'/);
+  assert.match(main, /ipcMain\.handle\('dashboard:getDeviceHistories'/);
   assert.match(main, /ipcMain\.on\('dashboard:close'/);
   assert.match(main, /ipcMain\.on\('dashboard:ready'/);
   assert.match(main, /BrowserWindow\.fromWebContents\(event\.sender\)/);
   assert.match(main, /function createDashboardWindow/);
   assert.match(main, /function getDashboardHistory/);
+  assert.match(main, /function getDashboardDeviceHistories/);
 });
 
 test('dashboard readiness waits for data and recovers only from actual failures', () => {
@@ -50,6 +53,7 @@ test('Dashboard and Widget share the complete local/host/client history resolver
   assert.match(historySource, /mode === 'local'/);
   assert.match(historySource, /hubMode === 'host' && embeddedHub/);
   assert.match(historySource, /\/api\/history/);
+  assert.match(historySource, /\/api\/devices/);
 });
 
 test('getDashboardHistory reads local history directly without a blocking collection tick', () => {

@@ -168,6 +168,7 @@ const verticalDragSortApi = window.TokenMonitorVerticalDragSort;
 const rowDragControllerApi = window.TokenMonitorRowDragController;
 const homeOverviewApi = window.TokenMonitorHomeOverview;
 const homeModulePreferencesApi = window.TokenMonitorHomeModulePreferences;
+const periodRangesApi = window.TokenMonitorPeriodRanges;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
@@ -307,9 +308,18 @@ state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
+state.deviceHistories = null;
+state.deviceHistoriesBusy = false;
+state.deviceHistoriesRequestSignature = '';
+state.deviceHistoriesLoadedSignature = '';
+state.deviceHistoriesFailedSignature = '';
+state.deviceHistoriesRetrySignature = '';
+state.deviceHistoriesRetries = 0;
+state.deviceHistoriesRetryTimer = null;
 state.homeReturnVisible = false;
 state.appUpdateNotesPresentedVersion = '';
 state.periodMotionActive = false;
+state.periodPopoverSlot = '';
 state.animateBarsFromZero = false;
 state.animateChartsOnRender = true;
 let directBreakdownOverride = null;
@@ -435,7 +445,8 @@ Object.assign(els, {
   resetThemeColorsButton: document.getElementById('resetThemeColorsButton'),
   resetVendorColorsButton: document.getElementById('resetVendorColorsButton'),
   sessionDetail: document.getElementById('session-detail'),
-  sessionDetailHead: document.getElementById('session-detail-head')
+  sessionDetailHead: document.getElementById('session-detail-head'),
+  periodPopover: document.getElementById('periodPopover')
 });
 
 function toggleAccordionRow(row) {
@@ -738,8 +749,66 @@ function hideTotalCompact() {
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
 }
+
+function periodHistoryEnabled() {
+  return state.settings?.historyEnabled !== false;
+}
+
+function effectivePeriodSelection(slot = state.period) {
+  return periodRangesApi.effectiveSelection(slot, state.settings || {}, {
+    historyEnabled: periodHistoryEnabled()
+  });
+}
+
+function fullHistoryForStats(stats) {
+  if (stats === state.stats) {
+    return homeOverviewApi.pickHomeHistory(state.homeHistory, stats?.historyPreview);
+  }
+  return stats?.history || { daily: [] };
+}
+
+function usagePeriodForStats(stats, history = fullHistoryForStats(stats)) {
+  const selection = effectivePeriodSelection();
+  if (!periodRangesApi.isDerived(selection)) {
+    return stats?.periods?.[selection] || stats?.[selection] || {
+      totalTokens: 0, costUsd: 0, clients: {}, clientCosts: {}, models: {}, modelCosts: {}
+    };
+  }
+  return periodRangesApi.derivePeriod(history?.daily || [], {
+    selection,
+    locale: currentLocale(),
+    todayKey: periodRangesApi.localDayKey(),
+    rangeStart: state.settings?.periodRangeStart,
+    rangeEnd: state.settings?.periodRangeEnd,
+    nativeToday: stats?.periods?.today || stats?.today
+  });
+}
+
+function currentUsagePeriod() {
+  return usagePeriodForStats(state.stats);
+}
+
+function deviceForCurrentPeriod(device) {
+  if (!periodRangesApi.isDerived(effectivePeriodSelection())) return device;
+  const deviceId = String(device?.deviceId || device?.id || '').trim();
+  const history = deviceId && state.deviceHistories
+    ? state.deviceHistories[deviceId]
+    : device?.history;
+  return {
+    ...device,
+    periods: {
+      ...(device?.periods || {}),
+      [state.period]: usagePeriodForStats(device, history || { daily: [] })
+    }
+  };
+}
+
+function devicesForCurrentPeriod() {
+  return (state.stats?.devices || []).map(deviceForCurrentPeriod);
+}
+
 function currentTokenRateValue() {
-  const period = state.stats?.periods?.[state.period];
+  const period = currentUsagePeriod();
   const burn = state.settings?.tokenRateMode === 'burn';
   return {
     burn,
@@ -1840,7 +1909,23 @@ function applyHomeListMark(mark, iconKind, color) {
   mark.style.background = color;
 }
 
-function renderRows(rows, { incompleteHint = '' } = {}) {
+function renderRows(rows, { incompleteHint = '', emptyState = '' } = {}) {
+  const emptyStateText = emptyState ? t(emptyState) : '';
+  if (emptyStateText) {
+    updateLargeSessionContainment(false);
+    els.breakdown.classList.add('is-empty-state');
+    const signature = JSON.stringify([state.breakdown, 'empty', emptyStateText]);
+    if (signature !== state.rowSignature) {
+      const message = document.createElement('p');
+      message.className = 'breakdown-empty-state';
+      message.setAttribute('role', 'status');
+      message.textContent = emptyStateText;
+      els.breakdown.replaceChildren(message);
+      state.rowSignature = signature;
+    }
+    return;
+  }
+  els.breakdown.classList.remove('is-empty-state');
   const largeSessionList = isLargeSessionBreakdown(state.breakdown, rows.length);
   if (rows.length === 0 && !incompleteHint) {
     updateLargeSessionContainment(false);
@@ -1933,7 +2018,7 @@ function stableColor(value, colors) {
 
 function deviceRowsForPeriod() {
   const localId = state.settings?.deviceId || '';
-  return (state.stats?.devices || []).map((device) => {
+  return devicesForCurrentPeriod().map((device) => {
     const breakdown = deviceBreakdownApi.deviceBreakdownForPeriod(device, state.period, {
       clientLabels,
       clientColors,
@@ -5399,9 +5484,40 @@ function renderTrends() {
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
-  const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
-  const { points, metric, labelKey } = charts.selectPreviewSeries(preview, state.period);
-  const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
+  const selection = effectivePeriodSelection();
+  const derived = periodRangesApi.isDerived(selection);
+  let points;
+  let metric;
+  let labelKey;
+  let summary;
+  let rangeLabel;
+  if (derived) {
+    const history = fullHistoryForStats(state.stats);
+    const rangeOptions = {
+      selection,
+      locale: currentLocale(),
+      todayKey: periodRangesApi.localDayKey(),
+      rangeStart: state.settings?.periodRangeStart,
+      rangeEnd: state.settings?.periodRangeEnd,
+      nativeToday: state.stats?.periods?.today
+    };
+    points = periodRangesApi.dailyRowsForSelection(history?.daily || [], rangeOptions);
+    metric = 'tokens';
+    labelKey = 'date';
+    summary = periodRangesApi.rangeSummary(history?.daily || [], rangeOptions);
+    rangeLabel = periodChoiceLabel(selection);
+  } else {
+    const selected = charts.selectPreviewSeries(preview, state.period);
+    points = selected.points;
+    metric = selected.metric;
+    labelKey = selected.labelKey;
+    const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
+    points = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
+    summary = preview.summary || {};
+    rangeLabel = state.period === 'allTime' ? t('trends.range.year')
+      : state.period === 'month' ? t('trends.range.month') : t('trends.range.week');
+  }
+  const finalPoints = points;
 
   if (finalPoints.length === 0) {
     els.trendsPanel.innerHTML = `<div class="trends-empty">${t('trends.empty')}</div>`;
@@ -5412,9 +5528,6 @@ function renderTrends() {
   const titles = finalPoints.map((p) => `${trendShortLabel(p[labelKey], labelKey)} · ${formatCompact(p[metric])}`);
   const svg = charts.sparklineSvg(model, { titles, showZeroMarkers: state.period === 'today' });
 
-  const summary = preview.summary || {};
-  const rangeLabel = state.period === 'allTime' ? t('trends.range.year')
-    : state.period === 'month' ? t('trends.range.month') : t('trends.range.week');
   const first = trendShortLabel(finalPoints[0][labelKey], labelKey);
   const last = trendShortLabel(finalPoints[finalPoints.length - 1][labelKey], labelKey);
   const stats = [
@@ -5493,6 +5606,8 @@ function openViewFromTray(viewId) {
 
 const HOME_HISTORY_MAX_RETRIES = 3;
 const HOME_HISTORY_RETRY_MS = 4000;
+const DEVICE_HISTORY_MAX_RETRIES = 3;
+const DEVICE_HISTORY_RETRY_MS = 4000;
 
 async function loadHomeHistory() {
   if (state.homeHistoryBusy || !window.tokenMonitor.getDashboardHistory) return;
@@ -5560,7 +5675,70 @@ async function loadHomeHistory() {
         void loadHomeHistory();
       }, HOME_HISTORY_RETRY_MS);
     }
-    if (state.breakdown === 'home') render();
+    if (state.breakdown === 'home' || periodRangesApi.isDerived(effectivePeriodSelection())) render();
+  }
+}
+
+function deviceHistoriesStatus() {
+  const signature = homeOverviewApi.homeHistorySignature(state.stats);
+  if (signature && state.deviceHistoriesLoadedSignature === signature) return 'ready';
+  if (signature && state.deviceHistoriesFailedSignature === signature) return 'unavailable';
+  return 'loading';
+}
+
+async function loadDeviceHistories() {
+  if (state.deviceHistoriesBusy || !window.tokenMonitor.getDeviceHistories) return;
+  const requestSignature = homeOverviewApi.homeHistorySignature(state.stats);
+  if (!requestSignature
+    || state.deviceHistoriesLoadedSignature === requestSignature
+    || state.deviceHistoriesFailedSignature === requestSignature
+    || state.deviceHistoriesRequestSignature === requestSignature) return;
+  if (state.deviceHistoriesRetrySignature !== requestSignature) {
+    clearTimeout(state.deviceHistoriesRetryTimer);
+    state.deviceHistoriesRetryTimer = null;
+    state.deviceHistoriesRetrySignature = requestSignature;
+    state.deviceHistoriesRetries = 0;
+    state.deviceHistoriesFailedSignature = '';
+  }
+  state.deviceHistoriesBusy = true;
+  state.deviceHistoriesRequestSignature = requestSignature;
+  let resolved = false;
+  let fetchedHistories = null;
+  try {
+    fetchedHistories = await window.tokenMonitor.getDeviceHistories();
+    resolved = fetchedHistories && typeof fetchedHistories === 'object' && !Array.isArray(fetchedHistories);
+  } catch (error) {
+    console.log(`[devices] history failed: ${error.message}`);
+  } finally {
+    state.deviceHistoriesBusy = false;
+    const currentSignature = homeOverviewApi.homeHistorySignature(state.stats);
+    if (currentSignature !== requestSignature) {
+      state.deviceHistoriesRequestSignature = '';
+      void loadDeviceHistories();
+    } else {
+      if (resolved) {
+        state.deviceHistories = fetchedHistories;
+        state.deviceHistoriesLoadedSignature = requestSignature;
+        state.deviceHistoriesFailedSignature = '';
+        state.deviceHistoriesRetries = 0;
+        state.deviceHistoriesRetrySignature = '';
+        clearTimeout(state.deviceHistoriesRetryTimer);
+        state.deviceHistoriesRetryTimer = null;
+      } else if (state.deviceHistoriesRetries < DEVICE_HISTORY_MAX_RETRIES) {
+        state.deviceHistoriesRetries += 1;
+        clearTimeout(state.deviceHistoriesRetryTimer);
+        state.deviceHistoriesRetryTimer = setTimeout(() => {
+          state.deviceHistoriesRetryTimer = null;
+          if (state.deviceHistoriesLoadedSignature === requestSignature) return;
+          if (homeOverviewApi.homeHistorySignature(state.stats) !== requestSignature) return;
+          state.deviceHistoriesRequestSignature = '';
+          void loadDeviceHistories();
+        }, DEVICE_HISTORY_RETRY_MS);
+      } else {
+        state.deviceHistoriesFailedSignature = requestSignature;
+      }
+      if (state.breakdown === 'home' || state.breakdown === 'device') render();
+    }
   }
 }
 
@@ -5979,7 +6157,16 @@ function renderHomeToolModule(period) {
 
 function renderHomeDeviceModule() {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  const rows = homeOverviewApi.homeDeviceRows(state.stats?.devices || [], {
+  if (periodRangesApi.isDerived(effectivePeriodSelection()) && deviceHistoriesStatus() !== 'ready') {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    empty.textContent = t(deviceHistoriesStatus() === 'unavailable'
+      ? 'periodRange.deviceHistoryUnavailable'
+      : 'periodRange.deviceHistoryLoading');
+    body.append(empty);
+    return module;
+  }
+  const rows = homeOverviewApi.homeDeviceRows(devicesForCurrentPeriod(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
     limit: 4
@@ -6433,7 +6620,7 @@ function renderHome() {
   hideHomeActivityTooltip({ preserveHover: true });
   state.homeActivityResizeObserver?.disconnect();
   state.homeActivityResizeObserver = null;
-  const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
+  const period = currentUsagePeriod();
   const moduleIds = homeModuleIds();
   if (moduleIds.includes('trends')) void loadHomeHistory();
   if (moduleIds.length === 0) {
@@ -6478,12 +6665,16 @@ function renderHome() {
 
 function render() {
   if (!state.stats) return;
+  if (periodRangesApi.isDerived(effectivePeriodSelection())) {
+    void loadHomeHistory();
+    void loadDeviceHistories();
+  }
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
-  const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
+  const period = currentUsagePeriod();
   const nextTotal = Number(period.totalTokens || 0);
   const totalChanged = nextTotal !== state.currentTotal;
   if (state.suppressInitialNumberAnimation) {
@@ -6562,14 +6753,26 @@ function render() {
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
-    const rows = rowsForPeriod(period);
+    const selection = effectivePeriodSelection();
+    const detailUnavailable = !periodRangesApi.supportsBreakdown(selection, state.breakdown);
+    const deviceHistoryStatus = state.breakdown === 'device' && periodRangesApi.isDerived(selection)
+      ? deviceHistoriesStatus()
+      : 'ready';
+    const rows = detailUnavailable || deviceHistoryStatus !== 'ready' ? [] : rowsForPeriod(period);
     let incompleteHint = '';
-    if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
+    if (!detailUnavailable && state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
-    } else if (state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
+    } else if (!detailUnavailable && state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'sessions.incomplete';
     }
-    renderRows(rows, { incompleteHint });
+    const emptyState = detailUnavailable
+      ? (state.breakdown === 'project'
+          ? 'periodRange.projectDetailUnavailable'
+          : 'periodRange.sessionDetailUnavailable')
+      : (deviceHistoryStatus === 'loading'
+          ? 'periodRange.deviceHistoryLoading'
+          : (deviceHistoryStatus === 'unavailable' ? 'periodRange.deviceHistoryUnavailable' : ''));
+    renderRows(rows, { incompleteHint, emptyState });
   }
   
   renderFloatingBubbleContent();
@@ -6716,6 +6919,13 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetrySignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
+      clearTimeout(state.deviceHistoriesRetryTimer);
+      state.deviceHistoriesRetryTimer = null;
+      state.deviceHistoriesRequestSignature = '';
+      state.deviceHistoriesLoadedSignature = '';
+      state.deviceHistoriesFailedSignature = '';
+      state.deviceHistoriesRetrySignature = '';
+      state.deviceHistoriesRetries = 0;
     }
     applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
@@ -7613,11 +7823,227 @@ async function refreshHubInfo() {
   } catch (_) { /* ignore */ }
 }
 
+const PERIOD_CHOICE_KEYS = {
+  today: 'periodRange.today',
+  month: 'periodRange.month',
+  allTime: 'periodRange.allTime',
+  week: 'periodRange.week',
+  last7: 'periodRange.last7',
+  last30: 'periodRange.last30',
+  range: 'periodRange.custom'
+};
+
+function periodChoiceLabel(selection) {
+  return t(PERIOD_CHOICE_KEYS[selection] || PERIOD_CHOICE_KEYS.today);
+}
+
+function periodSlotHasOptions(slot) {
+  return slot === 'month' || slot === 'allTime';
+}
+
+function closePeriodPopover() {
+  if (!els.periodPopover?.matches(':popover-open')) return;
+  try { els.periodPopover.hidePopover(); } catch (_) {}
+}
+
+function positionPeriodPopover(anchor) {
+  if (!els.periodPopover?.matches(':popover-open') || !anchor?.isConnected) return;
+  const rect = anchor.getBoundingClientRect();
+  const popoverRect = els.periodPopover.getBoundingClientRect();
+  const gutter = 8;
+  const gap = 5;
+  const left = Math.max(gutter, Math.min(
+    window.innerWidth - popoverRect.width - gutter,
+    rect.right - popoverRect.width
+  ));
+  const below = rect.bottom + gap;
+  const top = below + popoverRect.height <= window.innerHeight - gutter
+    ? below
+    : Math.max(gutter, rect.top - popoverRect.height - gap);
+  els.periodPopover.style.left = `${Math.round(left)}px`;
+  els.periodPopover.style.top = `${Math.round(top)}px`;
+}
+
+function renderPeriodSelectionChange(slot) {
+  const snapshot = captureBreakdownMotion();
+  setPeriod(slot);
+  syncPeriodTabs();
+  if (state.openSession) openSessionDetail(state.openSession);
+  state.rowSignature = '';
+  state.periodMotionActive = true;
+  try {
+    render();
+  } finally {
+    state.periodMotionActive = false;
+  }
+  animateBreakdownFrom(snapshot, { duration: 800 });
+  if (periodRangesApi.isDerived(effectivePeriodSelection())) {
+    void loadHomeHistory();
+    void loadDeviceHistories();
+  }
+}
+
+function selectPeriodMode(slot, mode, extraPatch = {}, options = {}) {
+  const key = periodRangesApi.modeSettingKey(slot);
+  if (!key) return;
+  const patch = { [key]: periodRangesApi.normalizeMode(slot, mode), ...extraPatch };
+  state.settings = { ...(state.settings || {}), ...patch };
+  closePeriodPopover();
+  if (options.activate === false) {
+    syncPeriodTabs();
+    render();
+  } else {
+    renderPeriodSelectionChange(slot);
+  }
+  void saveSettings(patch).then(() => {
+    syncPeriodTabs();
+    render();
+  }).catch(() => {
+    syncPeriodTabs();
+    render();
+  });
+}
+
+function periodOption(slot, mode, currentMode, options = {}) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `period-popover-option view-switcher-menu-item${mode === currentMode ? ' is-current' : ''}`;
+  button.setAttribute('role', 'menuitemradio');
+  button.setAttribute('aria-checked', String(mode === currentMode));
+  button.disabled = options.disabled === true;
+  const copy = document.createElement('span');
+  copy.className = 'period-popover-copy';
+  const label = document.createElement('span');
+  label.className = 'view-switcher-menu-label';
+  label.textContent = periodChoiceLabel(mode);
+  copy.append(label);
+  if (options.detail) {
+    const detail = document.createElement('small');
+    detail.textContent = options.detail;
+    copy.append(detail);
+  }
+  button.append(copy);
+  if (options.onClick) button.addEventListener('click', options.onClick);
+  else button.addEventListener('click', () => selectPeriodMode(slot, mode));
+  return button;
+}
+
+function appendCustomRangeForm(popover, currentMode, disabled) {
+  const today = periodRangesApi.localDayKey();
+  const minDate = periodRangesApi.dayKeyAddDays(today, -369);
+  const form = document.createElement('form');
+  form.className = 'period-range-form';
+  form.classList.toggle('hidden', currentMode !== 'range');
+  const startInput = document.createElement('input');
+  startInput.type = 'date';
+  startInput.min = minDate;
+  startInput.max = today;
+  startInput.value = periodRangesApi.normalizeDateKey(state.settings?.periodRangeStart)
+    || periodRangesApi.dayKeyAddDays(today, -6);
+  startInput.disabled = disabled;
+  const endInput = document.createElement('input');
+  endInput.type = 'date';
+  endInput.min = minDate;
+  endInput.max = today;
+  endInput.value = periodRangesApi.normalizeDateKey(state.settings?.periodRangeEnd) || today;
+  endInput.disabled = disabled;
+  for (const [labelKey, input] of [['periodRange.from', startInput], ['periodRange.to', endInput]]) {
+    const field = document.createElement('label');
+    field.className = 'period-range-field';
+    const label = document.createElement('span');
+    label.textContent = t(labelKey);
+    field.append(label, input);
+    form.append(field);
+  }
+  const error = document.createElement('div');
+  error.className = 'period-range-error';
+  error.setAttribute('role', 'alert');
+  const apply = document.createElement('button');
+  apply.type = 'submit';
+  apply.className = 'period-range-apply';
+  apply.textContent = t('periodRange.apply');
+  apply.disabled = disabled;
+  form.append(error, apply);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const range = periodRangesApi.normalizeDateRange(startInput.value, endInput.value);
+    if (!range || range.start < minDate || range.end > today) {
+      error.textContent = t('periodRange.invalid');
+      return;
+    }
+    selectPeriodMode('allTime', 'range', {
+      periodRangeStart: range.start,
+      periodRangeEnd: range.end
+    });
+  });
+  popover.append(form);
+  return { form, startInput };
+}
+
+function openPeriodPopover(slot, anchor) {
+  if (!els.periodPopover || !periodSlotHasOptions(slot)) return;
+  const currentMode = periodRangesApi.modeForSlot(slot, state.settings || {});
+  const historyDisabled = !periodHistoryEnabled();
+  els.periodPopover.replaceChildren();
+  els.periodPopover.dataset.slot = slot;
+  els.periodPopover.classList.toggle('has-form', slot === 'allTime' && currentMode === 'range');
+  els.periodPopover.setAttribute('aria-label', t(`periodRange.title.${slot}`));
+  const options = document.createElement('div');
+  options.className = 'period-popover-options';
+  options.setAttribute('role', 'menu');
+  els.periodPopover.append(options);
+  let customForm = null;
+  if (slot === 'month') {
+    options.append(
+      periodOption(slot, 'month', currentMode),
+      periodOption(slot, 'week', currentMode, { disabled: historyDisabled }),
+      periodOption(slot, 'last7', currentMode, { disabled: historyDisabled }),
+      periodOption(slot, 'last30', currentMode, { disabled: historyDisabled })
+    );
+  } else {
+    options.append(periodOption(slot, 'allTime', currentMode));
+    let customButton;
+    customButton = periodOption(slot, 'range', currentMode, {
+      disabled: historyDisabled,
+      onClick: () => {
+        customForm?.form.classList.remove('hidden');
+        els.periodPopover.classList.add('has-form');
+        options.querySelectorAll('.period-popover-option').forEach((option) => option.setAttribute('aria-checked', 'false'));
+        customButton.setAttribute('aria-checked', 'true');
+        customForm?.startInput.focus();
+        requestAnimationFrame(() => positionPeriodPopover(anchor));
+      }
+    });
+    options.append(customButton);
+    customForm = appendCustomRangeForm(els.periodPopover, currentMode, historyDisabled);
+  }
+  if (historyDisabled) {
+    const note = document.createElement('p');
+    note.className = 'period-popover-note';
+    note.textContent = t('periodRange.historyRequired');
+    els.periodPopover.append(note);
+  }
+  state.periodPopoverSlot = slot;
+  try { els.periodPopover.showPopover(); } catch (_) { return; }
+  requestAnimationFrame(() => {
+    positionPeriodPopover(anchor);
+    els.periodPopover.querySelector('[aria-checked="true"]')?.focus();
+  });
+}
+
 function syncPeriodTabs() {
   const tabs = Array.from(document.querySelectorAll('.tab'));
   const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.period === state.period));
   document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
   for (const tab of tabs) {
+    const selection = effectivePeriodSelection(tab.dataset.period);
+    const fullLabel = periodChoiceLabel(selection);
+    tab.textContent = periodRangesApi.displayLabel(selection);
+    const hasOptions = periodSlotHasOptions(tab.dataset.period);
+    tab.title = hasOptions ? t('periodRange.tabHint', { range: fullLabel }) : fullLabel;
+    tab.setAttribute('aria-label', fullLabel);
+    if (hasOptions) tab.setAttribute('aria-haspopup', 'menu');
+    else tab.removeAttribute('aria-haspopup');
     const active = tab.dataset.period === state.period;
     tab.classList.toggle('active', active);
     tab.setAttribute('aria-pressed', String(active));
@@ -8032,6 +8458,7 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
 
 function renderViewPreferences() {
   if (!els.viewDisplayList) return;
+  document.getElementById('periodSettingsContainer')?.replaceChildren(renderPeriodSettings());
   const hidden = hiddenViewSet();
   const orderValue = effectiveViewDisplayOrderValue();
   const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, orderValue);
@@ -8326,6 +8753,113 @@ function renderHomeLimitProviderList() {
     wrap.append(row);
   }
   return wrap;
+}
+
+function renderPeriodSettings() {
+  const section = document.createElement('section');
+  section.className = 'period-settings';
+  const note = document.createElement('p');
+  note.className = 'settings-note period-settings-note';
+  note.textContent = t('settings.periodRanges.note');
+  const rows = document.createElement('div');
+  rows.className = 'period-settings-rows';
+  section.append(note, rows);
+
+  const historyDisabled = !periodHistoryEnabled();
+  const rangeForm = document.createElement('form');
+  rangeForm.className = 'period-settings-range-form';
+  const today = periodRangesApi.localDayKey();
+  const minDate = periodRangesApi.dayKeyAddDays(today, -369);
+  const startInput = document.createElement('input');
+  startInput.type = 'date';
+  startInput.min = minDate;
+  startInput.max = today;
+  startInput.value = periodRangesApi.normalizeDateKey(state.settings?.periodRangeStart)
+    || periodRangesApi.dayKeyAddDays(today, -6);
+  startInput.disabled = historyDisabled;
+  const endInput = document.createElement('input');
+  endInput.type = 'date';
+  endInput.min = minDate;
+  endInput.max = today;
+  endInput.value = periodRangesApi.normalizeDateKey(state.settings?.periodRangeEnd) || today;
+  endInput.disabled = historyDisabled;
+  const dateFields = document.createElement('div');
+  dateFields.className = 'period-settings-date-fields';
+  for (const [labelKey, input] of [['periodRange.from', startInput], ['periodRange.to', endInput]]) {
+    const field = document.createElement('label');
+    field.className = 'period-settings-date-field';
+    const label = document.createElement('span');
+    label.textContent = t(labelKey);
+    field.append(label, input);
+    dateFields.append(field);
+  }
+  const rangeFooter = document.createElement('div');
+  rangeFooter.className = 'period-settings-range-footer';
+  const error = document.createElement('span');
+  error.className = 'period-settings-range-error';
+  error.setAttribute('role', 'alert');
+  const apply = document.createElement('button');
+  apply.type = 'submit';
+  apply.className = 'period-range-apply period-settings-range-apply';
+  apply.textContent = t('periodRange.apply');
+  apply.disabled = historyDisabled;
+  rangeFooter.append(error, apply);
+  rangeForm.append(dateFields, rangeFooter);
+
+  const appendSelectRow = (slot, labelKey, modes) => {
+    const row = document.createElement('label');
+    row.className = 'period-settings-row';
+    const label = document.createElement('span');
+    label.textContent = t(labelKey);
+    const select = document.createElement('select');
+    select.className = 'period-settings-select';
+    const currentMode = periodRangesApi.modeForSlot(slot, state.settings || {});
+    for (const mode of modes) {
+      const option = document.createElement('option');
+      option.value = mode;
+      option.textContent = periodChoiceLabel(mode);
+      option.selected = currentMode === mode;
+      option.disabled = historyDisabled && periodRangesApi.isDerived(mode);
+      select.append(option);
+    }
+    select.addEventListener('change', () => {
+      error.textContent = '';
+      if (slot === 'allTime' && select.value === 'range') {
+        rangeForm.classList.remove('hidden');
+        startInput.focus();
+        return;
+      }
+      if (slot === 'allTime') rangeForm.classList.add('hidden');
+      selectPeriodMode(slot, select.value, {}, { activate: false });
+    });
+    row.append(label, select);
+    rows.append(row);
+    return select;
+  };
+
+  appendSelectRow('month', 'settings.periodRanges.monthTab', ['month', 'week', 'last7', 'last30']);
+  const totalSelect = appendSelectRow('allTime', 'settings.periodRanges.totalTab', ['allTime', 'range']);
+  rangeForm.classList.toggle('hidden', totalSelect.value !== 'range');
+  rangeForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const range = periodRangesApi.normalizeDateRange(startInput.value, endInput.value);
+    if (!range || range.start < minDate || range.end > today) {
+      error.textContent = t('periodRange.invalid');
+      return;
+    }
+    selectPeriodMode('allTime', 'range', {
+      periodRangeStart: range.start,
+      periodRangeEnd: range.end
+    }, { activate: false });
+  });
+  section.append(rangeForm);
+  if (historyDisabled) {
+    const historyNote = document.createElement('p');
+    historyNote.className = 'settings-note period-settings-history-note';
+    historyNote.textContent = t('periodRange.historyRequired');
+    section.append(historyNote);
+  }
+  return section;
 }
 
 function renderHomeSettingsList() {
@@ -10016,6 +10550,7 @@ els.backHomeButton?.addEventListener('click', (event) => {
 
 window.addEventListener('blur', () => {
   cancelTokenRateBoost();
+  closePeriodPopover();
   clearViewSwitcherLongPress();
   clearViewSwitcherHoverClose();
   viewSwitcherLongPressTriggered = false;
@@ -10065,17 +10600,37 @@ async function init() {
 
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {
-    const snapshot = captureBreakdownMotion();
-    if (!setPeriod(tab.dataset.period)) return;
-    syncPeriodTabs();
-    if (state.openSession) openSessionDetail(state.openSession);
-    state.rowSignature = '';
-    state.periodMotionActive = true;
-    render();
-    state.periodMotionActive = false;
-    animateBreakdownFrom(snapshot, { duration: 800 });
+    const slot = tab.dataset.period;
+    if (slot === state.period) {
+      if (periodSlotHasOptions(slot)) openPeriodPopover(slot, tab);
+      return;
+    }
+    closePeriodPopover();
+    renderPeriodSelectionChange(slot);
+  });
+  tab.addEventListener('contextmenu', (event) => {
+    if (!periodSlotHasOptions(tab.dataset.period)) return;
+    event.preventDefault();
+    openPeriodPopover(tab.dataset.period, tab);
   });
 }
+
+els.periodPopover?.addEventListener('toggle', (event) => {
+  if (event.newState === 'closed') state.periodPopoverSlot = '';
+});
+els.periodPopover?.addEventListener('keydown', (event) => {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  const choices = [...els.periodPopover.querySelectorAll('.period-popover-option:not(:disabled)')];
+  if (!choices.length) return;
+  event.preventDefault();
+  const current = choices.indexOf(document.activeElement);
+  let next;
+  if (event.key === 'End') next = choices.length - 1;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'ArrowDown') next = current < 0 ? 0 : (current + 1) % choices.length;
+  else next = current < 0 ? choices.length - 1 : (current - 1 + choices.length) % choices.length;
+  choices[next]?.focus();
+});
 
 els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
@@ -10087,7 +10642,7 @@ els.breakdown.addEventListener('click', (event) => {
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = match[2];
-  const period = state.stats?.periods?.[state.period];
+  const period = currentUsagePeriod();
   const session = period?.sessions?.[`${client}:${sessionId}`];
   openSessionDetail({
     client,
@@ -10411,7 +10966,10 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
-window.addEventListener('resize', () => { if (!numberAnimHandle) fitTotalNumber(); });
+window.addEventListener('resize', () => {
+  if (!numberAnimHandle) fitTotalNumber();
+  closePeriodPopover();
+});
 els.swapSettingsRefreshInput.addEventListener('change', () => {
   applyControlLayout(els.swapSettingsRefreshInput.checked);
   void saveAppearanceFromControls();
@@ -10611,11 +11169,14 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   const prevLanguage = state.settings?.language;
   const prevCompactTokenUnits = state.settings?.compactTokenUnits;
   const prevShowCompactTotalTokens = state.settings?.showCompactTotalTokens;
+  const prevPeriodSettings = JSON.stringify(periodRangesApi.normalizedSettings(state.settings || {}));
   state.settings = next;
   applyEffectiveCurrencyRates();
   preserveSettingsPanelScroll(syncSettingsForm);
   maybeUpdateBarsIcon();
-  if ((prevMetric || 'cost') !== (next.heatmapMetric || 'cost')) {
+  const periodSettingsChanged = prevPeriodSettings !== JSON.stringify(periodRangesApi.normalizedSettings(next));
+  if (periodSettingsChanged) syncPeriodTabs();
+  if ((prevMetric || 'cost') !== (next.heatmapMetric || 'cost') || periodSettingsChanged) {
     render();
   } else if (
     prevLanguage !== next.language

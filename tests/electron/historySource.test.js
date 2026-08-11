@@ -2,7 +2,11 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { resolveCompleteHistory } = require('../../src/electron/historySource');
+const {
+  parseDeviceHistories,
+  resolveCompleteHistory,
+  resolveDeviceHistories
+} = require('../../src/electron/historySource');
 
 const aggregate = (devices) => ({
   daily: devices.map((device) => ({ date: device.date, tokens: device.tokens })),
@@ -46,5 +50,57 @@ test('fetches and parses the complete client history endpoint', async () => {
   });
   assert.deepEqual(result, history);
   assert.equal(request.url, 'https://hub.example/api/history');
+  assert.equal(request.options.headers.authorization, 'Bearer test-secret');
+});
+
+test('projects only explicit per-device histories into a device-id map', () => {
+  assert.deepEqual(parseDeviceHistories({
+    devices: [
+      { deviceId: 'mac', history: { daily: [{ date: '2026-08-11', tokens: 9 }] } },
+      { id: 'win', history: { monthly: [{ month: '2026-08', tokens: 5 }] } },
+      { deviceId: 'legacy' }
+    ]
+  }), {
+    mac: { daily: [{ date: '2026-08-11', tokens: 9 }], monthly: [], summary: {} },
+    win: { daily: [], monthly: [{ month: '2026-08', tokens: 5 }], summary: {} }
+  });
+});
+
+test('resolves local and embedded device histories without a network request', async () => {
+  const local = await resolveDeviceHistories({
+    mode: 'local',
+    localDevice: { deviceId: 'local', history: { daily: [{ date: '2026-08-11', tokens: 4 }] } }
+  });
+  assert.equal(local.local.daily[0].tokens, 4);
+
+  const embedded = await resolveDeviceHistories({
+    mode: 'host',
+    hubMode: 'host',
+    embeddedHub: {
+      hub: {
+        getDevices: () => [{ deviceId: 'remote', history: { daily: [{ date: '2026-08-10', tokens: 7 }] } }]
+      }
+    }
+  });
+  assert.equal(embedded.remote.daily[0].tokens, 7);
+});
+
+test('fetches authenticated raw device histories from the existing hub endpoint', async () => {
+  let request;
+  const result = await resolveDeviceHistories({
+    hubUrl: 'https://hub.example/',
+    secret: 'test-secret',
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        async json() {
+          return { devices: [{ deviceId: 'mac', history: { daily: [{ date: '2026-08-11', tokens: 12 }] } }] };
+        }
+      };
+    }
+  });
+  assert.equal(result.mac.daily[0].tokens, 12);
+  assert.equal(request.url, 'https://hub.example/api/devices');
   assert.equal(request.options.headers.authorization, 'Bearer test-secret');
 });

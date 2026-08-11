@@ -90,6 +90,7 @@ const {
   normalizeHiddenHomeModules,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
+const periodRanges = require('./renderer/periodRanges');
 const {
   checkNpmForNewer,
   cleanupStaleStaging,
@@ -148,7 +149,7 @@ const {
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
 const { historyPreview, historyRevision } = require('../shared/history');
-const { completeHistorySource, resolveCompleteHistory } = require('./historySource');
+const { completeHistorySource, resolveCompleteHistory, resolveDeviceHistories } = require('./historySource');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const {
@@ -354,6 +355,11 @@ function defaultSettings() {
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
     homeActiveDaysWindow: 'all',
+    periodTodayMode: 'today',
+    periodMonthMode: 'month',
+    periodTotalMode: 'allTime',
+    periodRangeStart: '',
+    periodRangeEnd: '',
     themeColors: {},
     vendorColors: {},
     floatingBubbleEnabled: false,
@@ -2034,6 +2040,7 @@ function readSettings() {
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    Object.assign(merged, periodRanges.normalizedSettings(merged));
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
@@ -5561,6 +5568,10 @@ async function getDashboardHistory() {
   return getCompleteHistory();
 }
 
+async function getDashboardDeviceHistories() {
+  return resolveDeviceHistories(historyResolverOptions());
+}
+
 let cursorStatusCache = { value: null, at: 0 };
 let opencodeStatusCache = { value: null, at: 0 };
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
@@ -5755,6 +5766,11 @@ app.whenReady().then(() => {
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
+    if (patch.periodTodayMode !== undefined) normalizedPatch.periodTodayMode = periodRanges.normalizeMode('today', patch.periodTodayMode, settings.periodTodayMode);
+    if (patch.periodMonthMode !== undefined) normalizedPatch.periodMonthMode = periodRanges.normalizeMode('month', patch.periodMonthMode, settings.periodMonthMode);
+    if (patch.periodTotalMode !== undefined) normalizedPatch.periodTotalMode = periodRanges.normalizeMode('allTime', patch.periodTotalMode, settings.periodTotalMode);
+    if (patch.periodRangeStart !== undefined) normalizedPatch.periodRangeStart = periodRanges.normalizeDateKey(patch.periodRangeStart);
+    if (patch.periodRangeEnd !== undefined) normalizedPatch.periodRangeEnd = periodRanges.normalizeDateKey(patch.periodRangeEnd);
     settings = normalizeWindowBehaviorSettings({
       ...settings,
       ...normalizedPatch,
@@ -6902,6 +6918,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', () => getDashboardHistory());
+  ipcMain.handle('dashboard:getDeviceHistories', () => getDashboardDeviceHistories());
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;

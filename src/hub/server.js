@@ -68,6 +68,10 @@ function createHub({
     return aggregateHistory(Object.values(store.devices));
   }
 
+  function getDevices() {
+    return Object.values(store.devices);
+  }
+
   const sseClients = new Set();
   const statsListeners = new Set();
 
@@ -283,7 +287,7 @@ function createHub({
   }
 
   return {
-    start, stop, server, getStats, getHistory, ingest, deleteDevice, onStats, bindHost,
+    start, stop, server, getStats, getHistory, getDevices, ingest, deleteDevice, onStats, bindHost,
     getSubscriptions, setSubscriptions
   };
 }

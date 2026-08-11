@@ -42,14 +42,15 @@ test('data bars animate on the compositor instead of changing layout width', () 
 
 test('period changes preserve row identity, animate rank changes, and count from the previous total', () => {
   const app = read('app.js');
-  const handler = app.slice(
-    app.indexOf("for (const tab of document.querySelectorAll('.tab'))"),
-    app.indexOf("els.breakdown.addEventListener('click'", app.indexOf("for (const tab of document.querySelectorAll('.tab'))"))
+  const transition = app.slice(
+    app.indexOf('function renderPeriodSelectionChange'),
+    app.indexOf('function selectPeriodMode')
   );
 
-  assert.match(handler, /const snapshot = captureBreakdownMotion\(\)/);
-  assert.match(handler, /animateBreakdownFrom\(snapshot, \{ duration: 800 \}\)/);
-  assert.doesNotMatch(handler, /state\.currentTotal = 0/);
+  assert.match(transition, /const snapshot = captureBreakdownMotion\(\)/);
+  assert.match(transition, /animateBreakdownFrom\(snapshot, \{ duration: 800 \}\)/);
+  assert.doesNotMatch(transition, /state\.currentTotal = 0/);
+  assert.match(app, /renderPeriodSelectionChange\(slot\)/);
   assert.match(app, /barScale: trackWidth > 0 \? Math\.max\(0, Math\.min\(1, fillWidth \/ trackWidth\)\) : 0/);
   assert.match(app, /previous\.top - row\.getBoundingClientRect\(\)\.top/);
   assert.match(app, /animateBarBetween\(fill, previous\.barScale, targetScale, 0, duration\)/);
