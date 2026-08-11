@@ -339,6 +339,25 @@ test('Codex provider classifies a 30-day primary window as a Monthly billing lan
   assert.equal(provider.windows[0].windowMinutes, 30 * 24 * 60);
 });
 
+test('Codex provider keeps an unknown long primary window in the weekly lane', () => {
+  const provider = mapCodexRateLimitsToProvider({
+    rateLimits: {
+      primary: {
+        usedPercent: 25,
+        resetsAt: '2026-06-15T00:00:00Z',
+        windowDurationMins: 14 * 24 * 60
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'managed',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.equal(provider.windows[0].kind, 'weekly');
+  assert.equal(provider.windows[0].windowMinutes, 14 * 24 * 60);
+});
+
 function codexPayload(email, sourceDetail) {
   return {
     account: { email, planType: 'plus' },

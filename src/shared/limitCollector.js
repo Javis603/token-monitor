@@ -1981,7 +1981,7 @@ function codexWindowKind(name, window) {
   // Monthly quotas use the shared wire contract's billing lane. The display
   // label below keeps the cadence explicit instead of presenting it as money.
   if (mins === 30 * 24 * 60) return 'billing';
-  if (mins === 7 * 24 * 60) return 'weekly';
+  if (mins >= 7 * 24 * 60) return 'weekly';
   if (mins === 5 * 60) return 'session';
   if (String(name).toLowerCase() === 'secondary') return 'weekly';
   return 'session';
