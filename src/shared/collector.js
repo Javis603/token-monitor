@@ -282,6 +282,11 @@ function localTodayKey(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+function collectionDate(now) {
+  const value = typeof now === 'function' ? now() : now;
+  return value == null ? new Date() : new Date(value);
+}
+
 // Stamp each posted snapshot with the UTC instant its today/month windows end
 // (next local midnight / next month start, in this device's timezone). The hub
 // uses these to expire a frozen snapshot once it goes offline past a day/month
@@ -741,7 +746,7 @@ async function collectUsageOnce(options) {
   // reuse it for the today-window key and updatedAt, so a collection that
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
   // window (issue #37 follow-up). Injectable for tests.
-  const collectedAt = options.now != null ? new Date(options.now) : new Date();
+  const collectedAt = collectionDate(options.now);
   const runTokscaleFn = options.runTokscale || runTokscale;
   const collectWsl = options.collectWslUsage || collectWslUsageImpl;
   const probeWslStateFn = options.probeWslState || probeWslStateImpl;
@@ -2380,12 +2385,23 @@ function startCollector(options) {
 
   async function performTick(reason, tickOptions = {}) {
     const tickStartedAt = Date.now();
-    const includeHistory = shouldIncludeHistory(Date.now(), lastHistoryAt, historyIntervalMs, Boolean(tickOptions.forceHistory), historyEnabled);
+    const collectedAt = collectionDate(options.now);
+    const todayKey = localTodayKey(collectedAt);
+    // A new local day turns the previous live period into retained history. Force
+    // one graph refresh before publishing the new day so usage collected after
+    // the last scheduled history scan cannot remain missing until the next one.
+    const localDayRolledOver = Boolean(anchor?.dateKey && anchor.dateKey !== todayKey);
+    const includeHistory = shouldIncludeHistory(
+      collectedAt.getTime(),
+      lastHistoryAt,
+      historyIntervalMs,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver,
+      historyEnabled
+    );
     if (includeHistory) {
-      lastHistoryAt = Date.now();
+      lastHistoryAt = collectedAt.getTime();
       lastHistoryAttemptAt = tickStartedAt;
     }
-    const todayKey = localTodayKey();
     const requestedTargetClients = [...new Set(normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean))];
     const targetAnchorReady = canTargetTodayPartitions(anchor, requestedTargetClients);
     const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
@@ -2405,6 +2421,7 @@ function startCollector(options) {
         agentVersion,
         agentRuntime,
         osInfo: deviceOsInfo,
+        now: collectedAt,
         includeHistory,
         // Capture after the runtime's transformUsage hook so the archive uses
         // the same today period that the user actually sees. The process-local

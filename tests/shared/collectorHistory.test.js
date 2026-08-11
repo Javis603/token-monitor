@@ -119,6 +119,51 @@ test('collector preserves the last successful history timestamp after a failed r
   }
 });
 
+test('startCollector finalizes history on local day rollover before the interval is due', async () => {
+  let nowMs = new Date(2026, 7, 11, 23, 45).getTime();
+  const initialDay = localTodayKey(new Date(nowMs));
+  const graphDays = [];
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'history-rollover',
+    intervalMs: 60 * 60 * 1000,
+    historyIntervalMs: 60 * 60 * 1000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: false,
+    anchorPersistenceEnabled: false,
+    limitsEnabled: false,
+    wslScanEnabled: false,
+    now: () => nowMs,
+    runTokscale: async () => usageSnapshot(100),
+    runGraph: async () => {
+      const day = localTodayKey(new Date(nowMs));
+      graphDays.push(day);
+      return { contributions: [{ date: day, clients: [
+        { client: 'claude', modelId: 'opus', tokens: { input: 100 }, cost: 0, messages: 1 }
+      ] }] };
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitForCondition(() => updates.length >= 1);
+    nowMs += 16 * 60 * 1000;
+    const nextDay = localTodayKey(new Date(nowMs));
+    assert.notEqual(nextDay, initialDay);
+
+    await runtime.tick('interval');
+
+    assert.deepEqual(graphDays, [initialDay, nextDay]);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('collectHistoryOnce returns null when there are no clients', async () => {
   let called = false;
   const history = await collectHistoryOnce({ clients: '', runGraph: async () => { called = true; return SAMPLE_GRAPH; } });
