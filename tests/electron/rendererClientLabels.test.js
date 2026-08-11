@@ -108,9 +108,9 @@ test('renderer uses the Reasonix icon for the Reasonix tool row', () => {
   assert.match(styles, /\.row-icon-reasonix\s*\{[^}]*assets\/icons\/reasonix\.svg/s);
 });
 
-test('Reasonix icon uses a filled mask-safe SVG path', () => {
+test('Reasonix icon keeps the official color in a mask-safe SVG path', () => {
   const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'reasonix.svg'), 'utf8');
-  assert.match(icon, /fill="currentColor"/);
+  assert.match(icon, /fill="#0153e5"/);
   assert.match(icon, /fill-rule="evenodd"/);
   assert.doesNotMatch(icon, /stroke=/);
 });

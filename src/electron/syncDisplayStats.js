@@ -23,6 +23,14 @@ function attachLocalNativeViews(stats, localDevice) {
   return stats;
 }
 
+function attachLocalPresentationNativeViews(stats, options = {}) {
+  // The anchor is a presentation fallback, not a completed observation. Once
+  // collection succeeds, the live record always owns the overlay.
+  const localDevice = options.lastCollectedDevice
+    || (options.mode === 'local' ? options.seededLocalDevice : null);
+  return attachLocalNativeViews(stats, localDevice);
+}
+
 function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   if (!localDevice?.deviceId) return hubStats;
   if (hubStats && !Array.isArray(hubStats.devices)) return hubStats;
@@ -68,4 +76,4 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   return displayStats;
 }
 
-module.exports = { attachLocalNativeViews, composeLocalSyncStats };
+module.exports = { attachLocalNativeViews, attachLocalPresentationNativeViews, composeLocalSyncStats };

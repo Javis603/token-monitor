@@ -357,6 +357,27 @@ function createTypedReplayState() {
   };
 }
 
+const LEGACY_TYPED_EVENT_TYPES = new Set([
+  'model.final',
+  'model_final',
+  'model.turn.started',
+  'user.message',
+  'user_message'
+]);
+
+function isLegacyTypedEventType(type) {
+  return LEGACY_TYPED_EVENT_TYPES.has(type) || type.startsWith('tool.');
+}
+
+function schemaVersionField(source) {
+  if (objectValue(source)) {
+    for (const key of ['schema_version', 'schemaVersion']) {
+      if (Object.hasOwn(source, key)) return { present: true, value: source[key] };
+    }
+  }
+  return { present: false, value: undefined };
+}
+
 function consumeTypedRecord(state, record, recordTimestamp) {
   const { events, toolsByTurn, pendingTools } = state;
 
@@ -585,6 +606,7 @@ function createReplayState() {
     records: 0,
     damaged: false,
     unsafe: false,
+    format: '',
     snapshot: {
       saw: false,
       applied: false,
@@ -613,11 +635,6 @@ function consumeReplayLine(state, line, limits) {
     return null;
   }
 
-  if (state.snapshot.saw && !['replace', 'append'].includes(preflight.type)) {
-    state.unsafe = true;
-    state.snapshot.stopped = true;
-    return null;
-  }
   // Match Reasonix's wire replay: include the already-applied snapshot in the
   // limit check before JSON.parse can materialize this append's messages.
   if (state.snapshot.saw && preflight.type === 'append') {
@@ -645,31 +662,44 @@ function consumeReplayLine(state, line, limits) {
   state.records += 1;
   if (state.snapshot.stopped) return null;
 
-  const recordTimestamp = timestampOf(record, record, '');
-  const type = eventType(record, record);
-  if (type === 'replace' || type === 'append') {
+  const payload = eventPayload(record);
+  const type = eventType(record, payload);
+  const rootType = eventType(record, record);
+  const rootSchemaVersion = schemaVersionField(record);
+  const nestedSchemaVersion = payload === record
+    ? { present: false, value: undefined }
+    : schemaVersionField(payload);
+  const nativeType = rootType === 'replace' || rootType === 'append';
+  const format = rootSchemaVersion.present || nativeType
+    ? 'native'
+    : !nestedSchemaVersion.present && isLegacyTypedEventType(type) ? 'legacy' : '';
+  if (!format
+    || (format === 'native'
+      && (!nativeType || rootSchemaVersion.value !== 1 || !Number.isInteger(rootSchemaVersion.value)))
+    || (state.format && state.format !== format)) {
+    state.unsafe = true;
+    state.snapshot.stopped = true;
+    return null;
+  }
+  state.format = format;
+  const recordTimestamp = timestampOf(record, format === 'native' ? record : payload, '');
+
+  if (format === 'native') {
     const snapshot = state.snapshot;
     snapshot.saw = true;
-    const payload = eventPayload(record);
-    const schemaVersion = firstValue([payload, record], ['schema_version', 'schemaVersion']);
-    if (schemaVersion !== 1 || !Number.isInteger(schemaVersion)) {
-      state.unsafe = true;
-      snapshot.stopped = true;
-      return null;
-    }
-    if (payload.messages !== undefined && !Array.isArray(payload.messages)) {
+    if (record.messages !== undefined && !Array.isArray(record.messages)) {
       state.damaged = true;
       snapshot.stopped = true;
       return null;
     }
-    const incoming = Array.isArray(payload.messages) ? payload.messages : [];
-    if (type === 'replace') {
+    const incoming = Array.isArray(record.messages) ? record.messages : [];
+    if (rootType === 'replace') {
       snapshot.messages = incoming.map((message) => ({ message, fallback: '' }));
       snapshot.collectionItems = preflight.collectionItems;
       snapshot.applied = true;
       return null;
     }
-    const index = firstValue([payload, record], ['message_index']);
+    const index = firstValue([record], ['message_index']);
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index !== snapshot.messages.length) {
       state.damaged = true;
       snapshot.stopped = true;
@@ -681,11 +711,6 @@ function consumeReplayLine(state, line, limits) {
     return null;
   }
 
-  if (state.snapshot.saw) {
-    state.unsafe = true;
-    state.snapshot.stopped = true;
-    return null;
-  }
   consumeTypedRecord(state.typed, record, recordTimestamp);
   return null;
 }

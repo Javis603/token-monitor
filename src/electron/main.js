@@ -195,7 +195,11 @@ const {
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
-const { attachLocalNativeViews, composeLocalSyncStats } = require('./syncDisplayStats');
+const {
+  attachLocalNativeViews,
+  attachLocalPresentationNativeViews,
+  composeLocalSyncStats
+} = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const {
   classifySettingsChange,
@@ -3353,7 +3357,11 @@ function startHostStats() {
 // being redeployed to preserve these fields.
 function injectLocalDeviceStatus(stats) {
   if (!stats || !Array.isArray(stats.devices)) return stats;
-  attachLocalNativeViews(stats, lastCollectedDevice);
+  attachLocalPresentationNativeViews(stats, {
+    lastCollectedDevice,
+    seededLocalDevice: localDevice,
+    mode
+  });
   if (lastCollectedDevice) {
     const device = stats.devices.find((entry) => entry.deviceId === lastCollectedDevice.deviceId);
     if (device) {

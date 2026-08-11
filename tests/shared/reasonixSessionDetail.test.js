@@ -300,6 +300,23 @@ test('Reasonix replay applies cumulative append limits before accepting the next
   assert.equal(collectionLimit.reason, 'limit');
   assert.equal(collectionLimit.resource, 'message_collection_items');
   assert.equal(collectionLimit.value, 3);
+
+  for (const envelope of ['payload', 'data']) {
+    const wrappedAppend = {
+      [envelope]: {
+        schema_version: 1,
+        type: 'append',
+        message_index: 2,
+        messages: [{ role: 'user', raw_content: 'two' }, { role: 'assistant' }]
+      }
+    };
+    fs.writeFileSync(eventsPath, `${JSON.stringify(replace)}\n${JSON.stringify(wrappedAppend)}\n`);
+    assert.equal(
+      readReasonixEventLog(eventsPath, { replayLimits: { maxMessages: 3 } }).ok,
+      false,
+      `${envelope}-wrapped native append must fail closed`
+    );
+  }
 });
 
 test('Reasonix native replay fails closed for an unknown event type after a valid snapshot', () => {
@@ -327,6 +344,40 @@ test('Reasonix native replay fails closed for an unknown event type after a vali
     env: { REASONIX_STATE_HOME: stateHome },
     platform: process.platform
   }).found, false);
+});
+
+test('Reasonix replay classifies the first record before choosing native or legacy parsing', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-replay-format-'));
+  const futureSchema = path.join(root, 'future-schema.events.jsonl');
+  const nativeWrongType = path.join(root, 'native-wrong-type.events.jsonl');
+  const nativeMissingSchema = path.join(root, 'native-missing-schema.events.jsonl');
+  const unknownType = path.join(root, 'unknown-type.events.jsonl');
+  const legacyTyped = path.join(root, 'legacy-typed.events.jsonl');
+  const wrappedLegacyTyped = path.join(root, 'wrapped-legacy-typed.events.jsonl');
+  const mixedFormats = path.join(root, 'mixed-formats.events.jsonl');
+  fs.writeFileSync(futureSchema, `${JSON.stringify({ schema_version: 2, type: 'model.final' })}\n`);
+  fs.writeFileSync(nativeWrongType, `${JSON.stringify({ schema_version: 1, type: 'model.final' })}\n`);
+  fs.writeFileSync(nativeMissingSchema, `${JSON.stringify({ type: 'replace', messages: [] })}\n`);
+  fs.writeFileSync(unknownType, `${JSON.stringify({ type: 'foreign.event' })}\n`);
+  fs.writeFileSync(legacyTyped, `${JSON.stringify({ type: 'model.final' })}\n`);
+  fs.writeFileSync(wrappedLegacyTyped, `${JSON.stringify({ payload: { type: 'model.final' } })}\n`);
+  fs.writeFileSync(mixedFormats, [
+    JSON.stringify({ type: 'model.final' }),
+    JSON.stringify({ schema_version: 1, type: 'replace', messages: [] }),
+    ''
+  ].join('\n'));
+
+  assert.equal(readReasonixEventLog(futureSchema).ok, false);
+  assert.equal(readReasonixEventLog(nativeWrongType).ok, false);
+  assert.equal(readReasonixEventLog(nativeMissingSchema).ok, false);
+  assert.equal(readReasonixEventLog(unknownType).ok, false);
+  assert.equal(readReasonixEventLog(mixedFormats).ok, false);
+  const legacyReplay = readReasonixEventLog(legacyTyped);
+  assert.equal(legacyReplay.ok, true);
+  assert.equal(legacyReplay.events.filter((event) => event.kind === 'turn').length, 1);
+  const wrappedLegacyReplay = readReasonixEventLog(wrappedLegacyTyped);
+  assert.equal(wrappedLegacyReplay.ok, true);
+  assert.equal(wrappedLegacyReplay.events.filter((event) => event.kind === 'turn').length, 1);
 });
 
 test('Reasonix event replay fails closed at the official resource boundaries', () => {
