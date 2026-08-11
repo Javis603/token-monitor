@@ -508,6 +508,7 @@ function buildNativeView(entries, options = {}) {
 
   const sessionsById = new Map();
   for (const entry of entries || []) {
+    if (!entry) continue;
     const previous = sessionsById.get(entry.sessionId);
     if (!previous) {
       sessionsById.set(entry.sessionId, entry);
@@ -552,7 +553,7 @@ function scanEntries(options = {}, cache = new Map(), directories = null, forced
       continue;
     }
     const session = readReasonixNativeSession(candidate.metaPath, candidate.telemetryPath, { ...options, eventPath: candidate.eventPath });
-    if (session) next.set(key, { signature, session });
+    next.set(key, { signature, session: session || null });
   }
 
   let changed = next.size !== cache.size;

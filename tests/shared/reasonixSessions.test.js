@@ -565,6 +565,54 @@ test('Reasonix native cache refreshes sidecar candidates without explicit invali
   assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:event-only'), false);
 });
 
+test('Reasonix native cache negative-caches unchanged fail-closed candidates', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-negative-cache-'));
+  const stateHome = path.join(root, 'state');
+  const sessionsDir = path.join(stateHome, 'sessions');
+  const metaPath = path.join(sessionsDir, 'broken.jsonl.meta');
+  const eventsPath = path.join(sessionsDir, 'broken.events.jsonl');
+  const now = new Date(2026, 7, 8, 12, 0, 0, 0);
+  writeJson(metaPath, {
+    id: 'broken',
+    created_at: '2026-08-08T02:00:00.000Z'
+  });
+  fs.writeFileSync(eventsPath, '{"schema_version":1,"type":"replace","messages":[\n');
+
+  const cache = cacheFor(stateHome, () => ({}));
+  const originalOpenSync = fs.openSync;
+  let replayReads = 0;
+  fs.openSync = function openSync(filePath, ...args) {
+    if (String(filePath) === eventsPath) replayReads += 1;
+    return originalOpenSync.call(this, filePath, ...args);
+  };
+
+  try {
+    let view = cache.getView({ now });
+    assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:broken'), false);
+    assert.equal(replayReads, 1);
+
+    view = cache.getView({ now });
+    assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:broken'), false);
+    assert.equal(replayReads, 1, 'an unchanged fail-closed candidate should not replay again');
+
+    cache.invalidate(eventsPath);
+    view = cache.getView({ now });
+    assert.equal(Object.hasOwn(view.sessions.allTime, 'reasonix:broken'), false);
+    assert.equal(replayReads, 2, 'event invalidation should force a replay of the same signature');
+
+    fs.writeFileSync(eventsPath, `${JSON.stringify({
+      schema_version: 1,
+      type: 'replace',
+      messages: [{ role: 'assistant' }]
+    })}\n`);
+    view = cache.getView({ now });
+    assert.equal(replayReads, 3, 'a changed event signature should retry replay');
+    assert.equal(view.sessions.allTime['reasonix:broken'].messageCount, 1);
+  } finally {
+    fs.openSync = originalOpenSync;
+  }
+});
+
 test('Reasonix event updates invalidate only the corresponding native session', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-event-cache-'));
   const stateHome = path.join(root, 'state');
