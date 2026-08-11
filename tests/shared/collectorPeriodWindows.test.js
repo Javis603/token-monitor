@@ -15,6 +15,8 @@ test('computePeriodWindows returns next local midnight and next month start', ()
 
   assert.equal(windows.today.key, '2026-06-27');
   assert.equal(windows.month.key, '2026-06');
+  assert.equal(windows.today.timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+  assert.equal(windows.month.timeZone, windows.today.timeZone);
 
   const todayEnd = new Date(windows.today.endsAt);
   assert.equal(todayEnd.getFullYear(), 2026);

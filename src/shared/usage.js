@@ -301,6 +301,15 @@ function utcDayKey(date) {
 // so an offline device's stale "today" stops counting once its day rolls over.
 const WINDOW_PERIODS = ['today', 'month'];
 
+function isValidTimeZone(value) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function normalizePeriodWindows(value) {
   if (!value || typeof value !== 'object') return null;
   const result = {};
@@ -311,6 +320,8 @@ function normalizePeriodWindows(value) {
     if (!endsAt) continue;
     result[periodName] = { endsAt };
     if (window.key) result[periodName].key = String(window.key);
+    const timeZone = String(window.timeZone || '').trim();
+    if (timeZone && isValidTimeZone(timeZone)) result[periodName].timeZone = timeZone;
   }
   return Object.keys(result).length ? result : null;
 }

@@ -5,9 +5,11 @@ const assert = require('node:assert/strict');
 
 const {
   dailyRowsForSelection,
+  currentDayKey,
   derivePeriod,
   displayLabel,
   effectiveSelection,
+  mergePeriods,
   normalizeDateRange,
   normalizeMode,
   rangeForSelection,
@@ -103,6 +105,23 @@ test('last 7 days means today plus the previous six local date keys', () => {
   );
 });
 
+test('remote device ranges advance in the device timezone after its reported window expires', () => {
+  const now = new Date('2026-08-11T16:30:00.000Z');
+  assert.equal(currentDayKey({ today: {
+    key: '2026-08-11',
+    endsAt: '2026-08-11T16:00:00.000Z',
+    timeZone: 'Asia/Hong_Kong'
+  } }, now), '2026-08-12');
+  assert.equal(currentDayKey({ today: {
+    key: '2026-08-11',
+    endsAt: '2026-08-12T00:00:00.000Z'
+  } }, new Date('2026-08-11T20:00:00.000Z')), '2026-08-11');
+  assert.equal(currentDayKey({ today: {
+    key: '2026-08-10',
+    endsAt: '2026-08-11T00:00:00.000Z'
+  } }, now), '2026-08-11');
+});
+
 test('derived periods patch today from live stats and retain client/model attribution', () => {
   const period = derivePeriod(daily, {
     selection: 'last7',
@@ -117,6 +136,77 @@ test('derived periods patch today from live stats and retain client/model attrib
   assert.deepEqual(period.modelCosts, { 'gpt-5': 6.5, opus: 3.5 });
   assert.deepEqual(period.sessions, {});
   assert.deepEqual(period.projects, {});
+});
+
+test('derived periods retain cache/output and client-to-model dimensions when history supports them', () => {
+  const history = [{
+    date: '2026-08-10',
+    tokens: 100,
+    cost: 5,
+    cacheReadTokens: 60,
+    cacheWriteTokens: 10,
+    outputTokens: 20,
+    capabilities: { tokenComponents: true, clientModels: true },
+    perClient: {
+      codex: {
+        tokens: 100, cost: 5, cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20
+      }
+    },
+    perModel: {
+      'gpt-5': {
+        tokens: 100, cost: 5, cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20
+      }
+    },
+    perClientModel: { codex: { 'gpt-5': { tokens: 100, cost: 5 } } }
+  }];
+  const period = derivePeriod(history, {
+    selection: 'last7',
+    todayKey: '2026-08-11',
+    capabilities: { tokenComponents: true, clientModels: true }
+  });
+  assert.deepEqual(period.capabilities, { tokenComponents: true, clientModels: true });
+  assert.equal(period.cacheReadTokens, 60);
+  assert.equal(period.clientCacheReads.codex, 60);
+  assert.equal(period.modelOutputs['gpt-5'], 20);
+  assert.deepEqual(period.clientModels, { codex: { 'gpt-5': 100 } });
+  assert.deepEqual(period.clientModelCosts, { codex: { 'gpt-5': 5 } });
+});
+
+test('derived periods mark legacy token components unavailable instead of treating missing fields as exact zero', () => {
+  const period = derivePeriod(daily, {
+    selection: 'last7',
+    todayKey: '2026-08-11',
+    nativeToday,
+    capabilities: { clientModels: true }
+  });
+  assert.deepEqual(period.capabilities, { tokenComponents: false, clientModels: true });
+});
+
+test('period aggregation preserves per-device range results and rejects prototype keys', () => {
+  const unsafe = JSON.parse('{"__proto__":{"tokens":5,"cost":1},"codex":{"tokens":10,"cost":2}}');
+  const first = derivePeriod([{
+    date: '2026-08-11', tokens: 15, cost: 3,
+    capabilities: { tokenComponents: true, clientModels: true },
+    perClient: unsafe,
+    perModel: {},
+    perClientModel: {}
+  }], {
+    selection: 'last7', todayKey: '2026-08-11',
+    capabilities: { tokenComponents: true, clientModels: true }
+  });
+  const merged = mergePeriods([first, {
+    ...first,
+    totalTokens: 2,
+    costUsd: 0.5,
+    clients: { claude: 2 },
+    clientCosts: { claude: 0.5 }
+  }]);
+  assert.equal(Object.prototype.tokens, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(first.clients, '__proto__'), true);
+  assert.equal(merged.totalTokens, 17);
+  assert.equal(merged.clients.__proto__, 5);
+  assert.equal(merged.clients.codex, 10);
+  assert.equal(merged.clients.claude, 2);
 });
 
 test('custom ranges are inclusive and reject malformed or reversed dates', () => {

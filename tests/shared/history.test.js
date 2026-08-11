@@ -70,20 +70,54 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
   assert.equal(day.cost, 1.5);
   assert.equal(day.messages, 4);
   assert.equal(day.activeTimeMs, 3600000);
-  assert.deepEqual(day.perClient.claude, { tokens: 30, cost: 1.0, messages: 3 });
-  assert.deepEqual(day.perClient.codex, { tokens: 10, cost: 0.5, messages: 1 });
-  assert.deepEqual(day.perModel.opus, { tokens: 30, cost: 1.0 });
-  assert.deepEqual(day.perModel.gpt, { tokens: 10, cost: 0.5 });
+  assert.deepEqual(day.perClient.claude, {
+    tokens: 30, cost: 1.0, messages: 3,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 20
+  });
+  assert.deepEqual(day.perClient.codex, {
+    tokens: 10, cost: 0.5, messages: 1,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 5
+  });
+  assert.deepEqual(day.perModel.opus, {
+    tokens: 30, cost: 1.0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 20
+  });
+  assert.deepEqual(day.perModel.gpt, {
+    tokens: 10, cost: 0.5, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 5
+  });
+  assert.deepEqual(day.perClientModel.claude.opus, { tokens: 30, cost: 1.0 });
 });
 
 test('parseGraphResult is defensive about missing/garbage input', () => {
-  assert.deepEqual(parseGraphResult(null), { contributions: [] });
-  assert.deepEqual(parseGraphResult({}), { contributions: [] });
-  assert.deepEqual(parseGraphResult({ contributions: 'x' }), { contributions: [] });
+  const empty = { capabilities: { tokenComponents: true, clientModels: true }, contributions: [] };
+  assert.deepEqual(parseGraphResult(null), empty);
+  assert.deepEqual(parseGraphResult({}), empty);
+  assert.deepEqual(parseGraphResult({ contributions: 'x' }), empty);
   const out = parseGraphResult({ contributions: [{ date: '2026-01-01' }] });
   assert.deepEqual(out.contributions[0], {
-    date: '2026-01-01', tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {}
+    date: '2026-01-01', tokens: 0, cost: 0, messages: 0,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, activeTimeMs: 0,
+    capabilities: { tokenComponents: true, clientModels: true },
+    perClient: {}, perModel: {}, perClientModel: {}
   });
+});
+
+test('parseGraphResult rejects impossible dates and safely aggregates prototype-shaped ids', () => {
+  const parsed = parseGraphResult({ contributions: [
+    { date: '2026-02-30', clients: [SAMPLE.contributions[0].clients[0]] },
+    {
+      date: '2026-02-28',
+      clients: [{
+        client: '__proto__', modelId: 'constructor',
+        tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 }, cost: 1, messages: 1
+      }]
+    }
+  ] });
+  assert.equal(parsed.contributions.length, 1);
+  const day = parsed.contributions[0];
+  assert.equal(Object.prototype.hasOwnProperty.call(day.perClient, '__proto__'), true);
+  assert.equal(day.perClient.__proto__.tokens, 10);
+  assert.equal(Object.prototype.hasOwnProperty.call(day.perModel, 'constructor'), true);
+  assert.equal(Object.prototype.tokens, undefined);
 });
 
 test('computeIntensities keeps legacy cost intensity and exposes explicit metrics', () => {
@@ -164,9 +198,17 @@ test('monthlyRollup sums tokens/cost and merges perClient/perModel by month', ()
   assert.equal(out[0].month, '2026-05');
   assert.equal(out[1].month, '2026-06');
   assert.equal(out[1].tokens, 12);
-  assert.deepEqual(out[1].perClient.claude, { tokens: 5, cost: 0.5, messages: 1 });
-  assert.deepEqual(out[1].perClient.codex, { tokens: 7, cost: 0.7, messages: 1 });
-  assert.deepEqual(out[1].perModel.opus, { tokens: 5, cost: 0.5 });
+  assert.deepEqual(out[1].perClient.claude, {
+    tokens: 5, cost: 0.5, messages: 1,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+  });
+  assert.deepEqual(out[1].perClient.codex, {
+    tokens: 7, cost: 0.7, messages: 1,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+  });
+  assert.deepEqual(out[1].perModel.opus, {
+    tokens: 5, cost: 0.5, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+  });
 });
 
 test('normalizeHistory caps daily but keeps monthly/summary full', () => {
@@ -227,8 +269,14 @@ test('mergeHistories sums daily across devices and recomputes derived fields', (
   const d7 = m.daily.find((d) => d.date === '2026-06-07');
   assert.equal(d7.tokens, 25);                         // 20 + 5
   assert.equal(d7.activeTimeMs, 150000);                // 120000 + 30000
-  assert.deepEqual(d7.perClient.claude, { tokens: 20, cost: 2, messages: 1 });
-  assert.deepEqual(d7.perClient.codex, { tokens: 5, cost: 0.5, messages: 1 });
+  assert.deepEqual(d7.perClient.claude, {
+    tokens: 20, cost: 2, messages: 1,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+  });
+  assert.deepEqual(d7.perClient.codex, {
+    tokens: 5, cost: 0.5, messages: 1,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+  });
   assert.equal(d7.intensity, 4);                       // highest-cost merged day
   assert.equal(m.summary.totalTokens, 35);
   assert.equal(m.summary.currentStreak, 2);

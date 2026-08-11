@@ -269,9 +269,10 @@ function computePeriodWindows(now = new Date()) {
   const startOfNextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
   const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
   const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
   return {
-    today: { key: localTodayKey(now), endsAt: startOfNextDay.toISOString() },
-    month: { key: monthKey, endsAt: startOfNextMonth.toISOString() }
+    today: { key: localTodayKey(now), endsAt: startOfNextDay.toISOString(), ...(timeZone ? { timeZone } : {}) },
+    month: { key: monthKey, endsAt: startOfNextMonth.toISOString(), ...(timeZone ? { timeZone } : {}) }
   };
 }
 

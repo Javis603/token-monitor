@@ -15,6 +15,22 @@ function num(value) {
   return 0;
 }
 
+function ownEntry(target, key, create) {
+  if (!Object.prototype.hasOwnProperty.call(target, key)) {
+    Object.defineProperty(target, key, { value: create(), enumerable: true, configurable: true, writable: true });
+  }
+  return target[key];
+}
+
+function isValidDayKey(key) {
+  const raw = String(key || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const date = new Date(`${raw}T00:00:00Z`);
+  return date.getUTCFullYear() === Number(raw.slice(0, 4))
+    && date.getUTCMonth() + 1 === Number(raw.slice(5, 7))
+    && date.getUTCDate() === Number(raw.slice(8, 10));
+}
+
 function normalizeTimeMetrics(value) {
   if (!value || typeof value !== 'object') return null;
   return {
@@ -41,12 +57,16 @@ function parseGraphResult(raw) {
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
     const date = String(row.date || '').slice(0, 10);
-    if (!date) continue;
+    if (!isValidDayKey(date)) continue;
     const perClient = {};
     const perModel = {};
+    const perClientModel = {};
     let tokens = 0;
     let cost = 0;
     let messages = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
+    let outputTokens = 0;
     const clientRows = Array.isArray(row.clients) ? row.clients : [];
     for (const c of clientRows) {
       if (!c || typeof c !== 'object') continue;
@@ -55,26 +75,55 @@ function parseGraphResult(raw) {
       const t = sumTokens(c.tokens);
       const cst = num(c.cost);
       const msg = num(c.messages);
+      const cacheRead = num(c.tokens?.cacheRead);
+      const cacheWrite = num(c.tokens?.cacheWrite);
+      const output = num(c.tokens?.output);
       tokens += t;
       cost += cst;
       messages += msg;
-      const pc = perClient[client] || (perClient[client] = { tokens: 0, cost: 0, messages: 0 });
+      cacheReadTokens += cacheRead;
+      cacheWriteTokens += cacheWrite;
+      outputTokens += output;
+      const pc = ownEntry(perClient, client, () => ({
+        tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+      }));
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
-      const pm = perModel[model] || (perModel[model] = { tokens: 0, cost: 0 });
+      pc.cacheReadTokens += cacheRead; pc.cacheWriteTokens += cacheWrite; pc.outputTokens += output;
+      const pm = ownEntry(perModel, model, () => ({
+        tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+      }));
       pm.tokens += t; pm.cost += cst;
+      pm.cacheReadTokens += cacheRead; pm.cacheWriteTokens += cacheWrite; pm.outputTokens += output;
+      const clientModels = ownEntry(perClientModel, client, () => ({}));
+      const pcm = ownEntry(clientModels, model, () => ({ tokens: 0, cost: 0 }));
+      pcm.tokens += t; pcm.cost += cst;
     }
     contributions.push({
       date,
       tokens,
       cost,
       messages,
+      cacheReadTokens,
+      cacheWriteTokens,
+      outputTokens,
       activeTimeMs: num(row.activeTimeMs ?? row.active_time_ms),
+      capabilities: {
+        tokenComponents: row?.capabilities?.tokenComponents !== false
+          && raw?.capabilities?.tokenComponents !== false,
+        clientModels: row?.capabilities?.clientModels !== false
+          && raw?.capabilities?.clientModels !== false
+      },
       perClient,
-      perModel
+      perModel,
+      perClientModel
     });
   }
   const timeMetrics = normalizeTimeMetrics(raw?.timeMetrics ?? raw?.time_metrics);
-  return timeMetrics ? { contributions, timeMetrics } : { contributions };
+  const capabilities = {
+    tokenComponents: raw?.capabilities?.tokenComponents !== false,
+    clientModels: raw?.capabilities?.clientModels !== false
+  };
+  return timeMetrics ? { capabilities, contributions, timeMetrics } : { capabilities, contributions };
 }
 
 function intensityBucket(value, max) {
@@ -103,6 +152,7 @@ function computeIntensities(days) {
 }
 
 function dayKeyAddDays(key, delta) {
+  if (!isValidDayKey(key)) return '';
   const ms = Date.parse(`${key}T00:00:00Z`) + delta * 86400000;
   return new Date(ms).toISOString().slice(0, 10);
 }
@@ -136,15 +186,35 @@ function computeStreaks(days, todayKey) {
 
 function addPerClient(target, source) {
   for (const [client, v] of Object.entries(source || {})) {
-    const t = target[client] || (target[client] = { tokens: 0, cost: 0, messages: 0 });
+    const t = ownEntry(target, client, () => ({
+      tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    }));
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
+    t.cacheReadTokens += num(v.cacheReadTokens);
+    t.cacheWriteTokens += num(v.cacheWriteTokens);
+    t.outputTokens += num(v.outputTokens);
   }
 }
 
 function addPerModel(target, source) {
   for (const [model, v] of Object.entries(source || {})) {
-    const t = target[model] || (target[model] = { tokens: 0, cost: 0 });
+    const t = ownEntry(target, model, () => ({
+      tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+    }));
     t.tokens += num(v.tokens); t.cost += num(v.cost);
+    t.cacheReadTokens += num(v.cacheReadTokens);
+    t.cacheWriteTokens += num(v.cacheWriteTokens);
+    t.outputTokens += num(v.outputTokens);
+  }
+}
+
+function addPerClientModel(target, source) {
+  for (const [client, models] of Object.entries(source || {})) {
+    const clientTarget = ownEntry(target, client, () => ({}));
+    for (const [model, v] of Object.entries(models || {})) {
+      const t = ownEntry(clientTarget, model, () => ({ tokens: 0, cost: 0 }));
+      t.tokens += num(v.tokens); t.cost += num(v.cost);
+    }
   }
 }
 
@@ -157,8 +227,14 @@ function monthlyRollup(days) {
   for (const d of (Array.isArray(days) ? days : [])) {
     const month = String(d.date).slice(0, 7);
     if (month.length !== 7) continue;
-    const m = byMonth.get(month) || { month, tokens: 0, cost: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+    const m = byMonth.get(month) || {
+      month, tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+      outputTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {}
+    };
     m.tokens += num(d.tokens); m.cost += num(d.cost); m.activeTimeMs += num(d.activeTimeMs);
+    m.cacheReadTokens += num(d.cacheReadTokens);
+    m.cacheWriteTokens += num(d.cacheWriteTokens);
+    m.outputTokens += num(d.outputTokens);
     addPerClient(m.perClient, d.perClient);
     addPerModel(m.perModel, d.perModel);
     byMonth.set(month, m);
@@ -174,7 +250,7 @@ function rollingDailyWindow(days, todayKey, capDays = DEFAULT_CAP_DAYS) {
   const startKey = dayKeyAddDays(todayKey, -(count - 1));
   return (Array.isArray(days) ? days : []).filter((d) => {
     const key = String(d?.date || '').slice(0, 10);
-    return key >= startKey && key <= todayKey;
+    return isValidDayKey(key) && key >= startKey && key <= todayKey;
   });
 }
 
@@ -217,6 +293,12 @@ function normalizeHistory(graphData, options = {}) {
   const activeTimeMs = timeMetrics ? timeMetrics.totalActiveTimeMs : activeTimeTotal(full);
 
   return {
+    capabilities: {
+      tokenComponents: full.every((day) => day?.capabilities?.tokenComponents !== false)
+        && graphData?.capabilities?.tokenComponents !== false,
+      clientModels: full.every((day) => day?.capabilities?.clientModels !== false)
+        && graphData?.capabilities?.clientModels !== false
+    },
     daily,
     monthly,
     summary: {
@@ -233,10 +315,18 @@ function mergeDailyMaps(histories) {
   for (const h of histories) {
     for (const d of (h && Array.isArray(h.daily) ? h.daily : [])) {
       const cur = byDate.get(d.date)
-        || { date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+        || {
+          date: d.date, tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0,
+          cacheWriteTokens: 0, outputTokens: 0, activeTimeMs: 0,
+          perClient: {}, perModel: {}, perClientModel: {}
+        };
       cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
+      cur.cacheReadTokens += num(d.cacheReadTokens);
+      cur.cacheWriteTokens += num(d.cacheWriteTokens);
+      cur.outputTokens += num(d.outputTokens);
       addPerClient(cur.perClient, d.perClient);
       addPerModel(cur.perModel, d.perModel);
+      addPerClientModel(cur.perClientModel, d.perClientModel);
       byDate.set(d.date, cur);
     }
   }
@@ -247,8 +337,14 @@ function mergeMonthlyMaps(histories) {
   const byMonth = new Map();
   for (const h of histories) {
     for (const m of (h && Array.isArray(h.monthly) ? h.monthly : [])) {
-      const cur = byMonth.get(m.month) || { month: m.month, tokens: 0, cost: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+      const cur = byMonth.get(m.month) || {
+        month: m.month, tokens: 0, cost: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+        outputTokens: 0, activeTimeMs: 0, perClient: {}, perModel: {}
+      };
       cur.tokens += num(m.tokens); cur.cost += num(m.cost); cur.activeTimeMs += num(m.activeTimeMs);
+      cur.cacheReadTokens += num(m.cacheReadTokens);
+      cur.cacheWriteTokens += num(m.cacheWriteTokens);
+      cur.outputTokens += num(m.outputTokens);
       addPerClient(cur.perClient, m.perClient);
       addPerModel(cur.perModel, m.perModel);
       byMonth.set(m.month, cur);
@@ -261,7 +357,7 @@ function mergeMonthlyMaps(histories) {
 // unions by month. Lifetime totals come from the uncapped monthly tier; daily-granularity
 // stats (active days / peak / streaks) come from the merged daily window.
 function mergeHistories(histories, options = {}) {
-  const list = Array.isArray(histories) ? histories : [];
+  const list = (Array.isArray(histories) ? histories : []).map(coerceHistory);
   const todayKey = String(options.todayKey || new Date().toISOString().slice(0, 10)).slice(0, 10);
   const capDays = Number.isFinite(options.capDays) ? options.capDays : DEFAULT_CAP_DAYS;
 
@@ -284,7 +380,11 @@ function mergeHistories(histories, options = {}) {
   const favoriteModel = favoriteModelOf(daily);
   const activeTimeMs = activeTimeTotal(monthly.length ? monthly : daily);
 
+  const capabilities = {};
+  if (list.length > 0 && list.every((history) => history.capabilities?.tokenComponents === true)) capabilities.tokenComponents = true;
+  if (list.length > 0 && list.every((history) => history.capabilities?.clientModels === true)) capabilities.clientModels = true;
   return {
+    ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     daily,
     monthly,
     summary: {
@@ -297,7 +397,11 @@ function mergeHistories(histories, options = {}) {
 // Defensively normalize arbitrary wire JSON to the { daily, monthly, summary } shape.
 function coerceHistory(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
+  const capabilities = {};
+  if (src.capabilities?.tokenComponents === true) capabilities.tokenComponents = true;
+  if (src.capabilities?.clientModels === true) capabilities.clientModels = true;
   return {
+    ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     daily: Array.isArray(src.daily) ? src.daily : [],
     monthly: Array.isArray(src.monthly) ? src.monthly : [],
     summary: src.summary && typeof src.summary === 'object' ? src.summary : {}
@@ -341,6 +445,6 @@ function historyRevision(history) {
 
 module.exports = {
   num, sumTokens, parseGraphResult, computeIntensities,
-  computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
+  computeStreaks, dayKeyAddDays, isValidDayKey, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision
 };

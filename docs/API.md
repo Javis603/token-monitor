@@ -152,8 +152,8 @@ Example payload:
     }
   },
   "periodWindows": {
-    "today": { "key": "2026-05-18", "endsAt": "2026-05-19T00:00:00.000Z" },
-    "month": { "key": "2026-05", "endsAt": "2026-06-01T00:00:00.000Z" }
+    "today": { "key": "2026-05-18", "endsAt": "2026-05-19T00:00:00.000Z", "timeZone": "Asia/Hong_Kong" },
+    "month": { "key": "2026-05", "endsAt": "2026-06-01T00:00:00.000Z", "timeZone": "Asia/Hong_Kong" }
   },
   "limits": {
     "updatedAt": "2026-05-18T00:00:00.000Z",
@@ -210,7 +210,9 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 
 `syncUploadIntervalMs` is optional. A remote-hub widget includes `0` for live uploads or the selected fixed interval in milliseconds (`600000`, `1200000`, or `1800000`). The hub uses a positive interval to keep the device and its limits fresh for at least twice the upload interval; omitted or `0` values retain the configured `staleAfterMs` behavior. Local collection and embedded-host ingest remain live.
 
-`periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). The hub uses it to expire a device's `today`/`month` from the aggregate once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
+`periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). Current clients also include the optional IANA `timeZone`, allowing rolling ranges to advance in the device's calendar after an offline snapshot's original window has expired; hubs validate it before storing. The hub uses `endsAt` to expire a device's `today`/`month` from the aggregate once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
+
+`history.capabilities` is optional and additive. `tokenComponents: true` means every retained daily row includes exact cache-read, cache-write, and output counters at both client and model level; `clientModels: true` means the client-to-model intersection is present. Consumers must treat an absent or false capability as unavailable detail rather than as a measured zero. Version-1 local history archives are migrated without losing totals, but remain component-incomplete until their retained days are replaced by fresh graph observations.
 
 `clientHealth` is optional per-client diagnostics: why a tracked tool shows the number it shows. It sits alongside the older `clientStatus` map (`active` / `waiting` / `missing` per client), which agents continue to send unchanged.
 

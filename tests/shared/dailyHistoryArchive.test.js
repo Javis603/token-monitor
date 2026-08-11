@@ -51,7 +51,7 @@ function livePeriod(totalTokens, costUsd = 0) {
 
 test('normalizeDailyHistoryArchive rejects malformed days and observations', () => {
   assert.deepEqual(normalizeDailyHistoryArchive({ days: { nope: {}, '2026-07-18': { observations: [{}] } } }), {
-    version: 1,
+    version: 2,
     days: {}
   });
 });
@@ -66,7 +66,9 @@ test('capture preserves a larger prior observation as one coherent record', () =
   const [stored] = Object.values(next.days['2026-07-17'].observations);
   assert.deepEqual(stored, {
     client: 'claude', modelId: 'opus', providerId: 'anthropic',
-    tokens: 100, cost: 4, messages: 5, reasoningTokens: 7
+    tokens: 100, cost: 4, messages: 5,
+    tokenComponents: true, inputTokens: 100, outputTokens: 0,
+    cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 7
   });
 });
 
@@ -80,8 +82,14 @@ test('capture updates identities independently without synthesizing token and co
   ]), { todayKey: '2026-07-18' });
   const restored = historyFrom(graphFromDailyHistoryArchive([], next, { todayKey: '2026-07-18' }));
   assert.equal(restored.daily[0].tokens, 160);
-  assert.deepEqual(restored.daily[0].perClient.claude, { tokens: 100, cost: 4, messages: 5 });
-  assert.deepEqual(restored.daily[0].perClient.codex, { tokens: 60, cost: 2.5, messages: 4 });
+  assert.deepEqual(restored.daily[0].perClient.claude, {
+    tokens: 100, cost: 4, messages: 5,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+  });
+  assert.deepEqual(restored.daily[0].perClient.codex, {
+    tokens: 60, cost: 2.5, messages: 4,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0
+  });
 });
 
 test('capture replaces the whole observation when usage grows and refreshes equal-usage pricing', () => {
@@ -95,7 +103,41 @@ test('capture replaces the whole observation when usage grows and refreshes equa
     client('claude', 'opus', 120, 5.2, 6)
   ]), { todayKey: '2026-07-18' });
   const [stored] = Object.values(repriced.days['2026-07-17'].observations);
-  assert.deepEqual(stored, { client: 'claude', modelId: 'opus', tokens: 120, cost: 5.2, messages: 6 });
+  assert.deepEqual(stored, {
+    client: 'claude', modelId: 'opus', tokens: 120, cost: 5.2, messages: 6,
+    tokenComponents: true, inputTokens: 120, outputTokens: 0,
+    cacheReadTokens: 0, cacheWriteTokens: 0
+  });
+});
+
+test('archive v2 preserves token components while legacy rows stay explicitly incomplete', () => {
+  const exact = captureDailyHistoryArchive({}, graph('2026-07-17', [{
+    client: 'claude', modelId: 'opus',
+    tokens: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, reasoning: 5 },
+    cost: 1, messages: 2
+  }]), { todayKey: '2026-07-18' });
+  const exactGraph = graphFromDailyHistoryArchive([], exact, { todayKey: '2026-07-18' });
+  const exactHistory = historyFrom(exactGraph);
+  assert.equal(exactGraph.capabilities.tokenComponents, true);
+  assert.equal(exactHistory.daily[0].cacheReadTokens, 30);
+  assert.equal(exactHistory.daily[0].cacheWriteTokens, 40);
+  assert.equal(exactHistory.daily[0].outputTokens, 20);
+
+  const legacy = normalizeDailyHistoryArchive({
+    version: 1,
+    days: {
+      '2026-07-16': {
+        date: '2026-07-16',
+        observations: [{ client: 'codex', modelId: 'gpt', tokens: 50, cost: 2, messages: 1 }]
+      }
+    }
+  });
+  const legacyGraph = graphFromDailyHistoryArchive([], legacy, { todayKey: '2026-07-18' });
+  const legacyHistory = historyFrom(legacyGraph);
+  assert.equal(legacy.version, 2);
+  assert.equal(legacyGraph.capabilities.tokenComponents, false);
+  assert.equal(legacyHistory.capabilities.tokenComponents, false);
+  assert.equal(legacyHistory.daily[0].tokens, 50);
 });
 
 test('live today snapshot wins over a smaller graph value after date rollover', () => {

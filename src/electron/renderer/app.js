@@ -777,14 +777,24 @@ function usagePeriodForStats(stats, history = fullHistoryForStats(stats)) {
   return periodRangesApi.derivePeriod(history?.daily || [], {
     selection,
     locale: currentLocale(),
-    todayKey: periodRangesApi.localDayKey(),
+    todayKey: periodRangesApi.currentDayKey(stats?.periodWindows),
     rangeStart: state.settings?.periodRangeStart,
     rangeEnd: state.settings?.periodRangeEnd,
-    nativeToday: stats?.periods?.today || stats?.today
+    nativeToday: stats?.periods?.today || stats?.today,
+    capabilities: history?.capabilities
   });
 }
 
 function currentUsagePeriod() {
+  if (periodRangesApi.isDerived(effectivePeriodSelection())
+    && Array.isArray(state.stats?.devices)
+    && state.stats.devices.length > 0
+    && deviceHistoriesStatus() === 'ready') {
+    return periodRangesApi.mergePeriods(state.stats.devices.map((device) => {
+      const deviceId = String(device?.deviceId || device?.id || '').trim();
+      return usagePeriodForStats(device, state.deviceHistories?.[deviceId] || { daily: [] });
+    }));
+  }
   return usagePeriodForStats(state.stats);
 }
 
@@ -2047,7 +2057,21 @@ function deviceRowsForPeriod() {
 }
 
 function toolRowsForPeriod(period) {
-  const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({ key: client, name: clientLabels[client] || client, value: Number(value), cost: Number(period?.clientCosts?.[client] || 0), color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: Number(period?.clientCacheReads?.[client] || 0), cacheWriteTokens: Number(period?.clientCacheWrites?.[client] || 0), outputTokens: Number(period?.clientOutputs?.[client] || 0) }));
+  const componentsAvailable = !periodRangesApi.isDerived(effectivePeriodSelection())
+    || period?.capabilities?.tokenComponents === true;
+  const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({
+    key: client,
+    name: clientLabels[client] || client,
+    value: Number(value),
+    cost: Number(period?.clientCosts?.[client] || 0),
+    color: clientColors[client] || clientColors.default,
+    stale: false,
+    ...(componentsAvailable ? {
+      cacheReadTokens: Number(period?.clientCacheReads?.[client] || 0),
+      cacheWriteTokens: Number(period?.clientCacheWrites?.[client] || 0),
+      outputTokens: Number(period?.clientOutputs?.[client] || 0)
+    } : {})
+  }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2057,6 +2081,8 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period) {
+  const componentsAvailable = !periodRangesApi.isDerived(effectivePeriodSelection())
+    || period?.capabilities?.tokenComponents === true;
   const modelRows = Object.entries(period?.models || {}).filter(([, value]) => Number(value) > 0).map(([model, value]) => ({
     key: model,
     name: model,
@@ -2064,9 +2090,11 @@ function modelRowsForPeriod(period) {
     cost: Number(period?.modelCosts?.[model] || 0),
     color: modelColor(model),
     stale: false,
-    cacheReadTokens: Number(period?.modelCacheReads?.[model] || 0),
-    cacheWriteTokens: Number(period?.modelCacheWrites?.[model] || 0),
-    outputTokens: Number(period?.modelOutputs?.[model] || 0)
+    ...(componentsAvailable ? {
+      cacheReadTokens: Number(period?.modelCacheReads?.[model] || 0),
+      cacheWriteTokens: Number(period?.modelCacheWrites?.[model] || 0),
+      outputTokens: Number(period?.modelOutputs?.[model] || 0)
+    } : {})
   }));
   if (modelRows.length > 0) return modelRows.sort((a, b) => b.value - a.value);
   if (Number(period?.totalTokens || 0) === 0) return [];

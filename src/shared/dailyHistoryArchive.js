@@ -6,7 +6,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { num, sumTokens } = require('./history');
 
-const ARCHIVE_VERSION = 1;
+const ARCHIVE_VERSION = 2;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function observationKey(value) {
@@ -20,7 +20,14 @@ function normalizeObservation(value) {
   if (!value || typeof value !== 'object') return null;
   const client = String(value.client || 'unknown');
   const modelId = String(value.modelId || value.model || value.model_id || 'unknown');
-  const tokens = Math.max(0, Math.round(num(value.tokens)));
+  const tokenComponents = value.tokenComponents === true;
+  const inputTokens = Math.max(0, Math.round(num(value.inputTokens ?? value.input_tokens)));
+  const outputTokens = Math.max(0, Math.round(num(value.outputTokens ?? value.output_tokens)));
+  const cacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
+  const cacheWriteTokens = Math.max(0, Math.round(num(value.cacheWriteTokens ?? value.cache_write_tokens)));
+  const tokens = tokenComponents
+    ? inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
+    : Math.max(0, Math.round(num(value.tokens)));
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
   const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
@@ -34,6 +41,13 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
+    ...(tokenComponents ? {
+      tokenComponents: true,
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheWriteTokens
+    } : {}),
     ...(reasoningTokens > 0 ? { reasoningTokens } : {})
   };
 }
@@ -91,6 +105,11 @@ function observationsFromGraphs(graphs) {
         const candidate = normalizeObservation({
           ...raw,
           tokens: sumTokens(raw?.tokens),
+          tokenComponents: true,
+          inputTokens: raw?.tokens?.input,
+          outputTokens: raw?.tokens?.output,
+          cacheReadTokens: raw?.tokens?.cacheRead,
+          cacheWriteTokens: raw?.tokens?.cacheWrite,
           reasoningTokens: raw?.tokens?.reasoning
         });
         if (!candidate) continue;
@@ -106,6 +125,11 @@ function observationsFromGraphs(graphs) {
           tokens: previous.tokens + candidate.tokens,
           cost: previous.cost + candidate.cost,
           messages: previous.messages + candidate.messages,
+          tokenComponents: previous.tokenComponents === true && candidate.tokenComponents === true,
+          inputTokens: num(previous.inputTokens) + num(candidate.inputTokens),
+          outputTokens: num(previous.outputTokens) + num(candidate.outputTokens),
+          cacheReadTokens: num(previous.cacheReadTokens) + num(candidate.cacheReadTokens),
+          cacheWriteTokens: num(previous.cacheWriteTokens) + num(candidate.cacheWriteTokens),
           reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens)
         });
       }
@@ -313,11 +337,18 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     }
   }
 
+  const tokenComponents = [...currentDays.values()].every((day) => Object.values(day.observations)
+    .every((observation) => observation.tokenComponents === true));
   const contributions = [...currentDays.values()]
     .sort((left, right) => left.date.localeCompare(right.date))
     .map((day) => ({
       date: day.date,
       activeTimeMs: day.activeTimeMs,
+      capabilities: {
+        tokenComponents: Object.values(day.observations)
+          .every((observation) => observation.tokenComponents === true),
+        clientModels: true
+      },
       clients: Object.values(day.observations)
         .sort((left, right) => observationKey(left).localeCompare(observationKey(right)))
         .map((observation) => ({
@@ -325,10 +356,10 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
           modelId: observation.modelId,
           ...(observation.providerId ? { providerId: observation.providerId } : {}),
           tokens: {
-            input: observation.tokens,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
+            input: observation.tokenComponents === true ? observation.inputTokens : observation.tokens,
+            output: observation.tokenComponents === true ? observation.outputTokens : 0,
+            cacheRead: observation.tokenComponents === true ? observation.cacheReadTokens : 0,
+            cacheWrite: observation.tokenComponents === true ? observation.cacheWriteTokens : 0,
             reasoning: num(observation.reasoningTokens)
           },
           cost: observation.cost,
@@ -337,7 +368,11 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     }));
   const activeTimeMs = contributions.reduce((sum, day) => sum + num(day.activeTimeMs), 0);
   const timeMetrics = graphTimeMetrics(graphs, activeTimeMs);
-  return { contributions, ...(timeMetrics ? { timeMetrics } : {}) };
+  return {
+    capabilities: { tokenComponents, clientModels: true },
+    contributions,
+    ...(timeMetrics ? { timeMetrics } : {})
+  };
 }
 
 function dailyHistoryArchivePath(options = {}) {

@@ -1073,8 +1073,8 @@ function staleSnapshotDevice(extra = {}) {
     updatedAt: '2026-06-21T05:00:00.000Z',
     receivedAt: '2026-06-21T05:00:00.000Z',
     periodWindows: {
-      today: { key: '2026-06-21', endsAt: '2026-06-22T00:00:00.000Z' },
-      month: { key: '2026-06', endsAt: '2026-07-01T00:00:00.000Z' }
+      today: { key: '2026-06-21', endsAt: '2026-06-22T00:00:00.000Z', timeZone: 'Asia/Hong_Kong' },
+      month: { key: '2026-06', endsAt: '2026-07-01T00:00:00.000Z', timeZone: 'Asia/Hong_Kong' }
     },
     today: { totalTokens: 4029210, clients: { codex: 4029210 } },
     month: { totalTokens: 4029210, clients: { codex: 4029210 } },
@@ -1088,6 +1088,17 @@ test('aggregateDevices drops today usage once a device today window has ended', 
   assert.equal(aggregate.periods.today.totalTokens, 0);
   assert.equal(aggregate.periods.today.clients.codex, undefined);
   assert.deepEqual(aggregate.devices[0].periodWindows, staleSnapshotDevice().periodWindows);
+});
+
+test('device period windows preserve valid IANA timezones and reject invalid ones', () => {
+  const valid = aggregateDevices([staleSnapshotDevice()], 0, Date.parse('2026-06-21T06:00:00.000Z'));
+  assert.equal(valid.devices[0].periodWindows.today.timeZone, 'Asia/Hong_Kong');
+  const invalid = aggregateDevices([staleSnapshotDevice({
+    periodWindows: {
+      today: { key: '2026-06-21', endsAt: '2026-06-22T00:00:00.000Z', timeZone: 'Mars/Olympus' }
+    }
+  })], 0, Date.parse('2026-06-21T06:00:00.000Z'));
+  assert.equal(invalid.devices[0].periodWindows.today.timeZone, undefined);
 });
 
 test('aggregateDevices keeps allTime from a device whose today window has ended', () => {

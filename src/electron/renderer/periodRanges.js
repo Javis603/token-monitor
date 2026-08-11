@@ -29,6 +29,15 @@
     return Number.isFinite(number) ? number : 0;
   }
 
+  function setOwn(target, key, value) {
+    Object.defineProperty(target, key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    });
+  }
+
   function normalizeMode(slot, value, fallback = DEFAULT_MODES[slot]) {
     const allowed = SLOT_MODES[slot] || [];
     const normalizedFallback = allowed.includes(fallback) ? fallback : (DEFAULT_MODES[slot] || allowed[0] || '');
@@ -102,6 +111,35 @@
     return `${year}-${month}-${day}`;
   }
 
+  function isValidTimeZone(value) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function currentDayKey(periodWindows, value = new Date()) {
+    const now = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(now.getTime())) return localDayKey();
+    const window = periodWindows?.today || {};
+    if (!window || Object.keys(window).length === 0) return localDayKey(now);
+    const timeZone = String(window.timeZone || '').trim();
+    if (timeZone && isValidTimeZone(timeZone)) {
+      try {
+        const parts = new Intl.DateTimeFormat('en-CA', { timeZone }).formatToParts(now);
+        const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+        const key = `${values.year}-${values.month}-${values.day}`;
+        if (normalizeDateKey(key)) return key;
+      } catch (_) { /* fall through to the legacy window key */ }
+    }
+    const key = normalizeDateKey(window.key);
+    const endsAt = Date.parse(String(window.endsAt || ''));
+    if (key && Number.isFinite(endsAt) && now.getTime() < endsAt) return key;
+    return now.toISOString().slice(0, 10);
+  }
+
   function weekStartsOn(locale) {
     try {
       const resolved = new Intl.Locale(String(locale || 'en'));
@@ -157,26 +195,48 @@
   function dailyRowFromPeriod(period, date, previous = {}) {
     const perClient = {};
     for (const [client, tokens] of Object.entries(period?.clients || {})) {
-      perClient[client] = {
+      setOwn(perClient, client, {
         tokens: finiteNumber(tokens),
         cost: finiteNumber(period?.clientCosts?.[client]),
-        messages: finiteNumber(previous?.perClient?.[client]?.messages)
-      };
+        messages: finiteNumber(previous?.perClient?.[client]?.messages),
+        cacheReadTokens: finiteNumber(period?.clientCacheReads?.[client]),
+        cacheWriteTokens: finiteNumber(period?.clientCacheWrites?.[client]),
+        outputTokens: finiteNumber(period?.clientOutputs?.[client])
+      });
     }
     const perModel = {};
     for (const [model, tokens] of Object.entries(period?.models || {})) {
-      perModel[model] = {
+      setOwn(perModel, model, {
         tokens: finiteNumber(tokens),
-        cost: finiteNumber(period?.modelCosts?.[model])
-      };
+        cost: finiteNumber(period?.modelCosts?.[model]),
+        cacheReadTokens: finiteNumber(period?.modelCacheReads?.[model]),
+        cacheWriteTokens: finiteNumber(period?.modelCacheWrites?.[model]),
+        outputTokens: finiteNumber(period?.modelOutputs?.[model])
+      });
+    }
+    const perClientModel = {};
+    for (const [client, models] of Object.entries(period?.clientModels || {})) {
+      const clientModels = {};
+      for (const [model, tokens] of Object.entries(models || {})) {
+        setOwn(clientModels, model, {
+          tokens: finiteNumber(tokens),
+          cost: finiteNumber(period?.clientModelCosts?.[client]?.[model])
+        });
+      }
+      setOwn(perClientModel, client, clientModels);
     }
     return {
       ...previous,
       date,
       tokens: finiteNumber(period?.totalTokens),
       cost: finiteNumber(period?.costUsd),
+      cacheReadTokens: finiteNumber(period?.cacheReadTokens),
+      cacheWriteTokens: finiteNumber(period?.cacheWriteTokens),
+      outputTokens: finiteNumber(period?.outputTokens),
+      capabilities: { tokenComponents: true, clientModels: true },
       perClient,
-      perModel
+      perModel,
+      perClientModel
     };
   }
 
@@ -204,33 +264,119 @@
 
   function addMapValue(target, key, value) {
     if (!key) return;
-    target[key] = finiteNumber(target[key]) + finiteNumber(value);
+    const previous = Object.prototype.hasOwnProperty.call(target, key) ? target[key] : 0;
+    setOwn(target, key, finiteNumber(previous) + finiteNumber(value));
+  }
+
+  function addNestedMapValue(target, outerKey, innerKey, value) {
+    if (!outerKey || !innerKey) return;
+    let inner = Object.prototype.hasOwnProperty.call(target, outerKey) ? target[outerKey] : null;
+    if (!inner || typeof inner !== 'object') {
+      inner = {};
+      setOwn(target, outerKey, inner);
+    }
+    addMapValue(inner, innerKey, value);
   }
 
   function derivePeriod(daily, options = {}) {
     const period = emptyPeriod();
     const rows = dailyRowsForSelection(daily, options);
+    period.capabilities = {
+      tokenComponents: rows.every((row) => row?.capabilities?.tokenComponents !== false)
+        && options.capabilities?.tokenComponents === true,
+      clientModels: rows.every((row) => row?.capabilities?.clientModels !== false)
+        && options.capabilities?.clientModels === true
+    };
     for (const row of rows) {
       period.totalTokens += finiteNumber(row?.tokens);
       period.costUsd += finiteNumber(row?.cost);
+      period.cacheReadTokens += finiteNumber(row?.cacheReadTokens);
+      period.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
+      period.outputTokens += finiteNumber(row?.outputTokens);
       for (const [client, value] of Object.entries(row?.perClient || {})) {
         addMapValue(period.clients, client, value?.tokens);
         addMapValue(period.clientCosts, client, value?.cost);
+        addMapValue(period.clientCacheReads, client, value?.cacheReadTokens);
+        addMapValue(period.clientCacheWrites, client, value?.cacheWriteTokens);
+        addMapValue(period.clientOutputs, client, value?.outputTokens);
       }
       for (const [model, value] of Object.entries(row?.perModel || {})) {
         addMapValue(period.models, model, value?.tokens);
         addMapValue(period.modelCosts, model, value?.cost);
+        addMapValue(period.modelCacheReads, model, value?.cacheReadTokens);
+        addMapValue(period.modelCacheWrites, model, value?.cacheWriteTokens);
+        addMapValue(period.modelOutputs, model, value?.outputTokens);
+      }
+      for (const [client, models] of Object.entries(row?.perClientModel || {})) {
+        for (const [model, value] of Object.entries(models || {})) {
+          addNestedMapValue(period.clientModels, client, model, value?.tokens);
+          addNestedMapValue(period.clientModelCosts, client, model, value?.cost);
+        }
       }
     }
     period.totalTokens = Math.max(0, Math.round(period.totalTokens));
     period.costUsd = Number(period.costUsd.toFixed(6));
-    for (const map of [period.clients, period.models]) {
+    for (const map of [
+      period.clients, period.clientCacheReads, period.clientCacheWrites, period.clientOutputs,
+      period.models, period.modelCacheReads, period.modelCacheWrites, period.modelOutputs
+    ]) {
       for (const key of Object.keys(map)) map[key] = Math.max(0, Math.round(map[key]));
     }
     for (const map of [period.clientCosts, period.modelCosts]) {
       for (const key of Object.keys(map)) map[key] = Number(map[key].toFixed(6));
     }
+    for (const client of Object.keys(period.clientModels)) {
+      for (const model of Object.keys(period.clientModels[client])) {
+        period.clientModels[client][model] = Math.max(0, Math.round(period.clientModels[client][model]));
+        period.clientModelCosts[client][model] = Number(period.clientModelCosts[client][model].toFixed(6));
+      }
+    }
     return period;
+  }
+
+  function mergePeriods(periods) {
+    const list = (Array.isArray(periods) ? periods : []).filter((period) => period && typeof period === 'object');
+    const merged = emptyPeriod();
+    merged.capabilities = {
+      tokenComponents: list.length > 0 && list.every((period) => period.capabilities?.tokenComponents === true),
+      clientModels: list.length > 0 && list.every((period) => period.capabilities?.clientModels === true)
+    };
+    for (const period of list) {
+      for (const key of ['totalTokens', 'costUsd', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens']) {
+        merged[key] += finiteNumber(period[key]);
+      }
+      for (const key of [
+        'clients', 'clientCosts', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs',
+        'models', 'modelCosts', 'modelCacheReads', 'modelCacheWrites', 'modelOutputs'
+      ]) {
+        for (const [name, value] of Object.entries(period[key] || {})) addMapValue(merged[key], name, value);
+      }
+      for (const key of ['clientModels', 'clientModelCosts']) {
+        for (const [client, models] of Object.entries(period[key] || {})) {
+          for (const [model, value] of Object.entries(models || {})) {
+            addNestedMapValue(merged[key], client, model, value);
+          }
+        }
+      }
+    }
+    merged.totalTokens = Math.max(0, Math.round(merged.totalTokens));
+    merged.costUsd = Number(merged.costUsd.toFixed(6));
+    for (const map of [
+      merged.clients, merged.clientCacheReads, merged.clientCacheWrites, merged.clientOutputs,
+      merged.models, merged.modelCacheReads, merged.modelCacheWrites, merged.modelOutputs
+    ]) {
+      for (const key of Object.keys(map)) map[key] = Math.max(0, Math.round(map[key]));
+    }
+    for (const map of [merged.clientCosts, merged.modelCosts]) {
+      for (const key of Object.keys(map)) map[key] = Number(map[key].toFixed(6));
+    }
+    for (const client of Object.keys(merged.clientModels)) {
+      for (const model of Object.keys(merged.clientModels[client])) {
+        merged.clientModels[client][model] = Math.max(0, Math.round(merged.clientModels[client][model]));
+        merged.clientModelCosts[client][model] = Number(merged.clientModelCosts[client][model].toFixed(6));
+      }
+    }
+    return merged;
   }
 
   function rangeSummary(daily, options = {}) {
@@ -260,11 +406,13 @@
     SLOT_MODES,
     dailyRowsForSelection,
     dayKeyAddDays,
+    currentDayKey,
     derivePeriod,
     displayLabel,
     effectiveSelection,
     isDerived,
     localDayKey,
+    mergePeriods,
     modeForSlot,
     modeSettingKey,
     normalizeDateKey,
