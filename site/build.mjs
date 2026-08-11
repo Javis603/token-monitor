@@ -7,11 +7,11 @@ const outputRoot = new URL("../_site/", import.meta.url);
 
 const cssFiles = ["styles/tokens.css", "styles/base.css", "styles/components.css", "styles/sections.css"];
 const jsFiles = ["scripts/i18n.js", "scripts/main.js"];
-const assetVersion = "20260730-story28";
+const assetVersion = "20260730-story29";
 // Icons are the site's own brand-colored copies under site/assets/icons/ (the app's
 // assets/icons/ stay mask-only currentColor and must not be mutated to serve the web).
 // tray-claude / tray-codex are the real tray glyphs, masked to monochrome in the surfaces section.
-const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "openrouter", "newapi", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "kimi", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilocode", "kiro", "mimo-code"];
+const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "reasonix", "openrouter", "newapi", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "kimi", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilocode", "kiro", "mimo-code"];
 const viewIconNames = ["home", "limits", "tool", "model", "device", "session", "project", "trends", "status"];
 const assets = [
   ["assets/app.png", "assets/app.png"], // full app icon used by the Discord mockup

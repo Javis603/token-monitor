@@ -11,6 +11,26 @@ function nonNegativeNumber(value) {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
 }
 
+function attachLocalNativeViews(stats, localDevice) {
+  if (!stats || typeof stats !== 'object') return stats;
+  // Hub aggregates intentionally discard these fields. Remove any accidental
+  // legacy copy before overlaying the current local device, so native session
+  // data can never look like it came from another device.
+  delete stats.nativeSessions;
+  delete stats.nativeProjects;
+  if (hasOwn(localDevice, 'nativeSessions')) stats.nativeSessions = localDevice.nativeSessions;
+  if (hasOwn(localDevice, 'nativeProjects')) stats.nativeProjects = localDevice.nativeProjects;
+  return stats;
+}
+
+function attachLocalPresentationNativeViews(stats, options = {}) {
+  // The anchor is a presentation fallback, not a completed observation. Once
+  // collection succeeds, the live record always owns the overlay.
+  const localDevice = options.lastCollectedDevice
+    || (options.mode === 'local' ? options.seededLocalDevice : null);
+  return attachLocalNativeViews(stats, localDevice);
+}
+
 function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   if (!localDevice?.deviceId) return hubStats;
   if (hubStats && !Array.isArray(hubStats.devices)) return hubStats;
@@ -46,6 +66,7 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     projectsIncomplete: aggregate.projectsIncomplete,
     limits: hasHubStaleAfterMs || !hasOwn(hubStats, 'limits') ? aggregate.limits : hubStats.limits
   };
+  attachLocalNativeViews(displayStats, localDevice);
 
   for (const key of ['sessionDetailsOmitted', 'periodProjectsOmitted']) {
     if (hasOwn(aggregate, key)) displayStats[key] = aggregate[key];
@@ -55,4 +76,4 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   return displayStats;
 }
 
-module.exports = { composeLocalSyncStats };
+module.exports = { attachLocalNativeViews, attachLocalPresentationNativeViews, composeLocalSyncStats };

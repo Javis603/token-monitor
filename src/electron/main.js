@@ -196,7 +196,11 @@ const {
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
-const { composeLocalSyncStats } = require('./syncDisplayStats');
+const {
+  attachLocalNativeViews,
+  attachLocalPresentationNativeViews,
+  composeLocalSyncStats
+} = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const {
   classifySettingsChange,
@@ -530,6 +534,7 @@ function electronUsageConfig(errorPrefix) {
     defaultDeviceId: defaultDeviceId(),
     intervalMs: collectorIntervalMs(),
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
+    reasonixNativeSessionsEnabled: true,
     watchEnabled: collectorWatchEnabled(),
     // No watchUsePolling on purpose. The widget states no preference so the
     // shared default in resolveWatchUsePolling() governs and the widget cannot
@@ -3359,6 +3364,11 @@ function startHostStats() {
 // being redeployed to preserve these fields.
 function injectLocalDeviceStatus(stats) {
   if (!stats || !Array.isArray(stats.devices)) return stats;
+  attachLocalPresentationNativeViews(stats, {
+    lastCollectedDevice,
+    seededLocalDevice: localDevice,
+    mode
+  });
   if (lastCollectedDevice) {
     const device = stats.devices.find((entry) => entry.deviceId === lastCollectedDevice.deviceId);
     if (device) {
@@ -3825,6 +3835,7 @@ function startLocalCollector() {
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
+      attachLocalNativeViews(localStats, localDevice);
       updateDiscordRpcDisplay(localStats);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } }, { widgetProducerOwner });
       sendStatus(true, { reason });

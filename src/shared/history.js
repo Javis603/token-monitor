@@ -2,6 +2,7 @@
 
 // Portable (Node-free) usage-history core. Mirrors usage.js conventions so the
 // Cloudflare Worker can import it. Pure functions only — no I/O.
+const { REASONIX_CLIENT } = require('./reasonixPaths');
 
 function num(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -38,12 +39,13 @@ function normalizeTimeMetrics(value) {
   };
 }
 
-// Additive token components. `reasoning` is excluded on purpose: tokscale already
-// folds reasoning into `output`, so adding it would double-count (same rule as usage.js).
-function sumTokens(breakdown) {
+// Additive token components. Existing clients expose reasoning inside `output`,
+// but Reasonix emits it as a disjoint component.
+function sumTokens(breakdown, client = '') {
   if (!breakdown || typeof breakdown !== 'object') return 0;
   return num(breakdown.input) + num(breakdown.output)
-    + num(breakdown.cacheRead) + num(breakdown.cacheWrite);
+    + num(breakdown.cacheRead) + num(breakdown.cacheWrite)
+    + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
 }
 
 function rowCapability(raw, row, key) {
@@ -82,11 +84,14 @@ function parseGraphResult(raw) {
       if (!c || typeof c !== 'object') continue;
       const client = String(c.client || 'unknown');
       const model = String(c.modelId || c.model || c.model_id || 'unknown');
-      const classified = sumTokens(c.tokens);
+      const classified = sumTokens(c.tokens, client);
       const declaredUnclassified = Math.max(0, num(c.unclassifiedTokens ?? c.unclassified_tokens));
       const t = classified + declaredUnclassified;
       const cst = num(c.cost);
-      const msg = num(c.messages);
+      // Reasonix's `messages` field is a provider request count, not user turns.
+      // Keep it out of Token Monitor's message/activity semantics; its tokens and
+      // cost still contribute normally to the history totals.
+      const msg = String(client).trim().toLowerCase() === REASONIX_CLIENT ? 0 : num(c.messages);
       const cacheRead = num(c.tokens?.cacheRead);
       const cacheWrite = num(c.tokens?.cacheWrite);
       const output = num(c.tokens?.output);

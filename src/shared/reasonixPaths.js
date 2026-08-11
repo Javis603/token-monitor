@@ -1,0 +1,186 @@
+'use strict';
+
+// Reasonix resolves its state directory in this order. Keep this module free of
+// Node built-ins so the source-check id and resolver can be vendored with the
+// Worker shared closure without making the Worker filesystem-aware.
+const REASONIX_CLIENT = 'reasonix';
+const REASONIX_SOURCE_CHECK_ID = 'reasonix-stats';
+
+const ENV_REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}/g;
+
+function nonEmpty(value) {
+  const text = String(value ?? '').trim();
+  return text || '';
+}
+
+function homeDirFor({ env = {}, homeDir = '', platform = '' } = {}) {
+  const configured = nonEmpty(homeDir);
+  if (configured) return configured;
+  if (platform === 'win32') {
+    return nonEmpty(env.USERPROFILE)
+      || nonEmpty(env.HOME)
+      || joinPath(platform, env.HOMEDRIVE, env.HOMEPATH);
+  }
+  return nonEmpty(env.HOME);
+}
+
+function expandEnvReferences(value, env) {
+  const expanded = String(value ?? '').replace(ENV_REFERENCE, (match, name, fallback) => {
+    const configured = nonEmpty(env?.[name]);
+    return configured || (fallback === undefined ? '' : fallback);
+  });
+  ENV_REFERENCE.lastIndex = 0;
+  return expanded;
+}
+
+function joinPath(platform, root, ...parts) {
+  const windows = platform === 'win32';
+  const separator = windows ? '\\' : '/';
+  let current = nonEmpty(root);
+  for (const part of parts) {
+    const next = nonEmpty(part);
+    if (!next) continue;
+    if (!current) {
+      current = next;
+    } else {
+      current = `${current.replace(/[\\/]+$/, '')}${separator}${next.replace(/^[\\/]+/, '')}`;
+    }
+  }
+  return current;
+}
+
+function isAbsolutePath(value, platform) {
+  if (platform === 'win32') return /^\\\\/.test(value) || /^\\/.test(value) || /^[A-Za-z]:[\\/]/.test(value);
+  return value.startsWith('/');
+}
+
+function normalizePosixPath(value) {
+  const absolute = value.startsWith('/');
+  const stack = [];
+  for (const segment of value.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (stack.length > 0 && stack.at(-1) !== '..') stack.pop();
+      else if (!absolute) stack.push(segment);
+    } else {
+      stack.push(segment);
+    }
+  }
+  const normalized = stack.join('/');
+  if (absolute) return `/${normalized}`;
+  return normalized || '.';
+}
+
+function normalizeWindowsPath(value) {
+  const input = value.replace(/\//g, '\\');
+  let root = '';
+  let rest = input;
+  let absolute = false;
+
+  if (input.startsWith('\\\\')) {
+    const parts = input.slice(2).split('\\');
+    const server = parts.shift() || '';
+    const share = parts.shift() || '';
+    root = `\\\\${server}${share ? `\\${share}` : ''}`;
+    rest = parts.join('\\');
+    absolute = true;
+  } else if (/^[A-Za-z]:/.test(input)) {
+    root = input.slice(0, 2);
+    rest = input.slice(2);
+    if (rest.startsWith('\\')) {
+      root += '\\';
+      rest = rest.slice(1);
+      absolute = true;
+    }
+  } else if (input.startsWith('\\')) {
+    root = '\\';
+    rest = input.slice(1);
+    absolute = true;
+  }
+
+  const stack = [];
+  for (const segment of rest.split('\\')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (stack.length > 0 && stack.at(-1) !== '..') stack.pop();
+      else if (!absolute) stack.push(segment);
+    } else {
+      stack.push(segment);
+    }
+  }
+
+  const suffix = stack.join('\\');
+  if (root) {
+    if (!suffix) return root;
+    return root.endsWith('\\') ? `${root}${suffix}` : `${root}\\${suffix}`;
+  }
+  return suffix || '.';
+}
+
+function normalizePath(value, platform) {
+  return platform === 'win32' ? normalizeWindowsPath(value) : normalizePosixPath(value);
+}
+
+function currentDirectory({ env = {}, cwdDir = '' } = {}) {
+  if (nonEmpty(cwdDir)) return nonEmpty(cwdDir);
+  if (nonEmpty(env.PWD)) return nonEmpty(env.PWD);
+  if (nonEmpty(env.INIT_CWD)) return nonEmpty(env.INIT_CWD);
+  // The Worker has no Node `process`; the guarded fallback keeps this pure
+  // module useful when called directly from Node while remaining vendorable.
+  return typeof process !== 'undefined' && typeof process.cwd === 'function' ? process.cwd() : '';
+}
+
+// Mirrors Reasonix's cleanEnvDir semantics: expand `${VAR}` and
+// `${VAR:-default}`, expand the home shorthand, make relative paths absolute,
+// and clean separators / dot segments before the caller appends `stats`.
+function cleanEnvDir(value, options = {}) {
+  const platform = options.platform || '';
+  const env = options.env || {};
+  let cleaned = nonEmpty(value);
+  if (!cleaned) return '';
+
+  cleaned = expandEnvReferences(cleaned, env).trim();
+  if (!cleaned) return '';
+
+  const homeDir = homeDirFor(options);
+  if (cleaned === '~' || cleaned.startsWith('~/') || cleaned.startsWith('~\\')) {
+    cleaned = joinPath(platform, homeDir, cleaned.slice(1));
+  }
+
+  if (!isAbsolutePath(cleaned, platform)) {
+    const cwd = currentDirectory(options);
+    if (cwd) cleaned = joinPath(platform, cwd, cleaned);
+  }
+  return normalizePath(cleaned, platform);
+}
+
+function resolveReasonixHome(options = {}) {
+  const platform = options.platform || '';
+  const env = options.env || {};
+  const stateHome = cleanEnvDir(env.REASONIX_STATE_HOME, options);
+  if (stateHome) return stateHome;
+
+  const configuredHome = cleanEnvDir(env.REASONIX_HOME, options);
+  if (configuredHome) return configuredHome;
+
+  if (platform === 'win32') {
+    const homeDir = homeDirFor(options);
+    const appData = cleanEnvDir(env.APPDATA, options)
+      || cleanEnvDir(joinPath(platform, homeDir, 'AppData', 'Roaming'), options);
+    return normalizePath(joinPath(platform, appData, 'reasonix'), platform);
+  }
+  return normalizePath(joinPath(platform, homeDirFor(options), '.reasonix'), platform);
+}
+
+function resolveReasonixStatsDir(options = {}) {
+  const platform = options.platform || '';
+  return normalizePath(joinPath(platform, resolveReasonixHome(options), 'stats'), platform);
+}
+
+module.exports = {
+  cleanEnvDir,
+  REASONIX_CLIENT,
+  REASONIX_SOURCE_CHECK_ID,
+  resolveReasonixHome,
+  resolveReasonixStatsDir
+};

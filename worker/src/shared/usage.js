@@ -8,13 +8,14 @@ const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
 const { coerceHistory, mergeHistories } = require('./history');
 const { isPeriodExpired } = require('./periodWindow');
+const { REASONIX_CLIENT } = require('./reasonixPaths');
+const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
-// Additive components for a token total. `reasoning` is deliberately excluded: OpenAI/Codex report
-// reasoning_output_tokens WITHIN output_tokens (tokscale's `output` already includes it and exposes
-// `reasoning` only as informational metadata), so summing it would double-count. It is still tracked
-// separately via REASONING_TOKEN_KEYS for display.
+// Additive components for a token total. `reasoning` is deliberately excluded for ordinary clients:
+// OpenAI/Codex report reasoning_output_tokens WITHIN output_tokens (tokscale's `output` already
+// includes it). Reasonix is the exception: its `output` and `reasoning` fields are disjoint.
 const TOKEN_COMPONENT_KEYS = [
   'input', 'inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens',
   'output', 'outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens',
@@ -80,6 +81,26 @@ function tokenValue(obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) sum += asNumber(obj[key]);
   }
   return sum;
+}
+
+// Most clients expose reasoning as a subset of output, so the generic token
+// total intentionally leaves it out. Reasonix stats are different: Tokscale
+// emits output and reasoning as disjoint fields, so only that client adds the
+// separate reasoning component to its token total.
+function tokenValueForClient(obj, client) {
+  const base = tokenValue(obj);
+  if (client !== REASONIX_CLIENT) return base;
+  const direct = firstNumber(obj, TOKEN_KEYS);
+  return direct !== 0 ? base : base + Math.max(0, firstNumber(obj, REASONING_TOKEN_KEYS));
+}
+
+// The public breakdown uses one output-family bucket. Reasonix's independent reasoning
+// component belongs there so cache-hit + cache-miss + output still closes over totalTokens.
+function outputValueForClient(obj, client) {
+  const output = Math.max(0, firstNumber(obj, OUTPUT_TOKEN_KEYS));
+  return client === REASONIX_CLIENT
+    ? output + Math.max(0, firstNumber(obj, REASONING_TOKEN_KEYS))
+    : output;
 }
 
 function costValue(obj) {
@@ -167,6 +188,7 @@ function normalizeClientName(value) {
   if (raw.includes('codebuddy')) return 'codebuddy';
   if (raw.includes('workbuddy')) return 'workbuddy';
   if (raw.includes('proma')) return 'proma';
+  if (raw.includes('reasonix')) return 'reasonix';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
@@ -180,6 +202,13 @@ function detectClient(obj) {
 function normalizeModelName(value) {
   const raw = String(value || '').trim().toLowerCase();
   return raw || null;
+}
+
+function normalizeModelNameForClient(value, client) {
+  const normalized = normalizeModelName(value);
+  if (!normalized || normalizeClientName(client) !== REASONIX_CLIENT) return normalized;
+  const qualified = normalized.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
+  return qualified?.[1] || normalized;
 }
 
 function normalizeSessionId(value) {
@@ -233,6 +262,7 @@ function normalizeProjects(value) {
 function projectRollupFromSessions(sessions) {
   const projects = Object.create(null);
   for (const session of Object.values(sessions || {})) {
+    if (isReasonixSyntheticSession(session)) continue;
     const label = String(session?.projectLabel || '').trim().normalize('NFC');
     const key = canonicalProjectKey(label);
     if (!key) continue;
@@ -334,9 +364,12 @@ function normalizePeriodWindows(value) {
   return Object.keys(result).length ? result : null;
 }
 
-function detectModel(obj) {
+function detectModel(obj, client = detectClient(obj)) {
   if (!obj || typeof obj !== 'object') return null;
-  return normalizeModelName(obj.model || obj.modelName || obj.model_name || obj.deployment || obj.engine);
+  return normalizeModelNameForClient(
+    obj.model || obj.modelName || obj.model_name || obj.deployment || obj.engine,
+    client
+  );
 }
 
 function detectSessionId(obj) {
@@ -349,7 +382,7 @@ function sessionKey(client, sessionId) {
 
 function looksLikeUsageRow(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
-  if (tokenValue(obj) === 0 && costValue(obj) === 0) return false;
+  if (tokenValueForClient(obj, detectClient(obj)) === 0 && costValue(obj) === 0) return false;
   return Boolean(obj.client || obj.clients || obj.source || obj.platform || obj.agent || obj.tool || obj.model || obj.provider || obj.date || obj.name || detectSessionId(obj));
 }
 
@@ -426,11 +459,11 @@ function mergeSession(target, source) {
     target.projectLabel = String(source.projectLabel);
   }
   for (const [model, tokens] of Object.entries(source.models || {})) {
-    const key = normalizeModelName(model);
+    const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
   }
   for (const [model, cost] of Object.entries(source.modelCosts || {})) {
-    const key = normalizeModelName(model);
+    const key = normalizeModelNameForClient(model, target.client);
     if (key) target.modelCosts[key] = (target.modelCosts[key] || 0) + asNumber(cost);
   }
   for (const [provider, tokens] of Object.entries(source.providers || {})) {
@@ -448,18 +481,20 @@ function mergeSession(target, source) {
 }
 
 function addSession(period, session) {
-  if (!session?.client || !session?.sessionId) return;
+  if (!session?.client || !session?.sessionId || isReasonixSyntheticSession(session)) return;
   const key = sessionKey(session.client, session.sessionId);
+  if (isReasonixSyntheticSession(session, key)) return;
   if (!period.sessions[key]) period.sessions[key] = emptySession(session.client, session.sessionId);
   mergeSession(period.sessions[key], session);
 }
 
 function sessionFromRow(row) {
   const client = detectClient(row);
+  if (!client || client === REASONIX_CLIENT || isReasonixSyntheticSession(row)) return null;
   const id = detectSessionId(row);
-  if (!client || !id) return null;
+  if (!id) return null;
   const session = emptySession(client, id);
-  session.totalTokens = Math.max(0, Math.round(tokenValue(row)));
+  session.totalTokens = Math.max(0, Math.round(tokenValueForClient(row, client)));
   session.costUsd = costValue(row);
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
@@ -467,7 +502,7 @@ function sessionFromRow(row) {
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
-  let model = detectModel(row);
+  let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
@@ -478,9 +513,10 @@ function sessionFromRow(row) {
 
 function normalizeSession(input, fallbackKey) {
   if (!input || typeof input !== 'object') return null;
+  if (isReasonixSyntheticSession(input, fallbackKey)) return null;
   const client = normalizeClientName(input.client || input.source || input.platform || input.agent || input.tool);
   const id = normalizeSessionId(input.sessionId || input.session_id || input.session || input.conversationId || input.conversation_id || input.threadId || input.thread_id || fallbackKey);
-  if (!client || !id) return null;
+  if (!client || client === REASONIX_CLIENT || !id) return null;
   const session = emptySession(client, id);
   const components = sessionTokenComponents(input);
   Object.assign(session, components);
@@ -494,13 +530,13 @@ function normalizeSession(input, fallbackKey) {
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
-      const key = normalizeModelName(model);
+      const key = normalizeModelNameForClient(model, client);
       if (key) session.models[key] = (session.models[key] || 0) + Math.max(0, Math.round(asNumber(value)));
     }
   }
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
-      const key = normalizeModelName(model);
+      const key = normalizeModelNameForClient(model, client);
       if (key) session.modelCosts[key] = (session.modelCosts[key] || 0) + asNumber(value);
     }
   }
@@ -598,7 +634,7 @@ function normalizePeriod(input, options = {}) {
       const clientKey = normalizeClientName(client);
       if (!clientKey || !models || typeof models !== 'object') continue;
       for (const [model, value] of Object.entries(models)) {
-        const modelKey = normalizeModelName(model);
+        const modelKey = normalizeModelNameForClient(model, clientKey);
         if (!modelKey) continue;
         if (!period.clientModels[clientKey]) period.clientModels[clientKey] = {};
         period.clientModels[clientKey][modelKey] = (period.clientModels[clientKey][modelKey] || 0) + Math.max(0, Math.round(asNumber(value)));
@@ -610,7 +646,7 @@ function normalizePeriod(input, options = {}) {
       const clientKey = normalizeClientName(client);
       if (!clientKey || !models || typeof models !== 'object') continue;
       for (const [model, value] of Object.entries(models)) {
-        const modelKey = normalizeModelName(model);
+        const modelKey = normalizeModelNameForClient(model, clientKey);
         if (!modelKey) continue;
         if (!period.clientModelCosts[clientKey]) period.clientModelCosts[clientKey] = {};
         period.clientModelCosts[clientKey][modelKey] = (period.clientModelCosts[clientKey][modelKey] || 0) + asNumber(value);
@@ -639,11 +675,11 @@ const UNATTRIBUTED_USAGE_CLIENT = '__unattributed';
 
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const client = detectedClient;
-  const tokens = tokenValue(row);
+  const tokens = tokenValueForClient(row, client);
   const cost = costValue(row);
   const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
   const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
-  const output = Math.max(0, Math.round(firstNumber(row, OUTPUT_TOKEN_KEYS)));
+  const output = Math.max(0, Math.round(outputValueForClient(row, client)));
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
   const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
@@ -651,7 +687,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   // the denominator. Gating rather than scaling by tokscale's `tokenCoverage` keeps this a
   // plain counter, which is what lets it merge and delta like every other token field.
   const timedOutputTokens = timedDurationMs > 0 ? output : 0;
-  let model = detectModel(row);
+  let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
@@ -1180,7 +1216,14 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
 // Recurses over the union of keys so it covers every numeric field a period may
 // grow (clients/models/clientModels/sessions/...) without per-field bookkeeping.
 function applyPeriodDelta(base, freshToday, anchorToday) {
-  return deltaValue(base, freshToday, anchorToday, '');
+  const result = deltaValue(base, freshToday, anchorToday, '');
+  // Older anchors may still contain the pre-native Reasonix stats-path rows.
+  // They are not authoritative session detail and must not survive a warm tick
+  // merely because the aggregate totals remain valid.
+  if (result && typeof result === 'object' && Object.prototype.hasOwnProperty.call(result, 'sessions')) {
+    result.sessions = filterReasonixSyntheticSessions(result.sessions);
+  }
+  return result;
 }
 
 function deltaValue(base, fresh, anchor, key) {
@@ -1231,6 +1274,8 @@ module.exports = {
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizeModelName,
+  normalizeModelNameForClient,
   normalizeDeviceRecord,
   normalizePeriod,
   projectRollupFromSessions

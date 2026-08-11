@@ -108,7 +108,7 @@ function observationsFromGraphs(graphs) {
       for (const raw of (Array.isArray(row?.clients) ? row.clients : [])) {
         const candidate = normalizeObservation({
           ...raw,
-          tokens: sumTokens(raw?.tokens),
+          tokens: sumTokens(raw?.tokens, raw?.client),
           tokenComponents: true,
           inputTokens: raw?.tokens?.input,
           outputTokens: raw?.tokens?.output,
@@ -384,7 +384,10 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
             output: observation.tokenComponents === true ? observation.outputTokens : 0,
             cacheRead: observation.tokenComponents === true ? observation.cacheReadTokens : 0,
             cacheWrite: observation.tokenComponents === true ? observation.cacheWriteTokens : 0,
-            reasoning: num(observation.reasoningTokens)
+            // A legacy observation's whole total is already represented by
+            // unclassifiedTokens above. Re-emitting Reasonix reasoning beside it
+            // would count the same tokens twice; v2 exact observations retain it.
+            reasoning: observation.tokenComponents === true ? num(observation.reasoningTokens) : 0
           },
           cost: observation.cost,
           messages: observation.messages

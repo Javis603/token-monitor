@@ -64,6 +64,36 @@ test('projectRowsForPeriod prefers the bounded project rollup', () => {
   ]);
 });
 
+test('projectRowsForPeriod recovers trusted native attribution from local sessions when the native rollup is absent', () => {
+  const rows = projectRowsForPeriod({
+    projects: {
+      'token monitor': { label: 'Token Monitor', tokens: 300, costUsd: 2.5, clients: { codex: 300 } }
+    }
+  }, {
+    nativeProjects: {},
+    nativeSessions: {
+      'reasonix:project-session': {
+        native: true,
+        client: 'reasonix',
+        projectId: 'sha256:token-monitor',
+        projectLabel: 'Token Monitor',
+        totalTokens: 140,
+        periodTokenDataUnavailable: false
+      }
+    },
+    clientLabels: { codex: 'Codex', reasonix: 'Reasonix' },
+    clientColors: { codex: '#00aabb', reasonix: '#4d6bfe' }
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].value, 440);
+  assert.equal(rows[0].cost, 2.5);
+  assert.deepEqual(rows[0].accordionRows.map(({ key, value }) => ({ key, value })), [
+    { key: 'codex', value: 300 },
+    { key: 'reasonix', value: 140 }
+  ]);
+});
+
 test('projectRowsForPeriod merges noncanonical rollup keys with the same identity', () => {
   const rows = projectRowsForPeriod({
     projects: {

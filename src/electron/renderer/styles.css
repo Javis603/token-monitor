@@ -3447,6 +3447,7 @@ html.is-windows .settings-panel select option {
 .row-icon-codebuddy  { -webkit-mask-image: url(../../../assets/icons/codebuddy.svg);     mask-image: url(../../../assets/icons/codebuddy.svg); }
 .row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
 .row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
+.row-icon-reasonix   { -webkit-mask-image: url(../../../assets/icons/reasonix.svg);      mask-image: url(../../../assets/icons/reasonix.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
@@ -5226,8 +5227,10 @@ html.is-windows .limit-live-badge {
 .detail-role-user { color: #bda5f5; }
 .detail-role-sep { color: var(--muted); }
 .detail-turn-title { color: var(--muted); }
-.row.session-row[data-client="claude"], .row.session-row[data-client="codex"], .row.session-row[data-client="opencode"] { cursor: pointer; }
-.row.session-row[data-client="claude"] .row-metrics::after, .row.session-row[data-client="codex"] .row-metrics::after, .row.session-row[data-client="opencode"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
+.row.session-row[data-client="claude"], .row.session-row[data-client="codex"], .row.session-row[data-client="opencode"], .row.session-row[data-client="reasonix"] { cursor: pointer; }
+.row.session-row[data-client="claude"] .row-metrics::after, .row.session-row[data-client="codex"] .row-metrics::after, .row.session-row[data-client="opencode"] .row-metrics::after, .row.session-row[data-client="reasonix"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
+.row.session-row[data-client="reasonix"][data-detail-unavailable="true"] { cursor: default; }
+.row.session-row[data-client="reasonix"][data-detail-unavailable="true"] .row-metrics::after { content: none; }
 .view-preference-row.has-subgroup {
   grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
 }

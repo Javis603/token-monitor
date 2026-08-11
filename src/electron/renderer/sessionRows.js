@@ -1,10 +1,14 @@
 'use strict';
 
 (function exposeSessionRows(root, factory) {
-  const api = factory();
+  const api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSessionRows = api;
-})(typeof window !== 'undefined' ? window : null, function createSessionRowsApi() {
+})(typeof window !== 'undefined' ? window : null, function createSessionRowsApi(root) {
+  const reasonixSessionGuard = typeof module === 'object' && module.exports
+    ? require('../../shared/reasonixSessionGuard')
+    : root?.TokenMonitorReasonixSessionGuard;
+  const isReasonixSyntheticSession = reasonixSessionGuard?.isReasonixSyntheticSession || (() => false);
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function finiteNumber(value) {
@@ -49,6 +53,11 @@
   function sessionIdLabel(id) {
     const raw = String(id || '').trim();
     if (!raw) return '';
+    const reasonixPrefix = raw.match(/^reasonix:/i);
+    const reasonixLabel = reasonixPrefix ? raw.slice(reasonixPrefix[0].length) : raw;
+    if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return '';
+    if (reasonixPrefix) return reasonixLabel;
+    if (raw.toLowerCase().startsWith('reasonix-stats:')) return '';
     const rollout = raw.match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}[:-]\d{2}-(.+)$/);
     if (rollout) return rollout[1];
     if (/^\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}/.test(raw)) return '';
@@ -74,9 +83,71 @@
     return compactSessionTime(session?.lastUsedAt || session?.startedAt, now);
   }
 
+  function textValue(value) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function sessionTitleParts(session, labels, fallbackLabel = 'Session', explicitModel = '') {
+    const client = textValue(session?.client);
+    const clientLabel = labels[client] || client || fallbackLabel;
+    const modelLabel = textValue(explicitModel) || sessionModelLabel(session);
+    return {
+      client,
+      clientLabel,
+      modelLabel,
+      titleParts: [clientLabel, modelLabel].filter(Boolean)
+    };
+  }
+
   function messageLabel(session) {
     const count = finiteNumber(session?.messageCount);
     return count > 0 ? `${formatNumber(count)} msg${count === 1 ? '' : 's'}` : '';
+  }
+
+  function nativeSessionRow(session, key, options, now) {
+    const periodTokenDataUnavailable = session?.periodTokenDataUnavailable === true;
+    // Native telemetry is cumulative for a resumed Branch, but it remains a
+    // trusted conversation total. Only an actually missing native total is
+    // unavailable; periodTokenDataUnavailable is reserved for aggregation so
+    // the same lifetime value is never counted as today's project usage.
+    const tokenDataUnavailable = session?.tokenDataUnavailable === true;
+    const value = tokenDataUnavailable ? 0 : finiteNumber(session?.totalTokens);
+    if (value <= 0 && !tokenDataUnavailable) return null;
+    const labels = options.clientLabels || {};
+    const colors = options.clientColors || {};
+    const stable = typeof options.stableColor === 'function' ? options.stableColor : stableColor;
+    const palette = options.fallbackColors || fallbackColors;
+    const client = textValue(session?.client) || 'reasonix';
+    const { clientLabel, titleParts } = sessionTitleParts(
+      { ...session, client },
+      labels,
+      'Reasonix',
+      session?.model
+    );
+    const subtitleParts = [
+      sessionActivityLabel(session, now),
+      messageLabel(session)
+    ].filter(Boolean);
+    return {
+      key: `session:${key}`,
+      kind: 'session',
+      name: titleParts.join(' · '),
+      subtitle: subtitleParts.join(' · '),
+      detail: sessionIdLabel(session?.sessionId || key),
+      value,
+      tokenDataUnavailable,
+      periodTokenDataUnavailable,
+      // A reported session cost is the same trusted conversation-level value
+      // as the cumulative token total. Do not hide it merely because the
+      // period cannot be split exactly.
+      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.reportedCostUsd),
+      sessionDetailAvailable: session?.sessionDetailAvailable === true,
+      color: colors[client] || stable(key, palette),
+      stale: false,
+      client,
+      sortTime: sessionTimestampValue(session),
+      title: `${clientLabel} session ${sessionIdLabel(session?.sessionId || key)}`
+    };
   }
 
   function sessionRowsForPeriod(period, options = {}) {
@@ -89,12 +160,10 @@
     const now = options.now || new Date();
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
+        if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);
         if (value <= 0) return null;
-        const client = session?.client || '';
-        const clientLabel = labels[client] || client || 'Session';
-        const modelLabel = sessionModelLabel(session);
-        const titleParts = [clientLabel, modelLabel].filter(Boolean);
+        const { client, titleParts, clientLabel, modelLabel } = sessionTitleParts(session, labels);
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
         const subtitleParts = [
@@ -115,10 +184,14 @@
           archived: archived || undefined,
           client,
           sortTime: sessionTimestampValue(session),
-          title: `${clientLabel} session ${sessionId}`
+          title: `${clientLabel} session${sessionIdLabel(sessionId) ? ` ${sessionIdLabel(sessionId)}` : ''}`
         };
       })
       .filter(Boolean);
+    for (const [key, session] of Object.entries(options.nativeSessions || {})) {
+      const row = nativeSessionRow(session, key, options, now);
+      if (row) rows.push(row);
+    }
     return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
   }
 
@@ -134,6 +207,7 @@
     const archivedKeys = new Set();
     for (const periodName of ['today', 'month', 'allTime']) {
       for (const [key, session] of Object.entries(periods?.[periodName]?.sessions || {})) {
+        if (isReasonixSyntheticSession(session, key)) continue;
         if (session?.archived !== true && session?.deleted !== true && session?.sourceDeleted !== true) continue;
         archivedKeys.add(`${session?.client || ''}:${session?.sessionId || key}`);
       }

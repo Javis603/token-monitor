@@ -4,7 +4,10 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { aggregateDevices } = require('../../src/shared/usage');
-const { composeLocalSyncStats } = require('../../src/electron/syncDisplayStats');
+const {
+  attachLocalPresentationNativeViews,
+  composeLocalSyncStats
+} = require('../../src/electron/syncDisplayStats');
 
 function device(deviceId, totalTokens, extra = {}) {
   return {
@@ -71,6 +74,49 @@ test('composeLocalSyncStats can render a local device before the first hub snaps
   assert.equal(result.periods.today.totalTokens, 25);
   assert.equal(result.devices.length, 1);
   assert.equal(result.devices[0].deviceId, 'local');
+});
+
+test('the local cold-start presentation restores native views from the anchor seed', () => {
+  const nativeSessions = { today: { session: { client: 'reasonix', totalTokens: 25 } }, month: {}, allTime: {} };
+  const nativeProjects = { today: { project: { label: 'Project', tokens: 25 } }, month: {}, allTime: {} };
+  const seededLocalDevice = device('local', 25, { nativeSessions, nativeProjects });
+  const stats = aggregateDevices([seededLocalDevice], 0, Date.parse('2026-07-16T00:00:00.000Z'));
+
+  assert.equal(Object.hasOwn(stats, 'nativeSessions'), false);
+  attachLocalPresentationNativeViews(stats, {
+    lastCollectedDevice: null,
+    seededLocalDevice,
+    mode: 'local'
+  });
+
+  assert.deepEqual(stats.nativeSessions, nativeSessions);
+  assert.deepEqual(stats.nativeProjects, nativeProjects);
+
+  const collectedSessions = { today: { live: { client: 'reasonix', totalTokens: 30 } }, month: {}, allTime: {} };
+  attachLocalPresentationNativeViews(stats, {
+    lastCollectedDevice: device('local', 30, { nativeSessions: collectedSessions }),
+    seededLocalDevice,
+    mode: 'local'
+  });
+  assert.deepEqual(stats.nativeSessions, collectedSessions);
+  assert.equal(Object.hasOwn(stats, 'nativeProjects'), false);
+});
+
+test('the cold-start native-view fallback is local-mode only', () => {
+  const seededLocalDevice = device('local', 25, {
+    nativeSessions: { today: {}, month: {}, allTime: {} },
+    nativeProjects: { today: {}, month: {}, allTime: {} }
+  });
+  const stats = aggregateDevices([seededLocalDevice], 0, Date.parse('2026-07-16T00:00:00.000Z'));
+
+  attachLocalPresentationNativeViews(stats, {
+    lastCollectedDevice: null,
+    seededLocalDevice,
+    mode: 'sync'
+  });
+
+  assert.equal(Object.hasOwn(stats, 'nativeSessions'), false);
+  assert.equal(Object.hasOwn(stats, 'nativeProjects'), false);
 });
 
 test('composeLocalSyncStats exposes current aggregate omission diagnostics', () => {
