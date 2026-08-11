@@ -860,6 +860,49 @@ function addClientModelUsage(target, client, models, costs) {
   }
 }
 
+function addComponentValue(target, field, key, value) {
+  const amount = Math.max(0, Math.round(asNumber(value)));
+  if (amount > 0) target[field][key] = (target[field][key] || 0) + amount;
+  return amount;
+}
+
+function preserveClientTokenComponents(target, source, client, tokens) {
+  const cacheRead = addComponentValue(target, 'clientCacheReads', client, source.clientCacheReads?.[client]);
+  const cacheWrite = addComponentValue(target, 'clientCacheWrites', client, source.clientCacheWrites?.[client]);
+  const output = addComponentValue(target, 'clientOutputs', client, source.clientOutputs?.[client]);
+  const unclassified = source.capabilities?.tokenComponents === true
+    ? addComponentValue(target, 'clientUnclassifiedTokens', client, source.clientUnclassifiedTokens?.[client])
+    : addComponentValue(target, 'clientUnclassifiedTokens', client, tokens);
+  target.cacheReadTokens += cacheRead;
+  target.cacheWriteTokens += cacheWrite;
+  target.outputTokens += output;
+  target.unclassifiedTokens += unclassified;
+}
+
+function preserveModelTokenComponents(target, source, preservedClients) {
+  const preservedByModel = Object.create(null);
+  for (const client of preservedClients) {
+    for (const [model, tokens] of Object.entries(source.clientModels?.[client] || {})) {
+      preservedByModel[model] = (preservedByModel[model] || 0) + Math.max(0, Math.round(asNumber(tokens)));
+    }
+  }
+  for (const [model, tokens] of Object.entries(preservedByModel)) {
+    if (tokens <= 0) continue;
+    const sourceModelTokens = Math.max(0, Math.round(asNumber(source.models?.[model])));
+    if (tokens !== sourceModelTokens) {
+      addComponentValue(target, 'modelUnclassifiedTokens', model, tokens);
+      continue;
+    }
+    addComponentValue(target, 'modelCacheReads', model, source.modelCacheReads?.[model]);
+    addComponentValue(target, 'modelCacheWrites', model, source.modelCacheWrites?.[model]);
+    addComponentValue(target, 'modelOutputs', model, source.modelOutputs?.[model]);
+    const unclassified = source.capabilities?.tokenComponents === true
+      ? source.modelUnclassifiedTokens?.[model]
+      : tokens;
+    addComponentValue(target, 'modelUnclassifiedTokens', model, unclassified);
+  }
+}
+
 function addClientSessionUsage(target, client, sessions, restoredSessions, projectsEnabled) {
   for (const [key, session] of Object.entries(sessions || {})) {
     if (session?.client !== client) continue;
@@ -910,9 +953,11 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       target.clients[client] = tokens;
       preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
+      preserveClientTokenComponents(target, source, client, tokens);
       addClientModelUsage(target, client, source.clientModels?.[client], source.clientModelCosts?.[client]);
       addClientSessionUsage(target, client, source.sessions, restoredSessions, projectsEnabled);
     }
+    preserveModelTokenComponents(target, source, preservedClients);
     if (!projectsEnabled) continue;
     const restoredProjects = projectRollupFromSessions(restoredSessions);
     for (const [key, project] of Object.entries(restoredProjects)) addProjectInto(target.projects, key, project);

@@ -711,6 +711,108 @@ test('mergeDeviceRecord preserves omitted-client day and month usage only inside
   assert.equal(nextMonth.periods.allTime.clients.hermes, 900);
 });
 
+test('mergeDeviceRecord preserves omitted-client component provenance without inventing model zeroes', () => {
+  const existing = {
+    deviceId: 'macbook',
+    trackedClients: ['codex', 'hermes'],
+    updatedAt: '2026-05-30T12:00:00.000Z',
+    today: {
+      totalTokens: 300,
+      cacheReadTokens: 90,
+      cacheWriteTokens: 8,
+      outputTokens: 32,
+      unclassifiedTokens: 5,
+      capabilities: { tokenComponents: true, clientModels: true },
+      clients: { hermes: 200, codex: 100 },
+      clientCacheReads: { hermes: 80, codex: 10 },
+      clientCacheWrites: { hermes: 8 },
+      clientOutputs: { hermes: 30, codex: 2 },
+      clientUnclassifiedTokens: { hermes: 5 },
+      models: { shared: 200, 'hermes-only': 100 },
+      modelCacheReads: { shared: 60, 'hermes-only': 30 },
+      modelCacheWrites: { shared: 3, 'hermes-only': 5 },
+      modelOutputs: { shared: 20, 'hermes-only': 12 },
+      modelUnclassifiedTokens: { 'hermes-only': 5 },
+      clientModels: {
+        hermes: { shared: 100, 'hermes-only': 100 },
+        codex: { shared: 100 }
+      }
+    }
+  };
+  const incoming = {
+    deviceId: 'macbook',
+    trackedClients: ['codex'],
+    updatedAt: '2026-05-30T13:00:00.000Z',
+    today: {
+      totalTokens: 120,
+      cacheReadTokens: 20,
+      outputTokens: 4,
+      capabilities: { tokenComponents: true, clientModels: true },
+      clients: { codex: 120 },
+      clientCacheReads: { codex: 20 },
+      clientOutputs: { codex: 4 },
+      models: { shared: 120 },
+      modelCacheReads: { shared: 20 },
+      modelOutputs: { shared: 4 },
+      clientModels: { codex: { shared: 120 } }
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming).periods.today;
+  assert.equal(merged.totalTokens, 320);
+  assert.equal(merged.cacheReadTokens, 100);
+  assert.equal(merged.cacheWriteTokens, 8);
+  assert.equal(merged.outputTokens, 34);
+  assert.equal(merged.unclassifiedTokens, 5);
+  assert.equal(merged.clientCacheReads.hermes, 80);
+  assert.equal(merged.clientCacheWrites.hermes, 8);
+  assert.equal(merged.clientOutputs.hermes, 30);
+  assert.equal(merged.clientUnclassifiedTokens.hermes, 5);
+  assert.equal(merged.modelCacheReads['hermes-only'], 30);
+  assert.equal(merged.modelCacheWrites['hermes-only'], 5);
+  assert.equal(merged.modelOutputs['hermes-only'], 12);
+  assert.equal(merged.modelUnclassifiedTokens['hermes-only'], 5);
+  assert.equal(merged.modelCacheReads.shared, 20);
+  assert.equal(merged.modelOutputs.shared, 4);
+  assert.equal(merged.modelUnclassifiedTokens.shared, 100);
+  assert.deepEqual(merged.capabilities, { tokenComponents: true, clientModels: true });
+});
+
+test('mergeDeviceRecord keeps legacy omitted-client components explicitly unclassified', () => {
+  const merged = mergeDeviceRecord({
+    deviceId: 'macbook',
+    trackedClients: ['codex', 'hermes'],
+    updatedAt: '2026-05-30T12:00:00.000Z',
+    today: {
+      totalTokens: 100,
+      clients: { hermes: 100 },
+      models: { legacy: 100 },
+      clientModels: { hermes: { legacy: 100 } }
+    }
+  }, {
+    deviceId: 'macbook',
+    trackedClients: ['codex'],
+    updatedAt: '2026-05-30T13:00:00.000Z',
+    today: {
+      totalTokens: 50,
+      cacheReadTokens: 10,
+      capabilities: { tokenComponents: true, clientModels: true },
+      clients: { codex: 50 },
+      clientCacheReads: { codex: 10 },
+      models: { current: 50 },
+      modelCacheReads: { current: 10 },
+      clientModels: { codex: { current: 50 } }
+    }
+  }).periods.today;
+
+  assert.equal(merged.totalTokens, 150);
+  assert.equal(merged.cacheReadTokens, 10);
+  assert.equal(merged.unclassifiedTokens, 100);
+  assert.equal(merged.clientUnclassifiedTokens.hermes, 100);
+  assert.equal(merged.modelUnclassifiedTokens.legacy, 100);
+  assert.deepEqual(merged.capabilities, { tokenComponents: true, clientModels: true });
+});
+
 test('extractUsageFromTokscale normalizes Antigravity client names', () => {
   const period = extractUsageFromTokscale([
     { client: 'Google Antigravity', model: 'gemini-3-pro', totalTokens: 42, costUsd: 0.125 }

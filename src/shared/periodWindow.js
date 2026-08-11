@@ -20,7 +20,7 @@
   }
 
   function recordDate(record) {
-    const ms = timestampMs(record?.receivedAt || record?.updatedAt);
+    const ms = timestampMs(record?.updatedAt || record?.receivedAt);
     return ms > 0 ? new Date(ms) : null;
   }
 
