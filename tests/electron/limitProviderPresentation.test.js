@@ -1205,6 +1205,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   assert.match(statsPush, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(statsPush, /statsRenderScheduler\.request\(\);/);
   assert.match(statsRender, /renderLimitProviderCheckboxes\(\);/);
+  assert.match(statsRender, /renderCodexAccounts\(\);/);
   // Account cards read state.stats, so every path that refreshes stats must
   // re-render them. Grok is automatic and belongs only to the generic provider
   // list, so it must not retain a separate account-card renderer.

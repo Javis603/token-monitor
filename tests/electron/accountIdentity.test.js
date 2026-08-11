@@ -9,6 +9,7 @@ const {
   codexAccountDisplayLabel,
   codexAccountIdForProvider,
   codexAccountMatchesProvider,
+  codexManagedAccountPlanLabel,
   isCodexLiveAccount,
   localLiveCodexProvider,
   maskEmailAddress
@@ -125,6 +126,22 @@ test('Codex account identity matches by key or normalized email fields', () => {
     accountKey: 'account-2',
     accountEmail: 'shared@example.com'
   }), 'two');
+});
+
+test('managed Codex plan labels prefer a matching successful provider', () => {
+  const account = {
+    accountKey: 'account-1',
+    email: 'user@example.com',
+    accountLabel: 'plus'
+  };
+  assert.equal(codexManagedAccountPlanLabel(account, [
+    { provider: 'codex', status: 'error', accountKey: 'account-1', accountLabel: 'team' },
+    { provider: 'codex', status: 'ok', accountKey: 'account-2', accountLabel: 'pro' },
+    { provider: 'codex', status: 'ok', accountKey: 'account-1', accountLabel: 'free' }
+  ]), 'free');
+  assert.equal(codexManagedAccountPlanLabel(account, [
+    { provider: 'codex', status: 'error', accountKey: 'account-1', accountLabel: 'free' }
+  ]), 'plus');
 });
 
 test('live Codex provider selection uses local raw limits with a legacy aggregate fallback', () => {

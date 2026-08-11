@@ -10662,6 +10662,7 @@ window.tokenMonitor.onTokscalePush?.((payload) => {
 
 function renderStatsUpdate() {
   render();
+  renderCodexAccounts();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
   renderToolPreferences();
@@ -12017,6 +12018,7 @@ function renderCodexAccounts() {
     empty.textContent = t('settings.codex.empty');
     listEl.append(empty);
   } else {
+    const codexProviders = localProviderStatuses('codex');
     for (const account of accounts) {
       const enabled = account.enabled !== false;
       const row = document.createElement('div');
@@ -12056,7 +12058,11 @@ function renderCodexAccounts() {
         : account.workspaceLabel;
       const accountMetadata = [
         workspaceLabel,
-        enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.codex.disabled')
+        enabled
+          ? limitProviderPresentationApi.limitProviderDisplayLabel(
+            accountIdentityApi.codexManagedAccountPlanLabel(account, codexProviders)
+          )
+          : t('settings.codex.disabled')
       ].filter((value, index, values) => value && values.indexOf(value) === index);
       info.textContent = accountMetadata.join(' · ');
       info.title = accountMetadata.join(' · ');

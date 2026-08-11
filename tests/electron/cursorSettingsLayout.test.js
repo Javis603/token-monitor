@@ -265,7 +265,9 @@ test('Codex account panel supports per-account enable toggles without showing ti
   assert.match(body, /account\.workspaceKind === 'personal'/);
   assert.match(body, /t\('settings\.codex\.personalWorkspace'\)/);
   assert.match(body, /account\.workspaceLabel/);
-  assert.match(body, /enabled \? limitProviderPresentationApi\.limitProviderDisplayLabel\(account\.accountLabel\) : t\('settings\.codex\.disabled'\)/);
+  assert.match(body, /const codexProviders = localProviderStatuses\('codex'\);/);
+  assert.match(body, /accountIdentityApi\.codexManagedAccountPlanLabel\(account, codexProviders\)/);
+  assert.match(body, /: t\('settings\.codex\.disabled'\)/);
   assert.match(body, /info\.textContent = accountMetadata\.join\(' · '\);/);
   assert.match(body, /right\.append\(info, remove\)/);
   assert.match(body, /row\.append\(input, main, right\)/);
