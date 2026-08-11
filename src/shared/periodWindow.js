@@ -1,0 +1,53 @@
+'use strict';
+
+(function exposePeriodWindow(root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) root.TokenMonitorPeriodWindow = api;
+})(typeof window !== 'undefined' ? window : null, function createPeriodWindowApi() {
+  function timestampMs(value) {
+    const date = value instanceof Date ? value : (value ? new Date(value) : null);
+    return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+  }
+
+  function utcDayKey(value) {
+    const ms = timestampMs(value);
+    return ms > 0 ? new Date(ms).toISOString().slice(0, 10) : '';
+  }
+
+  function utcMonthKey(value) {
+    return utcDayKey(value).slice(0, 7);
+  }
+
+  function recordDate(record) {
+    const ms = timestampMs(record?.receivedAt || record?.updatedAt);
+    return ms > 0 ? new Date(ms) : null;
+  }
+
+  function periodWindowStatus(periodWindows, periodName, now = Date.now()) {
+    if (periodName === 'allTime') return 'current';
+    const endMs = timestampMs(periodWindows?.[periodName]?.endsAt);
+    const nowMs = timestampMs(now);
+    if (!(endMs > 0) || !(nowMs > 0)) return 'unknown';
+    return nowMs >= endMs ? 'expired' : 'current';
+  }
+
+  // Hub aggregation keeps its historical mixed-version fallback: old producers
+  // without periodWindows can still expire short snapshots on UTC boundaries.
+  // Calendar-derived ranges use periodWindowStatus directly because a UTC guess
+  // cannot identify an old device's current local date after its window expires.
+  function isPeriodExpired(record, periodName, now = Date.now()) {
+    if (periodName === 'allTime') return false;
+    const status = periodWindowStatus(record?.periodWindows, periodName, now);
+    if (status !== 'unknown') return status === 'expired';
+    const recordedAt = recordDate(record);
+    const nowMs = timestampMs(now);
+    if (!recordedAt || !(nowMs > 0)) return false;
+    const nowDate = new Date(nowMs);
+    if (periodName === 'today') return utcDayKey(recordedAt) !== utcDayKey(nowDate);
+    if (periodName === 'month') return utcMonthKey(recordedAt) !== utcMonthKey(nowDate);
+    return false;
+  }
+
+  return { isPeriodExpired, periodWindowStatus };
+});

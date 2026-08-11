@@ -16,6 +16,7 @@ test('period selector keeps three equal slots and opens one shared popover witho
   assert.match(html, /<nav class="tabs"[\s\S]*data-period="today"[\s\S]*data-period="month"[\s\S]*data-period="allTime"/);
   assert.match(html, /id="periodPopover"[^>]*popover="auto"/);
   assert.doesNotMatch(html, /id="periodPopover"[^>]*view-switcher-menu/);
+  assert.ok(html.indexOf('../../shared/periodWindow.js') < html.indexOf('periodRanges.js'));
   assert.ok(html.indexOf('periodRanges.js') < html.indexOf('app.js'));
   assert.match(css, /\.tabs\s*\{[\s\S]*grid-template-columns:\s*repeat\(3, 1fr\)/);
   assert.match(css, /\.period-popover:not\(:popover-open\)\s*\{\s*display:\s*none/);

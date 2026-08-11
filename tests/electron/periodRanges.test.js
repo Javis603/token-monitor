@@ -45,6 +45,7 @@ const daily = [
 const nativeToday = {
   totalTokens: 40,
   costUsd: 4,
+  capabilities: { tokenComponents: true, clientModels: true },
   clients: { codex: 25, claude: 15 },
   clientCosts: { codex: 2.5, claude: 1.5 },
   models: { 'gpt-5': 25, opus: 15 },
@@ -106,7 +107,7 @@ test('last 7 days means today plus the previous six local date keys', () => {
   );
 });
 
-test('remote device ranges advance in the device timezone after its reported window expires', () => {
+test('remote device ranges advance only with a reliable device calendar', () => {
   const now = new Date('2026-08-11T16:30:00.000Z');
   assert.equal(currentDayKey({ today: {
     key: '2026-08-11',
@@ -120,7 +121,56 @@ test('remote device ranges advance in the device timezone after its reported win
   assert.equal(currentDayKey({ today: {
     key: '2026-08-10',
     endsAt: '2026-08-11T00:00:00.000Z'
-  } }, now), '2026-08-11');
+  } }, now), '');
+});
+
+test('offline device does not patch an expired today snapshot onto the next local day', () => {
+  const snapshot = deriveRangeSnapshot([{
+    periodWindows: { today: {
+      key: '2026-08-11',
+      endsAt: '2026-08-11T16:00:00.000Z',
+      timeZone: 'Asia/Hong_Kong'
+    } },
+    history: { daily: [{
+      date: '2026-08-11', tokens: 100, cost: 1,
+      capabilities: { tokenComponents: true, clientModels: true }
+    }] },
+    nativeToday: {
+      totalTokens: 100,
+      costUsd: 1,
+      capabilities: { tokenComponents: true, clientModels: true }
+    }
+  }], {
+    status: 'ready',
+    selection: 'last7',
+    now: new Date('2026-08-11T16:30:00.000Z')
+  });
+
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.period.totalTokens, 100);
+  assert.deepEqual(snapshot.daily.map((row) => [row.date, row.tokens]), [['2026-08-11', 100]]);
+});
+
+test('expired legacy device calendar fails closed instead of switching to UTC', () => {
+  const snapshot = deriveRangeSnapshot([{
+    periodWindows: { today: {
+      key: '2026-08-11',
+      endsAt: '2026-08-11T16:00:00.000Z'
+    } },
+    history: { daily: [{ date: '2026-08-11', tokens: 100 }] },
+    nativeToday: { totalTokens: 100 }
+  }], {
+    status: 'ready',
+    selection: 'last7',
+    now: new Date('2026-08-11T16:30:00.000Z')
+  });
+
+  assert.deepEqual(snapshot, {
+    status: 'unavailable',
+    period: null,
+    daily: [],
+    summary: null
+  });
 });
 
 test('derived periods patch today from live stats and retain client/model attribution', () => {
@@ -183,6 +233,26 @@ test('derived periods mark legacy token components unavailable instead of treati
     capabilities: { clientModels: true }
   });
   assert.deepEqual(period.capabilities, { tokenComponents: false, clientModels: false });
+});
+
+test('legacy native today does not upgrade missing token components to exact zero', () => {
+  const period = derivePeriod([], {
+    selection: 'last7',
+    todayKey: '2026-08-11',
+    nativeToday: {
+      totalTokens: 100,
+      clients: { codex: 100 },
+      models: { 'gpt-5': 100 }
+    }
+  });
+
+  assert.deepEqual(period.capabilities, { tokenComponents: false, clientModels: false });
+  assert.equal(period.totalTokens, 100);
+  assert.equal(period.unclassifiedTokens, 100);
+  assert.equal(period.clientUnclassifiedTokens.codex, 100);
+  assert.equal(period.modelUnclassifiedTokens['gpt-5'], 100);
+  assert.equal(period.cacheReadTokens, 0);
+  assert.equal(period.outputTokens, 0);
 });
 
 test('derived capabilities require every selected history row to be explicitly complete', () => {

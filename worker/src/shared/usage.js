@@ -7,6 +7,7 @@ const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
 const { coerceHistory, mergeHistories } = require('./history');
+const { isPeriodExpired } = require('./periodWindow');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
@@ -102,6 +103,8 @@ function emptyPeriod() {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     outputTokens: 0,
+    unclassifiedTokens: 0,
+    capabilities: { tokenComponents: true, clientModels: true },
     // tokscale's per-entry `performance` block, summed. `timedDurationMs` is the sum of
     // per-message durations (NOT a wall-clock span — concurrent sessions count twice), and
     // `timedTokens` covers only the messages that carried a duration, and `timedOutputTokens`
@@ -128,11 +131,13 @@ function emptyPeriod() {
     clientCacheReads: {},
     clientCacheWrites: {},
     clientOutputs: {},
+    clientUnclassifiedTokens: {},
     models: {},
     modelCosts: {},
     modelCacheReads: {},
     modelCacheWrites: {},
     modelOutputs: {},
+    modelUnclassifiedTokens: {},
     clientModels: {},
     clientModelCosts: {},
     projects: Object.create(null),
@@ -511,13 +516,25 @@ function normalizeSession(input, fallbackKey) {
 
 function normalizePeriod(input, options = {}) {
   const period = emptyPeriod();
-  if (!input || typeof input !== 'object') return period;
+  if (!input || typeof input !== 'object') {
+    period.capabilities = { tokenComponents: false, clientModels: false };
+    return period;
+  }
+  period.capabilities = {
+    tokenComponents: input.capabilities?.tokenComponents === true,
+    clientModels: input.capabilities?.clientModels === true
+  };
   const projectsEnabled = options.projectsEnabled !== false;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
   period.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
+  period.unclassifiedTokens = Math.max(0, Math.round(asNumber(
+    hasOwn(input, 'unclassifiedTokens') || hasOwn(input, 'unclassified_tokens')
+      ? (input.unclassifiedTokens ?? input.unclassified_tokens)
+      : (period.capabilities.tokenComponents ? 0 : period.totalTokens)
+  )));
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
   // Capped at outputTokens because the gate makes that a physical bound: output is counted
   // whole or not at all, so a period cannot have timed more output than it produced. The
@@ -536,6 +553,13 @@ function normalizePeriod(input, options = {}) {
         if (input.clientCacheReads?.[client]) period.clientCacheReads[key] = (period.clientCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheReads[client])));
         if (input.clientCacheWrites?.[client]) period.clientCacheWrites[key] = (period.clientCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheWrites[client])));
         if (input.clientOutputs?.[client]) period.clientOutputs[key] = (period.clientOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.clientOutputs[client])));
+        const unclassified = hasOwn(input.clientUnclassifiedTokens, client)
+          ? input.clientUnclassifiedTokens[client]
+          : (period.capabilities.tokenComponents ? 0 : value);
+        if (asNumber(unclassified) > 0) {
+          period.clientUnclassifiedTokens[key] = (period.clientUnclassifiedTokens[key] || 0)
+            + Math.max(0, Math.round(asNumber(unclassified)));
+        }
       }
     }
   }
@@ -553,6 +577,13 @@ function normalizePeriod(input, options = {}) {
         if (input.modelCacheReads?.[model]) period.modelCacheReads[key] = (period.modelCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheReads[model])));
         if (input.modelCacheWrites?.[model]) period.modelCacheWrites[key] = (period.modelCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheWrites[model])));
         if (input.modelOutputs?.[model]) period.modelOutputs[key] = (period.modelOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.modelOutputs[model])));
+        const unclassified = hasOwn(input.modelUnclassifiedTokens, model)
+          ? input.modelUnclassifiedTokens[model]
+          : (period.capabilities.tokenComponents ? 0 : value);
+        if (asNumber(unclassified) > 0) {
+          period.modelUnclassifiedTokens[key] = (period.modelUnclassifiedTokens[key] || 0)
+            + Math.max(0, Math.round(asNumber(unclassified)));
+        }
       }
     }
   }
@@ -993,11 +1024,18 @@ function aggregateHistory(devices) {
 // emptyPeriod()-shaped object). Shared by device aggregation and the WSL merge so
 // the two never diverge on which period fields exist.
 function addPeriodInto(target, source) {
+  target.capabilities = {
+    tokenComponents: target.capabilities?.tokenComponents === true
+      && source.capabilities?.tokenComponents === true,
+    clientModels: target.capabilities?.clientModels === true
+      && source.capabilities?.clientModels === true
+  };
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
   target.cacheReadTokens += source.cacheReadTokens;
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
+  target.unclassifiedTokens += source.unclassifiedTokens;
   target.timedTokens += source.timedTokens;
   target.timedOutputTokens += source.timedOutputTokens;
   target.timedDurationMs += source.timedDurationMs;
@@ -1006,6 +1044,7 @@ function addPeriodInto(target, source) {
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];
     if (source.clientCacheWrites?.[client]) target.clientCacheWrites[client] = (target.clientCacheWrites[client] || 0) + source.clientCacheWrites[client];
     if (source.clientOutputs?.[client]) target.clientOutputs[client] = (target.clientOutputs[client] || 0) + source.clientOutputs[client];
+    if (source.clientUnclassifiedTokens?.[client]) target.clientUnclassifiedTokens[client] = (target.clientUnclassifiedTokens[client] || 0) + source.clientUnclassifiedTokens[client];
   }
   for (const [client, cost] of Object.entries(source.clientCosts)) target.clientCosts[client] = (target.clientCosts[client] || 0) + cost;
   for (const [model, tokens] of Object.entries(source.models)) {
@@ -1013,6 +1052,7 @@ function addPeriodInto(target, source) {
     if (source.modelCacheReads?.[model]) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + source.modelCacheReads[model];
     if (source.modelCacheWrites?.[model]) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + source.modelCacheWrites[model];
     if (source.modelOutputs?.[model]) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + source.modelOutputs[model];
+    if (source.modelUnclassifiedTokens?.[model]) target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + source.modelUnclassifiedTokens[model];
   }
   for (const [model, cost] of Object.entries(source.modelCosts)) target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
   for (const [client, models] of Object.entries(source.clientModels)) {
@@ -1040,26 +1080,6 @@ function mergePeriods(...periods) {
     if (period) addPeriodInto(target, normalizePeriod(period));
   }
   return target;
-}
-
-// True when a device's today/month snapshot belongs to a window that has
-// already ended, so it must not be summed into the live aggregate. Uses the
-// device-local endsAt when present; old agents without periodWindows fall back
-// to a best-effort UTC day/month comparison against the snapshot timestamp.
-// allTime is cumulative and never expires.
-function isPeriodExpired(record, periodName, nowMs) {
-  if (periodName === 'allTime') return false;
-  const endsAt = record?.periodWindows?.[periodName]?.endsAt;
-  if (endsAt) {
-    const endMs = timestampMs(endsAt);
-    if (endMs > 0) return nowMs >= endMs;
-  }
-  const recordedAt = recordDate(record);
-  if (!recordedAt) return false;
-  const nowDate = new Date(nowMs);
-  if (periodName === 'today') return utcDayKey(recordedAt) !== utcDayKey(nowDate);
-  if (periodName === 'month') return utcMonthKey(recordedAt) !== utcMonthKey(nowDate);
-  return false;
 }
 
 function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {

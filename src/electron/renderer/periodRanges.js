@@ -1,8 +1,11 @@
 (function exposePeriodRanges(root, factory) {
-  const api = factory();
+  const periodWindowApi = typeof module === 'object' && module.exports
+    ? require('../../shared/periodWindow')
+    : root?.TokenMonitorPeriodWindow;
+  const api = factory(periodWindowApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorPeriodRanges = api;
-})(typeof window !== 'undefined' ? window : null, function createPeriodRangesApi() {
+})(typeof window !== 'undefined' ? window : null, function createPeriodRangesApi(periodWindowApi = {}) {
   const SLOT_MODES = Object.freeze({
     today: Object.freeze(['today']),
     month: Object.freeze(['month', 'week', 'last7', 'last30']),
@@ -120,24 +123,34 @@
     }
   }
 
-  function currentDayKey(periodWindows, value = new Date()) {
+  function currentDayState(periodWindows, value = new Date()) {
     const now = value instanceof Date ? value : new Date(value);
-    if (Number.isNaN(now.getTime())) return localDayKey();
+    if (Number.isNaN(now.getTime())) return { status: 'unavailable', key: '', nativeTodayCurrent: false };
     const window = periodWindows?.today || {};
-    if (!window || Object.keys(window).length === 0) return localDayKey(now);
+    if (!window || Object.keys(window).length === 0) {
+      return { status: 'unavailable', key: '', nativeTodayCurrent: false };
+    }
+    const windowStatus = periodWindowApi.periodWindowStatus?.(periodWindows, 'today', now) || 'unknown';
     const timeZone = String(window.timeZone || '').trim();
     if (timeZone && isValidTimeZone(timeZone)) {
       try {
         const parts = new Intl.DateTimeFormat('en-CA', { timeZone }).formatToParts(now);
         const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
         const key = `${values.year}-${values.month}-${values.day}`;
-        if (normalizeDateKey(key)) return key;
+        if (normalizeDateKey(key)) {
+          return { status: 'ready', key, nativeTodayCurrent: windowStatus === 'current' };
+        }
       } catch (_) { /* fall through to the legacy window key */ }
     }
     const key = normalizeDateKey(window.key);
-    const endsAt = Date.parse(String(window.endsAt || ''));
-    if (key && Number.isFinite(endsAt) && now.getTime() < endsAt) return key;
-    return now.toISOString().slice(0, 10);
+    if (key && windowStatus === 'current') {
+      return { status: 'ready', key, nativeTodayCurrent: true };
+    }
+    return { status: 'unavailable', key: '', nativeTodayCurrent: false };
+  }
+
+  function currentDayKey(periodWindows, value = new Date()) {
+    return currentDayState(periodWindows, value).key;
   }
 
   function weekStartsOn(locale) {
@@ -196,6 +209,8 @@
   }
 
   function dailyRowFromPeriod(period, date, previous = {}) {
+    const tokenComponents = period?.capabilities?.tokenComponents === true;
+    const clientModels = period?.capabilities?.clientModels === true;
     const perClient = {};
     for (const [client, tokens] of Object.entries(period?.clients || {})) {
       setOwn(perClient, client, {
@@ -205,7 +220,9 @@
         cacheReadTokens: finiteNumber(period?.clientCacheReads?.[client]),
         cacheWriteTokens: finiteNumber(period?.clientCacheWrites?.[client]),
         outputTokens: finiteNumber(period?.clientOutputs?.[client]),
-        unclassifiedTokens: 0
+        unclassifiedTokens: Object.prototype.hasOwnProperty.call(period?.clientUnclassifiedTokens || {}, client)
+          ? finiteNumber(period.clientUnclassifiedTokens[client])
+          : (tokenComponents ? 0 : finiteNumber(tokens))
       });
     }
     const perModel = {};
@@ -216,7 +233,9 @@
         cacheReadTokens: finiteNumber(period?.modelCacheReads?.[model]),
         cacheWriteTokens: finiteNumber(period?.modelCacheWrites?.[model]),
         outputTokens: finiteNumber(period?.modelOutputs?.[model]),
-        unclassifiedTokens: 0
+        unclassifiedTokens: Object.prototype.hasOwnProperty.call(period?.modelUnclassifiedTokens || {}, model)
+          ? finiteNumber(period.modelUnclassifiedTokens[model])
+          : (tokenComponents ? 0 : finiteNumber(tokens))
       });
     }
     const perClientModel = {};
@@ -238,8 +257,10 @@
       cacheReadTokens: finiteNumber(period?.cacheReadTokens),
       cacheWriteTokens: finiteNumber(period?.cacheWriteTokens),
       outputTokens: finiteNumber(period?.outputTokens),
-      unclassifiedTokens: 0,
-      capabilities: { tokenComponents: true, clientModels: true },
+      unclassifiedTokens: Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens')
+        ? finiteNumber(period.unclassifiedTokens)
+        : (tokenComponents ? 0 : finiteNumber(period?.totalTokens)),
+      capabilities: { tokenComponents, clientModels },
       perClient,
       perModel,
       perClientModel
@@ -463,12 +484,17 @@
     const rowGroups = [];
     const rangeEnds = [];
     for (const source of sources || []) {
-      const todayKey = normalizeDateKey(source?.todayKey)
-        || currentDayKey(source?.periodWindows, options.now);
+      const explicitTodayKey = normalizeDateKey(source?.todayKey);
+      const dayState = explicitTodayKey
+        ? { status: 'ready', key: explicitTodayKey, nativeTodayCurrent: source?.nativeTodayCurrent === true }
+        : currentDayState(source?.periodWindows, options.now);
+      if (dayState.status !== 'ready') {
+        return { status: 'unavailable', period: null, daily: [], summary: null };
+      }
       const sourceOptions = {
         ...options,
-        todayKey,
-        nativeToday: source?.nativeToday
+        todayKey: dayState.key,
+        nativeToday: dayState.nativeTodayCurrent ? source?.nativeToday : null
       };
       const daily = source?.history?.daily || [];
       periods.push(derivePeriod(daily, sourceOptions));

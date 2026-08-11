@@ -65,4 +65,10 @@ test('collectUsageOnce stamps updatedAt and periodWindows from one injected cloc
   assert.equal(summary.osName, 'macOS');
   assert.equal(summary.osVersion, '26.0');
   assert.deepEqual(summary.periodWindows, computePeriodWindows(now));
+  for (const periodName of ['today', 'month', 'allTime']) {
+    assert.deepEqual(summary[periodName].capabilities, {
+      tokenComponents: true,
+      clientModels: true
+    });
+  }
 });

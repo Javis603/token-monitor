@@ -9,8 +9,45 @@ const {
   extractUsageFromTokscale,
   mergeDeviceRecord,
   mergePeriods,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('../../src/shared/usage');
+
+test('normalizePeriod preserves explicit live attribution capabilities', () => {
+  const legacy = normalizePeriod({ totalTokens: 100, clients: { codex: 100 } });
+  assert.deepEqual(legacy.capabilities, { tokenComponents: false, clientModels: false });
+  assert.equal(legacy.unclassifiedTokens, 100);
+  assert.equal(legacy.clientUnclassifiedTokens.codex, 100);
+
+  const current = normalizePeriod({
+    totalTokens: 100,
+    capabilities: { tokenComponents: true, clientModels: true }
+  });
+  assert.deepEqual(current.capabilities, { tokenComponents: true, clientModels: true });
+  assert.equal(current.unclassifiedTokens, 0);
+});
+
+test('mergePeriods preserves the exact subset and isolates only the legacy remainder', () => {
+  const exact = normalizePeriod({
+    totalTokens: 40,
+    cacheReadTokens: 30,
+    outputTokens: 10,
+    clients: { codex: 40 },
+    clientCacheReads: { codex: 30 },
+    clientOutputs: { codex: 10 },
+    capabilities: { tokenComponents: true, clientModels: true }
+  });
+  const legacy = normalizePeriod({ totalTokens: 60, clients: { claude: 60 } });
+  const merged = mergePeriods(exact, legacy);
+
+  assert.deepEqual(merged.capabilities, { tokenComponents: false, clientModels: false });
+  assert.equal(merged.totalTokens, 100);
+  assert.equal(merged.cacheReadTokens, 30);
+  assert.equal(merged.outputTokens, 10);
+  assert.equal(merged.unclassifiedTokens, 60);
+  assert.equal(merged.clientUnclassifiedTokens.codex, undefined);
+  assert.equal(merged.clientUnclassifiedTokens.claude, 60);
+});
 
 function recordWithLimits(extra = {}) {
   return {
@@ -681,6 +718,8 @@ test('extractUsageFromTokscale normalizes Antigravity client names', () => {
 
   assert.equal(period.clients.antigravity, 42);
   assert.equal(period.clientCosts.antigravity, 0.125);
+  assert.deepEqual(period.capabilities, { tokenComponents: true, clientModels: true });
+  assert.equal(period.unclassifiedTokens, 0);
 });
 
 test('extractUsageFromTokscale normalizes Kimi, Qwen, and Grok Build client names', () => {
