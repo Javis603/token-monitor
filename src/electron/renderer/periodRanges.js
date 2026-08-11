@@ -403,25 +403,93 @@
     return merged;
   }
 
-  function rangeSummary(daily, options = {}) {
-    const rows = dailyRowsForSelection(daily, options);
-    const range = rangeForSelection(options.selection, options);
-    const activeDates = new Set(rows
+  function mergeSelectedDaily(rowGroups) {
+    const byDate = new Map();
+    for (const rows of rowGroups || []) {
+      for (const row of rows || []) {
+        const date = normalizeDateKey(row?.date);
+        if (!date) continue;
+        const current = byDate.get(date) || {
+          date,
+          tokens: 0,
+          cost: 0,
+          activeTimeMs: 0
+        };
+        current.tokens += finiteNumber(row?.tokens);
+        current.cost += finiteNumber(row?.cost);
+        current.activeTimeMs += finiteNumber(row?.activeTimeMs);
+        byDate.set(date, current);
+      }
+    }
+    return Array.from(byDate.values())
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((row) => ({
+        ...row,
+        tokens: Math.max(0, Math.round(row.tokens)),
+        cost: Number(row.cost.toFixed(6)),
+        activeTimeMs: Math.max(0, Math.round(row.activeTimeMs))
+      }));
+  }
+
+  function summarizeSelectedRows(rows, endDate = '') {
+    const visible = Array.isArray(rows) ? rows : [];
+    const activeDates = new Set(visible
       .filter((row) => finiteNumber(row?.tokens) > 0)
       .map((row) => normalizeDateKey(row?.date))
       .filter(Boolean));
     let currentStreak = 0;
-    let cursor = range?.end || '';
+    let cursor = normalizeDateKey(endDate);
     while (cursor && activeDates.has(cursor)) {
       currentStreak += 1;
       cursor = dayKeyAddDays(cursor, -1);
     }
     return {
-      activeDays: rows.filter((row) => finiteNumber(row?.tokens) > 0).length,
+      activeDays: activeDates.size,
       currentStreak,
-      activeTimeMs: rows.reduce((sum, row) => sum + finiteNumber(row?.activeTimeMs), 0),
-      peakDayTokens: rows.reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens)), 0)
+      activeTimeMs: visible.reduce((sum, row) => sum + finiteNumber(row?.activeTimeMs), 0),
+      peakDayTokens: visible.reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens)), 0)
     };
+  }
+
+  // One selected-range pipeline for the headline, breakdowns and Trends. Each source
+  // chooses its own current calendar day from its period window, then the exact rows
+  // and period derived from that selection are merged together. A non-ready status
+  // deliberately returns no period: callers must render loading/unavailable rather
+  // than treating a compact preview or stale history as a measured zero.
+  function deriveRangeSnapshot(sources, options = {}) {
+    const status = options.status || 'ready';
+    if (status !== 'ready') return { status, period: null, daily: [], summary: null };
+    const periods = [];
+    const rowGroups = [];
+    const rangeEnds = [];
+    for (const source of sources || []) {
+      const todayKey = normalizeDateKey(source?.todayKey)
+        || currentDayKey(source?.periodWindows, options.now);
+      const sourceOptions = {
+        ...options,
+        todayKey,
+        nativeToday: source?.nativeToday
+      };
+      const daily = source?.history?.daily || [];
+      periods.push(derivePeriod(daily, sourceOptions));
+      rowGroups.push(dailyRowsForSelection(daily, sourceOptions));
+      const range = rangeForSelection(options.selection, sourceOptions);
+      if (range?.end) rangeEnds.push(range.end);
+    }
+    const daily = mergeSelectedDaily(rowGroups);
+    const endDate = rangeEnds.sort().at(-1) || '';
+    return {
+      status: 'ready',
+      period: mergePeriods(periods),
+      daily,
+      summary: summarizeSelectedRows(daily, endDate)
+    };
+  }
+
+  function rangeSummary(daily, options = {}) {
+    const rows = dailyRowsForSelection(daily, options);
+    const range = rangeForSelection(options.selection, options);
+    return summarizeSelectedRows(rows, range?.end);
   }
 
   return {
@@ -431,6 +499,7 @@
     dailyRowsForSelection,
     dayKeyAddDays,
     currentDayKey,
+    deriveRangeSnapshot,
     derivePeriod,
     displayLabel,
     effectiveSelection,

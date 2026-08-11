@@ -368,6 +368,15 @@
     };
   }
 
+  function historyLoadStatus({ signature, loadedSignature, failedSignature, available = true } = {}) {
+    if (!available) return 'unavailable';
+    const target = String(signature || '').trim();
+    if (!target) return 'ready';
+    if (String(loadedSignature || '').trim() === target) return 'ready';
+    if (String(failedSignature || '').trim() === target) return 'unavailable';
+    return 'loading';
+  }
+
   function homeActivityWheelRoute(event) {
     if (event?.shiftKey) return 'activity-horizontal';
     const deltaX = Math.abs(Number(event?.deltaX || 0));
@@ -416,6 +425,7 @@
     shouldFetchHomeHistory,
     shouldRetryHomeHistory,
     homeHistoryFetchOutcome,
+    historyLoadStatus,
     homeActivityHeatmapLayout,
     homeActivityWheelRoute,
     homeActivityScrollTarget,

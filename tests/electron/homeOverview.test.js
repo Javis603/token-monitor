@@ -22,7 +22,8 @@ const {
   homeHistorySignature,
   shouldFetchHomeHistory,
   shouldRetryHomeHistory,
-  homeHistoryFetchOutcome
+  homeHistoryFetchOutcome,
+  historyLoadStatus
 } = require('../../src/electron/renderer/homeOverview');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
@@ -100,7 +101,7 @@ test('Home activity tooltip survives Home rerenders and is dismissed when the vi
   // renderHome replaces the scroller on live stats refreshes. Preserve the pointer point,
   // restore the attached scroller position before measuring the new cell, and repeat the
   // hover restoration after ResizeObserver confirms that layout has settled.
-  const renderHome = rendererSource.match(/function renderHome\(\) \{([\s\S]*?)\n\}\n\nfunction render\(\)/);
+  const renderHome = rendererSource.match(/function renderHome\(periodState = currentPeriodState\(\)\) \{([\s\S]*?)\n\}\n\nfunction render\(\)/);
   assert.ok(renderHome, 'renderHome exists');
   assert.match(renderHome[1], /hideHomeActivityTooltip\(\{\s*preserveHover:\s*true\s*\}\)/);
   assert.match(
@@ -131,7 +132,7 @@ test('Home activity tooltip survives Home rerenders and is dismissed when the vi
 
 test('Home device rows keep only the local badge and mute stale devices without status text', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const match = rendererSource.match(/function renderHomeDeviceModule\(\) \{([\s\S]*?)\n\}\n\nfunction dailyWithHeatIntensity/);
+  const match = rendererSource.match(/function renderHomeDeviceModule\([^)]*\) \{([\s\S]*?)\n\}\n\nfunction dailyWithHeatIntensity/);
   assert.ok(match, 'renderHomeDeviceModule exists');
   assert.match(match[1], /home-device-badge/);
   assert.match(match[1], /badge\.textContent = 'you'/);
@@ -539,7 +540,7 @@ test('loadHomeHistory wires the bounded retry through a timer, not a render', ()
   assert.match(body, /setTimeout\(/, 'the retry is timer-driven so it cannot re-enter on every render');
   assert.match(body, /homeHistoryRetries \+= 1/, 'the retry counter advances toward the cap');
   assert.match(body, /homeHistoryRetrySignature !== requestSignature[\s\S]*?homeHistoryRetries = 0/, 'a new signature receives a fresh retry budget');
-  assert.match(body, /homeHistoryLoadedSignature === requestSignature/, 'stale display history cannot suppress a retry');
+  assert.match(body, /homeHistoryLoadedSignature === requestKey/, 'stale display history cannot suppress a retry');
 });
 
 test('historyPreviewKey is empty for no days and changes as the daily tail moves', () => {
@@ -658,6 +659,15 @@ test('homeHistoryFetchOutcome accepts an empty result for a zero-usage account',
     history: emptyHistory,
     previewHasDays: false
   }), { loadedDays: false, accepted: true });
+});
+
+test('historyLoadStatus distinguishes a current failure from loading and an empty account', () => {
+  assert.equal(historyLoadStatus({ signature: '', available: true }), 'ready');
+  assert.equal(historyLoadStatus({ signature: 'rev-2', loadedSignature: 'rev-2' }), 'ready');
+  assert.equal(historyLoadStatus({ signature: 'rev-2', failedSignature: 'rev-2' }), 'unavailable');
+  assert.equal(historyLoadStatus({ signature: 'rev-2', failedSignature: 'rev-1' }), 'loading');
+  assert.equal(historyLoadStatus({ signature: '__empty_history__' }), 'loading');
+  assert.equal(historyLoadStatus({ signature: 'rev-2', available: false }), 'unavailable');
 });
 
 test('shouldFetchHomeHistory never polls a zero-usage account', () => {

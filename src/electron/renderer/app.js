@@ -307,6 +307,7 @@ state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
 state.homeHistoryLoadedSignature = '';
+state.homeHistoryFailedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.deviceHistories = null;
 state.deviceHistoriesBusy = false;
@@ -767,6 +768,30 @@ function fullHistoryForStats(stats) {
   return stats?.history || { daily: [] };
 }
 
+function derivedRangeOptions(status = 'ready') {
+  return {
+    status,
+    selection: effectivePeriodSelection(),
+    locale: currentLocale(),
+    now: new Date(),
+    rangeStart: state.settings?.periodRangeStart,
+    rangeEnd: state.settings?.periodRangeEnd
+  };
+}
+
+function homeHistoryRequestKey(stats) {
+  return homeOverviewApi.homeHistorySignature(stats) || '__empty_history__';
+}
+
+function homeHistoryStatus() {
+  return homeOverviewApi.historyLoadStatus({
+    signature: homeHistoryRequestKey(state.stats),
+    loadedSignature: state.homeHistoryLoadedSignature,
+    failedSignature: state.homeHistoryFailedSignature,
+    available: Boolean(window.tokenMonitor.getDashboardHistory)
+  });
+}
+
 function usagePeriodForStats(stats, history = fullHistoryForStats(stats)) {
   const selection = effectivePeriodSelection();
   if (!periodRangesApi.isDerived(selection)) {
@@ -774,28 +799,48 @@ function usagePeriodForStats(stats, history = fullHistoryForStats(stats)) {
       totalTokens: 0, costUsd: 0, clients: {}, clientCosts: {}, models: {}, modelCosts: {}
     };
   }
-  return periodRangesApi.derivePeriod(history?.daily || [], {
-    selection,
-    locale: currentLocale(),
-    todayKey: periodRangesApi.currentDayKey(stats?.periodWindows),
-    rangeStart: state.settings?.periodRangeStart,
-    rangeEnd: state.settings?.periodRangeEnd,
-    nativeToday: stats?.periods?.today || stats?.today,
-    capabilities: history?.capabilities
-  });
+  return periodRangesApi.deriveRangeSnapshot([{
+    history,
+    periodWindows: stats?.periodWindows,
+    nativeToday: stats?.periods?.today || stats?.today
+  }], derivedRangeOptions()).period;
+}
+
+function currentDerivedRangeSnapshot() {
+  if (!periodRangesApi.isDerived(effectivePeriodSelection())) return null;
+  const devices = Array.isArray(state.stats?.devices) ? state.stats.devices : [];
+  if (devices.length > 0) {
+    const status = deviceHistoriesStatus();
+    const sources = status === 'ready' ? devices.map((device) => {
+      const deviceId = String(device?.deviceId || device?.id || '').trim();
+      return {
+        history: state.deviceHistories?.[deviceId] || { daily: [] },
+        periodWindows: device?.periodWindows,
+        nativeToday: device?.periods?.today || device?.today
+      };
+    }) : [];
+    return periodRangesApi.deriveRangeSnapshot(sources, derivedRangeOptions(status));
+  }
+  const status = homeHistoryStatus();
+  const sources = status === 'ready' ? [{
+    history: state.homeHistory || { daily: [] },
+    periodWindows: state.stats?.periodWindows,
+    nativeToday: state.stats?.periods?.today || state.stats?.today
+  }] : [];
+  return periodRangesApi.deriveRangeSnapshot(sources, derivedRangeOptions(status));
+}
+
+function currentPeriodState() {
+  return currentDerivedRangeSnapshot() || {
+    status: 'ready',
+    period: usagePeriodForStats(state.stats),
+    daily: null,
+    summary: null
+  };
 }
 
 function currentUsagePeriod() {
-  if (periodRangesApi.isDerived(effectivePeriodSelection())
-    && Array.isArray(state.stats?.devices)
-    && state.stats.devices.length > 0
-    && deviceHistoriesStatus() === 'ready') {
-    return periodRangesApi.mergePeriods(state.stats.devices.map((device) => {
-      const deviceId = String(device?.deviceId || device?.id || '').trim();
-      return usagePeriodForStats(device, state.deviceHistories?.[deviceId] || { daily: [] });
-    }));
-  }
-  return usagePeriodForStats(state.stats);
+  return currentPeriodState().period || periodRangesApi.mergePeriods([]);
 }
 
 function deviceForCurrentPeriod(device) {
@@ -5521,7 +5566,13 @@ function turnNode(turn) {
 
 let contentReadySignaled = false;
 
-function renderTrends() {
+function periodHistoryMessageKey(status) {
+  return status === 'unavailable'
+    ? 'periodRange.historyUnavailable'
+    : 'periodRange.historyLoading';
+}
+
+function renderTrends(periodState = currentPeriodState()) {
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
@@ -5533,19 +5584,14 @@ function renderTrends() {
   let summary;
   let rangeLabel;
   if (derived) {
-    const history = fullHistoryForStats(state.stats);
-    const rangeOptions = {
-      selection,
-      locale: currentLocale(),
-      todayKey: periodRangesApi.localDayKey(),
-      rangeStart: state.settings?.periodRangeStart,
-      rangeEnd: state.settings?.periodRangeEnd,
-      nativeToday: state.stats?.periods?.today
-    };
-    points = periodRangesApi.dailyRowsForSelection(history?.daily || [], rangeOptions);
+    if (periodState.status !== 'ready') {
+      els.trendsPanel.innerHTML = `<div class="trends-empty">${t(periodHistoryMessageKey(periodState.status))}</div>`;
+      return;
+    }
+    points = periodState.daily;
     metric = 'tokens';
     labelKey = 'date';
-    summary = periodRangesApi.rangeSummary(history?.daily || [], rangeOptions);
+    summary = periodState.summary;
     rangeLabel = periodChoiceLabel(selection);
   } else {
     const selected = charts.selectPreviewSeries(preview, state.period);
@@ -5664,12 +5710,14 @@ async function loadHomeHistory() {
   // render — so Home is not stranded on the 30-day preview until the history genuinely
   // changes, which for an account with history but no current activity might be never.
   const requestSignature = homeOverviewApi.homeHistorySignature(state.stats);
+  const requestKey = homeHistoryRequestKey(state.stats);
   const previewHadDays = homeOverviewApi.historyHasDays(state.stats?.historyPreview);
   if (state.homeHistoryRetrySignature !== requestSignature) {
     clearTimeout(state.homeHistoryRetryTimer);
     state.homeHistoryRetryTimer = null;
     state.homeHistoryRetrySignature = requestSignature;
     state.homeHistoryRetries = 0;
+    state.homeHistoryFailedSignature = '';
   }
   state.homeHistoryRequested = true;
   state.homeHistorySignature = requestSignature;
@@ -5693,7 +5741,8 @@ async function loadHomeHistory() {
     });
     if (outcome.accepted) {
       state.homeHistory = fetchedHistory;
-      state.homeHistoryLoadedSignature = requestSignature;
+      state.homeHistoryLoadedSignature = requestKey;
+      state.homeHistoryFailedSignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistoryRetrySignature = '';
       clearTimeout(state.homeHistoryRetryTimer);
@@ -5710,21 +5759,25 @@ async function loadHomeHistory() {
         state.homeHistoryRetryTimer = null;
         // Stale display data is not proof that this signature loaded. Retry only
         // while the target is still current and no later request accepted it.
-        if (state.homeHistoryLoadedSignature === requestSignature) return;
+        if (state.homeHistoryLoadedSignature === requestKey) return;
         if (homeOverviewApi.homeHistorySignature(state.stats) !== requestSignature) return;
         state.homeHistorySignature = '';
         void loadHomeHistory();
       }, HOME_HISTORY_RETRY_MS);
+    } else {
+      state.homeHistoryFailedSignature = requestKey;
     }
     if (state.breakdown === 'home' || periodRangesApi.isDerived(effectivePeriodSelection())) render();
   }
 }
 
 function deviceHistoriesStatus() {
-  const signature = homeOverviewApi.homeHistorySignature(state.stats);
-  if (signature && state.deviceHistoriesLoadedSignature === signature) return 'ready';
-  if (signature && state.deviceHistoriesFailedSignature === signature) return 'unavailable';
-  return 'loading';
+  return homeOverviewApi.historyLoadStatus({
+    signature: homeOverviewApi.homeHistorySignature(state.stats),
+    loadedSignature: state.deviceHistoriesLoadedSignature,
+    failedSignature: state.deviceHistoriesFailedSignature,
+    available: Boolean(window.tokenMonitor.getDeviceHistories)
+  });
 }
 
 async function loadDeviceHistories() {
@@ -6127,8 +6180,15 @@ function renderHomeLimitModule() {
   return module;
 }
 
-function renderHomeModelModule(period) {
+function renderHomeModelModule(period, periodStatus = 'ready') {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
+  if (periodStatus !== 'ready') {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    empty.textContent = t(periodHistoryMessageKey(periodStatus));
+    body.append(empty);
+    return module;
+  }
   const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period), period?.totalTokens, 5);
   if (rows.length === 0) {
     const empty = document.createElement('div');
@@ -6166,8 +6226,15 @@ function homeToolSourceRows(period) {
   }));
 }
 
-function renderHomeToolModule(period) {
+function renderHomeToolModule(period, periodStatus = 'ready') {
   const { module, body } = homeModuleShell('tool', t('home.tools'), 'tool');
+  if (periodStatus !== 'ready') {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    empty.textContent = t(periodHistoryMessageKey(periodStatus));
+    body.append(empty);
+    return module;
+  }
   const rows = homeOverviewApi.homeToolRows(homeToolSourceRows(period), period?.totalTokens, 5);
   if (rows.length === 0) {
     const empty = document.createElement('div');
@@ -6196,14 +6263,12 @@ function renderHomeToolModule(period) {
   return module;
 }
 
-function renderHomeDeviceModule() {
+function renderHomeDeviceModule(periodStatus = 'ready') {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  if (periodRangesApi.isDerived(effectivePeriodSelection()) && deviceHistoriesStatus() !== 'ready') {
+  if (periodStatus !== 'ready') {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
-    empty.textContent = t(deviceHistoriesStatus() === 'unavailable'
-      ? 'periodRange.deviceHistoryUnavailable'
-      : 'periodRange.deviceHistoryLoading');
+    empty.textContent = t(periodHistoryMessageKey(periodStatus));
     body.append(empty);
     return module;
   }
@@ -6653,7 +6718,7 @@ function renderHomeTrendsModule() {
   return module;
 }
 
-function renderHome() {
+function renderHome(periodState = currentPeriodState()) {
   if (!els.homePanel) return;
   // The previous scroller (and its ResizeObserver) is about to be replaced; drop the
   // observer so at most one is live. Keep the active tooltip visible while the
@@ -6661,7 +6726,7 @@ function renderHome() {
   hideHomeActivityTooltip({ preserveHover: true });
   state.homeActivityResizeObserver?.disconnect();
   state.homeActivityResizeObserver = null;
-  const period = currentUsagePeriod();
+  const period = periodState.period || periodRangesApi.mergePeriods([]);
   const moduleIds = homeModuleIds();
   if (moduleIds.includes('trends')) void loadHomeHistory();
   if (moduleIds.length === 0) {
@@ -6685,9 +6750,9 @@ function renderHome() {
   }
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
-    if (id === 'tool') return renderHomeToolModule(period);
-    if (id === 'device') return renderHomeDeviceModule();
-    if (id === 'model') return renderHomeModelModule(period);
+    if (id === 'tool') return renderHomeToolModule(period, periodState.status);
+    if (id === 'device') return renderHomeDeviceModule(periodState.status);
+    if (id === 'model') return renderHomeModelModule(period, periodState.status);
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
@@ -6715,34 +6780,44 @@ function render() {
   renderViewSwitcher();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
-  const period = currentUsagePeriod();
-  const nextTotal = Number(period.totalTokens || 0);
-  const totalChanged = nextTotal !== state.currentTotal;
-  if (state.suppressInitialNumberAnimation) {
+  const periodState = currentPeriodState();
+  const period = periodState.period || periodRangesApi.mergePeriods([]);
+  if (periodState.status !== 'ready') {
     cancelNumberAnimation();
-    numberAnimValue = nextTotal;
-    els.totalTokens.textContent = formatNumber(nextTotal);
-    updateTotalCompact(nextTotal);
-    state.suppressInitialNumberAnimation = false;
-  } else if (totalChanged) {
-    // Keep the compact chip visible through the count-up and lock the font to the
-    // widest endpoint first (a downward roll starts wider than it settles), so the
-    // number never vanishes, clips, or resizes mid-roll. Re-fit on completion so a
-    // window resize during the animation, or a downward settle, still ends correct.
-    const animationFrom = numberAnimHandle ? numberAnimValue : state.currentTotal;
-    const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
-    els.totalTokens.textContent = formatNumber(widest);
-    updateTotalCompact(nextTotal);
-    animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000);
-    pulseLiveDot();
-  } else if (!headlineNumberIsAnimatingTo(nextTotal)) {
-    cancelNumberAnimation();
-    numberAnimValue = nextTotal;
-    els.totalTokens.textContent = formatNumber(nextTotal);
-    updateTotalCompact(nextTotal);
+    numberAnimValue = 0;
+    els.totalTokens.textContent = '—';
+    hideTotalCompact();
+    state.currentTotal = null;
+    els.cost.textContent = t(periodHistoryMessageKey(periodState.status));
+  } else {
+    const nextTotal = Number(period.totalTokens || 0);
+    const totalChanged = nextTotal !== state.currentTotal;
+    if (state.suppressInitialNumberAnimation) {
+      cancelNumberAnimation();
+      numberAnimValue = nextTotal;
+      els.totalTokens.textContent = formatNumber(nextTotal);
+      updateTotalCompact(nextTotal);
+      state.suppressInitialNumberAnimation = false;
+    } else if (totalChanged) {
+      // Keep the compact chip visible through the count-up and lock the font to the
+      // widest endpoint first (a downward roll starts wider than it settles), so the
+      // number never vanishes, clips, or resizes mid-roll. Re-fit on completion so a
+      // window resize during the animation, or a downward settle, still ends correct.
+      const animationFrom = numberAnimHandle ? numberAnimValue : state.currentTotal;
+      const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
+      els.totalTokens.textContent = formatNumber(widest);
+      updateTotalCompact(nextTotal);
+      animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000);
+      pulseLiveDot();
+    } else if (!headlineNumberIsAnimatingTo(nextTotal)) {
+      cancelNumberAnimation();
+      numberAnimValue = nextTotal;
+      els.totalTokens.textContent = formatNumber(nextTotal);
+      updateTotalCompact(nextTotal);
+    }
+    state.currentTotal = nextTotal;
+    els.cost.textContent = formatCost(period.costUsd || 0);
   }
-  state.currentTotal = nextTotal;
-  els.cost.textContent = formatCost(period.costUsd || 0);
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
@@ -6758,7 +6833,7 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.limitsPanel.classList.add('hidden');
     els.homePanel.classList.remove('hidden');
-    renderHome();
+    renderHome(periodState);
   } else if (state.breakdown === 'limits') {
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
@@ -6772,7 +6847,7 @@ function render() {
     els.limitsPanel.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.remove('hidden');
-    renderTrends();
+    renderTrends(periodState);
   } else if (state.breakdown === 'status') {
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
@@ -6796,10 +6871,8 @@ function render() {
     els.breakdown.classList.remove('hidden');
     const selection = effectivePeriodSelection();
     const detailUnavailable = !periodRangesApi.supportsBreakdown(selection, state.breakdown);
-    const deviceHistoryStatus = state.breakdown === 'device' && periodRangesApi.isDerived(selection)
-      ? deviceHistoriesStatus()
-      : 'ready';
-    const rows = detailUnavailable || deviceHistoryStatus !== 'ready' ? [] : rowsForPeriod(period);
+    const rangeStatus = periodRangesApi.isDerived(selection) ? periodState.status : 'ready';
+    const rows = detailUnavailable || rangeStatus !== 'ready' ? [] : rowsForPeriod(period);
     let incompleteHint = '';
     if (!detailUnavailable && state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
@@ -6810,9 +6883,7 @@ function render() {
       ? (state.breakdown === 'project'
           ? 'periodRange.projectDetailUnavailable'
           : 'periodRange.sessionDetailUnavailable')
-      : (deviceHistoryStatus === 'loading'
-          ? 'periodRange.deviceHistoryLoading'
-          : (deviceHistoryStatus === 'unavailable' ? 'periodRange.deviceHistoryUnavailable' : ''));
+      : (rangeStatus === 'ready' ? '' : periodHistoryMessageKey(rangeStatus));
     renderRows(rows, { incompleteHint, emptyState });
   }
   
@@ -6957,6 +7028,7 @@ async function refreshStats(options = {}) {
       clearTimeout(state.homeHistoryRetryTimer);
       state.homeHistoryRetryTimer = null;
       state.homeHistoryLoadedSignature = '';
+      state.homeHistoryFailedSignature = '';
       state.homeHistoryRetrySignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';

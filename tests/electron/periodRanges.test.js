@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   dailyRowsForSelection,
   currentDayKey,
+  deriveRangeSnapshot,
   derivePeriod,
   displayLabel,
   effectiveSelection,
@@ -276,6 +277,59 @@ test('custom ranges are inclusive and reject malformed or reversed dates', () =>
   });
   assert.equal(period.totalTokens, 50);
   assert.equal(period.costUsd, 5);
+});
+
+test('derived snapshots never turn unavailable full history into a preview-sized zero', () => {
+  const snapshot = deriveRangeSnapshot([{
+    history: { daily },
+    periodWindows: { today: { timeZone: 'Asia/Hong_Kong' } }
+  }], {
+    status: 'unavailable',
+    selection: 'range',
+    rangeStart: '2026-03-01',
+    rangeEnd: '2026-03-31'
+  });
+
+  assert.deepEqual(snapshot, {
+    status: 'unavailable',
+    period: null,
+    daily: [],
+    summary: null
+  });
+});
+
+test('cross-timezone derived snapshots use the same selected rows for headline and Trends', () => {
+  const now = new Date('2026-08-11T16:30:00.000Z');
+  const snapshot = deriveRangeSnapshot([
+    {
+      periodWindows: { today: { timeZone: 'Asia/Taipei' } },
+      history: { daily: [
+        { date: '2026-08-06', tokens: 6 },
+        { date: '2026-08-12', tokens: 12 }
+      ] }
+    },
+    {
+      periodWindows: { today: { timeZone: 'America/New_York' } },
+      history: { daily: [
+        { date: '2026-08-05', tokens: 5 },
+        { date: '2026-08-11', tokens: 11 }
+      ] }
+    }
+  ], {
+    status: 'ready',
+    selection: 'last7',
+    locale: 'en-US',
+    now
+  });
+
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.period.totalTokens, 34);
+  assert.equal(snapshot.daily.reduce((sum, row) => sum + row.tokens, 0), snapshot.period.totalTokens);
+  assert.deepEqual(snapshot.daily.map((row) => row.date), [
+    '2026-08-05', '2026-08-06', '2026-08-11', '2026-08-12'
+  ]);
+  assert.equal(snapshot.summary.activeDays, 4);
+  assert.equal(snapshot.summary.peakDayTokens, 12);
 });
 
 test('range summaries describe only selected daily rows', () => {
