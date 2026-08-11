@@ -170,6 +170,7 @@ const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServ
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
+const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
 const linuxAutostart = require('./linuxAutostart');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
@@ -2341,6 +2342,7 @@ let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
 let macWidgetSnapshotController = null;
+let macWidgetDemand = null;
 let macWidgetPublicationReady = false;
 let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
@@ -3448,9 +3450,40 @@ function macWidgetPresentation() {
   });
 }
 
+function ensureMacWidgetDemand() {
+  if (process.platform !== 'darwin') return null;
+  if (macWidgetDemand) return macWidgetDemand;
+  const widget = macWidgetConfiguration();
+  if (!widget) return null;
+  // The demand leases live beside the snapshot in the app group container. The
+  // widget extension touches the full marker on every timeline() request and
+  // the short provisional marker on a non-gallery snapshot() (the add flow),
+  // so a fresh marker here means "a Widget is on screen or being placed". The
+  // watcher arms immediately so a first placement primes the initial snapshot
+  // within moments; the reconcile poll catches anything the watcher missed.
+  const markerDirectory = path.dirname(widget.snapshotPath);
+  macWidgetDemand = createMacWidgetDemandState({
+    markerPath: path.join(markerDirectory, WIDGET_DEMAND_MARKER),
+    provisionalMarkerPath: path.join(markerDirectory, WIDGET_DEMAND_PROVISIONAL_MARKER),
+    onActivation: () => {
+      const visibleStats = electronPresentationStats(latestStats);
+      scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
+    },
+    logger: (message) => console.warn(message)
+  });
+  macWidgetDemand.start();
+  return macWidgetDemand;
+}
+
 function captureMacWidgetWork({ stats, owner }) {
   const widget = macWidgetConfiguration();
   if (!widget) return null;
+  // No Widget on screen means no WidgetKit render loop is asking for data, so
+  // the whole snapshot pipeline (history resolution, serialization, fsync and
+  // the reload helper spawn) can be skipped. Only a confirmed missing or stale
+  // demand marker closes this gate; an unarmed state must not starve someone
+  // who does have a Widget.
+  if (macWidgetDemand && !macWidgetDemand.isInstalled()) return null;
   const resolverConfig = Object.freeze({ ...historyResolverOptions() });
   const sourceKey = macWidgetHistorySourceKey(resolverConfig);
   return {
@@ -4560,6 +4593,10 @@ function stopAll() {
   stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
   macWidgetSnapshotController?.stop();
+  if (macWidgetDemand) {
+    macWidgetDemand.stop();
+    macWidgetDemand = null;
+  }
   // Fire-and-forget on purpose. server.close() does not complete until every
   // in-flight request does, so awaiting it hands a remote device on the embedded
   // hub the power to hold our own exit open. The listening socket closes with
@@ -5591,6 +5628,7 @@ app.whenReady().then(() => {
   if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
+  ensureMacWidgetDemand();
   startMode();
   void widgetRecovery.finally(() => {
     app.removeListener('before-quit', abortWidgetRecovery);
