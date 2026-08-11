@@ -121,7 +121,7 @@ test('Widget ownership advances producer lifetime only for mode transitions', ()
   );
 });
 
-test('production persisted history reads forward store warnings to the main-process logger', () => {
+test('production persisted history I/O forwards store warnings to the main-process logger', () => {
   const start = mainSource.indexOf('resolveHistory: (work) => resolveMacWidgetHistory({');
   const end = mainSource.indexOf('\n    prepareSnapshot:', start);
   assert.ok(start >= 0 && end > start, 'Widget history resolver wiring should exist');
@@ -129,6 +129,10 @@ test('production persisted history reads forward store warnings to the main-proc
   assert.match(
     resolverSource,
     /loadCachedHistory: \(\) => readMacWidgetHistoryCache\(\s*work\.historyCachePath,\s*work\.owner\.sourceKey,\s*\{ logger: \(message\) => console\.warn\(message\) \}\s*\),/
+  );
+  assert.match(
+    resolverSource,
+    /saveCachedHistory: \(history\) => writeMacWidgetHistoryCache\(\s*work\.historyCachePath,\s*work\.owner\.sourceKey,\s*history,\s*\{ logger: \(message\) => console\.warn\(message\) \}\s*\)/
   );
 });
 

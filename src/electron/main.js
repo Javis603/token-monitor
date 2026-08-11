@@ -3522,7 +3522,8 @@ function ensureMacWidgetSnapshotController() {
         saveCachedHistory: (history) => writeMacWidgetHistoryCache(
           work.historyCachePath,
           work.owner.sourceKey,
-          history
+          history,
+          { logger: (message) => console.warn(message) }
         )
       } : {}),
       minIntervalMs: completeHistorySource(work.resolverConfig) === 'remote' ? undefined : 0,
