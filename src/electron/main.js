@@ -41,6 +41,15 @@ const {
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
+// Chromium's network stack (unlike Node's undici-based global fetch) honors
+// the OS proxy configuration with zero setup, which matters because a GUI
+// app launched from the Dock/Start Menu never inherits a shell's
+// HTTP_PROXY/HTTPS_PROXY env vars in the first place. Wrapped instead of
+// passed by reference so `net.fetch`'s internal `this` never depends on how
+// the deps object destructures it.
+function electronNetFetch(input, init) {
+  return net.fetch(input, init);
+}
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
@@ -654,6 +663,7 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
 
 function electronLimitsDeps() {
   return {
+    fetch: electronNetFetch,
     claudeWebFetch: electronClaudeWebFetch,
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal

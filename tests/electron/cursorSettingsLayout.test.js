@@ -1431,6 +1431,33 @@ test('main settings normalize sync upload intervals and restart only the device 
   assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
 });
 
+test('electronNetFetch routes limit lookups through Electron net.fetch for system-proxy support', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const start = main.indexOf('function electronNetFetch(');
+  assert.notEqual(start, -1, 'electronNetFetch function should exist');
+  const end = main.indexOf('\n}', start) + 2;
+  const body = main.slice(start, end);
+
+  // vm.runInNewContext compiles a separate realm, so object literals built
+  // inside it are not `assert.deepEqual`-comparable against outer-realm
+  // objects; stringify inside the mock to sidestep that instead.
+  const calls = [];
+  const context = {
+    net: {
+      fetch: (url, init) => {
+        calls.push(JSON.stringify({ url, init }));
+        return 'net-fetch-result';
+      }
+    }
+  };
+  const result = vm.runInNewContext(
+    `${body}\nelectronNetFetch('https://example.com', { headers: { a: '1' } });`,
+    context
+  );
+  assert.equal(result, 'net-fetch-result');
+  assert.deepEqual(calls, [JSON.stringify({ url: 'https://example.com', init: { headers: { a: '1' } } })]);
+});
+
 test('main collectors share one live GUI limit credential resolver in every widget mode', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const runtimeConfig = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'runtimeConfig.js'), 'utf8');
@@ -1444,6 +1471,7 @@ test('main collectors share one live GUI limit credential resolver in every widg
     assert.match(collector, /limitsDeps: electronLimitsDeps\(\)/);
   }
   const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
+  assert.match(limitsDeps, /fetch: electronNetFetch/);
   assert.match(limitsDeps, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
   assert.match(limitsDeps, /onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal/);
   const renewalPersistence = functionBody(
