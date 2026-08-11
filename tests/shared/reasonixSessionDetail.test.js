@@ -380,6 +380,26 @@ test('Reasonix replay classifies the first record before choosing native or lega
   assert.equal(wrappedLegacyReplay.events.filter((event) => event.kind === 'turn').length, 1);
 });
 
+test('Reasonix event reader reassembles one record split across many chunks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-replay-fragments-'));
+  const eventsPath = path.join(root, 'fragmented.events.jsonl');
+  const prompt = `跨 chunk ${'x'.repeat(256 * 1024)}`;
+  fs.writeFileSync(eventsPath, `${JSON.stringify({
+    schema_version: 1,
+    type: 'replace',
+    messages: [
+      { role: 'user', raw_content: prompt },
+      { role: 'assistant' }
+    ]
+  })}\n`);
+
+  const replay = readReasonixEventLog(eventsPath);
+  assert.equal(replay.ok, true);
+  assert.equal(replay.records, 1);
+  assert.equal(replay.events.filter((event) => event.kind === 'prompt').length, 1);
+  assert.equal(replay.events.filter((event) => event.kind === 'turn').length, 1);
+});
+
 test('Reasonix event replay fails closed at the official resource boundaries', () => {
   assert.deepEqual(REASONIX_EVENT_REPLAY_LIMITS, {
     maxBytes: 128 * 1024 * 1024,

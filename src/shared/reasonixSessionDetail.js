@@ -773,9 +773,23 @@ function readReasonixEventLog(filePath, options = {}) {
   const state = createReplayState();
   const decoder = new StringDecoder('utf8');
   const buffer = Buffer.allocUnsafe(REASONIX_EVENT_READ_CHUNK_BYTES);
-  let pending = '';
+  const pendingFragments = [];
   let encodedBytes = 0;
   let fileDescriptor;
+  const consumeDecodedChunk = (decoded) => {
+    let start = 0;
+    let newline;
+    while ((newline = decoded.indexOf('\n', start)) >= 0) {
+      pendingFragments.push(decoded.slice(start, newline));
+      const failure = consumeReplayLine(state, pendingFragments.join(''), limits);
+      pendingFragments.length = 0;
+      if (failure) return failure;
+      if (state.damaged || state.unsafe) return null;
+      start = newline + 1;
+    }
+    if (start < decoded.length) pendingFragments.push(decoded.slice(start));
+    return null;
+  };
   try {
     fileDescriptor = fsApi.openSync(filePath, 'r');
     while (!state.damaged && !state.unsafe) {
@@ -785,18 +799,13 @@ function readReasonixEventLog(filePath, options = {}) {
       if (encodedBytes > limits.maxBytes) {
         return replayResult(state, new ReplayLimitExceeded('encoded_bytes', encodedBytes, limits.maxBytes));
       }
-      pending += decoder.write(buffer.subarray(0, bytesRead));
-      let newline;
-      while ((newline = pending.indexOf('\n')) >= 0) {
-        const failure = consumeReplayLine(state, pending.slice(0, newline), limits);
-        pending = pending.slice(newline + 1);
-        if (failure) return replayResult(state, failure);
-        if (state.damaged || state.unsafe) break;
-      }
+      const failure = consumeDecodedChunk(decoder.write(buffer.subarray(0, bytesRead)));
+      if (failure) return replayResult(state, failure);
     }
     if (!state.damaged && !state.unsafe) {
-      pending += decoder.end();
-      const failure = consumeReplayLine(state, pending, limits);
+      const chunkFailure = consumeDecodedChunk(decoder.end());
+      if (chunkFailure) return replayResult(state, chunkFailure);
+      const failure = consumeReplayLine(state, pendingFragments.join(''), limits);
       if (failure) return replayResult(state, failure);
     }
     return replayResult(state);
