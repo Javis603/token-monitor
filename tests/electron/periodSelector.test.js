@@ -52,6 +52,7 @@ test('derived ranges drive headline and Home usage without pretending sessions o
   const css = read('src', 'electron', 'renderer', 'styles.css');
 
   assert.match(app, /function currentDerivedRangeSnapshot\(\)[\s\S]*periodRangesApi\.deriveRangeSnapshot/);
+  assert.match(app, /deviceHistoriesCoverUsage\(devices, state\.deviceHistories\)[\s\S]*status = 'unavailable'/);
   assert.match(app, /function currentPeriodState\(\)[\s\S]*currentDerivedRangeSnapshot\(\)/);
   assert.match(app, /function renderHome\(periodState = currentPeriodState\(\)\)[\s\S]*periodState\.period/);
   assert.match(app, /function render\(\)[\s\S]*const periodState = currentPeriodState\(\)/);

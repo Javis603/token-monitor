@@ -23,7 +23,8 @@ const {
   shouldFetchHomeHistory,
   shouldRetryHomeHistory,
   homeHistoryFetchOutcome,
-  historyLoadStatus
+  historyLoadStatus,
+  deviceHistoriesCoverUsage
 } = require('../../src/electron/renderer/homeOverview');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
@@ -668,6 +669,22 @@ test('historyLoadStatus distinguishes a current failure from loading and an empt
   assert.equal(historyLoadStatus({ signature: 'rev-2', failedSignature: 'rev-1' }), 'loading');
   assert.equal(historyLoadStatus({ signature: '__empty_history__' }), 'loading');
   assert.equal(historyLoadStatus({ signature: 'rev-2', available: false }), 'unavailable');
+});
+
+test('device histories fail closed when one participating device disables history', () => {
+  const devices = [
+    { deviceId: 'mac', periods: { allTime: { totalTokens: 700 } } },
+    { deviceId: 'linux', periods: { today: { totalTokens: 50 }, allTime: { totalTokens: 500 } } },
+    { deviceId: 'unused', periods: { allTime: { totalTokens: 0 } } }
+  ];
+  assert.equal(deviceHistoriesCoverUsage(devices, {
+    mac: { available: true, daily: [{ date: '2026-08-11', tokens: 100 }] },
+    linux: { available: false, daily: [] }
+  }), false);
+  assert.equal(deviceHistoriesCoverUsage(devices, {
+    mac: { available: true, daily: [{ date: '2026-08-11', tokens: 100 }] },
+    linux: { available: true, daily: [] }
+  }), true);
 });
 
 test('shouldFetchHomeHistory never polls a zero-usage account', () => {

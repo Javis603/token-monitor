@@ -381,6 +381,7 @@ test('collectUsageOnce sends explicit null history when history collection is di
     limitsEnabled: false
   });
   assert.equal(summary.history, null);
+  assert.equal(summary.historyAvailable, false);
 });
 
 test('collectUsageOnce omits history entirely on a non-history tick', async () => {
@@ -392,6 +393,7 @@ test('collectUsageOnce omits history entirely on a non-history tick', async () =
     limitsEnabled: false
   });
   assert.equal(Object.hasOwn(summary, 'history'), false);
+  assert.equal(summary.historyAvailable, true);
 });
 
 test('collectUsageOnce includes Proma history without starting tokscale graph', async () => {

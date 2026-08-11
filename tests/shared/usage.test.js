@@ -993,7 +993,8 @@ test('mergeDeviceRecord clears prior history when incoming history is explicitly
     history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
   });
   const merged = mergeDeviceRecord(existing, { deviceId: 'm1', history: null });
-  assert.deepEqual(merged.history, { daily: [], monthly: [], summary: {} });
+  assert.equal(merged.history, null);
+  assert.equal(merged.historyAvailable, false);
 });
 
 test('aggregateHistory retains stored history from stale devices', () => {
@@ -1021,6 +1022,7 @@ test('aggregateHistory tolerates devices without history', () => {
 test('carryDeviceHistory carries prior history forward when the incoming snapshot omits it', () => {
   const previous = {
     deviceId: 'm1', receivedAt: '2026-06-08T00:00:00.000Z',
+    historyAvailable: true,
     history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
   };
   const incoming = { deviceId: 'm1', receivedAt: '2026-06-08T00:05:00.000Z', today: { totalTokens: 9 } };
@@ -1028,6 +1030,7 @@ test('carryDeviceHistory carries prior history forward when the incoming snapsho
   assert.equal(next.history.daily[0].tokens, 5);  // carried from the previous snapshot
   assert.equal(next.today.totalTokens, 9);         // incoming fields untouched
   assert.equal(next.receivedAt, '2026-06-08T00:05:00.000Z');
+  assert.equal(next.historyAvailable, true);
 });
 
 test('carryDeviceHistory keeps the incoming history when the tick brings its own', () => {

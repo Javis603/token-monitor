@@ -757,7 +757,17 @@ function normalizeDeviceRecord(record) {
     if (omitted) normalized.periodProjectsOmitted = omitted;
   }
   if (hasOwn(record, 'syncUploadIntervalMs')) normalized.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(record.syncUploadIntervalMs);
-  if (hasOwn(record, 'history')) normalized.history = coerceHistory(record.history);
+  if (hasOwn(record, 'historyAvailable')) {
+    normalized.historyAvailable = record.historyAvailable === true;
+  } else if (hasOwn(record, 'history') && record.history === null) {
+    // Older producers represented the disabled capability as `history: null`.
+    // Preserve that distinction instead of letting coerceHistory turn unknown into
+    // a legitimate empty history.
+    normalized.historyAvailable = false;
+  }
+  if (hasOwn(record, 'history')) {
+    normalized.history = record.history === null ? null : coerceHistory(record.history);
+  }
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
     if (windows) normalized.periodWindows = windows;
@@ -901,6 +911,7 @@ function mergeDeviceRecord(existing, incoming) {
   const hasExisting = existing && typeof existing === 'object';
   const hasIncomingLimits = incoming && typeof incoming === 'object' && Object.prototype.hasOwnProperty.call(incoming, 'limits');
   const hasIncomingHistory = incoming && typeof incoming === 'object' && Object.prototype.hasOwnProperty.call(incoming, 'history');
+  const hasIncomingHistoryAvailability = hasOwn(incoming, 'historyAvailable');
   const hasIncomingTrackedClients = hasOwn(incoming, 'trackedClients');
   const normalizedIncoming = normalizeDeviceRecord(incoming || {});
   if (!hasExisting) return normalizedIncoming;
@@ -935,6 +946,9 @@ function mergeDeviceRecord(existing, incoming) {
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
   if (!hasIncomingHistory && hasOwn(normalizedExisting, 'history')) normalizedIncoming.history = normalizedExisting.history;
+  if (!hasIncomingHistoryAvailability && !hasIncomingHistory && hasOwn(normalizedExisting, 'historyAvailable')) {
+    normalizedIncoming.historyAvailable = normalizedExisting.historyAvailable;
+  }
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
   }
@@ -948,11 +962,14 @@ function mergeDeviceRecord(existing, incoming) {
 // mergeDeviceRecord, but without normalizing the snapshot's raw period shape.
 function carryDeviceHistory(previous, incoming) {
   if (!incoming || typeof incoming !== 'object') return incoming;
-  if (hasOwn(incoming, 'history')) return incoming;
-  if (previous && typeof previous === 'object' && hasOwn(previous, 'history')) {
-    return { ...incoming, history: previous.history };
+  let result = incoming;
+  if (!hasOwn(incoming, 'history') && previous && typeof previous === 'object' && hasOwn(previous, 'history')) {
+    result = { ...result, history: previous.history };
   }
-  return incoming;
+  if (!hasOwn(incoming, 'historyAvailable') && previous && typeof previous === 'object' && hasOwn(previous, 'historyAvailable')) {
+    result = { ...result, historyAvailable: previous.historyAvailable };
+  }
+  return result;
 }
 
 // History is durable device data, not live presence. Keep a stored device's
@@ -963,7 +980,7 @@ function aggregateHistory(devices) {
   const histories = [];
   for (const record of devices) {
     const normalized = normalizeDeviceRecord(record);
-    if (!hasOwn(normalized, 'history')) continue;
+    if (normalized.historyAvailable === false || !hasOwn(normalized, 'history') || normalized.history === null) continue;
     histories.push(normalized.history);
   }
   return mergeHistories(histories);

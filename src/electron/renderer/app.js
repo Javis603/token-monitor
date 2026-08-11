@@ -810,7 +810,10 @@ function currentDerivedRangeSnapshot() {
   if (!periodRangesApi.isDerived(effectivePeriodSelection())) return null;
   const devices = Array.isArray(state.stats?.devices) ? state.stats.devices : [];
   if (devices.length > 0) {
-    const status = deviceHistoriesStatus();
+    let status = deviceHistoriesStatus();
+    if (status === 'ready' && !homeOverviewApi.deviceHistoriesCoverUsage(devices, state.deviceHistories)) {
+      status = 'unavailable';
+    }
     const sources = status === 'ready' ? devices.map((device) => {
       const deviceId = String(device?.deviceId || device?.id || '').trim();
       return {

@@ -53,6 +53,7 @@ Example payload:
   "agentRuntime": "headless-agent",
   "syncUploadIntervalMs": 1200000,
   "projectsEnabled": true,
+  "historyAvailable": true,
   "trackedClients": ["codex"],
   "today": {
     "totalTokens": 1234,
@@ -211,6 +212,8 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 `syncUploadIntervalMs` is optional. A remote-hub widget includes `0` for live uploads or the selected fixed interval in milliseconds (`600000`, `1200000`, or `1800000`). The hub uses a positive interval to keep the device and its limits fresh for at least twice the upload interval; omitted or `0` values retain the configured `staleAfterMs` behavior. Local collection and embedded-host ingest remain live.
 
 `periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). Current clients also include the optional IANA `timeZone`, allowing rolling ranges to advance in the device's calendar after an offline snapshot's original window has expired; hubs validate it before storing. The hub uses `endsAt` to expire a device's `today`/`month` from the aggregate once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
+
+`historyAvailable` is an optional device capability. Current agents send `true` when retained history is enabled and `false` when it is disabled; an explicit `history: null` from an older agent is treated as `false`. Hubs preserve the flag across interval ticks that omit the history payload. Consumers must not calculate a cross-device rolling or custom range when a device that contributes usage has unavailable history, because doing so would silently treat that device's unknown historical usage as zero.
 
 `history.capabilities` is optional and additive. `tokenComponents: true` means every retained daily row includes exact cache-read, cache-write, and output counters at both client and model level; `clientModels: true` means the client-to-model intersection is present. Consumers must treat an absent or false capability as unavailable detail rather than as a measured zero. Current histories additionally carry `unclassifiedTokens` on daily/monthly rows and their `perClient` / `perModel` entries: it is the retained token total whose input/output/cache split is unavailable, allowing a mixed range to show its exact component subset without silently treating the remainder as cache misses. Version-1 local history archives are migrated without losing totals, but remain component-incomplete until their retained days are replaced by fresh graph observations.
 

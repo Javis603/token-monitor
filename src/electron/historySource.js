@@ -11,8 +11,22 @@ function parseDeviceHistories(payload) {
   const histories = {};
   for (const device of Array.isArray(devices) ? devices : []) {
     const deviceId = String(device?.deviceId || device?.id || '').trim();
-    if (!deviceId || !Object.prototype.hasOwnProperty.call(device, 'history')) continue;
-    histories[deviceId] = coerceHistory(device.history);
+    if (!deviceId) continue;
+    const hasHistory = Object.prototype.hasOwnProperty.call(device, 'history');
+    const rawHistory = hasHistory ? device.history : null;
+    const hasHistoryPayload = Boolean(rawHistory && typeof rawHistory === 'object');
+    const history = coerceHistory(rawHistory);
+    const hasRows = history.daily.length > 0 || history.monthly.length > 0;
+    const allTimeTokens = Number(device?.periods?.allTime?.totalTokens ?? device?.allTime?.totalTokens ?? 0);
+    const explicitlyAvailable = device?.historyAvailable === true;
+    const explicitlyUnavailable = device?.historyAvailable === false || rawHistory === null;
+    // A legacy Hub may already have normalized `history: null` into an empty object.
+    // Treat an empty, unmarked history on a device with lifetime usage as unknown;
+    // a genuinely zero-usage legacy device is still a valid empty history.
+    const available = hasHistoryPayload
+      && !explicitlyUnavailable
+      && (explicitlyAvailable || hasRows || !(allTimeTokens > 0));
+    histories[deviceId] = { ...history, available };
   }
   return histories;
 }

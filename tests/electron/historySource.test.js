@@ -7,6 +7,8 @@ const {
   resolveCompleteHistory,
   resolveDeviceHistories
 } = require('../../src/electron/historySource');
+const { deviceHistoriesCoverUsage } = require('../../src/electron/renderer/homeOverview');
+const { deriveRangeSnapshot } = require('../../src/electron/renderer/periodRanges');
 
 const aggregate = (devices) => ({
   daily: devices.map((device) => ({ date: device.date, tokens: device.tokens })),
@@ -53,17 +55,54 @@ test('fetches and parses the complete client history endpoint', async () => {
   assert.equal(request.options.headers.authorization, 'Bearer test-secret');
 });
 
-test('projects only explicit per-device histories into a device-id map', () => {
+test('projects per-device histories and preserves explicit availability', () => {
   assert.deepEqual(parseDeviceHistories({
     devices: [
       { deviceId: 'mac', history: { daily: [{ date: '2026-08-11', tokens: 9 }] } },
       { id: 'win', history: { monthly: [{ month: '2026-08', tokens: 5 }] } },
-      { deviceId: 'legacy' }
+      { deviceId: 'disabled', historyAvailable: false, history: null, allTime: { totalTokens: 50 } },
+      { deviceId: 'legacy', allTime: { totalTokens: 0 } }
     ]
   }), {
-    mac: { daily: [{ date: '2026-08-11', tokens: 9 }], monthly: [], summary: {} },
-    win: { daily: [], monthly: [{ month: '2026-08', tokens: 5 }], summary: {} }
+    mac: { available: true, daily: [{ date: '2026-08-11', tokens: 9 }], monthly: [], summary: {} },
+    win: { available: true, daily: [], monthly: [{ month: '2026-08', tokens: 5 }], summary: {} },
+    disabled: { available: false, daily: [], monthly: [], summary: {} },
+    legacy: { available: false, daily: [], monthly: [], summary: {} }
   });
+});
+
+test('legacy empty history with lifetime usage is unavailable instead of an exact zero', () => {
+  const histories = parseDeviceHistories({ devices: [{
+    deviceId: 'legacy-normalized-null',
+    periods: { allTime: { totalTokens: 500 } },
+    history: { daily: [], monthly: [], summary: {} }
+  }] });
+
+  assert.equal(histories['legacy-normalized-null'].available, false);
+});
+
+test('a history-disabled participating device blocks a partial last-7-days total', () => {
+  const devices = [
+    {
+      deviceId: 'mac',
+      periods: { today: { totalTokens: 100 }, allTime: { totalTokens: 700 } },
+      historyAvailable: true,
+      history: { daily: [{ date: '2026-08-11', tokens: 100 }] }
+    },
+    {
+      deviceId: 'linux',
+      periods: { today: { totalTokens: 50 }, allTime: { totalTokens: 500 } },
+      historyAvailable: false,
+      history: null
+    }
+  ];
+  const histories = parseDeviceHistories(devices);
+  const status = deviceHistoriesCoverUsage(devices, histories) ? 'ready' : 'unavailable';
+  const snapshot = deriveRangeSnapshot([], { status, selection: 'last7', todayKey: '2026-08-11' });
+
+  assert.equal(status, 'unavailable');
+  assert.equal(snapshot.period, null);
+  assert.deepEqual(snapshot.daily, []);
 });
 
 test('resolves local and embedded device histories without a network request', async () => {

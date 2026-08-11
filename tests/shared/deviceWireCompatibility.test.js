@@ -6,6 +6,7 @@ const test = require('node:test');
 const { createDeviceState } = require('../../src/shared/deviceState');
 const { syncPayload } = require('../../src/shared/syncPayload');
 const { mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
+const { parseDeviceHistories } = require('../../src/electron/historySource');
 
 function period(tokens) {
   return {
@@ -17,6 +18,33 @@ function period(tokens) {
     modelCosts: {}
   };
 }
+
+test('history availability survives sync and hub normalization', () => {
+  const disabled = syncPayload({
+    deviceId: 'device-disabled',
+    historyAvailable: false,
+    history: null,
+    today: period(5),
+    month: period(10),
+    allTime: period(20)
+  });
+  const normalized = normalizeDeviceRecord(disabled);
+
+  assert.equal(normalized.historyAvailable, false);
+  assert.equal(normalized.history, null);
+});
+
+test('legacy normalized empty history with usage remains unavailable to ranges', () => {
+  const legacy = normalizeDeviceRecord({
+    deviceId: 'legacy-device',
+    allTime: period(500),
+    history: { daily: [], monthly: [], summary: {} }
+  });
+  const parsed = parseDeviceHistories([legacy]);
+
+  assert.equal(Object.hasOwn(legacy, 'historyAvailable'), false);
+  assert.equal(parsed['legacy-device'].available, false);
+});
 
 test('composed full records remain compatible with hub normalization and merging', () => {
   const records = [];

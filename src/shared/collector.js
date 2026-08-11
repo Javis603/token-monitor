@@ -1002,6 +1002,7 @@ async function collectUsageOnce(options) {
     trackedClients: normalizedClients ? normalizedClients.split(',') : [],
     clientStatus: deriveClientStatus(normalizedClients, allTime, { sourceChecks }),
     wslStatus,
+    historyAvailable: options.historyEnabled !== false,
     periodWindows: computePeriodWindows(collectedAt),
     today,
     month,
