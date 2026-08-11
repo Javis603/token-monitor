@@ -430,14 +430,15 @@ function skipJsonWhitespace(text, state) {
   while (state.index < text.length && /\s/.test(text[state.index])) state.index += 1;
 }
 
-function parseJsonString(text, state) {
+function parseJsonString(text, state, decode = false) {
+  const start = state.index;
   if (text[state.index] !== '"') throw new SyntaxError('JSON string expected');
   state.index += 1;
   while (state.index < text.length) {
     const code = text.charCodeAt(state.index);
     const character = text[state.index];
     state.index += 1;
-    if (character === '"') return;
+    if (character === '"') return decode ? JSON.parse(text.slice(start, state.index)) : '';
     if (character === '\\') {
       if (state.index >= text.length) throw new SyntaxError('JSON escape is truncated');
       const escape = text[state.index];
@@ -481,9 +482,9 @@ function parseJsonNumber(text, state) {
 }
 
 function preflightJsonValue(text, limits) {
-  const state = { index: 0, messageCount: 0, collectionItems: 0 };
+  const state = { index: 0, messageCount: 0, collectionItems: 0, type: '' };
 
-  function parseValue({ insideMessage = false, messageArray = false } = {}) {
+  function parseValue({ insideMessage = false, messageArray = false, root = false } = {}) {
     skipJsonWhitespace(text, state);
     const character = text[state.index];
     if (character === '"') {
@@ -505,7 +506,17 @@ function preflightJsonValue(text, limits) {
         skipJsonWhitespace(text, state);
         if (text[state.index] !== ':') throw new SyntaxError('JSON object colon is missing');
         state.index += 1;
-        parseValue({ insideMessage, messageArray: key === 'messages' && !insideMessage });
+        const isRootEventType = root && ['event_type', 'eventType', 'kind', 'type'].includes(key);
+        if (isRootEventType) {
+          skipJsonWhitespace(text, state);
+          if (text[state.index] === '"') {
+            state.type = String(parseJsonString(text, state, true) || '').toLowerCase();
+          } else {
+            parseValue({ insideMessage });
+          }
+        } else {
+          parseValue({ insideMessage, messageArray: key === 'messages' && !insideMessage });
+        }
         skipJsonWhitespace(text, state);
         if (text[state.index] === '}') {
           state.index += 1;
@@ -562,7 +573,7 @@ function preflightJsonValue(text, limits) {
     parseJsonNumber(text, state);
   }
 
-  parseValue();
+  parseValue({ root: true });
   skipJsonWhitespace(text, state);
   if (state.index !== text.length) throw new SyntaxError('JSON has trailing data');
   return state;
@@ -600,6 +611,24 @@ function consumeReplayLine(state, line, limits) {
     if (error instanceof ReplayLimitExceeded) return error;
     state.damaged = true;
     return null;
+  }
+
+  if (state.snapshot.saw && !['replace', 'append'].includes(preflight.type)) {
+    state.unsafe = true;
+    state.snapshot.stopped = true;
+    return null;
+  }
+  // Match Reasonix's wire replay: include the already-applied snapshot in the
+  // limit check before JSON.parse can materialize this append's messages.
+  if (state.snapshot.saw && preflight.type === 'append') {
+    const messageCount = state.snapshot.messages.length + preflight.messageCount;
+    if (messageCount > limits.maxMessages) {
+      return new ReplayLimitExceeded('messages', messageCount, limits.maxMessages);
+    }
+    const collectionItems = state.snapshot.collectionItems + preflight.collectionItems;
+    if (collectionItems > limits.maxCollectionItems) {
+      return new ReplayLimitExceeded('message_collection_items', collectionItems, limits.maxCollectionItems);
+    }
   }
 
   let record;
@@ -646,16 +675,6 @@ function consumeReplayLine(state, line, limits) {
       snapshot.stopped = true;
       return null;
     }
-    if (snapshot.messages.length + incoming.length > limits.maxMessages) {
-      return new ReplayLimitExceeded('messages', snapshot.messages.length + incoming.length, limits.maxMessages);
-    }
-    if (snapshot.collectionItems + preflight.collectionItems > limits.maxCollectionItems) {
-      return new ReplayLimitExceeded(
-        'message_collection_items',
-        snapshot.collectionItems + preflight.collectionItems,
-        limits.maxCollectionItems
-      );
-    }
     snapshot.messages.push(...incoming.map((message) => ({ message, fallback: recordTimestamp || '' })));
     snapshot.collectionItems += preflight.collectionItems;
     snapshot.applied = true;
@@ -663,7 +682,7 @@ function consumeReplayLine(state, line, limits) {
   }
 
   if (state.snapshot.saw) {
-    state.damaged = true;
+    state.unsafe = true;
     state.snapshot.stopped = true;
     return null;
   }

@@ -10,6 +10,7 @@ const { readSessionDetail } = require('../../src/shared/sessionDetail');
 const {
   countReasonixProviderMessages,
   parseReasonixEventLog,
+  readReasonixEventLog,
   readReasonixSessionEvents,
   REASONIX_EVENT_REPLAY_LIMITS,
   REASONIX_EVENT_REPLAY_PROBE_MAX_BYTES
@@ -240,10 +241,92 @@ test('Reasonix replay retains the last trusted state after illegal append, unsup
   const detail = readReasonix(root, stateHome, 'reasonix:damaged', 'total');
   assert.deepEqual(detail.exchanges.map((exchange) => exchange.promptPreview), ['可信 Prompt', '合法 append']);
   assert.equal(detail.totals.turnCount, 2);
+  const replay = readReasonixEventLog(path.join(directory, 'damaged.events.jsonl'));
+  assert.equal(replay.ok, true);
+  assert.equal(replay.damaged, true);
 
   const unsupported = parseReasonixEventLog(`${JSON.stringify(replace)}\n${JSON.stringify({ schema_version: 2, type: 'replace', messages: [] })}`);
   assert.equal(unsupported.filter((event) => event.kind === 'prompt').length, 1);
   assert.equal(unsupported.filter((event) => event.kind === 'turn').length, 1);
+});
+
+test('Reasonix replay applies cumulative append limits before accepting the next record', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-replay-cumulative-limits-'));
+  const stateHome = path.join(root, 'state');
+  const directory = path.join(stateHome, 'sessions');
+  fs.mkdirSync(directory, { recursive: true });
+  writeJson(path.join(directory, 'cumulative.jsonl.meta'), { id: 'cumulative' });
+  const eventsPath = path.join(directory, 'cumulative.events.jsonl');
+  const replace = {
+    schema_version: 1,
+    type: 'replace',
+    messages: [{ role: 'user', raw_content: 'one' }, { role: 'assistant' }]
+  };
+  const append = {
+    schema_version: 1,
+    type: 'append',
+    message_index: 2,
+    messages: [{ role: 'user', raw_content: 'two' }, { role: 'assistant' }]
+  };
+  fs.writeFileSync(eventsPath, `${JSON.stringify(replace)}\n${JSON.stringify(append)}\n`);
+
+  const messageLimit = readReasonixEventLog(eventsPath, { replayLimits: { maxMessages: 3 } });
+  assert.equal(messageLimit.ok, false);
+  assert.equal(messageLimit.reason, 'limit');
+  assert.equal(messageLimit.resource, 'messages');
+  assert.equal(messageLimit.value, 4);
+  assert.equal(readReasonixSessionEvents({
+    sessionId: 'reasonix:cumulative',
+    home: root,
+    env: { REASONIX_STATE_HOME: stateHome },
+    platform: process.platform,
+    replayLimits: { maxMessages: 3 }
+  }).found, false);
+
+  const collectionReplace = {
+    schema_version: 1,
+    type: 'replace',
+    messages: [{ role: 'assistant', tool_calls: [{ name: 'first' }] }]
+  };
+  const collectionAppend = {
+    schema_version: 1,
+    type: 'append',
+    message_index: 1,
+    messages: [{ role: 'assistant', tool_calls: [{ name: 'second' }, { name: 'third' }] }]
+  };
+  fs.writeFileSync(eventsPath, `${JSON.stringify(collectionReplace)}\n${JSON.stringify(collectionAppend)}\n`);
+  const collectionLimit = readReasonixEventLog(eventsPath, { replayLimits: { maxCollectionItems: 2 } });
+  assert.equal(collectionLimit.ok, false);
+  assert.equal(collectionLimit.reason, 'limit');
+  assert.equal(collectionLimit.resource, 'message_collection_items');
+  assert.equal(collectionLimit.value, 3);
+});
+
+test('Reasonix native replay fails closed for an unknown event type after a valid snapshot', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-replay-unknown-type-'));
+  const stateHome = path.join(root, 'state');
+  const directory = path.join(stateHome, 'sessions');
+  fs.mkdirSync(directory, { recursive: true });
+  writeJson(path.join(directory, 'unknown.jsonl.meta'), { id: 'unknown' });
+  const eventsPath = path.join(directory, 'unknown.events.jsonl');
+  fs.writeFileSync(eventsPath, `${JSON.stringify({
+    schema_version: 1,
+    type: 'replace',
+    messages: [{ role: 'assistant' }]
+  })}\n${JSON.stringify({
+    schema_version: 1,
+    type: 'future.event',
+    messages: []
+  })}\n`);
+
+  const replay = readReasonixEventLog(eventsPath);
+  assert.equal(replay.ok, false);
+  assert.equal(readReasonixSessionEvents({
+    sessionId: 'reasonix:unknown',
+    home: root,
+    env: { REASONIX_STATE_HOME: stateHome },
+    platform: process.platform
+  }).found, false);
 });
 
 test('Reasonix event replay fails closed at the official resource boundaries', () => {
