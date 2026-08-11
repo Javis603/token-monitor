@@ -1389,6 +1389,31 @@ function clientSourceRoots(clientsCsv) {
     ['cline-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
     ['cline-cli-sessions', clineCliSessionRoot(home)]
   );
+  // Cherry Studio (Electron desktop) writes standard Claude Code transcripts
+  // under its per-user app-data directory: %APPDATA%\CherryStudio\.claude\
+  // projects on Windows, ~/Library/Application Support/CherryStudio/.claude/
+  // projects on macOS, and $XDG_CONFIG_HOME/CherryStudio/.claude/projects (or
+  // ~/.config) on Linux — mirroring the `PathRoot::AppData` resolution in
+  // tokscale's clients.rs. tokscale's dedicated cherrystudio parser reads
+  // these files (deduping the same API call appended 3-4 times per streaming
+  // response) and tags them as `cherrystudio`.
+  //
+  // Cherry Studio V2 (2026-08) moved live transcripts to
+  // `<appdata>/CherryStudio/Data/Agents/.claude/projects`; the legacy root
+  // keeps the pre-V2 snapshot. Both are watched; tokscale dedupes same-named
+  // sessions (V2 copy wins, legacy fills in sessions V2 lacks).
+  const cherryAppDataRoots = [
+    path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'CherryStudio', 'Data', 'Agents', '.claude', 'projects'),
+    path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'CherryStudio', '.claude', 'projects'),
+    path.join(home, 'Library', 'Application Support', 'CherryStudio', 'Data', 'Agents', '.claude', 'projects'),
+    path.join(home, 'Library', 'Application Support', 'CherryStudio', '.claude', 'projects'),
+    path.join(nonBlankEnvPath('XDG_CONFIG_HOME', path.join(home, '.config')), 'CherryStudio', 'Data', 'Agents', '.claude', 'projects'),
+    path.join(nonBlankEnvPath('XDG_CONFIG_HOME', path.join(home, '.config')), 'CherryStudio', '.claude', 'projects')
+  ];
+  add(
+    'cherrystudio',
+    ...[...new Set(cherryAppDataRoots)].map((dir) => ['cherrystudio-transcripts', dir])
+  );
   return byClient;
 }
 
