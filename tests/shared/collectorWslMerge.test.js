@@ -36,6 +36,7 @@ test('full tick merges WSL bundle and marks WSL-only client active', async () =>
   // anchor basis is Windows-only
   assert.equal(anchorCaptured.windowsPeriods.today.totalTokens, 20);
   assert.equal(anchorCaptured.wslBundle.today.totalTokens, 9);
+  assert.equal(anchorCaptured.wslHistoryIncomplete, true);
 });
 
 test('WSL usage prevents host-only History from claiming complete v2 coverage', async () => {
@@ -75,6 +76,51 @@ test('a failed WSL scan prevents host-only History from claiming complete v2 cov
   });
 
   assert.equal(summary.allTime.totalTokens > 0, true);
+  assert.equal(summary.historyOmitted, true);
+  assert.equal(summary.history.schemaVersion, undefined);
+  assert.equal(summary.history.coverage, undefined);
+});
+
+test('a detected WSL store invalidates History even when allTimeSince excludes its usage', async () => {
+  const wslBundle = bundleWith(0);
+  wslBundle.month = bundleWith(9).month;
+  const summary = await collectUsageOnce({
+    clients: 'claude,gemini',
+    allTimeSince: '2026-08-12',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    historyEnabled: true,
+    includeHistory: true,
+    dailyHistoryArchiveEnabled: false,
+    limitsEnabled: false,
+    runTokscale: windowsTokscale,
+    runGraph: async () => ({ contributions: [] }),
+    collectWslUsage: async () => ({ bundle: wslBundle, detected: ['gemini'], complete: true })
+  });
+
+  assert.equal(summary.month.clients.gemini, 9);
+  assert.equal(summary.allTime.clients.gemini, 0);
+  assert.equal(summary.historyOmitted, true);
+  assert.equal(summary.history.schemaVersion, undefined);
+  assert.equal(summary.history.coverage, undefined);
+});
+
+test('prior WSL History evidence remains fail closed after a later empty refresh', async () => {
+  const summary = await collectUsageOnce({
+    clients: 'claude,gemini',
+    allTimeSince: '2025-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    historyEnabled: true,
+    includeHistory: true,
+    dailyHistoryArchiveEnabled: false,
+    limitsEnabled: false,
+    wslHistoryIncomplete: true,
+    runTokscale: windowsTokscale,
+    runGraph: async () => ({ contributions: [] }),
+    collectWslUsage: async () => ({ bundle: bundleWith(0), detected: [], complete: true })
+  });
+
   assert.equal(summary.historyOmitted, true);
   assert.equal(summary.history.schemaVersion, undefined);
   assert.equal(summary.history.coverage, undefined);

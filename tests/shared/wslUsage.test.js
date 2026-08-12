@@ -398,6 +398,50 @@ test('collectWslUsage returns empty bundle when no homes', async () => {
   assert.equal(complete, true);
 });
 
+test('collectWslUsage marks distro discovery failure incomplete', async () => {
+  const { complete } = await collectWslUsage(
+    { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: async () => ({}) },
+    {
+      platform: 'win32',
+      exec: (cmd) => {
+        if (cmd === 'reg') return 'Lxss';
+        throw new Error('wsl list unavailable');
+      }
+    }
+  );
+
+  assert.equal(complete, false);
+});
+
+test('collectWslUsage marks unreadable running distro homes incomplete', async () => {
+  const { complete } = await collectWslUsage(
+    { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: async () => ({}) },
+    {
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: (dir) => {
+        if (dir === '\\\\wsl$\\Ubuntu\\home') throw new Error('9p unavailable');
+        return [];
+      },
+      existsSync: () => false
+    }
+  );
+
+  assert.equal(complete, false);
+});
+
+test('collectWslUsage cannot prove zero while installed distros are stopped', async () => {
+  const { complete } = await collectWslUsage(
+    { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: async () => ({}) },
+    {
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : '')
+    }
+  );
+
+  assert.equal(complete, false);
+});
+
 test('collectWslUsage logs and skips a home that throws, keeps others', async () => {
   const logs = [];
   const deps = {

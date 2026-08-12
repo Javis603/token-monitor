@@ -931,6 +931,7 @@ async function collectUsageOnce(options) {
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
   let wslScanComplete = options.wslAnchor ? options.wslScanComplete === true : true;
+  let wslHistoryIncomplete = options.wslScanEnabled !== false && options.wslHistoryIncomplete === true;
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
@@ -974,6 +975,15 @@ async function collectUsageOnce(options) {
       wslScanComplete = wslResult.complete !== false;
     }
   }
+  wslHistoryIncomplete = wslHistoryIncomplete
+    || wslScanComplete === false
+    // Until WSL homes have their own History graph, any tracked data marker is
+    // evidence that host-only daily rows cannot prove complete coverage. This
+    // must not depend on the configurable allTimeSince window.
+    || wslDetected.length > 0
+    || periodHasUsage(wslBundle.today)
+    || periodHasUsage(wslBundle.month)
+    || periodHasUsage(wslBundle.allTime);
   today = mergePeriods(windowsPeriods.today, wslBundle.today);
   month = mergePeriods(windowsPeriods.month, wslBundle.month);
   allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
@@ -1078,6 +1088,7 @@ async function collectUsageOnce(options) {
       wslBundle,
       wslStatus,
       wslScanComplete,
+      wslHistoryIncomplete,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
       ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
     });
@@ -1100,7 +1111,6 @@ async function collectUsageOnce(options) {
       onHistoryStatus: options.onHistoryStatus,
       logger: options.logger
     });
-    const wslHistoryIncomplete = wslScanComplete === false || periodHasUsage(wslBundle.allTime);
     if (history && wslHistoryIncomplete) {
       // Native periods include WSL, but the graph scan above is host-only. Until
       // WSL homes have their own complete History scan, retain the host rows for
@@ -2294,7 +2304,8 @@ function startCollector(options) {
   let anchor = null;
   let wslAnchor = null;
   let wslStatusAnchor = null;
-  let wslScanCompleteAnchor = true;
+  let wslScanCompleteAnchor = false;
+  let wslHistoryIncompleteAnchor = false;
   // The last-activity days a history refresh produced, carried across the ticks
   // that skip history. Read back out of the record this collector just published
   // rather than kept as a second copy, so the two cannot drift; a restart simply
@@ -2418,6 +2429,7 @@ function startCollector(options) {
         wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
         wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
         wslScanCompleteAnchor = options.wslScanEnabled !== false && saved.wslScanComplete === true;
+        wslHistoryIncompleteAnchor = options.wslScanEnabled !== false && saved.wslHistoryIncomplete === true;
         // An untrustworthy capture time leaves lastFullScanAt at 0, which forces
         // a full scan on the first interval tick (see loop()).
         if (trust.capturedAtMs !== null) lastFullScanAt = trust.capturedAtMs;
@@ -2497,6 +2509,7 @@ function startCollector(options) {
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
         wslScanComplete: anchored ? wslScanCompleteAnchor : true,
+        wslHistoryIncomplete: wslHistoryIncompleteAnchor,
         lastActivityDays: activityDaysAnchor,
         refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
@@ -2558,6 +2571,7 @@ function startCollector(options) {
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
         wslScanCompleteAnchor = captured.wslScanComplete === true;
+        wslHistoryIncompleteAnchor = captured.wslHistoryIncomplete === true;
         lastFullScanAt = Date.now();
         if (options.anchorPersistenceEnabled !== false) {
           try {
@@ -2570,6 +2584,7 @@ function startCollector(options) {
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
               wslScanComplete: wslScanCompleteAnchor,
+              wslHistoryIncomplete: wslHistoryIncompleteAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
               configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
@@ -2587,6 +2602,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
           wslScanCompleteAnchor = captured.wslScanComplete === true;
+          wslHistoryIncompleteAnchor = captured.wslHistoryIncomplete === true;
         }
       }
       const transformedSummary = await onUpdate?.(summary, reason);

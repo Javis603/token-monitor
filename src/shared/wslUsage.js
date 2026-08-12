@@ -120,19 +120,28 @@ function isWslInstalled(deps = {}) {
   }
 }
 
-function listRunningWslDistros(deps = {}) {
-  if (!isWslInstalled(deps)) return [];
+function discoverRunningWslDistros(deps = {}) {
+  if (!isWslInstalled(deps)) return { distros: [], complete: true, state: 'not-installed' };
   const exec = deps.exec || defaultExec;
   let out;
   try {
     out = exec('wsl.exe', ['--list', '--quiet', '--running']);
   } catch (_) {
-    return [];
+    return { distros: [], complete: false, state: 'unavailable' };
   }
-  return String(out)
+  const distros = String(out)
     .split(/\r?\n/)
     .map((line) => line.replace(/\u0000/g, '').trim())
     .filter(Boolean);
+  return {
+    distros,
+    complete: true,
+    state: distros.length > 0 ? 'ok' : 'not-running'
+  };
+}
+
+function listRunningWslDistros(deps = {}) {
+  return discoverRunningWslDistros(deps).distros;
 }
 
 // Returns the tracked-client ids whose marker is present in this home (deduped).
@@ -163,32 +172,42 @@ function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
   return [...ids];
 }
 
-function wslUsageHomes(deps = {}) {
+function discoverWslUsageHomes(deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const existsSync = deps.existsSync || fs.existsSync;
   const homes = [];
-  for (const distro of listRunningWslDistros(deps)) {
+  const running = discoverRunningWslDistros(deps);
+  let complete = running.complete && running.state !== 'not-running';
+  for (const distro of running.distros) {
     const candidates = [];
     const homeRoot = `\\\\wsl$\\${distro}\\home`;
     try {
       for (const user of readdirSync(homeRoot)) {
         candidates.push(`${homeRoot}\\${user}`);
       }
-    } catch (_) { /* distro has no /home or it is unreadable */ }
+    } catch (_) {
+      // Once a running distro is known, an unreadable /home means its tracked
+      // stores are unknown rather than absent. Keep the root candidate for
+      // best-effort native periods, but flexible History must fail closed.
+      complete = false;
+    }
     candidates.push(`\\\\wsl$\\${distro}\\root`);
     for (const home of candidates) {
       if (homeHasData(home, existsSync, readdirSync).length > 0) homes.push(home);
     }
   }
-  return homes;
+  return { homes, complete, state: running.state };
+}
+
+function wslUsageHomes(deps = {}) {
+  return discoverWslUsageHomes(deps).homes;
 }
 
 // Cheap WSL readiness probe (no tokscale). Returns 'not-installed' (no Lxss),
 // 'not-running' (installed but no running distro), or 'ok'.
 function probeWslState(deps = {}) {
-  if (!isWslInstalled(deps)) return 'not-installed';
-  if (listRunningWslDistros(deps).length === 0) return 'not-running';
-  return 'ok';
+  const discovery = discoverRunningWslDistros(deps);
+  return discovery.state === 'unavailable' ? 'not-running' : discovery.state;
 }
 
 async function collectWslUsage(options = {}, deps = {}) {
@@ -199,7 +218,8 @@ async function collectWslUsage(options = {}, deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
-  let complete = true;
+  const discovery = discoverWslUsageHomes(deps);
+  let complete = discovery.complete;
   if (!trackedClients) return { bundle, detected: [], complete };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
@@ -211,7 +231,7 @@ async function collectWslUsage(options = {}, deps = {}) {
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
     .filter((client) => client !== REASONIX_CLIENT)
     .join(',');
-  for (const home of wslUsageHomes(deps)) {
+  for (const home of discovery.homes) {
     // Attribution is marker-based, independent of whether a parser returns data.
     const homeDataClients = homeHasData(home, existsSync, readdirSync);
     for (const id of homeDataClients) {
