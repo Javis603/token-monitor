@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const {
   homeActivityHeatmapLayout,
+  activityStatsForPeriod,
   homeDeviceRows,
   homeLimitAccounts,
   homeLimitAccountsForProviders,
@@ -523,11 +524,54 @@ test('patchDailyToday appends today with live cost so its heatmap cell is not em
   assert.equal(appended.cost, 492.5); // intensity uses cost — a 0 here renders today as empty
 });
 
-test('renderHomeTrendsModule patches the activity today cell with the live period total', () => {
+test('renderHomeTrendsModule preserves long-range Activity while selecting range stats', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const match = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(match, 'renderHomeTrendsModule exists');
-  assert.match(match[1], /patchDailyToday\([\s\S]*?totalTokens/);
+  assert.match(match[1], /patchDailyToday\(/);
+  assert.match(match[1], /rollingYearHeatmap\(/);
+  assert.match(match[1], /clampDaily\(points, 45\)/);
+  assert.match(match[1], /activityStatsForPeriod\(/);
+});
+
+test('Trends preserves its long-range chart while selecting range stats', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const match = rendererSource.match(/function renderTrends\(\) \{([\s\S]*?)\n\}\n\nfunction viewLabelById/);
+  assert.ok(match, 'renderTrends exists');
+  assert.match(match[1], /selectPreviewSeries\(preview, fixed\?\.status === 'ready' \? 'allTime' : state\.period\)/);
+  assert.match(match[1], /activityStatsForPeriod\(/);
+});
+
+test('Activity keeps long-term day and streak stats while range-shaping time and peak', () => {
+  const fixedSnapshot = {
+    status: 'ready',
+    summary: { activeDays: 4, currentStreak: 4, activeTimeMs: 3600000, peakDayTokens: 80 }
+  };
+  assert.deepEqual(activityStatsForPeriod({
+    period: 'last7',
+    fixedSnapshot,
+    historySummary: { activeDays: 119, currentStreak: 87, activeTimeMs: 999, peakDayTokens: 999 }
+  }), {
+    activeDays: 119,
+    currentStreak: 87,
+    activeTimeMs: 3600000,
+    peakDayTokens: 80
+  });
+});
+
+test('native DAY and MONTH activity time and peak follow their calendar range', () => {
+  const daily = [
+    { date: '2026-07-31', tokens: 90, activeTimeMs: 9000 },
+    { date: '2026-08-11', tokens: 40, activeTimeMs: 4000 },
+    { date: '2026-08-12', tokens: 70, activeTimeMs: 7000 }
+  ];
+  const historySummary = { activeDays: 120, currentStreak: 8, activeTimeMs: 20000, peakDayTokens: 90 };
+  assert.deepEqual(activityStatsForPeriod({
+    period: 'today', daily, historySummary, todayKey: '2026-08-12'
+  }), { activeDays: 120, currentStreak: 8, activeTimeMs: 7000, peakDayTokens: 70 });
+  assert.deepEqual(activityStatsForPeriod({
+    period: 'month', daily, historySummary, todayKey: '2026-08-12'
+  }), { activeDays: 120, currentStreak: 8, activeTimeMs: 11000, peakDayTokens: 70 });
 });
 
 test('loadHomeHistory wires the bounded retry through a timer, not a render', () => {

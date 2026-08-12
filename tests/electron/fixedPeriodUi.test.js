@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 const read = (name) => fs.readFileSync(path.join(rendererDir, name), 'utf8');
@@ -29,6 +30,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   const html = read('index.html');
   const css = read('styles.css');
   const app = read('app.js');
+  const boot = read('floatingBubbleBoot.js');
   assert.ok(html.indexOf('src="fixedPeriodRanges.js"') < html.indexOf('src="app.js"'));
   assert.match(html, /id="monthPeriodMenu" class="view-switcher-menu period-menu hidden"/);
   assert.equal((html.match(/class="view-switcher-menu-item"/g) || []).length, 4);
@@ -38,6 +40,8 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(css, /\.period-menu\s*\{[^}]*-webkit-app-region:\s*no-drag;[^}]*pointer-events:\s*auto;/s);
   assert.match(app, /closest\('\.titlebar'\)\?\.classList\.toggle\('period-menu-open', state\.periodMenuOpen\)/);
   assert.match(app, /button\.classList\.toggle\('is-current', active\)/);
+  assert.match(app, /handlePeriodMenuNavigation\(event/);
+  assert.match(app, /setPeriodMenuOpen\(true, \{ focus: event\.key === 'ArrowUp' \? 'last' : 'first' \}\)/);
   assert.match(app, /deviceHistoriesAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
   assert.match(app, /getDashboardHistory\(\{ includeDevices: true \}\)/);
   assert.match(app, /state\.stats\?\.deviceHistoryRevision \|\| state\.stats\?\.historyRevision/);
@@ -46,6 +50,12 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /fixedPeriodHistoryInventoriesMatch\(fetchedHistory\)/);
   assert.match(app, /shouldRetryFixedPeriodHistory\(\{/);
   assert.match(app, /setTimeout\(\(\) => \{[\s\S]*?void loadFixedPeriodHistory\(\{ force: true \}\);[\s\S]*?FIXED_PERIOD_HISTORY_RETRY_MS\)/);
+  assert.match(app, /await warmFixedPeriodHistory\(\);/);
+  assert.match(app, /loadFixedPeriodHistory\(\{ renderOnComplete: false \}\)/);
+  const loader = app.slice(app.indexOf('async function performFixedPeriodHistoryLoad'), app.indexOf('function loadFixedPeriodHistory'));
+  assert.doesNotMatch(loader, /status: 'loading'[\s\S]*?if \(fixedPeriodRangesApi\.isDerived\(state\.period\)\) render\(\);/);
+  assert.match(app, /return state\.fixedPeriodHistoryPromise \|\| Promise\.resolve\(false\)/);
+  assert.match(boot, /\['today', 'month', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
   const snapshotBuilder = app.slice(app.indexOf('function buildFixedPeriodSnapshot()'), app.indexOf('async function loadFixedPeriodHistory'));
@@ -70,4 +80,17 @@ test('the Settings default uses the standard title-control-description row', () 
   assert.doesNotMatch(html, /Middle period button/);
   assert.match(i18n, /'periodRange\.settingsTitle': '預設統計範圍'/);
   assert.match(i18n, /'periodRange\.settingsNote': '設定主畫面時段選擇器的預設範圍；也可直接在主畫面切換。'/);
+});
+
+test('cold-start boot restores every fixed middle-slot selection', () => {
+  const boot = read('floatingBubbleBoot.js');
+  for (const period of ['week', 'last7', 'last30']) {
+    const window = { location: { search: `?period=${period}&breakdown=home` } };
+    const document = { documentElement: { classList: { add() {} } } };
+    vm.runInNewContext(boot, { document, URLSearchParams, window });
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(window.__TOKEN_MONITOR_INITIAL_VIEW_STATE__)),
+      { period, breakdown: 'home' }
+    );
+  }
 });

@@ -298,6 +298,41 @@
     return rows;
   }
 
+  // Activity keeps its established long-range visuals regardless of the headline
+  // period. Only the two additive/range-shaped stats follow the selection; active
+  // days and current streak remain the retained-history values users already know.
+  function activityStatsForPeriod({ period, fixedSnapshot, daily, historySummary, todayKey } = {}) {
+    const history = historySummary && typeof historySummary === 'object' ? historySummary : {};
+    if (fixedSnapshot?.status === 'ready') {
+      return {
+        activeDays: finiteNumber(history.activeDays) || 0,
+        currentStreak: finiteNumber(history.currentStreak) || 0,
+        activeTimeMs: finiteNumber(fixedSnapshot.summary?.activeTimeMs) || 0,
+        peakDayTokens: finiteNumber(fixedSnapshot.summary?.peakDayTokens) || 0
+      };
+    }
+    if (period === 'allTime') {
+      return {
+        activeDays: finiteNumber(history.activeDays) || 0,
+        currentStreak: finiteNumber(history.currentStreak) || 0,
+        activeTimeMs: finiteNumber(history.activeTimeMs) || 0,
+        peakDayTokens: finiteNumber(history.peakDayTokens) || 0
+      };
+    }
+    const day = String(todayKey || '').slice(0, 10);
+    const month = day.slice(0, 7);
+    const selected = (Array.isArray(daily) ? daily : []).filter((row) => {
+      const key = String(row?.date || '').slice(0, 10);
+      return period === 'today' ? key === day : key.slice(0, 7) === month;
+    });
+    return {
+      activeDays: finiteNumber(history.activeDays) || 0,
+      currentStreak: finiteNumber(history.currentStreak) || 0,
+      activeTimeMs: selected.reduce((sum, row) => sum + (finiteNumber(row?.activeTimeMs) || 0), 0),
+      peakDayTokens: selected.reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens) || 0), 0)
+    };
+  }
+
   // Stable signature of the preview's daily tail. Two previews with the same key
   // describe the same fetch opportunity, so the full history is fetched at most
   // once per distinct preview state — a failed/empty fetch (e.g. a transient
@@ -408,6 +443,7 @@
     homeToolRows,
     homeDeviceRows,
     homeTrendSummary,
+    activityStatsForPeriod,
     pickHomeHistory,
     patchDailyToday,
     historyPreviewKey,

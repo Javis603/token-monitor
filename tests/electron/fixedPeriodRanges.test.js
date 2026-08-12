@@ -316,3 +316,33 @@ test('fixed periods fail closed without History and for unsupported detail views
   assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: false }), false);
   assert.equal(ranges.supportsBreakdown('last7', 'model'), true);
 });
+
+test('period menu keyboard navigation moves focus with standard menu keys', () => {
+  const target = new EventTarget();
+  const focused = [];
+  target.addEventListener('keydown', (event) => {
+    ranges.handlePeriodMenuNavigation(event, {
+      currentIndex: 1,
+      itemCount: 4,
+      focusIndex: (index) => focused.push(index)
+    });
+  });
+
+  const arrow = new Event('keydown', { cancelable: true });
+  Object.defineProperty(arrow, 'key', { value: 'ArrowDown' });
+  target.dispatchEvent(arrow);
+  assert.equal(arrow.defaultPrevented, true);
+  assert.deepEqual(focused, [2]);
+
+  const end = new Event('keydown', { cancelable: true });
+  Object.defineProperty(end, 'key', { value: 'End' });
+  target.dispatchEvent(end);
+  assert.equal(end.defaultPrevented, true);
+  assert.deepEqual(focused, [2, 3]);
+
+  const unrelated = new Event('keydown', { cancelable: true });
+  Object.defineProperty(unrelated, 'key', { value: 'Enter' });
+  target.dispatchEvent(unrelated);
+  assert.equal(unrelated.defaultPrevented, false);
+  assert.deepEqual(focused, [2, 3]);
+});

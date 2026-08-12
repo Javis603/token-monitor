@@ -323,6 +323,7 @@ state.fixedPeriodHistorySignature = '';
 state.fixedPeriodHistoryRetries = 0;
 state.fixedPeriodHistoryRetrySignature = '';
 state.fixedPeriodHistoryRetryTimer = null;
+state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodSnapshot = null;
 state.periodMenuOpen = false;
 let directBreakdownOverride = null;
@@ -5495,9 +5496,10 @@ function renderTrends() {
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
   const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
   const fixed = fixedPeriodRangesApi.isDerived(state.period) ? state.fixedPeriodSnapshot : null;
-  const selected = fixed?.status === 'ready'
-    ? { points: fixed.daily || [], metric: 'tokens', labelKey: 'date' }
-    : charts.selectPreviewSeries(preview, state.period);
+  // Fixed headline ranges do not collapse the Trends context down to a handful
+  // of bars. Keep the established long-range monthly view; the range-specific
+  // active-time and peak cards below still describe the selected fixed period.
+  const selected = charts.selectPreviewSeries(preview, fixed?.status === 'ready' ? 'allTime' : state.period);
   const { points, metric, labelKey } = selected;
   const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
 
@@ -5510,10 +5512,16 @@ function renderTrends() {
   const titles = finalPoints.map((p) => `${trendShortLabel(p[labelKey], labelKey)} · ${formatCompact(p[metric])}`);
   const svg = charts.sparklineSvg(model, { titles, showZeroMarkers: state.period === 'today' });
 
-  const summary = fixed?.status === 'ready' ? fixed.summary : (preview.summary || {});
-  const rangeLabel = fixed?.status === 'ready' ? fixedPeriodRangesApi.displayLabel(state.period)
-    : state.period === 'allTime' ? t('trends.range.year')
-      : state.period === 'month' ? t('trends.range.month') : t('trends.range.week');
+  const summary = homeOverviewApi.activityStatsForPeriod({
+    period: state.period,
+    fixedSnapshot: fixed,
+    daily: preview.daily,
+    historySummary: preview.summary,
+    todayKey: charts.localDayKey()
+  });
+  const rangeLabel = fixed?.status === 'ready' || state.period === 'allTime'
+    ? t('trends.range.year')
+    : state.period === 'month' ? t('trends.range.month') : t('trends.range.week');
   const first = trendShortLabel(finalPoints[0][labelKey], labelKey);
   const last = trendShortLabel(finalPoints[finalPoints.length - 1][labelKey], labelKey);
   const stats = [
@@ -5694,10 +5702,10 @@ function buildFixedPeriodSnapshot() {
   return buildFixedPeriodSourcesSnapshot();
 }
 
-async function loadFixedPeriodHistory({ force = false } = {}) {
-  if (state.fixedPeriodHistoryBusy || !window.tokenMonitor.getDashboardHistory) return;
+async function performFixedPeriodHistoryLoad({ force = false, renderOnComplete = true } = {}) {
+  if (!window.tokenMonitor.getDashboardHistory) return false;
   const signature = fixedPeriodHistorySignature();
-  if (!force && state.fixedPeriodHistoryRequested && state.fixedPeriodHistorySignature === signature) return;
+  if (!force && state.fixedPeriodHistoryRequested && state.fixedPeriodHistorySignature === signature) return false;
   if (state.fixedPeriodHistoryRetrySignature !== signature) {
     clearTimeout(state.fixedPeriodHistoryRetryTimer);
     state.fixedPeriodHistoryRetryTimer = null;
@@ -5709,7 +5717,6 @@ async function loadFixedPeriodHistory({ force = false } = {}) {
   state.fixedPeriodHistoryFailed = false;
   state.fixedPeriodHistorySignature = signature;
   state.fixedPeriodSnapshot = { status: 'loading', reason: 'loading', period: null };
-  if (fixedPeriodRangesApi.isDerived(state.period)) render();
   let fetchedHistory = null;
   try {
     fetchedHistory = await window.tokenMonitor.getDashboardHistory({ includeDevices: true });
@@ -5749,8 +5756,36 @@ async function loadFixedPeriodHistory({ force = false } = {}) {
     if (state.fixedPeriodSnapshot.status === 'ready' && state.stats?.periods) {
       state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
     }
-    if (fixedPeriodRangesApi.isDerived(state.period)) render();
+    if (renderOnComplete && fixedPeriodRangesApi.isDerived(state.period)) render();
   }
+  return true;
+}
+
+function loadFixedPeriodHistory(options = {}) {
+  if (state.fixedPeriodHistoryBusy) {
+    return state.fixedPeriodHistoryPromise || Promise.resolve(false);
+  }
+  const promise = performFixedPeriodHistoryLoad(options);
+  state.fixedPeriodHistoryPromise = promise;
+  const clearPromise = () => {
+    if (state.fixedPeriodHistoryPromise === promise) state.fixedPeriodHistoryPromise = null;
+  };
+  void promise.then(clearPromise, clearPromise);
+  return promise;
+}
+
+function fixedPeriodHistoryNeedsWarmup() {
+  if (!state.stats || state.settings?.historyEnabled === false) return false;
+  if (!window.tokenMonitor.getDashboardHistory) return false;
+  if (state.fixedPeriodHistoryBusy) return Boolean(state.fixedPeriodHistoryPromise);
+  return !state.fixedPeriodHistoryRequested
+    || state.fixedPeriodHistorySignature !== fixedPeriodHistorySignature();
+}
+
+async function warmFixedPeriodHistory() {
+  if (!fixedPeriodHistoryNeedsWarmup()) return false;
+  await loadFixedPeriodHistory({ renderOnComplete: false });
+  return true;
 }
 
 function fixedPeriodMessage(snapshot, breakdown = '') {
@@ -5774,13 +5809,30 @@ function hidePeriodContentForMessage(message) {
   els.sessionDetailHead.classList.add('hidden');
 }
 
-function setPeriodMenuOpen(open, { restoreFocus = false } = {}) {
+function periodMenuButtons() {
+  return Array.from(els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []);
+}
+
+function focusPeriodMenuButton(index) {
+  const buttons = periodMenuButtons();
+  if (!buttons.length) return;
+  const target = buttons[Math.max(0, Math.min(buttons.length - 1, Number(index) || 0))];
+  for (const button of buttons) button.tabIndex = button === target ? 0 : -1;
+  target?.focus();
+}
+
+function setPeriodMenuOpen(open, { restoreFocus = false, focus = '' } = {}) {
   state.periodMenuOpen = Boolean(open);
   els.monthPeriodMenu?.closest('.titlebar')?.classList.toggle('period-menu-open', state.periodMenuOpen);
   els.monthPeriodMenu?.classList.toggle('hidden', !state.periodMenuOpen);
   els.monthPeriodTab?.setAttribute('aria-expanded', String(state.periodMenuOpen));
-  for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
+  for (const button of periodMenuButtons()) {
     button.tabIndex = state.periodMenuOpen && button.classList.contains('is-current') ? 0 : -1;
+  }
+  if (state.periodMenuOpen && focus) {
+    const buttons = periodMenuButtons();
+    const current = Math.max(0, buttons.findIndex((button) => button.classList.contains('is-current')));
+    focusPeriodMenuButton(focus === 'first' ? 0 : focus === 'last' ? buttons.length - 1 : current);
   }
   if (!state.periodMenuOpen && restoreFocus) els.monthPeriodTab?.focus();
 }
@@ -5789,7 +5841,7 @@ function syncPeriodMenu() {
   const mode = fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
     ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
     : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
-  for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
+  for (const button of periodMenuButtons()) {
     const active = button.dataset.fixedPeriod === mode;
     button.classList.toggle('is-current', active);
     button.setAttribute('aria-checked', String(active));
@@ -6550,6 +6602,7 @@ function renderHomeTrendsModule() {
   const historyEnabled = state.settings?.historyEnabled !== false;
   const preview = state.stats?.historyPreview || { daily: [] };
   const history = homeOverviewApi.pickHomeHistory(state.homeHistory, preview);
+  const fixedSnapshot = fixedPeriodRangesApi.isDerived(state.period) ? state.fixedPeriodSnapshot : null;
   const rawDaily = history.daily || [];
   if (!historyEnabled || rawDaily.length === 0) {
     const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends');
@@ -6579,7 +6632,12 @@ function renderHomeTrendsModule() {
   // The key must be the LOCAL day: the period being patched in is local-day scoped.
   const today = charts.localDayKey();
   const todayPeriod = state.stats?.periods?.today;
-  const points = homeOverviewApi.patchDailyToday(rawDaily, today, Number(todayPeriod?.totalTokens || 0), Number(todayPeriod?.costUsd || 0));
+  const points = homeOverviewApi.patchDailyToday(
+    rawDaily,
+    today,
+    Number(todayPeriod?.totalTokens || 0),
+    Number(todayPeriod?.costUsd || 0)
+  );
   const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const heatMetric = state.settings?.heatmapMetric || 'cost';
   const intensityField = heatMetric === 'cost' ? 'costIntensity' : 'tokenIntensity';
@@ -6624,14 +6682,21 @@ function renderHomeTrendsModule() {
   });
   activityScroll.append(activityCanvas);
   const linePoints = charts.clampDaily(points, 45);
-  const summary = homeOverviewApi.homeTrendSummary(linePoints);
+  const trendSummary = homeOverviewApi.homeTrendSummary(linePoints);
+  const selectedStats = homeOverviewApi.activityStatsForPeriod({
+    period: state.period,
+    fixedSnapshot,
+    daily: points,
+    historySummary: history.summary,
+    todayKey: today
+  });
   const trendHead = document.createElement('div');
   trendHead.className = 'home-trend-head';
   const trendTitle = document.createElement('span');
   trendTitle.textContent = t('home.trend');
   const trendMeta = document.createElement('span');
   trendMeta.className = 'home-module-meta';
-  trendMeta.textContent = t('home.peakTokens', { value: formatCompact(summary.peak) });
+  trendMeta.textContent = t('home.peakTokens', { value: formatCompact(selectedStats.peakDayTokens) });
   trendHead.append(trendTitle, trendMeta);
   const model = charts.areaLineChart(linePoints, { width: 300, height: 70, padTop: 4, padRight: 3, padBottom: 4, padLeft: 3, metric: 'tokens', curve: true });
   const plot = document.createElement('div');
@@ -6642,7 +6707,7 @@ function renderHomeTrendsModule() {
   plot.append(chart);
   const dates = document.createElement('div');
   dates.className = 'home-trend-dates';
-  for (const date of summary.dates) {
+  for (const date of trendSummary.dates) {
     const label = document.createElement('span');
     label.className = 'home-trend-date';
     label.textContent = trendShortLabel(date, 'date');
@@ -6989,6 +7054,10 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
     }
+    // Prime the retained per-device History before the first paint. Fixed ranges
+    // can then switch as synchronously as DAY/MONTH/TOTAL instead of hiding every
+    // panel for a loading render on the user's first click after launch.
+    await warmFixedPeriodHistory();
     applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
     statsRenderScheduler.request();
@@ -10353,7 +10422,7 @@ for (const tab of document.querySelectorAll('.tab')) {
     const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
     if (slot === 'month' && activeSlot === 'month') {
       event.stopPropagation();
-      setPeriodMenuOpen(!state.periodMenuOpen);
+      setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
       return;
     }
     setPeriodMenuOpen(false);
@@ -10394,6 +10463,26 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     await saveSettings({ periodMonthMode: selection });
   });
 }
+
+els.monthPeriodTab?.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  event.preventDefault();
+  setPeriodMenuOpen(true, { focus: event.key === 'ArrowUp' ? 'last' : 'first' });
+});
+
+els.monthPeriodMenu?.addEventListener('keydown', (event) => {
+  if (event.key === 'Tab') {
+    setPeriodMenuOpen(false);
+    return;
+  }
+  const buttons = periodMenuButtons();
+  const currentIndex = buttons.findIndex((button) => button === event.target);
+  fixedPeriodRangesApi.handlePeriodMenuNavigation(event, {
+    currentIndex,
+    itemCount: buttons.length,
+    focusIndex: focusPeriodMenuButton
+  });
+});
 
 els.periodMonthModeInput?.addEventListener('change', async () => {
   const selection = fixedPeriodRangesApi.normalizeMonthMode(els.periodMonthModeInput.value);
@@ -11061,7 +11150,19 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   setStatus(statusTextFor(state.mode, state.streamConnected));
   renderSyncClientStatus();
   if (payload.data?.stats) {
-    statsRenderScheduler.request();
+    const warmup = warmFixedPeriodHistory();
+    if (fixedPeriodRangesApi.isDerived(state.period)) {
+      // Keep the currently rendered range stable while a new History revision is
+      // fetched; repaint once with the coherent snapshot instead of flashing an
+      // intermediate loading layout.
+      void warmup.then(
+        () => statsRenderScheduler.request(),
+        () => statsRenderScheduler.request()
+      );
+    } else {
+      statsRenderScheduler.request();
+      void warmup;
+    }
     maybeUpdateBarsIcon();
   }
   restartTimer();

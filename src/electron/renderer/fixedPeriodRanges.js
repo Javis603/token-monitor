@@ -56,6 +56,25 @@
     return MONTH_MODES.includes(value) ? value : 'month';
   }
 
+  function periodMenuTargetIndex(key, currentIndex, itemCount) {
+    const count = Math.max(0, Math.floor(Number(itemCount) || 0));
+    if (count === 0) return -1;
+    const current = Math.max(0, Math.min(count - 1, Math.floor(Number(currentIndex) || 0)));
+    if (key === 'ArrowDown') return (current + 1) % count;
+    if (key === 'ArrowUp') return (current - 1 + count) % count;
+    if (key === 'Home') return 0;
+    if (key === 'End') return count - 1;
+    return -1;
+  }
+
+  function handlePeriodMenuNavigation(event, options = {}) {
+    const index = periodMenuTargetIndex(event?.key, options.currentIndex, options.itemCount);
+    if (index < 0) return false;
+    event?.preventDefault?.();
+    options.focusIndex?.(index);
+    return true;
+  }
+
   function isDerived(value) {
     return value === 'week' || value === 'last7' || value === 'last30';
   }
@@ -398,7 +417,9 @@
     isDerived,
     joinDeviceHistorySources,
     localDayKey,
+    handlePeriodMenuNavigation,
     normalizeMonthMode,
+    periodMenuTargetIndex,
     rangeForSelection,
     shouldRetryFixedPeriodHistory,
     slotForSelection,

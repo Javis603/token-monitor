@@ -37,6 +37,32 @@ function parseDeviceHistories(payload) {
   }).filter(Boolean);
 }
 
+// The local collector can finalize History before its throttled sync upload reaches
+// the Hub. Mirror composeLocalSyncStats' local-wins display contract here so a
+// fixed range cannot refetch on the local revision and then render the older Hub
+// copy. An absent local History means "no update in this snapshot", so retain the
+// Hub's last-good History; an explicit local null remains authoritative.
+function devicesWithLocalHistory(records, localDevice) {
+  const devices = Array.isArray(records) ? records.slice() : [];
+  const localId = String(localDevice?.deviceId || '').trim();
+  if (!localId) return devices;
+  const index = devices.findIndex((record) => String(record?.deviceId || record?.id || '').trim() === localId);
+  if (index < 0) return devices.concat(localDevice);
+  const existing = devices[index] || {};
+  const localUpdatedAt = Date.parse(localDevice?.updatedAt || localDevice?.receivedAt || '');
+  const existingUpdatedAt = Date.parse(existing?.updatedAt || existing?.receivedAt || '');
+  if (
+    Number.isFinite(existingUpdatedAt)
+    && (!Number.isFinite(localUpdatedAt) || localUpdatedAt < existingUpdatedAt)
+  ) {
+    return devices;
+  }
+  const merged = { ...existing, ...localDevice };
+  if (!hasOwn(localDevice, 'history') && hasOwn(existing, 'history')) merged.history = existing.history;
+  devices[index] = merged;
+  return devices;
+}
+
 // Which of the four resolutions below a configuration selects. Callers that need
 // to know how expensive a history read will be ask this rather than re-deriving
 // the branches, so the cost model cannot drift from the resolver: only 'remote'
@@ -111,7 +137,7 @@ async function resolveCompleteHistoryWithDevices(options = {}) {
       records = localDevice ? [localDevice] : [];
       break;
     case 'embedded':
-      records = embeddedHub.hub.getDevices();
+      records = devicesWithLocalHistory(embeddedHub.hub.getDevices(), localDevice);
       break;
     default: {
       if (typeof fetchImpl !== 'function') throw new Error('Device History fetch is unavailable');
@@ -125,7 +151,10 @@ async function resolveCompleteHistoryWithDevices(options = {}) {
         });
         if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
         const payload = await response.json();
-        records = Array.isArray(payload) ? payload : payload?.devices;
+        records = devicesWithLocalHistory(
+          Array.isArray(payload) ? payload : payload?.devices,
+          localDevice
+        );
       } finally {
         clearTimeout(timeout);
       }
@@ -141,6 +170,7 @@ async function resolveCompleteHistoryWithDevices(options = {}) {
 
 module.exports = {
   completeHistorySource,
+  devicesWithLocalHistory,
   parseDeviceHistories,
   parseCompleteHistory,
   resolveCompleteHistory,

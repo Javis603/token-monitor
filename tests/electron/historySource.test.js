@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+  devicesWithLocalHistory,
   parseDeviceHistories,
   resolveCompleteHistory,
   resolveCompleteHistoryWithDevices
@@ -100,6 +101,64 @@ test('keeps device identity when resolving fixed-range histories', async () => {
     { deviceId: 'mac', hostname: 'MacBook', tokens: 40, todayTokens: 40, todayKey: '2026-08-11' },
     { deviceId: 'pc', hostname: 'Windows', tokens: 60, todayTokens: 60, todayKey: '2026-08-11' }
   ]);
+});
+
+test('remote fixed-range history overlays a fresher local device record', async () => {
+  const hubDevice = {
+    deviceId: 'mac',
+    periodWindows: { today: { key: '2026-08-12', endsAt: '2026-08-13T00:00:00.000Z' } },
+    today: { totalTokens: 5 },
+    history: { daily: [{ date: '2026-08-11', tokens: 100 }], monthly: [], summary: {} }
+  };
+  const localDevice = {
+    deviceId: 'mac',
+    periodWindows: { today: { key: '2026-08-12', endsAt: '2026-08-13T00:00:00.000Z' } },
+    today: { totalTokens: 5 },
+    history: { daily: [{ date: '2026-08-11', tokens: 200 }], monthly: [], summary: {} }
+  };
+  const result = await resolveCompleteHistoryWithDevices({
+    hubUrl: 'https://hub.example',
+    localDevice,
+    aggregateHistory: (devices) => devices[0].history,
+    fetchImpl: async () => ({ ok: true, async json() { return { devices: [hubDevice] }; } })
+  });
+  assert.equal(result.history.daily[0].tokens, 200);
+  assert.equal(result.deviceHistories[0].history.daily[0].tokens, 200);
+});
+
+test('local snapshot without History preserves the Hub last-good History', () => {
+  const hubHistory = { daily: [{ date: '2026-08-11', tokens: 80 }] };
+  assert.deepEqual(devicesWithLocalHistory([
+    { deviceId: 'mac', history: hubHistory, today: { totalTokens: 4 } }
+  ], {
+    deviceId: 'mac',
+    today: { totalTokens: 5 }
+  }), [{
+    deviceId: 'mac',
+    history: hubHistory,
+    today: { totalTokens: 5 }
+  }]);
+});
+
+test('older widget snapshot cannot replace newer headless-agent Hub History', () => {
+  const hubHistory = { daily: [{ date: '2026-08-11', tokens: 300 }] };
+  const localHistory = { daily: [{ date: '2026-08-11', tokens: 200 }] };
+  assert.deepEqual(devicesWithLocalHistory([{
+    deviceId: 'mac',
+    updatedAt: '2026-08-12T13:05:00.000Z',
+    agentRuntime: 'headless-agent',
+    history: hubHistory
+  }], {
+    deviceId: 'mac',
+    updatedAt: '2026-08-12T13:00:00.000Z',
+    agentRuntime: 'electron-widget',
+    history: localHistory
+  }), [{
+    deviceId: 'mac',
+    updatedAt: '2026-08-12T13:05:00.000Z',
+    agentRuntime: 'headless-agent',
+    history: hubHistory
+  }]);
 });
 
 test('marks a device without retained History unavailable instead of inventing zero', () => {
