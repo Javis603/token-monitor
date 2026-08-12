@@ -11,7 +11,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayLayout = api;
 })(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay) {
-  const VERSION = 2;
+  const VERSION = 3;
   const MAX_ITEMS = 12;
   const STYLE_IDS = Object.freeze([
     'appIcon',
@@ -45,6 +45,7 @@
   const BAR_ICON_MODES = new Set(['app', 'first', 'second', 'none']);
   const SPACER_SIZES = new Set(['narrow', 'regular', 'wide']);
   const SPACER_VARIANTS = new Set(['space', 'dot']);
+  const COST_FORMATS = new Set(['compact', 'full']);
   const PERIODS = new Set(['today', 'month', 'allTime']);
   const WINDOW_PRESETS = new Set(['primary', 'secondary', 'session', 'weekly', 'billing']);
 
@@ -107,6 +108,17 @@
     };
   }
 
+  function normalizeCostDisplay(input = {}) {
+    const format = clean(input.costFormat, 24);
+    const decimals = input.costDecimals === null || input.costDecimals === ''
+      ? null
+      : finite(input.costDecimals);
+    return {
+      costFormat: COST_FORMATS.has(format) ? format : 'compact',
+      costDecimals: decimals === null ? 2 : Math.max(0, Math.min(4, Math.round(decimals)))
+    };
+  }
+
   function normalizeSource(input, fallbackWindow = 'primary') {
     const source = input && typeof input === 'object' ? input : {};
     const provider = clean(source.provider, 48).toLowerCase();
@@ -122,21 +134,25 @@
   }
 
   function infoRowDefaults(metric = 'percent', window = 'primary') {
-    return {
+    const row = {
       ...sourceDefaults(window),
       metric: INFO_METRICS.has(metric) ? metric : 'percent',
       period: 'today'
     };
+    return row.metric === 'cost' ? { ...row, ...normalizeCostDisplay() } : row;
   }
 
   function normalizeInfoRow(input, fallbackMetric = 'percent', fallbackWindow = 'primary') {
     const row = input && typeof input === 'object' ? input : {};
     const metric = clean(row.metric, 24);
-    return {
+    const normalized = {
       ...normalizeSource(row, fallbackWindow),
       metric: INFO_METRICS.has(metric) ? metric : fallbackMetric,
       period: PERIODS.has(row.period) ? row.period : 'today'
     };
+    return normalized.metric === 'cost'
+      ? { ...normalized, ...normalizeCostDisplay(row) }
+      : normalized;
   }
 
   function normalizeBarIcon(value, rowCount = 1) {
@@ -275,7 +291,7 @@
       cost: 'cost',
       account: 'account'
     }[styleId];
-    return {
+    const item = {
       id,
       type: 'text',
       style: styleId,
@@ -284,6 +300,7 @@
       period: 'today',
       source: sourceDefaults()
     };
+    return metric === 'cost' ? { ...item, ...normalizeCostDisplay() } : item;
   }
 
   function normalizeItem(input, index = 0) {
@@ -414,7 +431,7 @@
       };
     }
     const period = PERIODS.has(input.period) ? input.period : 'today';
-    return {
+    const normalized = {
       id,
       type,
       style: STYLE_SET.has(style) ? style : metric,
@@ -423,6 +440,9 @@
       period,
       source: normalizeSource(input.source)
     };
+    return metric === 'cost'
+      ? { ...normalized, ...normalizeCostDisplay(input) }
+      : normalized;
   }
 
   function uniqueItemId(value, usedIds) {
@@ -759,7 +779,12 @@
       const text = item.metric === 'tokens'
         ? formatCompactNumber(period.totalTokens, options)
         : currencyApi?.formatCurrencyFromUsd
-          ? currencyApi.formatCurrencyFromUsd(period.costUsd, options.currency || 'USD')
+          ? currencyApi.formatCurrencyFromUsd(period.costUsd, options.currency || 'USD', {
+            compact: item.costFormat !== 'full',
+            fractionDigits: item.costDecimals,
+            compactTokenUnits: options.compactTokenUnits,
+            locale: options.locale || options.language
+          })
           : String(Number(period.costUsd) || 0);
       return { ...item, available: true, text };
     }
@@ -837,6 +862,7 @@
           if (item.metric === 'mixed') {
             const rows = item.rows.map((source) => {
               const resolved = resolveTextItem({
+                ...source,
                 type: 'text',
                 style: source.metric,
                 metric: source.metric,

@@ -91,7 +91,7 @@ test('tray layouts normalize to a versioned and bounded shape', () => {
   };
 
   assert.deepEqual(normalizeTrayLayout(malformed), {
-    version: 2,
+    version: 3,
     items: [
       {
         id: 'one',
@@ -186,7 +186,7 @@ test('tray layouts support optional shared icons, stacked values and configurabl
     ]
   });
 
-  assert.equal(normalized.version, 2);
+  assert.equal(normalized.version, 3);
   assert.equal(normalized.items[0].icon, 'none');
   assert.equal(normalized.items[1].style, 'doubleReset');
   assert.equal(normalized.items[1].icon, 'second');
@@ -375,6 +375,51 @@ test('layout resolution uses real period, quota, reset and account data', () => 
   assert.equal(resolved.items[0].text, '1.2M');
   assert.equal(resolved.items[1].text, '72% · 42m');
   assert.equal(resolved.items[2].text, 'managed@example.com');
+});
+
+test('cost items default to compact units and preserve per-item decimal choices', () => {
+  const [migrated] = normalizeTrayLayout({
+    version: 2,
+    items: [{
+      id: 'legacy-cost',
+      type: 'text',
+      style: 'cost',
+      metric: 'cost',
+      period: 'today',
+      source: {}
+    }]
+  }).items;
+  assert.equal(migrated.costFormat, 'compact');
+  assert.equal(migrated.costDecimals, 2);
+
+  const compact = createTrayLayoutItem('cost', { idFactory: () => 'compact-cost' });
+  compact.period = 'allTime';
+  const full = { ...compact, id: 'full-cost', costFormat: 'full', costDecimals: 0 };
+  const info = createTrayLayoutItem('doubleInfo', { idFactory: () => 'cost-info' });
+  info.rows[1] = {
+    ...info.rows[1],
+    metric: 'cost',
+    period: 'allTime',
+    costFormat: 'compact',
+    costDecimals: 1
+  };
+
+  const resolved = resolveTrayLayout({ version: 2, items: [compact, full, info] }, stats, {
+    currency: 'HKD',
+    nowMs: now
+  });
+
+  assert.equal(resolved.items[0].text, 'HK$1.52K');
+  assert.equal(resolved.items[1].text, 'HK$1517');
+  assert.equal(resolved.items[2].rows[1].text, 'HK$1.5K');
+
+  const localized = resolveTrayLayout({ version: 3, items: [compact] }, stats, {
+    currency: 'HKD',
+    compactTokenUnits: 'localized',
+    locale: 'zh-TW',
+    nowMs: now
+  });
+  assert.equal(localized.items[0].text, 'HK$1517.10');
 });
 
 test('stacked quota values resolve two percentages or reset times independently', () => {

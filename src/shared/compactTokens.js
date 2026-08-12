@@ -49,9 +49,13 @@
     ];
   }
 
-  function decimalsFor(unitSystem, unitIndex, scaled, style) {
+  function decimalsFor(unitSystem, unitIndex, scaled, options = {}) {
+    if (options.fractionDigits !== null && options.fractionDigits !== '') {
+      const requested = Number(options.fractionDigits);
+      if (Number.isFinite(requested)) return Math.max(0, Math.min(4, Math.round(requested)));
+    }
     if (unitSystem === 'localized') return Math.abs(scaled) < 10 ? 2 : 1;
-    if (style === 'tray') return unitIndex === 2 ? 2 : 1;
+    if (options.style === 'tray') return unitIndex === 2 ? 2 : 1;
     return 1;
   }
 
@@ -68,11 +72,19 @@
         break;
       }
     }
-    if (unitIndex < 0) return String(num);
+    if (unitIndex < 0) {
+      const requestedDigits = Number(options.fractionDigits);
+      if (options.fractionDigits !== null
+        && options.fractionDigits !== ''
+        && Number.isFinite(requestedDigits)) {
+        return num.toFixed(Math.max(0, Math.min(4, Math.round(requestedDigits))));
+      }
+      return String(num);
+    }
 
     const formatScaled = () => {
       const scaled = num / units[unitIndex].divisor;
-      const digits = decimalsFor(effective, unitIndex, scaled, options.style);
+      const digits = decimalsFor(effective, unitIndex, scaled, options);
       return scaled.toFixed(digits);
     };
     let display = formatScaled();
@@ -82,7 +94,8 @@
       display = formatScaled();
     }
 
-    const keepTrailingZeros = options.style === 'tray' && effective === 'western';
+    const keepTrailingZeros = options.keepTrailingZeros === true
+      || (options.style === 'tray' && effective === 'western');
     if (!keepTrailingZeros) display = display.replace(/\.?0+$/, '');
     return `${display}${units[unitIndex].suffix}`;
   }
