@@ -377,7 +377,7 @@ test('layout resolution uses real period, quota, reset and account data', () => 
   assert.equal(resolved.items[2].text, 'managed@example.com');
 });
 
-test('cost items default to compact units and preserve per-item decimal choices', () => {
+test('cost items preserve legacy output and support compact per-item decimal choices', () => {
   const [migrated] = normalizeTrayLayout({
     version: 2,
     items: [{
@@ -389,8 +389,21 @@ test('cost items default to compact units and preserve per-item decimal choices'
       source: {}
     }]
   }).items;
-  assert.equal(migrated.costFormat, 'compact');
-  assert.equal(migrated.costDecimals, 2);
+  assert.equal(migrated.costFormat, 'full');
+  assert.equal(migrated.costDecimals, 'auto');
+
+  const legacySmall = resolveTrayLayout({
+    version: 2,
+    items: [{
+      id: 'legacy-small',
+      type: 'text',
+      style: 'cost',
+      metric: 'cost',
+      period: 'today',
+      source: {}
+    }]
+  }, { periods: { today: { costUsd: 0.0049 } } }, { currency: 'USD' });
+  assert.equal(legacySmall.items[0].text, '$0.0049');
 
   const compact = createTrayLayoutItem('cost', { idFactory: () => 'compact-cost' });
   compact.period = 'allTime';
@@ -404,7 +417,7 @@ test('cost items default to compact units and preserve per-item decimal choices'
     costDecimals: 1
   };
 
-  const resolved = resolveTrayLayout({ version: 2, items: [compact, full, info] }, stats, {
+  const resolved = resolveTrayLayout({ version: 3, items: [compact, full, info] }, stats, {
     currency: 'HKD',
     nowMs: now
   });

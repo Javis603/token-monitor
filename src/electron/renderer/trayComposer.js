@@ -51,6 +51,12 @@
     return { ...item, period };
   }
 
+  function costDisplayPatch(item, rowIndex, patch) {
+    return Array.isArray(item?.rows)
+      ? sourcePatch(item, rowIndex, patch)
+      : { ...item, ...patch };
+  }
+
   function accountModeSourcePatch(source, accounts, accountMode) {
     if (accountMode !== 'specific') {
       return { accountMode, accountKey: '', window: source.window };
@@ -631,9 +637,6 @@
 
     function costDisplayEditors(item, rowIndex = 0) {
       const source = Array.isArray(item.rows) ? sourceForItem(item, rowIndex) : item;
-      const patchItem = (patch) => (
-        Array.isArray(item.rows) ? sourcePatch(item, rowIndex, patch) : { ...item, ...patch }
-      );
       return [
         picker(
           l('trayComposer.costFormat', 'Cost format'),
@@ -642,14 +645,17 @@
             { value: 'full', label: l('trayComposer.costFormat.full', 'Full number') }
           ],
           source.costFormat,
-          (costFormat) => updateItem(item, patchItem({ costFormat }))
+          (costFormat) => updateItem(item, costDisplayPatch(item, rowIndex, { costFormat }))
         ),
         picker(
           l('trayComposer.costDecimals', 'Decimal places'),
-          [0, 1, 2, 3, 4].map((value) => ({ value, label: String(value) })),
+          [
+            { value: 'auto', label: l('trayComposer.costDecimals.auto', 'Automatic') },
+            ...[0, 1, 2, 3, 4].map((value) => ({ value, label: String(value) }))
+          ],
           source.costDecimals,
-          (costDecimals) => updateItem(item, patchItem({
-            costDecimals: Number(costDecimals)
+          (costDecimals) => updateItem(item, costDisplayPatch(item, rowIndex, {
+            costDecimals: costDecimals === 'auto' ? 'auto' : Number(costDecimals)
           }))
         )
       ];
@@ -1276,6 +1282,7 @@
 
   return {
     accountModeSourcePatch,
+    costDisplayPatch,
     createTrayComposer,
     duplicateTrayLayoutItem,
     handlePickerDocumentScroll,

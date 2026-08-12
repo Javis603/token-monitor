@@ -36,35 +36,6 @@ test('formats converted costs with unambiguous symbols (built-in defaults)', () 
   assert.equal(formatCurrencyFromUsd(1, 'CNY'), '¥6.80');
 });
 
-test('formats compact tray costs with explicit decimal places', () => {
-  configureRates(null);
-  assert.equal(
-    formatCurrencyFromUsd(263.4, 'HKD', { compact: true, fractionDigits: 2 }),
-    'HK$2.05K'
-  );
-  assert.equal(
-    formatCurrencyFromUsd(263.4, 'HKD', { compact: false, fractionDigits: 0 }),
-    'HK$2055'
-  );
-  assert.equal(
-    formatCurrencyFromUsd(128205.128205, 'HKD', { compact: true, fractionDigits: 1 }),
-    'HK$1.0M'
-  );
-  assert.equal(
-    formatCurrencyFromUsd(999999.9, 'USD', { compact: true, fractionDigits: 2 }),
-    '$1.00M'
-  );
-  assert.equal(
-    formatCurrencyFromUsd(1896.0461538, 'HKD', {
-      compact: true,
-      fractionDigits: 2,
-      compactTokenUnits: 'localized',
-      locale: 'zh-TW'
-    }),
-    'HK$1.48萬'
-  );
-});
-
 test('configureRates overlays active rates and null resets to defaults', () => {
   configureRates({ CNY: 7.25, TWD: 0, HKD: -1, JPY: 150 });
   assert.equal(convertUsd(1, 'CNY'), 7.25);   // valid override applied

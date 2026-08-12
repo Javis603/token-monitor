@@ -8,6 +8,7 @@ const test = require('node:test');
 const trayLayoutApi = require('../../src/shared/trayLayout');
 const {
   accountModeSourcePatch,
+  costDisplayPatch,
   createTrayComposer,
   duplicateTrayLayoutItem,
   handlePickerDocumentScroll,
@@ -100,6 +101,27 @@ test('period updates target the item for single text and the source for stacked 
   const stackedUpdated = periodItemPatch(stacked, 1, 'allTime');
   assert.equal(stackedUpdated.rows[0].period, 'today');
   assert.equal(stackedUpdated.rows[1].period, 'allTime');
+});
+
+test('cost display updates target a single item or one mixed-information row', () => {
+  const single = trayLayoutApi.createTrayLayoutItem('cost', { idFactory: () => 'single-cost' });
+  const singleUpdated = costDisplayPatch(single, 0, { costFormat: 'full', costDecimals: 'auto' });
+  assert.equal(singleUpdated.costFormat, 'full');
+  assert.equal(singleUpdated.costDecimals, 'auto');
+  assert.equal(singleUpdated.source.costFormat, undefined);
+
+  const stacked = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked-cost' });
+  const stackedUpdated = costDisplayPatch(stacked, 1, { costFormat: 'compact', costDecimals: 3 });
+  assert.equal(stackedUpdated.rows[0].costFormat, undefined);
+  assert.equal(stackedUpdated.rows[1].costFormat, 'compact');
+  assert.equal(stackedUpdated.rows[1].costDecimals, 3);
+
+  const normalized = trayLayoutApi.normalizeTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ ...stackedUpdated, rows: [stackedUpdated.rows[0], { ...stackedUpdated.rows[1], metric: 'cost' }] }]
+  });
+  assert.equal(normalized.items[0].rows[1].costFormat, 'compact');
+  assert.equal(normalized.items[0].rows[1].costDecimals, 3);
 });
 
 test('keyboard movement returns the reordered layout and respects boundaries', () => {

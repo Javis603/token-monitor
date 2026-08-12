@@ -1,13 +1,10 @@
 'use strict';
 
 (function exposeCurrency(root, factory) {
-  const compactTokens = typeof module === 'object' && module.exports
-    ? require('./compactTokens')
-    : root?.TokenMonitorCompactTokens;
-  const api = factory(compactTokens);
+  const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorCurrency = api;
-})(typeof window !== 'undefined' ? window : null, function createCurrencyApi(compactTokens) {
+})(typeof window !== 'undefined' ? window : null, function createCurrencyApi() {
   const CURRENCY_RATES = Object.freeze({
     USD: Object.freeze({ code: 'USD', symbol: '$', rate: 1 }),
     TWD: Object.freeze({ code: 'TWD', symbol: 'NT$', rate: 31.5 }),
@@ -15,12 +12,6 @@
     CNY: Object.freeze({ code: 'CNY', symbol: '¥', rate: 6.8 })
   });
   const CURRENCY_CODES = Object.freeze(Object.keys(CURRENCY_RATES));
-  const COMPACT_CURRENCY_UNITS = Object.freeze([
-    Object.freeze({ divisor: 1e12, suffix: 'T' }),
-    Object.freeze({ divisor: 1e9, suffix: 'B' }),
-    Object.freeze({ divisor: 1e6, suffix: 'M' }),
-    Object.freeze({ divisor: 1e3, suffix: 'K' })
-  ]);
 
   function defaultRateMap() {
     const map = {};
@@ -75,44 +66,11 @@
     return Math.abs(amount) >= 1 ? 2 : 4;
   }
 
-  function normalizeFractionDigits(value, fallback) {
-    const number = Number(value);
-    if (!Number.isFinite(number)) return fallback;
-    return Math.max(0, Math.min(4, Math.round(number)));
-  }
-
-  function compactCurrencyAmount(amount, fractionDigits, options = {}) {
-    if (compactTokens?.formatCompactValue) {
-      return compactTokens.formatCompactValue(
-        amount,
-        options.compactTokenUnits,
-        options.locale || options.language || 'en',
-        { fractionDigits, keepTrailingZeros: true }
-      );
-    }
-    const roundedMagnitude = Math.abs(Number(amount.toFixed(fractionDigits)));
-    let unitIndex = COMPACT_CURRENCY_UNITS.findIndex((entry) => roundedMagnitude >= entry.divisor);
-    if (unitIndex < 0) return amount.toFixed(fractionDigits);
-    let display = (amount / COMPACT_CURRENCY_UNITS[unitIndex].divisor).toFixed(fractionDigits);
-    if (Math.abs(Number(display)) >= 1000 && unitIndex > 0) {
-      unitIndex -= 1;
-      display = (amount / COMPACT_CURRENCY_UNITS[unitIndex].divisor).toFixed(fractionDigits);
-    }
-    return `${display}${COMPACT_CURRENCY_UNITS[unitIndex].suffix}`;
-  }
-
-  function formatCurrencyFromUsd(value, currency = 'USD', options = {}) {
+  function formatCurrencyFromUsd(value, currency = 'USD') {
     const code = normalizeCurrency(currency);
     const amount = convertUsd(value, code);
-    const displayOptions = options && typeof options === 'object' ? options : {};
-    const digits = normalizeFractionDigits(
-      displayOptions.fractionDigits,
-      fractionDigitsFor(amount, code)
-    );
-    const number = displayOptions.compact === true
-      ? compactCurrencyAmount(amount, digits, displayOptions)
-      : amount.toFixed(digits);
-    return `${CURRENCY_RATES[code].symbol}${number}`;
+    const digits = fractionDigitsFor(amount, code);
+    return `${CURRENCY_RATES[code].symbol}${amount.toFixed(digits)}`;
   }
 
   return {
