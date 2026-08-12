@@ -25,7 +25,8 @@ const {
   pickLimitProviderByKindPriority,
   pickRecentUsageProviderId,
   pickWorstLimitProvider,
-  trayShowsTitle
+  trayShowsTitle,
+  usageSessionActivityTimestampMs
 } = require('../../src/shared/trayText');
 
 const stats = {
@@ -65,6 +66,64 @@ test('recent usage provider follows the newest valid session timestamp', () => {
     null
   );
   assert.equal(pickRecentUsageProviderId({ periods: { today: {} } }), null);
+});
+
+test('recent usage provider includes the local Reasonix native session view', () => {
+  const recentStats = {
+    periods: {
+      today: {
+        sessions: {
+          'claude:older': { client: 'claude', lastUsedAt: '2026-08-12T10:00:00.000Z' }
+        }
+      }
+    },
+    nativeSessions: {
+      today: {
+        'reasonix:newer': {
+          client: 'reasonix',
+          lastMessageAt: '2026-08-12T10:05:00.000Z',
+          lastUsedAt: '2026-08-12T10:06:00.000Z'
+        }
+      },
+      month: {},
+      allTime: {}
+    }
+  };
+
+  assert.equal(pickRecentUsageProviderId(recentStats), 'reasonix');
+  assert.equal(pickRecentUsageProviderId(recentStats, ['claude', 'reasonix']), 'reasonix');
+});
+
+test('Reasonix title metadata cannot masquerade as recent activity', () => {
+  const renamedReasonix = {
+    client: 'reasonix',
+    createdAt: '2026-08-12T09:00:00.000Z',
+    lastUsedAt: '2026-08-12T10:05:00.000Z',
+    updatedAt: '2026-08-12T10:05:00.000Z'
+  };
+  assert.equal(
+    usageSessionActivityTimestampMs(renamedReasonix, 'native'),
+    Date.parse('2026-08-12T09:00:00.000Z')
+  );
+
+  const statsAfterRename = {
+    periods: {
+      today: {
+        sessions: {
+          'claude:active': { client: 'claude', lastUsedAt: '2026-08-12T10:00:00.000Z' }
+        }
+      }
+    },
+    nativeSessions: {
+      today: {},
+      month: {},
+      allTime: { 'reasonix:renamed': renamedReasonix }
+    }
+  };
+  assert.equal(pickRecentUsageProviderId(statsAfterRename), 'claude');
+
+  statsAfterRename.nativeSessions.allTime['reasonix:renamed'].lastMessageAt = '2026-08-12T10:10:00.000Z';
+  assert.equal(pickRecentUsageProviderId(statsAfterRename), 'reasonix');
 });
 
 test('fallback tray icon source stays transparent and high-resolution', () => {

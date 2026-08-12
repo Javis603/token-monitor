@@ -823,7 +823,7 @@
     );
   }
 
-  function resolveUsageValue(item, stats) {
+  function resolveUsageValue(item, stats, recentProvider) {
     const period = stats?.periods?.[item.period] || {};
     if (normalizeUsageScope(item.usageScope) !== 'recent') {
       return {
@@ -832,7 +832,7 @@
         value: item.metric === 'tokens' ? period.totalTokens : period.costUsd
       };
     }
-    const provider = trayTextApi?.pickRecentUsageProviderId?.(stats) || null;
+    const provider = recentProvider || null;
     if (!provider) return { available: false, provider: null, value: 0 };
     return {
       available: true,
@@ -843,13 +843,13 @@
     };
   }
 
-  function resolveTextItem(item, stats, options) {
+  function resolveTextItem(item, stats, options, recentProvider = null) {
     if (item.metric === 'custom') {
       const text = clean(item.text, 40);
       return { ...item, available: Boolean(text), text: text || '--' };
     }
     if (item.metric === 'tokens' || item.metric === 'cost') {
-      const usage = resolveUsageValue(item, stats);
+      const usage = resolveUsageValue(item, stats, recentProvider);
       if (!usage.available) {
         return { ...item, available: false, text: '--', provider: null };
       }
@@ -880,6 +880,19 @@
 
   function resolveTrayLayout(layout, stats, options = {}) {
     const normalized = normalizeTrayLayout(layout);
+    const usesRecentProvider = normalized.items.some((item) => (
+      (item.type === 'icon' && item.autoMode === 'recent')
+      || (item.type === 'text' && item.usageScope === 'recent')
+      || (item.type === 'stack' && item.metric === 'mixed'
+        && item.rows.some((row) => row.usageScope === 'recent'))
+    ));
+    const recentProvider = usesRecentProvider
+      ? trayTextApi?.pickRecentUsageProviderId?.(stats) || null
+      : null;
+    const recentIconProvider = recentProvider && (
+      !Array.isArray(options.availableProviderIds)
+      || options.availableProviderIds.includes(recentProvider)
+    ) ? recentProvider : null;
     return {
       version: VERSION,
       items: normalized.items.map((item) => {
@@ -896,7 +909,7 @@
           }
           if (item.autoMode === 'recent' || item.autoMode === 'tokens' || item.autoMode === 'cost') {
             const provider = item.autoMode === 'recent'
-              ? trayTextApi?.pickRecentUsageProviderId?.(stats, options.availableProviderIds)
+              ? recentIconProvider
               : trayTextApi?.pickUsageProviderId?.(
                   stats,
                   item.autoMode,
@@ -948,7 +961,7 @@
                 metric: source.metric,
                 period: source.period,
                 source
-              }, stats, options);
+              }, stats, options, recentProvider);
               return {
                 source,
                 available: resolved.available,
@@ -976,7 +989,7 @@
           return { ...item, available: rows.some((row) => row.available), rows };
         }
         if (item.type === 'spacer') return { ...item, available: true };
-        return resolveTextItem(item, stats, options);
+        return resolveTextItem(item, stats, options, recentProvider);
       })
     };
   }

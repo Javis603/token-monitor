@@ -71,18 +71,36 @@
     return new Set(availableIconIds).has(client) ? client : null;
   }
 
+  function usageSessionActivityTimestampMs(session, source = 'period') {
+    const value = source === 'native'
+      ? session?.lastMessageAt || session?.createdAt || session?.startedAt
+      : session?.lastUsedAt || session?.startedAt || session?.createdAt;
+    const timestamp = Date.parse(value || '');
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
   function pickRecentUsageProviderId(stats, availableIconIds) {
     let latest = null;
-    for (const period of Object.values(stats?.periods || {})) {
-      for (const session of Object.values(period?.sessions || {})) {
+    const considerSessions = (sessions, source) => {
+      for (const session of Object.values(sessions || {})) {
         const client = normalizedProviderId(session?.client);
         if (!client) continue;
-        const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
-        if (!Number.isFinite(lastUsedMs)) continue;
+        const lastUsedMs = usageSessionActivityTimestampMs(session, source);
+        if (lastUsedMs <= 0) continue;
         if (!latest || lastUsedMs > latest.lastUsedMs || (
           lastUsedMs === latest.lastUsedMs && client.localeCompare(latest.client) < 0
         )) latest = { client, lastUsedMs };
       }
+    };
+    for (const period of Object.values(stats?.periods || {})) {
+      considerSessions(period?.sessions, 'period');
+    }
+    // Reasonix native sessions are a local-only presentation view and are
+    // intentionally excluded from periods.sessions. Their timestamps may
+    // select the recent client, while Tokscale period aggregates remain the
+    // authority for the Token and Cost values shown by the tray.
+    for (const sessions of Object.values(stats?.nativeSessions || {})) {
+      considerSessions(sessions, 'native');
     }
     if (!latest) return null;
     if (!Array.isArray(availableIconIds)) return latest.client;
@@ -331,6 +349,7 @@
     pickRecentUsageProviderId,
     pickWorstLimit,
     pickWorstLimitProvider,
-    trayShowsTitle
+    trayShowsTitle,
+    usageSessionActivityTimestampMs
   };
 });
