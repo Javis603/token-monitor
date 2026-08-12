@@ -90,6 +90,16 @@
     };
   }
 
+  function handlePickerDocumentScroll(picker, eventTarget, actions = {}) {
+    if (picker?.menu?.contains?.(eventTarget)) return 'ignore';
+    if (!picker?.owner?.isConnected || !picker?.trigger?.isConnected) {
+      actions.close?.();
+      return 'close';
+    }
+    actions.reposition?.();
+    return 'reposition';
+  }
+
   function syncTrayComposerSurfaces(surfaces, composers, createComposer) {
     for (const surface of surfaces) {
       surface.root?.classList.toggle('hidden', !surface.visible);
@@ -435,8 +445,14 @@
         closePickerMenu();
       };
       const onDocumentScroll = (event) => {
-        if (menu.contains(event.target)) return;
-        closePickerMenu({ restoreFocus: false });
+        // Stats updates can adjust the settings page's scroll position while a
+        // picker is open. Keep the in-progress control stable and follow its
+        // connected trigger instead of treating that layout correction as an
+        // outside dismissal.
+        handlePickerDocumentScroll(activePicker, event.target, {
+          close: () => closePickerMenu({ restoreFocus: false }),
+          reposition: positionPickerMenu
+        });
       };
       activePicker = {
         owner,
@@ -1234,6 +1250,7 @@
     accountModeSourcePatch,
     createTrayComposer,
     duplicateTrayLayoutItem,
+    handlePickerDocumentScroll,
     moveTrayLayoutItemByKey,
     periodItemPatch,
     syncTrayComposerSurfaces

@@ -10,6 +10,7 @@ const {
   accountModeSourcePatch,
   createTrayComposer,
   duplicateTrayLayoutItem,
+  handlePickerDocumentScroll,
   moveTrayLayoutItemByKey,
   periodItemPatch,
   syncTrayComposerSurfaces
@@ -111,6 +112,43 @@ test('keyboard movement returns the reordered layout and respects boundaries', (
   const boundary = moveTrayLayoutItemByKey(trayLayoutApi, moved.layout, 'selected', 'ArrowRight');
   assert.equal(boundary.moved, false);
   assert.deepEqual(boundary.layout, moved.layout);
+});
+
+test('an open picker follows outer scroll updates while its trigger stays connected', () => {
+  const menu = { contains: (target) => target === 'menu-scroll' };
+  const connected = {
+    menu,
+    owner: { isConnected: true },
+    trigger: { isConnected: true }
+  };
+  const calls = [];
+  const actions = {
+    close: () => calls.push('close'),
+    reposition: () => calls.push('reposition')
+  };
+
+  assert.equal(handlePickerDocumentScroll(connected, 'menu-scroll', actions), 'ignore');
+  assert.deepEqual(calls, []);
+  assert.equal(handlePickerDocumentScroll(connected, 'settings-scroll', actions), 'reposition');
+  assert.deepEqual(calls, ['reposition']);
+  assert.equal(
+    handlePickerDocumentScroll(
+      { ...connected, trigger: { isConnected: false } },
+      'settings-scroll',
+      actions
+    ),
+    'close'
+  );
+  assert.deepEqual(calls, ['reposition', 'close']);
+  assert.equal(
+    handlePickerDocumentScroll(
+      { ...connected, owner: { isConnected: false } },
+      'settings-scroll',
+      actions
+    ),
+    'close'
+  );
+  assert.deepEqual(calls, ['reposition', 'close', 'close']);
 });
 
 test('composer visibility destroys hidden surfaces and creates newly visible surfaces', () => {
