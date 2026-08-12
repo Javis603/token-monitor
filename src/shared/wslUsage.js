@@ -150,10 +150,39 @@ function wslHomePath(home, relativePath) {
   return `${home}\\${relativePath.replace(/\//g, '\\')}`;
 }
 
-function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
+function missingPathError(error) {
+  return error?.code === 'ENOENT' || error?.code === 'ENOTDIR';
+}
+
+function pathProbe(pathValue, deps = {}) {
+  if (typeof deps.statSync === 'function') {
+    try {
+      deps.statSync(pathValue);
+      return 'present';
+    } catch (error) {
+      return missingPathError(error) ? 'absent' : 'inaccessible';
+    }
+  }
+  // Preserve the lightweight boolean seam used by callers and older tests.
+  // Production discovery always supplies fs.statSync below, which is what lets
+  // it distinguish a real absence from UNC/permission/I/O failure.
+  return (deps.existsSync || fs.existsSync)(pathValue) ? 'present' : 'absent';
+}
+
+function probeHomeData(home, deps = {}) {
   const ids = new Set();
+  let complete = true;
+  if (typeof deps.statSync === 'function') {
+    const homeState = pathProbe(home, deps);
+    if (homeState === 'inaccessible' || (deps.required === true && homeState !== 'present')) {
+      return { clients: [], complete: false };
+    }
+    if (homeState === 'absent') return { clients: [], complete: true };
+  }
   for (const rel of WSL_DATA_MARKERS) {
-    if (existsSync(wslHomePath(home, rel))) {
+    const markerState = pathProbe(wslHomePath(home, rel), deps);
+    if (markerState === 'inaccessible') complete = false;
+    if (markerState === 'present') {
       const client = MARKER_CLIENTS[rel];
       if (client) ids.add(client);
     }
@@ -162,20 +191,29 @@ function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
   // Tokscale 4.5.2 actually parses instead of marking every VS Code WSL home.
   const workspaceRoot = wslHomePath(home, '.config/Code/User/workspaceStorage');
   try {
-    for (const workspace of readdirSync(workspaceRoot)) {
-      if (existsSync(`${workspaceRoot}\\${workspace}\\chatSessions`)) {
+    for (const workspace of (deps.readdirSync || fs.readdirSync)(workspaceRoot)) {
+      const sessionsState = pathProbe(`${workspaceRoot}\\${workspace}\\chatSessions`, deps);
+      if (sessionsState === 'inaccessible') complete = false;
+      if (sessionsState === 'present') {
         ids.add('copilot');
         break;
       }
     }
-  } catch (_) { /* workspaceStorage missing or unreadable */ }
-  return [...ids];
+  } catch (error) {
+    if (!missingPathError(error)) complete = false;
+  }
+  return { clients: [...ids], complete };
+}
+
+function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
+  return probeHomeData(home, { existsSync, readdirSync }).clients;
 }
 
 function discoverWslUsageHomes(deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const existsSync = deps.existsSync || fs.existsSync;
   const homes = [];
+  const homeClients = new Map();
   const running = discoverRunningWslDistros(deps);
   let complete = running.complete && running.state !== 'not-running';
   for (const distro of running.distros) {
@@ -183,7 +221,7 @@ function discoverWslUsageHomes(deps = {}) {
     const homeRoot = `\\\\wsl$\\${distro}\\home`;
     try {
       for (const user of readdirSync(homeRoot)) {
-        candidates.push(`${homeRoot}\\${user}`);
+        candidates.push({ home: `${homeRoot}\\${user}`, required: true });
       }
     } catch (_) {
       // Once a running distro is known, an unreadable /home means its tracked
@@ -191,12 +229,22 @@ function discoverWslUsageHomes(deps = {}) {
       // best-effort native periods, but flexible History must fail closed.
       complete = false;
     }
-    candidates.push(`\\\\wsl$\\${distro}\\root`);
-    for (const home of candidates) {
-      if (homeHasData(home, existsSync, readdirSync).length > 0) homes.push(home);
+    candidates.push({ home: `\\\\wsl$\\${distro}\\root`, required: false });
+    for (const candidate of candidates) {
+      const probed = probeHomeData(candidate.home, {
+        existsSync,
+        readdirSync,
+        statSync: deps.statSync || (deps.existsSync ? null : fs.statSync),
+        required: candidate.required
+      });
+      if (!probed.complete) complete = false;
+      if (probed.clients.length > 0) {
+        homes.push(candidate.home);
+        homeClients.set(candidate.home, probed.clients);
+      }
     }
   }
-  return { homes, complete, state: running.state };
+  return { homes, homeClients, complete, state: running.state };
 }
 
 function wslUsageHomes(deps = {}) {
@@ -214,8 +262,6 @@ async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
-  const existsSync = deps.existsSync || fs.existsSync;
-  const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
   const discovery = discoverWslUsageHomes(deps);
@@ -233,7 +279,7 @@ async function collectWslUsage(options = {}, deps = {}) {
     .join(',');
   for (const home of discovery.homes) {
     // Attribution is marker-based, independent of whether a parser returns data.
-    const homeDataClients = homeHasData(home, existsSync, readdirSync);
+    const homeDataClients = discovery.homeClients.get(home) || [];
     for (const id of homeDataClients) {
       if (tracked.has(id)) detected.add(id);
     }

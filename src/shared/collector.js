@@ -670,6 +670,50 @@ const HISTORY_TIMEOUT_MS = 60000;
 const DEFAULT_HISTORY_INTERVAL_MS = 15 * 60 * 1000;
 const HISTORY_INTERVAL_VALUES = new Set([5, 10, 15, 30, 60].map((minutes) => minutes * 60 * 1000));
 
+function dayKeyEpoch(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const epoch = Date.UTC(year, month - 1, day);
+  const check = new Date(epoch);
+  return check.getUTCFullYear() === year
+    && check.getUTCMonth() === month - 1
+    && check.getUTCDate() === day
+    ? epoch
+    : null;
+}
+
+function normalizeWslHistoryEvidence(raw, todayKey) {
+  const todayEpoch = dayKeyEpoch(todayKey);
+  const source = raw?.clients && typeof raw.clients === 'object' ? raw.clients : {};
+  const clients = {};
+  for (const [client, lastSeenDay] of Object.entries(source)) {
+    const key = String(client || '').trim().toLowerCase();
+    const seenEpoch = dayKeyEpoch(lastSeenDay);
+    if (!key || seenEpoch === null || todayEpoch === null) continue;
+    const ageDays = Math.floor((todayEpoch - seenEpoch) / 86400000);
+    if (ageDays < HISTORY_CAP_DAYS) clients[key] = String(lastSeenDay);
+  }
+  return { clients };
+}
+
+function wslEvidenceClients(detected, bundle) {
+  const clients = new Set((Array.isArray(detected) ? detected : [])
+    .map((client) => String(client || '').trim().toLowerCase())
+    .filter(Boolean));
+  for (const period of [bundle?.today, bundle?.month, bundle?.allTime]) {
+    for (const [client, tokens] of Object.entries(period?.clients || {})) {
+      if (Number(tokens || 0) > 0) clients.add(String(client).trim().toLowerCase());
+    }
+  }
+  if (clients.size === 0 && [bundle?.today, bundle?.month, bundle?.allTime].some(periodHasUsage)) {
+    clients.add('*');
+  }
+  return clients;
+}
+
 function normalizeHistoryIntervalMs(value) {
   const parsed = Number(value);
   return HISTORY_INTERVAL_VALUES.has(parsed) ? parsed : DEFAULT_HISTORY_INTERVAL_MS;
@@ -931,7 +975,10 @@ async function collectUsageOnce(options) {
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
   let wslScanComplete = options.wslAnchor ? options.wslScanComplete === true : true;
-  let wslHistoryIncomplete = options.wslScanEnabled !== false && options.wslHistoryIncomplete === true;
+  const wslHistoryEvidence = normalizeWslHistoryEvidence(
+    options.wslHistoryEvidence,
+    localTodayKey(collectedAt)
+  );
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
@@ -975,15 +1022,14 @@ async function collectUsageOnce(options) {
       wslScanComplete = wslResult.complete !== false;
     }
   }
-  wslHistoryIncomplete = wslHistoryIncomplete
-    || wslScanComplete === false
-    // Until WSL homes have their own History graph, any tracked data marker is
-    // evidence that host-only daily rows cannot prove complete coverage. This
-    // must not depend on the configurable allTimeSince window.
-    || wslDetected.length > 0
-    || periodHasUsage(wslBundle.today)
-    || periodHasUsage(wslBundle.month)
-    || periodHasUsage(wslBundle.allTime);
+  for (const client of wslEvidenceClients(wslDetected, wslBundle)) {
+    wslHistoryEvidence.clients[client] = localTodayKey(collectedAt);
+  }
+  const relevantWslEvidence = Object.keys(wslHistoryEvidence.clients).some((client) => (
+    client === '*' || trackedClientSet.has(client)
+  ));
+  const wslHistoryIncomplete = options.wslScanEnabled !== false
+    && (wslScanComplete === false || relevantWslEvidence);
   today = mergePeriods(windowsPeriods.today, wslBundle.today);
   month = mergePeriods(windowsPeriods.month, wslBundle.month);
   allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
@@ -1088,7 +1134,7 @@ async function collectUsageOnce(options) {
       wslBundle,
       wslStatus,
       wslScanComplete,
-      wslHistoryIncomplete,
+      wslHistoryEvidence,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
       ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
     });
@@ -2305,7 +2351,7 @@ function startCollector(options) {
   let wslAnchor = null;
   let wslStatusAnchor = null;
   let wslScanCompleteAnchor = false;
-  let wslHistoryIncompleteAnchor = false;
+  let wslHistoryEvidenceAnchor = { clients: {} };
   // The last-activity days a history refresh produced, carried across the ticks
   // that skip history. Read back out of the record this collector just published
   // rather than kept as a second copy, so the two cannot drift; a restart simply
@@ -2406,6 +2452,13 @@ function startCollector(options) {
   if (options.anchorPersistenceEnabled !== false) {
     try {
       const saved = readJson(anchorPath, null);
+      // WSL History evidence has a 370-day lifetime, independent of whether the
+      // same-day period anchor can be reused. Date rollover, allTimeSince and
+      // project settings must not erase evidence for retained History rows.
+      wslHistoryEvidenceAnchor = normalizeWslHistoryEvidence(
+        saved?.wslHistoryEvidence,
+        localTodayKey(collectionDate(options.now))
+      );
       const trust = collectorAnchorTrust(saved, {
         clients,
         allTimeSince,
@@ -2429,11 +2482,31 @@ function startCollector(options) {
         wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
         wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
         wslScanCompleteAnchor = options.wslScanEnabled !== false && saved.wslScanComplete === true;
-        wslHistoryIncompleteAnchor = options.wslScanEnabled !== false && saved.wslHistoryIncomplete === true;
         // An untrustworthy capture time leaves lastFullScanAt at 0, which forces
         // a full scan on the first interval tick (see loop()).
         if (trust.capturedAtMs !== null) lastFullScanAt = trust.capturedAtMs;
       }
+    } catch (_) {}
+  }
+
+  function persistCollectorAnchor() {
+    if (options.anchorPersistenceEnabled === false || !anchor) return;
+    try {
+      fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
+      fs.writeFileSync(anchorPath, JSON.stringify({
+        dateKey: anchor.dateKey,
+        today: anchor.today,
+        month: anchor.month,
+        allTime: anchor.allTime,
+        wslBundle: wslAnchor,
+        wslStatus: wslStatusAnchor,
+        wslScanComplete: wslScanCompleteAnchor,
+        wslHistoryEvidence: wslHistoryEvidenceAnchor,
+        ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
+        ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
+        configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
+        fullScanAt: lastFullScanAt > 0 ? new Date(lastFullScanAt).toISOString() : null
+      }));
     } catch (_) {}
   }
 
@@ -2509,7 +2582,7 @@ function startCollector(options) {
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
         wslScanComplete: anchored ? wslScanCompleteAnchor : true,
-        wslHistoryIncomplete: wslHistoryIncompleteAnchor,
+        wslHistoryEvidence: wslHistoryEvidenceAnchor,
         lastActivityDays: activityDaysAnchor,
         refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
@@ -2571,27 +2644,9 @@ function startCollector(options) {
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
         wslScanCompleteAnchor = captured.wslScanComplete === true;
-        wslHistoryIncompleteAnchor = captured.wslHistoryIncomplete === true;
+        wslHistoryEvidenceAnchor = captured.wslHistoryEvidence || { clients: {} };
         lastFullScanAt = Date.now();
-        if (options.anchorPersistenceEnabled !== false) {
-          try {
-            fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
-            fs.writeFileSync(anchorPath, JSON.stringify({
-              dateKey: anchor.dateKey,
-              today: anchor.today,
-              month: anchor.month,
-              allTime: anchor.allTime,
-              wslBundle: wslAnchor,
-              wslStatus: wslStatusAnchor,
-              wslScanComplete: wslScanCompleteAnchor,
-              wslHistoryIncomplete: wslHistoryIncompleteAnchor,
-              ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
-              ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
-              fullScanAt: new Date().toISOString()
-            }));
-          } catch (_) {}
-        }
+        persistCollectorAnchor();
       } else if (anchored && captured) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
@@ -2602,7 +2657,8 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
           wslScanCompleteAnchor = captured.wslScanComplete === true;
-          wslHistoryIncompleteAnchor = captured.wslHistoryIncomplete === true;
+          wslHistoryEvidenceAnchor = captured.wslHistoryEvidence || { clients: {} };
+          persistCollectorAnchor();
         }
       }
       const transformedSummary = await onUpdate?.(summary, reason);

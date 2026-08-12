@@ -430,6 +430,30 @@ test('collectWslUsage marks unreadable running distro homes incomplete', async (
   assert.equal(complete, false);
 });
 
+test('collectWslUsage marks an inaccessible candidate-home marker incomplete', async () => {
+  const missing = () => Object.assign(new Error('missing'), { code: 'ENOENT' });
+  const { complete } = await collectWslUsage(
+    { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: async () => ({}) },
+    {
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: (dir) => {
+        if (dir === '\\\\wsl$\\Ubuntu\\home') return ['alice'];
+        throw missing();
+      },
+      statSync: (pathValue) => {
+        if (pathValue === '\\\\wsl$\\Ubuntu\\home\\alice') return {};
+        if (pathValue === '\\\\wsl$\\Ubuntu\\home\\alice\\.claude\\projects') {
+          throw Object.assign(new Error('access denied'), { code: 'EACCES' });
+        }
+        throw missing();
+      }
+    }
+  );
+
+  assert.equal(complete, false);
+});
+
 test('collectWslUsage cannot prove zero while installed distros are stopped', async () => {
   const { complete } = await collectWslUsage(
     { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: async () => ({}) },

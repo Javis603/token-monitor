@@ -231,6 +231,76 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
   }
 });
 
+test('persisted WSL History evidence survives date rollover and unrelated config changes', async (t) => {
+  const now = new Date('2026-08-12T08:00:00.000Z');
+  const todayKey = localTodayKey(now);
+  const cases = [
+    {
+      name: 'previous-day period anchor',
+      dateKey: '2026-08-11',
+      fingerprint: configFingerprint('claude', '2024-01-01', true),
+      options: { allTimeSince: '2024-01-01', projectsEnabled: true }
+    },
+    {
+      name: 'changed all-time and project settings',
+      dateKey: todayKey,
+      fingerprint: configFingerprint('claude', '2025-01-01', false),
+      options: { allTimeSince: '2024-01-01', projectsEnabled: true }
+    }
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-evidence-'));
+      const anchorData = {
+        dateKey: scenario.dateKey,
+        today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
+        wslBundle: emptyWslBundle(),
+        wslScanComplete: true,
+        wslHistoryEvidence: { clients: { claude: '2026-08-11' } },
+        configFingerprint: scenario.fingerprint,
+        fullScanAt: new Date(now.getTime() - 300000).toISOString()
+      };
+      fs.writeFileSync(path.join(tmpShared, 'collector-anchor.json'), JSON.stringify(anchorData));
+
+      const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+      process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
+      let handle;
+      try {
+        const { startCollector } = freshCollector();
+        const updates = [];
+        handle = startCollector({
+          ...baseOptions,
+          ...scenario.options,
+          now,
+          historyEnabled: true,
+          dailyHistoryArchiveEnabled: false,
+          wslScanEnabled: true,
+          runTokscale: async () => ({ entries: [] }),
+          runGraph: async () => ({ contributions: [] }),
+          collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [], complete: true }),
+          intervalMs: 60 * 60 * 1000,
+          watchEnabled: false,
+          onUpdate: (summary) => updates.push(summary)
+        });
+
+        await waitForCondition(() => updates.length === 1);
+        assert.equal(updates[0].historyOmitted, true);
+        assert.equal(updates[0].history.schemaVersion, undefined);
+        assert.equal(updates[0].history.coverage, undefined);
+        const saved = JSON.parse(fs.readFileSync(path.join(tmpShared, 'collector-anchor.json'), 'utf8'));
+        assert.deepEqual(saved.wslHistoryEvidence, { clients: { claude: '2026-08-11' } });
+      } finally {
+        if (handle) try { handle.stop(); } catch (_) {}
+        if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+        else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+        delete require.cache[collectorPath];
+        fs.rmSync(tmpShared, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 test('future fullScanAt forces a full scan on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-future-ts-'));
   const dateKey = localTodayKey();

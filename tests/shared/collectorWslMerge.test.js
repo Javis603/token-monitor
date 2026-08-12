@@ -36,7 +36,7 @@ test('full tick merges WSL bundle and marks WSL-only client active', async () =>
   // anchor basis is Windows-only
   assert.equal(anchorCaptured.windowsPeriods.today.totalTokens, 20);
   assert.equal(anchorCaptured.wslBundle.today.totalTokens, 9);
-  assert.equal(anchorCaptured.wslHistoryIncomplete, true);
+  assert.deepEqual(anchorCaptured.wslHistoryEvidence, { clients: { gemini: localTodayKey() } });
 });
 
 test('WSL usage prevents host-only History from claiming complete v2 coverage', async () => {
@@ -105,7 +105,45 @@ test('a detected WSL store invalidates History even when allTimeSince excludes i
   assert.equal(summary.history.coverage, undefined);
 });
 
-test('prior WSL History evidence remains fail closed after a later empty refresh', async () => {
+test('transient WSL uncertainty clears after a later complete empty refresh', async () => {
+  let firstCapture = null;
+  const first = await collectUsageOnce({
+    clients: 'claude,gemini',
+    allTimeSince: '2025-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    historyEnabled: true,
+    includeHistory: true,
+    dailyHistoryArchiveEnabled: false,
+    limitsEnabled: false,
+    runTokscale: windowsTokscale,
+    runGraph: async () => ({ contributions: [] }),
+    collectWslUsage: async () => ({ bundle: bundleWith(0), detected: [], complete: false }),
+    onAnchorComputed: (capture) => { firstCapture = capture; }
+  });
+  const second = await collectUsageOnce({
+    clients: 'claude,gemini',
+    allTimeSince: '2025-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    historyEnabled: true,
+    includeHistory: true,
+    dailyHistoryArchiveEnabled: false,
+    limitsEnabled: false,
+    wslHistoryEvidence: firstCapture.wslHistoryEvidence,
+    runTokscale: windowsTokscale,
+    runGraph: async () => ({ contributions: [] }),
+    collectWslUsage: async () => ({ bundle: bundleWith(0), detected: [], complete: true })
+  });
+
+  assert.equal(first.historyOmitted, true);
+  assert.deepEqual(firstCapture.wslHistoryEvidence, { clients: {} });
+  assert.equal(second.historyOmitted, undefined);
+  assert.equal(second.history.schemaVersion, 2);
+  assert.ok(second.history.coverage);
+});
+
+test('positive WSL History evidence remains fail closed after a later empty refresh', async () => {
   const summary = await collectUsageOnce({
     clients: 'claude,gemini',
     allTimeSince: '2025-01-01',
@@ -115,7 +153,7 @@ test('prior WSL History evidence remains fail closed after a later empty refresh
     includeHistory: true,
     dailyHistoryArchiveEnabled: false,
     limitsEnabled: false,
-    wslHistoryIncomplete: true,
+    wslHistoryEvidence: { clients: { gemini: localTodayKey() } },
     runTokscale: windowsTokscale,
     runGraph: async () => ({ contributions: [] }),
     collectWslUsage: async () => ({ bundle: bundleWith(0), detected: [], complete: true })
@@ -124,6 +162,28 @@ test('prior WSL History evidence remains fail closed after a later empty refresh
   assert.equal(summary.historyOmitted, true);
   assert.equal(summary.history.schemaVersion, undefined);
   assert.equal(summary.history.coverage, undefined);
+});
+
+test('WSL History evidence expires with the retained daily window', async () => {
+  const summary = await collectUsageOnce({
+    clients: 'claude,gemini',
+    allTimeSince: '2025-01-01',
+    now: '2026-08-12T08:00:00.000Z',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    historyEnabled: true,
+    includeHistory: true,
+    dailyHistoryArchiveEnabled: false,
+    limitsEnabled: false,
+    wslHistoryEvidence: { clients: { gemini: '2025-08-07' } },
+    runTokscale: windowsTokscale,
+    runGraph: async () => ({ contributions: [] }),
+    collectWslUsage: async () => ({ bundle: bundleWith(0), detected: [], complete: true })
+  });
+
+  assert.equal(summary.historyOmitted, undefined);
+  assert.equal(summary.history.schemaVersion, 2);
+  assert.ok(summary.history.coverage);
 });
 
 test('WSL scans exclude locally parsed Proma while retaining it for marker detection', async () => {
