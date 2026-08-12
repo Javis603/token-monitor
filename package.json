@@ -100,7 +100,10 @@
       "description": "Real-time token, cost, and AI limits widget with multi-device sync for Claude Code, Codex, OpenCode and more."
     },
     "nsis": {
-      "artifactName": "Token-Monitor-Setup-${version}.${ext}"
+      "artifactName": "Token-Monitor-Setup-${version}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     },
     "portable": {
       "artifactName": "Token-Monitor-${version}.${ext}"
