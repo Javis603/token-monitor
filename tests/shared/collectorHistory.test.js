@@ -60,6 +60,8 @@ test('collectHistoryOnce normalizes injected graph JSON into a History', async (
   assert.equal(history.daily.length, 1);
   assert.equal(history.daily[0].tokens, 30);
   assert.equal(history.summary.totalTokens, 30);
+  assert.equal(history.schemaVersion, 2);
+  assert.deepEqual(history.coverage, { start: '2025-06-03', end: '2026-06-07' });
   assert.equal(statuses.length, 1);
   assert.ok(statuses[0].attemptedAt);
   assert.ok(statuses[0].successAt);
@@ -197,6 +199,33 @@ test('collectHistoryOnce retains a prior client observation when a later graph l
   assert.equal(restored.daily[0].tokens, 160);
   assert.equal(restored.daily[0].perClient.claude.tokens, 100);
   assert.equal(restored.daily[0].perClient.codex.tokens, 60);
+});
+
+test('a failed graph scan can reuse archive totals but cannot advance v2 coverage', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-history-coverage-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const options = {
+    clients: 'claude',
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath }
+  };
+  const first = await collectHistoryOnce({
+    ...options,
+    todayKey: '2026-08-01',
+    runGraph: async () => SAMPLE_GRAPH
+  });
+  const stale = await collectHistoryOnce({
+    ...options,
+    todayKey: '2026-08-10',
+    runGraph: async () => { throw new Error('graph unavailable'); }
+  });
+
+  assert.equal(first.schemaVersion, 2);
+  assert.deepEqual(first.coverage, { start: '2025-07-28', end: '2026-08-01' });
+  assert.equal(stale.summary.totalTokens, 30);
+  assert.equal(stale.schemaVersion, undefined);
+  assert.equal(stale.coverage, undefined);
 });
 
 test('collectHistoryOnce stores older days locally while capping daily output', async (t) => {
@@ -439,6 +468,25 @@ test('collectUsageOnce omits history entirely on a non-history tick', async () =
   });
   assert.equal(Object.hasOwn(summary, 'history'), false);
   assert.equal(summary.historyAvailable, true);
+  assert.equal(Object.hasOwn(summary, 'historyOmitted'), false);
+});
+
+test('collectUsageOnce marks a requested failed history refresh unavailable', async () => {
+  const summary = await collectUsageOnce({
+    clients: 'claude',
+    deviceId: 'device-a',
+    historyEnabled: true,
+    includeHistory: true,
+    dailyHistoryArchiveEnabled: false,
+    wslScanEnabled: false,
+    limitsEnabled: false,
+    runTokscale: async () => usageSnapshot(10),
+    runGraph: async () => { throw new Error('graph unavailable'); }
+  });
+
+  assert.equal(Object.hasOwn(summary, 'history'), false);
+  assert.equal(summary.historyAvailable, true);
+  assert.equal(summary.historyOmitted, true);
 });
 
 test('collectUsageOnce includes Proma history without starting tokscale graph', async () => {

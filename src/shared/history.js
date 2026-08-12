@@ -279,6 +279,7 @@ function monthlyRollup(days) {
 }
 
 const DEFAULT_CAP_DAYS = 370;
+const HISTORY_SCHEMA_VERSION = 2;
 
 function normalizeHistoryCoverage(value) {
   const start = String(value?.start || '').slice(0, 10);
@@ -350,8 +351,11 @@ function normalizeHistory(graphData, options = {}) {
   const timeMetrics = normalizeTimeMetrics(graphData?.timeMetrics);
   const activeTimeMs = timeMetrics ? timeMetrics.totalActiveTimeMs : activeTimeTotal(full);
 
+  const coverage = options.coverageComplete === false
+    ? null
+    : retainedHistoryCoverage(todayKey, capDays);
   return {
-    ...(retainedHistoryCoverage(todayKey, capDays) ? { coverage: retainedHistoryCoverage(todayKey, capDays) } : {}),
+    ...(coverage ? { schemaVersion: HISTORY_SCHEMA_VERSION, coverage } : {}),
     capabilities: {
       tokenComponents: full.every((day) => day?.capabilities?.tokenComponents !== false)
         && graphData?.capabilities?.tokenComponents !== false,
@@ -445,13 +449,16 @@ function mergeHistories(histories, options = {}) {
   const { currentStreak, longestStreak } = computeStreaks(daily, todayKey);
   const favoriteModel = favoriteModelOf(daily);
   const activeTimeMs = activeTimeTotal(monthly.length ? monthly : daily);
-  const coverage = sharedHistoryCoverage(list);
+  const coverage = list.length > 0
+    && list.every((history) => history.schemaVersion === HISTORY_SCHEMA_VERSION)
+    ? sharedHistoryCoverage(list)
+    : null;
 
   const capabilities = {};
   if (list.length > 0 && list.every((history) => history.capabilities?.tokenComponents === true)) capabilities.tokenComponents = true;
   if (list.length > 0 && list.every((history) => history.capabilities?.clientModels === true)) capabilities.clientModels = true;
   return {
-    ...(coverage ? { coverage } : {}),
+    ...(coverage ? { schemaVersion: HISTORY_SCHEMA_VERSION, coverage } : {}),
     ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     daily,
     monthly,
@@ -470,7 +477,9 @@ function coerceHistory(raw) {
   if (src.capabilities?.tokenComponents === true) capabilities.tokenComponents = true;
   if (src.capabilities?.clientModels === true) capabilities.clientModels = true;
   return {
-    ...(coverage ? { coverage } : {}),
+    ...(src.schemaVersion === HISTORY_SCHEMA_VERSION && coverage
+      ? { schemaVersion: HISTORY_SCHEMA_VERSION, coverage }
+      : {}),
     ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     daily: Array.isArray(src.daily) ? src.daily : [],
     monthly: Array.isArray(src.monthly) ? src.monthly : [],
@@ -494,6 +503,9 @@ function deviceHistoryState(device) {
   }
   if (!hasHistory) return { state: 'missing', history: null };
   const history = coerceHistory(device.history);
+  if (history.schemaVersion === HISTORY_SCHEMA_VERSION && history.coverage) {
+    return { state: 'available', history };
+  }
   const retainedRows = history.daily.length + history.monthly.length;
   const lifetimeTokens = num(device?.periods?.allTime?.totalTokens ?? device?.allTime?.totalTokens);
   const summarizedTokens = num(history.summary?.totalTokens);
@@ -510,7 +522,14 @@ function historyPreview(history, options = {}) {
   const h = coerceHistory(history);
   const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs) }));
   const monthly = h.monthly.slice(-monthlyMonths).map((m) => ({ month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs) }));
-  return { ...(h.coverage ? { coverage: h.coverage } : {}), daily, monthly, summary: h.summary };
+  return {
+    ...(h.schemaVersion === HISTORY_SCHEMA_VERSION && h.coverage
+      ? { schemaVersion: HISTORY_SCHEMA_VERSION, coverage: h.coverage }
+      : {}),
+    daily,
+    monthly,
+    summary: h.summary
+  };
 }
 
 function stableJson(value) {
@@ -560,6 +579,7 @@ function historyRevision(devices) {
 }
 
 module.exports = {
+  HISTORY_SCHEMA_VERSION,
   num, sumTokens, parseGraphResult, computeIntensities,
   computeStreaks, dayKeyAddDays, isValidDayKey, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, deviceHistoryState, historyPreview, historyRevision

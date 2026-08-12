@@ -16,6 +16,15 @@ const aggregate = (devices) => ({
   summary: { totalTokens: devices.reduce((sum, device) => sum + device.tokens, 0) }
 });
 
+const v2History = (history = {}, coverage = { start: '2025-08-08', end: '2026-08-11' }) => ({
+  schemaVersion: 2,
+  coverage,
+  daily: [],
+  monthly: [],
+  summary: {},
+  ...history
+});
+
 test('returns the same empty history shape when history is disabled', async () => {
   assert.deepEqual(await resolveCompleteHistory({ historyEnabled: false, aggregateHistory: aggregate }), {
     daily: [], monthly: [], summary: { totalTokens: 0 }
@@ -58,16 +67,16 @@ test('fetches and parses the complete client history endpoint', async () => {
 test('projects per-device histories and preserves explicit availability', () => {
   assert.deepEqual(parseDeviceHistories({
     devices: [
-      { deviceId: 'mac', history: { daily: [{ date: '2026-08-11', tokens: 9 }] } },
+      { deviceId: 'mac', history: v2History({ daily: [{ date: '2026-08-11', tokens: 9 }] }) },
       { id: 'win', historyAvailable: true, history: { monthly: [{ month: '2026-08', tokens: 5 }] }, allTime: { totalTokens: 5 } },
-      { id: 'idle', historyAvailable: true, history: { daily: [], monthly: [] }, allTime: { totalTokens: 0 } },
+      { id: 'idle', historyAvailable: true, history: v2History(), allTime: { totalTokens: 500 } },
       { deviceId: 'disabled', historyAvailable: false, history: null, allTime: { totalTokens: 50 } },
       { deviceId: 'legacy', allTime: { totalTokens: 0 } }
     ]
   }), {
-    mac: { available: true, daily: [{ date: '2026-08-11', tokens: 9 }], monthly: [], summary: {} },
+    mac: { available: true, ...v2History({ daily: [{ date: '2026-08-11', tokens: 9 }] }) },
     win: { available: false, daily: [], monthly: [{ month: '2026-08', tokens: 5 }], summary: {} },
-    idle: { available: true, daily: [], monthly: [], summary: {} },
+    idle: { available: true, ...v2History() },
     disabled: { available: false, daily: [], monthly: [], summary: {} },
     legacy: { available: false, daily: [], monthly: [], summary: {} }
   });
@@ -206,7 +215,7 @@ test('remote device histories retain Hub last-good data for a capability-only lo
           deviceId: 'mac',
           periods: { allTime: { totalTokens: 80 } },
           historyAvailable: true,
-          history: { daily: [{ date: '2026-08-11', tokens: 80 }] }
+          history: v2History({ daily: [{ date: '2026-08-11', tokens: 80 }] })
         }] };
       }
     })
@@ -248,6 +257,7 @@ test('a transport-omitted history keeps Hub data but fails derived ranges closed
     historyAvailable: true,
     historyOmitted: true,
     history: {
+      schemaVersion: 2,
       coverage: { start: '2026-08-01', end: '2026-08-10' },
       daily: [{ date: '2026-08-10', tokens: 80 }]
     }

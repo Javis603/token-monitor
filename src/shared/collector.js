@@ -29,7 +29,12 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
-const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
+const {
+  HISTORY_SCHEMA_VERSION,
+  mergeHistories,
+  parseGraphResult,
+  normalizeHistory
+} = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
@@ -716,8 +721,14 @@ async function collectHistoryOnce(options) {
         capDays,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
-      const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
-      const result = retained.daily.length || retained.monthly.length ? retained : null;
+      const retained = normalizeHistory(parseGraphResult(retainedGraph), {
+        capDays,
+        todayKey,
+        coverageComplete: failureCode === null
+      });
+      const result = retained.schemaVersion || retained.daily.length || retained.monthly.length
+        ? retained
+        : null;
       reportStatus(failureCode === null);
       return result;
     } catch (error) {
@@ -730,7 +741,13 @@ async function collectHistoryOnce(options) {
     return null;
   }
   const history = histories.length === 1 ? histories[0] : mergeHistories(histories, { todayKey });
-  const result = history.daily.length || history.monthly.length ? history : null;
+  if (failureCode !== null) {
+    delete history.schemaVersion;
+    delete history.coverage;
+  }
+  const result = history.schemaVersion || history.daily.length || history.monthly.length
+    ? history
+    : null;
   reportStatus(failureCode === null);
   return result;
 }
@@ -1079,6 +1096,12 @@ async function collectUsageOnce(options) {
       logger: options.logger
     });
     if (history) summary.history = history;
+    if (!history || history.schemaVersion !== HISTORY_SCHEMA_VERSION) {
+      // A requested refresh that cannot prove complete v2 coverage must invalidate
+      // the Hub's carried last-good copy. Ordinary non-History ticks omit both
+      // fields and therefore remain a no-op for retained History state.
+      summary.historyOmitted = true;
+    }
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
   // scan already produced rather than from a second source of truth.

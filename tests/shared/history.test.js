@@ -404,10 +404,19 @@ test('coerceHistory normalizes shape and drops garbage', () => {
   assert.deepEqual(coerceHistory({ daily: 'x' }), { daily: [], monthly: [], summary: {} });
   const ok = { daily: [{ date: '2026-06-07', tokens: 1 }], monthly: [{ month: '2026-06', tokens: 1 }], summary: { totalTokens: 1 } };
   assert.deepEqual(coerceHistory(ok), ok);
-  assert.deepEqual(coerceHistory({ ...ok, coverage: { start: '2026-01-01', end: '2026-06-07' } }).coverage, {
+  assert.equal(coerceHistory({ ...ok, coverage: { start: '2026-01-01', end: '2026-06-07' } }).coverage, undefined);
+  assert.deepEqual(coerceHistory({
+    ...ok,
+    schemaVersion: 2,
+    coverage: { start: '2026-01-01', end: '2026-06-07' }
+  }).coverage, {
     start: '2026-01-01', end: '2026-06-07'
   });
-  assert.equal(coerceHistory({ ...ok, coverage: { start: '2026-06-08', end: '2026-06-07' } }).coverage, undefined);
+  assert.equal(coerceHistory({
+    ...ok,
+    schemaVersion: 2,
+    coverage: { start: '2026-06-08', end: '2026-06-07' }
+  }).coverage, undefined);
 });
 
 test('historyPreview keeps recent totals only (no per-client)', () => {

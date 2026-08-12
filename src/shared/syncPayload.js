@@ -2,6 +2,7 @@
 
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits');
+const { HISTORY_SCHEMA_VERSION } = require('./history');
 const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
@@ -132,7 +133,13 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
   delete payload.allTimeProjectsIncomplete;
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
-  if (hasOwn(payload, 'history')) delete payload.historyOmitted;
+  if (
+    hasOwn(payload, 'history')
+    && payload.history?.schemaVersion === HISTORY_SCHEMA_VERSION
+    && payload.history?.coverage
+  ) {
+    delete payload.historyOmitted;
+  }
 
   for (const periodName of ['today', 'month']) {
     const period = summary[periodName];
@@ -173,6 +180,32 @@ function historyWithoutClientModels(history) {
   };
 }
 
+function historyWithoutAttribution(history) {
+  if (!history || typeof history !== 'object') return history;
+  const stripDaily = (row) => {
+    const compact = {
+      ...row,
+      capabilities: { ...(row?.capabilities || {}), clientModels: false }
+    };
+    delete compact.perClient;
+    delete compact.perModel;
+    delete compact.perClientModel;
+    return compact;
+  };
+  const stripMonthly = (row) => {
+    const compact = { ...row };
+    delete compact.perClient;
+    delete compact.perModel;
+    return compact;
+  };
+  return {
+    ...history,
+    capabilities: { ...(history.capabilities || {}), clientModels: false },
+    daily: Array.isArray(history.daily) ? history.daily.map(stripDaily) : [],
+    monthly: Array.isArray(history.monthly) ? history.monthly.map(stripMonthly) : []
+  };
+}
+
 function serializeSyncPayload(summary, options = {}) {
   const maxBytes = Number.isFinite(options.maxBytes) ? options.maxBytes : SYNC_PAYLOAD_BUDGET_BYTES;
   let payload = buildSyncPayload(summary, options);
@@ -208,6 +241,17 @@ function serializeSyncPayload(summary, options = {}) {
     // field. Sacrifice that optional attribution first so daily totals, component
     // counters, and coverage can continue to advance on the Hub.
     payload.history = historyWithoutClientModels(payload.history);
+    body = JSON.stringify(payload);
+  }
+  if (
+    Buffer.byteLength(body, 'utf8') > maxBytes
+    && payload.history
+    && typeof payload.history === 'object'
+  ) {
+    // If the intersection alone is not enough, retain the versioned coverage and
+    // exact daily totals/components. This keeps flexible-range headlines correct
+    // while deliberately making client/model attribution unavailable.
+    payload.history = historyWithoutAttribution(payload.history);
     body = JSON.stringify(payload);
   }
   if (

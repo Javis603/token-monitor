@@ -74,6 +74,7 @@ function normalizeDay(value, fallbackDate = '') {
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),
+    capabilities: { clientModels: value?.capabilities?.clientModels === true },
     observations
   };
 }
@@ -105,7 +106,15 @@ function observationsFromGraphs(graphs) {
     for (const row of (Array.isArray(graph.contributions) ? graph.contributions : [])) {
       const date = String(row?.date || '').slice(0, 10);
       if (!DAY_KEY_RE.test(date)) continue;
-      const day = days.get(date) || { date, activeTimeMs: 0, observations: {} };
+      const day = days.get(date) || {
+        date,
+        activeTimeMs: 0,
+        capabilities: { clientModels: true },
+        observations: {}
+      };
+      day.capabilities.clientModels = day.capabilities.clientModels === true
+        && graph.capabilities?.clientModels !== false
+        && row.capabilities?.clientModels !== false;
       day.activeTimeMs += Math.max(0, Math.round(num(row.activeTimeMs ?? row.active_time_ms)));
       for (const raw of (Array.isArray(row?.clients) ? row.clients : [])) {
         const candidate = normalizeObservation({
@@ -180,10 +189,19 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
 
   for (const [date, incoming] of incomingDays) {
     if (hasTodayKey && date > todayKey) continue;
-    const previous = archive.days[date] || { date, activeTimeMs: 0, observations: {} };
+    const previous = archive.days[date] || {
+      date,
+      activeTimeMs: 0,
+      capabilities: { clientModels: true },
+      observations: {}
+    };
     const next = {
       date,
       activeTimeMs: Math.max(previous.activeTimeMs, incoming.activeTimeMs),
+      capabilities: {
+        clientModels: previous.capabilities?.clientModels === true
+          && incoming.capabilities?.clientModels === true
+      },
       observations: { ...previous.observations }
     };
     for (const [key, observation] of Object.entries(incoming.observations)) {
@@ -271,7 +289,12 @@ function periodLiveDay(period, date) {
     );
   }
 
-  const day = normalizeDay({ date, activeTimeMs: 0, observations: [...observations.values()] }, date);
+  const day = normalizeDay({
+    date,
+    activeTimeMs: 0,
+    capabilities: { clientModels: period.capabilities?.clientModels === true },
+    observations: [...observations.values()]
+  }, date);
   return day && Object.keys(day.observations).length > 0 ? day : null;
 }
 
@@ -325,6 +348,10 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   return {
     ...liveDay,
     activeTimeMs: Math.max(liveDay.activeTimeMs, previousDay.activeTimeMs),
+    capabilities: {
+      clientModels: liveDay.capabilities?.clientModels === true
+        && previousDay.capabilities?.clientModels === true
+    },
     observations
   };
 }
@@ -380,6 +407,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
 
   const tokenComponents = [...currentDays.values()].every((day) => Object.values(day.observations)
     .every(observationHasTokenComponents));
+  const clientModels = [...currentDays.values()].every((day) => day.capabilities?.clientModels === true);
   const contributions = [...currentDays.values()]
     .sort((left, right) => left.date.localeCompare(right.date))
     .map((day) => ({
@@ -387,7 +415,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
       activeTimeMs: day.activeTimeMs,
       capabilities: {
         tokenComponents: Object.values(day.observations).every(observationHasTokenComponents),
-        clientModels: true
+        clientModels: day.capabilities?.clientModels === true
       },
       clients: Object.values(day.observations)
         .sort((left, right) => observationKey(left).localeCompare(observationKey(right)))
@@ -416,7 +444,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   const activeTimeMs = contributions.reduce((sum, day) => sum + num(day.activeTimeMs), 0);
   const timeMetrics = graphTimeMetrics(graphs, activeTimeMs);
   return {
-    capabilities: { tokenComponents, clientModels: true },
+    capabilities: { tokenComponents, clientModels },
     contributions,
     ...(timeMetrics ? { timeMetrics } : {})
   };

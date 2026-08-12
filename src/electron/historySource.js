@@ -1,6 +1,6 @@
 'use strict';
 
-const { coerceHistory, deviceHistoryState } = require('../shared/history');
+const { HISTORY_SCHEMA_VERSION, coerceHistory, deviceHistoryState } = require('../shared/history');
 
 function parseCompleteHistory(payload) {
   return coerceHistory(payload);
@@ -24,15 +24,12 @@ function parseDeviceHistories(payload) {
     if (!deviceId) continue;
     const historyState = deviceHistoryState(device);
     const history = historyState.history || coerceHistory(null);
-    const hasDailyRows = history.daily.length > 0;
-    const allTimeTokens = Number(device?.periods?.allTime?.totalTokens ?? device?.allTime?.totalTokens ?? 0);
-    const retainedUsage = history.monthly.some((row) => Number(row?.tokens || 0) > 0)
-      || Number(history.summary?.totalTokens || 0) > 0
-      || allTimeTokens > 0;
-    // Rolling/custom ranges require daily rows. An empty history is exact only
-    // when every retained/lifetime signal also says the device has no usage.
+    // Flexible ranges are a same-version feature. Only the explicit v2 coverage
+    // contract can distinguish sparse measured-zero days from unknown history;
+    // legacy rows remain available to the native DAY/MONTH/TOTAL views only.
     const available = historyState.state === 'available'
-      && (hasDailyRows || !retainedUsage);
+      && history.schemaVersion === HISTORY_SCHEMA_VERSION
+      && Boolean(history.coverage);
     histories[deviceId] = { ...history, available };
   }
   return histories;

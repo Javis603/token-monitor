@@ -152,6 +152,50 @@ test('serializeSyncPayload omits an oversized history without blocking core usag
   assert.equal(summary.history.daily.length, 370);
 });
 
+test('serializeSyncPayload preserves an unavailable marker for incomplete history', () => {
+  const summary = {
+    deviceId: 'history-incomplete',
+    historyAvailable: true,
+    historyOmitted: true,
+    today: { totalTokens: 10 },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 },
+    history: {
+      daily: [{ date: '2026-08-10', tokens: 10 }],
+      monthly: [],
+      summary: { totalTokens: 10 }
+    }
+  };
+
+  const { payload } = serializeSyncPayload(summary);
+
+  assert.equal(payload.historyOmitted, true);
+  assert.equal(payload.history.schemaVersion, undefined);
+});
+
+test('serializeSyncPayload clears an old unavailable marker after complete v2 history', () => {
+  const summary = {
+    deviceId: 'history-complete',
+    historyAvailable: true,
+    historyOmitted: true,
+    today: { totalTokens: 10 },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 },
+    history: {
+      schemaVersion: 2,
+      coverage: { start: '2026-08-01', end: '2026-08-11' },
+      daily: [{ date: '2026-08-10', tokens: 10 }],
+      monthly: [],
+      summary: { totalTokens: 10 }
+    }
+  };
+
+  const { payload } = serializeSyncPayload(summary);
+
+  assert.equal(payload.historyOmitted, undefined);
+  assert.equal(payload.history.schemaVersion, 2);
+});
+
 test('serializeSyncPayload keeps daily totals by dropping client-model history first', () => {
   const summary = {
     deviceId: 'history-attributed',
@@ -160,6 +204,7 @@ test('serializeSyncPayload keeps daily totals by dropping client-model history f
     month: { totalTokens: 20 },
     allTime: { totalTokens: 30 },
     history: {
+      schemaVersion: 2,
       coverage: { start: '2026-08-01', end: '2026-08-11' },
       capabilities: { tokenComponents: true, clientModels: true },
       daily: Array.from({ length: 10 }, (_, index) => ({
@@ -185,6 +230,51 @@ test('serializeSyncPayload keeps daily totals by dropping client-model history f
   assert.equal(payload.history.daily[0].capabilities.clientModels, false);
   assert.equal(Object.hasOwn(payload.history.daily[0], 'perClientModel'), false);
   assert.deepEqual(payload.history.daily[0].perClient, summary.history.daily[0].perClient);
+});
+
+test('serializeSyncPayload retains v2 coverage and totals before omitting history', () => {
+  const noisyKey = `client-${'x'.repeat(300)}`;
+  const summary = {
+    deviceId: 'history-totals',
+    historyAvailable: true,
+    today: { totalTokens: 10 },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 },
+    history: {
+      schemaVersion: 2,
+      coverage: { start: '2026-08-01', end: '2026-08-11' },
+      capabilities: { tokenComponents: true, clientModels: true },
+      daily: Array.from({ length: 10 }, (_, index) => ({
+        date: `2026-08-${String(index + 1).padStart(2, '0')}`,
+        tokens: index + 1,
+        cost: index / 10,
+        cacheReadTokens: index,
+        outputTokens: 1,
+        capabilities: { tokenComponents: true, clientModels: true },
+        perClient: { [noisyKey]: { tokens: index + 1 } },
+        perModel: { [noisyKey]: { tokens: index + 1 } },
+        perClientModel: { [noisyKey]: { [noisyKey]: { tokens: index + 1 } } }
+      })),
+      monthly: [{
+        month: '2026-08', tokens: 55, cost: 4.5,
+        perClient: { [noisyKey]: { tokens: 55 } },
+        perModel: { [noisyKey]: { tokens: 55 } }
+      }],
+      summary: { totalTokens: 55 }
+    }
+  };
+
+  const { payload, bytes } = serializeSyncPayload(summary, { maxBytes: 2200 });
+
+  assert.ok(bytes <= 2200);
+  assert.equal(payload.historyOmitted, undefined);
+  assert.equal(payload.history.schemaVersion, 2);
+  assert.deepEqual(payload.history.coverage, summary.history.coverage);
+  assert.equal(payload.history.daily[0].tokens, 1);
+  assert.equal(payload.history.daily[0].cacheReadTokens, 0);
+  assert.equal(Object.hasOwn(payload.history.daily[0], 'perClient'), false);
+  assert.equal(Object.hasOwn(payload.history.daily[0], 'perModel'), false);
+  assert.equal(Object.hasOwn(payload.history.daily[0], 'perClientModel'), false);
 });
 
 test('postSyncPayload retries a legacy 413 once without all-time projects', async () => {

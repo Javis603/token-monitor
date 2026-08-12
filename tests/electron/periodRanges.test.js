@@ -52,6 +52,12 @@ const nativeToday = {
   modelCosts: { 'gpt-5': 2.5, opus: 1.5 }
 };
 
+const v2History = (rows, coverage = { start: '2025-08-08', end: '2026-08-11' }) => ({
+  schemaVersion: 2,
+  coverage,
+  daily: rows
+});
+
 test('period range modes stay inside their three fixed selector families', () => {
   assert.equal(normalizeMode('today', 'last7'), 'today');
   assert.equal(normalizeMode('month', 'week'), 'week');
@@ -131,10 +137,10 @@ test('offline device restores a newer expired today snapshot onto its original l
       endsAt: '2026-08-11T16:00:00.000Z',
       timeZone: 'Asia/Hong_Kong'
     } },
-    history: { daily: [{
+    history: v2History([{
       date: '2026-08-11', tokens: 80, cost: 0.8,
       capabilities: { tokenComponents: true, clientModels: true }
-    }] },
+    }], { start: '2026-08-11', end: '2026-08-11' }),
     nativeToday: {
       totalTokens: 100,
       costUsd: 1,
@@ -160,7 +166,9 @@ test('offline device keeps a more complete history row than its stale today snap
       endsAt: '2026-08-11T16:00:00.000Z',
       timeZone: 'Asia/Hong_Kong'
     } },
-    history: { daily: [{ date: '2026-08-11', tokens: 120, cost: 1.2 }] },
+    history: v2History([{ date: '2026-08-11', tokens: 120, cost: 1.2 }], {
+      start: '2026-08-11', end: '2026-08-11'
+    }),
     nativeToday: { totalTokens: 100, costUsd: 1 }
   }], {
     status: 'ready',
@@ -182,6 +190,7 @@ test('current live day cannot shrink a more complete durable history row', () =>
       timeZone: 'Asia/Hong_Kong'
     } },
     history: {
+      schemaVersion: 2,
       coverage: { start: '2025-08-08', end: '2026-08-11' },
       daily: [{ date: '2026-08-11', tokens: 150, cost: 2 }]
     },
@@ -205,6 +214,7 @@ test('equal-token stale snapshot can correct cost downward', () => {
       timeZone: 'Asia/Hong_Kong'
     } },
     history: {
+      schemaVersion: 2,
       coverage: { start: '2025-08-08', end: '2026-08-11' },
       daily: [{ date: '2026-08-11', tokens: 100, cost: 2 }]
     },
@@ -230,6 +240,7 @@ test('offline device gaps after its last complete day are unavailable', () => {
       timeZone: 'Asia/Hong_Kong'
     } },
     history: {
+      schemaVersion: 2,
       coverage: { start: '2025-07-28', end: '2026-08-01' },
       daily: [{ date: '2026-08-01', tokens: 100 }]
     },
@@ -266,13 +277,15 @@ test('expired legacy device calendar fails closed instead of switching to UTC', 
   });
 });
 
-test('historical custom range does not require a current legacy device calendar', () => {
+test('historical custom range requires v2 coverage but not a current device calendar', () => {
   const snapshot = deriveRangeSnapshot([{
     periodWindows: { today: {
       key: '2026-08-11',
       endsAt: '2026-08-11T16:00:00.000Z'
     } },
-    history: { daily: [{ date: '2026-07-05', tokens: 50, cost: 5 }] },
+    history: v2History([{ date: '2026-07-05', tokens: 50, cost: 5 }], {
+      start: '2025-08-08', end: '2026-08-11'
+    }),
     nativeToday: { totalTokens: 100, costUsd: 10 }
   }], {
     status: 'ready',
@@ -285,6 +298,20 @@ test('historical custom range does not require a current legacy device calendar'
   assert.equal(snapshot.status, 'ready');
   assert.equal(snapshot.period.totalTokens, 50);
   assert.deepEqual(snapshot.daily.map((row) => [row.date, row.tokens]), [['2026-07-05', 50]]);
+});
+
+test('legacy history cannot manufacture coverage from a custom range', () => {
+  const snapshot = deriveRangeSnapshot([{
+    history: { daily: [{ date: '2026-07-05', tokens: 50 }] }
+  }], {
+    status: 'ready',
+    selection: 'range',
+    rangeStart: '2020-01-01',
+    rangeEnd: '2020-01-10'
+  });
+
+  assert.equal(snapshot.status, 'unavailable');
+  assert.equal(snapshot.period, null);
 });
 
 test('derived periods patch today from live stats and retain client/model attribution', () => {
@@ -532,6 +559,7 @@ test('persisted custom ranges fail closed after aging out of retained coverage',
       timeZone: 'Asia/Hong_Kong'
     } },
     history: {
+      schemaVersion: 2,
       coverage: { start: '2025-08-08', end: '2026-08-11' },
       daily: [{ date: '2025-08-08', tokens: 50 }]
     }
@@ -552,17 +580,17 @@ test('cross-timezone derived snapshots use the same selected rows for headline a
   const snapshot = deriveRangeSnapshot([
     {
       periodWindows: { today: { timeZone: 'Asia/Taipei' } },
-      history: { daily: [
+      history: v2History([
         { date: '2026-08-06', tokens: 6 },
         { date: '2026-08-12', tokens: 12 }
-      ] }
+      ], { start: '2025-08-09', end: '2026-08-12' })
     },
     {
       periodWindows: { today: { timeZone: 'America/New_York' } },
-      history: { daily: [
+      history: v2History([
         { date: '2026-08-05', tokens: 5 },
         { date: '2026-08-11', tokens: 11 }
-      ] }
+      ], { start: '2025-08-08', end: '2026-08-11' })
     }
   ], {
     status: 'ready',

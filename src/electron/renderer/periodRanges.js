@@ -17,7 +17,7 @@
     allTime: 'periodTotalMode'
   });
   const DEFAULT_MODES = Object.freeze({ today: 'today', month: 'month', allTime: 'allTime' });
-  const DEFAULT_HISTORY_DAYS = 370;
+  const HISTORY_SCHEMA_VERSION = 2;
   const DISPLAY_LABELS = Object.freeze({
     today: 'DAY',
     month: 'MONTH',
@@ -290,14 +290,10 @@
     return rows.sort((a, b) => String(a?.date || '').localeCompare(String(b?.date || '')));
   }
 
-  function historyCoverageForSource(source, dayState, snapshotDayKey) {
+  function historyCoverageForSource(source) {
+    if (source?.history?.schemaVersion !== HISTORY_SCHEMA_VERSION) return null;
     const explicit = normalizeDateRange(source?.history?.coverage?.start, source?.history?.coverage?.end);
-    if (explicit) return explicit;
-    // Histories produced before coverage metadata used the same 370-day retained
-    // window. Anchor that legacy inference to the producer snapshot day, never to
-    // the viewer's newer local day, so an offline gap cannot masquerade as zero.
-    const end = normalizeDateKey(snapshotDayKey) || normalizeDateKey(dayState?.key);
-    return end ? { start: dayKeyAddDays(end, -(DEFAULT_HISTORY_DAYS - 1)), end } : null;
+    return explicit;
   }
 
   function rangeCoveredBySource(range, coverage, source, dayState) {

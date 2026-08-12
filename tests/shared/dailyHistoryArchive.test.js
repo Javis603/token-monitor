@@ -40,6 +40,7 @@ function livePeriod(totalTokens, costUsd = 0) {
   return {
     totalTokens,
     costUsd,
+    capabilities: { tokenComponents: true, clientModels: true },
     clients: { claude: totalTokens },
     clientCosts: { claude: costUsd },
     models: { opus: totalTokens },
@@ -193,8 +194,23 @@ test('archive v2 preserves token components while legacy rows stay explicitly in
   const legacyHistory = historyFrom(legacyGraph);
   assert.equal(legacy.version, 2);
   assert.equal(legacyGraph.capabilities.tokenComponents, false);
+  assert.equal(legacyGraph.capabilities.clientModels, false);
   assert.equal(legacyHistory.capabilities.tokenComponents, false);
   assert.equal(legacyHistory.daily[0].tokens, 50);
+});
+
+test('archive reconstruction never upgrades unavailable client-model attribution', () => {
+  const archive = captureLiveDailyHistory({}, {
+    ...livePeriod(100, 1),
+    capabilities: { tokenComponents: true, clientModels: false }
+  }, { todayKey: '2026-08-05' });
+  const graphValue = graphFromDailyHistoryArchive([], archive, { todayKey: '2026-08-05' });
+  const restored = historyFrom(graphValue, '2026-08-05');
+
+  assert.equal(graphValue.capabilities.clientModels, false);
+  assert.equal(graphValue.contributions[0].capabilities.clientModels, false);
+  assert.equal(restored.capabilities.clientModels, false);
+  assert.equal(restored.daily[0].capabilities.clientModels, false);
 });
 
 test('legacy days do not erase exact capabilities from unrelated v2 days', () => {
