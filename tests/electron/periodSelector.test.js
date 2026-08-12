@@ -64,6 +64,8 @@ test('derived ranges drive headline and Home usage without pretending sessions o
   assert.match(app, /periodRangesApi\.supportsBreakdown\(selection, state\.breakdown, period\)/);
   assert.match(app, /detailUnavailable \|\| rangeStatus !== 'ready' \? \[\] : rowsForPeriod\(period\)/);
   assert.match(app, /const detailUnavailable = rangeStatus === 'ready'[\s\S]*const emptyState = rangeStatus !== 'ready'[\s\S]*periodHistoryMessageKey\(rangeStatus\)/);
+  assert.match(app, /function renderHomeModelModule[\s\S]*supportsBreakdown\(effectivePeriodSelection\(\), 'model', period\)[\s\S]*periodRange\.modelDetailUnavailable/);
+  assert.match(app, /function renderHomeToolModule[\s\S]*supportsBreakdown\(effectivePeriodSelection\(\), 'tool', period\)[\s\S]*periodRange\.toolDetailUnavailable/);
   assert.match(app, /renderRows\(rows, \{ incompleteHint, emptyState \}\)/);
   assert.match(app, /state\.breakdown === 'project'[\s\S]*periodRange\.projectDetailUnavailable[\s\S]*periodRange\.sessionDetailUnavailable/);
   assert.match(css, /\.breakdown-empty-state\s*\{[\s\S]*top:\s*50%;[\s\S]*left:\s*50%;[\s\S]*white-space:\s*nowrap/);

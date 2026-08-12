@@ -62,6 +62,18 @@ test('deviceBreakdownForPeriod hides client-model rows when attribution is unava
   assert.deepEqual(result.tools[0].models, []);
 });
 
+test('deviceBreakdownForPeriod hides partial tool maps when primary attribution is unavailable', () => {
+  const result = deviceBreakdownForPeriod({ periods: { month: {
+    totalTokens: 100,
+    clients: { codex: 40 },
+    clientModels: { codex: { 'gpt-5': 40 } },
+    capabilities: { attribution: false, clientModels: false }
+  } } }, 'month');
+
+  assert.equal(result.totalTokens, 100);
+  assert.deepEqual(result.tools, []);
+});
+
 test('devicePlatformLabel appends OS versions without exposing architecture', () => {
   assert.equal(devicePlatformLabel('darwin-arm64', 'macOS', '26.0'), 'macOS 26.0');
   assert.equal(devicePlatformLabel('win32-x64', 'Windows 11', '24H2'), 'Windows 11 24H2');

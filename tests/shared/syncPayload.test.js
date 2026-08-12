@@ -216,7 +216,7 @@ test('serializeSyncPayload keeps daily totals by dropping client-model history f
         perClientModel: { codex: { [`model-${index}-${'x'.repeat(200)}`]: { tokens: index + 1 } } }
       })),
       monthly: [],
-      summary: { totalTokens: 55 }
+      summary: { totalTokens: 55, favoriteModel: 'model-that-was-stripped' }
     }
   };
 
@@ -275,6 +275,7 @@ test('serializeSyncPayload retains v2 coverage and totals before omitting histor
   assert.equal(payload.history.daily[0].cacheReadTokens, 0);
   assert.equal(payload.history.capabilities.attribution, false);
   assert.equal(payload.history.daily[0].capabilities.attribution, false);
+  assert.equal(Object.hasOwn(payload.history.summary, 'favoriteModel'), false);
   assert.equal(Object.hasOwn(payload.history.daily[0], 'perClient'), false);
   assert.equal(Object.hasOwn(payload.history.daily[0], 'perModel'), false);
   assert.equal(Object.hasOwn(payload.history.daily[0], 'perClientModel'), false);

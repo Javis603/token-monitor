@@ -182,6 +182,10 @@ function historyWithoutClientModels(history) {
 
 function historyWithoutAttribution(history) {
   if (!history || typeof history !== 'object') return history;
+  const summary = history.summary && typeof history.summary === 'object'
+    ? { ...history.summary }
+    : null;
+  if (summary) delete summary.favoriteModel;
   const stripDaily = (row) => {
     const compact = {
       ...row,
@@ -202,7 +206,8 @@ function historyWithoutAttribution(history) {
     ...history,
     capabilities: { ...(history.capabilities || {}), attribution: false, clientModels: false },
     daily: Array.isArray(history.daily) ? history.daily.map(stripDaily) : [],
-    monthly: Array.isArray(history.monthly) ? history.monthly.map(stripMonthly) : []
+    monthly: Array.isArray(history.monthly) ? history.monthly.map(stripMonthly) : [],
+    ...(summary ? { summary } : {})
   };
 }
 

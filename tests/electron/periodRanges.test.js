@@ -22,21 +22,25 @@ const {
 const daily = [
   {
     date: '2026-08-05', tokens: 10, cost: 1, activeTimeMs: 100,
+    capabilities: { attribution: true },
     perClient: { codex: { tokens: 10, cost: 1 } },
     perModel: { 'gpt-5': { tokens: 10, cost: 1 } }
   },
   {
     date: '2026-08-06', tokens: 20, cost: 2, activeTimeMs: 200,
+    capabilities: { attribution: true },
     perClient: { claude: { tokens: 20, cost: 2 } },
     perModel: { opus: { tokens: 20, cost: 2 } }
   },
   {
     date: '2026-08-10', tokens: 30, cost: 3, activeTimeMs: 300,
+    capabilities: { attribution: true },
     perClient: { codex: { tokens: 30, cost: 3 } },
     perModel: { 'gpt-5': { tokens: 30, cost: 3 } }
   },
   {
     date: '2026-08-11', tokens: 1, cost: 0.1, activeTimeMs: 400,
+    capabilities: { attribution: true },
     perClient: { codex: { tokens: 1, cost: 0.1, messages: 2 } },
     perModel: { 'gpt-5': { tokens: 1, cost: 0.1 } }
   }
@@ -139,12 +143,12 @@ test('offline device restores a newer expired today snapshot onto its original l
     } },
     history: v2History([{
       date: '2026-08-11', tokens: 80, cost: 0.8,
-      capabilities: { tokenComponents: true, clientModels: true }
+      capabilities: { tokenComponents: true, attribution: true, clientModels: true }
     }], { start: '2026-08-11', end: '2026-08-11' }),
     nativeToday: {
       totalTokens: 100,
       costUsd: 1,
-      capabilities: { tokenComponents: true, clientModels: true }
+      capabilities: { tokenComponents: true, attribution: true, clientModels: true }
     }
   }], {
     status: 'ready',
@@ -373,7 +377,7 @@ test('derived periods mark legacy token components unavailable instead of treati
     nativeToday,
     capabilities: { clientModels: true }
   });
-  assert.deepEqual(period.capabilities, { tokenComponents: false, attribution: false, clientModels: false });
+  assert.deepEqual(period.capabilities, { tokenComponents: false, attribution: true, clientModels: false });
 });
 
 test('legacy native today does not upgrade missing token components to exact zero', () => {
@@ -412,13 +416,13 @@ test('derived capabilities require every selected history row to be explicitly c
     capabilities: { tokenComponents: true, clientModels: true }
   });
 
-  assert.deepEqual(period.capabilities, { tokenComponents: false, attribution: false, clientModels: true });
+  assert.deepEqual(period.capabilities, { tokenComponents: false, attribution: false, clientModels: false });
 });
 
 test('derived periods suppress client-model maps when the selected rows lack that capability', () => {
   const period = derivePeriod([{
     date: '2026-08-11', tokens: 10, cost: 1,
-    capabilities: { tokenComponents: true, clientModels: false },
+    capabilities: { tokenComponents: true, attribution: true, clientModels: false },
     perClient: { codex: { tokens: 10, cost: 1 } },
     perModel: { 'gpt-5': { tokens: 10, cost: 1 } },
     perClientModel: { codex: { 'gpt-5': { tokens: 10, cost: 1 } } }
@@ -438,24 +442,46 @@ test('primary attribution capability fails closed across selected devices', () =
   }], { selection: 'last7', todayKey: '2026-08-11' });
   const compact = derivePeriod([{
     date: '2026-08-11', tokens: 100, cost: 2,
-    capabilities: { tokenComponents: true, attribution: false, clientModels: false }
+    capabilities: { tokenComponents: true, attribution: false, clientModels: false },
+    perClient: { claude: { tokens: 100, cost: 2 } },
+    perModel: { opus: { tokens: 100, cost: 2 } }
   }], { selection: 'last7', todayKey: '2026-08-11' });
   const merged = mergePeriods([exact, compact]);
 
   assert.equal(merged.totalTokens, 150);
   assert.equal(merged.capabilities.attribution, false);
+  assert.deepEqual(compact.clients, {});
+  assert.deepEqual(compact.models, {});
+  assert.deepEqual(merged.clients, {});
+  assert.deepEqual(merged.models, {});
   assert.equal(supportsBreakdown('last7', 'device', merged), true);
   assert.equal(supportsBreakdown('last7', 'tool', merged), false);
   assert.equal(supportsBreakdown('last7', 'model', merged), false);
 });
 
+test('a measured-zero range keeps exact empty breakdown capabilities', () => {
+  const period = derivePeriod([], { selection: 'last7', todayKey: '2026-08-11' });
+
+  assert.equal(period.totalTokens, 0);
+  assert.deepEqual(period.capabilities, {
+    tokenComponents: true,
+    attribution: true,
+    clientModels: true
+  });
+  assert.equal(supportsBreakdown('last7', 'tool', period), true);
+  assert.equal(supportsBreakdown('last7', 'model', period), true);
+});
+
 test('merged periods suppress partial client-model attribution', () => {
   const exact = derivePeriod([{
     date: '2026-08-11', tokens: 10, cost: 1,
-    capabilities: { tokenComponents: true, clientModels: true },
+    capabilities: { tokenComponents: true, attribution: true, clientModels: true },
     perClientModel: { codex: { 'gpt-5': { tokens: 10, cost: 1 } } }
   }], { selection: 'last7', todayKey: '2026-08-11' });
-  const legacy = { ...exact, capabilities: { tokenComponents: true, clientModels: false } };
+  const legacy = {
+    ...exact,
+    capabilities: { tokenComponents: true, attribution: true, clientModels: false }
+  };
   const merged = mergePeriods([exact, legacy]);
 
   assert.equal(merged.capabilities.clientModels, false);
@@ -468,7 +494,7 @@ test('derived periods preserve classified components and isolate the unavailable
     date: '2026-08-10', tokens: 100, cost: 5,
     cacheReadTokens: 30, cacheWriteTokens: 0, outputTokens: 20,
     unclassifiedTokens: 10,
-    capabilities: { tokenComponents: false, clientModels: true },
+    capabilities: { tokenComponents: false, attribution: true, clientModels: true },
     perClient: {
       codex: {
         tokens: 100, cost: 5, cacheReadTokens: 30, cacheWriteTokens: 0,
@@ -497,7 +523,7 @@ test('period aggregation preserves per-device range results and rejects prototyp
   const unsafe = JSON.parse('{"__proto__":{"tokens":5,"cost":1},"codex":{"tokens":10,"cost":2}}');
   const first = derivePeriod([{
     date: '2026-08-11', tokens: 15, cost: 3,
-    capabilities: { tokenComponents: true, clientModels: true },
+    capabilities: { tokenComponents: true, attribution: true, clientModels: true },
     perClient: unsafe,
     perModel: {},
     perClientModel: {}

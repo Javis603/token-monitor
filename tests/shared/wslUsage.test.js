@@ -390,11 +390,12 @@ test('collectWslUsage applies the cached Proma price to WSL rows', async () => {
 });
 
 test('collectWslUsage returns empty bundle when no homes', async () => {
-  const { bundle } = await collectWslUsage(
+  const { bundle, complete } = await collectWslUsage(
     { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: async () => ({}) },
     { platform: 'darwin' }
   );
   assert.equal(bundle.today.totalTokens, 0);
+  assert.equal(complete, true);
 });
 
 test('collectWslUsage logs and skips a home that throws, keeps others', async () => {
@@ -410,11 +411,12 @@ test('collectWslUsage logs and skips a home that throws, keeps others', async ()
     if (home.includes('Debian')) throw new Error('9p down');
     return entriesJson(7);
   };
-  const { bundle } = await collectWslUsage(
+  const { bundle, complete } = await collectWslUsage(
     { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale, logger: (m) => logs.push(m) },
     deps
   );
   assert.equal(bundle.today.totalTokens, 7); // Ubuntu counted, Debian skipped
+  assert.equal(complete, false);
   assert.equal(logs.length, 1);
   assert.match(logs[0], /Debian/);
 });

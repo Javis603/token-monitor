@@ -199,7 +199,8 @@ async function collectWslUsage(options = {}, deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
-  if (!trackedClients) return { bundle, detected: [] };
+  let complete = true;
+  if (!trackedClients) return { bundle, detected: [], complete };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
   // Reasonix aggregate usage is supported on the host, but remains excluded
@@ -239,13 +240,18 @@ async function collectWslUsage(options = {}, deps = {}) {
         bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(proma.month));
         bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
       } catch (error) {
+        complete = false;
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
       }
     }
     // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,
     // so every requested client can be passed through for each discovered home.
     // Keep the empty guard because an empty --client expands to all clients.
-    if (clientsCsv.length === 0 || typeof runTokscale !== 'function') continue;
+    if (clientsCsv.length === 0) continue;
+    if (typeof runTokscale !== 'function') {
+      if (homeDataClients.some((id) => tracked.has(id) && id !== 'proma' && id !== REASONIX_CLIENT)) complete = false;
+      continue;
+    }
     try {
       // Serial on purpose (issue #15): never run these concurrently.
       const todayJson = await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs });
@@ -261,10 +267,11 @@ async function collectWslUsage(options = {}, deps = {}) {
       bundle.month = mergePeriods(bundle.month, periods.month);
       bundle.allTime = mergePeriods(bundle.allTime, periods.allTime);
     } catch (error) {
+      complete = false;
       if (typeof logger === 'function') logger(`wsl usage scan failed for ${home}: ${error.message}`);
     }
   }
-  return { bundle, detected: [...detected] };
+  return { bundle, detected: [...detected], complete };
 }
 
 module.exports = {

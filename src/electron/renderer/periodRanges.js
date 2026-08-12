@@ -357,15 +357,16 @@
   function derivePeriod(daily, options = {}) {
     const period = emptyPeriod();
     const rows = dailyRowsForSelection(daily, options);
+    const attribution = rows.length === 0
+      || rows.every((row) => row?.capabilities?.attribution === true);
     period.capabilities = {
       // Capability is selection-local. The history-wide summary can be false
       // because of an unrelated legacy day outside the requested range.
-      tokenComponents: rows.length > 0
-        && rows.every((row) => row?.capabilities?.tokenComponents === true),
-      attribution: rows.length > 0
-        && rows.every((row) => row?.capabilities?.attribution === true),
-      clientModels: rows.length > 0
-        && rows.every((row) => row?.capabilities?.clientModels === true)
+      tokenComponents: rows.length === 0
+        || rows.every((row) => row?.capabilities?.tokenComponents === true),
+      attribution,
+      clientModels: attribution && (rows.length === 0
+        || rows.every((row) => row?.capabilities?.clientModels === true))
     };
     for (const row of rows) {
       period.totalTokens += finiteNumber(row?.tokens);
@@ -375,21 +376,23 @@
       period.outputTokens += finiteNumber(row?.outputTokens);
       const rowExact = row?.capabilities?.tokenComponents === true;
       period.unclassifiedTokens += unclassifiedValue(row, rowExact);
-      for (const [client, value] of Object.entries(row?.perClient || {})) {
-        addMapValue(period.clients, client, value?.tokens);
-        addMapValue(period.clientCosts, client, value?.cost);
-        addMapValue(period.clientCacheReads, client, value?.cacheReadTokens);
-        addMapValue(period.clientCacheWrites, client, value?.cacheWriteTokens);
-        addMapValue(period.clientOutputs, client, value?.outputTokens);
-        addMapValue(period.clientUnclassifiedTokens, client, unclassifiedValue(value, rowExact));
-      }
-      for (const [model, value] of Object.entries(row?.perModel || {})) {
-        addMapValue(period.models, model, value?.tokens);
-        addMapValue(period.modelCosts, model, value?.cost);
-        addMapValue(period.modelCacheReads, model, value?.cacheReadTokens);
-        addMapValue(period.modelCacheWrites, model, value?.cacheWriteTokens);
-        addMapValue(period.modelOutputs, model, value?.outputTokens);
-        addMapValue(period.modelUnclassifiedTokens, model, unclassifiedValue(value, rowExact));
+      if (period.capabilities.attribution) {
+        for (const [client, value] of Object.entries(row?.perClient || {})) {
+          addMapValue(period.clients, client, value?.tokens);
+          addMapValue(period.clientCosts, client, value?.cost);
+          addMapValue(period.clientCacheReads, client, value?.cacheReadTokens);
+          addMapValue(period.clientCacheWrites, client, value?.cacheWriteTokens);
+          addMapValue(period.clientOutputs, client, value?.outputTokens);
+          addMapValue(period.clientUnclassifiedTokens, client, unclassifiedValue(value, rowExact));
+        }
+        for (const [model, value] of Object.entries(row?.perModel || {})) {
+          addMapValue(period.models, model, value?.tokens);
+          addMapValue(period.modelCosts, model, value?.cost);
+          addMapValue(period.modelCacheReads, model, value?.cacheReadTokens);
+          addMapValue(period.modelCacheWrites, model, value?.cacheWriteTokens);
+          addMapValue(period.modelOutputs, model, value?.outputTokens);
+          addMapValue(period.modelUnclassifiedTokens, model, unclassifiedValue(value, rowExact));
+        }
       }
       if (period.capabilities.clientModels) {
         for (const [client, models] of Object.entries(row?.perClientModel || {})) {
@@ -425,21 +428,25 @@
   function mergePeriods(periods) {
     const list = (Array.isArray(periods) ? periods : []).filter((period) => period && typeof period === 'object');
     const merged = emptyPeriod();
+    const attribution = list.length === 0
+      || list.every((period) => period.capabilities?.attribution === true);
     merged.capabilities = {
-      tokenComponents: list.length > 0 && list.every((period) => period.capabilities?.tokenComponents === true),
-      attribution: list.length > 0 && list.every((period) => period.capabilities?.attribution === true),
-      clientModels: list.length > 0 && list.every((period) => period.capabilities?.clientModels === true)
+      tokenComponents: list.length === 0 || list.every((period) => period.capabilities?.tokenComponents === true),
+      attribution,
+      clientModels: attribution && (list.length === 0 || list.every((period) => period.capabilities?.clientModels === true))
     };
     for (const period of list) {
       for (const key of ['totalTokens', 'costUsd', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens', 'unclassifiedTokens']) {
         merged[key] += finiteNumber(period[key]);
       }
-      for (const key of [
-        'clients', 'clientCosts', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs',
-        'clientUnclassifiedTokens', 'models', 'modelCosts', 'modelCacheReads',
-        'modelCacheWrites', 'modelOutputs', 'modelUnclassifiedTokens'
-      ]) {
-        for (const [name, value] of Object.entries(period[key] || {})) addMapValue(merged[key], name, value);
+      if (merged.capabilities.attribution) {
+        for (const key of [
+          'clients', 'clientCosts', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs',
+          'clientUnclassifiedTokens', 'models', 'modelCosts', 'modelCacheReads',
+          'modelCacheWrites', 'modelOutputs', 'modelUnclassifiedTokens'
+        ]) {
+          for (const [name, value] of Object.entries(period[key] || {})) addMapValue(merged[key], name, value);
+        }
       }
       if (merged.capabilities.clientModels) {
         for (const key of ['clientModels', 'clientModelCosts']) {

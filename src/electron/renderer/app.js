@@ -6252,6 +6252,13 @@ function renderHomeModelModule(period, periodStatus = 'ready') {
     body.append(empty);
     return module;
   }
+  if (!periodRangesApi.supportsBreakdown(effectivePeriodSelection(), 'model', period)) {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    empty.textContent = t('periodRange.modelDetailUnavailable');
+    body.append(empty);
+    return module;
+  }
   const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period), period?.totalTokens, 5);
   if (rows.length === 0) {
     const empty = document.createElement('div');
@@ -6295,6 +6302,13 @@ function renderHomeToolModule(period, periodStatus = 'ready') {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
     empty.textContent = t(periodHistoryMessageKey(periodStatus));
+    body.append(empty);
+    return module;
+  }
+  if (!periodRangesApi.supportsBreakdown(effectivePeriodSelection(), 'tool', period)) {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    empty.textContent = t('periodRange.toolDetailUnavailable');
     body.append(empty);
     return module;
   }
