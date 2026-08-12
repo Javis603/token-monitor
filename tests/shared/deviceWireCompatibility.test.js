@@ -34,6 +34,21 @@ test('history availability survives sync and hub normalization', () => {
   assert.equal(normalized.history, null);
 });
 
+test('history transport omission survives sync and hub normalization', () => {
+  const normalized = normalizeDeviceRecord(syncPayload({
+    deviceId: 'device-omitted',
+    historyAvailable: true,
+    historyOmitted: true,
+    today: period(5),
+    month: period(10),
+    allTime: period(20)
+  }));
+
+  assert.equal(normalized.historyAvailable, true);
+  assert.equal(normalized.historyOmitted, true);
+  assert.equal(parseDeviceHistories([normalized])['device-omitted'].available, false);
+});
+
 test('legacy normalized empty history with usage remains unavailable to ranges', () => {
   const legacy = normalizeDeviceRecord({
     deviceId: 'legacy-device',

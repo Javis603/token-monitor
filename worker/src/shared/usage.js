@@ -838,6 +838,9 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'history')) {
     normalized.history = record.history === null ? null : coerceHistory(record.history);
   }
+  if (hasOwn(record, 'historyOmitted')) {
+    normalized.historyOmitted = record.historyOmitted === true;
+  }
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
     if (windows) normalized.periodWindows = windows;
@@ -1027,6 +1030,7 @@ function mergeDeviceRecord(existing, incoming) {
   const hasIncomingLimits = incoming && typeof incoming === 'object' && Object.prototype.hasOwnProperty.call(incoming, 'limits');
   const hasIncomingHistory = incoming && typeof incoming === 'object' && Object.prototype.hasOwnProperty.call(incoming, 'history');
   const hasIncomingHistoryAvailability = hasOwn(incoming, 'historyAvailable');
+  const hasIncomingHistoryOmission = hasOwn(incoming, 'historyOmitted');
   const hasIncomingTrackedClients = hasOwn(incoming, 'trackedClients');
   const normalizedIncoming = normalizeDeviceRecord(incoming || {});
   if (!hasExisting) return normalizedIncoming;
@@ -1064,6 +1068,9 @@ function mergeDeviceRecord(existing, incoming) {
   if (!hasIncomingHistoryAvailability && !hasIncomingHistory && hasOwn(normalizedExisting, 'historyAvailable')) {
     normalizedIncoming.historyAvailable = normalizedExisting.historyAvailable;
   }
+  if (!hasIncomingHistoryOmission && !hasIncomingHistory && hasOwn(normalizedExisting, 'historyOmitted')) {
+    normalizedIncoming.historyOmitted = normalizedExisting.historyOmitted;
+  }
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
   }
@@ -1083,6 +1090,9 @@ function carryDeviceHistory(previous, incoming) {
   }
   if (!hasOwn(incoming, 'historyAvailable') && previous && typeof previous === 'object' && hasOwn(previous, 'historyAvailable')) {
     result = { ...result, historyAvailable: previous.historyAvailable };
+  }
+  if (!hasOwn(incoming, 'historyOmitted') && !hasOwn(incoming, 'history') && previous && typeof previous === 'object' && hasOwn(previous, 'historyOmitted')) {
+    result = { ...result, historyOmitted: previous.historyOmitted };
   }
   return result;
 }

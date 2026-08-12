@@ -1127,6 +1127,29 @@ test('mergeDeviceRecord preserves prior history when the incoming post omits it'
   assert.equal(merged.history.daily[0].tokens, 5);
 });
 
+test('mergeDeviceRecord preserves last-good history but marks transport omission unavailable', () => {
+  const existing = normalizeDeviceRecord({
+    deviceId: 'm1',
+    historyAvailable: true,
+    history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
+  });
+  const omitted = mergeDeviceRecord(existing, {
+    deviceId: 'm1',
+    historyAvailable: true,
+    historyOmitted: true
+  });
+  assert.equal(omitted.history.daily[0].tokens, 5);
+  assert.equal(omitted.historyOmitted, true);
+
+  const restored = mergeDeviceRecord(omitted, {
+    deviceId: 'm1',
+    historyAvailable: true,
+    history: { daily: [{ date: '2026-06-08', tokens: 7 }], monthly: [], summary: { totalTokens: 7 } }
+  });
+  assert.equal(restored.history.daily[0].tokens, 7);
+  assert.equal(Object.hasOwn(restored, 'historyOmitted'), false);
+});
+
 test('mergeDeviceRecord clears prior history when incoming history is explicitly null', () => {
   const existing = normalizeDeviceRecord({
     deviceId: 'm1',

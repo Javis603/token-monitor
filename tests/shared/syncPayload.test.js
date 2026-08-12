@@ -144,11 +144,47 @@ test('serializeSyncPayload omits an oversized history without blocking core usag
   assert.ok(bytes <= 700, `expected ${bytes} bytes to fit the test budget`);
   assert.equal(Object.hasOwn(payload, 'history'), false);
   assert.equal(payload.historyAvailable, true);
+  assert.equal(payload.historyOmitted, true);
   assert.equal(payload.today.totalTokens, 10);
   assert.equal(payload.month.totalTokens, 20);
   assert.equal(payload.allTime.totalTokens, 30);
   assert.equal(JSON.parse(body).deviceId, 'history-heavy');
   assert.equal(summary.history.daily.length, 370);
+});
+
+test('serializeSyncPayload keeps daily totals by dropping client-model history first', () => {
+  const summary = {
+    deviceId: 'history-attributed',
+    historyAvailable: true,
+    today: { totalTokens: 10 },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 },
+    history: {
+      coverage: { start: '2026-08-01', end: '2026-08-11' },
+      capabilities: { tokenComponents: true, clientModels: true },
+      daily: Array.from({ length: 10 }, (_, index) => ({
+        date: `2026-08-${String(index + 1).padStart(2, '0')}`,
+        tokens: index + 1,
+        capabilities: { tokenComponents: true, clientModels: true },
+        perClient: { codex: { tokens: index + 1 } },
+        perModel: { [`model-${index}`]: { tokens: index + 1 } },
+        perClientModel: { codex: { [`model-${index}-${'x'.repeat(200)}`]: { tokens: index + 1 } } }
+      })),
+      monthly: [],
+      summary: { totalTokens: 55 }
+    }
+  };
+
+  const { payload, bytes } = serializeSyncPayload(summary, { maxBytes: 2600 });
+
+  assert.ok(bytes <= 2600);
+  assert.equal(payload.historyOmitted, undefined);
+  assert.deepEqual(payload.history.coverage, summary.history.coverage);
+  assert.equal(payload.history.capabilities.clientModels, false);
+  assert.equal(payload.history.daily[0].tokens, 1);
+  assert.equal(payload.history.daily[0].capabilities.clientModels, false);
+  assert.equal(Object.hasOwn(payload.history.daily[0], 'perClientModel'), false);
+  assert.deepEqual(payload.history.daily[0].perClient, summary.history.daily[0].perClient);
 });
 
 test('postSyncPayload retries a legacy 413 once without all-time projects', async () => {

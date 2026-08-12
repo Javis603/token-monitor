@@ -280,6 +280,28 @@ function monthlyRollup(days) {
 
 const DEFAULT_CAP_DAYS = 370;
 
+function normalizeHistoryCoverage(value) {
+  const start = String(value?.start || '').slice(0, 10);
+  const end = String(value?.end || '').slice(0, 10);
+  if (!isValidDayKey(start) || !isValidDayKey(end) || start > end) return null;
+  return { start, end };
+}
+
+function retainedHistoryCoverage(todayKey, capDays = DEFAULT_CAP_DAYS) {
+  const end = String(todayKey || '').slice(0, 10);
+  const count = Math.max(0, Math.floor(num(capDays)));
+  if (!isValidDayKey(end) || count === 0) return null;
+  return { start: dayKeyAddDays(end, -(count - 1)), end };
+}
+
+function sharedHistoryCoverage(histories) {
+  const coverages = histories.map((history) => normalizeHistoryCoverage(history?.coverage));
+  if (coverages.length === 0 || coverages.some((coverage) => !coverage)) return null;
+  const start = coverages.reduce((latest, coverage) => latest > coverage.start ? latest : coverage.start, coverages[0].start);
+  const end = coverages.reduce((earliest, coverage) => earliest < coverage.end ? earliest : coverage.end, coverages[0].end);
+  return start <= end ? { start, end } : null;
+}
+
 function rollingDailyWindow(days, todayKey, capDays = DEFAULT_CAP_DAYS) {
   const count = Math.max(0, Math.floor(num(capDays)));
   if (count === 0) return [];
@@ -329,6 +351,7 @@ function normalizeHistory(graphData, options = {}) {
   const activeTimeMs = timeMetrics ? timeMetrics.totalActiveTimeMs : activeTimeTotal(full);
 
   return {
+    ...(retainedHistoryCoverage(todayKey, capDays) ? { coverage: retainedHistoryCoverage(todayKey, capDays) } : {}),
     capabilities: {
       tokenComponents: full.every((day) => day?.capabilities?.tokenComponents !== false)
         && graphData?.capabilities?.tokenComponents !== false,
@@ -422,11 +445,13 @@ function mergeHistories(histories, options = {}) {
   const { currentStreak, longestStreak } = computeStreaks(daily, todayKey);
   const favoriteModel = favoriteModelOf(daily);
   const activeTimeMs = activeTimeTotal(monthly.length ? monthly : daily);
+  const coverage = sharedHistoryCoverage(list);
 
   const capabilities = {};
   if (list.length > 0 && list.every((history) => history.capabilities?.tokenComponents === true)) capabilities.tokenComponents = true;
   if (list.length > 0 && list.every((history) => history.capabilities?.clientModels === true)) capabilities.clientModels = true;
   return {
+    ...(coverage ? { coverage } : {}),
     ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     daily,
     monthly,
@@ -441,9 +466,11 @@ function mergeHistories(histories, options = {}) {
 function coerceHistory(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
   const capabilities = {};
+  const coverage = normalizeHistoryCoverage(src.coverage);
   if (src.capabilities?.tokenComponents === true) capabilities.tokenComponents = true;
   if (src.capabilities?.clientModels === true) capabilities.clientModels = true;
   return {
+    ...(coverage ? { coverage } : {}),
     ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     daily: Array.isArray(src.daily) ? src.daily : [],
     monthly: Array.isArray(src.monthly) ? src.monthly : [],
@@ -456,6 +483,12 @@ function coerceHistory(raw) {
 // unused device can still expose an exact empty history.
 function deviceHistoryState(device) {
   const hasHistory = Object.prototype.hasOwnProperty.call(device || {}, 'history');
+  if (device?.historyOmitted === true) {
+    return {
+      state: 'unavailable',
+      history: hasHistory && device.history !== null ? coerceHistory(device.history) : null
+    };
+  }
   if (device?.historyAvailable === false || (hasHistory && device.history === null)) {
     return { state: 'unavailable', history: null };
   }
@@ -477,7 +510,7 @@ function historyPreview(history, options = {}) {
   const h = coerceHistory(history);
   const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs) }));
   const monthly = h.monthly.slice(-monthlyMonths).map((m) => ({ month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs) }));
-  return { daily, monthly, summary: h.summary };
+  return { ...(h.coverage ? { coverage: h.coverage } : {}), daily, monthly, summary: h.summary };
 }
 
 function stableJson(value) {
@@ -521,7 +554,9 @@ function historyRevision(devices) {
     })
     .filter(Boolean)
     .sort((left, right) => left.deviceId.localeCompare(right.deviceId));
-  return revisionFor(entries);
+  // Prefix the second-generation per-device token so a renderer that reconnects
+  // across a Hub upgrade never mistakes it for the legacy aggregate-history hash.
+  return `v2:${revisionFor(entries)}`;
 }
 
 module.exports = {

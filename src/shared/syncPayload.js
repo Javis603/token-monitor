@@ -132,6 +132,7 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
   delete payload.allTimeProjectsIncomplete;
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
+  if (hasOwn(payload, 'history')) delete payload.historyOmitted;
 
   for (const periodName of ['today', 'month']) {
     const period = summary[periodName];
@@ -154,6 +155,22 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
     }
   }
   return payload;
+}
+
+function historyWithoutClientModels(history) {
+  if (!history || typeof history !== 'object') return history;
+  return {
+    ...history,
+    capabilities: { ...(history.capabilities || {}), clientModels: false },
+    daily: Array.isArray(history.daily) ? history.daily.map((row) => {
+      const compact = {
+        ...row,
+        capabilities: { ...(row?.capabilities || {}), clientModels: false }
+      };
+      delete compact.perClientModel;
+      return compact;
+    }) : []
+  };
 }
 
 function serializeSyncPayload(summary, options = {}) {
@@ -186,11 +203,23 @@ function serializeSyncPayload(summary, options = {}) {
     && payload.history
     && typeof payload.history === 'object'
   ) {
-    // A retained attributed history can legitimately outgrow the ingest
-    // ceiling. An absent history field means "no update", so mergeDeviceRecord
-    // keeps any last-good Hub copy while the current usage/limits snapshot can
-    // still advance. A Hub without a prior copy remains honestly unavailable.
+    // The client→model intersection duplicates data already present in the
+    // per-client and per-model maps and is normally the largest retained-history
+    // field. Sacrifice that optional attribution first so daily totals, component
+    // counters, and coverage can continue to advance on the Hub.
+    payload.history = historyWithoutClientModels(payload.history);
+    body = JSON.stringify(payload);
+  }
+  if (
+    Buffer.byteLength(body, 'utf8') > maxBytes
+    && payload.history
+    && typeof payload.history === 'object'
+  ) {
+    // Absence alone means "no update" and would make the Hub's last-good copy
+    // look current forever. Keep that copy for recovery, but explicitly mark this
+    // device unavailable for derived ranges until a complete history fits again.
     delete payload.history;
+    payload.historyOmitted = true;
     body = JSON.stringify(payload);
   }
   return { payload, body, bytes: Buffer.byteLength(body, 'utf8') };

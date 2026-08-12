@@ -250,6 +250,8 @@ test('normalizeHistory caps daily but keeps monthly/summary full', () => {
   ]);
   const h = normalizeHistory(parseGraphResult(graph), { capDays: 30, todayKey: '2026-06-07' });
 
+  assert.deepEqual(h.coverage, { start: '2026-05-09', end: '2026-06-07' });
+
   // daily: old day dropped by the 30-day cap, recent two kept, asc
   assert.deepEqual(h.daily.map((d) => d.date), ['2026-06-06', '2026-06-07']);
   assert.equal(h.daily[1].intensity, 4); // highest cost day
@@ -296,6 +298,7 @@ test('mergeHistories sums daily across devices and recomputes derived fields', (
 
   const m = mergeHistories([dev1, dev2], { todayKey: '2026-06-07' });
 
+  assert.deepEqual(m.coverage, { start: '2025-06-03', end: '2026-06-07' });
   assert.deepEqual(m.daily.map((d) => d.date), ['2026-06-06', '2026-06-07']);
   const d7 = m.daily.find((d) => d.date === '2026-06-07');
   assert.equal(d7.tokens, 25);                         // 20 + 5
@@ -372,6 +375,16 @@ test('historyRevision is key-order stable and tracks device attribution', () => 
 
   assert.equal(historyRevision(original), historyRevision(reorderedDevices));
   assert.notEqual(historyRevision(original), historyRevision(swapped));
+  assert.match(historyRevision(original), /^v2:/);
+});
+
+test('historyRevision changes when current history was omitted in transport', () => {
+  const device = {
+    deviceId: 'alpha',
+    historyAvailable: true,
+    history: { daily: [{ date: '2026-06-07', tokens: 10 }], monthly: [], summary: {} }
+  };
+  assert.notEqual(historyRevision([device]), historyRevision([{ ...device, historyOmitted: true }]));
 });
 
 test('historyRevision preserves legacy normalized-null availability semantics', () => {
@@ -391,6 +404,10 @@ test('coerceHistory normalizes shape and drops garbage', () => {
   assert.deepEqual(coerceHistory({ daily: 'x' }), { daily: [], monthly: [], summary: {} });
   const ok = { daily: [{ date: '2026-06-07', tokens: 1 }], monthly: [{ month: '2026-06', tokens: 1 }], summary: { totalTokens: 1 } };
   assert.deepEqual(coerceHistory(ok), ok);
+  assert.deepEqual(coerceHistory({ ...ok, coverage: { start: '2026-01-01', end: '2026-06-07' } }).coverage, {
+    start: '2026-01-01', end: '2026-06-07'
+  });
+  assert.equal(coerceHistory({ ...ok, coverage: { start: '2026-06-08', end: '2026-06-07' } }).coverage, undefined);
 });
 
 test('historyPreview keeps recent totals only (no per-client)', () => {

@@ -142,7 +142,9 @@ test('offline device restores a newer expired today snapshot onto its original l
     }
   }], {
     status: 'ready',
-    selection: 'last7',
+    selection: 'range',
+    rangeStart: '2026-08-11',
+    rangeEnd: '2026-08-11',
     now: new Date('2026-08-11T16:30:00.000Z')
   });
 
@@ -162,12 +164,84 @@ test('offline device keeps a more complete history row than its stale today snap
     nativeToday: { totalTokens: 100, costUsd: 1 }
   }], {
     status: 'ready',
-    selection: 'last7',
+    selection: 'range',
+    rangeStart: '2026-08-11',
+    rangeEnd: '2026-08-11',
     now: new Date('2026-08-11T16:30:00.000Z')
   });
 
   assert.equal(snapshot.period.totalTokens, 120);
   assert.deepEqual(snapshot.daily.map((row) => [row.date, row.tokens]), [['2026-08-11', 120]]);
+});
+
+test('current live day cannot shrink a more complete durable history row', () => {
+  const snapshot = deriveRangeSnapshot([{
+    periodWindows: { today: {
+      key: '2026-08-11',
+      endsAt: '2026-08-11T16:00:00.000Z',
+      timeZone: 'Asia/Hong_Kong'
+    } },
+    history: {
+      coverage: { start: '2025-08-08', end: '2026-08-11' },
+      daily: [{ date: '2026-08-11', tokens: 150, cost: 2 }]
+    },
+    nativeToday: { totalTokens: 100, costUsd: 1 }
+  }], {
+    status: 'ready',
+    selection: 'last7',
+    now: new Date('2026-08-11T12:00:00.000Z')
+  });
+
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.period.totalTokens, 150);
+  assert.equal(snapshot.period.costUsd, 2);
+});
+
+test('equal-token stale snapshot can correct cost downward', () => {
+  const snapshot = deriveRangeSnapshot([{
+    periodWindows: { today: {
+      key: '2026-08-11',
+      endsAt: '2026-08-11T16:00:00.000Z',
+      timeZone: 'Asia/Hong_Kong'
+    } },
+    history: {
+      coverage: { start: '2025-08-08', end: '2026-08-11' },
+      daily: [{ date: '2026-08-11', tokens: 100, cost: 2 }]
+    },
+    nativeToday: { totalTokens: 100, costUsd: 1.8 }
+  }], {
+    status: 'ready',
+    selection: 'range',
+    rangeStart: '2026-08-11',
+    rangeEnd: '2026-08-11',
+    now: new Date('2026-08-11T16:30:00.000Z')
+  });
+
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.period.totalTokens, 100);
+  assert.equal(snapshot.period.costUsd, 1.8);
+});
+
+test('offline device gaps after its last complete day are unavailable', () => {
+  const snapshot = deriveRangeSnapshot([{
+    periodWindows: { today: {
+      key: '2026-08-01',
+      endsAt: '2026-08-01T16:00:00.000Z',
+      timeZone: 'Asia/Hong_Kong'
+    } },
+    history: {
+      coverage: { start: '2025-07-28', end: '2026-08-01' },
+      daily: [{ date: '2026-08-01', tokens: 100 }]
+    },
+    nativeToday: { totalTokens: 100 }
+  }], {
+    status: 'ready',
+    selection: 'last7',
+    now: new Date('2026-08-10T04:00:00.000Z')
+  });
+
+  assert.equal(snapshot.status, 'unavailable');
+  assert.equal(snapshot.period, null);
 });
 
 test('expired legacy device calendar fails closed instead of switching to UTC', () => {
@@ -448,6 +522,29 @@ test('invalid custom ranges are unavailable instead of a successful zero', () =>
       status: 'unavailable', period: null, daily: [], summary: null
     });
   }
+});
+
+test('persisted custom ranges fail closed after aging out of retained coverage', () => {
+  const snapshot = deriveRangeSnapshot([{
+    periodWindows: { today: {
+      key: '2026-08-11',
+      endsAt: '2026-08-11T16:00:00.000Z',
+      timeZone: 'Asia/Hong_Kong'
+    } },
+    history: {
+      coverage: { start: '2025-08-08', end: '2026-08-11' },
+      daily: [{ date: '2025-08-08', tokens: 50 }]
+    }
+  }], {
+    status: 'ready',
+    selection: 'range',
+    rangeStart: '2025-08-07',
+    rangeEnd: '2025-08-20',
+    now: new Date('2026-08-11T12:00:00.000Z')
+  });
+
+  assert.equal(snapshot.status, 'unavailable');
+  assert.equal(snapshot.period, null);
 });
 
 test('cross-timezone derived snapshots use the same selected rows for headline and Trends', () => {

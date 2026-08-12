@@ -17,6 +17,7 @@
     allTime: 'periodTotalMode'
   });
   const DEFAULT_MODES = Object.freeze({ today: 'today', month: 'month', allTime: 'allTime' });
+  const DEFAULT_HISTORY_DAYS = 370;
   const DISPLAY_LABELS = Object.freeze({
     today: 'DAY',
     month: 'MONTH',
@@ -267,7 +268,7 @@
     };
   }
 
-  function patchToday(daily, todayKey, nativeToday, options = {}) {
+  function patchToday(daily, todayKey, nativeToday) {
     const rows = Array.isArray(daily) ? daily.map((row) => ({ ...row })) : [];
     const date = normalizeDateKey(todayKey);
     if (!date || !nativeToday) return rows;
@@ -276,16 +277,40 @@
     const next = dailyRowFromPeriod(nativeToday, date, previous);
     const previousTokens = finiteNumber(previous?.tokens);
     const nextTokens = finiteNumber(next?.tokens);
-    const previousCost = finiteNumber(previous?.cost);
-    const nextCost = finiteNumber(next?.cost);
-    const staleSnapshotIsNewer = nextTokens > previousTokens
-      || (nextTokens === previousTokens && nextCost > previousCost);
+    // Retained token totals are monotonic snapshots of an append-only log. A
+    // smaller live value can be a temporarily incomplete scan, while equal-token
+    // live data is authoritative for price/capability corrections in either
+    // direction.
+    const liveSnapshotWins = nextTokens >= previousTokens;
     if (index >= 0) {
-      if (options.current === true || staleSnapshotIsNewer) rows[index] = next;
+      if (liveSnapshotWins) rows[index] = next;
     } else {
       rows.push(next);
     }
     return rows.sort((a, b) => String(a?.date || '').localeCompare(String(b?.date || '')));
+  }
+
+  function historyCoverageForSource(source, dayState, snapshotDayKey) {
+    const explicit = normalizeDateRange(source?.history?.coverage?.start, source?.history?.coverage?.end);
+    if (explicit) return explicit;
+    // Histories produced before coverage metadata used the same 370-day retained
+    // window. Anchor that legacy inference to the producer snapshot day, never to
+    // the viewer's newer local day, so an offline gap cannot masquerade as zero.
+    const end = normalizeDateKey(snapshotDayKey) || normalizeDateKey(dayState?.key);
+    return end ? { start: dayKeyAddDays(end, -(DEFAULT_HISTORY_DAYS - 1)), end } : null;
+  }
+
+  function rangeCoveredBySource(range, coverage, source, dayState) {
+    if (!range || !coverage || range.start < coverage.start) return false;
+    let completeThrough = coverage.end;
+    if (
+      dayState?.nativeTodayCurrent === true
+      && source?.nativeToday
+      && dayKeyAddDays(coverage.end, 1) === dayState.key
+    ) {
+      completeThrough = dayState.key;
+    }
+    return range.end <= completeThrough;
   }
 
   function dailyRowsForSelection(daily, options = {}) {
@@ -295,8 +320,7 @@
     return patchToday(
       daily,
       options.nativeTodayKey || options.todayKey,
-      options.nativeToday,
-      { current: options.nativeTodayCurrent === true }
+      options.nativeToday
     ).filter((row) => {
       const date = normalizeDateKey(row?.date);
       return date && date >= range.start && date <= range.end;
@@ -532,9 +556,13 @@
         nativeTodayCurrent: dayState.nativeTodayCurrent
       };
       const daily = source?.history?.daily || [];
+      const range = rangeForSelection(options.selection, sourceOptions);
+      const coverage = historyCoverageForSource(source, dayState, snapshotDayKey);
+      if (!rangeCoveredBySource(range, coverage, source, dayState)) {
+        return { status: 'unavailable', period: null, daily: [], summary: null };
+      }
       periods.push(derivePeriod(daily, sourceOptions));
       rowGroups.push(dailyRowsForSelection(daily, sourceOptions));
-      const range = rangeForSelection(options.selection, sourceOptions);
       if (range?.end) rangeEnds.push(range.end);
     }
     const daily = mergeSelectedDaily(rowGroups);

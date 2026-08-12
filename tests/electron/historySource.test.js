@@ -241,3 +241,51 @@ test('an explicit local disabled state overrides Hub last-good history', async (
   assert.equal(result.mac.available, false);
   assert.deepEqual(result.mac.daily, []);
 });
+
+test('a transport-omitted history keeps Hub data but fails derived ranges closed', () => {
+  const histories = parseDeviceHistories({ devices: [{
+    deviceId: 'mac',
+    historyAvailable: true,
+    historyOmitted: true,
+    history: {
+      coverage: { start: '2026-08-01', end: '2026-08-10' },
+      daily: [{ date: '2026-08-10', tokens: 80 }]
+    }
+  }] });
+
+  assert.equal(histories.mac.available, false);
+  assert.equal(histories.mac.daily[0].tokens, 80);
+});
+
+test('embedded host device histories overlay the authoritative local snapshot', async () => {
+  const result = await resolveDeviceHistories({
+    mode: 'host',
+    hubMode: 'host',
+    localDevice: {
+      deviceId: 'mac',
+      periods: { allTime: { totalTokens: 100 } },
+      historyAvailable: true,
+      history: { daily: [{ date: '2026-08-11', tokens: 100 }] }
+    },
+    embeddedHub: {
+      hub: {
+        getDevices: () => [
+          {
+            deviceId: 'mac',
+            periods: { allTime: { totalTokens: 80 } },
+            historyAvailable: true,
+            history: { daily: [{ date: '2026-08-11', tokens: 80 }] }
+          },
+          {
+            deviceId: 'remote',
+            periods: { allTime: { totalTokens: 25 } },
+            history: { daily: [{ date: '2026-08-10', tokens: 25 }] }
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal(result.mac.daily[0].tokens, 100);
+  assert.equal(result.remote.daily[0].tokens, 25);
+});

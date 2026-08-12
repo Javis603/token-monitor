@@ -12,6 +12,7 @@ function parseCompleteHistory(payload) {
 // disabled state, is authoritative.
 function hasAuthoritativeHistoryState(device) {
   return Object.prototype.hasOwnProperty.call(device || {}, 'history')
+    || device?.historyOmitted === true
     || device?.historyAvailable === false;
 }
 
@@ -78,6 +79,9 @@ async function resolveCompleteHistory(options = {}) {
     case 'local':
       return parseCompleteHistory(aggregate(localDevice ? [localDevice] : []));
     case 'embedded':
+      if (typeof embeddedHub.hub.getDevices === 'function') {
+        return parseCompleteHistory(aggregate(devicesWithLocalHistory(embeddedHub.hub.getDevices(), localDevice)));
+      }
       return parseCompleteHistory(embeddedHub.hub.getHistory());
     default:
       break;
@@ -114,7 +118,7 @@ async function resolveDeviceHistories(options = {}) {
     case 'local':
       return parseDeviceHistories(localDevice ? [localDevice] : []);
     case 'embedded':
-      return parseDeviceHistories(embeddedHub.hub.getDevices());
+      return parseDeviceHistories(devicesWithLocalHistory(embeddedHub.hub.getDevices(), localDevice));
     default:
       break;
   }
