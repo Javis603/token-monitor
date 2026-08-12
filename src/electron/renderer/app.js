@@ -187,6 +187,7 @@ const {
   toolIconsEnabled
 } = breakdownRenderPolicyApi;
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
+const usageAttributionRowsApi = window.TokenMonitorUsageAttributionRows;
 const projectRowsApi = window.TokenMonitorProjectRows;
 const sessionDetailApi = window.TokenMonitorSessionDetail;
 const windowShortcutApi = window.TokenMonitorWindowShortcut;
@@ -2047,7 +2048,7 @@ function deviceRowsForPeriod() {
 
 function toolRowsForPeriod(period) {
   const hasTokenComponents = period?.capabilities?.tokenComponents !== false;
-  const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({ key: client, name: clientLabels[client] || client, value: Number(value), cost: Number(period?.clientCosts?.[client] || 0), color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: hasTokenComponents ? Number(period?.clientCacheReads?.[client] || 0) : undefined, cacheWriteTokens: hasTokenComponents ? Number(period?.clientCacheWrites?.[client] || 0) : undefined, outputTokens: hasTokenComponents ? Number(period?.clientOutputs?.[client] || 0) : undefined }));
+  const clientRows = usageAttributionRowsApi.attributionRows(period?.clients, period?.clientCosts).map(({ key: client, value, cost }) => ({ key: client, name: clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: hasTokenComponents ? Number(period?.clientCacheReads?.[client] || 0) : undefined, cacheWriteTokens: hasTokenComponents ? Number(period?.clientCacheWrites?.[client] || 0) : undefined, outputTokens: hasTokenComponents ? Number(period?.clientOutputs?.[client] || 0) : undefined }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2058,11 +2059,11 @@ function toolRowsForPeriod(period) {
 
 function modelRowsForPeriod(period) {
   const hasTokenComponents = period?.capabilities?.tokenComponents !== false;
-  const modelRows = Object.entries(period?.models || {}).filter(([, value]) => Number(value) > 0).map(([model, value]) => ({
+  const modelRows = usageAttributionRowsApi.attributionRows(period?.models, period?.modelCosts).map(({ key: model, value, cost }) => ({
     key: model,
     name: model,
-    value: Number(value),
-    cost: Number(period?.modelCosts?.[model] || 0),
+    value,
+    cost,
     color: modelColor(model),
     stale: false,
     cacheReadTokens: hasTokenComponents ? Number(period?.modelCacheReads?.[model] || 0) : undefined,
