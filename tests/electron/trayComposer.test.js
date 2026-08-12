@@ -14,7 +14,8 @@ const {
   handlePickerDocumentScroll,
   moveTrayLayoutItemByKey,
   periodItemPatch,
-  syncTrayComposerSurfaces
+  syncTrayComposerSurfaces,
+  usageScopePatch
 } = require('../../src/electron/renderer/trayComposer');
 
 function layoutWithIds(...ids) {
@@ -122,6 +123,24 @@ test('cost display updates target a single item or one mixed-information row', (
   });
   assert.equal(normalized.items[0].rows[1].costFormat, 'compact');
   assert.equal(normalized.items[0].rows[1].costDecimals, 3);
+});
+
+test('usage source updates target a single item or one mixed-information row', () => {
+  const single = trayLayoutApi.createTrayLayoutItem('tokens', { idFactory: () => 'single-tokens' });
+  const singleUpdated = usageScopePatch(single, 0, 'recent');
+  assert.equal(singleUpdated.usageScope, 'recent');
+  assert.equal(singleUpdated.source.usageScope, undefined);
+
+  const stacked = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked-tokens' });
+  const stackedUpdated = usageScopePatch(stacked, 1, 'recent');
+  assert.equal(stackedUpdated.rows[0].usageScope, undefined);
+  assert.equal(stackedUpdated.rows[1].usageScope, 'recent');
+
+  const normalized = trayLayoutApi.normalizeTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ ...stackedUpdated, rows: [stackedUpdated.rows[0], { ...stackedUpdated.rows[1], metric: 'tokens' }] }]
+  });
+  assert.equal(normalized.items[0].rows[1].usageScope, 'recent');
 });
 
 test('keyboard movement returns the reordered layout and respects boundaries', () => {

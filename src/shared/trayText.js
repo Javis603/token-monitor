@@ -71,6 +71,24 @@
     return new Set(availableIconIds).has(client) ? client : null;
   }
 
+  function pickRecentUsageProviderId(stats, availableIconIds) {
+    let latest = null;
+    for (const period of Object.values(stats?.periods || {})) {
+      for (const session of Object.values(period?.sessions || {})) {
+        const client = normalizedProviderId(session?.client);
+        if (!client) continue;
+        const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
+        if (!Number.isFinite(lastUsedMs)) continue;
+        if (!latest || lastUsedMs > latest.lastUsedMs || (
+          lastUsedMs === latest.lastUsedMs && client.localeCompare(latest.client) < 0
+        )) latest = { client, lastUsedMs };
+      }
+    }
+    if (!latest) return null;
+    if (!Array.isArray(availableIconIds)) return latest.client;
+    return new Set(availableIconIds).has(latest.client) ? latest.client : null;
+  }
+
   function csvValues(value) {
     return Array.isArray(value) ? value : String(value || '').split(',');
   }
@@ -310,6 +328,7 @@
     pickConfiguredSessionLimits,
     pickLimitProviderByKindPriority,
     pickUsageProviderId,
+    pickRecentUsageProviderId,
     pickWorstLimit,
     pickWorstLimitProvider,
     trayShowsTitle

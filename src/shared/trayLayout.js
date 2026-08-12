@@ -14,7 +14,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayLayout = api;
 })(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay, compactMoneyApi) {
-  const VERSION = 3;
+  const VERSION = 4;
   const MAX_ITEMS = 12;
   const STYLE_IDS = Object.freeze([
     'appIcon',
@@ -44,11 +44,12 @@
   const STACK_METRICS = new Set(['percent', 'reset', 'mixed', 'custom']);
   const STACK_ALIGNMENTS = new Set(['left', 'right']);
   const FONT_STYLES = new Set(['normal', 'condensed', 'menubar', 'compactMono']);
-  const ICON_AUTO_MODES = new Set(['lowestLimit', 'tokens', 'cost']);
+  const ICON_AUTO_MODES = new Set(['lowestLimit', 'recent', 'tokens', 'cost']);
   const BAR_ICON_MODES = new Set(['app', 'first', 'second', 'none']);
   const SPACER_SIZES = new Set(['narrow', 'regular', 'wide']);
   const SPACER_VARIANTS = new Set(['space', 'dot']);
   const COST_FORMATS = new Set(['compact', 'full']);
+  const USAGE_SCOPES = new Set(['all', 'recent']);
   const PERIODS = new Set(['today', 'month', 'allTime']);
   const WINDOW_PRESETS = new Set(['primary', 'secondary', 'session', 'weekly', 'billing']);
 
@@ -128,6 +129,11 @@
     };
   }
 
+  function normalizeUsageScope(value) {
+    const scope = clean(value, 24);
+    return USAGE_SCOPES.has(scope) ? scope : 'all';
+  }
+
   function normalizeSource(input, fallbackWindow = 'primary') {
     const source = input && typeof input === 'object' ? input : {};
     const provider = clean(source.provider, 48).toLowerCase();
@@ -148,7 +154,8 @@
       metric: INFO_METRICS.has(metric) ? metric : 'percent',
       period: 'today'
     };
-    return row.metric === 'cost' ? { ...row, ...normalizeCostDisplay() } : row;
+    if (row.metric === 'cost') return { ...row, usageScope: 'all', ...normalizeCostDisplay() };
+    return row.metric === 'tokens' ? { ...row, usageScope: 'all' } : row;
   }
 
   function normalizeInfoRow(input, fallbackMetric = 'percent', fallbackWindow = 'primary', options = {}) {
@@ -159,8 +166,15 @@
       metric: INFO_METRICS.has(metric) ? metric : fallbackMetric,
       period: PERIODS.has(row.period) ? row.period : 'today'
     };
-    return normalized.metric === 'cost'
-      ? { ...normalized, ...normalizeCostDisplay(row, options.costDefaults) }
+    if (normalized.metric === 'cost') {
+      return {
+        ...normalized,
+        usageScope: normalizeUsageScope(row.usageScope),
+        ...normalizeCostDisplay(row, options.costDefaults)
+      };
+    }
+    return normalized.metric === 'tokens'
+      ? { ...normalized, usageScope: normalizeUsageScope(row.usageScope) }
       : normalized;
   }
 
@@ -309,7 +323,8 @@
       period: 'today',
       source: sourceDefaults()
     };
-    return metric === 'cost' ? { ...item, ...normalizeCostDisplay() } : item;
+    if (metric === 'cost') return { ...item, usageScope: 'all', ...normalizeCostDisplay() };
+    return metric === 'tokens' ? { ...item, usageScope: 'all' } : item;
   }
 
   function normalizeItem(input, index = 0, options = {}) {
@@ -450,8 +465,15 @@
       period,
       source: normalizeSource(input.source)
     };
-    return metric === 'cost'
-      ? { ...normalized, ...normalizeCostDisplay(input, options.costDefaults) }
+    if (metric === 'cost') {
+      return {
+        ...normalized,
+        usageScope: normalizeUsageScope(input.usageScope),
+        ...normalizeCostDisplay(input, options.costDefaults)
+      };
+    }
+    return metric === 'tokens'
+      ? { ...normalized, usageScope: normalizeUsageScope(input.usageScope) }
       : normalized;
   }
 
@@ -484,7 +506,7 @@
     const items = [];
     const usedIds = new Set();
     const sourceVersion = finite(input.version);
-    const normalizeOptions = sourceVersion === null || sourceVersion < VERSION
+    const normalizeOptions = sourceVersion === null || sourceVersion < 3
       ? { costDefaults: { costFormat: 'full', costDecimals: 'auto' } }
       : {};
     for (const candidate of Array.isArray(input.items) ? input.items : []) {
@@ -801,17 +823,40 @@
     );
   }
 
+  function resolveUsageValue(item, stats) {
+    const period = stats?.periods?.[item.period] || {};
+    if (normalizeUsageScope(item.usageScope) !== 'recent') {
+      return {
+        available: true,
+        provider: null,
+        value: item.metric === 'tokens' ? period.totalTokens : period.costUsd
+      };
+    }
+    const provider = trayTextApi?.pickRecentUsageProviderId?.(stats) || null;
+    if (!provider) return { available: false, provider: null, value: 0 };
+    return {
+      available: true,
+      provider,
+      value: item.metric === 'tokens'
+        ? Number(period.clients?.[provider]) || 0
+        : Number(period.clientCosts?.[provider]) || 0
+    };
+  }
+
   function resolveTextItem(item, stats, options) {
     if (item.metric === 'custom') {
       const text = clean(item.text, 40);
       return { ...item, available: Boolean(text), text: text || '--' };
     }
     if (item.metric === 'tokens' || item.metric === 'cost') {
-      const period = stats?.periods?.[item.period] || {};
+      const usage = resolveUsageValue(item, stats);
+      if (!usage.available) {
+        return { ...item, available: false, text: '--', provider: null };
+      }
       const text = item.metric === 'tokens'
-        ? formatCompactNumber(period.totalTokens, options)
-        : formatCost(period.costUsd, item, options);
-      return { ...item, available: true, text };
+        ? formatCompactNumber(usage.value, options)
+        : formatCost(usage.value, item, options);
+      return { ...item, available: true, text, provider: usage.provider };
     }
     const selection = selectSource(stats, item.source, options);
     if (!selection) return { ...item, available: false, text: '--', selection: null };
@@ -823,6 +868,14 @@
     else if (item.metric === 'reset') text = reset || '--';
     else text = accountLabel(selection.providerRecord) || selection.provider;
     return { ...item, available: Boolean(text && text !== '--'), text: text || '--', selection };
+  }
+
+  function preferredRowProvider(rows, preferredIndex = 0) {
+    const providerFor = (row) => clean(row?.selection?.provider || row?.provider, 48).toLowerCase();
+    const preferred = Array.isArray(rows) ? rows[preferredIndex] : null;
+    return providerFor(preferred)
+      || providerFor((rows || []).find((row) => providerFor(row)))
+      || '';
   }
 
   function resolveTrayLayout(layout, stats, options = {}) {
@@ -841,17 +894,19 @@
               selection: null
             };
           }
-          if (item.autoMode === 'tokens' || item.autoMode === 'cost') {
-            const provider = trayTextApi?.pickUsageProviderId?.(
-              stats,
-              item.autoMode,
-              item.period,
-              options.availableProviderIds
-            ) || 'app';
+          if (item.autoMode === 'recent' || item.autoMode === 'tokens' || item.autoMode === 'cost') {
+            const provider = item.autoMode === 'recent'
+              ? trayTextApi?.pickRecentUsageProviderId?.(stats, options.availableProviderIds)
+              : trayTextApi?.pickUsageProviderId?.(
+                  stats,
+                  item.autoMode,
+                  item.period,
+                  options.availableProviderIds
+                );
             return {
               ...item,
               available: true,
-              provider,
+              provider: provider || 'app',
               selection: null
             };
           }
@@ -898,6 +953,7 @@
                 source,
                 available: resolved.available,
                 text: resolved.text,
+                provider: resolved.provider || null,
                 selection: resolved.selection || null
               };
             });
@@ -939,6 +995,7 @@
     normalizeSource,
     normalizeTrayLayout,
     providerOptions,
+    preferredRowProvider,
     removeTrayLayoutItem,
     replaceTrayLayoutItem,
     resolveTrayLayout,

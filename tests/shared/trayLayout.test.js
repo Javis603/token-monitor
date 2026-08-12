@@ -11,6 +11,7 @@ const {
   formatResetCountdown,
   moveTrayLayoutItem,
   normalizeTrayLayout,
+  preferredRowProvider,
   removeTrayLayoutItem,
   replaceTrayLayoutItem,
   resolveTrayLayout,
@@ -91,7 +92,7 @@ test('tray layouts normalize to a versioned and bounded shape', () => {
   };
 
   assert.deepEqual(normalizeTrayLayout(malformed), {
-    version: 3,
+    version: 4,
     items: [
       {
         id: 'one',
@@ -186,7 +187,7 @@ test('tray layouts support optional shared icons, stacked values and configurabl
     ]
   });
 
-  assert.equal(normalized.version, 3);
+  assert.equal(normalized.version, 4);
   assert.equal(normalized.items[0].icon, 'none');
   assert.equal(normalized.items[1].style, 'doubleReset');
   assert.equal(normalized.items[1].icon, 'second');
@@ -391,6 +392,24 @@ test('cost items preserve legacy output and support compact per-item decimal cho
   }).items;
   assert.equal(migrated.costFormat, 'full');
   assert.equal(migrated.costDecimals, 'auto');
+  assert.equal(migrated.usageScope, 'all');
+
+  const [versionThree] = normalizeTrayLayout({
+    version: 3,
+    items: [{
+      id: 'version-three-cost',
+      type: 'text',
+      style: 'cost',
+      metric: 'cost',
+      period: 'today',
+      costFormat: 'compact',
+      costDecimals: 2,
+      source: {}
+    }]
+  }).items;
+  assert.equal(versionThree.costFormat, 'compact');
+  assert.equal(versionThree.costDecimals, 2);
+  assert.equal(versionThree.usageScope, 'all');
 
   const legacySmall = resolveTrayLayout({
     version: 2,
@@ -530,6 +549,89 @@ test('automatic provider icons can follow token or cost leaders for each period'
     availableProviderIds: ['claude', 'codex']
   });
   assert.equal(resolved.items[0].provider, 'codex');
+});
+
+test('recent activity can drive provider icons and per-tool token or cost values', () => {
+  const recentStats = {
+    periods: {
+      today: {
+        totalTokens: 1_025,
+        costUsd: 8.5,
+        clients: { claude: 1_000, openclaw: 25 },
+        clientCosts: { claude: 8, openclaw: 0.5 },
+        sessions: {
+          'claude:older': {
+            client: 'claude',
+            sessionId: 'older',
+            lastUsedAt: '2026-07-23T07:00:00.000Z'
+          },
+          'openclaw:newer': {
+            client: 'openclaw',
+            sessionId: 'newer',
+            lastUsedAt: '2026-07-23T07:59:00.000Z'
+          }
+        }
+      }
+    }
+  };
+  const icon = createTrayLayoutItem('providerIcon', { idFactory: () => 'recent-icon' });
+  icon.autoMode = 'recent';
+  const tokens = createTrayLayoutItem('tokens', { idFactory: () => 'recent-tokens' });
+  tokens.usageScope = 'recent';
+  const cost = createTrayLayoutItem('cost', { idFactory: () => 'recent-cost' });
+  cost.usageScope = 'recent';
+
+  const resolved = resolveTrayLayout({ version: 4, items: [icon, tokens, cost] }, recentStats, {
+    availableProviderIds: ['claude', 'openclaw'],
+    currency: 'USD'
+  });
+
+  assert.equal(resolved.items[0].provider, 'openclaw');
+  assert.equal(resolved.items[1].provider, 'openclaw');
+  assert.equal(resolved.items[1].text, '25');
+  assert.equal(resolved.items[2].provider, 'openclaw');
+  assert.equal(resolved.items[2].text, '$0.50');
+
+  const info = createTrayLayoutItem('doubleInfo', { idFactory: () => 'recent-info' });
+  info.rows = [
+    { ...info.rows[0], metric: 'tokens', usageScope: 'recent' },
+    { ...info.rows[1], metric: 'cost', usageScope: 'recent' }
+  ];
+  const resolvedInfo = resolveTrayLayout({ version: 4, items: [info] }, recentStats, {
+    availableProviderIds: ['claude', 'openclaw'],
+    currency: 'USD'
+  }).items[0];
+  assert.equal(resolvedInfo.rows[0].provider, 'openclaw');
+  assert.equal(resolvedInfo.rows[1].provider, 'openclaw');
+  assert.equal(preferredRowProvider(resolvedInfo.rows, 0), 'openclaw');
+  assert.equal(preferredRowProvider([
+    { provider: null, selection: null },
+    { provider: null, selection: { provider: 'codex' } }
+  ], 0), 'codex');
+
+  recentStats.periods.today.sessions['claude:older'].lastUsedAt = '2026-07-23T08:00:00.000Z';
+  const switched = resolveTrayLayout({ version: 4, items: [icon, tokens, cost] }, recentStats, {
+    availableProviderIds: ['claude', 'openclaw'],
+    currency: 'USD'
+  });
+  assert.equal(switched.items[0].provider, 'claude');
+  assert.equal(switched.items[1].text, '1.0K');
+  assert.equal(switched.items[2].text, '$8.00');
+});
+
+test('recent activity uses a stable app or unavailable fallback without timestamps', () => {
+  const icon = createTrayLayoutItem('providerIcon', { idFactory: () => 'recent-icon-fallback' });
+  icon.autoMode = 'recent';
+  const tokens = createTrayLayoutItem('tokens', { idFactory: () => 'recent-tokens-fallback' });
+  tokens.usageScope = 'recent';
+
+  const resolved = resolveTrayLayout({ version: 4, items: [icon, tokens] }, stats, {
+    availableProviderIds: ['claude', 'codex']
+  });
+
+  assert.equal(resolved.items[0].provider, 'app');
+  assert.equal(resolved.items[1].available, false);
+  assert.equal(resolved.items[1].text, '--');
 });
 
 test('automatic provider icons keep a stable app fallback without matching data or artwork', () => {

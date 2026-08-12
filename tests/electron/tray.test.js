@@ -23,6 +23,7 @@ const {
   pickConfiguredLimitProviders,
   pickConfiguredSessionLimits,
   pickLimitProviderByKindPriority,
+  pickRecentUsageProviderId,
   pickWorstLimitProvider,
   trayShowsTitle
 } = require('../../src/shared/trayText');
@@ -39,6 +40,32 @@ const stats = {
     }
   }
 };
+
+test('recent usage provider follows the newest valid session timestamp', () => {
+  const recentStats = {
+    periods: {
+      today: {
+        sessions: {
+          'claude:older': { client: 'claude', lastUsedAt: '2026-08-12T10:00:00.000Z' },
+          'openclaw:newer': { client: 'openclaw', lastUsedAt: '2026-08-12T10:01:00.000Z' },
+          'unknown:newest': { client: 'unknown', lastUsedAt: '2026-08-12T10:02:00.000Z' }
+        }
+      },
+      allTime: {
+        sessions: {
+          'codex:invalid': { client: 'codex', lastUsedAt: 'not-a-date' }
+        }
+      }
+    }
+  };
+
+  assert.equal(pickRecentUsageProviderId(recentStats), 'unknown');
+  assert.equal(
+    pickRecentUsageProviderId(recentStats, ['claude', 'openclaw', 'codex']),
+    null
+  );
+  assert.equal(pickRecentUsageProviderId({ periods: { today: {} } }), null);
+});
 
 test('fallback tray icon source stays transparent and high-resolution', () => {
   const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png'));

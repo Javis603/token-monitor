@@ -57,6 +57,12 @@
       : { ...item, ...patch };
   }
 
+  function usageScopePatch(item, rowIndex, usageScope) {
+    return Array.isArray(item?.rows)
+      ? sourcePatch(item, rowIndex, { usageScope })
+      : { ...item, usageScope };
+  }
+
   function accountModeSourcePatch(source, accounts, accountMode) {
     if (accountMode !== 'specific') {
       return { accountMode, accountKey: '', window: source.window };
@@ -661,6 +667,19 @@
       ];
     }
 
+    function usageScopeEditor(item, rowIndex = 0) {
+      const source = Array.isArray(item.rows) ? sourceForItem(item, rowIndex) : item;
+      return picker(
+        l('trayComposer.usageScope', 'Usage source'),
+        [
+          { value: 'all', label: l('trayComposer.usageScope.all', 'All AI tools') },
+          { value: 'recent', label: l('trayComposer.usageScope.recent', 'Most recently active tool') }
+        ],
+        source.usageScope,
+        (usageScope) => updateItem(item, usageScopePatch(item, rowIndex, usageScope))
+      );
+    }
+
     function sourceEditor(item, rowIndex, title = '', options = {}) {
       const source = sourceForItem(item, rowIndex);
       const section = document.createElement('section');
@@ -683,6 +702,7 @@
 
       if (metric === 'tokens' || metric === 'cost') {
         const currentPeriod = Array.isArray(item.rows) ? source.period : item.period;
+        section.append(usageScopeEditor(item, rowIndex));
         section.append(picker(
           l('trayComposer.period', 'Period'),
           periodChoices(),
@@ -720,6 +740,10 @@
           {
             value: 'lowestLimit',
             label: l('trayComposer.icon.auto.lowestLimit', 'Lowest remaining quota')
+          },
+          {
+            value: 'recent',
+            label: l('trayComposer.icon.auto.recent', 'Most recently active tool')
           },
           {
             value: 'tokens',
@@ -1025,6 +1049,7 @@
         ));
         popover.append(fontStyleEditor(item));
         if (item.metric === 'tokens' || item.metric === 'cost') {
+          popover.append(usageScopeEditor(item));
           popover.append(picker(
             l('trayComposer.period', 'Period'),
             periodChoices(),
@@ -1288,6 +1313,7 @@
     handlePickerDocumentScroll,
     moveTrayLayoutItemByKey,
     periodItemPatch,
-    syncTrayComposerSurfaces
+    syncTrayComposerSurfaces,
+    usageScopePatch
   };
 });
