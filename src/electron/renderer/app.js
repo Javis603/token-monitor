@@ -6933,8 +6933,9 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
     const selection = effectivePeriodSelection();
-    const detailUnavailable = !periodRangesApi.supportsBreakdown(selection, state.breakdown, period);
     const rangeStatus = periodRangesApi.isDerived(selection) ? periodState.status : 'ready';
+    const detailUnavailable = rangeStatus === 'ready'
+      && !periodRangesApi.supportsBreakdown(selection, state.breakdown, period);
     const rows = detailUnavailable || rangeStatus !== 'ready' ? [] : rowsForPeriod(period);
     let incompleteHint = '';
     if (!detailUnavailable && state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
@@ -6942,15 +6943,17 @@ function render() {
     } else if (!detailUnavailable && state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'sessions.incomplete';
     }
-    const emptyState = detailUnavailable
-      ? (state.breakdown === 'project'
-          ? 'periodRange.projectDetailUnavailable'
-          : state.breakdown === 'session'
-            ? 'periodRange.sessionDetailUnavailable'
-            : state.breakdown === 'model'
-              ? 'periodRange.modelDetailUnavailable'
-              : 'periodRange.toolDetailUnavailable')
-      : (rangeStatus === 'ready' ? '' : periodHistoryMessageKey(rangeStatus));
+    const emptyState = rangeStatus !== 'ready'
+      ? periodHistoryMessageKey(rangeStatus)
+      : detailUnavailable
+        ? (state.breakdown === 'project'
+            ? 'periodRange.projectDetailUnavailable'
+            : state.breakdown === 'session'
+              ? 'periodRange.sessionDetailUnavailable'
+              : state.breakdown === 'model'
+                ? 'periodRange.modelDetailUnavailable'
+                : 'periodRange.toolDetailUnavailable')
+        : '';
     renderRows(rows, { incompleteHint, emptyState });
   }
   
