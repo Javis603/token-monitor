@@ -349,7 +349,8 @@ test('home limit windows ignore missing percentage values', () => {
 test('homeModelRows returns one-line token shares without cost fields', () => {
   const rows = homeModelRows([
     { name: 'claude-opus-4-8', value: 34_000_000, cost: 21.96, color: '#cc7c5e' },
-    { name: 'gpt-5.5', value: 29_800_000, cost: 25.88, color: '#49a3b0' }
+    { name: 'gpt-5.5', value: 29_800_000, cost: 25.88, color: '#49a3b0' },
+    { name: 'cost-only', value: 0, cost: 3.25, color: '#9aa0aa' }
   ], 63_800_000);
 
   assert.deepEqual(rows, [

@@ -1028,6 +1028,7 @@ async function collectUsageOnce(options) {
     clientStatus: deriveClientStatus(normalizedClients, allTime, { sourceChecks }),
     wslStatus,
     periodWindows: computePeriodWindows(collectedAt),
+    historyAvailable: options.historyEnabled !== false,
     today,
     month,
     allTime

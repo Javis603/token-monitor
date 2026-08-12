@@ -20,10 +20,12 @@ function period(tokens) {
 }
 
 test('Node and Worker preserve explicit unavailable History', () => {
-  const record = { deviceId: 'device-1', history: null };
+  const record = { deviceId: 'device-1', historyAvailable: false, history: null };
 
   assert.equal(normalizeDeviceRecord(record).history, null);
   assert.equal(workerUsage.normalizeDeviceRecord(record).history, null);
+  assert.equal(normalizeDeviceRecord(record).historyAvailable, false);
+  assert.equal(workerUsage.normalizeDeviceRecord(record).historyAvailable, false);
 });
 
 test('composed full records remain compatible with hub normalization and merging', () => {
@@ -42,6 +44,7 @@ test('composed full records remain compatible with hub normalization and merging
     today: period(10),
     month: period(20),
     allTime: period(30),
+    historyAvailable: true,
     history: { daily: [{ date: '2026-07-21', totalTokens: 10, costUsd: 0 }] }
   });
   state.updateLimits({
@@ -62,8 +65,10 @@ test('composed full records remain compatible with hub normalization and merging
   const normalized = normalizeDeviceRecord(records[1].record);
   assert.equal(normalized.periods.today.totalTokens, 10);
   assert.equal(normalized.history.daily[0].totalTokens, 10);
+  assert.equal(normalized.historyAvailable, true);
   assert.equal(normalized.limits.providers[0].status, 'unavailable');
   assert.equal(normalized.limits.providers[0].windows[0].usedPercent, 40);
+  assert.equal(syncPayload(records[1].record).historyAvailable, true);
 
   const merged = mergeDeviceRecord(records[0].record, {
     ...records[1].record,

@@ -53,6 +53,7 @@ Example payload:
   "agentRuntime": "headless-agent",
   "syncUploadIntervalMs": 1200000,
   "projectsEnabled": true,
+  "historyAvailable": true,
   "trackedClients": ["codex"],
   "today": {
     "totalTokens": 1234,
@@ -206,6 +207,8 @@ The collector satisfies that bound by construction, but the hub and the Worker n
 All three are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses to carry a `today` rescan into `month` and `allTime`. The one case where `timedOutputTokens` and a full rescan can disagree is a session that spans the boundary and starts or stops reporting durations partway through, since a rescan then re-gates the whole session on its combined state; the next full scan reconciles it. Closing even that needs a per-message timed-output counter from tokscale.
 
 `trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
+
+`historyAvailable` is an explicit boolean capability for retained History. Current producers send it on every usage snapshot: `true` means History collection is enabled, while `false` means disabled. Fixed-range readers require both `historyAvailable: true` and a retained `history` object; a missing capability (including records passed through an older Hub) is unavailable rather than an inferred zero. The `history` field itself remains interval-gated: omission means "no History update this tick", explicit `null` means unavailable, and an object replaces the retained History.
 
 Current agents and widgets include `osName` and, when known, `osVersion` so device details can show a user-facing operating-system release. macOS uses the product version from Electron or `sw_vers`; Windows uses the product family and display version from the registry; Linux uses the distribution name and version from `os-release`. Detection failures fall back to an explicitly labelled Windows build or Linux kernel release. The hub continues to accept older payloads without these fields.
 

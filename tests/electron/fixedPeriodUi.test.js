@@ -66,6 +66,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
   assert.match(boot, /\['today', 'month', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
+  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period\)/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
   const snapshotBuilder = app.slice(app.indexOf('function buildFixedPeriodSnapshot()'), app.indexOf('async function loadFixedPeriodHistory'));
   assert.ok(snapshotBuilder.indexOf('historyEnabled === false') < snapshotBuilder.indexOf('fixedPeriodHistoryRequested'));

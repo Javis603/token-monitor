@@ -292,6 +292,10 @@ test('deviceHistoryRevision tracks device identity and explicit History state', 
     deviceHistoryRevision([{ deviceId: 'mac' }]),
     deviceHistoryRevision([{ deviceId: 'mac', history: null }])
   );
+  assert.notEqual(
+    deviceHistoryRevision([{ deviceId: 'mac', historyAvailable: false, history: null }]),
+    deviceHistoryRevision([{ deviceId: 'mac', historyAvailable: true, history }])
+  );
 });
 
 test('coerceHistory normalizes shape and drops garbage', () => {

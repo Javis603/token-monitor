@@ -143,7 +143,9 @@
   }
 
   function homeModelRows(rows, totalTokens, limit = 5) {
-    const visible = (rows || []).slice(0, Math.max(0, Number(limit) || 0));
+    const visible = (rows || [])
+      .filter((row) => Math.max(0, Number(row?.value || 0)) > 0)
+      .slice(0, Math.max(0, Number(limit) || 0));
     const suppliedTotal = finiteNumber(totalTokens);
     const total = suppliedTotal != null && suppliedTotal > 0
       ? suppliedTotal

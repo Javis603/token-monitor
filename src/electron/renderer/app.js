@@ -1990,13 +1990,7 @@ function stableColor(value, colors) {
 
 function fixedPeriodDevices() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return state.stats?.devices || [];
-  return buildFixedPeriodSourcesSnapshot().devices.map((source) => ({
-    ...source,
-    periods: {
-      ...(source?.periods || {}),
-      [state.period]: source.period
-    }
-  }));
+  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period);
 }
 
 function fixedPeriodSources() {

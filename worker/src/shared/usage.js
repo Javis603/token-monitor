@@ -793,6 +793,7 @@ function normalizeDeviceRecord(record) {
     if (omitted) normalized.periodProjectsOmitted = omitted;
   }
   if (hasOwn(record, 'syncUploadIntervalMs')) normalized.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(record.syncUploadIntervalMs);
+  if (hasOwn(record, 'historyAvailable')) normalized.historyAvailable = record.historyAvailable === true;
   if (hasOwn(record, 'history')) {
     // An explicit null means History is disabled/unavailable. Preserve that
     // wire distinction; an omitted field means "no History update this tick"
@@ -963,6 +964,9 @@ function mergeDeviceRecord(existing, incoming) {
     if (hasOwn(normalizedExisting, 'allTimeProjectsIncomplete')) normalizedIncoming.allTimeProjectsIncomplete = normalizedExisting.allTimeProjectsIncomplete;
     if (hasOwn(normalizedExisting, 'sessionDetailsOmitted')) normalizedIncoming.sessionDetailsOmitted = normalizedExisting.sessionDetailsOmitted;
     if (hasOwn(normalizedExisting, 'periodProjectsOmitted')) normalizedIncoming.periodProjectsOmitted = normalizedExisting.periodProjectsOmitted;
+    if (!hasOwn(normalizedIncoming, 'historyAvailable') && hasOwn(normalizedExisting, 'historyAvailable')) {
+      normalizedIncoming.historyAvailable = normalizedExisting.historyAvailable;
+    }
     if (!hasOwn(normalizedIncoming, 'syncUploadIntervalMs') && hasOwn(normalizedExisting, 'syncUploadIntervalMs')) {
       normalizedIncoming.syncUploadIntervalMs = normalizedExisting.syncUploadIntervalMs;
     }

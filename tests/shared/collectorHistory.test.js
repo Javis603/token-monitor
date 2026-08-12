@@ -540,6 +540,7 @@ test('collectUsageOnce sends explicit null history when history collection is di
     historyEnabled: false,
     limitsEnabled: false
   });
+  assert.equal(summary.historyAvailable, false);
   assert.equal(summary.history, null);
 });
 
@@ -551,6 +552,7 @@ test('collectUsageOnce omits history entirely on a non-history tick', async () =
     includeHistory: false,
     limitsEnabled: false
   });
+  assert.equal(summary.historyAvailable, true);
   assert.equal(Object.hasOwn(summary, 'history'), false);
 });
 

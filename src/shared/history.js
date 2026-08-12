@@ -355,8 +355,10 @@ function deviceHistoryRevision(devices) {
       const deviceId = String(record?.deviceId || record?.id || '').trim();
       if (!deviceId) return null;
       const hasHistory = Object.prototype.hasOwnProperty.call(record || {}, 'history');
+      const hasAvailability = Object.prototype.hasOwnProperty.call(record || {}, 'historyAvailable');
       return {
         deviceId,
+        historyAvailable: hasAvailability ? record.historyAvailable === true : 'missing',
         history: !hasHistory
           ? 'missing'
           : record.history === null

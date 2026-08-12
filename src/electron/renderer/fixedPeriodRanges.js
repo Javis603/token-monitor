@@ -321,6 +321,17 @@
     return snapshot?.status === 'ready' && snapshot.selection === selection ? snapshot : null;
   }
 
+  function devicesForReadySnapshot(snapshot, selection) {
+    const ready = readySnapshotForSelection(snapshot, selection);
+    return (ready?.devices || []).map((source) => ({
+      ...source,
+      periods: {
+        ...(source?.periods || {}),
+        [selection]: source.period
+      }
+    }));
+  }
+
   function addDailyAttribution(target, field, source) {
     for (const [name, value] of Object.entries(source || {})) {
       if (!target[field][name]) target[field][name] = { tokens: 0, cost: 0 };
@@ -500,6 +511,7 @@
     dayKeyAddDays,
     derivePeriod,
     deviceInventorySignature,
+    devicesForReadySnapshot,
     displayLabel,
     fixedPeriodDeviceSnapshots,
     fixedPeriodSnapshot,

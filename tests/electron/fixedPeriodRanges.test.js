@@ -387,6 +387,24 @@ test('ready snapshots are reused only for the same fixed selection', () => {
   assert.equal(ranges.readySnapshotForSelection(snapshot, 'last30'), null);
 });
 
+test('device rows come from the same ready presentation snapshot as the headline', () => {
+  const snapshot = {
+    status: 'ready',
+    selection: 'last7',
+    devices: [{
+      deviceId: 'mac',
+      period: { totalTokens: 70 },
+      periods: { today: { totalTokens: 10 } }
+    }]
+  };
+
+  const [device] = ranges.devicesForReadySnapshot(snapshot, 'last7');
+  assert.equal(device.deviceId, 'mac');
+  assert.equal(device.periods.today.totalTokens, 10);
+  assert.equal(device.periods.last7.totalTokens, 70);
+  assert.deepEqual(ranges.devicesForReadySnapshot(snapshot, 'last30'), []);
+});
+
 test('contributing devices without a current producer calendar fail closed', () => {
   const source = deviceSource({ deviceId: 'legacy', history: [day('2026-08-11', 50)], todayTokens: 50 });
   delete source.periodWindows;

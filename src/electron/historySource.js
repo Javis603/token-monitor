@@ -16,7 +16,9 @@ function parseDeviceHistories(payload) {
   return records.map((record) => {
     const deviceId = String(record?.deviceId || record?.id || '').trim();
     if (!deviceId) return null;
-    const historyAvailable = hasOwn(record, 'history') && record.history !== null;
+    const historyAvailable = record?.historyAvailable === true
+      && hasOwn(record, 'history')
+      && record.history !== null;
     return {
       deviceId,
       displayName: String(record?.displayName || '').trim(),
@@ -116,7 +118,9 @@ async function resolveCompleteHistory(options = {}) {
 
 // Fixed-range device rows need the same retained V1 History, but before the Hub
 // merges away device identity. This is a read-side projection only: producers keep
-// posting the existing device record and old Hubs already expose /api/devices.
+// posting the existing device record and Hubs expose /api/devices. Fixed ranges
+// still require the current producer's explicit History capability, so an older
+// Hub that strips it fails closed instead of turning disabled History into zero.
 async function resolveCompleteHistoryWithDevices(options = {}) {
   const {
     aggregateHistory,

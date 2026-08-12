@@ -976,16 +976,21 @@ test('normalizeDeviceRecord carries a history field when present', () => {
   assert.equal('history' in bare, false);
   const unavailable = normalizeDeviceRecord({ deviceId: 'm1', history: null });
   assert.equal(unavailable.history, null);
+  const capable = normalizeDeviceRecord({ deviceId: 'm1', historyAvailable: true });
+  assert.equal(capable.historyAvailable, true);
+  assert.equal(Object.hasOwn(normalizeDeviceRecord({ deviceId: 'm1' }), 'historyAvailable'), false);
 });
 
 test('mergeDeviceRecord preserves prior history when the incoming post omits it', () => {
   const existing = normalizeDeviceRecord({
     deviceId: 'm1',
     today: { totalTokens: 1, costUsd: 0, clients: {}, clientCosts: {} },
+    historyAvailable: true,
     history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
   });
   const merged = mergeDeviceRecord(existing, { deviceId: 'm1', limitsOnly: true });
   assert.equal(merged.history.daily[0].tokens, 5);
+  assert.equal(merged.historyAvailable, true);
 });
 
 test('mergeDeviceRecord clears prior history when incoming history is explicitly null', () => {

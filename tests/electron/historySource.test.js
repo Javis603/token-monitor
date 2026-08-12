@@ -8,6 +8,7 @@ const {
   resolveCompleteHistory,
   resolveCompleteHistoryWithDevices
 } = require('../../src/electron/historySource');
+const { fixedPeriodSnapshotFromDevices } = require('../../src/electron/renderer/fixedPeriodRanges');
 const { normalizeDeviceRecord } = require('../../src/shared/usage');
 
 const aggregate = (devices) => ({
@@ -65,6 +66,7 @@ test('keeps device identity when resolving fixed-range histories', async () => {
       today: { totalTokens: 40 },
       date: '2026-08-11',
       tokens: 40,
+      historyAvailable: true,
       history: { daily: [{ date: '2026-08-11', tokens: 40 }], monthly: [], summary: {} }
     },
     {
@@ -75,6 +77,7 @@ test('keeps device identity when resolving fixed-range histories', async () => {
       today: { totalTokens: 60 },
       date: '2026-08-11',
       tokens: 60,
+      historyAvailable: true,
       history: { daily: [{ date: '2026-08-11', tokens: 60 }], monthly: [], summary: {} }
     }
   ];
@@ -109,12 +112,14 @@ test('remote fixed-range history overlays a fresher local device record', async 
     deviceId: 'mac',
     periodWindows: { today: { key: '2026-08-12', endsAt: '2026-08-13T00:00:00.000Z' } },
     today: { totalTokens: 5 },
+    historyAvailable: true,
     history: { daily: [{ date: '2026-08-11', tokens: 100 }], monthly: [], summary: {} }
   };
   const localDevice = {
     deviceId: 'mac',
     periodWindows: { today: { key: '2026-08-12', endsAt: '2026-08-13T00:00:00.000Z' } },
     today: { totalTokens: 5 },
+    historyAvailable: true,
     history: { daily: [{ date: '2026-08-11', tokens: 200 }], monthly: [], summary: {} }
   };
   const result = await resolveCompleteHistoryWithDevices({
@@ -181,6 +186,7 @@ test('marks a device without retained History unavailable instead of inventing z
 test('keeps explicit disabled History unavailable after device normalization', () => {
   const record = normalizeDeviceRecord({
     deviceId: 'mac',
+    historyAvailable: false,
     history: null,
     today: { totalTokens: 100 }
   });
@@ -191,11 +197,38 @@ test('keeps explicit disabled History unavailable after device normalization', (
   assert.equal(device.periods.today.totalTokens, 100);
 });
 
+test('does not trust legacy empty History without the producer capability', () => {
+  const [legacy] = parseDeviceHistories([{
+    deviceId: 'legacy',
+    periodWindows: { today: { key: '2026-08-12', endsAt: '2026-08-13T00:00:00.000Z' } },
+    today: { totalTokens: 100 },
+    month: { totalTokens: 100 },
+    allTime: { totalTokens: 100 },
+    history: { daily: [], monthly: [], summary: {} }
+  }]);
+  const [current] = parseDeviceHistories([{
+    deviceId: 'current',
+    historyAvailable: true,
+    history: { daily: [], monthly: [], summary: {} }
+  }]);
+
+  assert.equal(legacy.historyAvailable, false);
+  assert.equal(legacy.history, null);
+  assert.equal(fixedPeriodSnapshotFromDevices('last7', [legacy], {
+    historyEnabled: true,
+    historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  }).status, 'unavailable');
+  assert.equal(current.historyAvailable, true);
+  assert.deepEqual(current.history, { daily: [], monthly: [], summary: {} });
+});
+
 test('resolves embedded device histories without a loopback request', async () => {
   const devices = [{
     deviceId: 'host',
     date: '2026-08-12',
     tokens: 12,
+    historyAvailable: true,
     history: { daily: [{ date: '2026-08-12', tokens: 12 }] }
   }];
   const result = await resolveCompleteHistoryWithDevices({
