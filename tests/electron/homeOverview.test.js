@@ -536,11 +536,15 @@ test('renderHomeTrendsModule preserves long-range Activity and peak', () => {
   assert.doesNotMatch(match[1], /activityStatsForPeriod\(/);
 });
 
-test('Home peak prefers the retained long-range summary with a daily fallback', () => {
+test('Home peak uses the freshest maximum across retained and live daily data', () => {
   assert.equal(longRangePeakDayTokens({
     historySummary: { peakDayTokens: 999 },
     daily: [{ tokens: 100 }, { tokens: 200 }]
   }), 999);
+  assert.equal(longRangePeakDayTokens({
+    historySummary: { peakDayTokens: 100 },
+    daily: [{ tokens: 200 }]
+  }), 200);
   assert.equal(longRangePeakDayTokens({
     historySummary: {},
     daily: [{ tokens: 100 }, { tokens: 200 }]

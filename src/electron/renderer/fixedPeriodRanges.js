@@ -145,7 +145,11 @@
 
   function dailyForRange(daily, range, options = {}) {
     const byDate = new Map();
-    for (const row of dailyWithLiveToday(daily, options.todayKey, options.todayPeriod)) {
+    for (const row of dailyWithLiveToday(
+      daily,
+      options.liveTodayKey || options.todayKey,
+      options.todayPeriod
+    )) {
       const date = normalizeDateKey(row?.date);
       if (date && date >= range.start && date <= range.end) byDate.set(date, row);
     }
@@ -259,7 +263,24 @@
     return (source?.history?.daily || []).some((row) => finiteNumber(row?.tokens) > 0);
   }
 
-  function deviceCurrentDay(source, options = {}) {
+  function dayKeyInTimeZone(value, timeZone) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime()) || !timeZone) return '';
+    try {
+      const parts = new Intl.DateTimeFormat('en', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).formatToParts(date);
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return normalizeDateKey(`${values.year}-${values.month}-${values.day}`);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function deviceDayState(source, options = {}) {
     const window = source?.periodWindows?.today;
     const key = normalizeDateKey(window?.key);
     const endsAtMs = Date.parse(window?.endsAt || '');
@@ -268,8 +289,14 @@
       : Number.isFinite(Number(options.now))
         ? Number(options.now)
         : Date.now();
-    if (!key || !Number.isFinite(endsAtMs) || nowMs >= endsAtMs) return null;
-    return key;
+    if (!key || !Number.isFinite(endsAtMs)) return null;
+    if (nowMs < endsAtMs) return { currentKey: key, snapshotKey: key };
+    const currentKey = dayKeyInTimeZone(nowMs, source?.periodWindows?.timeZone);
+    return currentKey ? { currentKey, snapshotKey: key } : null;
+  }
+
+  function readySnapshotForSelection(snapshot, selection) {
+    return snapshot?.status === 'ready' && snapshot.selection === selection ? snapshot : null;
   }
 
   function addDailyAttribution(target, field, source) {
@@ -340,15 +367,16 @@
     }
     const snapshots = [];
     for (const source of participating) {
-      const todayKey = deviceCurrentDay(source, options);
-      if (!todayKey) {
+      const dayState = deviceDayState(source, options);
+      if (!dayState) {
         return { status: 'unavailable', reason: 'historyUnavailable', period: null, range: null, devices: [] };
       }
       const snapshot = fixedPeriodSnapshot(selection, {
         ...options,
         historyAvailable: true,
         daily: source.history?.daily || [],
-        todayKey,
+        todayKey: dayState.currentKey,
+        liveTodayKey: dayState.snapshotKey,
         todayPeriod: sourcePeriod(source, 'today')
       });
       if (snapshot.status !== 'ready') return { ...snapshot, devices: [] };
@@ -362,6 +390,7 @@
     };
     return {
       status: 'ready',
+      selection,
       reason: '',
       range,
       daily,
@@ -414,14 +443,15 @@
   }
 
   function fixedPeriodSnapshot(selection, options = {}) {
-    if (!isDerived(selection)) return { status: 'native', period: null, range: null };
-    if (options.historyEnabled === false) return { status: 'unavailable', reason: 'historyDisabled', period: null, range: null };
-    if (options.historyAvailable !== true) return { status: 'unavailable', reason: 'historyUnavailable', period: null, range: null };
+    if (!isDerived(selection)) return { status: 'native', selection, period: null, range: null };
+    if (options.historyEnabled === false) return { status: 'unavailable', selection, reason: 'historyDisabled', period: null, range: null };
+    if (options.historyAvailable !== true) return { status: 'unavailable', selection, reason: 'historyUnavailable', period: null, range: null };
     const range = rangeForSelection(selection, options);
-    if (!range) return { status: 'unavailable', reason: 'historyUnavailable', period: null, range: null };
+    if (!range) return { status: 'unavailable', selection, reason: 'historyUnavailable', period: null, range: null };
     const daily = dailyForRange(options.daily, range, options);
     return {
       status: 'ready',
+      selection,
       reason: '',
       range,
       daily,
@@ -458,6 +488,7 @@
     handlePeriodMenuNavigation,
     normalizeMonthMode,
     periodMenuTargetIndex,
+    readySnapshotForSelection,
     rangeForSelection,
     shouldRetryFixedPeriodHistory,
     slotForSelection,

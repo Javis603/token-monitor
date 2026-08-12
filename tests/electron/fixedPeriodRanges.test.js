@@ -22,6 +22,7 @@ function deviceSource({
   history = [],
   historyAvailable = true,
   platform = 'darwin-arm64',
+  timeZone = '',
   todayTokens = 0
 }) {
   return {
@@ -29,7 +30,10 @@ function deviceSource({
     platform,
     historyAvailable,
     history: historyAvailable ? { daily: history } : null,
-    periodWindows: { today: { key: date, endsAt } },
+    periodWindows: {
+      ...(timeZone ? { timeZone } : {}),
+      today: { key: date, endsAt }
+    },
     periods: {
       today: { totalTokens: todayTokens },
       month: { totalTokens: todayTokens },
@@ -265,6 +269,41 @@ test('each device uses its own current period-window day before aggregation', ()
     { deviceId: 'taipei', totalTokens: 40, rangeEnd: '2026-08-12' },
     { deviceId: 'new-york', totalTokens: 60, rangeEnd: '2026-08-11' }
   ]);
+});
+
+test('offline devices keep their last live snapshot on its producer day', () => {
+  const result = ranges.fixedPeriodSnapshotFromDevices('last7', [
+    deviceSource({
+      deviceId: 'new-york-offline',
+      date: '2026-08-11',
+      endsAt: '2026-08-12T04:00:00.000Z',
+      timeZone: 'America/New_York',
+      history: [day('2026-08-11', 80)],
+      todayTokens: 100
+    })
+  ], {
+    historyEnabled: true,
+    historyAvailable: true,
+    now: Date.parse('2026-08-12T16:30:00.000Z')
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.period.totalTokens, 100);
+  assert.equal(result.range.end, '2026-08-12');
+  assert.equal(result.daily.find((row) => row.date === '2026-08-11').tokens, 100);
+  assert.equal(result.daily.find((row) => row.date === '2026-08-12').tokens, 0);
+});
+
+test('ready snapshots are reused only for the same fixed selection', () => {
+  const snapshot = ranges.fixedPeriodSnapshot('week', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [day('2026-08-12', 10)]
+  });
+
+  assert.equal(ranges.readySnapshotForSelection(snapshot, 'week'), snapshot);
+  assert.equal(ranges.readySnapshotForSelection(snapshot, 'last30'), null);
 });
 
 test('contributing devices without a current producer calendar fail closed', () => {

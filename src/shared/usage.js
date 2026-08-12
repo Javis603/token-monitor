@@ -342,7 +342,15 @@ function normalizePeriodWindows(value) {
     result[periodName] = { endsAt };
     if (window.key) result[periodName].key = String(window.key);
   }
-  return Object.keys(result).length ? result : null;
+  if (!Object.keys(result).length) return null;
+  const timeZone = String(value.timeZone || '').trim().slice(0, 128);
+  if (timeZone) {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone }).format(0);
+      result.timeZone = timeZone;
+    } catch (_) { /* omit invalid IANA zones */ }
+  }
+  return result;
 }
 
 function detectModel(obj, client = detectClient(obj)) {

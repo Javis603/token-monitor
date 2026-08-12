@@ -5698,8 +5698,12 @@ function buildFixedPeriodSnapshot() {
     return { status: 'loading', reason: 'loading', period: null };
   }
   if (state.fixedPeriodHistoryBusy) {
-    return state.fixedPeriodSnapshot?.status === 'ready'
-      ? state.fixedPeriodSnapshot
+    const ready = fixedPeriodRangesApi.readySnapshotForSelection(
+      state.fixedPeriodSnapshot,
+      state.period
+    );
+    return ready
+      ? ready
       : { status: 'loading', reason: 'loading', period: null };
   }
   if (state.fixedPeriodHistoryFailed) {

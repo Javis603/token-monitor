@@ -261,9 +261,9 @@
 
   function longRangePeakDayTokens({ historySummary, daily } = {}) {
     const summaryPeak = finiteNumber(historySummary?.peakDayTokens);
-    if (summaryPeak != null) return Math.max(0, summaryPeak);
-    return (Array.isArray(daily) ? daily : [])
+    const dailyPeak = (Array.isArray(daily) ? daily : [])
       .reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens) || 0), 0);
+    return Math.max(0, summaryPeak || 0, dailyPeak);
   }
 
   function homeActivityHeatmapLayout() {

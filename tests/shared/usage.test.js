@@ -1073,6 +1073,7 @@ function staleSnapshotDevice(extra = {}) {
     updatedAt: '2026-06-21T05:00:00.000Z',
     receivedAt: '2026-06-21T05:00:00.000Z',
     periodWindows: {
+      timeZone: 'Asia/Hong_Kong',
       today: { key: '2026-06-21', endsAt: '2026-06-22T00:00:00.000Z' },
       month: { key: '2026-06', endsAt: '2026-07-01T00:00:00.000Z' }
     },
@@ -1088,6 +1089,13 @@ test('aggregateDevices drops today usage once a device today window has ended', 
   assert.equal(aggregate.periods.today.totalTokens, 0);
   assert.equal(aggregate.periods.today.clients.codex, undefined);
   assert.deepEqual(aggregate.devices[0].periodWindows, staleSnapshotDevice().periodWindows);
+});
+
+test('aggregateDevices omits an invalid producer timezone', () => {
+  const device = staleSnapshotDevice();
+  device.periodWindows.timeZone = 'Not/A_TimeZone';
+  const aggregate = aggregateDevices([device], 10 * 60 * 1000, Date.parse('2026-06-21T12:00:00.000Z'));
+  assert.equal(aggregate.devices[0].periodWindows.timeZone, undefined);
 });
 
 test('aggregateDevices keeps allTime from a device whose today window has ended', () => {
