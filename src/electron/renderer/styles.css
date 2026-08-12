@@ -2627,7 +2627,6 @@ html.is-windows .settings-panel select option {
   background: transparent;
   box-shadow: none;
 }
-.period-default-setting select { min-width: 122px; }
 .fixed-period-message {
   position: relative;
   z-index: 1;

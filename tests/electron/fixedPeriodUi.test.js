@@ -50,11 +50,12 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /fixedPeriodHistoryInventoriesMatch\(fetchedHistory\)/);
   assert.match(app, /shouldRetryFixedPeriodHistory\(\{/);
   assert.match(app, /setTimeout\(\(\) => \{[\s\S]*?void loadFixedPeriodHistory\(\{ force: true \}\);[\s\S]*?FIXED_PERIOD_HISTORY_RETRY_MS\)/);
-  assert.match(app, /await warmFixedPeriodHistory\(\);/);
-  assert.match(app, /loadFixedPeriodHistory\(\{ renderOnComplete: false \}\)/);
+  assert.match(app, /await warmFixedPeriodHistory\(\{ renderOnComplete: false \}\);/);
+  assert.match(app, /void warmFixedPeriodHistory\(\{ renderOnComplete: false \}\);/);
   const loader = app.slice(app.indexOf('async function performFixedPeriodHistoryLoad'), app.indexOf('function loadFixedPeriodHistory'));
   assert.doesNotMatch(loader, /status: 'loading'[\s\S]*?if \(fixedPeriodRangesApi\.isDerived\(state\.period\)\) render\(\);/);
-  assert.match(app, /return state\.fixedPeriodHistoryPromise \|\| Promise\.resolve\(false\)/);
+  assert.match(app, /createLatestRequestCoordinator\(\{/);
+  assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
   assert.match(boot, /\['today', 'month', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
@@ -76,10 +77,11 @@ test('the Settings default uses the standard title-control-description row', () 
   assert.ok(setting.indexOf('periodMonthModeInput') < setting.indexOf('settings-item-desc'));
   assert.doesNotMatch(css, /\.period-default-setting\s*\{[^}]*align-items:/s);
   assert.match(setting, /data-i18n="periodRange\.settingsTitle">Default usage range</);
-  assert.match(setting, /data-i18n="periodRange\.settingsNote">Set the default range for the Home period selector\./);
+  assert.match(setting, /data-i18n="periodRange\.settingsNote">Choose the default usage range shown on Home\./);
+  assert.doesNotMatch(css, /\.period-default-setting select\s*\{[^}]*min-width:/s);
   assert.doesNotMatch(html, /Middle period button/);
   assert.match(i18n, /'periodRange\.settingsTitle': '預設統計範圍'/);
-  assert.match(i18n, /'periodRange\.settingsNote': '設定主畫面時段選擇器的預設範圍；也可直接在主畫面切換。'/);
+  assert.match(i18n, /'periodRange\.settingsNote': '選擇主畫面預設顯示的統計範圍。也可在主畫面再次點擊上方目前選取的時段，開啟選單快速切換。'/);
 });
 
 test('cold-start boot restores every fixed middle-slot selection', () => {

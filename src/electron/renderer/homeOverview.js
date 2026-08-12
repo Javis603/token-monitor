@@ -259,6 +259,13 @@
     return { peak, dates };
   }
 
+  function longRangePeakDayTokens({ historySummary, daily } = {}) {
+    const summaryPeak = finiteNumber(historySummary?.peakDayTokens);
+    if (summaryPeak != null) return Math.max(0, summaryPeak);
+    return (Array.isArray(daily) ? daily : [])
+      .reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens) || 0), 0);
+  }
+
   function homeActivityHeatmapLayout() {
     return { cell: 9, gap: 3, radius: 2 };
   }
@@ -298,9 +305,9 @@
     return rows;
   }
 
-  // Activity keeps its established long-range visuals regardless of the headline
-  // period. Only the two additive/range-shaped stats follow the selection; active
-  // days and current streak remain the retained-history values users already know.
+  // The standalone Trends page keeps active time and peak aligned with the selected
+  // period. Home uses longRangePeakDayTokens instead, matching its long-range chart;
+  // active days and current streak remain the retained-history values users know.
   function activityStatsForPeriod({ period, fixedSnapshot, daily, historySummary, todayKey } = {}) {
     const history = historySummary && typeof historySummary === 'object' ? historySummary : {};
     if (fixedSnapshot?.status === 'ready') {
@@ -440,6 +447,7 @@
     homeLimitAccounts,
     homeLimitAccountsForProviders,
     homeModelRows,
+    longRangePeakDayTokens,
     homeToolRows,
     homeDeviceRows,
     homeTrendSummary,

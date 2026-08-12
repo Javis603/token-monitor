@@ -197,6 +197,43 @@
       && (options.failed === true || options.inventoryMatches !== true);
   }
 
+  function createLatestRequestCoordinator(options = {}) {
+    let activePromise = null;
+    let renderRequested = false;
+
+    function request(requestOptions = {}) {
+      if (requestOptions.renderOnComplete !== false) renderRequested = true;
+      if (activePromise) return activePromise;
+
+      const promise = (async () => {
+        let force = requestOptions.force === true;
+        let loaded = false;
+        while (true) {
+          const signature = String(options.signature?.() || '');
+          loaded = Boolean(await options.load?.({ force, signature })) || loaded;
+          force = false;
+          if (String(options.signature?.() || '') === signature) return loaded;
+        }
+      })();
+      activePromise = promise;
+
+      const settle = () => {
+        if (activePromise !== promise) return;
+        activePromise = null;
+        const shouldRender = renderRequested;
+        renderRequested = false;
+        options.onSettled?.({ render: shouldRender });
+      };
+      void promise.then(settle, settle);
+      return promise;
+    }
+
+    return {
+      active: () => Boolean(activePromise),
+      request
+    };
+  }
+
   function joinDeviceHistorySources(historySources, liveDevices) {
     const histories = new Map((historySources || []).map((source) => [String(source?.deviceId || ''), source]));
     const live = new Map((liveDevices || []).map((source) => [String(source?.deviceId || ''), source]));
@@ -406,6 +443,7 @@
 
   return {
     MONTH_MODES,
+    createLatestRequestCoordinator,
     dailyForRange,
     dayKeyAddDays,
     derivePeriod,

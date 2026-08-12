@@ -346,3 +346,34 @@ test('period menu keyboard navigation moves focus with standard menu keys', () =
   assert.equal(unrelated.defaultPrevented, false);
   assert.deepEqual(focused, [2, 3]);
 });
+
+test('latest request coordinator catches up revisions and upgrades a background waiter', async () => {
+  let signature = 'revision-a';
+  const requests = [];
+  const deferred = [];
+  const settled = [];
+  const coordinator = ranges.createLatestRequestCoordinator({
+    signature: () => signature,
+    load: ({ signature: requestedSignature }) => {
+      requests.push(requestedSignature);
+      return new Promise((resolve) => deferred.push(resolve));
+    },
+    onSettled: (result) => settled.push(result)
+  });
+
+  const background = coordinator.request({ renderOnComplete: false });
+  signature = 'revision-b';
+  const foreground = coordinator.request({ renderOnComplete: true });
+  assert.equal(foreground, background);
+
+  deferred.shift()(true);
+  await Promise.resolve();
+  assert.deepEqual(requests, ['revision-a', 'revision-b']);
+  assert.deepEqual(settled, []);
+
+  deferred.shift()(true);
+  assert.equal(await foreground, true);
+  await Promise.resolve();
+  assert.deepEqual(settled, [{ render: true }]);
+  assert.equal(coordinator.active(), false);
+});

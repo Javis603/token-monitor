@@ -324,6 +324,7 @@ state.fixedPeriodHistoryRetries = 0;
 state.fixedPeriodHistoryRetrySignature = '';
 state.fixedPeriodHistoryRetryTimer = null;
 state.fixedPeriodHistoryPromise = null;
+state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
 state.periodMenuOpen = false;
 let directBreakdownOverride = null;
@@ -5693,8 +5694,13 @@ function buildFixedPeriodSnapshot() {
   if (state.settings?.historyEnabled === false) {
     return { status: 'unavailable', reason: 'historyDisabled', period: null };
   }
-  if (!state.fixedPeriodHistoryRequested || state.fixedPeriodHistoryBusy) {
+  if (!state.fixedPeriodHistoryRequested) {
     return { status: 'loading', reason: 'loading', period: null };
+  }
+  if (state.fixedPeriodHistoryBusy) {
+    return state.fixedPeriodSnapshot?.status === 'ready'
+      ? state.fixedPeriodSnapshot
+      : { status: 'loading', reason: 'loading', period: null };
   }
   if (state.fixedPeriodHistoryFailed) {
     return { status: 'unavailable', reason: 'historyUnavailable', period: null };
@@ -5702,9 +5708,8 @@ function buildFixedPeriodSnapshot() {
   return buildFixedPeriodSourcesSnapshot();
 }
 
-async function performFixedPeriodHistoryLoad({ force = false, renderOnComplete = true } = {}) {
+async function performFixedPeriodHistoryLoad({ force = false, signature = fixedPeriodHistorySignature() } = {}) {
   if (!window.tokenMonitor.getDashboardHistory) return false;
-  const signature = fixedPeriodHistorySignature();
   if (!force && state.fixedPeriodHistoryRequested && state.fixedPeriodHistorySignature === signature) return false;
   if (state.fixedPeriodHistoryRetrySignature !== signature) {
     clearTimeout(state.fixedPeriodHistoryRetryTimer);
@@ -5716,56 +5721,72 @@ async function performFixedPeriodHistoryLoad({ force = false, renderOnComplete =
   state.fixedPeriodHistoryBusy = true;
   state.fixedPeriodHistoryFailed = false;
   state.fixedPeriodHistorySignature = signature;
-  state.fixedPeriodSnapshot = { status: 'loading', reason: 'loading', period: null };
+  if (state.fixedPeriodSnapshot?.status !== 'ready') {
+    state.fixedPeriodSnapshot = { status: 'loading', reason: 'loading', period: null };
+  }
   let fetchedHistory = null;
+  let failed = false;
   try {
     fetchedHistory = await window.tokenMonitor.getDashboardHistory({ includeDevices: true });
-    state.fixedPeriodHistory = fetchedHistory;
   } catch (error) {
     console.log(`[period] history failed: ${error.message}`);
-    state.fixedPeriodHistory = null;
-    state.fixedPeriodHistoryFailed = true;
+    failed = true;
   } finally {
     state.fixedPeriodHistoryBusy = false;
-    const inventoryMatches = !state.fixedPeriodHistoryFailed
-      && fixedPeriodHistoryInventoriesMatch(fetchedHistory);
-    if (inventoryMatches) {
-      state.fixedPeriodHistoryRetries = 0;
-      state.fixedPeriodHistoryRetrySignature = '';
-      clearTimeout(state.fixedPeriodHistoryRetryTimer);
-      state.fixedPeriodHistoryRetryTimer = null;
-    } else if (fixedPeriodRangesApi.shouldRetryFixedPeriodHistory({
-      signature,
-      currentSignature: fixedPeriodHistorySignature(),
-      retries: state.fixedPeriodHistoryRetries,
-      maxRetries: FIXED_PERIOD_HISTORY_MAX_RETRIES,
-      failed: state.fixedPeriodHistoryFailed,
-      inventoryMatches
-    })) {
-      state.fixedPeriodHistoryRetries += 1;
-      clearTimeout(state.fixedPeriodHistoryRetryTimer);
-      state.fixedPeriodHistoryRetryTimer = setTimeout(() => {
+    const requestIsCurrent = fixedPeriodHistorySignature() === signature;
+    if (requestIsCurrent) {
+      state.fixedPeriodHistoryFailed = failed;
+      state.fixedPeriodHistory = failed ? null : fetchedHistory;
+      const inventoryMatches = !failed && fixedPeriodHistoryInventoriesMatch(fetchedHistory);
+      if (inventoryMatches) {
+        state.fixedPeriodHistoryRetries = 0;
+        state.fixedPeriodHistoryRetrySignature = '';
+        clearTimeout(state.fixedPeriodHistoryRetryTimer);
         state.fixedPeriodHistoryRetryTimer = null;
-        if (fixedPeriodHistorySignature() !== signature) return;
-        if (!state.fixedPeriodHistoryFailed
-          && fixedPeriodHistoryInventoriesMatch(state.fixedPeriodHistory)) return;
-        void loadFixedPeriodHistory({ force: true });
-      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+      } else if (fixedPeriodRangesApi.shouldRetryFixedPeriodHistory({
+        signature,
+        currentSignature: fixedPeriodHistorySignature(),
+        retries: state.fixedPeriodHistoryRetries,
+        maxRetries: FIXED_PERIOD_HISTORY_MAX_RETRIES,
+        failed,
+        inventoryMatches
+      })) {
+        state.fixedPeriodHistoryRetries += 1;
+        clearTimeout(state.fixedPeriodHistoryRetryTimer);
+        state.fixedPeriodHistoryRetryTimer = setTimeout(() => {
+          state.fixedPeriodHistoryRetryTimer = null;
+          if (fixedPeriodHistorySignature() !== signature) return;
+          if (!state.fixedPeriodHistoryFailed
+            && fixedPeriodHistoryInventoriesMatch(state.fixedPeriodHistory)) return;
+          void loadFixedPeriodHistory({ force: true });
+        }, FIXED_PERIOD_HISTORY_RETRY_MS);
+      }
+      state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
+      if (state.fixedPeriodSnapshot.status === 'ready' && state.stats?.periods) {
+        state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
+      }
     }
-    state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
-    if (state.fixedPeriodSnapshot.status === 'ready' && state.stats?.periods) {
-      state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
-    }
-    if (renderOnComplete && fixedPeriodRangesApi.isDerived(state.period)) render();
   }
   return true;
 }
 
-function loadFixedPeriodHistory(options = {}) {
-  if (state.fixedPeriodHistoryBusy) {
-    return state.fixedPeriodHistoryPromise || Promise.resolve(false);
+function fixedPeriodHistoryCoordinator() {
+  if (!state.fixedPeriodHistoryCoordinator) {
+    state.fixedPeriodHistoryCoordinator = fixedPeriodRangesApi.createLatestRequestCoordinator({
+      signature: fixedPeriodHistorySignature,
+      load: performFixedPeriodHistoryLoad,
+      onSettled: ({ render: shouldRender }) => {
+        if (shouldRender && fixedPeriodRangesApi.isDerived(state.period)) {
+          statsRenderScheduler.request();
+        }
+      }
+    });
   }
-  const promise = performFixedPeriodHistoryLoad(options);
+  return state.fixedPeriodHistoryCoordinator;
+}
+
+function loadFixedPeriodHistory(options = {}) {
+  const promise = fixedPeriodHistoryCoordinator().request(options);
   state.fixedPeriodHistoryPromise = promise;
   const clearPromise = () => {
     if (state.fixedPeriodHistoryPromise === promise) state.fixedPeriodHistoryPromise = null;
@@ -5777,14 +5798,14 @@ function loadFixedPeriodHistory(options = {}) {
 function fixedPeriodHistoryNeedsWarmup() {
   if (!state.stats || state.settings?.historyEnabled === false) return false;
   if (!window.tokenMonitor.getDashboardHistory) return false;
-  if (state.fixedPeriodHistoryBusy) return Boolean(state.fixedPeriodHistoryPromise);
+  if (fixedPeriodHistoryCoordinator().active()) return true;
   return !state.fixedPeriodHistoryRequested
     || state.fixedPeriodHistorySignature !== fixedPeriodHistorySignature();
 }
 
-async function warmFixedPeriodHistory() {
+async function warmFixedPeriodHistory(options = {}) {
   if (!fixedPeriodHistoryNeedsWarmup()) return false;
-  await loadFixedPeriodHistory({ renderOnComplete: false });
+  await loadFixedPeriodHistory({ renderOnComplete: options.renderOnComplete === true });
   return true;
 }
 
@@ -6602,7 +6623,6 @@ function renderHomeTrendsModule() {
   const historyEnabled = state.settings?.historyEnabled !== false;
   const preview = state.stats?.historyPreview || { daily: [] };
   const history = homeOverviewApi.pickHomeHistory(state.homeHistory, preview);
-  const fixedSnapshot = fixedPeriodRangesApi.isDerived(state.period) ? state.fixedPeriodSnapshot : null;
   const rawDaily = history.daily || [];
   if (!historyEnabled || rawDaily.length === 0) {
     const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends');
@@ -6683,12 +6703,9 @@ function renderHomeTrendsModule() {
   activityScroll.append(activityCanvas);
   const linePoints = charts.clampDaily(points, 45);
   const trendSummary = homeOverviewApi.homeTrendSummary(linePoints);
-  const selectedStats = homeOverviewApi.activityStatsForPeriod({
-    period: state.period,
-    fixedSnapshot,
-    daily: points,
+  const longRangePeak = homeOverviewApi.longRangePeakDayTokens({
     historySummary: history.summary,
-    todayKey: today
+    daily: points
   });
   const trendHead = document.createElement('div');
   trendHead.className = 'home-trend-head';
@@ -6696,7 +6713,7 @@ function renderHomeTrendsModule() {
   trendTitle.textContent = t('home.trend');
   const trendMeta = document.createElement('span');
   trendMeta.className = 'home-module-meta';
-  trendMeta.textContent = t('home.peakTokens', { value: formatCompact(selectedStats.peakDayTokens) });
+  trendMeta.textContent = t('home.peakTokens', { value: formatCompact(longRangePeak) });
   trendHead.append(trendTitle, trendMeta);
   const model = charts.areaLineChart(linePoints, { width: 300, height: 70, padTop: 4, padRight: 3, padBottom: 4, padLeft: 3, metric: 'tokens', curve: true });
   const plot = document.createElement('div');
@@ -6784,7 +6801,11 @@ function render() {
   const derivedPeriod = fixedPeriodRangesApi.isDerived(state.period);
   if (derivedPeriod) {
     const signature = fixedPeriodHistorySignature();
-    if (!state.fixedPeriodHistoryRequested || state.fixedPeriodHistorySignature !== signature) {
+    if (!state.fixedPeriodHistoryRequested
+      || state.fixedPeriodHistorySignature !== signature
+      || state.fixedPeriodHistoryBusy) {
+      // Joining an existing background preload upgrades its completion into a
+      // visible repaint, so switching to a fixed range cannot remain on loading.
       void loadFixedPeriodHistory();
     }
     state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
@@ -7054,13 +7075,15 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
     }
-    // Prime the retained per-device History before the first paint. Fixed ranges
-    // can then switch as synchronously as DAY/MONTH/TOTAL instead of hiding every
-    // panel for a loading render on the user's first click after launch.
-    await warmFixedPeriodHistory();
     applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
-    statsRenderScheduler.request();
+    if (fixedPeriodRangesApi.isDerived(state.period)) {
+      await warmFixedPeriodHistory({ renderOnComplete: false });
+      statsRenderScheduler.request();
+    } else {
+      statsRenderScheduler.request();
+      void warmFixedPeriodHistory({ renderOnComplete: false });
+    }
     maybeUpdateBarsIcon();
     if (feedback) settleRefreshButtonState('refreshed');
   } catch (error) {
@@ -11150,18 +11173,18 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   setStatus(statusTextFor(state.mode, state.streamConnected));
   renderSyncClientStatus();
   if (payload.data?.stats) {
-    const warmup = warmFixedPeriodHistory();
     if (fixedPeriodRangesApi.isDerived(state.period)) {
       // Keep the currently rendered range stable while a new History revision is
       // fetched; repaint once with the coherent snapshot instead of flashing an
       // intermediate loading layout.
-      void warmup.then(
-        () => statsRenderScheduler.request(),
-        () => statsRenderScheduler.request()
-      );
+      if (fixedPeriodHistoryNeedsWarmup()) {
+        void warmFixedPeriodHistory({ renderOnComplete: true });
+      } else {
+        statsRenderScheduler.request();
+      }
     } else {
       statsRenderScheduler.request();
-      void warmup;
+      void warmFixedPeriodHistory({ renderOnComplete: false });
     }
     maybeUpdateBarsIcon();
   }

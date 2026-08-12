@@ -12,6 +12,7 @@ const {
   homeLimitAccounts,
   homeLimitAccountsForProviders,
   homeModelRows,
+  longRangePeakDayTokens,
   homeToolRows,
   homeActivityWheelRoute,
   homeActivityScrollTarget,
@@ -524,14 +525,26 @@ test('patchDailyToday appends today with live cost so its heatmap cell is not em
   assert.equal(appended.cost, 492.5); // intensity uses cost — a 0 here renders today as empty
 });
 
-test('renderHomeTrendsModule preserves long-range Activity while selecting range stats', () => {
+test('renderHomeTrendsModule preserves long-range Activity and peak', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const match = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(match, 'renderHomeTrendsModule exists');
   assert.match(match[1], /patchDailyToday\(/);
   assert.match(match[1], /rollingYearHeatmap\(/);
   assert.match(match[1], /clampDaily\(points, 45\)/);
-  assert.match(match[1], /activityStatsForPeriod\(/);
+  assert.match(match[1], /longRangePeakDayTokens\(/);
+  assert.doesNotMatch(match[1], /activityStatsForPeriod\(/);
+});
+
+test('Home peak prefers the retained long-range summary with a daily fallback', () => {
+  assert.equal(longRangePeakDayTokens({
+    historySummary: { peakDayTokens: 999 },
+    daily: [{ tokens: 100 }, { tokens: 200 }]
+  }), 999);
+  assert.equal(longRangePeakDayTokens({
+    historySummary: {},
+    daily: [{ tokens: 100 }, { tokens: 200 }]
+  }), 200);
 });
 
 test('Trends preserves its long-range chart while selecting range stats', () => {
