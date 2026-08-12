@@ -14,6 +14,7 @@ const {
 } = require('../../scripts/verify-updater-artifact-names');
 const { mergeMacUpdaterMetadata } = require('../../scripts/merge-mac-updater-metadata');
 const { extractReleaseNotes } = require('../../src/shared/appUpdater');
+const { MAC_APP_MIN_DARWIN_VERSION } = require('../../src/shared/macSystemRequirements');
 
 function macUpdaterMetadata(version, arch) {
   return [
@@ -157,6 +158,8 @@ test('merges arm64 and x64 mac updater files into one architecture-aware feed', 
     `Token-Monitor-${version}-x64.dmg`
   ]);
   assert.match(merged, new RegExp(`^path: Token-Monitor-${version}-arm64\\.zip$`, 'm'));
+  assert.match(merged, new RegExp(`^minimumSystemVersion: ${MAC_APP_MIN_DARWIN_VERSION.replaceAll('.', '\\.')}$`, 'm'));
+  assert.equal((merged.match(/^minimumSystemVersion:/gm) || []).length, 1);
   assert.match(merged, /arm64 release notes survive metadata processing/);
   assert.doesNotMatch(merged, /x64 release notes survive metadata processing/);
 
@@ -198,6 +201,26 @@ test('rejects mismatched or mislabelled mac updater metadata', () => {
       macUpdaterMetadata('0.33.0', 'arm64')
     ),
     /expected only arm64 artifacts/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      macUpdaterMetadata('0.33.0', 'arm64').replace(
+        'files:',
+        'minimumSystemVersion: 23.0.0\nfiles:'
+      ),
+      macUpdaterMetadata('0.33.0', 'x64')
+    ),
+    /does not match release policy/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      macUpdaterMetadata('0.33.0', 'arm64').replace(
+        'files:',
+        'minimumSystemVersion:\nfiles:'
+      ),
+      macUpdaterMetadata('0.33.0', 'x64')
+    ),
+    /empty top-level minimumSystemVersion/
   );
 });
 

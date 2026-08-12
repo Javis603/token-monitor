@@ -56,7 +56,7 @@
         "zip"
       ],
       "forceCodeSigning": true,
-      "minimumSystemVersion": "14.0",
+      "minimumSystemVersion": "12.0",
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.png",
       "extendInfo": {
