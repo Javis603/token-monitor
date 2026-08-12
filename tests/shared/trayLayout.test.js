@@ -554,6 +554,10 @@ test('automatic provider icons can follow token or cost leaders for each period'
 
 test('recent activity can drive provider icons and per-tool token or cost values', () => {
   const recentStats = {
+    localRecentUsageActivity: {
+      provider: 'openclaw',
+      timestampMs: Date.parse('2026-07-23T07:59:00.000Z')
+    },
     periods: {
       today: {
         totalTokens: 1_025,
@@ -611,6 +615,10 @@ test('recent activity can drive provider icons and per-tool token or cost values
   ], 0), 'codex');
 
   recentStats.periods.today.sessions['claude:older'].lastUsedAt = '2026-07-23T08:00:00.000Z';
+  recentStats.localRecentUsageActivity = {
+    provider: 'claude',
+    timestampMs: Date.parse('2026-07-23T08:00:00.000Z')
+  };
   const switched = resolveTrayLayout({ version: 3, items: [icon, tokens, cost] }, recentStats, {
     availableProviderIds: ['claude', 'openclaw'],
     currency: 'USD'
@@ -637,6 +645,10 @@ test('recent activity uses a stable app or unavailable fallback without timestam
 
 test('local Reasonix native activity selects aggregate Reasonix Token and Cost values', () => {
   const reasonixStats = {
+    localRecentUsageActivity: {
+      provider: 'reasonix',
+      timestampMs: Date.parse('2026-08-12T10:05:00.000Z')
+    },
     periods: {
       today: {
         totalTokens: 1_040,
@@ -684,7 +696,7 @@ test('local Reasonix native activity selects aggregate Reasonix Token and Cost v
   assert.equal(resolved.items[2].text, '$0.25');
 });
 
-test('one layout resolution scans recent activity only once', () => {
+test('one layout resolution reads the local recent provider only once', () => {
   const original = trayTextApi.pickRecentUsageProviderId;
   let calls = 0;
   trayTextApi.pickRecentUsageProviderId = (...args) => {
@@ -700,6 +712,10 @@ test('one layout resolution scans recent activity only once', () => {
     info.rows[0] = { ...info.rows[0], metric: 'cost', usageScope: 'recent' };
 
     resolveTrayLayout({ version: 3, items: [icon, tokens, info] }, {
+      localRecentUsageActivity: {
+        provider: 'claude',
+        timestampMs: Date.parse('2026-08-12T10:00:00.000Z')
+      },
       periods: {
         today: {
           clients: { claude: 10 },

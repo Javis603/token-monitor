@@ -23,6 +23,7 @@ const {
   pickConfiguredLimitProviders,
   pickConfiguredSessionLimits,
   pickLimitProviderByKindPriority,
+  pickRecentUsageActivity,
   pickRecentUsageProviderId,
   pickWorstLimitProvider,
   trayShowsTitle,
@@ -60,6 +61,11 @@ test('recent usage provider follows the newest valid session timestamp', () => {
     }
   };
 
+  assert.deepEqual(pickRecentUsageActivity(recentStats), {
+    provider: 'unknown',
+    timestampMs: Date.parse('2026-08-12T10:02:00.000Z')
+  });
+  recentStats.localRecentUsageActivity = pickRecentUsageActivity(recentStats);
   assert.equal(pickRecentUsageProviderId(recentStats), 'unknown');
   assert.equal(
     pickRecentUsageProviderId(recentStats, ['claude', 'openclaw', 'codex']),
@@ -90,6 +96,7 @@ test('recent usage provider includes the local Reasonix native session view', ()
     }
   };
 
+  recentStats.localRecentUsageActivity = pickRecentUsageActivity(recentStats);
   assert.equal(pickRecentUsageProviderId(recentStats), 'reasonix');
   assert.equal(pickRecentUsageProviderId(recentStats, ['claude', 'reasonix']), 'reasonix');
 });
@@ -120,10 +127,10 @@ test('Reasonix title metadata cannot masquerade as recent activity', () => {
       allTime: { 'reasonix:renamed': renamedReasonix }
     }
   };
-  assert.equal(pickRecentUsageProviderId(statsAfterRename), 'claude');
+  assert.equal(pickRecentUsageActivity(statsAfterRename)?.provider, 'claude');
 
   statsAfterRename.nativeSessions.allTime['reasonix:renamed'].lastMessageAt = '2026-08-12T10:10:00.000Z';
-  assert.equal(pickRecentUsageProviderId(statsAfterRename), 'reasonix');
+  assert.equal(pickRecentUsageActivity(statsAfterRename)?.provider, 'reasonix');
 });
 
 test('fallback tray icon source stays transparent and high-resolution', () => {

@@ -79,7 +79,7 @@
     return Number.isFinite(timestamp) ? timestamp : 0;
   }
 
-  function pickRecentUsageProviderId(stats, availableIconIds) {
+  function pickRecentUsageActivity(stats) {
     let latest = null;
     const considerSessions = (sessions, source) => {
       for (const session of Object.values(sessions || {})) {
@@ -95,16 +95,20 @@
     for (const period of Object.values(stats?.periods || {})) {
       considerSessions(period?.sessions, 'period');
     }
-    // Reasonix native sessions are a local-only presentation view and are
-    // intentionally excluded from periods.sessions. Their timestamps may
-    // select the recent client, while Tokscale period aggregates remain the
-    // authority for the Token and Cost values shown by the tray.
+    // This helper receives one device's presentation source. Reasonix native
+    // sessions are intentionally excluded from periods.sessions, so include
+    // their trusted activity timestamps without treating telemetry as usage.
     for (const sessions of Object.values(stats?.nativeSessions || {})) {
       considerSessions(sessions, 'native');
     }
-    if (!latest) return null;
-    if (!Array.isArray(availableIconIds)) return latest.client;
-    return new Set(availableIconIds).has(latest.client) ? latest.client : null;
+    return latest ? { provider: latest.client, timestampMs: latest.lastUsedMs } : null;
+  }
+
+  function pickRecentUsageProviderId(stats, availableIconIds) {
+    const client = normalizedProviderId(stats?.localRecentUsageActivity?.provider);
+    if (!client) return null;
+    if (!Array.isArray(availableIconIds)) return client;
+    return new Set(availableIconIds).has(client) ? client : null;
   }
 
   function csvValues(value) {
@@ -346,6 +350,7 @@
     pickConfiguredSessionLimits,
     pickLimitProviderByKindPriority,
     pickUsageProviderId,
+    pickRecentUsageActivity,
     pickRecentUsageProviderId,
     pickWorstLimit,
     pickWorstLimitProvider,
