@@ -2,7 +2,11 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { resolveCompleteHistory } = require('../../src/electron/historySource');
+const {
+  parseDeviceHistories,
+  resolveCompleteHistory,
+  resolveCompleteHistoryWithDevices
+} = require('../../src/electron/historySource');
 
 const aggregate = (devices) => ({
   daily: devices.map((device) => ({ date: device.date, tokens: device.tokens })),
@@ -47,4 +51,87 @@ test('fetches and parses the complete client history endpoint', async () => {
   assert.deepEqual(result, history);
   assert.equal(request.url, 'https://hub.example/api/history');
   assert.equal(request.options.headers.authorization, 'Bearer test-secret');
+});
+
+test('keeps device identity when resolving fixed-range histories', async () => {
+  const devices = [
+    {
+      deviceId: 'mac',
+      hostname: 'MacBook',
+      platform: 'darwin-arm64',
+      periodWindows: { today: { key: '2026-08-11', endsAt: '2026-08-12T00:00:00.000Z' } },
+      today: { totalTokens: 40 },
+      date: '2026-08-11',
+      tokens: 40,
+      history: { daily: [{ date: '2026-08-11', tokens: 40 }], monthly: [], summary: {} }
+    },
+    {
+      deviceId: 'pc',
+      hostname: 'Windows',
+      platform: 'win32-x64',
+      periodWindows: { today: { key: '2026-08-11', endsAt: '2026-08-12T00:00:00.000Z' } },
+      today: { totalTokens: 60 },
+      date: '2026-08-11',
+      tokens: 60,
+      history: { daily: [{ date: '2026-08-11', tokens: 60 }], monthly: [], summary: {} }
+    }
+  ];
+  let request;
+  const result = await resolveCompleteHistoryWithDevices({
+    hubUrl: 'https://hub.example/',
+    secret: 'test-secret',
+    aggregateHistory: aggregate,
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return { ok: true, async json() { return { devices }; } };
+    }
+  });
+
+  assert.equal(request.url, 'https://hub.example/api/devices');
+  assert.equal(request.options.headers.authorization, 'Bearer test-secret');
+  assert.equal(result.history.summary.totalTokens, 100);
+  assert.deepEqual(result.deviceHistories.map((entry) => ({
+    deviceId: entry.deviceId,
+    hostname: entry.hostname,
+    tokens: entry.history.daily[0].tokens,
+    todayTokens: entry.periods.today.totalTokens,
+    todayKey: entry.periodWindows.today.key
+  })), [
+    { deviceId: 'mac', hostname: 'MacBook', tokens: 40, todayTokens: 40, todayKey: '2026-08-11' },
+    { deviceId: 'pc', hostname: 'Windows', tokens: 60, todayTokens: 60, todayKey: '2026-08-11' }
+  ]);
+});
+
+test('marks a device without retained History unavailable instead of inventing zero', () => {
+  assert.deepEqual(parseDeviceHistories([{ deviceId: 'mac' }]), [{
+    deviceId: 'mac',
+    displayName: '',
+    hostname: '',
+    platform: '',
+    updatedAt: '',
+    agentVersion: '',
+    agentRuntime: '',
+    periodWindows: null,
+    periods: { today: null, month: null, allTime: null },
+    historyAvailable: false,
+    history: null
+  }]);
+});
+
+test('resolves embedded device histories without a loopback request', async () => {
+  const devices = [{
+    deviceId: 'host',
+    date: '2026-08-12',
+    tokens: 12,
+    history: { daily: [{ date: '2026-08-12', tokens: 12 }] }
+  }];
+  const result = await resolveCompleteHistoryWithDevices({
+    mode: 'host',
+    hubMode: 'host',
+    embeddedHub: { hub: { getDevices: () => devices } },
+    aggregateHistory: aggregate,
+    fetchImpl: async () => { throw new Error('must not fetch'); }
+  });
+  assert.equal(result.history.summary.totalTokens, 12);
+  assert.equal(result.deviceHistories[0].deviceId, 'host');
 });

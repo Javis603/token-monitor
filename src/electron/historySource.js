@@ -2,8 +2,39 @@
 
 const { coerceHistory } = require('../shared/history');
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
 function parseCompleteHistory(payload) {
   return coerceHistory(payload);
+}
+
+function parseDeviceHistories(payload) {
+  const records = Array.isArray(payload) ? payload : payload?.devices;
+  if (!Array.isArray(records)) return [];
+  return records.map((record) => {
+    const deviceId = String(record?.deviceId || record?.id || '').trim();
+    if (!deviceId) return null;
+    const historyAvailable = hasOwn(record, 'history') && record.history !== null;
+    return {
+      deviceId,
+      displayName: String(record?.displayName || '').trim(),
+      hostname: String(record?.hostname || '').trim(),
+      platform: String(record?.platform || '').trim(),
+      updatedAt: record?.updatedAt || record?.receivedAt || '',
+      agentVersion: String(record?.agentVersion || '').trim(),
+      agentRuntime: String(record?.agentRuntime || '').trim(),
+      periodWindows: record?.periodWindows || null,
+      periods: {
+        today: record?.periods?.today || record?.today || null,
+        month: record?.periods?.month || record?.month || null,
+        allTime: record?.periods?.allTime || record?.allTime || null
+      },
+      historyAvailable,
+      history: historyAvailable ? parseCompleteHistory(record.history) : null
+    };
+  }).filter(Boolean);
 }
 
 // Which of the four resolutions below a configuration selects. Callers that need
@@ -57,8 +88,61 @@ async function resolveCompleteHistory(options = {}) {
   }
 }
 
+// Fixed-range device rows need the same retained V1 History, but before the Hub
+// merges away device identity. This is a read-side projection only: producers keep
+// posting the existing device record and old Hubs already expose /api/devices.
+async function resolveCompleteHistoryWithDevices(options = {}) {
+  const {
+    aggregateHistory,
+    embeddedHub,
+    fetchImpl = globalThis.fetch,
+    hubUrl,
+    localDevice,
+    secret,
+    timeoutMs = 15_000
+  } = options;
+  const aggregate = typeof aggregateHistory === 'function' ? aggregateHistory : () => parseCompleteHistory(null);
+  let records;
+  switch (completeHistorySource(options)) {
+    case 'empty':
+      records = [];
+      break;
+    case 'local':
+      records = localDevice ? [localDevice] : [];
+      break;
+    case 'embedded':
+      records = embeddedHub.hub.getDevices();
+      break;
+    default: {
+      if (typeof fetchImpl !== 'function') throw new Error('Device History fetch is unavailable');
+      const url = `${String(hubUrl).replace(/\/$/, '')}/api/devices`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetchImpl(url, {
+          headers: secret ? { authorization: `Bearer ${secret}` } : {},
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+        const payload = await response.json();
+        records = Array.isArray(payload) ? payload : payload?.devices;
+      } finally {
+        clearTimeout(timeout);
+      }
+      break;
+    }
+  }
+  const devices = Array.isArray(records) ? records : [];
+  return {
+    history: parseCompleteHistory(aggregate(devices)),
+    deviceHistories: parseDeviceHistories(devices)
+  };
+}
+
 module.exports = {
   completeHistorySource,
+  parseDeviceHistories,
   parseCompleteHistory,
-  resolveCompleteHistory
+  resolveCompleteHistory,
+  resolveCompleteHistoryWithDevices
 };

@@ -1,6 +1,7 @@
 'use strict';
 
 const { aggregateDevices } = require('../shared/usage');
+const { deviceHistoryRevision } = require('../shared/history');
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -66,6 +67,12 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     projectsIncomplete: aggregate.projectsIncomplete,
     limits: hasHubStaleAfterMs || !hasOwn(hubStats, 'limits') ? aggregate.limits : hubStats.limits
   };
+  // The local collector can own fresher History than the Hub copy currently
+  // represented by its revision. Include that overlay in the display cache key
+  // so fixed ranges refetch immediately instead of waiting for the next upload.
+  displayStats.deviceHistoryRevision = `${String(
+    hubStats?.deviceHistoryRevision || hubStats?.historyRevision || ''
+  )}:${deviceHistoryRevision([localDevice])}`;
   attachLocalNativeViews(displayStats, localDevice);
 
   for (const key of ['sessionDetailsOmitted', 'periodProjectsOmitted']) {

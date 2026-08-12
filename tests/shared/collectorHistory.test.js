@@ -119,6 +119,166 @@ test('collector preserves the last successful history timestamp after a failed r
   }
 });
 
+test('startCollector finalizes history on local day rollover before the interval is due', async () => {
+  let nowMs = new Date(2026, 7, 11, 23, 45).getTime();
+  const initialDay = localTodayKey(new Date(nowMs));
+  const graphDays = [];
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'history-rollover',
+    intervalMs: 60 * 60 * 1000,
+    historyIntervalMs: 60 * 60 * 1000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: false,
+    anchorPersistenceEnabled: false,
+    wslScanEnabled: false,
+    now: () => nowMs,
+    runTokscale: async () => usageSnapshot(100),
+    runGraph: async () => {
+      const day = localTodayKey(new Date(nowMs));
+      graphDays.push(day);
+      return { contributions: [{ date: day, clients: [
+        { client: 'claude', modelId: 'opus', tokens: { input: 100 }, cost: 0, messages: 1 }
+      ] }] };
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitForCondition(() => updates.length >= 1);
+    nowMs += 16 * 60 * 1000;
+    const nextDay = localTodayKey(new Date(nowMs));
+    assert.notEqual(nextDay, initialDay);
+
+    await runtime.tick('interval');
+
+    assert.deepEqual(graphDays, [initialDay, nextDay]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('startCollector retries a failed rollover History scan once', async () => {
+  let nowMs = new Date(2026, 7, 11, 23, 45).getTime();
+  let graphCalls = 0;
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'history-rollover-retry',
+    intervalMs: 60 * 60 * 1000,
+    historyIntervalMs: 60 * 60 * 1000,
+    historyRetryMs: 10,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: false,
+    anchorPersistenceEnabled: false,
+    wslScanEnabled: false,
+    now: () => nowMs,
+    runTokscale: async () => usageSnapshot(100),
+    runGraph: async () => {
+      graphCalls += 1;
+      if (graphCalls === 2) throw new Error('temporary rollover failure');
+      const date = localTodayKey(new Date(nowMs));
+      return { contributions: [{ date, clients: [
+        { client: 'claude', modelId: 'opus', tokens: { input: 100 }, cost: 0, messages: 1 }
+      ] }] };
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitForCondition(() => updates.length >= 1);
+    nowMs += 16 * 60 * 1000;
+
+    await runtime.tick('interval');
+    assert.equal(graphCalls, 2);
+    assert.equal(runtime.getDiagnostics().lastHistoryFailureCode, 'history-graph-failed');
+
+    await waitForCondition(() => graphCalls >= 3);
+    await waitForCondition(() => updates.at(-1)?.reason === 'history-rollover-retry');
+    assert.equal(runtime.getDiagnostics().lastHistoryFailureCode, null);
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(graphCalls, 3);
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('a coalesced rollover retry keeps its one-attempt marker', async () => {
+  let nowMs = new Date(2026, 7, 11, 23, 45).getTime();
+  let graphCalls = 0;
+  let blockNextTokscale = false;
+  let tokscaleBlocked = false;
+  let releaseBlockedTokscale = null;
+  const updates = [];
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2026-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'history-rollover-coalesced-retry',
+    intervalMs: 60 * 60 * 1000,
+    historyIntervalMs: 60 * 60 * 1000,
+    historyRetryMs: 10,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: false,
+    anchorPersistenceEnabled: false,
+    wslScanEnabled: false,
+    now: () => nowMs,
+    runTokscale: async () => {
+      if (blockNextTokscale) {
+        blockNextTokscale = false;
+        tokscaleBlocked = true;
+        await new Promise((resolve) => { releaseBlockedTokscale = resolve; });
+      }
+      return usageSnapshot(100);
+    },
+    runGraph: async () => {
+      graphCalls += 1;
+      if (graphCalls >= 2) throw new Error('rollover History remains unavailable');
+      const date = localTodayKey(new Date(nowMs));
+      return { contributions: [{ date, clients: [
+        { client: 'claude', modelId: 'opus', tokens: { input: 100 }, cost: 0, messages: 1 }
+      ] }] };
+    },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    await waitForCondition(() => updates.length >= 1);
+    nowMs += 16 * 60 * 1000;
+
+    await runtime.tick('interval');
+    assert.equal(graphCalls, 2);
+
+    blockNextTokscale = true;
+    const inFlight = runtime.tick('manual');
+    await waitForCondition(() => tokscaleBlocked);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    releaseBlockedTokscale();
+    releaseBlockedTokscale = null;
+    await inFlight;
+    await waitForCondition(() => graphCalls >= 3);
+
+    assert.equal(graphCalls, 3);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(graphCalls, 3);
+  } finally {
+    if (releaseBlockedTokscale) releaseBlockedTokscale();
+    runtime.stop();
+  }
+});
+
 test('collectHistoryOnce returns null when there are no clients', async () => {
   let called = false;
   const history = await collectHistoryOnce({ clients: '', runGraph: async () => { called = true; return SAMPLE_GRAPH; } });

@@ -49,6 +49,7 @@ test('composeLocalSyncStats replaces the hub copy of the local device without do
   remoteHubDevice.stale = true;
   remoteHubDevice.ageMs = 900000;
   hubStats.historyRevision = 'hub-revision';
+  hubStats.deviceHistoryRevision = 'hub-device-revision';
   hubStats.limits = { providers: [{ provider: 'codex', sourceDeviceId: 'remote' }] };
 
   const result = composeLocalSyncStats(hubStats, device('local', 120, {
@@ -64,8 +65,22 @@ test('composeLocalSyncStats replaces the hub copy of the local device without do
   assert.equal(result.devices.find((entry) => entry.deviceId === 'remote').stale, true);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'remote').ageMs, 900000);
   assert.equal(result.historyRevision, 'hub-revision');
+  assert.match(result.deviceHistoryRevision, /^hub-device-revision:/);
   assert.deepEqual(result.limits, hubStats.limits);
   assert.equal(hubStats.periods.today.totalTokens, 150);
+});
+
+test('composeLocalSyncStats invalidates fixed ranges for fresher local History', () => {
+  const hubStats = aggregateDevices([device('local', 100)], 0, Date.parse('2026-07-16T00:01:00.000Z'));
+  hubStats.deviceHistoryRevision = 'hub-device-revision';
+  const first = composeLocalSyncStats(hubStats, device('local', 100, {
+    history: { daily: [{ date: '2026-07-15', tokens: 80 }], monthly: [], summary: {} }
+  }));
+  const second = composeLocalSyncStats(hubStats, device('local', 100, {
+    history: { daily: [{ date: '2026-07-15', tokens: 90 }], monthly: [], summary: {} }
+  }));
+
+  assert.notEqual(first.deviceHistoryRevision, second.deviceHistoryRevision);
 });
 
 test('composeLocalSyncStats can render a local device before the first hub snapshot', () => {

@@ -17,10 +17,16 @@
         <div class="title-controls">
           <nav class="tabs" aria-label="Period tabs">
             <span class="tab-indicator" aria-hidden="true"></span>
-            <button class="tab active" data-period="today">DAY</button>
-            <button class="tab" data-period="month">MONTH</button>
-            <button class="tab" data-period="allTime">TOTAL</button>
+            <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
+            <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
+            <button class="tab" data-period="allTime" data-period-slot="allTime">TOTAL</button>
           </nav>
+          <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" role="menu" aria-labelledby="monthPeriodTab">
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="month"><span class="view-switcher-menu-label" data-i18n="periodRange.month">This month</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="week"><span class="view-switcher-menu-label" data-i18n="periodRange.week">This week</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last30"><span class="view-switcher-menu-label" data-i18n="periodRange.last30">Last 30 days</span></button>
+          </div>
           <div class="actions-hotspot" title="Window controls"></div>
           <div class="window-actions">
             <button id="pinButton" class="icon-button" title="Cycle window behavior">⇧</button>
@@ -174,6 +180,18 @@
           </button>
           <div id="mainSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-main-screen-group">
+              <label class="settings-item period-default-setting">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="periodRange.settingsTitle">Default usage range</span>
+                </span>
+                <select id="periodMonthModeInput">
+                  <option value="month" data-i18n="periodRange.month">This month</option>
+                  <option value="week" data-i18n="periodRange.week">This week</option>
+                  <option value="last7" data-i18n="periodRange.last7">Last 7 days</option>
+                  <option value="last30" data-i18n="periodRange.last30">Last 30 days</option>
+                </select>
+                <span class="settings-note settings-item-desc" data-i18n="periodRange.settingsNote">Set the default range for the Home period selector. You can also switch it directly from Home.</span>
+              </label>
               <div class="settings-note-row">
                 <p class="settings-note" data-i18n="settings.views.note">Choose which main views appear and the order of the mode button.</p>
                 <div class="tool-header-actions">
@@ -1370,6 +1388,8 @@
         </button>
       </div>
 
+      <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>
+
       <section id="homePanel" class="home-panel hidden"></section>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
@@ -1432,6 +1452,7 @@
     <script src="clientDisplayPreferences.js"></script>
     <script src="viewDisplayPreferences.js"></script>
     <script src="homeModulePreferences.js"></script>
+    <script src="fixedPeriodRanges.js"></script>
     <script src="preferenceDragSort.js"></script>
     <script src="verticalDragSort.js"></script>
     <script src="rowDragController.js"></script>

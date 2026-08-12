@@ -198,6 +198,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 12px;
   min-height: 30px;
 }
+.titlebar.period-menu-open { z-index: 13; }
 .shell.desktop-mode .titlebar { -webkit-app-region: no-drag; }
 .titlebar > div:first-child { min-width: 0; flex: 1 1 auto; }
 .app-title {
@@ -2626,6 +2627,22 @@ html.is-windows .settings-panel select option {
   background: transparent;
   box-shadow: none;
 }
+.period-default-setting select { min-width: 122px; }
+.fixed-period-message {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  place-items: center;
+  padding: 0 24px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: center;
+  text-wrap: balance;
+}
+.fixed-period-message.hidden { display: none; }
 .total-panel {
   position: relative;
   z-index: 1;
@@ -4705,6 +4722,23 @@ html.is-windows .limit-live-badge {
   line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.period-menu {
+  -webkit-app-region: no-drag;
+  top: 34px;
+  right: 42px;
+  bottom: auto;
+  left: auto;
+  width: 132px;
+  pointer-events: auto;
+  transform-origin: right top;
+}
+.period-menu.view-switcher-menu [data-fixed-period] {
+  -webkit-app-region: no-drag;
+  grid-template-columns: minmax(0, 1fr);
+}
+.period-menu.hidden {
+  transform: translateY(-6px) scale(0.985);
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .view-switcher-menu {

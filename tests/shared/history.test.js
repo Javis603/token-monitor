@@ -243,7 +243,9 @@ test('mergeHistories handles empty list', () => {
   assert.equal(m.summary.totalTokens, 0);
 });
 
-const { coerceHistory, historyPreview, historyRevision } = require('../../src/shared/history');
+const {
+  coerceHistory, deviceHistoryRevision, historyPreview, historyRevision
+} = require('../../src/shared/history');
 
 test('mergeHistories re-caps stale device daily rows without losing lifetime totals', () => {
   const history = {
@@ -270,6 +272,26 @@ test('historyRevision is key-order stable and tracks breakdown changes', () => {
   const changed = { ...first, daily: [{ date: '2026-06-07', tokens: 10, perClient: { claude: { tokens: 10 } } }] };
   assert.equal(historyRevision(first), historyRevision(reordered));
   assert.notEqual(historyRevision(first), historyRevision(changed));
+});
+
+test('deviceHistoryRevision tracks device identity and explicit History state', () => {
+  const history = { daily: [{ date: '2026-06-07', tokens: 10 }], monthly: [], summary: {} };
+  const first = deviceHistoryRevision([
+    { deviceId: 'mac', history },
+    { deviceId: 'pc', history: null }
+  ]);
+  assert.equal(first, deviceHistoryRevision([
+    { deviceId: 'pc', history: null },
+    { deviceId: 'mac', history }
+  ]));
+  assert.notEqual(first, deviceHistoryRevision([
+    { deviceId: 'mac', history: null },
+    { deviceId: 'pc', history }
+  ]));
+  assert.notEqual(
+    deviceHistoryRevision([{ deviceId: 'mac' }]),
+    deviceHistoryRevision([{ deviceId: 'mac', history: null }])
+  );
 });
 
 test('coerceHistory normalizes shape and drops garbage', () => {

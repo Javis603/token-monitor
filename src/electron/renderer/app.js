@@ -170,6 +170,7 @@ const verticalDragSortApi = window.TokenMonitorVerticalDragSort;
 const rowDragControllerApi = window.TokenMonitorRowDragController;
 const homeOverviewApi = window.TokenMonitorHomeOverview;
 const homeModulePreferencesApi = window.TokenMonitorHomeModulePreferences;
+const fixedPeriodRangesApi = window.TokenMonitorFixedPeriodRanges;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
@@ -249,7 +250,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'limits', labelKey: 'views.limits' },
   { id: 'trends', labelKey: 'views.trends' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'allTime']);
+const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -314,6 +315,16 @@ state.appUpdateNotesPresentedVersion = '';
 state.periodMotionActive = false;
 state.animateBarsFromZero = false;
 state.animateChartsOnRender = true;
+state.fixedPeriodHistory = null;
+state.fixedPeriodHistoryBusy = false;
+state.fixedPeriodHistoryRequested = false;
+state.fixedPeriodHistoryFailed = false;
+state.fixedPeriodHistorySignature = '';
+state.fixedPeriodHistoryRetries = 0;
+state.fixedPeriodHistoryRetrySignature = '';
+state.fixedPeriodHistoryRetryTimer = null;
+state.fixedPeriodSnapshot = null;
+state.periodMenuOpen = false;
 let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
@@ -327,6 +338,12 @@ const els = {
   shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
+Object.assign(els, {
+  fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
+  monthPeriodMenu: document.getElementById('monthPeriodMenu'),
+  monthPeriodTab: document.getElementById('monthPeriodTab'),
+  periodMonthModeInput: document.getElementById('periodMonthModeInput')
+});
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
   viewBackRow: document.getElementById('viewBackRow'),
@@ -1964,9 +1981,37 @@ function stableColor(value, colors) {
   return colors[Math.abs(hash) % colors.length];
 }
 
+function fixedPeriodDevices() {
+  if (!fixedPeriodRangesApi.isDerived(state.period)) return state.stats?.devices || [];
+  return buildFixedPeriodSourcesSnapshot().devices.map((source) => ({
+    ...source,
+    periods: {
+      ...(source?.periods || {}),
+      [state.period]: source.period
+    }
+  }));
+}
+
+function fixedPeriodSources() {
+  return fixedPeriodRangesApi.joinDeviceHistorySources(
+    state.fixedPeriodHistory?.deviceHistories || [],
+    state.stats?.devices || []
+  );
+}
+
+function buildFixedPeriodSourcesSnapshot() {
+  const meta = state.fixedPeriodHistory?.fixedPeriods || {};
+  return fixedPeriodRangesApi.fixedPeriodSnapshotFromDevices(state.period, fixedPeriodSources(), {
+    historyEnabled: state.settings?.historyEnabled !== false,
+    historyAvailable: meta.historyTransportAvailable === true,
+    todayKey: fixedPeriodTodayKey(),
+    locale: currentLocale()
+  });
+}
+
 function deviceRowsForPeriod() {
   const localId = state.settings?.deviceId || '';
-  return (state.stats?.devices || []).map((device) => {
+  return fixedPeriodDevices().map((device) => {
     const breakdown = deviceBreakdownApi.deviceBreakdownForPeriod(device, state.period, {
       clientLabels,
       clientColors,
@@ -1995,7 +2040,8 @@ function deviceRowsForPeriod() {
 }
 
 function toolRowsForPeriod(period) {
-  const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({ key: client, name: clientLabels[client] || client, value: Number(value), cost: Number(period?.clientCosts?.[client] || 0), color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: Number(period?.clientCacheReads?.[client] || 0), cacheWriteTokens: Number(period?.clientCacheWrites?.[client] || 0), outputTokens: Number(period?.clientOutputs?.[client] || 0) }));
+  const hasTokenComponents = period?.capabilities?.tokenComponents !== false;
+  const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({ key: client, name: clientLabels[client] || client, value: Number(value), cost: Number(period?.clientCosts?.[client] || 0), color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: hasTokenComponents ? Number(period?.clientCacheReads?.[client] || 0) : undefined, cacheWriteTokens: hasTokenComponents ? Number(period?.clientCacheWrites?.[client] || 0) : undefined, outputTokens: hasTokenComponents ? Number(period?.clientOutputs?.[client] || 0) : undefined }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2005,6 +2051,7 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period) {
+  const hasTokenComponents = period?.capabilities?.tokenComponents !== false;
   const modelRows = Object.entries(period?.models || {}).filter(([, value]) => Number(value) > 0).map(([model, value]) => ({
     key: model,
     name: model,
@@ -2012,9 +2059,9 @@ function modelRowsForPeriod(period) {
     cost: Number(period?.modelCosts?.[model] || 0),
     color: modelColor(model),
     stale: false,
-    cacheReadTokens: Number(period?.modelCacheReads?.[model] || 0),
-    cacheWriteTokens: Number(period?.modelCacheWrites?.[model] || 0),
-    outputTokens: Number(period?.modelOutputs?.[model] || 0)
+    cacheReadTokens: hasTokenComponents ? Number(period?.modelCacheReads?.[model] || 0) : undefined,
+    cacheWriteTokens: hasTokenComponents ? Number(period?.modelCacheWrites?.[model] || 0) : undefined,
+    outputTokens: hasTokenComponents ? Number(period?.modelOutputs?.[model] || 0) : undefined
   }));
   if (modelRows.length > 0) return modelRows.sort((a, b) => b.value - a.value);
   if (Number(period?.totalTokens || 0) === 0) return [];
@@ -5447,7 +5494,11 @@ function renderTrends() {
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
   const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
-  const { points, metric, labelKey } = charts.selectPreviewSeries(preview, state.period);
+  const fixed = fixedPeriodRangesApi.isDerived(state.period) ? state.fixedPeriodSnapshot : null;
+  const selected = fixed?.status === 'ready'
+    ? { points: fixed.daily || [], metric: 'tokens', labelKey: 'date' }
+    : charts.selectPreviewSeries(preview, state.period);
+  const { points, metric, labelKey } = selected;
   const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
 
   if (finalPoints.length === 0) {
@@ -5459,9 +5510,10 @@ function renderTrends() {
   const titles = finalPoints.map((p) => `${trendShortLabel(p[labelKey], labelKey)} · ${formatCompact(p[metric])}`);
   const svg = charts.sparklineSvg(model, { titles, showZeroMarkers: state.period === 'today' });
 
-  const summary = preview.summary || {};
-  const rangeLabel = state.period === 'allTime' ? t('trends.range.year')
-    : state.period === 'month' ? t('trends.range.month') : t('trends.range.week');
+  const summary = fixed?.status === 'ready' ? fixed.summary : (preview.summary || {});
+  const rangeLabel = fixed?.status === 'ready' ? fixedPeriodRangesApi.displayLabel(state.period)
+    : state.period === 'allTime' ? t('trends.range.year')
+      : state.period === 'month' ? t('trends.range.month') : t('trends.range.week');
   const first = trendShortLabel(finalPoints[0][labelKey], labelKey);
   const last = trendShortLabel(finalPoints[finalPoints.length - 1][labelKey], labelKey);
   const stats = [
@@ -5540,6 +5592,8 @@ function openViewFromTray(viewId) {
 
 const HOME_HISTORY_MAX_RETRIES = 3;
 const HOME_HISTORY_RETRY_MS = 4000;
+const FIXED_PERIOD_HISTORY_MAX_RETRIES = 3;
+const FIXED_PERIOD_HISTORY_RETRY_MS = 4000;
 
 async function loadHomeHistory() {
   if (state.homeHistoryBusy || !window.tokenMonitor.getDashboardHistory) return;
@@ -5608,6 +5662,140 @@ async function loadHomeHistory() {
       }, HOME_HISTORY_RETRY_MS);
     }
     if (state.breakdown === 'home') render();
+  }
+}
+
+function fixedPeriodTodayKey() {
+  return fixedPeriodRangesApi.localDayKey();
+}
+
+function fixedPeriodHistorySignature() {
+  const inventory = fixedPeriodRangesApi.deviceInventorySignature(state.stats?.devices || []);
+  const revision = state.stats?.deviceHistoryRevision || state.stats?.historyRevision || '';
+  return `${String(revision)}:${fixedPeriodTodayKey()}:${inventory}`;
+}
+
+function fixedPeriodHistoryInventoriesMatch(history) {
+  return fixedPeriodRangesApi.deviceInventorySignature(history?.deviceHistories || [])
+    === fixedPeriodRangesApi.deviceInventorySignature(state.stats?.devices || []);
+}
+
+function buildFixedPeriodSnapshot() {
+  if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
+  if (state.settings?.historyEnabled === false) {
+    return { status: 'unavailable', reason: 'historyDisabled', period: null };
+  }
+  if (!state.fixedPeriodHistoryRequested || state.fixedPeriodHistoryBusy) {
+    return { status: 'loading', reason: 'loading', period: null };
+  }
+  if (state.fixedPeriodHistoryFailed) {
+    return { status: 'unavailable', reason: 'historyUnavailable', period: null };
+  }
+  return buildFixedPeriodSourcesSnapshot();
+}
+
+async function loadFixedPeriodHistory({ force = false } = {}) {
+  if (state.fixedPeriodHistoryBusy || !window.tokenMonitor.getDashboardHistory) return;
+  const signature = fixedPeriodHistorySignature();
+  if (!force && state.fixedPeriodHistoryRequested && state.fixedPeriodHistorySignature === signature) return;
+  if (state.fixedPeriodHistoryRetrySignature !== signature) {
+    clearTimeout(state.fixedPeriodHistoryRetryTimer);
+    state.fixedPeriodHistoryRetryTimer = null;
+    state.fixedPeriodHistoryRetrySignature = signature;
+    state.fixedPeriodHistoryRetries = 0;
+  }
+  state.fixedPeriodHistoryRequested = true;
+  state.fixedPeriodHistoryBusy = true;
+  state.fixedPeriodHistoryFailed = false;
+  state.fixedPeriodHistorySignature = signature;
+  state.fixedPeriodSnapshot = { status: 'loading', reason: 'loading', period: null };
+  if (fixedPeriodRangesApi.isDerived(state.period)) render();
+  let fetchedHistory = null;
+  try {
+    fetchedHistory = await window.tokenMonitor.getDashboardHistory({ includeDevices: true });
+    state.fixedPeriodHistory = fetchedHistory;
+  } catch (error) {
+    console.log(`[period] history failed: ${error.message}`);
+    state.fixedPeriodHistory = null;
+    state.fixedPeriodHistoryFailed = true;
+  } finally {
+    state.fixedPeriodHistoryBusy = false;
+    const inventoryMatches = !state.fixedPeriodHistoryFailed
+      && fixedPeriodHistoryInventoriesMatch(fetchedHistory);
+    if (inventoryMatches) {
+      state.fixedPeriodHistoryRetries = 0;
+      state.fixedPeriodHistoryRetrySignature = '';
+      clearTimeout(state.fixedPeriodHistoryRetryTimer);
+      state.fixedPeriodHistoryRetryTimer = null;
+    } else if (fixedPeriodRangesApi.shouldRetryFixedPeriodHistory({
+      signature,
+      currentSignature: fixedPeriodHistorySignature(),
+      retries: state.fixedPeriodHistoryRetries,
+      maxRetries: FIXED_PERIOD_HISTORY_MAX_RETRIES,
+      failed: state.fixedPeriodHistoryFailed,
+      inventoryMatches
+    })) {
+      state.fixedPeriodHistoryRetries += 1;
+      clearTimeout(state.fixedPeriodHistoryRetryTimer);
+      state.fixedPeriodHistoryRetryTimer = setTimeout(() => {
+        state.fixedPeriodHistoryRetryTimer = null;
+        if (fixedPeriodHistorySignature() !== signature) return;
+        if (!state.fixedPeriodHistoryFailed
+          && fixedPeriodHistoryInventoriesMatch(state.fixedPeriodHistory)) return;
+        void loadFixedPeriodHistory({ force: true });
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+    }
+    state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
+    if (state.fixedPeriodSnapshot.status === 'ready' && state.stats?.periods) {
+      state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
+    }
+    if (fixedPeriodRangesApi.isDerived(state.period)) render();
+  }
+}
+
+function fixedPeriodMessage(snapshot, breakdown = '') {
+  if (snapshot?.status === 'loading') return t('periodRange.loading');
+  if (breakdown === 'session') return t('periodRange.sessionUnavailable');
+  if (breakdown === 'project') return t('periodRange.projectUnavailable');
+  if (snapshot?.reason === 'historyDisabled') return t('periodRange.historyDisabled');
+  if (snapshot?.reason === 'historyUnavailable') return t('periodRange.historyUnavailable');
+  return t('periodRange.historyUnavailable');
+}
+
+function hidePeriodContentForMessage(message) {
+  els.fixedPeriodMessage.textContent = message;
+  els.fixedPeriodMessage.classList.remove('hidden');
+  els.homePanel.classList.add('hidden');
+  els.breakdown.classList.add('hidden');
+  els.serviceStatusPanel?.classList.add('hidden');
+  els.limitsPanel.classList.add('hidden');
+  els.trendsPanel.classList.add('hidden');
+  els.sessionDetail.classList.add('hidden');
+  els.sessionDetailHead.classList.add('hidden');
+}
+
+function setPeriodMenuOpen(open, { restoreFocus = false } = {}) {
+  state.periodMenuOpen = Boolean(open);
+  els.monthPeriodMenu?.closest('.titlebar')?.classList.toggle('period-menu-open', state.periodMenuOpen);
+  els.monthPeriodMenu?.classList.toggle('hidden', !state.periodMenuOpen);
+  els.monthPeriodTab?.setAttribute('aria-expanded', String(state.periodMenuOpen));
+  for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
+    button.tabIndex = state.periodMenuOpen && button.classList.contains('is-current') ? 0 : -1;
+  }
+  if (!state.periodMenuOpen && restoreFocus) els.monthPeriodTab?.focus();
+}
+
+function syncPeriodMenu() {
+  const mode = fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
+    ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
+    : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+  for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
+    const active = button.dataset.fixedPeriod === mode;
+    button.classList.toggle('is-current', active);
+    button.setAttribute('aria-checked', String(active));
+    if (active) button.setAttribute('aria-current', 'true');
+    else button.removeAttribute('aria-current');
+    button.tabIndex = state.periodMenuOpen && active ? 0 : -1;
   }
 }
 
@@ -6026,7 +6214,7 @@ function renderHomeToolModule(period) {
 
 function renderHomeDeviceModule() {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  const rows = homeOverviewApi.homeDeviceRows(state.stats?.devices || [], {
+  const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
     limit: 4
@@ -6528,9 +6716,42 @@ function render() {
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
+  const derivedPeriod = fixedPeriodRangesApi.isDerived(state.period);
+  if (derivedPeriod) {
+    const signature = fixedPeriodHistorySignature();
+    if (!state.fixedPeriodHistoryRequested || state.fixedPeriodHistorySignature !== signature) {
+      void loadFixedPeriodHistory();
+    }
+    state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
+    if (state.fixedPeriodSnapshot.status === 'ready') {
+      state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
+    }
+  } else {
+    state.fixedPeriodSnapshot = null;
+  }
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
+  const fixedUnavailable = derivedPeriod && state.fixedPeriodSnapshot?.status !== 'ready';
+  const detailUnavailable = derivedPeriod
+    && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
+      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+    });
+  if (fixedUnavailable || detailUnavailable) {
+    cancelNumberAnimation();
+    els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
+    updateTotalCompact(fixedUnavailable ? 0 : Number(period.totalTokens || 0));
+    els.cost.textContent = fixedUnavailable ? '' : formatCost(period.costUsd || 0);
+    state.currentTotal = fixedUnavailable ? 0 : Number(period.totalTokens || 0);
+    hidePeriodContentForMessage(fixedPeriodMessage(state.fixedPeriodSnapshot, detailUnavailable ? state.breakdown : ''));
+    renderFloatingBubbleContent();
+    if (!contentReadySignaled) {
+      contentReadySignaled = true;
+      window.tokenMonitor.signalContentReady?.();
+    }
+    return;
+  }
+  els.fixedPeriodMessage.classList.add('hidden');
   const nextTotal = Number(period.totalTokens || 0);
   const totalChanged = nextTotal !== state.currentTotal;
   if (state.suppressInitialNumberAnimation) {
@@ -7666,13 +7887,22 @@ async function refreshHubInfo() {
 
 function syncPeriodTabs() {
   const tabs = Array.from(document.querySelectorAll('.tab'));
-  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.period === state.period));
+  const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
+  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.periodSlot === activeSlot));
   document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
   for (const tab of tabs) {
-    const active = tab.dataset.period === state.period;
+    const active = tab.dataset.periodSlot === activeSlot;
     tab.classList.toggle('active', active);
     tab.setAttribute('aria-pressed', String(active));
   }
+  if (els.monthPeriodTab) {
+    const mode = activeSlot === 'month'
+      ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
+      : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+    els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
+    els.monthPeriodTab.dataset.period = mode;
+  }
+  syncPeriodMenu();
 }
 
 function applyInitialBreakdownPreference() {
@@ -7707,6 +7937,9 @@ function syncSettingsForm() {
   syncPeriodTabs();
   syncHubModeUi();
   if (els.languageInput) els.languageInput.value = currentLanguage();
+  if (els.periodMonthModeInput) {
+    els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+  }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   syncCurrencyRateControls();
   els.hubUrlInput.value = state.settings.hubUrl || '';
@@ -10115,11 +10348,26 @@ async function init() {
 }
 
 for (const tab of document.querySelectorAll('.tab')) {
-  tab.addEventListener('click', () => {
+  tab.addEventListener('click', (event) => {
+    const slot = tab.dataset.periodSlot || tab.dataset.period;
+    const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
+    if (slot === 'month' && activeSlot === 'month') {
+      event.stopPropagation();
+      setPeriodMenuOpen(!state.periodMenuOpen);
+      return;
+    }
+    setPeriodMenuOpen(false);
+    const targetPeriod = slot === 'month'
+      ? fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode)
+      : tab.dataset.period;
     const snapshot = captureBreakdownMotion();
-    if (!setPeriod(tab.dataset.period)) return;
+    if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
-    if (state.openSession) openSessionDetail(state.openSession);
+    if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
+      openSessionDetail(state.openSession);
+    } else if (state.openSession) {
+      state.openSession = null;
+    }
     state.rowSignature = '';
     state.periodMotionActive = true;
     render();
@@ -10127,6 +10375,47 @@ for (const tab of document.querySelectorAll('.tab')) {
     animateBreakdownFrom(snapshot, { duration: 800 });
   });
 }
+
+for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const selection = fixedPeriodRangesApi.normalizeMonthMode(button.dataset.fixedPeriod);
+    setPeriodMenuOpen(false, { restoreFocus: true });
+    const changed = setPeriod(selection);
+    state.settings.periodMonthMode = selection;
+    syncPeriodTabs();
+    syncPeriodMenu();
+    if (changed) {
+      state.rowSignature = '';
+      state.periodMotionActive = true;
+      render();
+      state.periodMotionActive = false;
+    }
+    await saveSettings({ periodMonthMode: selection });
+  });
+}
+
+els.periodMonthModeInput?.addEventListener('change', async () => {
+  const selection = fixedPeriodRangesApi.normalizeMonthMode(els.periodMonthModeInput.value);
+  state.settings.periodMonthMode = selection;
+  if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month') setPeriod(selection);
+  syncPeriodTabs();
+  render();
+  await saveSettings({ periodMonthMode: selection });
+});
+
+document.addEventListener('click', (event) => {
+  if (!state.periodMenuOpen) return;
+  if (els.monthPeriodMenu?.contains(event.target) || els.monthPeriodTab?.contains(event.target)) return;
+  setPeriodMenuOpen(false);
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.periodMenuOpen) {
+    event.preventDefault();
+    setPeriodMenuOpen(false, { restoreFocus: true });
+  }
+});
 
 els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;

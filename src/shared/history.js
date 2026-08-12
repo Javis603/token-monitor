@@ -329,8 +329,8 @@ function stableJson(value) {
 // Compact, deterministic invalidation token for the full history payload. This
 // includes daily/monthly breakdowns (not just headline totals), stays portable
 // to the Worker runtime, and keeps /api/stats small.
-function historyRevision(history) {
-  const source = stableJson(coerceHistory(history));
+function stableRevision(value) {
+  const source = stableJson(value);
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
   for (let i = 0; i < source.length; i += 1) {
@@ -341,8 +341,36 @@ function historyRevision(history) {
   return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+function historyRevision(history) {
+  return stableRevision(coerceHistory(history));
+}
+
+// The aggregate History hash cannot detect attribution-only changes such as two
+// devices exchanging otherwise identical daily rows. Keep the public stats
+// payload small while ensuring renderer caches follow the per-device source of
+// each History record, including explicit missing/unavailable states.
+function deviceHistoryRevision(devices) {
+  const entries = (Array.isArray(devices) ? devices : [])
+    .map((record) => {
+      const deviceId = String(record?.deviceId || record?.id || '').trim();
+      if (!deviceId) return null;
+      const hasHistory = Object.prototype.hasOwnProperty.call(record || {}, 'history');
+      return {
+        deviceId,
+        history: !hasHistory
+          ? 'missing'
+          : record.history === null
+            ? 'unavailable'
+            : historyRevision(record.history)
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.deviceId.localeCompare(right.deviceId));
+  return stableRevision(entries);
+}
+
 module.exports = {
   num, sumTokens, parseGraphResult, computeIntensities,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
-  coerceHistory, historyPreview, historyRevision
+  coerceHistory, historyPreview, historyRevision, deviceHistoryRevision
 };
