@@ -974,6 +974,8 @@ test('normalizeDeviceRecord carries a history field when present', () => {
   assert.equal(rec.history.daily[0].tokens, 5);
   const bare = normalizeDeviceRecord({ deviceId: 'm1' });
   assert.equal('history' in bare, false);
+  const unavailable = normalizeDeviceRecord({ deviceId: 'm1', history: null });
+  assert.equal(unavailable.history, null);
 });
 
 test('mergeDeviceRecord preserves prior history when the incoming post omits it', () => {
@@ -993,7 +995,7 @@ test('mergeDeviceRecord clears prior history when incoming history is explicitly
     history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
   });
   const merged = mergeDeviceRecord(existing, { deviceId: 'm1', history: null });
-  assert.deepEqual(merged.history, { daily: [], monthly: [], summary: {} });
+  assert.equal(merged.history, null);
 });
 
 test('aggregateHistory retains stored history from stale devices', () => {

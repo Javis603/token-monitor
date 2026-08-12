@@ -793,7 +793,12 @@ function normalizeDeviceRecord(record) {
     if (omitted) normalized.periodProjectsOmitted = omitted;
   }
   if (hasOwn(record, 'syncUploadIntervalMs')) normalized.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(record.syncUploadIntervalMs);
-  if (hasOwn(record, 'history')) normalized.history = coerceHistory(record.history);
+  if (hasOwn(record, 'history')) {
+    // An explicit null means History is disabled/unavailable. Preserve that
+    // wire distinction; an omitted field means "no History update this tick"
+    // and an object is the retained History payload.
+    normalized.history = record.history === null ? null : coerceHistory(record.history);
+  }
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
     if (windows) normalized.periodWindows = windows;

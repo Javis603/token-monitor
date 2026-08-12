@@ -107,17 +107,25 @@
 
   function rowFromLivePeriod(period, date, previous = {}) {
     const perClient = {};
-    for (const [client, tokens] of Object.entries(period?.clients || {})) {
+    const clients = new Set([
+      ...Object.keys(period?.clients || {}),
+      ...Object.keys(period?.clientCosts || {})
+    ]);
+    for (const client of clients) {
       perClient[client] = {
-        tokens: finiteNumber(tokens),
+        tokens: finiteNumber(period?.clients?.[client]),
         cost: finiteNumber(period?.clientCosts?.[client]),
         messages: finiteNumber(previous?.perClient?.[client]?.messages)
       };
     }
     const perModel = {};
-    for (const [model, tokens] of Object.entries(period?.models || {})) {
+    const models = new Set([
+      ...Object.keys(period?.models || {}),
+      ...Object.keys(period?.modelCosts || {})
+    ]);
+    for (const model of models) {
       perModel[model] = {
-        tokens: finiteNumber(tokens),
+        tokens: finiteNumber(period?.models?.[model]),
         cost: finiteNumber(period?.modelCosts?.[model])
       };
     }
@@ -201,6 +209,17 @@
       && (options.failed === true || options.inventoryMatches !== true);
   }
 
+  function shouldWarmFixedPeriodHistory(options = {}) {
+    if (options.hasStats !== true || options.historyEnabled === false || options.apiAvailable !== true) {
+      return false;
+    }
+    if (options.active === true) return true;
+    if (options.force === true) return true;
+    if (options.retryFailed === true && options.failed === true) return true;
+    return options.requested !== true
+      || String(options.loadedSignature || '') !== String(options.currentSignature || '');
+  }
+
   function createLatestRequestCoordinator(options = {}) {
     let activePromise = null;
     let renderRequested = false;
@@ -258,9 +277,12 @@
 
   function sourceParticipatesInUsage(source) {
     for (const periodName of ['today', 'month', 'allTime']) {
-      if (finiteNumber(sourcePeriod(source, periodName)?.totalTokens) > 0) return true;
+      const period = sourcePeriod(source, periodName);
+      if (finiteNumber(period?.totalTokens) > 0 || finiteNumber(period?.costUsd) > 0) return true;
     }
-    return (source?.history?.daily || []).some((row) => finiteNumber(row?.tokens) > 0);
+    return (source?.history?.daily || []).some((row) => (
+      finiteNumber(row?.tokens) > 0 || finiteNumber(row?.cost) > 0
+    ));
   }
 
   function dayKeyInTimeZone(value, timeZone) {
@@ -491,6 +513,7 @@
     readySnapshotForSelection,
     rangeForSelection,
     shouldRetryFixedPeriodHistory,
+    shouldWarmFixedPeriodHistory,
     slotForSelection,
     supportsBreakdown,
     weekStartsOn

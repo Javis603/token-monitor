@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+const { resolveRegionalLocale } = require('../../src/electron/renderer/i18n');
 
 function day(date, tokens, client = 'claude', model = 'opus') {
   return {
@@ -107,6 +108,33 @@ test('a failed History request retries with the same signature and settles after
   assert.equal(attempts, 2);
 });
 
+test('exhausted History failure only retries across an explicit recovery boundary', () => {
+  const state = {
+    hasStats: true,
+    historyEnabled: true,
+    apiAvailable: true,
+    active: false,
+    failed: true,
+    requested: true,
+    loadedSignature: 'same',
+    currentSignature: 'same'
+  };
+  assert.equal(ranges.shouldWarmFixedPeriodHistory(state), false);
+  assert.equal(ranges.shouldWarmFixedPeriodHistory({ ...state, retryFailed: true }), true);
+  assert.equal(ranges.shouldWarmFixedPeriodHistory({ ...state, force: true }), true);
+});
+
+test('this week uses the full regional locale instead of the translation locale', () => {
+  assert.deepEqual(ranges.rangeForSelection('week', {
+    todayKey: '2026-08-12',
+    locale: resolveRegionalLocale(['en-GB'])
+  }), { start: '2026-08-10', end: '2026-08-12' });
+  assert.deepEqual(ranges.rangeForSelection('week', {
+    todayKey: '2026-08-12',
+    locale: resolveRegionalLocale(['en-US'])
+  }), { start: '2026-08-09', end: '2026-08-12' });
+});
+
 test('last 7 days is available immediately from V1 daily history', () => {
   const result = ranges.fixedPeriodSnapshot('last7', {
     historyAvailable: true,
@@ -139,6 +167,59 @@ test('live today replaces a lagging V1 history row without double counting', () 
   assert.equal(result.status, 'ready');
   assert.equal(result.period.totalTokens, 60);
   assert.deepEqual(result.period.clients, { claude: 10, codex: 50 });
+});
+
+test('historical cost-only usage participates in a fixed range', () => {
+  const source = deviceSource({ deviceId: 'cost-only' });
+  source.history.daily = [{
+    date: '2026-08-11',
+    tokens: 0,
+    cost: 2.5,
+    perClient: { codex: { tokens: 0, cost: 2.5 } },
+    perModel: { gpt: { tokens: 0, cost: 2.5 } }
+  }];
+  source.periods.allTime.costUsd = 2.5;
+
+  const result = ranges.fixedPeriodSnapshotFromDevices('last7', [source], {
+    historyEnabled: true,
+    historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.period.totalTokens, 0);
+  assert.equal(result.period.costUsd, 2.5);
+  assert.equal(result.period.clientCosts.codex, 2.5);
+  assert.equal(result.period.modelCosts.gpt, 2.5);
+  assert.deepEqual(result.devices.map((device) => device.deviceId), ['cost-only']);
+});
+
+test('live cost-only attribution uses cost-map keys without token-map entries', () => {
+  const source = deviceSource({ deviceId: 'live-cost-only' });
+  source.periods.today = {
+    totalTokens: 0,
+    costUsd: 3.25,
+    clients: {},
+    clientCosts: { codex: 3.25 },
+    models: {},
+    modelCosts: { gpt: 3.25 }
+  };
+  source.periods.month = source.periods.today;
+  source.periods.allTime = source.periods.today;
+
+  const result = ranges.fixedPeriodSnapshotFromDevices('last7', [source], {
+    historyEnabled: true,
+    historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.period.totalTokens, 0);
+  assert.equal(result.period.costUsd, 3.25);
+  assert.equal(result.period.clients.codex, 0);
+  assert.equal(result.period.clientCosts.codex, 3.25);
+  assert.equal(result.period.models.gpt, 0);
+  assert.equal(result.period.modelCosts.gpt, 3.25);
 });
 
 test('per-device V1 histories retain device identity for fixed ranges', () => {

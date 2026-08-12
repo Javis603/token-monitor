@@ -519,6 +519,10 @@ function currentLocale() {
   return i18n.resolveLocale(state.settings?.locale || currentLanguage(), preferredLanguages());
 }
 
+function currentCalendarLocale() {
+  return i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
+}
+
 function supportsLocalizedCompactTokenUnits(locale) {
   return compactTokenApi.supportsLocalizedCompactTokenUnits(locale);
 }
@@ -2007,7 +2011,7 @@ function buildFixedPeriodSourcesSnapshot() {
     historyEnabled: state.settings?.historyEnabled !== false,
     historyAvailable: meta.historyTransportAvailable === true,
     todayKey: fixedPeriodTodayKey(),
-    locale: currentLocale()
+    locale: currentCalendarLocale()
   });
 }
 
@@ -5799,17 +5803,37 @@ function loadFixedPeriodHistory(options = {}) {
   return promise;
 }
 
-function fixedPeriodHistoryNeedsWarmup() {
-  if (!state.stats || state.settings?.historyEnabled === false) return false;
-  if (!window.tokenMonitor.getDashboardHistory) return false;
-  if (fixedPeriodHistoryCoordinator().active()) return true;
-  return !state.fixedPeriodHistoryRequested
-    || state.fixedPeriodHistorySignature !== fixedPeriodHistorySignature();
+function resetFixedPeriodHistoryRetryBudget() {
+  clearTimeout(state.fixedPeriodHistoryRetryTimer);
+  state.fixedPeriodHistoryRetryTimer = null;
+  state.fixedPeriodHistoryRetrySignature = '';
+  state.fixedPeriodHistoryRetries = 0;
+}
+
+function fixedPeriodHistoryNeedsWarmup(options = {}) {
+  return fixedPeriodRangesApi.shouldWarmFixedPeriodHistory({
+    hasStats: Boolean(state.stats),
+    historyEnabled: state.settings?.historyEnabled !== false,
+    apiAvailable: Boolean(window.tokenMonitor.getDashboardHistory),
+    active: fixedPeriodHistoryCoordinator().active(),
+    force: options.force === true,
+    retryFailed: options.retryFailed === true,
+    failed: state.fixedPeriodHistoryFailed,
+    requested: state.fixedPeriodHistoryRequested,
+    loadedSignature: state.fixedPeriodHistorySignature,
+    currentSignature: fixedPeriodHistorySignature()
+  });
 }
 
 async function warmFixedPeriodHistory(options = {}) {
-  if (!fixedPeriodHistoryNeedsWarmup()) return false;
-  await loadFixedPeriodHistory({ renderOnComplete: options.renderOnComplete === true });
+  if (!fixedPeriodHistoryNeedsWarmup(options)) return false;
+  const explicitRecovery = options.force === true
+    || (options.retryFailed === true && state.fixedPeriodHistoryFailed);
+  if (explicitRecovery) resetFixedPeriodHistoryRetryBudget();
+  await loadFixedPeriodHistory({
+    force: explicitRecovery,
+    renderOnComplete: options.renderOnComplete === true
+  });
   return true;
 }
 
@@ -7081,12 +7105,21 @@ async function refreshStats(options = {}) {
     }
     applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
+    const forceFixedPeriodHistory = options.forceHistory === true;
     if (fixedPeriodRangesApi.isDerived(state.period)) {
-      await warmFixedPeriodHistory({ renderOnComplete: false });
+      await warmFixedPeriodHistory({
+        force: forceFixedPeriodHistory,
+        retryFailed: forceFixedPeriodHistory,
+        renderOnComplete: false
+      });
       statsRenderScheduler.request();
     } else {
       statsRenderScheduler.request();
-      void warmFixedPeriodHistory({ renderOnComplete: false });
+      void warmFixedPeriodHistory({
+        force: forceFixedPeriodHistory,
+        retryFailed: forceFixedPeriodHistory,
+        renderOnComplete: false
+      });
     }
     maybeUpdateBarsIcon();
     if (feedback) settleRefreshButtonState('refreshed');
@@ -7125,10 +7158,16 @@ function publishViewState() {
 function setPeriod(period) {
   const next = normalizeInitialViewValue(period, viewPeriodValues, state.period);
   if (next === state.period) {
+    if (fixedPeriodRangesApi.isDerived(next) && state.fixedPeriodHistoryFailed) {
+      void warmFixedPeriodHistory({ retryFailed: true, renderOnComplete: true });
+    }
     publishViewState();
     return false;
   }
   state.period = next;
+  if (fixedPeriodRangesApi.isDerived(next) && state.fixedPeriodHistoryFailed) {
+    void warmFixedPeriodHistory({ retryFailed: true, renderOnComplete: true });
+  }
   publishViewState();
   return true;
 }

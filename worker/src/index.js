@@ -167,6 +167,7 @@ export class HubDO {
       if (!this.publicStatsEnabled) return jsonResponse(404, { error: 'not_found' });
       const stats = await this.getStats();
       const { devices, limits, periods, ...rest } = stats;
+      delete rest.deviceHistoryRevision;
       return jsonResponse(200, {
         ok: true,
         source: 'cloudflare-worker',

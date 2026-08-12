@@ -9,6 +9,7 @@ const {
   MESSAGES,
   normalizeLanguage,
   resolveLocale,
+  resolveRegionalLocale,
   translate
 } = require('../../src/electron/renderer/i18n');
 
@@ -49,6 +50,13 @@ test('resolveLocale maps auto to Chinese variants from browser languages', () =>
   assert.equal(resolveLocale('auto', ['zh-Hans-CN', 'en-US']), 'zh-CN');
   assert.equal(resolveLocale('auto', ['en-US']), 'en');
   assert.equal(resolveLocale('zh-CN', ['zh-TW']), 'zh-CN');
+});
+
+test('regional locale preserves the OS region for calendar rules', () => {
+  assert.equal(resolveRegionalLocale(['en-GB', 'en-US']), 'en-GB');
+  assert.equal(resolveRegionalLocale(['en_AU']), 'en-AU');
+  assert.equal(resolveRegionalLocale(['invalid locale', 'en-NZ']), 'en-NZ');
+  assert.equal(resolveRegionalLocale(['auto', '']), 'en');
 });
 
 test('translate falls back to English and interpolates values', () => {

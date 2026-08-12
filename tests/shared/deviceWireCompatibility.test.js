@@ -6,6 +6,7 @@ const test = require('node:test');
 const { createDeviceState } = require('../../src/shared/deviceState');
 const { syncPayload } = require('../../src/shared/syncPayload');
 const { mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
+const workerUsage = require('../../worker/src/shared/usage');
 
 function period(tokens) {
   return {
@@ -17,6 +18,13 @@ function period(tokens) {
     modelCosts: {}
   };
 }
+
+test('Node and Worker preserve explicit unavailable History', () => {
+  const record = { deviceId: 'device-1', history: null };
+
+  assert.equal(normalizeDeviceRecord(record).history, null);
+  assert.equal(workerUsage.normalizeDeviceRecord(record).history, null);
+});
 
 test('composed full records remain compatible with hub normalization and merging', () => {
   const records = [];

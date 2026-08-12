@@ -8,6 +8,7 @@ const {
   resolveCompleteHistory,
   resolveCompleteHistoryWithDevices
 } = require('../../src/electron/historySource');
+const { normalizeDeviceRecord } = require('../../src/shared/usage');
 
 const aggregate = (devices) => ({
   daily: devices.map((device) => ({ date: device.date, tokens: device.tokens })),
@@ -175,6 +176,19 @@ test('marks a device without retained History unavailable instead of inventing z
     historyAvailable: false,
     history: null
   }]);
+});
+
+test('keeps explicit disabled History unavailable after device normalization', () => {
+  const record = normalizeDeviceRecord({
+    deviceId: 'mac',
+    history: null,
+    today: { totalTokens: 100 }
+  });
+  const [device] = parseDeviceHistories([record]);
+
+  assert.equal(device.historyAvailable, false);
+  assert.equal(device.history, null);
+  assert.equal(device.periods.today.totalTokens, 100);
 });
 
 test('resolves embedded device histories without a loopback request', async () => {

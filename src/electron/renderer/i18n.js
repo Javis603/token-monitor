@@ -6274,6 +6274,21 @@
     return 'en';
   }
 
+  // Translation dictionaries intentionally collapse regional variants such as
+  // en-GB to `en`. Calendar rules must keep that region, though: it determines
+  // whether a locale's week starts on Sunday or Monday.
+  function resolveRegionalLocale(preferredLanguages) {
+    const languages = Array.isArray(preferredLanguages) ? preferredLanguages : [preferredLanguages];
+    for (const item of languages) {
+      const tag = String(item || '').replace(/_/g, '-').trim();
+      if (!tag || tag.toLowerCase() === 'auto') continue;
+      try {
+        return new Intl.Locale(tag).toString();
+      } catch (_) { /* try the next regional preference */ }
+    }
+    return 'en';
+  }
+
   function translate(locale, key, params = {}) {
     const resolved = normalizeLanguage(locale) === 'auto' ? 'en' : normalizeLanguage(locale);
     const template = MESSAGES[resolved]?.[key] ?? MESSAGES.en[key] ?? key;
@@ -6313,5 +6328,13 @@
     return resolved;
   }
 
-  return { LANGUAGE_OPTIONS, MESSAGES, applyTranslations, normalizeLanguage, resolveLocale, translate };
+  return {
+    LANGUAGE_OPTIONS,
+    MESSAGES,
+    applyTranslations,
+    normalizeLanguage,
+    resolveLocale,
+    resolveRegionalLocale,
+    translate
+  };
 });
