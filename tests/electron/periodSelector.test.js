@@ -61,7 +61,7 @@ test('derived ranges drive headline and Home usage without pretending sessions o
   assert.match(app, /function currentPeriodState\(\)[\s\S]*currentDerivedRangeSnapshot\(\)/);
   assert.match(app, /function renderHome\(periodState = currentPeriodState\(\)\)[\s\S]*periodState\.period/);
   assert.match(app, /function render\(\)[\s\S]*const periodState = currentPeriodState\(\)/);
-  assert.match(app, /periodRangesApi\.supportsBreakdown\(selection, state\.breakdown\)/);
+  assert.match(app, /periodRangesApi\.supportsBreakdown\(selection, state\.breakdown, period\)/);
   assert.match(app, /detailUnavailable \|\| rangeStatus !== 'ready' \? \[\] : rowsForPeriod\(period\)/);
   assert.match(app, /renderRows\(rows, \{ incompleteHint, emptyState \}\)/);
   assert.match(app, /state\.breakdown === 'project'[\s\S]*periodRange\.projectDetailUnavailable[\s\S]*periodRange\.sessionDetailUnavailable/);
@@ -116,6 +116,8 @@ test('Main settings expose the global Month and Total ranges outside Home custom
     assert.ok(messages['periodRange.historyUnavailable'], `${locale} should translate full-history failure`);
     assert.ok(messages['periodRange.sessionDetailUnavailable'], `${locale} should translate unavailable session detail`);
     assert.ok(messages['periodRange.projectDetailUnavailable'], `${locale} should translate unavailable project detail`);
+    assert.ok(messages['periodRange.toolDetailUnavailable'], `${locale} should translate unavailable tool detail`);
+    assert.ok(messages['periodRange.modelDetailUnavailable'], `${locale} should translate unavailable model detail`);
   }
 });
 

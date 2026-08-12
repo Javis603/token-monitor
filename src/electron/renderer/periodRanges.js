@@ -80,8 +80,15 @@
     return selection === 'week' || selection === 'last7' || selection === 'last30' || selection === 'range';
   }
 
-  function supportsBreakdown(selection, breakdown) {
-    return !isDerived(selection) || (breakdown !== 'project' && breakdown !== 'session');
+  function supportsBreakdown(selection, breakdown, period) {
+    if (!isDerived(selection)) return true;
+    if (breakdown === 'project' || breakdown === 'session') return false;
+    if (
+      (breakdown === 'tool' || breakdown === 'model')
+      && period !== undefined
+      && period?.capabilities?.attribution !== true
+    ) return false;
+    return true;
   }
 
   function normalizeDateKey(value) {
@@ -211,6 +218,7 @@
 
   function dailyRowFromPeriod(period, date, previous = {}) {
     const tokenComponents = period?.capabilities?.tokenComponents === true;
+    const attribution = period?.capabilities?.attribution !== false;
     const clientModels = period?.capabilities?.clientModels === true;
     const perClient = {};
     for (const [client, tokens] of Object.entries(period?.clients || {})) {
@@ -261,7 +269,7 @@
       unclassifiedTokens: Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens')
         ? finiteNumber(period.unclassifiedTokens)
         : (tokenComponents ? 0 : finiteNumber(period?.totalTokens)),
-      capabilities: { tokenComponents, clientModels },
+      capabilities: { tokenComponents, attribution, clientModels },
       perClient,
       perModel,
       perClientModel
@@ -354,6 +362,8 @@
       // because of an unrelated legacy day outside the requested range.
       tokenComponents: rows.length > 0
         && rows.every((row) => row?.capabilities?.tokenComponents === true),
+      attribution: rows.length > 0
+        && rows.every((row) => row?.capabilities?.attribution === true),
       clientModels: rows.length > 0
         && rows.every((row) => row?.capabilities?.clientModels === true)
     };
@@ -417,6 +427,7 @@
     const merged = emptyPeriod();
     merged.capabilities = {
       tokenComponents: list.length > 0 && list.every((period) => period.capabilities?.tokenComponents === true),
+      attribution: list.length > 0 && list.every((period) => period.capabilities?.attribution === true),
       clientModels: list.length > 0 && list.every((period) => period.capabilities?.clientModels === true)
     };
     for (const period of list) {

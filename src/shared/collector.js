@@ -714,6 +714,7 @@ async function collectHistoryOnce(options) {
   }
   if (options.dailyHistoryArchiveEnabled) {
     try {
+      const coverageComplete = failureCode === null && rawGraphs.length > 0;
       const retainedGraph = retainDailyHistory(rawGraphs, {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: options.dailyHistoryLiveDays,
@@ -724,12 +725,12 @@ async function collectHistoryOnce(options) {
       const retained = normalizeHistory(parseGraphResult(retainedGraph), {
         capDays,
         todayKey,
-        coverageComplete: failureCode === null
+        coverageComplete
       });
       const result = retained.schemaVersion || retained.daily.length || retained.monthly.length
         ? retained
         : null;
-      reportStatus(failureCode === null);
+      reportStatus(coverageComplete);
       return result;
     } catch (error) {
       failureCode = failureCode || 'daily-history-archive-failed';
@@ -1095,8 +1096,16 @@ async function collectUsageOnce(options) {
       onHistoryStatus: options.onHistoryStatus,
       logger: options.logger
     });
+    const wslHistoryIncomplete = periodHasUsage(wslBundle.allTime);
+    if (history && wslHistoryIncomplete) {
+      // Native periods include WSL, but the graph scan above is host-only. Until
+      // WSL homes have their own complete History scan, retain the host rows for
+      // recovery without claiming that they cover this device's full usage.
+      delete history.schemaVersion;
+      delete history.coverage;
+    }
     if (history) summary.history = history;
-    if (!history || history.schemaVersion !== HISTORY_SCHEMA_VERSION) {
+    if (!history || history.schemaVersion !== HISTORY_SCHEMA_VERSION || wslHistoryIncomplete) {
       // A requested refresh that cannot prove complete v2 coverage must invalidate
       // the Hub's carried last-good copy. Ordinary non-History ticks omit both
       // fields and therefore remain a no-op for retained History state.

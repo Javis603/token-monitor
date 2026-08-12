@@ -415,6 +415,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
       activeTimeMs: day.activeTimeMs,
       capabilities: {
         tokenComponents: Object.values(day.observations).every(observationHasTokenComponents),
+        attribution: true,
         clientModels: day.capabilities?.clientModels === true
       },
       clients: Object.values(day.observations)
@@ -444,7 +445,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   const activeTimeMs = contributions.reduce((sum, day) => sum + num(day.activeTimeMs), 0);
   const timeMetrics = graphTimeMetrics(graphs, activeTimeMs);
   return {
-    capabilities: { tokenComponents, clientModels },
+    capabilities: { tokenComponents, attribution: true, clientModels },
     contributions,
     ...(timeMetrics ? { timeMetrics } : {})
   };

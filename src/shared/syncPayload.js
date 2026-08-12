@@ -185,7 +185,7 @@ function historyWithoutAttribution(history) {
   const stripDaily = (row) => {
     const compact = {
       ...row,
-      capabilities: { ...(row?.capabilities || {}), clientModels: false }
+      capabilities: { ...(row?.capabilities || {}), attribution: false, clientModels: false }
     };
     delete compact.perClient;
     delete compact.perModel;
@@ -200,7 +200,7 @@ function historyWithoutAttribution(history) {
   };
   return {
     ...history,
-    capabilities: { ...(history.capabilities || {}), clientModels: false },
+    capabilities: { ...(history.capabilities || {}), attribution: false, clientModels: false },
     daily: Array.isArray(history.daily) ? history.daily.map(stripDaily) : [],
     monthly: Array.isArray(history.monthly) ? history.monthly.map(stripMonthly) : []
   };

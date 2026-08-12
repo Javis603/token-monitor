@@ -206,11 +206,11 @@ test('serializeSyncPayload keeps daily totals by dropping client-model history f
     history: {
       schemaVersion: 2,
       coverage: { start: '2026-08-01', end: '2026-08-11' },
-      capabilities: { tokenComponents: true, clientModels: true },
+      capabilities: { tokenComponents: true, attribution: true, clientModels: true },
       daily: Array.from({ length: 10 }, (_, index) => ({
         date: `2026-08-${String(index + 1).padStart(2, '0')}`,
         tokens: index + 1,
-        capabilities: { tokenComponents: true, clientModels: true },
+        capabilities: { tokenComponents: true, attribution: true, clientModels: true },
         perClient: { codex: { tokens: index + 1 } },
         perModel: { [`model-${index}`]: { tokens: index + 1 } },
         perClientModel: { codex: { [`model-${index}-${'x'.repeat(200)}`]: { tokens: index + 1 } } }
@@ -225,6 +225,7 @@ test('serializeSyncPayload keeps daily totals by dropping client-model history f
   assert.ok(bytes <= 2600);
   assert.equal(payload.historyOmitted, undefined);
   assert.deepEqual(payload.history.coverage, summary.history.coverage);
+  assert.equal(payload.history.capabilities.attribution, true);
   assert.equal(payload.history.capabilities.clientModels, false);
   assert.equal(payload.history.daily[0].tokens, 1);
   assert.equal(payload.history.daily[0].capabilities.clientModels, false);
@@ -243,14 +244,14 @@ test('serializeSyncPayload retains v2 coverage and totals before omitting histor
     history: {
       schemaVersion: 2,
       coverage: { start: '2026-08-01', end: '2026-08-11' },
-      capabilities: { tokenComponents: true, clientModels: true },
+      capabilities: { tokenComponents: true, attribution: true, clientModels: true },
       daily: Array.from({ length: 10 }, (_, index) => ({
         date: `2026-08-${String(index + 1).padStart(2, '0')}`,
         tokens: index + 1,
         cost: index / 10,
         cacheReadTokens: index,
         outputTokens: 1,
-        capabilities: { tokenComponents: true, clientModels: true },
+        capabilities: { tokenComponents: true, attribution: true, clientModels: true },
         perClient: { [noisyKey]: { tokens: index + 1 } },
         perModel: { [noisyKey]: { tokens: index + 1 } },
         perClientModel: { [noisyKey]: { [noisyKey]: { tokens: index + 1 } } }
@@ -272,6 +273,8 @@ test('serializeSyncPayload retains v2 coverage and totals before omitting histor
   assert.deepEqual(payload.history.coverage, summary.history.coverage);
   assert.equal(payload.history.daily[0].tokens, 1);
   assert.equal(payload.history.daily[0].cacheReadTokens, 0);
+  assert.equal(payload.history.capabilities.attribution, false);
+  assert.equal(payload.history.daily[0].capabilities.attribution, false);
   assert.equal(Object.hasOwn(payload.history.daily[0], 'perClient'), false);
   assert.equal(Object.hasOwn(payload.history.daily[0], 'perModel'), false);
   assert.equal(Object.hasOwn(payload.history.daily[0], 'perClientModel'), false);

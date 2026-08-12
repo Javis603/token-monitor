@@ -38,6 +38,27 @@ test('full tick merges WSL bundle and marks WSL-only client active', async () =>
   assert.equal(anchorCaptured.wslBundle.today.totalTokens, 9);
 });
 
+test('WSL usage prevents host-only History from claiming complete v2 coverage', async () => {
+  const summary = await collectUsageOnce({
+    clients: 'claude,gemini',
+    allTimeSince: '2025-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    historyEnabled: true,
+    includeHistory: true,
+    dailyHistoryArchiveEnabled: false,
+    limitsEnabled: false,
+    runTokscale: windowsTokscale,
+    runGraph: async () => ({ contributions: [] }),
+    collectWslUsage: async () => ({ bundle: bundleWith(9), detected: ['gemini'] })
+  });
+
+  assert.equal(summary.allTime.clients.gemini, 9);
+  assert.equal(summary.historyOmitted, true);
+  assert.equal(summary.history.schemaVersion, undefined);
+  assert.equal(summary.history.coverage, undefined);
+});
+
 test('WSL scans exclude locally parsed Proma while retaining it for marker detection', async () => {
   let wslOptions = null;
   const collectedAt = '2026-07-10T08:00:00.000Z';

@@ -145,6 +145,7 @@ function parseGraphResult(raw) {
         // this row. Prefer an explicit per-day capability so one old archive
         // entry does not make every newer day look incomplete.
         tokenComponents: rowCapability(raw, row, 'tokenComponents'),
+        attribution: rowCapability(raw, row, 'attribution'),
         clientModels: rowCapability(raw, row, 'clientModels')
       },
       perClient,
@@ -155,6 +156,7 @@ function parseGraphResult(raw) {
   const timeMetrics = normalizeTimeMetrics(raw?.timeMetrics ?? raw?.time_metrics);
   const capabilities = {
     tokenComponents: raw?.capabilities?.tokenComponents !== false,
+    attribution: raw?.capabilities?.attribution !== false,
     clientModels: raw?.capabilities?.clientModels !== false
   };
   return timeMetrics ? { capabilities, contributions, timeMetrics } : { capabilities, contributions };
@@ -362,6 +364,8 @@ function normalizeHistory(graphData, options = {}) {
     capabilities: {
       tokenComponents: full.every((day) => day?.capabilities?.tokenComponents !== false)
         && graphData?.capabilities?.tokenComponents !== false,
+      attribution: full.every((day) => day?.capabilities?.attribution !== false)
+        && graphData?.capabilities?.attribution !== false,
       clientModels: full.every((day) => day?.capabilities?.clientModels !== false)
         && graphData?.capabilities?.clientModels !== false
     },
@@ -384,7 +388,7 @@ function mergeDailyMaps(histories) {
         || {
           date: d.date, tokens: 0, cost: 0, messages: 0, cacheReadTokens: 0,
           cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0, activeTimeMs: 0,
-          capabilities: { tokenComponents: true, clientModels: true },
+          capabilities: { tokenComponents: true, attribution: true, clientModels: true },
           perClient: {}, perModel: {}, perClientModel: {}
         };
       cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
@@ -394,6 +398,8 @@ function mergeDailyMaps(histories) {
       cur.unclassifiedTokens += num(d.unclassifiedTokens);
       cur.capabilities.tokenComponents = cur.capabilities.tokenComponents
         && d?.capabilities?.tokenComponents === true;
+      cur.capabilities.attribution = cur.capabilities.attribution
+        && d?.capabilities?.attribution === true;
       cur.capabilities.clientModels = cur.capabilities.clientModels
         && d?.capabilities?.clientModels === true;
       addPerClient(cur.perClient, d.perClient);
@@ -459,6 +465,7 @@ function mergeHistories(histories, options = {}) {
 
   const capabilities = {};
   if (list.length > 0 && list.every((history) => history.capabilities?.tokenComponents === true)) capabilities.tokenComponents = true;
+  if (list.length > 0 && list.every((history) => history.capabilities?.attribution === true)) capabilities.attribution = true;
   if (list.length > 0 && list.every((history) => history.capabilities?.clientModels === true)) capabilities.clientModels = true;
   return {
     ...(coverage ? { schemaVersion: HISTORY_SCHEMA_VERSION, coverage } : {}),
@@ -478,6 +485,7 @@ function coerceHistory(raw) {
   const capabilities = {};
   const coverage = normalizeHistoryCoverage(src.coverage);
   if (src.capabilities?.tokenComponents === true) capabilities.tokenComponents = true;
+  if (src.capabilities?.attribution === true) capabilities.attribution = true;
   if (src.capabilities?.clientModels === true) capabilities.clientModels = true;
   return {
     ...(src.schemaVersion === HISTORY_SCHEMA_VERSION && coverage

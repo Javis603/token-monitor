@@ -90,7 +90,7 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
 });
 
 test('parseGraphResult is defensive about missing/garbage input', () => {
-  const empty = { capabilities: { tokenComponents: true, clientModels: true }, contributions: [] };
+  const empty = { capabilities: { tokenComponents: true, attribution: true, clientModels: true }, contributions: [] };
   assert.deepEqual(parseGraphResult(null), empty);
   assert.deepEqual(parseGraphResult({}), empty);
   assert.deepEqual(parseGraphResult({ contributions: 'x' }), empty);
@@ -98,7 +98,7 @@ test('parseGraphResult is defensive about missing/garbage input', () => {
   assert.deepEqual(out.contributions[0], {
     date: '2026-01-01', tokens: 0, cost: 0, messages: 0,
     cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0, activeTimeMs: 0,
-    capabilities: { tokenComponents: true, clientModels: true },
+    capabilities: { tokenComponents: true, attribution: true, clientModels: true },
     perClient: {}, perModel: {}, perClientModel: {}
   });
 });

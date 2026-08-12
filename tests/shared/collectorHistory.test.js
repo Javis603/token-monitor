@@ -228,6 +228,31 @@ test('a failed graph scan can reuse archive totals but cannot advance v2 coverag
   assert.equal(stale.coverage, undefined);
 });
 
+test('an archive-only read retains totals without publishing v2 coverage', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-history-archive-only-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const archiveOptions = {
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath }
+  };
+  await collectHistoryOnce({
+    ...archiveOptions,
+    clients: 'claude',
+    todayKey: '2026-08-01',
+    runGraph: async () => SAMPLE_GRAPH
+  });
+  const archiveOnly = await collectHistoryOnce({
+    ...archiveOptions,
+    clients: '',
+    todayKey: '2026-08-10'
+  });
+
+  assert.equal(archiveOnly.summary.totalTokens, 30);
+  assert.equal(archiveOnly.schemaVersion, undefined);
+  assert.equal(archiveOnly.coverage, undefined);
+});
+
 test('collectHistoryOnce stores older days locally while capping daily output', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-full-daily-history-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

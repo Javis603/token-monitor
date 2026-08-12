@@ -2152,6 +2152,7 @@ function deviceRowsForPeriod() {
 }
 
 function toolRowsForPeriod(period) {
+  if (periodRangesApi.isDerived(effectivePeriodSelection()) && period?.capabilities?.attribution !== true) return [];
   const componentsAvailable = !periodRangesApi.isDerived(effectivePeriodSelection())
     || Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens');
   const clientRows = Object.entries(period?.clients || {}).filter(([, value]) => Number(value) > 0).map(([client, value]) => ({
@@ -2177,6 +2178,7 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period) {
+  if (periodRangesApi.isDerived(effectivePeriodSelection()) && period?.capabilities?.attribution !== true) return [];
   const componentsAvailable = !periodRangesApi.isDerived(effectivePeriodSelection())
     || Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens');
   const modelRows = Object.entries(period?.models || {}).filter(([, value]) => Number(value) > 0).map(([model, value]) => ({
@@ -6931,7 +6933,7 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
     const selection = effectivePeriodSelection();
-    const detailUnavailable = !periodRangesApi.supportsBreakdown(selection, state.breakdown);
+    const detailUnavailable = !periodRangesApi.supportsBreakdown(selection, state.breakdown, period);
     const rangeStatus = periodRangesApi.isDerived(selection) ? periodState.status : 'ready';
     const rows = detailUnavailable || rangeStatus !== 'ready' ? [] : rowsForPeriod(period);
     let incompleteHint = '';
@@ -6943,7 +6945,11 @@ function render() {
     const emptyState = detailUnavailable
       ? (state.breakdown === 'project'
           ? 'periodRange.projectDetailUnavailable'
-          : 'periodRange.sessionDetailUnavailable')
+          : state.breakdown === 'session'
+            ? 'periodRange.sessionDetailUnavailable'
+            : state.breakdown === 'model'
+              ? 'periodRange.modelDetailUnavailable'
+              : 'periodRange.toolDetailUnavailable')
       : (rangeStatus === 'ready' ? '' : periodHistoryMessageKey(rangeStatus));
     renderRows(rows, { incompleteHint, emptyState });
   }
