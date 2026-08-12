@@ -103,7 +103,8 @@
       "artifactName": "Token-Monitor-Setup-${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "scripts/nsis-installer.nsh"
     },
     "portable": {
       "artifactName": "Token-Monitor-${version}.${ext}"
