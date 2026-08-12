@@ -93,7 +93,7 @@ test('tray layouts normalize to a versioned and bounded shape', () => {
   };
 
   assert.deepEqual(normalizeTrayLayout(malformed), {
-    version: 4,
+    version: 3,
     items: [
       {
         id: 'one',
@@ -188,7 +188,7 @@ test('tray layouts support optional shared icons, stacked values and configurabl
     ]
   });
 
-  assert.equal(normalized.version, 4);
+  assert.equal(normalized.version, 3);
   assert.equal(normalized.items[0].icon, 'none');
   assert.equal(normalized.items[1].style, 'doubleReset');
   assert.equal(normalized.items[1].icon, 'second');
@@ -582,7 +582,7 @@ test('recent activity can drive provider icons and per-tool token or cost values
   const cost = createTrayLayoutItem('cost', { idFactory: () => 'recent-cost' });
   cost.usageScope = 'recent';
 
-  const resolved = resolveTrayLayout({ version: 4, items: [icon, tokens, cost] }, recentStats, {
+  const resolved = resolveTrayLayout({ version: 3, items: [icon, tokens, cost] }, recentStats, {
     availableProviderIds: ['claude', 'openclaw'],
     currency: 'USD'
   });
@@ -598,7 +598,7 @@ test('recent activity can drive provider icons and per-tool token or cost values
     { ...info.rows[0], metric: 'tokens', usageScope: 'recent' },
     { ...info.rows[1], metric: 'cost', usageScope: 'recent' }
   ];
-  const resolvedInfo = resolveTrayLayout({ version: 4, items: [info] }, recentStats, {
+  const resolvedInfo = resolveTrayLayout({ version: 3, items: [info] }, recentStats, {
     availableProviderIds: ['claude', 'openclaw'],
     currency: 'USD'
   }).items[0];
@@ -611,7 +611,7 @@ test('recent activity can drive provider icons and per-tool token or cost values
   ], 0), 'codex');
 
   recentStats.periods.today.sessions['claude:older'].lastUsedAt = '2026-07-23T08:00:00.000Z';
-  const switched = resolveTrayLayout({ version: 4, items: [icon, tokens, cost] }, recentStats, {
+  const switched = resolveTrayLayout({ version: 3, items: [icon, tokens, cost] }, recentStats, {
     availableProviderIds: ['claude', 'openclaw'],
     currency: 'USD'
   });
@@ -626,7 +626,7 @@ test('recent activity uses a stable app or unavailable fallback without timestam
   const tokens = createTrayLayoutItem('tokens', { idFactory: () => 'recent-tokens-fallback' });
   tokens.usageScope = 'recent';
 
-  const resolved = resolveTrayLayout({ version: 4, items: [icon, tokens] }, stats, {
+  const resolved = resolveTrayLayout({ version: 3, items: [icon, tokens] }, stats, {
     availableProviderIds: ['claude', 'codex']
   });
 
@@ -674,7 +674,7 @@ test('local Reasonix native activity selects aggregate Reasonix Token and Cost v
   const cost = createTrayLayoutItem('cost', { idFactory: () => 'reasonix-cost' });
   cost.usageScope = 'recent';
 
-  const resolved = resolveTrayLayout({ version: 4, items: [icon, tokens, cost] }, reasonixStats, {
+  const resolved = resolveTrayLayout({ version: 3, items: [icon, tokens, cost] }, reasonixStats, {
     availableProviderIds: ['claude', 'reasonix'],
     currency: 'USD'
   });
@@ -699,7 +699,7 @@ test('one layout resolution scans recent activity only once', () => {
     const info = createTrayLayoutItem('doubleInfo', { idFactory: () => 'once-info' });
     info.rows[0] = { ...info.rows[0], metric: 'cost', usageScope: 'recent' };
 
-    resolveTrayLayout({ version: 4, items: [icon, tokens, info] }, {
+    resolveTrayLayout({ version: 3, items: [icon, tokens, info] }, {
       periods: {
         today: {
           clients: { claude: 10 },

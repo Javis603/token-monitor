@@ -14,7 +14,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayLayout = api;
 })(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay, compactMoneyApi) {
-  const VERSION = 4;
+  const VERSION = 3;
   const MAX_ITEMS = 12;
   const STYLE_IDS = Object.freeze([
     'appIcon',
