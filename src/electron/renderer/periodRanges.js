@@ -361,10 +361,12 @@
         addMapValue(period.modelOutputs, model, value?.outputTokens);
         addMapValue(period.modelUnclassifiedTokens, model, unclassifiedValue(value, rowExact));
       }
-      for (const [client, models] of Object.entries(row?.perClientModel || {})) {
-        for (const [model, value] of Object.entries(models || {})) {
-          addNestedMapValue(period.clientModels, client, model, value?.tokens);
-          addNestedMapValue(period.clientModelCosts, client, model, value?.cost);
+      if (period.capabilities.clientModels) {
+        for (const [client, models] of Object.entries(row?.perClientModel || {})) {
+          for (const [model, value] of Object.entries(models || {})) {
+            addNestedMapValue(period.clientModels, client, model, value?.tokens);
+            addNestedMapValue(period.clientModelCosts, client, model, value?.cost);
+          }
         }
       }
     }
@@ -408,10 +410,12 @@
       ]) {
         for (const [name, value] of Object.entries(period[key] || {})) addMapValue(merged[key], name, value);
       }
-      for (const key of ['clientModels', 'clientModelCosts']) {
-        for (const [client, models] of Object.entries(period[key] || {})) {
-          for (const [model, value] of Object.entries(models || {})) {
-            addNestedMapValue(merged[key], client, model, value);
+      if (merged.capabilities.clientModels) {
+        for (const key of ['clientModels', 'clientModelCosts']) {
+          for (const [client, models] of Object.entries(period[key] || {})) {
+            for (const [model, value] of Object.entries(models || {})) {
+              addNestedMapValue(merged[key], client, model, value);
+            }
           }
         }
       }
@@ -500,6 +504,9 @@
     const explicitRange = options.selection === 'range'
       ? normalizeDateRange(options.rangeStart, options.rangeEnd)
       : null;
+    if (options.selection === 'range' && !explicitRange) {
+      return { status: 'unavailable', period: null, daily: [], summary: null };
+    }
     for (const source of sources || []) {
       const explicitTodayKey = normalizeDateKey(source?.todayKey);
       const resolvedDayState = explicitTodayKey

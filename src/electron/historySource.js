@@ -1,6 +1,6 @@
 'use strict';
 
-const { coerceHistory } = require('../shared/history');
+const { coerceHistory, deviceHistoryState } = require('../shared/history');
 
 function parseCompleteHistory(payload) {
   return coerceHistory(payload);
@@ -21,19 +21,17 @@ function parseDeviceHistories(payload) {
   for (const device of Array.isArray(devices) ? devices : []) {
     const deviceId = String(device?.deviceId || device?.id || '').trim();
     if (!deviceId) continue;
-    const hasHistory = Object.prototype.hasOwnProperty.call(device, 'history');
-    const rawHistory = hasHistory ? device.history : null;
-    const hasHistoryPayload = Boolean(rawHistory && typeof rawHistory === 'object');
-    const history = coerceHistory(rawHistory);
+    const historyState = deviceHistoryState(device);
+    const history = historyState.history || coerceHistory(null);
     const hasDailyRows = history.daily.length > 0;
     const allTimeTokens = Number(device?.periods?.allTime?.totalTokens ?? device?.allTime?.totalTokens ?? 0);
-    const explicitlyUnavailable = device?.historyAvailable === false || rawHistory === null;
-    // A legacy Hub may already have normalized `history: null` into an empty object.
-    // Treat an empty, unmarked history on a device with lifetime usage as unknown;
-    // a genuinely zero-usage legacy device is still a valid empty history.
-    const available = hasHistoryPayload
-      && !explicitlyUnavailable
-      && (hasDailyRows || !(allTimeTokens > 0));
+    const retainedUsage = history.monthly.some((row) => Number(row?.tokens || 0) > 0)
+      || Number(history.summary?.totalTokens || 0) > 0
+      || allTimeTokens > 0;
+    // Rolling/custom ranges require daily rows. An empty history is exact only
+    // when every retained/lifetime signal also says the device has no usage.
+    const available = historyState.state === 'available'
+      && (hasDailyRows || !retainedUsage);
     histories[deviceId] = { ...history, available };
   }
   return histories;

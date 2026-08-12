@@ -14,8 +14,9 @@
   function deviceBreakdownForPeriod(device, periodName, options = {}) {
     const period = device?.periods?.[periodName] || {};
     const totalTokens = Math.max(0, Number(period.totalTokens || 0));
+    const clientModels = period.capabilities?.clientModels === false ? {} : period.clientModels;
     const tools = positiveEntries(period.clients).map(([client, value]) => {
-      const models = positiveEntries(period.clientModels?.[client]).map(([model, modelValue]) => {
+      const models = positiveEntries(clientModels?.[client]).map(([model, modelValue]) => {
         return {
           key: model,
           name: model,

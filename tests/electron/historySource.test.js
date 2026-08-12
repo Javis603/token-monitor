@@ -83,6 +83,19 @@ test('legacy empty history with lifetime usage is unavailable instead of an exac
   assert.equal(histories['legacy-normalized-null'].available, false);
 });
 
+test('monthly-only history without an all-time period is unavailable for daily ranges', () => {
+  const histories = parseDeviceHistories({ devices: [{
+    deviceId: 'monthly-only',
+    history: {
+      daily: [],
+      monthly: [{ month: '2026-08', tokens: 500 }],
+      summary: {}
+    }
+  }] });
+
+  assert.equal(histories['monthly-only'].available, false);
+});
+
 test('a history-disabled participating device blocks a partial last-7-days total', () => {
   const devices = [
     {

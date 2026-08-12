@@ -124,6 +124,33 @@ test('serializeSyncPayload drops only all-time projects when they exceed the byt
   assert.ok(bytes < 400);
 });
 
+test('serializeSyncPayload omits an oversized history without blocking core usage', () => {
+  const summary = {
+    deviceId: 'history-heavy',
+    historyAvailable: true,
+    today: { totalTokens: 10 },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 },
+    history: {
+      daily: Array.from({ length: 370 }, (_, index) => ({
+        date: `2025-${String(Math.floor(index / 31) + 1).padStart(2, '0')}-${String((index % 31) + 1).padStart(2, '0')}`,
+        perClientModel: { codex: { [`model-${index}`]: { tokens: index + 1, cost: index / 100 } } }
+      }))
+    }
+  };
+
+  const { payload, body, bytes } = serializeSyncPayload(summary, { maxBytes: 700 });
+
+  assert.ok(bytes <= 700, `expected ${bytes} bytes to fit the test budget`);
+  assert.equal(Object.hasOwn(payload, 'history'), false);
+  assert.equal(payload.historyAvailable, true);
+  assert.equal(payload.today.totalTokens, 10);
+  assert.equal(payload.month.totalTokens, 20);
+  assert.equal(payload.allTime.totalTokens, 30);
+  assert.equal(JSON.parse(body).deviceId, 'history-heavy');
+  assert.equal(summary.history.daily.length, 370);
+});
+
 test('postSyncPayload retries a legacy 413 once without all-time projects', async () => {
   const bodies = [];
   const responses = [

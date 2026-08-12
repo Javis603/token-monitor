@@ -279,10 +279,6 @@ function dayTokens(day) {
   return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.tokens), 0);
 }
 
-function dayCost(day) {
-  return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.cost), 0);
-}
-
 function observationHasTokenComponents(observation) {
   // Legacy synthetic rows can carry only message counts. With no tokens there
   // is no missing token split, so they must not make the whole day unavailable.
@@ -294,7 +290,10 @@ function liveDayIsGreater(incoming, previous) {
   const incomingTokens = dayTokens(incoming);
   const previousTokens = dayTokens(previous);
   if (incomingTokens !== previousTokens) return incomingTokens > previousTokens;
-  return dayCost(incoming) > dayCost(previous);
+  // The live period owns pricing for an equal usage snapshot. Cost can move in
+  // either direction after a custom-price or upstream pricing correction, so
+  // monotonic cost ordering would resurrect stale values.
+  return true;
 }
 
 function mergeLiveObservationMetadata(liveObservation, previousObservation) {

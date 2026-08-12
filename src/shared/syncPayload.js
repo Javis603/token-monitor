@@ -181,6 +181,18 @@ function serializeSyncPayload(summary, options = {}) {
       if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
     }
   }
+  if (
+    Buffer.byteLength(body, 'utf8') > maxBytes
+    && payload.history
+    && typeof payload.history === 'object'
+  ) {
+    // A retained attributed history can legitimately outgrow the ingest
+    // ceiling. An absent history field means "no update", so mergeDeviceRecord
+    // keeps any last-good Hub copy while the current usage/limits snapshot can
+    // still advance. A Hub without a prior copy remains honestly unavailable.
+    delete payload.history;
+    body = JSON.stringify(payload);
+  }
   return { payload, body, bytes: Buffer.byteLength(body, 'utf8') };
 }
 

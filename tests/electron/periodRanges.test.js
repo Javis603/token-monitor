@@ -314,6 +314,34 @@ test('derived capabilities require every selected history row to be explicitly c
   assert.deepEqual(period.capabilities, { tokenComponents: false, clientModels: true });
 });
 
+test('derived periods suppress client-model maps when the selected rows lack that capability', () => {
+  const period = derivePeriod([{
+    date: '2026-08-11', tokens: 10, cost: 1,
+    capabilities: { tokenComponents: true, clientModels: false },
+    perClient: { codex: { tokens: 10, cost: 1 } },
+    perModel: { 'gpt-5': { tokens: 10, cost: 1 } },
+    perClientModel: { codex: { 'gpt-5': { tokens: 10, cost: 1 } } }
+  }], { selection: 'last7', todayKey: '2026-08-11' });
+
+  assert.equal(period.capabilities.clientModels, false);
+  assert.deepEqual(period.clientModels, {});
+  assert.deepEqual(period.clientModelCosts, {});
+});
+
+test('merged periods suppress partial client-model attribution', () => {
+  const exact = derivePeriod([{
+    date: '2026-08-11', tokens: 10, cost: 1,
+    capabilities: { tokenComponents: true, clientModels: true },
+    perClientModel: { codex: { 'gpt-5': { tokens: 10, cost: 1 } } }
+  }], { selection: 'last7', todayKey: '2026-08-11' });
+  const legacy = { ...exact, capabilities: { tokenComponents: true, clientModels: false } };
+  const merged = mergePeriods([exact, legacy]);
+
+  assert.equal(merged.capabilities.clientModels, false);
+  assert.deepEqual(merged.clientModels, {});
+  assert.deepEqual(merged.clientModelCosts, {});
+});
+
 test('derived periods preserve classified components and isolate the unavailable remainder', () => {
   const period = derivePeriod([{
     date: '2026-08-10', tokens: 100, cost: 5,
@@ -406,6 +434,20 @@ test('derived snapshots never turn unavailable full history into a preview-sized
     daily: [],
     summary: null
   });
+});
+
+test('invalid custom ranges are unavailable instead of a successful zero', () => {
+  for (const [rangeStart, rangeEnd] of [
+    ['', '2026-08-11'],
+    ['2026-08-12', '2026-08-11'],
+    ['2026-02-30', '2026-08-11']
+  ]) {
+    assert.deepEqual(deriveRangeSnapshot([], {
+      status: 'ready', selection: 'range', rangeStart, rangeEnd
+    }), {
+      status: 'unavailable', period: null, daily: [], summary: null
+    });
+  }
 });
 
 test('cross-timezone derived snapshots use the same selected rows for headline and Trends', () => {

@@ -3,7 +3,7 @@
 const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
-const { coerceHistory, mergeHistories } = require('./history');
+const { coerceHistory, deviceHistoryState, mergeHistories } = require('./history');
 const { isPeriodExpired } = require('./periodWindow');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
@@ -1092,8 +1092,9 @@ function aggregateHistory(devices) {
   const histories = [];
   for (const record of devices) {
     const normalized = normalizeDeviceRecord(record);
-    if (normalized.historyAvailable === false || !hasOwn(normalized, 'history') || normalized.history === null) continue;
-    histories.push(normalized.history);
+    const historyState = deviceHistoryState(normalized);
+    if (historyState.state !== 'available') continue;
+    histories.push(historyState.history);
   }
   return mergeHistories(histories);
 }

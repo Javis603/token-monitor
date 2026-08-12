@@ -274,6 +274,25 @@ test('equal-token live snapshot keeps corrected cost and graph component metadat
   assert.equal(restored.daily[0].unclassifiedTokens, 0);
 });
 
+test('equal-token live snapshot accepts a downward cost correction', () => {
+  let archive = captureLiveDailyHistory({}, livePeriod(150, 20), {
+    todayKey: '2026-08-05'
+  });
+  archive = captureLiveDailyHistory(archive, livePeriod(150, 10), {
+    todayKey: '2026-08-05'
+  });
+  const restored = historyFrom(graphFromDailyHistoryArchive(
+    graph('2026-08-05', [client('claude', 'opus', 150, 20, 5)]),
+    archive,
+    { todayKey: '2026-08-06' }
+  ), '2026-08-06');
+
+  assert.equal(dayObservation(archive, '2026-08-05').cost, 10);
+  assert.equal(restored.daily[0].cost, 10);
+  assert.equal(restored.daily[0].perClient.claude.cost, 10);
+  assert.equal(restored.daily[0].capabilities.tokenComponents, true);
+});
+
 test('live snapshot keeps model-less remainder under its original client', () => {
   const archive = captureLiveDailyHistory({}, {
     totalTokens: 150,

@@ -97,7 +97,8 @@ function parseGraphResult(raw) {
       const msg = String(client).trim().toLowerCase() === REASONIX_CLIENT ? 0 : num(c.messages);
       const cacheRead = num(c.tokens?.cacheRead);
       const cacheWrite = num(c.tokens?.cacheWrite);
-      const output = num(c.tokens?.output);
+      const output = num(c.tokens?.output)
+        + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(c.tokens?.reasoning) : 0);
       const unclassified = entryCapability(raw, row, c, 'tokenComponents')
         ? 0
         : (Object.prototype.hasOwnProperty.call(c, 'unclassifiedTokens')
@@ -453,6 +454,25 @@ function coerceHistory(raw) {
   };
 }
 
+// Preserve the unavailable meaning of legacy records that an older Hub may
+// already have normalized from `history: null` into an empty object. A truly
+// unused device can still expose an exact empty history.
+function deviceHistoryState(device) {
+  const hasHistory = Object.prototype.hasOwnProperty.call(device || {}, 'history');
+  if (device?.historyAvailable === false || (hasHistory && device.history === null)) {
+    return { state: 'unavailable', history: null };
+  }
+  if (!hasHistory) return { state: 'missing', history: null };
+  const history = coerceHistory(device.history);
+  const retainedRows = history.daily.length + history.monthly.length;
+  const lifetimeTokens = num(device?.periods?.allTime?.totalTokens ?? device?.allTime?.totalTokens);
+  const summarizedTokens = num(history.summary?.totalTokens);
+  if (retainedRows === 0 && Math.max(lifetimeTokens, summarizedTokens) > 0) {
+    return { state: 'unavailable', history: null };
+  }
+  return { state: 'available', history };
+}
+
 // Trim a full History to a compact, per-client-free payload for /api/stats.
 function historyPreview(history, options = {}) {
   const dailyDays = Number.isFinite(options.dailyDays) ? options.dailyDays : 30;
@@ -495,12 +515,11 @@ function historyRevision(devices) {
     .map((device) => {
       const deviceId = String(device?.deviceId || device?.id || '').trim();
       if (!deviceId) return null;
-      const hasHistory = Object.prototype.hasOwnProperty.call(device || {}, 'history');
-      const unavailable = device?.historyAvailable === false || (hasHistory && device.history === null);
+      const historyState = deviceHistoryState(device);
       return {
         deviceId,
-        state: unavailable ? 'unavailable' : (hasHistory ? 'available' : 'missing'),
-        history: hasHistory && device.history !== null ? coerceHistory(device.history) : null
+        state: historyState.state,
+        history: historyState.history
       };
     })
     .filter(Boolean)
@@ -511,5 +530,5 @@ function historyRevision(devices) {
 module.exports = {
   num, sumTokens, parseGraphResult, computeIntensities,
   computeStreaks, dayKeyAddDays, isValidDayKey, monthlyRollup, normalizeHistory, mergeHistories,
-  coerceHistory, historyPreview, historyRevision
+  coerceHistory, deviceHistoryState, historyPreview, historyRevision
 };

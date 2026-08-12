@@ -206,6 +206,9 @@ test('Reasonix history uses additive reasoning while existing clients stay uncha
   assert.equal(parsed.contributions[0].perClient.codex.tokens, 130);
   assert.equal(parsed.contributions[0].perModel['deepseek-chat'].tokens, 140);
   assert.equal(parsed.contributions[0].perModel['gpt-5'].tokens, 130);
+  assert.equal(parsed.contributions[0].outputTokens, 70);
+  assert.equal(parsed.contributions[0].perClient.reasonix.outputTokens, 40);
+  assert.equal(parsed.contributions[0].perClient.codex.outputTokens, 30);
   assert.equal(parsed.contributions[0].messages, 1);
   assert.equal(parsed.contributions[0].perClient.reasonix.messages, 0);
   assert.equal(parsed.contributions[0].perClient.codex.messages, 1);
@@ -213,6 +216,8 @@ test('Reasonix history uses additive reasoning while existing clients stay uncha
   assert.equal(history.daily[0].tokens, 270);
   assert.equal(history.daily[0].perClient.reasonix.tokens, 140);
   assert.equal(history.daily[0].perModel['deepseek-chat'].tokens, 140);
+  assert.equal(history.daily[0].outputTokens, 70);
+  assert.equal(history.daily[0].perClient.reasonix.outputTokens, 40);
   assert.equal(history.daily[0].messages, 1);
   assert.equal(history.daily[0].perClient.reasonix.messages, 0);
   assert.equal(history.summary.messages, 1);
@@ -237,6 +242,8 @@ test('Reasonix daily history archive preserves its additive total', () => {
   });
   assert.equal(restored.daily[0].perClient.reasonix.tokens, 140);
   assert.equal(restored.daily[0].perModel['deepseek-chat'].tokens, 140);
+  assert.equal(restored.daily[0].outputTokens, 40);
+  assert.equal(restored.daily[0].perClient.reasonix.outputTokens, 40);
   assert.equal(restored.daily[0].perClient.reasonix.messages, 0);
   assert.equal(restored.summary.messages, 0);
   assert.equal(restored.summary.totalTokens, 140);

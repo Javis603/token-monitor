@@ -374,6 +374,18 @@ test('historyRevision is key-order stable and tracks device attribution', () => 
   assert.notEqual(historyRevision(original), historyRevision(swapped));
 });
 
+test('historyRevision preserves legacy normalized-null availability semantics', () => {
+  const empty = { daily: [], monthly: [], summary: {} };
+  assert.equal(
+    historyRevision([{ deviceId: 'legacy', allTime: { totalTokens: 50 }, history: empty }]),
+    historyRevision([{ deviceId: 'legacy', allTime: { totalTokens: 50 }, history: null }])
+  );
+  assert.notEqual(
+    historyRevision([{ deviceId: 'idle', allTime: { totalTokens: 0 }, history: empty }]),
+    historyRevision([{ deviceId: 'idle', allTime: { totalTokens: 0 }, history: null }])
+  );
+});
+
 test('coerceHistory normalizes shape and drops garbage', () => {
   assert.deepEqual(coerceHistory(null), { daily: [], monthly: [], summary: {} });
   assert.deepEqual(coerceHistory({ daily: 'x' }), { daily: [], monthly: [], summary: {} });

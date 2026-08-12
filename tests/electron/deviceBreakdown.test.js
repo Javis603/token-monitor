@@ -50,6 +50,18 @@ test('deviceBreakdownForPeriod tolerates shared models and legacy device records
   });
 });
 
+test('deviceBreakdownForPeriod hides client-model rows when attribution is unavailable', () => {
+  const result = deviceBreakdownForPeriod({ periods: { month: {
+    totalTokens: 100,
+    clients: { codex: 100 },
+    clientModels: { codex: { 'gpt-5': 100 } },
+    capabilities: { clientModels: false }
+  } } }, 'month');
+
+  assert.equal(result.tools.length, 1);
+  assert.deepEqual(result.tools[0].models, []);
+});
+
 test('devicePlatformLabel appends OS versions without exposing architecture', () => {
   assert.equal(devicePlatformLabel('darwin-arm64', 'macOS', '26.0'), 'macOS 26.0');
   assert.equal(devicePlatformLabel('win32-x64', 'Windows 11', '24H2'), 'Windows 11 24H2');

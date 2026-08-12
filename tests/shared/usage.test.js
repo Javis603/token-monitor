@@ -1160,6 +1160,18 @@ test('aggregateHistory tolerates devices without history', () => {
   assert.deepEqual(merged.daily, []);
 });
 
+test('aggregateHistory skips legacy normalized-null history with lifetime usage', () => {
+  const merged = aggregateHistory([{
+    deviceId: 'legacy',
+    allTime: { totalTokens: 500 },
+    history: { daily: [], monthly: [], summary: { totalTokens: 500 } }
+  }]);
+
+  assert.deepEqual(merged.daily, []);
+  assert.deepEqual(merged.monthly, []);
+  assert.equal(merged.summary.totalTokens, 0);
+});
+
 test('carryDeviceHistory carries prior history forward when the incoming snapshot omits it', () => {
   const previous = {
     deviceId: 'm1', receivedAt: '2026-06-08T00:00:00.000Z',
