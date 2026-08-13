@@ -10,6 +10,7 @@ const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
   'clientHealth',
   'wslStatus',
   'periodWindows',
+  'historyAvailable',
   'projectsEnabled',
   'allTimeProjectsOmitted',
   'allTimeProjectsIncomplete',

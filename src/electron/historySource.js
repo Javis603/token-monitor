@@ -42,8 +42,9 @@ function parseDeviceHistories(payload) {
 // The local collector can finalize History before its throttled sync upload reaches
 // the Hub. Mirror composeLocalSyncStats' local-wins display contract here so a
 // fixed range cannot refetch on the local revision and then render the older Hub
-// copy. An absent local History means "no update in this snapshot", so retain the
-// Hub's last-good History; an explicit local null remains authoritative.
+// copy. An absent local History means "no update in this snapshot", so retain a
+// Hub last-good History only when the Hub record carries the producer's explicit
+// capability with it; an explicit local null remains authoritative.
 function devicesWithLocalHistory(records, localDevice) {
   const devices = Array.isArray(records) ? records.slice() : [];
   const localId = String(localDevice?.deviceId || '').trim();
@@ -60,7 +61,13 @@ function devicesWithLocalHistory(records, localDevice) {
     return devices;
   }
   const merged = { ...existing, ...localDevice };
-  if (!hasOwn(localDevice, 'history') && hasOwn(existing, 'history')) merged.history = existing.history;
+  if (!hasOwn(localDevice, 'history')) {
+    if (existing?.historyAvailable === true && hasOwn(existing, 'history')) {
+      merged.history = existing.history;
+    } else {
+      delete merged.history;
+    }
+  }
   devices[index] = merged;
   return devices;
 }

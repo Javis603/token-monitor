@@ -135,15 +135,34 @@ test('remote fixed-range history overlays a fresher local device record', async 
 test('local snapshot without History preserves the Hub last-good History', () => {
   const hubHistory = { daily: [{ date: '2026-08-11', tokens: 80 }] };
   assert.deepEqual(devicesWithLocalHistory([
-    { deviceId: 'mac', history: hubHistory, today: { totalTokens: 4 } }
+    { deviceId: 'mac', historyAvailable: true, history: hubHistory, today: { totalTokens: 4 } }
   ], {
     deviceId: 'mac',
+    historyAvailable: true,
     today: { totalTokens: 5 }
   }), [{
     deviceId: 'mac',
+    historyAvailable: true,
     history: hubHistory,
     today: { totalTokens: 5 }
   }]);
+});
+
+test('local capability does not endorse ambiguous legacy Hub History', () => {
+  const records = devicesWithLocalHistory([{
+    deviceId: 'mac',
+    history: { daily: [], monthly: [], summary: {} },
+    today: { totalTokens: 4 }
+  }], {
+    deviceId: 'mac',
+    historyAvailable: true,
+    today: { totalTokens: 5 }
+  });
+
+  assert.equal(Object.hasOwn(records[0], 'history'), false);
+  const [device] = parseDeviceHistories(records);
+  assert.equal(device.historyAvailable, false);
+  assert.equal(device.history, null);
 });
 
 test('older widget snapshot cannot replace newer headless-agent Hub History', () => {
