@@ -13,6 +13,7 @@ const {
   nodeLockBuildInput,
   nodePackageBuildInput,
   updatedRegistry,
+  validateRegistry,
   workerLockBuildInput,
   workerPackageBuildInput,
   workerSharedPackageContents
@@ -20,6 +21,13 @@ const {
 
 function buildId(character) {
   return `sha256:${character.repeat(64)}`;
+}
+
+function componentHistory(characters) {
+  return [...characters].map((character, index) => ({
+    revision: index + 1,
+    buildId: buildId(character)
+  }));
 }
 
 test('Hub build registry matches the current core and runtime source closures', () => {
@@ -130,23 +138,54 @@ test('desktop comparison changes do not alter the portable Hub core closure', ()
   assert.ok(!WORKER_SHARED_MODULES.includes('hubBuildComparison.js'));
 });
 
+test('Hub build registry enforces canonical component histories', () => {
+  assert.equal(validateRegistry(registry), registry);
+
+  const valid = {
+    schemaVersion: 1,
+    components: {
+      core: componentHistory('12'),
+      'node-hub': componentHistory('34'),
+      'cloudflare-worker': componentHistory('56')
+    }
+  };
+  assert.equal(validateRegistry(valid), valid);
+
+  const clone = () => JSON.parse(JSON.stringify(valid));
+  const missingComponent = clone();
+  delete missingComponent.components['node-hub'];
+  assert.throws(() => validateRegistry(missingComponent), /components must be exactly/);
+
+  const duplicateRevision = clone();
+  duplicateRevision.components.core[1].revision = 1;
+  assert.throws(() => validateRegistry(duplicateRevision), /core revision at index 1 must be 2/);
+
+  const skippedRevision = clone();
+  skippedRevision.components['node-hub'][1].revision = 3;
+  assert.throws(() => validateRegistry(skippedRevision), /node-hub revision at index 1 must be 2/);
+
+  const malformedBuildId = clone();
+  malformedBuildId.components['cloudflare-worker'][0].buildId = `sha256:${'F'.repeat(64)}`;
+  assert.throws(() => validateRegistry(malformedBuildId), /valid SHA-256 build ID/);
+});
+
 test('Hub build registry advances only the component whose source changed', () => {
   const base = {
     schemaVersion: 1,
     components: {
-      core: [{ revision: 3, buildId: 'sha256:core' }],
-      'node-hub': [{ revision: 4, buildId: 'sha256:node-old' }],
-      'cloudflare-worker': [{ revision: 5, buildId: 'sha256:worker' }]
+      core: componentHistory('123'),
+      'node-hub': componentHistory('4567'),
+      'cloudflare-worker': componentHistory('89abc')
     }
   };
   const next = updatedRegistry(base, {
-    core: 'sha256:core',
-    'node-hub': 'sha256:node-new',
-    'cloudflare-worker': 'sha256:worker'
+    core: buildId('3'),
+    'node-hub': buildId('d'),
+    'cloudflare-worker': buildId('c')
   });
-  assert.equal(next.components.core.length, 1);
-  assert.deepEqual(next.components['node-hub'].at(-1), { revision: 5, buildId: 'sha256:node-new' });
-  assert.equal(next.components['cloudflare-worker'].length, 1);
+  assert.equal(next.components.core.length, 3);
+  assert.deepEqual(next.components['node-hub'].at(-1), { revision: 5, buildId: buildId('d') });
+  assert.equal(next.components['cloudflare-worker'].length, 5);
 });
 
 test('Hub build comparison distinguishes current, older, newer, and divergent builds', () => {

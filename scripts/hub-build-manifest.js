@@ -6,6 +6,8 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const REGISTRY_PATH = path.join(ROOT, 'src', 'shared', 'hubBuildRegistry.json');
+const REGISTRY_COMPONENTS = Object.freeze(['core', 'node-hub', 'cloudflare-worker']);
+const BUILD_ID_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 // This is the portable Hub core copied into the standalone Worker repository.
 // Hash the canonical src/shared files, not their generated Worker copies, so a
@@ -124,11 +126,42 @@ function emptyRegistry() {
   };
 }
 
+function validateRegistry(registry) {
+  if (!registry || typeof registry !== 'object' || Array.isArray(registry) || registry.schemaVersion !== 1) {
+    throw new Error('unsupported Hub build registry');
+  }
+  if (!registry.components || typeof registry.components !== 'object' || Array.isArray(registry.components)) {
+    throw new Error('Hub build registry components must be an object');
+  }
+  const componentNames = Object.keys(registry.components).sort();
+  const expectedNames = [...REGISTRY_COMPONENTS].sort();
+  if (componentNames.length !== expectedNames.length
+    || componentNames.some((component, index) => component !== expectedNames[index])) {
+    throw new Error(`Hub build registry components must be exactly: ${REGISTRY_COMPONENTS.join(', ')}`);
+  }
+  for (const component of REGISTRY_COMPONENTS) {
+    const entries = registry.components[component];
+    if (!Array.isArray(entries)) {
+      throw new Error(`Hub build registry component ${component} must be an array`);
+    }
+    entries.forEach((entry, index) => {
+      const expectedRevision = index + 1;
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || entry.revision !== expectedRevision) {
+        throw new Error(`${component} revision at index ${index} must be ${expectedRevision}`);
+      }
+      if (typeof entry.buildId !== 'string' || !BUILD_ID_PATTERN.test(entry.buildId)) {
+        throw new Error(`${component} revision ${expectedRevision} must have a valid SHA-256 build ID`);
+      }
+    });
+  }
+  return registry;
+}
+
 function readRegistry() {
   try {
     const parsed = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
-    if (parsed?.schemaVersion !== 1 || !parsed.components) throw new Error('unsupported Hub build registry');
-    return parsed;
+    return validateRegistry(parsed);
   } catch (error) {
     if (error.code === 'ENOENT') return emptyRegistry();
     throw error;
@@ -141,9 +174,8 @@ function latestEntry(registry, component) {
 }
 
 function updatedRegistry(registry, buildIds) {
-  const next = JSON.parse(JSON.stringify(registry || emptyRegistry()));
-  for (const component of ['core', 'node-hub', 'cloudflare-worker']) {
-    if (!Array.isArray(next.components[component])) next.components[component] = [];
+  const next = JSON.parse(JSON.stringify(validateRegistry(registry || emptyRegistry())));
+  for (const component of REGISTRY_COMPONENTS) {
     const current = latestEntry(next, component);
     if (current?.buildId === buildIds[component]) continue;
     next.components[component].push({
@@ -151,7 +183,7 @@ function updatedRegistry(registry, buildIds) {
       buildId: buildIds[component]
     });
   }
-  return next;
+  return validateRegistry(next);
 }
 
 module.exports = {
@@ -164,6 +196,7 @@ module.exports = {
   nodePackageBuildInput,
   readRegistry,
   updatedRegistry,
+  validateRegistry,
   workerLockBuildInput,
   workerPackageBuildInput,
   workerSharedPackageContents
