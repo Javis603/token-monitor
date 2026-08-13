@@ -83,12 +83,15 @@ function readGoApiKey(env = process.env) {
   return cleanSecret(entry.key);
 }
 
-// The endpoint returns no workspace id, and each device's connect flow mints
-// its own key, so identity is per-key — i.e. per device. That is deliberate:
-// collapsing every API-sourced device onto one constant key would silently
-// merge two people's accounts on a shared hub and show one of them the other's
-// quota. A cookie still yields the real workspace identity, which is what makes
-// cross-device collapse work; see openCodeWebIdentity in limitCollector.js.
+// The endpoint returns no workspace id, so the key itself is the identity.
+// Upstream provisions exactly one "Default API Key" per (workspace, user) and
+// returns early when one already exists, so two devices signed in to the same
+// account normally hold the same key and therefore collapse into one row on the
+// Hub. They diverge only if someone mints an extra key by hand, which is the
+// safe direction: an over-eager constant would instead merge two *different*
+// people's accounts on a shared hub and show one of them the other's quota.
+// A cookie yields the real workspace identity regardless; see
+// openCodeWebIdentity in limitCollector.js.
 function goApiIdentity(apiKey) {
   // Full digest: truncating buys nothing here (this value is never displayed or
   // typed) and only narrows the space in which two accounts could collide.
