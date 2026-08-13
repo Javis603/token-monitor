@@ -57,13 +57,33 @@ function readSessionMeta(sessionIds, deps = {}) {
       db = openDb(dbPath, sqliteMod);
       const columns = new Set(db.prepare('PRAGMA table_info(session)').all().map((column) => String(column.name)));
       const directory = columns.has('directory') ? "COALESCE(directory,'')" : "''";
-      const sql = `SELECT id, COALESCE(title,'') AS title, ${directory} AS directory, time_created AS created, time_updated AS updated
+      const messageColumns = new Set(db.prepare('PRAGMA table_info(message)').all().map((column) => String(column.name)));
+      const lastMessageBySession = new Map();
+      if (messageColumns.has('session_id') && (messageColumns.has('data') || messageColumns.has('time_created'))) {
+        const jsonCreated = messageColumns.has('data')
+          ? "CASE WHEN json_valid(data) THEN CAST(json_extract(data,'$.time.created') AS INTEGER) END"
+          : 'NULL';
+        const storedCreated = messageColumns.has('time_created') ? 'time_created' : 'NULL';
+        const messageSql = `SELECT session_id AS sessionId,
+                                   MAX(CAST(COALESCE(${jsonCreated}, ${storedCreated}) AS INTEGER)) AS lastMessageMs
+                            FROM message
+                            WHERE session_id IN (${placeholders})
+                            GROUP BY session_id`;
+        for (const row of db.prepare(messageSql).all(...ids)) {
+          lastMessageBySession.set(String(row.sessionId), row.lastMessageMs);
+        }
+      }
+      const sql = `SELECT id, COALESCE(title,'') AS title, ${directory} AS directory, time_created AS created
                    FROM session WHERE id IN (${placeholders})`;
       for (const r of db.prepare(sql).all(...ids)) {
         const id = String(r.id);
         if (out.has(id)) continue;
         const startedAt = isoFromMs(r.created);
-        const meta = { startedAt, lastUsedAt: isoFromMs(r.updated) || startedAt, title: String(r.title || '') };
+        // session.time_updated can change for metadata/background work. Only a
+        // persisted message is real usage activity; a message-less session
+        // falls back to its creation time instead of masquerading as recent.
+        const lastUsedAt = isoFromMs(lastMessageBySession.get(id)) || startedAt;
+        const meta = { startedAt, lastUsedAt, title: String(r.title || '') };
         if (r.directory) meta.projectPath = String(r.directory);
         out.set(id, meta);
       }
