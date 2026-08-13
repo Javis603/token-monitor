@@ -84,6 +84,18 @@ test('fullChangelogRange locks generated notes to the curated compare range', ()
     ),
     { previousTag: 'v0.42.1', currentTag: 'v0.43.0' }
   );
+  assert.deepEqual(
+    fullChangelogRange(
+      '<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v1.0.0...v1.1.0-beta.1+build.2">v1.0.0...v1.1.0-beta.1+build.2</a></summary>'
+    ),
+    { previousTag: 'v1.0.0', currentTag: 'v1.1.0-beta.1+build.2' }
+  );
+  assert.throws(
+    () => fullChangelogRange(
+      '<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v1.0.0...v1.1.0">v1.0.0...v1.2.0</a></summary>'
+    ),
+    /does not match href range/
+  );
   assert.throws(() => fullChangelogRange('missing'), /found 0/);
 });
 
@@ -109,10 +121,55 @@ test('fetchGeneratedNotes requests GitHub generated notes for the pushed tag', a
   assert.equal(request.url, 'https://api.github.com/repos/Javis603/token-monitor/releases/generate-notes');
   assert.equal(request.options.method, 'POST');
   assert.equal(request.options.headers.Authorization, 'Bearer test-token');
+  assert.equal(request.options.headers['X-GitHub-Api-Version'], '2026-03-10');
+  assert.ok(request.options.signal instanceof AbortSignal);
   assert.deepEqual(JSON.parse(request.options.body), {
     tag_name: 'v1.1.0',
     previous_tag_name: 'v1.0.0'
   });
+});
+
+test('fetchGeneratedNotes honors GITHUB_API_URL and fails when its timeout signal fires', async () => {
+  await assert.rejects(
+    fetchGeneratedNotes({
+      repository: 'Javis603/token-monitor',
+      tag: 'v1.1.0',
+      previousTag: 'v1.0.0',
+      token: 'test-token',
+      apiUrl: 'https://github.example/api/v3/',
+      signalFactory: () => AbortSignal.timeout(1),
+      fetchImpl: async (url, options) => {
+        assert.equal(url, 'https://github.example/api/v3/repos/Javis603/token-monitor/releases/generate-notes');
+        await new Promise((resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+        });
+      }
+    }),
+    /GitHub release-notes generation timed out/
+  );
+});
+
+test('fetchGeneratedNotes rejects GitHub API errors and invalid JSON', async () => {
+  const input = {
+    repository: 'Javis603/token-monitor',
+    tag: 'v1.1.0',
+    previousTag: 'v1.0.0',
+    token: 'test-token'
+  };
+  await assert.rejects(
+    fetchGeneratedNotes({
+      ...input,
+      fetchImpl: async () => ({ ok: false, status: 502, async text() { return 'bad gateway'; } })
+    }),
+    /failed \(502\): bad gateway/
+  );
+  await assert.rejects(
+    fetchGeneratedNotes({
+      ...input,
+      fetchImpl: async () => ({ ok: true, async json() { throw new SyntaxError('bad JSON'); } })
+    }),
+    /was not valid JSON/
+  );
 });
 
 test('fetchDirectCommits keeps only commits without an associated merged PR', async () => {
@@ -146,8 +203,11 @@ test('fetchDirectCommits keeps only commits without an associated merged PR', as
     tag: 'v1.1.0',
     previousTag: 'v1.0.0',
     token: 'test-token',
-    fetchImpl: async (url) => {
+    apiUrl: 'https://github.example/api/v3/',
+    fetchImpl: async (url, options) => {
       requests.push(url);
+      assert.equal(options.headers['X-GitHub-Api-Version'], '2026-03-10');
+      assert.ok(options.signal instanceof AbortSignal);
       const key = url.includes('/compare/')
         ? 'compare'
         : url.includes('111111111111') ? '1111111' : '2222222';
@@ -165,7 +225,10 @@ test('fetchDirectCommits keeps only commits without an associated merged PR', as
     authorName: 'Direct Author'
   }]);
   assert.equal(requests.filter((url) => url.includes('/commits/')).length, 2);
-  assert.match(requests[0], /compare\/v1\.0\.0\.\.\.v1\.1\.0\?per_page=100&page=1$/);
+  assert.equal(
+    requests[0],
+    'https://github.example/api/v3/repos/Javis603/token-monitor/compare/v1.0.0...v1.1.0?per_page=100&page=1'
+  );
 });
 
 test('release commit filtering accepts scoped and unscoped release subjects only', () => {

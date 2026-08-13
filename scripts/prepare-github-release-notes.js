@@ -3,6 +3,41 @@
 const fs = require('node:fs/promises');
 
 const GENERATED_NOTES_MARKER = '<!-- github-generated-release-notes -->';
+const GITHUB_API_VERSION = '2026-03-10';
+const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_COMPARE_PAGES = 10_000;
+
+function apiEndpoint(apiUrl, pathname) {
+  const base = String(apiUrl || '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(base)) {
+    throw new Error(`invalid GITHUB_API_URL: ${apiUrl}`);
+  }
+  return `${base}${pathname}`;
+}
+
+function requestHeaders(token) {
+  return {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    'X-GitHub-Api-Version': GITHUB_API_VERSION,
+    'User-Agent': 'token-monitor-release-workflow'
+  };
+}
+
+function requestSignal() {
+  return AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+}
+
+async function githubFetch(url, options, fetchImpl, context) {
+  try {
+    return await fetchImpl(url, options);
+  } catch (error) {
+    if (options.signal?.aborted || error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+      throw new Error(`${context} timed out`, { cause: error });
+    }
+    throw new Error(`${context} request failed: ${error?.message || error}`, { cause: error });
+  }
+}
 
 function generatedNotesWithoutFullChangelog(notes) {
   return String(notes || '')
@@ -51,55 +86,73 @@ function composeReleaseNotes(template, generatedNotes, { repository = '', direct
 }
 
 function fullChangelogRange(template) {
-  const matches = [...template.matchAll(/^<summary><strong>Full Changelog:<\/strong> <a href="https:\/\/github\.com\/Javis603\/token-monitor\/compare\/(v[^.\s"]+(?:\.[^.\s"]+){2})\.\.\.(v[^.\s"]+(?:\.[^.\s"]+){2})">\1\.\.\.\2<\/a><\/summary>$/gm)];
+  const matches = [...template.matchAll(/^<summary><strong>Full Changelog:<\/strong> <a href="https:\/\/github\.com\/Javis603\/token-monitor\/compare\/([^"\s]+)">([^<]+)<\/a><\/summary>$/gm)];
   if (matches.length !== 1) {
     throw new Error(`expected exactly one versioned Full Changelog link, found ${matches.length}`);
   }
-  return { previousTag: matches[0][1], currentTag: matches[0][2] };
+  const hrefRange = matches[0][1];
+  const linkText = matches[0][2];
+  const tags = hrefRange.split('...');
+  if (tags.length !== 2 || tags.some((tag) => !tag.startsWith('v') || tag.length === 1)) {
+    throw new Error(`invalid Full Changelog range: ${hrefRange}`);
+  }
+  if (linkText !== hrefRange) {
+    throw new Error(`Full Changelog text ${linkText} does not match href range ${hrefRange}`);
+  }
+  return { previousTag: tags[0], currentTag: tags[1] };
 }
 
-async function fetchGeneratedNotes({ repository, tag, previousTag, token, fetchImpl = fetch }) {
+async function fetchGeneratedNotes({
+  repository,
+  tag,
+  previousTag,
+  token,
+  apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com',
+  fetchImpl = fetch,
+  signalFactory = requestSignal
+}) {
   if (!repository || !tag || !previousTag || !token) {
     throw new Error('repository, current tag, previous tag, and token are required');
   }
 
-  const response = await fetchImpl(`https://api.github.com/repos/${repository}/releases/generate-notes`, {
+  const response = await githubFetch(apiEndpoint(apiUrl, `/repos/${repository}/releases/generate-notes`), {
     method: 'POST',
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'token-monitor-release-workflow'
-    },
-    body: JSON.stringify({ tag_name: tag, previous_tag_name: previousTag })
-  });
+    headers: requestHeaders(token),
+    body: JSON.stringify({ tag_name: tag, previous_tag_name: previousTag }),
+    signal: signalFactory()
+  }, fetchImpl, 'GitHub release-notes generation');
 
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`GitHub release-notes generation failed (${response.status}): ${detail}`);
   }
 
-  const payload = await response.json();
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error('GitHub release-notes response was not valid JSON');
+  }
   if (typeof payload.body !== 'string') {
     throw new Error('GitHub release-notes response did not contain a body');
   }
   return payload.body;
 }
 
-async function githubJson(url, token, fetchImpl) {
-  const response = await fetchImpl(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'token-monitor-release-workflow'
-    }
-  });
+async function githubJson(url, token, fetchImpl, signalFactory) {
+  const response = await githubFetch(url, {
+    headers: requestHeaders(token),
+    signal: signalFactory()
+  }, fetchImpl, 'GitHub changelog lookup');
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`GitHub changelog lookup failed (${response.status}): ${detail}`);
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    throw new Error('GitHub changelog response was not valid JSON');
+  }
 }
 
 function isReleaseCommit(subject, currentTag) {
@@ -123,18 +176,30 @@ async function mapConcurrent(values, concurrency, mapper) {
   return results;
 }
 
-async function fetchDirectCommits({ repository, tag, previousTag, token, fetchImpl = fetch }) {
+async function fetchDirectCommits({
+  repository,
+  tag,
+  previousTag,
+  token,
+  apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com',
+  fetchImpl = fetch,
+  signalFactory = requestSignal
+}) {
   if (!repository || !tag || !previousTag || !token) {
     throw new Error('repository, current tag, previous tag, and token are required');
   }
 
-  const baseUrl = `https://api.github.com/repos/${repository}`;
+  const baseUrl = apiEndpoint(apiUrl, `/repos/${repository}`);
   const commits = [];
   for (let page = 1; ; page += 1) {
+    if (page > MAX_COMPARE_PAGES) {
+      throw new Error(`GitHub compare pagination exceeded ${MAX_COMPARE_PAGES} pages`);
+    }
     const comparison = await githubJson(
       `${baseUrl}/compare/${encodeURIComponent(previousTag)}...${encodeURIComponent(tag)}?per_page=100&page=${page}`,
       token,
-      fetchImpl
+      fetchImpl,
+      signalFactory
     );
     if (!Array.isArray(comparison.commits)) {
       throw new Error('GitHub compare response did not contain commits');
@@ -148,7 +213,7 @@ async function fetchDirectCommits({ repository, tag, previousTag, token, fetchIm
     const subject = commit?.commit?.message?.split('\n')[0]?.trim();
     if (!sha || !subject || isReleaseCommit(subject, tag)) return null;
 
-    const pulls = await githubJson(`${baseUrl}/commits/${sha}/pulls`, token, fetchImpl);
+    const pulls = await githubJson(`${baseUrl}/commits/${sha}/pulls`, token, fetchImpl, signalFactory);
     if (!Array.isArray(pulls)) {
       throw new Error(`GitHub pull-request lookup for ${sha} did not return an array`);
     }
@@ -203,6 +268,7 @@ if (require.main === module) {
 
 module.exports = {
   GENERATED_NOTES_MARKER,
+  apiEndpoint,
   composeReleaseNotes,
   fetchDirectCommits,
   fetchGeneratedNotes,
