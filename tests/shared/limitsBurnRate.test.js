@@ -121,12 +121,29 @@ test('credits windows are ignored', () => {
   assert.equal(next(limits, state, BASE_MS), null);
 });
 
-test('windows without a usable percentage are ignored', () => {
+test('windows without a usable percentage are never recorded', () => {
   const state = createLimitsBurnState();
   const bare = (used) => ({ kind: 'session', label: '5-hour', usedPercent: used });
   sample(state, summary([bare(null)], { updatedAt: 'a' }), 0);
   const limits = summary([bare(null)], { updatedAt: 'b' });
   sample(state, limits, BASE_MS);
+  // Asserted on the state, not only on the schedule: two coerced zeroes also
+  // produce no schedule, so a rate of nothing is not evidence of nothing stored.
+  assert.equal(state.windows.size, 0);
+  assert.equal(next(limits, state, BASE_MS), null);
+});
+
+// normalizeLimitWindow leaves usedPercent null whenever no explicit percentage
+// is given and used/limit cannot derive one, so this is a shape the wire really
+// carries rather than a defensive hypothetical.
+test('an underivable percentage does not become a zero baseline', () => {
+  const state = createLimitsBurnState();
+  const bare = (used) => ({ kind: 'session', label: '5-hour', usedPercent: used });
+  sample(state, summary([bare(null)], { updatedAt: 'a' }), 0);
+  const limits = summary([bare(80)], { updatedAt: 'b' });
+  sample(state, limits, BASE_MS);
+  // The first real reading is a baseline, not an 80-point burn.
+  assert.equal([...state.windows.values()][0].rate, 0);
   assert.equal(next(limits, state, BASE_MS), null);
 });
 

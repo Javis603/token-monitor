@@ -76,8 +76,12 @@ function windowKey(window) {
 // to measure a rate against.
 function measurableWindow(window) {
   if (!window || window.metric === 'credits') return null;
-  const usedPercent = Number(window.usedPercent);
-  return Number.isFinite(usedPercent) ? usedPercent : null;
+  // Read rather than coerced: a normalized window carries either a finite number
+  // or null, and Number(null) is 0. Coercing would turn a percentage that could
+  // not be derived into a fully unused quota, and score the next real reading as
+  // a burn of that entire amount.
+  const usedPercent = window.usedPercent;
+  return typeof usedPercent === 'number' && Number.isFinite(usedPercent) ? usedPercent : null;
 }
 
 function createLimitsBurnState() {
