@@ -204,6 +204,7 @@ async function collectGoApi(deps = {}) {
 module.exports = {
   GO_USAGE_URL,
   GO_AUTH_PROVIDER_ID,
+  isAbortError,
   goAuthPath,
   readGoApiKey,
   goApiIdentity,

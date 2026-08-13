@@ -3134,6 +3134,11 @@ function openCodeWebIdentity(goWeb, zen, cookie) {
 
 const OPENCODE_COMPONENT_PROVENANCE_DETAIL = 'managed';
 
+// Statuses that mean "this source failed and the user should see it". Everything
+// else, notably `notConfigured`, is a fall-through: the source simply has nothing
+// for this account, so a later source may still answer.
+const OPENCODE_REMOTE_FAIL_STATUSES = ['unauthorized', 'sourceRateLimited', 'unavailable'];
+
 function openCodeSupplementalZenWindows(goWeb, zen) {
   const goWindowKeys = new Set(
     (goWeb?.status === 'ok' ? goWeb.windows || [] : [])
@@ -3159,9 +3164,10 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const envCookie = (deps.env || process.env).TOKEN_MONITOR_OPENCODE_COOKIE || '';
 
   let cookies = [];
-  // A profile carries exactly one credential: an API key (Go quota) or a cookie
-  // (Go plus Zen balance). The kind is inferred from which field is present, so
-  // profiles saved before API keys existed keep working untouched.
+  // A profile carries up to two credentials: an API key (Go quota) and/or a
+  // cookie (Go quota plus Zen balance). Both under one name is the user's own
+  // assertion that they are the same account. The kind is inferred from which
+  // fields are present, so profiles saved before API keys keep working.
   if (explicitProfiles && Object.keys(explicitProfiles).length > 0) {
     for (const [name, p] of Object.entries(explicitProfiles)) {
       if (!p.enabled) continue;
@@ -3290,7 +3296,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       if (!accountLabel) accountLabel = 'Zen';
       if (!accountKey) accountKey = hashKey('opencode', `zen:${zen.workspaceId || ''}`);
     } else if (status !== 'ok') {
-      const remoteFail = ['unauthorized', 'sourceRateLimited', 'unavailable'];
+      const remoteFail = OPENCODE_REMOTE_FAIL_STATUSES;
       // Only reached when nothing produced windows. A stale API key would
       // otherwise read as "not configured" and leave the user nothing to fix.
       const surfaced = (remoteFail.includes(goApi.status) && { status: goApi.status, source: 'api' })
@@ -3304,11 +3310,15 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     // nothing already stored on the Hub.
     if (!accountKey && goApi.identity) accountKey = hashKey('opencode', goApi.identity);
     if (webAccountKey) accountKey = webAccountKey;
+    // Publish the key's own identity as an alias whenever one was used. The
+    // cookie's workspace identity wins above, so without this a device holding
+    // only the key would never group with the account it belongs to.
+    const apiAlias = goApi.identity ? hashKey('opencode', goApi.identity) : '';
     return normalizeLimitProvider({
       provider: 'opencode',
       accountKey,
       webAccountKey,
-      accountKeyAliases: webIdentity.aliases,
+      accountKeyAliases: [...webIdentity.aliases, apiAlias].filter(Boolean),
       accountLabel,
       source,
       sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
@@ -3388,7 +3398,7 @@ async function fetchOpenCodeApiProfile(profile, collectGoApi, nowMs, updatedAt, 
     }
     return row('ok', result.windows.map((window) => ({ ...window, source: 'web' })));
   } catch (error) {
-    if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
+    if (opencodeGoApi.isAbortError(error)) throw error;
     return row('unavailable', []);
   }
 }
@@ -3454,7 +3464,12 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     }
 
     if (status !== 'ok') {
-      const failStatus = goApi?.status || goWeb?.status || zen?.status || 'unauthorized';
+      // `notConfigured` from the API means "this account has no Go subscription",
+      // which is a fallback condition rather than a failure. Letting it win here
+      // would hide the cookie's own `unauthorized` and tell the user nothing is
+      // configured when what actually happened is that their cookie expired.
+      const failStatus = (OPENCODE_REMOTE_FAIL_STATUSES.includes(goApi?.status) && goApi.status)
+        || goWeb?.status || zen?.status || 'unauthorized';
       status = failStatus;
     }
 
@@ -3467,11 +3482,18 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       accountKey = hashKey('opencode', `cookie:${cookieHash}`);
     }
 
+    // A bound key must also be published as an alias. The same key on another
+    // device with no cookie identifies itself by that key alone, and without the
+    // alias the two devices would never group into one account.
+    const boundKeyAlias = api.apiKey
+      ? hashKey('opencode', opencodeGoApi.goApiIdentity(api.apiKey))
+      : '';
+
     return normalizeLimitProvider({
       provider: 'opencode',
       accountKey,
       webAccountKey: accountKey,
-      accountKeyAliases: webIdentity.aliases,
+      accountKeyAliases: [...webIdentity.aliases, boundKeyAlias].filter(Boolean),
       accountName: name,
       // Keep accountLabel as the profile name for pre-accountName renderers.
       // New renderers use planLabel for Go/Zen and accountName for identity.
@@ -3484,8 +3506,12 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       windows,
       balanceUsd
     });
-  } catch {
+  } catch (error) {
     clearTimeout(timer);
+    // Routing the API probe through this helper made it reachable by an abort,
+    // which the bare catch would have turned into a stale `unavailable` row and
+    // published over whatever superseded it. The lane is latest-wins.
+    if (opencodeGoApi.isAbortError(error)) throw error;
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return normalizeLimitProvider({
       provider: 'opencode', accountKey: hashKey('opencode', `cookie:${cookieHash}`),

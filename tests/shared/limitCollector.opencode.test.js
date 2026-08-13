@@ -608,11 +608,21 @@ test('an explicitly associated key and cookie give api then web then local', asy
 test('aggregation keeps the API source claim instead of flattening it to Web', async () => {
   // The renderer always reads stats through the device -> aggregate projection,
   // so a source the merge overwrites is a source the user never sees.
+  // A cookie-only account is never read with the ambient key, so reaching an
+  // API-sourced provider that also has a balance takes an explicitly bound
+  // profile. Stubbing around that would assert a state production cannot reach.
   const summary = await collectLimitsOnce(
-    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, apiKey: 'key-work', cookie: 'sess=1' } }
+    },
     {
       now: () => now403,
-      opencodeCollectGoApi: async () => goApiOk,
+      opencodeCollectGoApi: async (d) => {
+        assert.strictEqual(d.apiKey, 'key-work');
+        return goApiOk;
+      },
       opencodeFetchGoWeb: async () => ({ status: 'unavailable', windows: [], workspaceId: '' }),
       opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 7.5 })
     }
@@ -621,6 +631,86 @@ test('aggregation keeps the API source claim instead of flattening it to Web', a
   const p = aggregated.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.source, 'api');
   assert.strictEqual(p.balanceUsd, 7.5);
+});
+
+test('a bound account groups with the same key on a device that has no cookie', async () => {
+  // Device A: key only. Device B: same key bound to a cookie. Without the key
+  // published as an alias on B, the fleet shows the one account twice.
+  const apiOnly = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, apiKey: 'key-work' } }
+    },
+    { now: () => now403, opencodeCollectGoApi: async () => goApiOk }
+  );
+  const bound = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, apiKey: 'key-work', cookie: 'sess=1' } }
+    },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => goApiOk,
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 4 })
+    }
+  );
+  const aggregated = aggregateLimits([
+    { deviceId: 'api-only', limits: apiOnly },
+    { deviceId: 'bound', limits: bound }
+  ], 0, now403);
+  assert.strictEqual(aggregated.providers.filter((x) => x.provider === 'opencode').length, 1);
+});
+
+test('a bound account surfaces an expired cookie instead of the API notConfigured', async () => {
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, apiKey: 'key-work', cookie: 'sess=1' } }
+    },
+    {
+      now: () => now403,
+      // No Go subscription behind the key: a fall-through, not a failure.
+      opencodeCollectGoApi: async () => ({ status: 'notConfigured', windows: [], identity: '' }),
+      opencodeFetchGoWeb: async () => ({ status: 'unauthorized', windows: [], workspaceId: '' }),
+      opencodeFetchZen: async () => ({ status: 'unauthorized', windows: [], balanceUsd: null })
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.status, 'unauthorized');
+});
+
+test('a cancelled probe discards the tick instead of publishing a per-account row', async () => {
+  // Routing the API probe through the cookie helper put an abort inside a catch
+  // that answers with a provider row. Swallowed, the cancelled account would
+  // publish a plausible-looking `unavailable` beside the other account's real
+  // data; rethrown, the whole provider probe is discarded for this tick.
+  const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        work: { enabled: true, apiKey: 'key-work', cookie: 'sess=1' },
+        other: { enabled: true, cookie: 'sess=other' }
+      }
+    },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => { throw abort; },
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => zenNone
+    }
+  );
+  const rows = summary.providers.filter((x) => x.provider === 'opencode');
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].status, 'unavailable');
+  // No account identity survives, so nothing is attributed to either profile.
+  assert.strictEqual(rows[0].accountName || '', '');
+  assert.strictEqual(rows[0].accountKey || '', '');
 });
 
 test('aggregation still refuses to call a local estimate Web', async () => {

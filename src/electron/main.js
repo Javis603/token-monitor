@@ -6518,11 +6518,22 @@ app.whenReady().then(() => {
             error: probe.status
           }];
         }
-        const [go, zen] = await Promise.all([
+        const [go, zen, apiProbe] = await Promise.all([
           opencodeWeb.fetchGoWeb(profile.cookie, {}),
-          opencodeWeb.fetchZen(profile.cookie, {})
+          opencodeWeb.fetchZen(profile.cookie, {}),
+          profile.apiKey ? probeOpenCodeApiKey(profile.apiKey) : null
         ]);
-        return [name, { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd }];
+        const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
+        // A bound key answers for Go on its own, so the row must not read as
+        // expired just because the cookie half died: the collector still has
+        // quota, and only the Zen balance is actually missing.
+        if (apiProbe?.status === 'ok') {
+          summary.go = true;
+          summary.linked = true;
+          summary.expired = false;
+          delete summary.error;
+        }
+        return [name, summary];
       })
     );
 
