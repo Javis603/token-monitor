@@ -10535,7 +10535,7 @@ async function init() {
   diagnosticsPanel?.render();
   publishViewState();
   await refreshHubInfo();
-  await refreshHubBuildStatus();
+  void refreshHubBuildStatus();
   await refreshTokscaleStatus();
   restartTimer();
   try {
@@ -10690,7 +10690,7 @@ els.saveSettingsButton.addEventListener('click', async () => {
   }
   await saveSettings(patch);
   await refreshHubInfo();
-  await refreshHubBuildStatus();
+  void refreshHubBuildStatus();
   await refreshStats();
 });
 
@@ -10699,7 +10699,7 @@ els.hubModeOptions.addEventListener('change', async (event) => {
   if (!(target instanceof HTMLInputElement) || target.name !== 'hubMode') return;
   await saveSettings({ hubMode: target.value });
   await refreshHubInfo();
-  await refreshHubBuildStatus();
+  void refreshHubBuildStatus();
   await refreshStats();
 });
 

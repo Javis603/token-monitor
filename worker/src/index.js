@@ -4,7 +4,7 @@ import currency from './shared/currency.js';
 import { aggregateDevices, mergeDeviceRecord, aggregateHistory } from './shared/usage.js';
 import { DEFAULT_STALE_AFTER_MS } from './shared/syncUploadInterval.js';
 import { deviceHistoryRevision, historyPreview, historyRevision } from './shared/history.js';
-import hubBuild from './shared/hubBuild.js';
+import hubBuildIdentity from './shared/hubBuildIdentity.js';
 
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -158,7 +158,7 @@ export class HubDO {
         role: 'hub',
         runtime: 'cloudflare-worker',
         version: 1,
-        hubBuild: hubBuild.currentHubBuild('cloudflare-worker'),
+        hubBuild: hubBuildIdentity.currentHubBuild('cloudflare-worker'),
         deviceCount: devices.length,
         secretRequired: Boolean(this.secret),
         now: new Date().toISOString()

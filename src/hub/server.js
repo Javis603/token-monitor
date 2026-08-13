@@ -12,7 +12,7 @@ const {
   subscriptionDocument
 } = require('../shared/subscriptionDisplay');
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
-const { currentHubBuild } = require('../shared/hubBuild');
+const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 

@@ -4,19 +4,19 @@
     "core": [
       {
         "revision": 1,
-        "buildId": "sha256:1ee9f50db3d80b492a9b9a5904c6ed3a05485aebf67a177b37c1f74202b8886f"
+        "buildId": "sha256:5e6cc748a0598374a232cfa7d9d7690c41528d25a1ff388a71c46f480a9d8602"
       }
     ],
     "node-hub": [
       {
         "revision": 1,
-        "buildId": "sha256:e83d085b4a61dc429e47f3873be2a6fbcb214c5844e9c4a2477c23ec422becea"
+        "buildId": "sha256:647d5adf089c359f557b4880ceb52b9447357324d3ab870b8ea25fe54d3ad0d3"
       }
     ],
     "cloudflare-worker": [
       {
         "revision": 1,
-        "buildId": "sha256:689070fc1e85157cc7e016291e8cc46baa01f328a17600691db487dd7a4caf2c"
+        "buildId": "sha256:a02f96b20ea72eb22ce4ee81f738023661742830f705c1f89fb71259ec41fd72"
       }
     ]
   }

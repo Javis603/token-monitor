@@ -3,13 +3,17 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { compareHubBuild, currentHubBuild } = require('../../src/shared/hubBuild');
+const { compareHubBuild } = require('../../src/shared/hubBuildComparison');
+const { currentHubBuild } = require('../../src/shared/hubBuildIdentity');
 const registry = require('../../src/shared/hubBuildRegistry.json');
 const {
+  WORKER_SHARED_MODULES,
   currentHubSourceBuildIds,
   latestEntry,
   updatedRegistry,
-  workerPackageBuildInput
+  workerLockBuildInput,
+  workerPackageBuildInput,
+  workerSharedPackageContents
 } = require('../../scripts/hub-build-manifest');
 
 test('Hub build registry matches the current core and runtime source closures', () => {
@@ -29,6 +33,47 @@ test('Worker package product version does not affect its build identity input', 
     workerPackageBuildInput({ ...common, version: '0.42.0' }),
     workerPackageBuildInput({ ...common, version: '0.43.0' })
   );
+});
+
+test('Worker resolved toolchain changes affect its build identity without following the product version', () => {
+  const lock = {
+    name: 'token-monitor-hub-worker',
+    version: '0.42.0',
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      '': { name: 'token-monitor-hub-worker', version: '0.42.0' },
+      'node_modules/wrangler': { version: '4.118.0', integrity: 'sha512:first' }
+    }
+  };
+  assert.equal(
+    workerLockBuildInput(lock),
+    workerLockBuildInput({
+      ...lock,
+      version: '0.43.0',
+      packages: { ...lock.packages, '': { ...lock.packages[''], version: '0.43.0' } }
+    })
+  );
+  assert.notEqual(
+    workerLockBuildInput(lock),
+    workerLockBuildInput({
+      ...lock,
+      packages: {
+        ...lock.packages,
+        'node_modules/wrangler': { version: '4.119.0', integrity: 'sha512:second' }
+      }
+    })
+  );
+});
+
+test('Worker runtime identity includes its generated CommonJS boundary', () => {
+  assert.match(workerSharedPackageContents(), /"type": "commonjs"/);
+  assert.notEqual(workerSharedPackageContents(), workerSharedPackageContents({ type: 'module' }));
+});
+
+test('desktop comparison changes do not alter the portable Hub core closure', () => {
+  assert.ok(WORKER_SHARED_MODULES.includes('hubBuildIdentity.js'));
+  assert.ok(!WORKER_SHARED_MODULES.includes('hubBuildComparison.js'));
 });
 
 test('Hub build registry advances only the component whose source changed', () => {
@@ -70,11 +115,43 @@ test('Hub build comparison distinguishes current, older, newer, and divergent bu
   assert.equal(compareHubBuild(null).status, 'legacy');
 });
 
+test('known historical revisions must retain their canonical build ids', () => {
+  const current = currentHubBuild('cloudflare-worker');
+  const expectedNext = {
+    ...current,
+    coreRevision: current.coreRevision + 1,
+    coreBuildId: 'sha256:expected-next-core',
+    runtimeRevision: current.runtimeRevision + 1,
+    runtimeBuildId: 'sha256:expected-next-runtime'
+  };
+  assert.equal(compareHubBuild(current, expectedNext).status, 'updateAvailable');
+  assert.equal(compareHubBuild({
+    ...current,
+    coreBuildId: 'sha256:custom-old-core'
+  }, expectedNext).status, 'unknown');
+  assert.equal(compareHubBuild({
+    ...current,
+    runtimeBuildId: 'sha256:custom-old-runtime'
+  }, expectedNext).status, 'unknown');
+  assert.equal(compareHubBuild({
+    ...current,
+    coreBuildId: 'sha256:custom-known-future-core'
+  }, {
+    ...current,
+    coreRevision: current.coreRevision - 1,
+    coreBuildId: 'sha256:older-expected-core'
+  }).status, 'unknown');
+});
+
 test('mixed component directions are treated as unknown instead of suggesting a downgrade', () => {
   const current = currentHubBuild('node-hub');
   assert.equal(compareHubBuild({
     ...current,
     coreRevision: current.coreRevision + 1,
-    runtimeRevision: current.runtimeRevision - 1
+    coreBuildId: 'sha256:future-core'
+  }, {
+    ...current,
+    runtimeRevision: current.runtimeRevision + 1,
+    runtimeBuildId: 'sha256:expected-newer-runtime'
   }).status, 'unknown');
 });

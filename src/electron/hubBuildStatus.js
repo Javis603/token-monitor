@@ -1,6 +1,7 @@
 'use strict';
 
-const { compareHubBuild, normalizeRuntime } = require('../shared/hubBuild');
+const { compareHubBuild } = require('../shared/hubBuildComparison');
+const { normalizeRuntime } = require('../shared/hubBuildIdentity');
 
 function healthRuntime(payload) {
   return normalizeRuntime(payload?.hubBuild?.runtime || payload?.runtime || '');

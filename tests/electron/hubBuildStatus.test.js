@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { currentHubBuild } = require('../../src/shared/hubBuild');
+const { currentHubBuild } = require('../../src/shared/hubBuildIdentity');
 const { healthRuntime, probeHubBuild } = require('../../src/electron/hubBuildStatus');
 
 function response(payload, options = {}) {
