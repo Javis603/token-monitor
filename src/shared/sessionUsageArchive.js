@@ -223,6 +223,11 @@ function addArchivedSession(period, session) {
   const cacheWrite = Math.max(0, Math.round(numberValue(archived.cacheWriteTokens)));
   const output = Math.max(0, Math.round(numberValue(archived.outputTokens)));
 
+  // Session archives created before component provenance cannot distinguish a
+  // real zero from detail that was never recorded. Retain known fields below,
+  // while making the aggregate period classify only the unproven remainder as
+  // unknown.
+  if (tokens > 0) period.capabilities.tokenComponents = false;
   period.totalTokens += tokens;
   period.costUsd += cost;
   period.cacheReadTokens += cacheRead;

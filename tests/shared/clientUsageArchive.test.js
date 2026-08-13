@@ -201,6 +201,7 @@ test('archived client usage restores the cache/output breakdown from its session
   assert.equal(summary.allTime.modelCacheReads['claude-3-5-sonnet'], 700);
   assert.equal(summary.allTime.modelCacheWrites['claude-3-5-sonnet'], 110);
   assert.equal(summary.allTime.modelOutputs['claude-3-5-sonnet'], 90);
+  assert.equal(summary.allTime.capabilities.tokenComponents, false);
 });
 
 test('archived client usage is ignored and pruned once the client is tracked again', () => {

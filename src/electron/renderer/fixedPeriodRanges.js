@@ -132,24 +132,48 @@
     return value.tokenComponentsAvailable === true ? 0 : Math.max(0, finiteNumber(value.tokens));
   }
 
+  function liveComponentValues(totalValue, cacheReadValue, cacheWriteValue, outputValue, exact) {
+    const total = Math.max(0, finiteNumber(totalValue));
+    const cacheReadTokens = Math.min(total, Math.max(0, finiteNumber(cacheReadValue)));
+    const cacheWriteTokens = Math.min(
+      total - cacheReadTokens,
+      Math.max(0, finiteNumber(cacheWriteValue))
+    );
+    const outputTokens = Math.min(
+      total - cacheReadTokens - cacheWriteTokens,
+      Math.max(0, finiteNumber(outputValue))
+    );
+    return {
+      cacheReadTokens,
+      cacheWriteTokens,
+      outputTokens,
+      unclassifiedTokens: exact
+        ? 0
+        : Math.max(0, total - cacheReadTokens - cacheWriteTokens - outputTokens)
+    };
+  }
+
   function rowFromLivePeriod(period, date, previous = {}) {
-    const tokenComponentsAvailable = period?.capabilities?.tokenComponents !== false;
+    const tokenComponentsAvailable = period?.capabilities?.tokenComponents === true;
     const perClient = {};
     const clients = new Set([
       ...Object.keys(period?.clients || {}),
       ...Object.keys(period?.clientCosts || {})
     ]);
     for (const client of clients) {
+      const tokens = finiteNumber(period?.clients?.[client]);
+      const components = liveComponentValues(
+        tokens,
+        period?.clientCacheReads?.[client],
+        period?.clientCacheWrites?.[client],
+        period?.clientOutputs?.[client],
+        tokenComponentsAvailable
+      );
       perClient[client] = {
-        tokens: finiteNumber(period?.clients?.[client]),
+        tokens,
         cost: finiteNumber(period?.clientCosts?.[client]),
         messages: finiteNumber(previous?.perClient?.[client]?.messages),
-        unclassifiedTokens: tokenComponentsAvailable ? 0 : finiteNumber(period?.clients?.[client]),
-        ...(tokenComponentsAvailable ? {
-          cacheReadTokens: finiteNumber(period?.clientCacheReads?.[client]),
-          cacheWriteTokens: finiteNumber(period?.clientCacheWrites?.[client]),
-          outputTokens: finiteNumber(period?.clientOutputs?.[client])
-        } : {})
+        ...components
       };
     }
     const perModel = {};
@@ -158,26 +182,33 @@
       ...Object.keys(period?.modelCosts || {})
     ]);
     for (const model of models) {
+      const tokens = finiteNumber(period?.models?.[model]);
+      const components = liveComponentValues(
+        tokens,
+        period?.modelCacheReads?.[model],
+        period?.modelCacheWrites?.[model],
+        period?.modelOutputs?.[model],
+        tokenComponentsAvailable
+      );
       perModel[model] = {
-        tokens: finiteNumber(period?.models?.[model]),
+        tokens,
         cost: finiteNumber(period?.modelCosts?.[model]),
-        unclassifiedTokens: tokenComponentsAvailable ? 0 : finiteNumber(period?.models?.[model]),
-        ...(tokenComponentsAvailable ? {
-          cacheReadTokens: finiteNumber(period?.modelCacheReads?.[model]),
-          cacheWriteTokens: finiteNumber(period?.modelCacheWrites?.[model]),
-          outputTokens: finiteNumber(period?.modelOutputs?.[model])
-        } : {})
+        ...components
       };
     }
+    const totalComponents = liveComponentValues(
+      period?.totalTokens,
+      period?.cacheReadTokens,
+      period?.cacheWriteTokens,
+      period?.outputTokens,
+      tokenComponentsAvailable
+    );
     return {
       ...previous,
       date,
       tokens: finiteNumber(period?.totalTokens),
       cost: finiteNumber(period?.costUsd),
-      cacheReadTokens: tokenComponentsAvailable ? finiteNumber(period?.cacheReadTokens) : 0,
-      cacheWriteTokens: tokenComponentsAvailable ? finiteNumber(period?.cacheWriteTokens) : 0,
-      outputTokens: tokenComponentsAvailable ? finiteNumber(period?.outputTokens) : 0,
-      unclassifiedTokens: tokenComponentsAvailable ? 0 : finiteNumber(period?.totalTokens),
+      ...totalComponents,
       tokenComponentsAvailable,
       perClient,
       perModel

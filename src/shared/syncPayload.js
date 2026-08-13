@@ -285,16 +285,23 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
     logger(`project detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
   let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
-  const canRetryWithoutProjects = response.status === 413
-    && serialized.payload?.allTimeProjectsOmitted !== true
-    && projectEntries(serialized.payload?.allTime) > 0;
-  if (canRetryWithoutProjects) {
+  const retrySerialized = response.status === 413
+    ? serializeSyncPayload(summary, {
+        omitHistoryTokenComponents: true,
+        omitAllTimeProjects: true
+      })
+    : null;
+  const canRetryReduced = response.status === 413
+    && retrySerialized?.body !== serialized.body;
+  if (canRetryReduced) {
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
-    serialized = serializeSyncPayload(summary, { omitAllTimeProjects: true });
-    if (typeof logger === 'function') logger('hub rejected the payload; retrying once without all-time projects');
+    serialized = retrySerialized;
+    if (typeof logger === 'function') {
+      logger('hub rejected the payload; retrying once without additive History components or all-time projects');
+    }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }
-  return { response, payload: serialized.payload, retried: canRetryWithoutProjects };
+  return { response, payload: serialized.payload, retried: canRetryReduced };
 }
 
 module.exports = {

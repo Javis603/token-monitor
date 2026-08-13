@@ -215,6 +215,102 @@ test('live rollover keeps graph components and classifies only the later delta a
   assert.equal(day.perModel.opus.unclassifiedTokens, 20);
 });
 
+test('live-only archive preserves native day, client, and model components', () => {
+  const archive = captureLiveDailyHistory({}, {
+    capabilities: { tokenComponents: true },
+    totalTokens: 100,
+    costUsd: 1,
+    cacheReadTokens: 60,
+    cacheWriteTokens: 10,
+    outputTokens: 20,
+    clients: { claude: 100 },
+    clientCosts: { claude: 1 },
+    clientCacheReads: { claude: 60 },
+    clientCacheWrites: { claude: 10 },
+    clientOutputs: { claude: 20 },
+    models: { opus: 100 },
+    modelCosts: { opus: 1 },
+    modelCacheReads: { opus: 60 },
+    modelCacheWrites: { opus: 10 },
+    modelOutputs: { opus: 20 },
+    clientModels: { claude: { opus: 100 } },
+    clientModelCosts: { claude: { opus: 1 } }
+  }, { todayKey: '2026-08-05' });
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-05'
+  }), '2026-08-05');
+  const day = restored.daily[0];
+
+  assert.equal(day.tokens, 100);
+  assert.equal(day.cacheReadTokens, 60);
+  assert.equal(day.cacheWriteTokens, 10);
+  assert.equal(day.outputTokens, 20);
+  assert.equal(day.unclassifiedTokens, 0);
+  assert.equal(day.tokenComponentsAvailable, true);
+  assert.equal(day.perClient.claude.cacheReadTokens, 60);
+  assert.equal(day.perModel.opus.outputTokens, 20);
+});
+
+test('equal-token live capture upgrades an earlier aggregate-only snapshot', () => {
+  let archive = captureLiveDailyHistory({}, {
+    ...livePeriod(100, 1),
+    capabilities: { tokenComponents: false }
+  }, { todayKey: '2026-08-05' });
+  archive = captureLiveDailyHistory(archive, {
+    ...livePeriod(100, 1),
+    capabilities: { tokenComponents: true },
+    cacheReadTokens: 60,
+    cacheWriteTokens: 10,
+    outputTokens: 20,
+    clientCacheReads: { claude: 60 },
+    clientCacheWrites: { claude: 10 },
+    clientOutputs: { claude: 20 },
+    modelCacheReads: { opus: 60 },
+    modelCacheWrites: { opus: 10 },
+    modelOutputs: { opus: 20 }
+  }, { todayKey: '2026-08-05' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-05'
+  }), '2026-08-05');
+  assert.equal(restored.daily[0].tokenComponentsAvailable, true);
+  assert.equal(restored.daily[0].cacheReadTokens, 60);
+});
+
+test('live rollover never inflates a shrinking attribution bucket', () => {
+  const exactGraph = graph('2026-08-05', [{
+    client: 'claude',
+    modelId: 'opus',
+    tokens: { input: 10, output: 20, cacheRead: 60, cacheWrite: 10, reasoning: 0 },
+    cost: 1,
+    messages: 1
+  }]);
+  let archive = captureDailyHistoryArchive({}, exactGraph, { todayKey: '2026-08-05' });
+  archive = captureLiveDailyHistory(archive, {
+    totalTokens: 150,
+    costUsd: 1.5,
+    clients: { claude: 50, codex: 100 },
+    clientCosts: { claude: 0.5, codex: 1 },
+    models: { opus: 50, gpt: 100 },
+    modelCosts: { opus: 0.5, gpt: 1 },
+    clientModels: { claude: { opus: 50 }, codex: { gpt: 100 } },
+    clientModelCosts: { claude: { opus: 0.5 }, codex: { gpt: 1 } },
+    capabilities: { tokenComponents: false }
+  }, { todayKey: '2026-08-05' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-06'
+  }), '2026-08-06');
+  const day = restored.daily[0];
+
+  assert.equal(day.tokens, 150);
+  assert.equal(day.perClient.claude.tokens, 50);
+  assert.equal(day.perClient.codex.tokens, 100);
+  assert.equal(day.unclassifiedTokens, 150);
+  assert.equal(day.cacheReadTokens, 0);
+  assert.equal(day.outputTokens, 0);
+});
+
 test('live snapshot keeps model-less remainder under its original client', () => {
   const archive = captureLiveDailyHistory({}, {
     totalTokens: 150,

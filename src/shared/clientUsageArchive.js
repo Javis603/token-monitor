@@ -161,6 +161,10 @@ function targetPeriod(summary, periodName) {
 function addClientUsage(period, client, usage) {
   const tokens = Math.max(0, Math.round(numberValue(usage?.totalTokens)));
   const cost = numberValue(usage?.costUsd);
+  // Existing client archives predate component provenance. Keep any component
+  // detail that their sessions can prove, but do not present the remainder as
+  // an exact cache miss split.
+  if (tokens > 0) period.capabilities.tokenComponents = false;
   period.totalTokens += tokens;
   period.costUsd += cost;
   if (tokens > 0) period.clients[client] = (period.clients[client] || 0) + tokens;

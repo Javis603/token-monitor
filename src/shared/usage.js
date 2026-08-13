@@ -115,6 +115,7 @@ function normalizeIsoTimestamp(value) {
 
 function emptyPeriod() {
   return {
+    capabilities: { tokenComponents: true },
     totalTokens: 0,
     costUsd: 0,
     cacheReadTokens: 0,
@@ -544,6 +545,21 @@ function normalizePeriod(input, options = {}) {
   if (!input || typeof input !== 'object') return period;
   const projectsEnabled = options.projectsEnabled !== false;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
+  const componentCapability = input.capabilities?.tokenComponents;
+  const hasLegacyComponentShape = [
+    'cacheReadTokens',
+    'cache_read_tokens',
+    'cacheWriteTokens',
+    'cache_write_tokens',
+    'outputTokens',
+    'output_tokens'
+  ].some((key) => hasOwn(input, key));
+  // Pre-capability producers already sent the component counters on ordinary
+  // periods, so their shape remains trustworthy. An aggregate-only fallback
+  // has only a total; missing provenance there must not be normalized into an
+  // apparently exact cache-miss split.
+  period.capabilities.tokenComponents = componentCapability === true
+    || (componentCapability !== false && (period.totalTokens === 0 || hasLegacyComponentShape));
   period.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
@@ -687,17 +703,14 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
 }
 
 function fallbackUsagePeriod(json) {
-  return {
-    totalTokens: Math.max(0, Math.round(tokenValue(json))),
-    costUsd: costValue(json),
-    clients: {},
-    clientCosts: {},
-    models: {},
-    modelCosts: {},
-    clientModels: {},
-    clientModelCosts: {},
-    sessions: {}
-  };
+  const period = emptyPeriod();
+  period.totalTokens = Math.max(0, Math.round(tokenValue(json)));
+  period.costUsd = costValue(json);
+  // Aggregate-only Tokscale output proves the total but not how it divides
+  // across cache read/write and output. Preserve that distinction through the
+  // hub instead of letting normalizePeriod's zero defaults imply a cache miss.
+  period.capabilities.tokenComponents = period.totalTokens === 0;
+  return period;
 }
 
 // Build the public aggregate and exact internal per-client partitions in one
@@ -1015,6 +1028,8 @@ function aggregateHistory(devices) {
 // emptyPeriod()-shaped object). Shared by device aggregation and the WSL merge so
 // the two never diverge on which period fields exist.
 function addPeriodInto(target, source) {
+  target.capabilities.tokenComponents = target.capabilities.tokenComponents === true
+    && source.capabilities?.tokenComponents === true;
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
   target.cacheReadTokens += source.cacheReadTokens;
@@ -1193,6 +1208,12 @@ function applyPeriodDelta(base, freshToday, anchorToday) {
 }
 
 function deltaValue(base, fresh, anchor, key) {
+  if (key === 'tokenComponents') {
+    // A warm tick may introduce aggregate-only fallback data. Boolean
+    // provenance is not arithmetically subtractable, so retain exactness only
+    // while both the durable base and the fresh replacement prove it.
+    return base === true && fresh === true;
+  }
   if (key === 'startedAt') {
     const baseMs = timestampMs(base);
     const freshMs = timestampMs(fresh);

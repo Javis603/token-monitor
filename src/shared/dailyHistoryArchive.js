@@ -69,6 +69,57 @@ function normalizeObservation(value) {
   };
 }
 
+function normalizeComponentValues(value, totalTokens) {
+  const cacheReadTokens = Math.max(0, Math.round(num(value?.cacheReadTokens)));
+  const cacheWriteTokens = Math.max(0, Math.round(num(value?.cacheWriteTokens)));
+  const outputTokens = Math.max(0, Math.round(num(value?.outputTokens)));
+  if (cacheReadTokens + cacheWriteTokens + outputTokens > totalTokens) return null;
+  return {
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+    ...(outputTokens > 0 ? { outputTokens } : {})
+  };
+}
+
+function observationTokenMaps(observations) {
+  const perClient = {};
+  const perModel = {};
+  let totalTokens = 0;
+  for (const observation of Object.values(observations || {})) {
+    const tokens = Math.max(0, Math.round(num(observation?.tokens)));
+    totalTokens += tokens;
+    perClient[observation.client] = num(perClient[observation.client]) + tokens;
+    perModel[observation.modelId] = num(perModel[observation.modelId]) + tokens;
+  }
+  return { totalTokens, perClient, perModel };
+}
+
+function normalizeComponentSummary(value, observations) {
+  if (value?.tokenComponentsAvailable !== true) return null;
+  const tokenMaps = observationTokenMaps(observations);
+  const totals = normalizeComponentValues(value, tokenMaps.totalTokens);
+  if (!totals) return null;
+
+  const normalizeMap = (source, tokensByKey) => {
+    const result = {};
+    for (const [key, tokens] of Object.entries(tokensByKey)) {
+      const normalized = normalizeComponentValues(source?.[key], tokens);
+      if (!normalized) return null;
+      if (Object.keys(normalized).length > 0) result[key] = normalized;
+    }
+    return result;
+  };
+  const perClient = normalizeMap(value.perClient, tokenMaps.perClient);
+  const perModel = normalizeMap(value.perModel, tokenMaps.perModel);
+  if (!perClient || !perModel) return null;
+  return {
+    tokenComponentsAvailable: true,
+    ...totals,
+    perClient,
+    perModel
+  };
+}
+
 function normalizeDay(value, fallbackDate = '') {
   const date = String(value?.date || fallbackDate).slice(0, 10);
   if (!DAY_KEY_RE.test(date)) return null;
@@ -82,10 +133,12 @@ function normalizeDay(value, fallbackDate = '') {
     observations[observationKey(observation)] = observation;
   }
   if (Object.keys(observations).length === 0 && num(value?.activeTimeMs) <= 0) return null;
+  const componentSummary = normalizeComponentSummary(value?.componentSummary, observations);
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),
-    observations
+    observations,
+    ...(componentSummary ? { componentSummary } : {})
   };
 }
 
@@ -269,7 +322,30 @@ function periodLiveDay(period, date) {
     );
   }
 
-  const day = normalizeDay({ date, activeTimeMs: 0, observations: [...observations.values()] }, date);
+  const componentSummary = period.capabilities?.tokenComponents === true
+    ? {
+        tokenComponentsAvailable: true,
+        cacheReadTokens: num(period.cacheReadTokens),
+        cacheWriteTokens: num(period.cacheWriteTokens),
+        outputTokens: num(period.outputTokens),
+        perClient: Object.fromEntries([...clientIds].map((client) => [client, {
+          cacheReadTokens: num(period.clientCacheReads?.[client]),
+          cacheWriteTokens: num(period.clientCacheWrites?.[client]),
+          outputTokens: num(period.clientOutputs?.[client])
+        }])),
+        perModel: Object.fromEntries(Object.keys(period.models || {}).map((model) => [model, {
+          cacheReadTokens: num(period.modelCacheReads?.[model]),
+          cacheWriteTokens: num(period.modelCacheWrites?.[model]),
+          outputTokens: num(period.modelOutputs?.[model])
+        }]))
+      }
+    : null;
+  const day = normalizeDay({
+    date,
+    activeTimeMs: 0,
+    observations: [...observations.values()],
+    ...(componentSummary ? { componentSummary } : {})
+  }, date);
   return day && Object.keys(day.observations).length > 0 ? day : null;
 }
 
@@ -281,11 +357,26 @@ function dayCost(day) {
   return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.cost), 0);
 }
 
+function dayComponentQuality(day) {
+  if (day?.componentSummary?.tokenComponentsAvailable === true) return 2;
+  const usage = Object.values(day?.observations || {}).filter((observation) => num(observation.tokens) > 0);
+  if (usage.length === 0 || usage.every((observation) => observation.tokenComponentsAvailable === true)) return 2;
+  return usage.some((observation) => (
+    num(observation.cacheReadTokens) > 0
+    || num(observation.cacheWriteTokens) > 0
+    || num(observation.outputTokens) > 0
+  )) ? 1 : 0;
+}
+
 function liveDayIsGreater(incoming, previous) {
   const incomingTokens = dayTokens(incoming);
   const previousTokens = dayTokens(previous);
   if (incomingTokens !== previousTokens) return incomingTokens > previousTokens;
-  return dayCost(incoming) > dayCost(previous);
+  const qualityDifference = dayComponentQuality(incoming) - dayComponentQuality(previous);
+  if (qualityDifference !== 0) return qualityDifference > 0;
+  // Equal usage can receive a corrected price in either direction. The later
+  // live observation is authoritative once its provenance quality is equal.
+  return dayCost(incoming) !== dayCost(previous);
 }
 
 function mergeLiveDayMetadata(liveDay, previousDay) {
@@ -293,14 +384,26 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
-    const previousUnclassified = Math.min(num(previous.tokens), num(previous.unclassifiedTokens));
-    const previousClassified = Math.max(0, num(previous.tokens) - previousUnclassified);
-    const retainedClassified = Math.min(num(observation.tokens), previousClassified);
-    const unclassifiedTokens = Math.max(0, num(observation.tokens) - retainedClassified);
+    if (liveDay.componentSummary) {
+      return [key, {
+        ...observation,
+        messages: Math.max(observation.messages, previous.messages),
+        ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
+          ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
+          : {})
+      }];
+    }
+    const incomingTokens = num(observation.tokens);
+    const previousTokens = num(previous.tokens);
+    const canRetainPreviousComponents = incomingTokens >= previousTokens;
+    const previousUnclassified = Math.min(previousTokens, num(previous.unclassifiedTokens));
+    const unclassifiedTokens = canRetainPreviousComponents
+      ? previousUnclassified + (incomingTokens - previousTokens)
+      : incomingTokens;
     return [key, {
       ...observation,
       messages: Math.max(observation.messages, previous.messages),
-      ...(retainedClassified > 0 ? {
+      ...(canRetainPreviousComponents && previousTokens - previousUnclassified > 0 ? {
         cacheReadTokens: num(previous.cacheReadTokens),
         cacheWriteTokens: num(previous.cacheWriteTokens),
         outputTokens: num(previous.outputTokens)
@@ -373,6 +476,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     .map((day) => ({
       date: day.date,
       activeTimeMs: day.activeTimeMs,
+      ...(day.componentSummary ? { tokenComponentSummary: day.componentSummary } : {}),
       clients: Object.values(day.observations)
         .sort((left, right) => observationKey(left).localeCompare(observationKey(right)))
         .map((observation) => ({

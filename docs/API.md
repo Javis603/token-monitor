@@ -56,6 +56,9 @@ Example payload:
   "historyAvailable": true,
   "trackedClients": ["codex"],
   "today": {
+    "capabilities": {
+      "tokenComponents": true
+    },
     "totalTokens": 1234,
     "costUsd": 0.01,
     "cacheReadTokens": 1100,
@@ -205,6 +208,8 @@ Because the gate is all-or-nothing per entry, `timedOutputTokens ≤ outputToken
 The collector satisfies that bound by construction, but the hub and the Worker normalize records posted by any agent, so normalization **enforces** it: a `timedOutputTokens` larger than the record's own `outputTokens` is capped rather than trusted. Ingest is a trust boundary here, and this value divides straight into a headline rate.
 
 All three are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses to carry a `today` rescan into `month` and `allTime`. The one case where `timedOutputTokens` and a full rescan can disagree is a session that spans the boundary and starts or stops reporting durations partway through, since a rescan then re-gates the whole session on its combined state; the next full scan reconciles it. Closing even that needs a per-message timed-output counter from tokscale.
+
+Each native period may include `capabilities.tokenComponents`. Current producers set it to `true` when cache read/write and output were derived from individual Tokscale rows, and to `false` when Tokscale supplied only an aggregate fallback total. A missing marker remains accepted for older DAY / MONTH / TOTAL payloads, but fixed-range live-day derivation requires explicit `true`; otherwise the exact token total is retained and its component remainder is classified as `Unclassified` rather than silently treated as cache miss. Device aggregation propagates `false` fail closed.
 
 `trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
 

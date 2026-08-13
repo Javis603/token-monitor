@@ -308,7 +308,16 @@ test('postSyncPayload retries a legacy 413 once without all-time projects', asyn
     bodies.push(JSON.parse(options.body));
     return responses.shift();
   }, 'http://hub/api/ingest', {
-    summary: { allTime: { totalTokens: 5, projects: { app: { label: 'App', tokens: 5, clients: {} } } } },
+    summary: {
+      periodWindows: { today: { key: '2026-08-13' } },
+      history: {
+        daily: [{
+          date: '2026-08-13', tokens: 5, cacheReadTokens: 5,
+          tokenComponentsAvailable: true, perClient: {}, perModel: {}
+        }]
+      },
+      allTime: { totalTokens: 5, projects: { app: { label: 'App', tokens: 5, clients: {} } } }
+    },
     logger: (message) => logs.push(message)
   });
 
@@ -316,8 +325,40 @@ test('postSyncPayload retries a legacy 413 once without all-time projects', asyn
   assert.equal(retried, true);
   assert.equal(Object.hasOwn(bodies[0].allTime, 'projects'), true);
   assert.equal(Object.hasOwn(bodies[1].allTime, 'projects'), false);
+  assert.equal(bodies[0].history.daily[0].tokenComponentsAvailable, true);
+  assert.equal(Object.hasOwn(bodies[1].history.daily[0], 'tokenComponentsAvailable'), false);
   assert.equal(payload.allTimeProjectsOmitted, true);
   assert.equal(logs.length, 1);
+});
+
+test('postSyncPayload retries a legacy 413 when only History components can be reduced', async () => {
+  const bodies = [];
+  const responses = [
+    { status: 413, ok: false, async arrayBuffer() { return new ArrayBuffer(0); } },
+    { status: 200, ok: true }
+  ];
+  const { response, retried } = await postSyncPayload(async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return responses.shift();
+  }, 'http://hub/api/ingest', {
+    summary: {
+      periodWindows: { today: { key: '2026-08-13' } },
+      history: {
+        daily: [{
+          date: '2026-08-13', tokens: 100, cacheReadTokens: 60,
+          cacheWriteTokens: 10, outputTokens: 20,
+          tokenComponentsAvailable: true, perClient: {}, perModel: {}
+        }]
+      },
+      allTime: { totalTokens: 100 }
+    }
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(retried, true);
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].history.daily[0].tokenComponentsAvailable, true);
+  assert.equal(Object.hasOwn(bodies[1].history.daily[0], 'tokenComponentsAvailable'), false);
 });
 
 test('postSyncPayload reports the actual reduced size after budget omission', async () => {

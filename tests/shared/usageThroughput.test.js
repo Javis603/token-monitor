@@ -142,6 +142,13 @@ test('normalizePeriod accepts both spellings and defaults an older payload to ze
   assert.equal(legacy.timedTokens, 0);
   assert.equal(legacy.timedOutputTokens, 0);
   assert.equal(legacy.timedDurationMs, 0);
+  assert.equal(legacy.capabilities.tokenComponents, false);
+  assert.equal(normalizePeriod({
+    totalTokens: 5,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0
+  }).capabilities.tokenComponents, true);
 });
 
 test('normalization caps timedOutputTokens at the output it claims to have timed', () => {
@@ -266,6 +273,18 @@ test('an unattributed fallback period reads as no throughput data, never NaN', (
   }
   assert.equal(merged.timedOutputTokens, timed.timedOutputTokens, 'the fallback adds no phantom throughput');
   assert.equal(normalizePeriod(fallback).timedOutputTokens, 0);
+});
+
+test('aggregate fallback component provenance survives normalization and warm deltas', () => {
+  const exactBase = extractUsageFromTokscale({ entries: [tokscaleEntry()] });
+  const exactAnchor = extractUsageFromTokscale({ entries: [tokscaleEntry()] });
+  const aggregateFallback = extractUsageFromTokscale({ totalTokens: 200, totalCost: 2 });
+
+  assert.equal(normalizePeriod(aggregateFallback).capabilities.tokenComponents, false);
+  assert.equal(
+    applyPeriodDelta(exactBase, aggregateFallback, exactAnchor).capabilities.tokenComponents,
+    false
+  );
 });
 
 test('a targeted watch tick lands on the same throughput as a full rescan', () => {

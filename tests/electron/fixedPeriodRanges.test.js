@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
 const { resolveRegionalLocale } = require('../../src/electron/renderer/i18n');
+const { extractUsageFromTokscale, normalizePeriod } = require('../../src/shared/usage');
 
 function day(date, tokens, client = 'claude', model = 'opus') {
   return {
@@ -245,6 +246,7 @@ test('live-only fixed ranges carry native token components through exact zero hi
     todayKey: '2026-08-12',
     daily: [],
     todayPeriod: {
+      capabilities: { tokenComponents: true },
       totalTokens: 100,
       costUsd: 1,
       cacheReadTokens: 60,
@@ -266,6 +268,61 @@ test('live-only fixed ranges carry native token components through exact zero hi
   assert.equal(result.period.cacheReadTokens, 60);
   assert.equal(result.period.clientCacheWrites.codex, 10);
   assert.equal(result.period.modelOutputs.gpt, 20);
+});
+
+test('aggregate-only live fallback remains exact in total but unclassified in components', () => {
+  const todayPeriod = normalizePeriod(extractUsageFromTokscale({
+    totalTokens: 100,
+    totalCost: 1
+  }));
+  const result = ranges.fixedPeriodSnapshot('last7', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [],
+    todayPeriod
+  });
+
+  assert.equal(todayPeriod.capabilities.tokenComponents, false);
+  assert.equal(result.period.totalTokens, 100);
+  assert.equal(result.period.capabilities.tokenComponents, false);
+  assert.equal(result.period.unclassifiedTokens, 100);
+  assert.equal(result.period.cacheReadTokens, 0);
+});
+
+test('partial live provenance preserves known components and classifies only the remainder', () => {
+  const result = ranges.fixedPeriodSnapshot('last7', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [],
+    todayPeriod: {
+      capabilities: { tokenComponents: false },
+      totalTokens: 100,
+      costUsd: 1,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 10,
+      outputTokens: 20,
+      clients: { codex: 100 },
+      clientCosts: { codex: 1 },
+      clientCacheReads: { codex: 60 },
+      clientCacheWrites: { codex: 10 },
+      clientOutputs: { codex: 20 },
+      models: { gpt: 100 },
+      modelCosts: { gpt: 1 },
+      modelCacheReads: { gpt: 60 },
+      modelCacheWrites: { gpt: 10 },
+      modelOutputs: { gpt: 20 }
+    }
+  });
+
+  assert.equal(result.period.capabilities.tokenComponents, false);
+  assert.equal(result.period.cacheReadTokens, 60);
+  assert.equal(result.period.cacheWriteTokens, 10);
+  assert.equal(result.period.outputTokens, 20);
+  assert.equal(result.period.unclassifiedTokens, 10);
+  assert.equal(result.period.clientUnclassifiedTokens.codex, 10);
+  assert.equal(result.period.modelUnclassifiedTokens.gpt, 10);
 });
 
 test('historical cost-only usage participates in a fixed range', () => {

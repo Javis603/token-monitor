@@ -38,6 +38,33 @@ function sumOutputTokens(breakdown, client = '') {
     + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
 }
 
+function exactComponentValues(value, totalTokens) {
+  const cacheReadTokens = Math.max(0, num(value?.cacheReadTokens));
+  const cacheWriteTokens = Math.max(0, num(value?.cacheWriteTokens));
+  const outputTokens = Math.max(0, num(value?.outputTokens));
+  if (cacheReadTokens + cacheWriteTokens + outputTokens > totalTokens) return null;
+  return { cacheReadTokens, cacheWriteTokens, outputTokens };
+}
+
+function applyExactComponentSummary(summary, totalTokens, perClient, perModel) {
+  if (summary?.tokenComponentsAvailable !== true) return null;
+  const totals = exactComponentValues(summary, totalTokens);
+  if (!totals) return null;
+  const clients = {};
+  for (const [key, value] of Object.entries(perClient)) {
+    const components = exactComponentValues(summary.perClient?.[key], num(value.tokens));
+    if (!components) return null;
+    clients[key] = components;
+  }
+  const models = {};
+  for (const [key, value] of Object.entries(perModel)) {
+    const components = exactComponentValues(summary.perModel?.[key], num(value.tokens));
+    if (!components) return null;
+    models[key] = components;
+  }
+  return { totals, clients, models };
+}
+
 // Folds tokscale `graph` output (contributions[].clients[]) into a per-day shape where a
 // day's total always equals the sum of its perClient and perModel stacks.
 function parseGraphResult(raw) {
@@ -102,6 +129,31 @@ function parseGraphResult(raw) {
       if (cacheWrite > 0) pm.cacheWriteTokens = num(pm.cacheWriteTokens) + cacheWrite;
       if (output > 0) pm.outputTokens = num(pm.outputTokens) + output;
       pm.unclassifiedTokens += unclassified;
+    }
+    const exactSummary = applyExactComponentSummary(
+      row.tokenComponentSummary,
+      tokens,
+      perClient,
+      perModel
+    );
+    if (exactSummary) {
+      cacheReadTokens = exactSummary.totals.cacheReadTokens;
+      cacheWriteTokens = exactSummary.totals.cacheWriteTokens;
+      outputTokens = exactSummary.totals.outputTokens;
+      unclassifiedTokens = 0;
+      tokenComponentsAvailable = true;
+      for (const [client, value] of Object.entries(perClient)) {
+        value.cacheReadTokens = exactSummary.clients[client].cacheReadTokens;
+        value.cacheWriteTokens = exactSummary.clients[client].cacheWriteTokens;
+        value.outputTokens = exactSummary.clients[client].outputTokens;
+        value.unclassifiedTokens = 0;
+      }
+      for (const [model, value] of Object.entries(perModel)) {
+        value.cacheReadTokens = exactSummary.models[model].cacheReadTokens;
+        value.cacheWriteTokens = exactSummary.models[model].cacheWriteTokens;
+        value.outputTokens = exactSummary.models[model].outputTokens;
+        value.unclassifiedTokens = 0;
+      }
     }
     contributions.push({
       date,
