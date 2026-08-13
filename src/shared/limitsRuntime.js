@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const {
   PROVIDER_CLEANUP_GRACE_MS,
+  normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   parseBoolean,
   parseLimitProviders,
@@ -14,6 +15,14 @@ const {
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
 } = require('./limitResetBoundary');
+const {
+  LIMITS_ADAPTIVE_BASE_MS,
+  createLimitsBurnState,
+  nextLimitsUrgencyRefresh,
+  pruneLimitsBurnState,
+  recordLimitsSample,
+  recordLimitsUrgencyAttempt
+} = require('./limitsBurnRate');
 const { runWithProbeDeadline } = require('./probeDeadline');
 const {
   DEFAULT_LIMITS_RETRY_BASE_MS,
@@ -167,7 +176,14 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
   let config = cloneValue(initialOptions);
   let enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
-  let refreshMs = normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
+  let refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
+  // Adaptive replaces the chosen interval with its own baseline rather than
+  // modifying it, so the stored limitsRefreshMs survives a round trip through
+  // adaptive and back. Everything downstream, including the refreshMs published
+  // on the wire, then describes the cadence actually in effect.
+  let refreshMs = refreshMode === 'adaptive'
+    ? LIMITS_ADAPTIVE_BASE_MS
+    : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
   let configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
   let runtimeEpoch = 1;
   let stopped = false;
@@ -177,7 +193,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   let pumpQueued = false;
   let intervalTimer = null;
   let resetTimer = null;
+  let urgencyTimer = null;
   let lastScheduledFullAt = 0;
+  const burnState = createLimitsBurnState();
   const listeners = new Set();
   const lanes = new Map();
   const providerQueue = [];
@@ -323,7 +341,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);
+    // Only sample once this runtime is actually polling. The constructor seeds
+    // rows from previousLimits that can be arbitrarily old, and pairing that
+    // seed with the first live probe would read a whole offline session's
+    // consumption as having happened in the milliseconds between the two.
+    if (started && !stopped) {
+      recordLimitsSample(burnState, snapshot, now());
+      pruneLimitsBurnState(burnState, snapshot);
+    }
     scheduleResetTimer();
+    scheduleUrgencyTimer();
     const published = cloneValue(snapshot);
     deps.onUpdate?.(published);
     for (const listener of listeners) listener(published);
@@ -350,6 +377,51 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       }
       scheduleResetTimer();
     }, next.delayMs);
+  }
+
+  function clearUrgencyTimer() {
+    if (urgencyTimer !== null) clearTimer(urgencyTimer);
+    urgencyTimer = null;
+  }
+
+  // A second data-driven timer alongside scheduleResetTimer(), active only in
+  // adaptive mode. The 5-minute baseline still applies to every provider; this
+  // inserts an earlier, provider-scoped probe for a quota whose burn rate says
+  // it is close to running out, never faster than the floor in limitsBurnRate.
+  // 'burn-rate' is deliberately absent from COOLDOWN_BYPASS_REASONS, so
+  // queueScope defers it whenever the lane is already backing off.
+  function scheduleUrgencyTimer() {
+    clearUrgencyTimer();
+    if (!started || stopped || !enabled || refreshMode !== 'adaptive') return;
+    const due = nextLimitsUrgencyRefresh(snapshot, burnState, now(), { baseRefreshMs: refreshMs });
+    if (!due) return;
+    urgencyTimer = setTimer(() => {
+      urgencyTimer = null;
+      // Recorded for every key rather than only the dispatched ones, so a scope
+      // skipped below still consumes its deadline instead of re-firing at once.
+      recordLimitsUrgencyAttempt(burnState, due.keys, now());
+      const dispatched = [];
+      for (const [index, scope] of (due.scopes || []).entries()) {
+        const provider = providerId(scope.provider);
+        const rows = snapshot.providers.filter((row) => row.provider === provider);
+        const strongIdentity = clean(scope.accountKey || scope.accountEmail || scope.accountName);
+        if (!configuredProviders.has(provider) || (rows.length > 1 && !strongIdentity)) continue;
+        // Held until the probe settles, not merely until it is dispatched. The
+        // lane is latest-wins, so re-scheduling a scope whose probe is still
+        // running aborts that probe: a provider slower than the floor would
+        // otherwise never publish a reading, only cancelled requests.
+        const key = due.keys[index];
+        dispatched.push(key);
+        burnState.inFlight.add(key);
+        void refresh(scope, 'burn-rate').finally(() => {
+          burnState.inFlight.delete(key);
+          scheduleUrgencyTimer();
+        });
+      }
+      // Only re-arm here for the scopes that did not start a probe; the rest
+      // re-arm from their own settle above.
+      if (dispatched.length === 0) scheduleUrgencyTimer();
+    }, due.delayMs);
   }
 
   function clearIntervalTimer() {
@@ -659,7 +731,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const previousProviders = configuredProviders;
     config = { ...config, ...cloneValue(nextOptions) };
     enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
-    refreshMs = normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
+    refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
+    refreshMs = refreshMode === 'adaptive'
+      ? LIMITS_ADAPTIVE_BASE_MS
+      : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
     configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
 
     for (const provider of previousProviders) {
@@ -675,6 +750,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
     if (!enabled) {
       clearIntervalTimer();
+      clearUrgencyTimer();
       if (resetTimer !== null) clearTimer(resetTimer);
       resetTimer = null;
       for (const lane of lanes.values()) {
@@ -778,6 +854,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     void refresh({}, 'startup');
     scheduleInterval(refreshMs);
     scheduleResetTimer();
+    scheduleUrgencyTimer();
   }
 
   function stop() {
@@ -785,6 +862,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     stopped = true;
     runtimeEpoch += 1;
     clearIntervalTimer();
+    clearUrgencyTimer();
     if (resetTimer !== null) clearTimer(resetTimer);
     resetTimer = null;
     for (const lane of lanes.values()) {

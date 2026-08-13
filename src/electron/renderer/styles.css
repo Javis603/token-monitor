@@ -661,6 +661,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .settings-panel .settings-item.hidden { display: none; }
 #windowsBackdropNote.hidden { display: none; }
+#limitsRefreshAdaptiveNote.hidden { display: none; }
 .settings-item-text {
   flex: 1 1 auto;
   min-width: 0;

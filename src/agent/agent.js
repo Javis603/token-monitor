@@ -6,7 +6,12 @@ const { defaultDeviceId, loadDotEnv, parseArgs, pidFilePath } = require('../shar
 const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
-const { normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limitCollector');
+const {
+  normalizeLimitsRefreshMode,
+  normalizeLimitsRefreshMs,
+  parseBoolean,
+  parseLimitProviders
+} = require('../shared/limitCollector');
 const { postSyncPayload } = require('../shared/syncPayload');
 const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
@@ -32,6 +37,7 @@ const commandTimeoutMs = Number(args.timeoutMs || process.env.TOKEN_MONITOR_TOKS
 const limitsEnabled = parseBoolean(args.limits ?? args.limitsEnabled ?? process.env.TOKEN_MONITOR_LIMITS_ENABLED, true);
 const limitProviders = parseLimitProviders(args.limitProviders ?? process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(',');
 const limitsRefreshMs = normalizeLimitsRefreshMs(args.limitsRefreshMs || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS);
+const limitsRefreshMode = normalizeLimitsRefreshMode(args.limitsRefreshMode || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE);
 const historyEnabled = parseBoolean(args.history ?? args.historyEnabled ?? process.env.TOKEN_MONITOR_HISTORY_ENABLED, true);
 const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
@@ -70,6 +76,7 @@ const usageOptions = {
 const limitsOptions = {
   limitsEnabled,
   limitProviders,
+  limitsRefreshMode,
   limitsRefreshMs,
   claudeWebCookie: '',
   opencodeLocalLimitsEnabled,
@@ -130,7 +137,7 @@ function registerPidFile(stopRuntime) {
 }
 
 async function main() {
-  const startupMessage = `Token Monitor agent device=${deviceId} hub=${hubUrl} intervalMs=${intervalMs} watch=${watchEnabled} projects=${projectsEnabled ? 'on' : 'off'} history=${historyEnabled ? 'on' : 'off'} sessionArchive=${sessionUsageArchiveEnabled ? 'on' : 'off'} limits=${limitsEnabled ? `${limitProviders || 'none'}:${limitsRefreshMs}ms` : 'off'}`;
+  const startupMessage = `Token Monitor agent device=${deviceId} hub=${hubUrl} intervalMs=${intervalMs} watch=${watchEnabled} projects=${projectsEnabled ? 'on' : 'off'} history=${historyEnabled ? 'on' : 'off'} sessionArchive=${sessionUsageArchiveEnabled ? 'on' : 'off'} limits=${limitsEnabled ? `${limitProviders || 'none'}:${limitsRefreshMode === 'adaptive' ? 'adaptive' : `${limitsRefreshMs}ms`}` : 'off'}`;
   if (dryRun) console.error(startupMessage);
   else console.log(startupMessage);
   if (!secret) console.warn('Warning: TOKEN_MONITOR_SECRET is not set. Posting without authorization header.');

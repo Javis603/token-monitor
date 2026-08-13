@@ -115,6 +115,13 @@ function normalizeLimitsRefreshMs(value) {
   return DEFAULT_LIMITS_REFRESH_MS;
 }
 
+// A scheduling policy, kept separate from limitsRefreshMs so that switching to
+// adaptive and back restores the interval the user had chosen, and so that no
+// consumer doing arithmetic on limitsRefreshMs has to handle a sentinel value.
+function normalizeLimitsRefreshMode(value) {
+  return String(value ?? '').trim().toLowerCase() === 'adaptive' ? 'adaptive' : 'fixed';
+}
+
 function hashKey(...parts) {
   const hash = crypto.createHash('sha256');
   for (const part of parts) hash.update(String(part || '')).update('\0');
@@ -3841,6 +3848,7 @@ module.exports = {
   parseClaudeCliUsageText,
   parseBoolean,
   parseLimitProviders,
+  normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   refreshClaudeAccessToken,
   refreshClaudeCredentials,

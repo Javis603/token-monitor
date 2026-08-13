@@ -53,7 +53,7 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -411,6 +411,7 @@ function defaultSettings() {
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
+    limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
@@ -5880,6 +5881,7 @@ app.whenReady().then(() => {
       serviceProviderDisplayOrder: patch.serviceProviderDisplayOrder !== undefined ? String(patch.serviceProviderDisplayOrder || '') : (settings.serviceProviderDisplayOrder || ''),
       hiddenServiceProviders: patch.hiddenServiceProviders !== undefined ? String(patch.hiddenServiceProviders || '') : (settings.hiddenServiceProviders || ''),
       serviceStatusRefreshMs: normalizeServiceStatusRefreshMs(patch.serviceStatusRefreshMs ?? settings.serviceStatusRefreshMs),
+      limitsRefreshMode: normalizeLimitsRefreshMode(patch.limitsRefreshMode ?? settings.limitsRefreshMode),
       limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),

@@ -44,6 +44,7 @@ test('diagnostic configuration projects effective normalized values without cred
     projectsEnabled: false,
     wslScanEnabled: false,
     syncUploadIntervalMs: 20 * 60 * 1000,
+    limitsRefreshMode: 'fixed',
     limitsRefreshMs: 5 * 60 * 1000
   });
   assert.equal(JSON.stringify(configuration).includes('secret'), false);

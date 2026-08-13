@@ -2,7 +2,11 @@
 
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
-const { normalizeLimitsRefreshMs, parseLimitProviders } = require('../shared/limitCollector');
+const {
+  normalizeLimitsRefreshMode,
+  normalizeLimitsRefreshMs,
+  parseLimitProviders
+} = require('../shared/limitCollector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
@@ -29,6 +33,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
   'limitProviders',
+  'limitsRefreshMode',
   'limitsRefreshMs',
   'opencodeLocalLimitsEnabled'
 ]);
@@ -103,6 +108,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
   return {
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
+    limitsRefreshMode: normalizeLimitsRefreshMode(settings.limitsRefreshMode),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
     claudeWebCookie: settings.claudeWebCookie
       || env.CLAUDE_WEB_COOKIE
@@ -148,6 +154,7 @@ function diagnosticConfigurationFromSettings(settings = {}, context = {}) {
     syncUploadIntervalMs: normalizeSyncUploadIntervalMs(
       context.syncUploadIntervalMs ?? settings.syncUploadIntervalMs
     ),
+    limitsRefreshMode: limits.limitsRefreshMode,
     limitsRefreshMs: limits.limitsRefreshMs
   };
 }

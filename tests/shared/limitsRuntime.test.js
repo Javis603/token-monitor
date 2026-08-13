@@ -595,6 +595,207 @@ test('limitsRefreshMs reconfigures only one runtime timer using elapsed cadence'
   runtime.stop();
 });
 
+function burnRateRuntime(clock, usedPercent, overrides = {}, config = {}) {
+  const calls = [];
+  const runtime = createLimitsRuntime(
+    { limitProviders: ['claude', 'kimi'], limitsRefreshMode: 'adaptive', ...config },
+    runtimeDeps({
+      autoStart: true,
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      probeProvider: async (provider, _config, context) => {
+        calls.push({ provider, reason: context.reason, scope: context.scope });
+        return [providerRow(provider, 'acct', 'Account', {
+          updatedAt: new Date(clock.now()).toISOString(),
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: usedPercent(provider) }]
+        })];
+      },
+      ...overrides
+    })
+  );
+  return { calls, runtime };
+}
+
+// A quota burning 20 points per 5-minute interval has 12 left, so it runs out in
+// three minutes. Waiting a full base interval would show that 12% right up to
+// the moment it became 0; the early probe bounds the error to the floor instead.
+test('a burning quota gets an early provider-scoped refresh before the base interval', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 68, kimi: 10 };
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider]);
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+    // Only the claude lane is close enough to exhaustion to earn one: kimi burned
+    // the same 10 points but has 80% left, so the base cadence still covers it.
+    assert.deepEqual(clock.delays(), [60_000, 300_000]);
+
+    clock.advance(60_000);
+    await waitFor(() => calls.length === 5, 'burn-rate refresh');
+    assert.equal(calls[4].provider, 'claude');
+    assert.equal(calls[4].reason, 'burn-rate');
+    assert.equal(calls[4].scope.provider, 'claude');
+    assert.equal(calls[4].scope.accountKey, 'acct');
+  } finally {
+    runtime.stop();
+  }
+  assert.deepEqual(clock.delays(), []);
+});
+
+// A provider lane is latest-wins, so scheduling a scope whose probe is still
+// running aborts that probe. A provider slower than the 60s floor would publish
+// nothing at all and only emit cancelled requests, which is worse than the base
+// cadence it replaced.
+test('a probe slower than the floor is never superseded by the next urgency tick', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 68, kimi: 10 };
+  const aborted = [];
+  let release = null;
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      const rows = [providerRow(provider, 'acct', 'Account', {
+        updatedAt: new Date(clock.now()).toISOString(),
+        windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+      })];
+      if (context.reason !== 'burn-rate') return rows;
+      return new Promise((resolve, reject) => {
+        context.signal?.addEventListener('abort', () => {
+          aborted.push(provider);
+          reject(new Error('aborted'));
+        });
+        release = () => resolve(rows);
+      });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+
+    clock.advance(60_000);
+    await waitFor(() => calls.length === 5, 'burn-rate probe');
+    assert.equal(calls[4].reason, 'burn-rate');
+    // The probe is still running. No second urgency probe may be armed for it.
+    assert.equal(clock.delays().includes(60_000), false);
+
+    clock.advance(120_000);
+    assert.equal(calls.length, 5);
+    assert.deepEqual(aborted, []);
+
+    release();
+    await waitFor(
+      () => clock.delays().some((delay) => delay < 300_000),
+      'urgency re-armed after settle'
+    );
+  } finally {
+    release?.();
+    runtime.stop();
+  }
+});
+
+test('fixed mode never schedules an early refresh', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 68, kimi: 10 };
+  const { calls, runtime } = burnRateRuntime(
+    clock,
+    (provider) => used[provider],
+    {},
+    { limitsRefreshMode: 'fixed', limitsRefreshMs: 300_000 }
+  );
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 6, 'second interval refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// Adaptive replaces the stored interval with its own baseline rather than
+// modifying it, so a device saved at 30 minutes polls at 5 while adaptive.
+test('adaptive uses its own baseline and ignores the stored interval', async () => {
+  const clock = fakeClock(1_000);
+  const { calls, runtime } = burnRateRuntime(
+    clock,
+    () => 10,
+    {},
+    { limitsRefreshMode: 'adaptive', limitsRefreshMs: 1_800_000 }
+  );
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+    assert.equal(runtime.getSnapshot().refreshMs, 300_000);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// The stored interval surviving a trip through adaptive is the whole reason the
+// mode is a separate setting, so it is pinned rather than left to the reader of
+// the two assignments in the runtime.
+test('switching to adaptive and back restores the stored interval', async () => {
+  const clock = fakeClock(1_000);
+  const { calls, runtime } = burnRateRuntime(
+    clock,
+    () => 10,
+    {},
+    { limitsRefreshMode: 'fixed', limitsRefreshMs: 1_800_000 }
+  );
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    assert.deepEqual(clock.delays(), [1_800_000]);
+
+    runtime.reconfigure({ limitsRefreshMode: 'adaptive' });
+    assert.equal(runtime.getSnapshot().refreshMs, 300_000);
+    assert.deepEqual(clock.delays(), [300_000]);
+
+    // Only the mode is sent back, exactly as the settings dropdown does.
+    runtime.reconfigure({ limitsRefreshMode: 'fixed' });
+    assert.equal(runtime.getSnapshot().refreshMs, 1_800_000);
+    assert.deepEqual(clock.delays(), [1_800_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// The case a "remaining < N%" threshold gets wrong: low, but nothing is
+// consuming it, so nothing is gained by probing more often than configured.
+test('a low but idle quota keeps the base cadence', async () => {
+  const clock = fakeClock(1_000);
+  const { calls, runtime } = burnRateRuntime(clock, () => 88);
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 6, 'second interval refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('reset boundaries enqueue the exact provider/account scope only once', async () => {
   const calls = [];
   const resetsAt = '2026-07-21T01:00:00.000Z';

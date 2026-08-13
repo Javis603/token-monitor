@@ -543,6 +543,7 @@
             <div id="limitProviderCheckboxes" class="client-checkboxes limit-provider-list"></div>
             <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</span></span>
               <select id="limitsRefreshInput">
+                <option value="adaptive" data-i18n="settings.limits.refreshAdaptive">Adaptive</option>
                 <option value="60000">1 min</option>
                 <option value="120000">2 min</option>
                 <option value="300000">5 min</option>
@@ -550,6 +551,7 @@
                 <option value="1800000">30 min</option>
               </select>
             </label>
+            <p id="limitsRefreshAdaptiveNote" class="settings-note hidden" data-i18n="settings.limits.refreshAdaptiveNote">Adjusts the refresh rate to how fast a quota is being consumed: every 5 minutes normally, as often as every minute when needed.</p>
             <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.showSource">Show Source</span></span><input id="showLimitSourceInput" type="checkbox" /></label>
             <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.maskAccountEmails">Mask account emails</span></span><input id="maskLimitAccountEmailsInput" type="checkbox" /></label>
             <div class="settings-item">
