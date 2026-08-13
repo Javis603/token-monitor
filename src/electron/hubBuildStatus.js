@@ -17,6 +17,7 @@ async function probeHubBuild(hubUrl, options = {}) {
     const response = await fetchImpl(`${base}/api/health`, { signal });
     if (!response.ok) return { status: 'unavailable', runtime: '', hubUrl: base };
     const payload = await response.json();
+    if (payload?.role !== 'hub') return { status: 'unavailable', runtime: '', hubUrl: base };
     const runtime = healthRuntime(payload);
     const compared = compareHubBuild(payload?.hubBuild);
     if (compared.status === 'legacy') {

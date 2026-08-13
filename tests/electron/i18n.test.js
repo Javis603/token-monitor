@@ -99,10 +99,24 @@ test('Hub deployment copy describes the whole build instead of only its shared c
     translate('zh-TW', 'settings.sync.hubBuild.unknown', { target: 'Worker' }),
     'Worker 的部署版本無法識別'
   );
+  assert.equal(
+    translate('en', 'settings.sync.hubBuild.remoteNewer', { target: 'Worker' }),
+    'This Worker was deployed by a newer version of Token Monitor'
+  );
+  assert.equal(
+    translate('zh-TW', 'settings.sync.hubBuild.remoteNewer', { target: 'Worker' }),
+    '此 Worker 由較新的 Token Monitor 版本部署'
+  );
   for (const locale of Object.keys(MESSAGES)) {
     assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.current'], /core|核心|코어|コア/i, locale);
     assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.updateAvailable'], /core|核心|코어|コア/i, locale);
     assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.unknown'], /custom|自訂|自定义|사용자 지정|カスタム/i, locale);
+    assert.doesNotMatch(
+      MESSAGES[locale]['settings.sync.hubBuild.remoteNewer'],
+      /redeploy|重新部署|재배포|再デプロイ/i,
+      locale
+    );
+    assert.match(MESSAGES[locale]['settings.sync.hubBuild.remoteNewer'], /Token Monitor/, locale);
   }
 });
 

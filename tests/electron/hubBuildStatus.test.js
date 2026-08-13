@@ -18,7 +18,7 @@ test('remote Hub probe recognizes the exact current Worker build', async () => {
   const result = await probeHubBuild('https://hub.example/', {
     fetchImpl: async (url) => {
       requested = url;
-      return response({ hubBuild: currentHubBuild('cloudflare-worker') });
+      return response({ role: 'hub', hubBuild: currentHubBuild('cloudflare-worker') });
     }
   });
   assert.equal(requested, 'https://hub.example/api/health');
@@ -43,6 +43,7 @@ test('remote Hub probe identifies legacy health responses without guessing an up
 test('remote Hub probe treats present but malformed build metadata as unknown', async () => {
   const result = await probeHubBuild('https://hub.example', {
     fetchImpl: async () => response({
+      role: 'hub',
       runtime: 'cloudflare-worker',
       hubBuild: { runtime: 'cloudflare-worker', schemaVersion: 0 }
     })
@@ -51,6 +52,17 @@ test('remote Hub probe treats present but malformed build metadata as unknown', 
     status: 'unknown',
     runtime: 'cloudflare-worker',
     hubUrl: 'https://hub.example'
+  });
+});
+
+test('remote Hub probe rejects a successful response from a non-Hub service', async () => {
+  const result = await probeHubBuild('https://example.com', {
+    fetchImpl: async () => response({ ok: true })
+  });
+  assert.deepEqual(result, {
+    status: 'unavailable',
+    runtime: '',
+    hubUrl: 'https://example.com'
   });
 });
 
