@@ -81,29 +81,36 @@ function measurableWindow(window) {
 }
 
 function createLimitsBurnState() {
+  // live holds the identities this runtime has actually probed successfully.
+  // Eligibility cannot be read off the snapshot: previousLimits seeds rows that
+  // carry status 'ok' from a previous session, and any other provider committing
+  // rebuilds the whole snapshot, so a provider that has not been probed yet would
+  // otherwise have its persisted row planted as a baseline stamped with the
+  // current time. Its own first probe would then look like an entire offline
+  // session's consumption in a second.
+  //
   // inFlight holds the provider identities whose urgency probe has been
   // dispatched but has not settled. Without it a provider slower than the floor
   // is scheduled again while its own probe is still running, and the lane's
   // latest-wins semantics abort the first one: an endless series of cancelled
   // requests that never publishes a reading. The attempt floor cannot cover
   // this, since it only moves a deadline and does not know what is running.
-  return { windows: new Map(), attempts: new Map(), inFlight: new Set() };
+  return { windows: new Map(), attempts: new Map(), inFlight: new Set(), live: new Set() };
 }
 
 function recordLimitsSample(state, limits, nowMs) {
   if (!state) return;
   for (const provider of limits?.providers || []) {
-    // A failed probe keeps the last good windows and re-publishes them under the
-    // failure status, so only a successful attempt is ever a measurement. The
-    // status check is what stops a seeded previousLimits row, retained through a
-    // failed startup probe, from becoming a baseline stamped with the current
-    // time: the next successful probe would then read a whole offline session's
-    // consumption as having happened since startup. updatedAt additionally keeps
-    // an unchanged successful row from being re-sampled on an unrelated rebuild.
+    // Only a successful probe from this runtime is a measurement. A failed probe
+    // republishes the retained last-good windows under the failure status, and a
+    // row that has never been probed here is a persisted seed; updatedAt then
+    // keeps an unchanged successful row from being re-sampled on an unrelated
+    // rebuild.
     if (text(provider?.status) !== 'ok') continue;
     const updatedAt = text(provider?.updatedAt);
     if (!updatedAt) continue;
     const identity = providerIdentityKey(provider);
+    if (!state.live?.has(identity)) continue;
     for (const window of provider?.windows || []) {
       const usedPercent = measurableWindow(window);
       if (usedPercent === null) continue;
@@ -133,6 +140,12 @@ function recordLimitsSample(state, limits, nowMs) {
   }
 }
 
+// Called by the runtime for every row a probe of its own committed successfully.
+// Nothing else may mark an identity measurable.
+function markLimitsProbeSuccess(state, row) {
+  if (state) state.live.add(providerIdentityKey(row));
+}
+
 function recordLimitsUrgencyAttempt(state, keys, nowMs) {
   if (!state) return;
   for (const key of keys || []) state.attempts.set(String(key), nowMs);
@@ -154,6 +167,9 @@ function pruneLimitsBurnState(state, limits) {
   }
   for (const key of state.attempts.keys()) {
     if (!identities.has(key)) state.attempts.delete(key);
+  }
+  for (const key of state.live) {
+    if (!identities.has(key)) state.live.delete(key);
   }
 }
 
@@ -225,6 +241,7 @@ module.exports = {
   LIMITS_URGENCY_RELEASE_WEIGHT,
   LIMITS_URGENCY_SAMPLES_AHEAD,
   createLimitsBurnState,
+  markLimitsProbeSuccess,
   nextLimitsUrgencyRefresh,
   pruneLimitsBurnState,
   recordLimitsSample,

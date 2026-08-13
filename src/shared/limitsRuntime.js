@@ -18,6 +18,7 @@ const {
 const {
   LIMITS_ADAPTIVE_BASE_MS,
   createLimitsBurnState,
+  markLimitsProbeSuccess,
   nextLimitsUrgencyRefresh,
   pruneLimitsBurnState,
   recordLimitsSample,
@@ -405,6 +406,13 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         const rows = snapshot.providers.filter((row) => row.provider === provider);
         const strongIdentity = clean(scope.accountKey || scope.accountEmail || scope.accountName);
         if (!configuredProviders.has(provider) || (rows.length > 1 && !strongIdentity)) continue;
+        // A lane already running a probe is skipped whatever queued it: an
+        // intent superseded by another refresh resolves its promise at once
+        // while the physical probe keeps running, so inFlight alone would let an
+        // urgency tick abort an account refresh or a reset-boundary probe. The
+        // attempt above was already recorded for this key, so it simply waits a
+        // floor rather than retrying against a busy lane.
+        if (lanes.get(provider)?.active) continue;
         // Held until the probe settles, not merely until it is dispatched. The
         // lane is latest-wins, so re-scheduling a scope whose probe is still
         // running aborts that probe: a provider slower than the floor would
@@ -549,6 +557,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
       represented.add(identityKey);
       applyAttempt(lane, identityKey, row, row.status, attemptAt);
+      // Marks the row as measurable by this runtime, so a persisted seed for a
+      // provider that has not answered yet can never become a burn baseline.
+      if (row.status === 'ok') markLimitsProbeSuccess(burnState, row);
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {

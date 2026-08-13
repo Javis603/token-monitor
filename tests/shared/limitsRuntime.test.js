@@ -793,6 +793,97 @@ test('a retained row from a failed probe never becomes the burn-rate baseline', 
   }
 });
 
+// Any provider committing rebuilds the whole snapshot, which still holds the
+// persisted rows of providers that have not answered yet. Sampling one of those
+// would date a previous session's usage to now and invent a huge burn rate.
+test('a seeded row is never sampled because another provider committed first', async () => {
+  const clock = fakeClock(1_000);
+  const previousLimits = {
+    providers: [
+      providerRow('claude', 'acct', 'Account', { windows: [{ kind: 'session', label: '5-hour', usedPercent: 30 }] }),
+      providerRow('kimi', 'acct', 'Account', { windows: [{ kind: 'session', label: '5-hour', usedPercent: 20 }] })
+    ]
+  };
+  const used = { claude: 32, kimi: 60 };
+  const calls = [];
+  const runtime = createLimitsRuntime(
+    { limitProviders: ['claude', 'kimi'], limitsRefreshMode: 'adaptive', previousLimits },
+    runtimeDeps({
+      autoStart: true,
+      maxConcurrency: 1,
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      probeProvider: async (provider) => {
+        calls.push(provider);
+        // Claude answers first and rebuilds the snapshot while kimi still shows
+        // its seed; kimi then answers a minute later, 20% -> 60%.
+        if (provider === 'kimi') clock.jump(60_000);
+        return [providerRow(provider, 'acct', 'Account', {
+          updatedAt: new Date(clock.now()).toISOString(),
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+        })];
+      }
+    })
+  );
+
+  try {
+    await waitFor(() => calls.length === 2, 'both startup probes');
+    assert.deepEqual(calls, ['claude', 'kimi']);
+    assert.deepEqual(clock.delays(), [240_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// An intent superseded by another refresh resolves its promise at once while the
+// physical probe keeps running, so inFlight alone would clear early and let the
+// next urgency tick abort a probe that another reason had legitimately started.
+test('an urgency tick never aborts a probe another reason is still running', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 68, kimi: 10 };
+  const aborted = [];
+  const started = [];
+  let releaseAccount = null;
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      started.push(context.reason);
+      const rows = [providerRow(provider, 'acct', 'Account', {
+        updatedAt: new Date(clock.now()).toISOString(),
+        windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+      })];
+      if (context.reason !== 'burn-rate' && context.reason !== 'account-state') return rows;
+      return new Promise((resolve) => {
+        context.signal?.addEventListener('abort', () => aborted.push(context.reason));
+        if (context.reason === 'account-state') releaseAccount = () => resolve(rows);
+      });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+
+    clock.advance(60_000);
+    await waitFor(() => started.includes('burn-rate'), 'burn-rate probe');
+    // Supersedes the burn-rate intent, so its promise settles while this probe runs.
+    void runtime.refresh({ provider: 'claude', accountKey: 'acct' }, 'account-state');
+    await waitFor(() => started.includes('account-state'), 'account refresh probe');
+
+    clock.advance(120_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(aborted.includes('account-state'), false);
+    assert.equal(started.filter((reason) => reason === 'burn-rate').length, 1);
+  } finally {
+    releaseAccount?.();
+    runtime.stop();
+  }
+});
+
 test('fixed mode never schedules an early refresh', async () => {
   const clock = fakeClock(1_000);
   const used = { claude: 68, kimi: 10 };
