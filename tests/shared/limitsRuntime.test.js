@@ -983,6 +983,66 @@ test('queued work is matched by account alias, not by identity key', async () =>
   }
 });
 
+// Accounts on one lane queue behind each other without cancelling, so a probe
+// for a different account is not a reason to make an urgent one forfeit its turn
+// and wait another floor.
+test('an urgent account queues behind a different account on the same lane', async () => {
+  const clock = fakeClock(1_000);
+  const used = { a: 60, b: 10 };
+  const started = [];
+  const aborted = [];
+  let releaseB = null;
+  const rowFor = (key) => ({
+    provider: 'claude',
+    accountKey: key,
+    accountLabel: `Account ${key}`,
+    source: 'api',
+    status: 'ok',
+    updatedAt: new Date(clock.now()).toISOString(),
+    windows: [{ kind: 'session', label: '5-hour', usedPercent: used[key] }]
+  });
+  const runtime = createLimitsRuntime(
+    { limitProviders: ['claude'], limitsRefreshMode: 'adaptive' },
+    runtimeDeps({
+      autoStart: true,
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      probeProvider: async (_provider, _config, context) => {
+        const scoped = context.scope?.accountKey;
+        started.push(`${scoped || '*'}:${context.reason}`);
+        if (scoped !== 'b') return scoped ? [rowFor(scoped)] : [rowFor('a'), rowFor('b')];
+        return new Promise((resolve) => {
+          context.signal?.addEventListener('abort', () => aborted.push('b'));
+          releaseB = () => resolve([rowFor('b')]);
+        });
+      }
+    })
+  );
+
+  try {
+    await waitFor(() => started.length === 1, 'startup refresh');
+    used.a = 88;
+    used.b = 20;
+    clock.advance(300_000);
+    await waitFor(() => started.length === 2, 'interval refresh');
+
+    // Only account a is close to exhaustion; b holds the lane with a slow probe.
+    void runtime.refresh({ provider: 'claude', accountKey: 'b' }, 'manual');
+    await waitFor(() => started.includes('b:manual'), 'account b probe');
+
+    clock.advance(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(aborted, []);
+
+    releaseB();
+    await waitFor(() => started.includes('a:burn-rate'), 'account a urgency probe');
+  } finally {
+    releaseB?.();
+    runtime.stop();
+  }
+});
+
 test('fixed mode never schedules an early refresh', async () => {
   const clock = fakeClock(1_000);
   const used = { claude: 68, kimi: 10 };

@@ -380,6 +380,27 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     }, next.delayMs);
   }
 
+  // An urgency probe must stand down only when the lane is already doing work
+  // that covers this exact scope. A lane serialises probes, but account-scoped
+  // work queues behind other accounts without cancelling them, so an account
+  // close to exhaustion has to be allowed to take its place in that queue rather
+  // than forfeit its turn and wait another floor for a probe that was never
+  // about it.
+  function urgencyScopeCovered(lane, scope) {
+    if (!lane) return false;
+    const active = lane.active?.intent;
+    const pending = [...lane.pending.values()];
+    // A provider-wide dispatch aborts whatever is running and empties the queue,
+    // so anything in progress makes it destructive rather than merely redundant.
+    if (!isAccountScope(scope)) return Boolean(active) || pending.length > 0;
+    // A provider-wide refresh, running or queued, answers for every account.
+    if (active && !active.accountScoped) return true;
+    if (lane.pending.has(`${lane.provider}:*`)) return true;
+    // Work already aimed at this same account, which dispatching would supersede.
+    if (active?.accountScoped && rowMatchesScope(scope, active.scope)) return true;
+    return pending.some((intent) => rowMatchesScope(scope, intent.scope));
+  }
+
   function clearUrgencyTimer() {
     if (urgencyTimer !== null) clearTimer(urgencyTimer);
     urgencyTimer = null;
@@ -409,28 +430,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         // A lane already running a probe is skipped whatever queued it: an
         // intent superseded by another refresh resolves its promise at once
         // while the physical probe keeps running, so inFlight alone would let an
-        // urgency tick abort an account refresh or a reset-boundary probe. The
-        // attempt above was already recorded for this key, so it simply waits a
-        // floor rather than retrying against a lane that is already covered.
+        // urgency tick disturb work the lane is already doing. The attempt above
+        // was already recorded for this key, so a scope that stands down waits a
+        // floor rather than retrying against a lane that already covers it.
         //
-        // Queued work counts too, and is matched by scope rather than by lane:
-        // a pending refresh for this same account would be superseded by the
-        // tick, and a pending provider-wide refresh is about to return exactly
-        // the reading being asked for. Another account's pending work is not a
-        // reason to hold this one back.
-        //
-        // Compared through rowMatchesScope rather than by identity key, because
-        // an account is addressable by several aliases and callers pick whichever
-        // one they hold: a row carrying both accountKey and accountName produces
-        // the accountKey form here, while a profile refresh enqueues the name
-        // form. Key equality reads those as different accounts and lets the tick
-        // probe an account that is already queued.
-        const lane = lanes.get(provider);
-        const covered = lane
-          && (lane.active
-            || lane.pending.has(`${provider}:*`)
-            || [...lane.pending.values()].some((pending) => rowMatchesScope(scope, pending.scope)));
-        if (covered) continue;
+        // urgencyScopeCovered compares through rowMatchesScope rather than by
+        // identity key, because an account is addressable by several aliases and
+        // callers enqueue whichever one they hold: a row carrying both
+        // accountKey and accountName yields the accountKey form here, while a
+        // profile refresh enqueues the name form.
+        if (urgencyScopeCovered(lanes.get(provider), scope)) continue;
         // Held until the probe settles, not merely until it is dispatched. The
         // lane is latest-wins, so re-scheduling a scope whose probe is still
         // running aborts that probe: a provider slower than the floor would
