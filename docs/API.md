@@ -44,7 +44,7 @@ Example response:
 }
 ```
 
-`version` remains the legacy Hub storage/API value and is not a deployment version. `hubBuild` is the content-derived deployment identity used by Token Monitor to compare the remote Hub with the core bundled by the app. `core*` identifies shared Node/Worker aggregation logic; `runtime*` identifies the Node Hub or Cloudflare Worker adapter. Product-only version bumps do not change either build ID. A health response without `hubBuild` is a legacy Hub and remains otherwise compatible.
+`version` remains the legacy Hub storage/API value and is not a deployment version. `hubBuild` is the content-derived deployment identity used by Token Monitor to compare the remote Hub with the core bundled by the app. `core*` identifies shared Node/Worker aggregation logic; `runtime*` identifies the Node Hub or Cloudflare Worker adapter. Product-only version bumps do not change either build ID. This is a build marker generated from the registered source closure, not a runtime attestation: a fork that changes source without regenerating its metadata may still report the marker it started from. A health response without `hubBuild` is a legacy Hub and remains otherwise compatible; present but malformed metadata is unrecognized instead of being treated as legacy.
 
 ## `POST /api/ingest`
 

@@ -10,7 +10,7 @@
     "node-hub": [
       {
         "revision": 1,
-        "buildId": "sha256:647d5adf089c359f557b4880ceb52b9447357324d3ab870b8ea25fe54d3ad0d3"
+        "buildId": "sha256:dbdaa0b2aa2e8d627b939d6ab76a9029aa2807839fdbe4e7918edcab592fe749"
       }
     ],
     "cloudflare-worker": [

@@ -67,6 +67,21 @@ function workerPackageBuildInput(packageJson = JSON.parse(fs.readFileSync(path.j
   });
 }
 
+function nodePackageBuildInput(packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))) {
+  return JSON.stringify({
+    dependencies: {
+      dotenv: packageJson.dependencies?.dotenv || ''
+    }
+  });
+}
+
+function nodeLockBuildInput(packageLock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'))) {
+  return JSON.stringify({
+    lockfileVersion: packageLock.lockfileVersion,
+    dotenv: packageLock.packages?.['node_modules/dotenv'] || null
+  });
+}
+
 function workerLockBuildInput(packageLock = JSON.parse(fs.readFileSync(path.join(ROOT, 'worker', 'package-lock.json'), 'utf8'))) {
   const packages = { ...(packageLock.packages || {}) };
   delete packages[''];
@@ -84,7 +99,11 @@ function workerSharedPackageContents(packageJson = WORKER_SHARED_PACKAGE) {
 function currentHubSourceBuildIds() {
   return {
     core: hashInputs(fileInputs(CORE_SOURCE_FILES)),
-    'node-hub': hashInputs(fileInputs(NODE_RUNTIME_SOURCE_FILES)),
+    'node-hub': hashInputs([
+      ...fileInputs(NODE_RUNTIME_SOURCE_FILES),
+      { name: 'package.node-hub.json', contents: nodePackageBuildInput() },
+      { name: 'package-lock.node-hub.json', contents: nodeLockBuildInput() }
+    ]),
     'cloudflare-worker': hashInputs([
       ...fileInputs(WORKER_RUNTIME_SOURCE_FILES),
       { name: 'worker/package.json', contents: workerPackageBuildInput() },
@@ -141,6 +160,8 @@ module.exports = {
   WORKER_SHARED_PACKAGE,
   currentHubSourceBuildIds,
   latestEntry,
+  nodeLockBuildInput,
+  nodePackageBuildInput,
   readRegistry,
   updatedRegistry,
   workerLockBuildInput,

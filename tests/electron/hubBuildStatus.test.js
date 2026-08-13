@@ -40,6 +40,20 @@ test('remote Hub probe identifies legacy health responses without guessing an up
   });
 });
 
+test('remote Hub probe treats present but malformed build metadata as unknown', async () => {
+  const result = await probeHubBuild('https://hub.example', {
+    fetchImpl: async () => response({
+      runtime: 'cloudflare-worker',
+      hubBuild: { runtime: 'cloudflare-worker', schemaVersion: 0 }
+    })
+  });
+  assert.deepEqual(result, {
+    status: 'unknown',
+    runtime: 'cloudflare-worker',
+    hubUrl: 'https://hub.example'
+  });
+});
+
 test('remote Hub probe suppresses transport failures so stream status remains authoritative', async () => {
   const result = await probeHubBuild('https://hub.example', {
     fetchImpl: async () => { throw new Error('offline'); }

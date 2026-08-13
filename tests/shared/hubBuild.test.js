@@ -3,18 +3,24 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { compareHubBuild } = require('../../src/shared/hubBuildComparison');
+const { compareHubBuild, validBuildId } = require('../../src/shared/hubBuildComparison');
 const { currentHubBuild } = require('../../src/shared/hubBuildIdentity');
 const registry = require('../../src/shared/hubBuildRegistry.json');
 const {
   WORKER_SHARED_MODULES,
   currentHubSourceBuildIds,
   latestEntry,
+  nodeLockBuildInput,
+  nodePackageBuildInput,
   updatedRegistry,
   workerLockBuildInput,
   workerPackageBuildInput,
   workerSharedPackageContents
 } = require('../../scripts/hub-build-manifest');
+
+function buildId(character) {
+  return `sha256:${character.repeat(64)}`;
+}
 
 test('Hub build registry matches the current core and runtime source closures', () => {
   const sourceBuildIds = currentHubSourceBuildIds();
@@ -66,6 +72,54 @@ test('Worker resolved toolchain changes affect its build identity without follow
   );
 });
 
+test('Node Hub identity follows only its declared dotenv runtime dependency and resolution', () => {
+  const packageJson = {
+    version: '0.42.0',
+    dependencies: { dotenv: '^17.4.2', semver: '^7.8.5' }
+  };
+  assert.equal(
+    nodePackageBuildInput(packageJson),
+    nodePackageBuildInput({ ...packageJson, version: '0.43.0' })
+  );
+  assert.notEqual(
+    nodePackageBuildInput(packageJson),
+    nodePackageBuildInput({ ...packageJson, dependencies: { ...packageJson.dependencies, dotenv: '^18.0.0' } })
+  );
+
+  const lock = {
+    lockfileVersion: 3,
+    packages: {
+      '': { version: '0.42.0' },
+      'node_modules/dotenv': { version: '17.4.2', integrity: 'sha512:first' },
+      'node_modules/semver': { version: '7.8.5', integrity: 'sha512:unrelated' }
+    }
+  };
+  assert.equal(
+    nodeLockBuildInput(lock),
+    nodeLockBuildInput({ ...lock, packages: { ...lock.packages, '': { version: '0.43.0' } } })
+  );
+  assert.equal(
+    nodeLockBuildInput(lock),
+    nodeLockBuildInput({
+      ...lock,
+      packages: {
+        ...lock.packages,
+        'node_modules/semver': { version: '8.0.0', integrity: 'sha512:changed-but-unrelated' }
+      }
+    })
+  );
+  assert.notEqual(
+    nodeLockBuildInput(lock),
+    nodeLockBuildInput({
+      ...lock,
+      packages: {
+        ...lock.packages,
+        'node_modules/dotenv': { version: '18.0.0', integrity: 'sha512:second' }
+      }
+    })
+  );
+});
+
 test('Worker runtime identity includes its generated CommonJS boundary', () => {
   assert.match(workerSharedPackageContents(), /"type": "commonjs"/);
   assert.notEqual(workerSharedPackageContents(), workerSharedPackageContents({ type: 'module' }));
@@ -101,18 +155,38 @@ test('Hub build comparison distinguishes current, older, newer, and divergent bu
   assert.equal(compareHubBuild(current, {
     ...current,
     coreRevision: current.coreRevision + 1,
-    coreBuildId: 'sha256:expected-newer'
+    coreBuildId: buildId('a')
   }).status, 'updateAvailable');
   assert.equal(compareHubBuild({
     ...current,
     runtimeRevision: current.runtimeRevision + 1,
-    runtimeBuildId: 'sha256:newer'
+    runtimeBuildId: buildId('b')
   }).status, 'remoteNewer');
   assert.equal(compareHubBuild({
     ...current,
     runtimeBuildId: 'sha256:custom'
   }).status, 'unknown');
-  assert.equal(compareHubBuild(null).status, 'legacy');
+  assert.equal(compareHubBuild(undefined).status, 'legacy');
+});
+
+test('only absent build metadata is legacy and current-schema metadata fails closed', () => {
+  const current = currentHubBuild('cloudflare-worker');
+  assert.equal(compareHubBuild(undefined).status, 'legacy');
+  for (const invalid of [null, [], '', { ...current, schemaVersion: 0 }, { ...current, schemaVersion: 'nope' }]) {
+    assert.equal(compareHubBuild(invalid).status, 'unknown');
+  }
+  assert.equal(compareHubBuild({
+    ...current,
+    coreRevision: current.coreRevision + 1,
+    coreBuildId: undefined
+  }).status, 'unknown');
+  assert.equal(compareHubBuild({
+    ...current,
+    runtimeRevision: current.runtimeRevision + 1,
+    runtimeBuildId: 'sha256:not-a-real-digest'
+  }).status, 'unknown');
+  assert.equal(validBuildId(buildId('f')), true);
+  assert.equal(validBuildId(`sha256:${'F'.repeat(64)}`), false);
 });
 
 test('known historical revisions must retain their canonical build ids', () => {
@@ -120,9 +194,9 @@ test('known historical revisions must retain their canonical build ids', () => {
   const expectedNext = {
     ...current,
     coreRevision: current.coreRevision + 1,
-    coreBuildId: 'sha256:expected-next-core',
+    coreBuildId: buildId('c'),
     runtimeRevision: current.runtimeRevision + 1,
-    runtimeBuildId: 'sha256:expected-next-runtime'
+    runtimeBuildId: buildId('d')
   };
   assert.equal(compareHubBuild(current, expectedNext).status, 'updateAvailable');
   assert.equal(compareHubBuild({
@@ -148,10 +222,10 @@ test('mixed component directions are treated as unknown instead of suggesting a 
   assert.equal(compareHubBuild({
     ...current,
     coreRevision: current.coreRevision + 1,
-    coreBuildId: 'sha256:future-core'
+    coreBuildId: buildId('e')
   }, {
     ...current,
     runtimeRevision: current.runtimeRevision + 1,
-    runtimeBuildId: 'sha256:expected-newer-runtime'
+    runtimeBuildId: buildId('f')
   }).status, 'unknown');
 });

@@ -8072,15 +8072,25 @@ async function refreshHubInfo() {
   } catch (_) { /* ignore */ }
 }
 
+const HUB_BUILD_STATUS_REFRESH_TTL_MS = 5 * 60 * 1000;
 let hubBuildStatusRequest = 0;
+let hubBuildStatusLastProbeAt = 0;
+
+function hubBuildStatusRefreshDue(now = Date.now()) {
+  return !hubBuildStatusLastProbeAt
+    || now < hubBuildStatusLastProbeAt
+    || now - hubBuildStatusLastProbeAt >= HUB_BUILD_STATUS_REFRESH_TTL_MS;
+}
 
 async function refreshHubBuildStatus() {
   const request = ++hubBuildStatusRequest;
   if (!window.tokenMonitor.getHubBuildStatus || state.settings?.hubMode !== 'client') {
+    hubBuildStatusLastProbeAt = 0;
     state.hubBuildStatus = null;
     renderHubBuildStatus();
     return;
   }
+  hubBuildStatusLastProbeAt = Date.now();
   const requestedUrl = String(state.settings.hubUrl || '').trim().replace(/\/$/, '');
   try {
     const result = await window.tokenMonitor.getHubBuildStatus();
@@ -11264,6 +11274,9 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) cancelTokenRateBoost();
+  if (!document.hidden && state.settings?.hubMode === 'client' && hubBuildStatusRefreshDue()) {
+    void refreshHubBuildStatus();
+  }
   statsRenderScheduler.flush();
 });
 

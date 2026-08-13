@@ -95,9 +95,14 @@ test('Hub deployment copy describes the whole build instead of only its shared c
     translate('zh-TW', 'settings.sync.hubBuild.updateAvailable', { target: 'Worker' }),
     'Worker 有更新可用，重新部署即可取得最新 Hub build'
   );
+  assert.equal(
+    translate('zh-TW', 'settings.sync.hubBuild.unknown', { target: 'Worker' }),
+    'Worker 的部署版本無法識別'
+  );
   for (const locale of Object.keys(MESSAGES)) {
     assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.current'], /core|核心|코어|コア/i, locale);
     assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.updateAvailable'], /core|核心|코어|コア/i, locale);
+    assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.unknown'], /custom|自訂|自定义|사용자 지정|カスタム/i, locale);
   }
 });
 
