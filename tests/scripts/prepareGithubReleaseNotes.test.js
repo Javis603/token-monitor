@@ -141,7 +141,11 @@ test('fetchGeneratedNotes honors GITHUB_API_URL and fails when its timeout signa
       fetchImpl: async (url, options) => {
         assert.equal(url, 'https://github.example/api/v3/repos/Javis603/token-monitor/releases/generate-notes');
         await new Promise((resolve, reject) => {
-          options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+          const guard = setTimeout(() => reject(new Error('timeout signal did not fire')), 250);
+          options.signal.addEventListener('abort', () => {
+            clearTimeout(guard);
+            reject(options.signal.reason);
+          }, { once: true });
         });
       }
     }),
