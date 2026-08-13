@@ -6473,11 +6473,28 @@ app.whenReady().then(() => {
       return opencodeStatusCache.value;
     }
     const profiles = settings.opencodeProfiles || {};
-    const entries = Object.entries(profiles).filter(([, p]) => p.cookie && p.enabled);
+    const entries = Object.entries(profiles).filter(([, p]) => (p.cookie || p.apiKey) && p.enabled);
 
     // Query all profiles in parallel
     const results = await Promise.all(
       entries.map(async ([name, profile]) => {
+        // An API key reaches Go quota and nothing else, so it reports the same
+        // shape as a cookie with the Zen half permanently absent. Without this
+        // branch an API account is never probed and the panel sits at "0/1".
+        if (profile.apiKey) {
+          const probe = await opencodeGoApi.fetchGoApi(profile.apiKey, {});
+          return [name, {
+            linked: true,
+            expired: probe.status === 'unauthorized',
+            go: probe.status === 'ok',
+            zen: false,
+            hasBalance: false,
+            balanceUsd: null,
+            ...(['unavailable', 'sourceRateLimited'].includes(probe.status)
+              ? { error: probe.status }
+              : {})
+          }];
+        }
         const [go, zen] = await Promise.all([
           opencodeWeb.fetchGoWeb(profile.cookie, {}),
           opencodeWeb.fetchZen(profile.cookie, {})

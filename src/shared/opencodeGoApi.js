@@ -90,8 +90,9 @@ function readGoApiKey(env = process.env) {
 // quota. A cookie still yields the real workspace identity, which is what makes
 // cross-device collapse work; see openCodeWebIdentity in limitCollector.js.
 function goApiIdentity(apiKey) {
-  const digest = crypto.createHash('sha256').update(String(apiKey || '')).digest('hex');
-  return `go-api:${digest.slice(0, 12)}`;
+  // Full digest: truncating buys nothing here (this value is never displayed or
+  // typed) and only narrows the space in which two accounts could collide.
+  return `go-api:${crypto.createHash('sha256').update(String(apiKey || '')).digest('hex')}`;
 }
 
 function normalizeResetsAt(value) {
@@ -182,18 +183,19 @@ async function fetchGoApi(apiKey, deps = {}) {
   return { status: 'ok', windows };
 }
 
-// Composed entry point used by the limit collector: resolve the key, probe,
-// and attach the identity seed only for a successful read.
+// Composed entry point used by the limit collector: resolve the key and probe.
+// Passing an explicit `apiKey` of '' suppresses the ambient lookup entirely,
+// which is how a caller says "this account has no API credential of its own".
 async function collectGoApi(deps = {}) {
   const env = deps.env || process.env;
   const apiKey = deps.apiKey !== undefined ? deps.apiKey : readGoApiKey(env);
   if (!apiKey) return { status: 'notConfigured', windows: [], identity: '' };
 
   const result = await fetchGoApi(apiKey, deps);
-  return {
-    ...result,
-    identity: result.status === 'ok' ? goApiIdentity(apiKey) : ''
-  };
+  // Identity comes from the key, not from the probe result, so an account keeps
+  // one identity across a failed refresh instead of collapsing into an empty
+  // accountKey that matches nothing already on the Hub.
+  return { ...result, identity: goApiIdentity(apiKey) };
 }
 
 module.exports = {

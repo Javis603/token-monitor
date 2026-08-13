@@ -710,9 +710,78 @@ test('a disabled API profile never lends its key to another account', async () =
       opencodeFetchZen: async () => zenNone
     }
   );
-  // One enabled profile means the single-account path, which still auto-detects
-  // the local key (that is the zero-config behaviour) but must never reach for
-  // the disabled profile's key.
-  assert.deepStrictEqual(seen, [undefined]);
+  // The one enabled profile is a cookie account, so no API key is used at all:
+  // not the disabled profile's, and not the ambient one either ('' is the
+  // caller suppressing the auth.json lookup).
+  assert.deepStrictEqual(seen, ['']);
   assert.strictEqual(summary.providers.filter((x) => x.provider === 'opencode').length, 1);
+});
+
+test('the ambient API key is never paired with a cookie account', async () => {
+  // The locally signed-in OpenCode account and the configured cookie may be
+  // different accounts, and nothing can prove otherwise: the usage endpoint
+  // returns no workspace id to compare. Publishing account A's quota under
+  // account B's workspace identity would also merge it across devices as B.
+  let ambientRequested = false;
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=account-b' },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async (d) => {
+        // '' is the caller saying "no API credential"; undefined would mean
+        // "go read auth.json", which is the bug this guards.
+        if (d.apiKey === undefined) ambientRequested = true;
+        return d.apiKey ? goApiOk : { status: 'notConfigured', windows: [], identity: '' };
+      },
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 8 })
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(ambientRequested, false);
+  assert.strictEqual(p.source, 'web');
+  // 11 is the cookie account's own figure; 57 belongs to the local account.
+  assert.strictEqual(p.windows.find((w) => w.kind === 'weekly').usedPercent, 11);
+  assert.strictEqual(p.balanceUsd, 8);
+  assert.strictEqual(p.accountKey, p.webAccountKey);
+});
+
+test('an explicit API profile still overrides the ambient key', async () => {
+  const seen = [];
+  await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, apiKey: 'key-work' } }
+    },
+    { now: () => now403, opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; } }
+  );
+  assert.deepStrictEqual(seen, ['key-work']);
+});
+
+test('zero configuration still reads the ambient key', async () => {
+  const seen = [];
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true },
+    { now: () => now403, opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; } }
+  );
+  assert.deepStrictEqual(seen, [undefined]);
+  assert.strictEqual(summary.providers.find((x) => x.provider === 'opencode').source, 'api');
+});
+
+test('a single API account keeps its identity when the probe fails', async () => {
+  const collect = async (result) => (await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, apiKey: 'key-work' } }
+    },
+    { now: () => now403, opencodeCollectGoApi: async () => result }
+  )).providers.find((x) => x.provider === 'opencode');
+
+  const healthy = await collect(goApiOk);
+  const failed = await collect({ status: 'unauthorized', windows: [], identity: goApiOk.identity });
+  assert.strictEqual(failed.status, 'unauthorized');
+  assert.strictEqual(failed.accountKey, healthy.accountKey);
+  assert.notStrictEqual(failed.accountKey, '');
 });

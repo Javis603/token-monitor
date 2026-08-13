@@ -159,7 +159,9 @@ test('collectGoApi is notConfigured without a key and never calls out', async ()
   assert.strictEqual(called, false);
 });
 
-test('collectGoApi attaches an identity only on success', async () => {
+test('collectGoApi keeps the identity across a failed probe', async () => {
+  // The key names the account, so a 401 must not blank the identity: an empty
+  // accountKey matches nothing already stored on the Hub.
   const ok = await collectGoApi({
     apiKey: 'go-key-123',
     fetch: async () => jsonResponse(200, LIVE_PAYLOAD)
@@ -170,11 +172,25 @@ test('collectGoApi attaches an identity only on success', async () => {
     apiKey: 'go-key-123',
     fetch: async () => jsonResponse(401, {})
   });
-  assert.strictEqual(failed.identity, '');
+  assert.strictEqual(failed.status, 'unauthorized');
+  assert.strictEqual(failed.identity, ok.identity);
+});
+
+test('an empty apiKey suppresses the ambient lookup instead of reading auth.json', async () => {
+  const { env } = withDataDir(JSON.stringify({ 'opencode-go': { type: 'api', key: 'ambient' } }));
+  let called = false;
+  const result = await collectGoApi({
+    env,
+    apiKey: '',
+    fetch: async () => { called = true; return jsonResponse(200, LIVE_PAYLOAD); }
+  });
+  assert.strictEqual(result.status, 'notConfigured');
+  assert.strictEqual(called, false);
 });
 
 test('goApiIdentity is stable per key and distinct across keys', () => {
   assert.strictEqual(goApiIdentity('a'), goApiIdentity('a'));
   assert.notStrictEqual(goApiIdentity('a'), goApiIdentity('b'));
-  assert.match(goApiIdentity('a'), /^go-api:[0-9a-f]{12}$/);
+  // Full digest: truncating only narrows the space two accounts could collide in.
+  assert.match(goApiIdentity('a'), /^go-api:[0-9a-f]{64}$/);
 });

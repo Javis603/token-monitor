@@ -3201,18 +3201,26 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       : { status: 'notConfigured', windows: [] };
     const primary = cookies[0] || {};
     const cookie = primary.cookie;
-    // The cookie probes still run alongside a successful API read: Zen balance
-    // has no API, and goWeb is what resolves the workspace id that gives this
-    // account a cross-device identity. A profile that carries its own API key
-    // overrides auth.json, so a single explicitly-added account is read as that
-    // account rather than as whichever one happens to be logged in locally.
+    // Which key this account is read with:
+    //   explicit API profile -> its own key
+    //   cookie account       -> none ('' suppresses the ambient lookup)
+    //   nothing configured   -> undefined, i.e. the ambient auth.json/env key
+    //
+    // The ambient key is deliberately NOT paired with a cookie account. Pairing
+    // them asserts that whoever is signed in to OpenCode on this machine is the
+    // same account as the cookie, and nothing can verify that: the usage
+    // endpoint returns no workspace id to compare against the cookie's. Where
+    // they differ the cookie's workspace identity wins further down
+    // (`webAccountKey`), so the result would publish one account's quota — and
+    // merge it across devices — under the other account's identity.
+    const primaryApiKey = primary.apiKey || (cookie ? '' : undefined);
     const [goApi, goWeb, zen] = await Promise.all([
       collectGoApi({
         env: deps.env || process.env,
         now: () => nowMs,
         fetch: deps.fetch,
         signal: deps.signal,
-        ...(primary.apiKey ? { apiKey: primary.apiKey } : {})
+        ...(primaryApiKey === undefined ? {} : { apiKey: primaryApiKey })
       }),
       cookie ? fetchGoWeb(cookie, { now: () => nowMs }) : null,
       cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '' }) : null
@@ -3279,6 +3287,10 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       if (surfaced) { status = surfaced.status; source = surfaced.source; }
     }
 
+    // A failed API probe still names its account: the key identifies it, so a
+    // 401 or a rate limit must not leave an empty accountKey that matches
+    // nothing already stored on the Hub.
+    if (!accountKey && goApi.identity) accountKey = hashKey('opencode', goApi.identity);
     if (webAccountKey) accountKey = webAccountKey;
     return normalizeLimitProvider({
       provider: 'opencode',
