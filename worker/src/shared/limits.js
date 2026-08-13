@@ -739,7 +739,11 @@ function mergeOpenCodeProviderComponents(candidates) {
     accountKey,
     ...(canonicalWebAccountKey ? { webAccountKey: canonicalWebAccountKey } : {}),
     ...(accountKeyAliases.length > 0 ? { accountKeyAliases } : {}),
-    source: hasWebComponent ? 'web' : winner.source,
+    // The Web envelope exists so an old Hub cannot turn a local estimate into a
+    // Web observation. 'api' is a strictly stronger claim than 'web' and is only
+    // ever set by a collector that read the official usage endpoint, so it keeps
+    // its own label instead of being flattened by a Web window or balance.
+    source: hasWebComponent && winner.source !== 'api' ? 'web' : winner.source,
     windows,
     balanceUsd
   };

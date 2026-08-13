@@ -5525,6 +5525,23 @@ html.is-windows .limit-live-badge {
 .opencode-profile-list {
   margin-bottom: 4px;
 }
+/* This stylesheet has no global `.hidden`; every use is scoped to its own
+   selector, so the credential blocks need their own rule to disappear. */
+.opencode-credential-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.opencode-credential-fields.hidden { display: none; }
+/* The API key field sits outside .settings-row, so it needs the same explicit
+   sizing that rule gives the labelled controls. */
+.opencode-credential-fields > input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 30px;
+  font-family: monospace;
+  font-size: 12px;
+}
 .opencode-empty {
   padding: 16px 8px;
   color: var(--muted);
@@ -5718,8 +5735,15 @@ html.is-windows .limit-live-badge {
   color: var(--muted);
   white-space: nowrap;
 }
-.opencode-add-body .settings-row input {
+/* `select` is listed alongside `input` for the reason spelled out above
+   .subscription-add-body: the global `button, input, select { font: inherit }`
+   otherwise drops a select back to the panel's base size, and the two carry
+   different paddings, so the height is pinned to keep the rows aligned. */
+.opencode-add-body .settings-row :is(input, select) {
   flex: 1;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
   font-size: 12px;
 }
 .opencode-add-body textarea {

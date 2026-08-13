@@ -1,9 +1,18 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { collectLimitsOnce } = require('../../src/shared/limitCollector');
+const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limitCollector');
 const { hashKey } = require('../../src/shared/hashKey');
 const { aggregateLimits } = require('../../src/shared/limits');
+
+// The Go usage API is a zero-config path: left unstubbed it would read the
+// developer's real auth.json and probe opencode.ai. Default it to "no key" so
+// each test opts in to the response it actually wants.
+const OPENCODE_API_UNCONFIGURED = { status: 'notConfigured', windows: [], identity: '' };
+const collectLimitsOnce = (options, deps = {}) => collectLimitsOnceRaw(options, {
+  opencodeCollectGoApi: async () => OPENCODE_API_UNCONFIGURED,
+  ...deps
+});
 
 test('collectLimitsOnce includes opencode provider from injected Go data', async () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
@@ -465,4 +474,245 @@ test('fetchOpenCodeLimits refresh scope probes only the requested profile', asyn
   assert.equal(summary.providers[0].accountName, 'work');
   assert.equal(summary.providers[0].accountLabel, 'work');
   assert.equal(summary.providers[0].planLabel, 'Go');
+});
+
+// --- Official Go usage API (issue #403) -------------------------------------
+
+const now403 = Date.UTC(2026, 7, 13, 12, 0, 0);
+const apiWindows = [
+  { kind: 'session', used: null, limit: null, usedPercent: 0, resetsAt: '2026-08-13T15:11:49.412Z', windowMinutes: 300 },
+  { kind: 'weekly', used: null, limit: null, usedPercent: 57, resetsAt: '2026-08-17T00:00:00.412Z', windowMinutes: 10080 },
+  { kind: 'monthly', used: null, limit: null, usedPercent: 30, resetsAt: '2026-09-04T11:42:50.412Z', windowMinutes: 43200 }
+];
+const goApiOk = { status: 'ok', identity: 'go-api:abc123def456', windows: apiWindows };
+const goWebOk = {
+  status: 'ok',
+  workspaceId: 'wrk_1',
+  windows: [{ kind: 'weekly', used: null, limit: null, usedPercent: 11, resetsAt: new Date(now403).toISOString(), windowMinutes: 10080 }]
+};
+const goLocalOk = {
+  status: 'ok',
+  identity: 'opencode-go:/tmp/opencode.db',
+  windows: [{ kind: 'weekly', used: 3.3, limit: 30, usedPercent: 11, resetsAt: new Date(now403).toISOString(), windowMinutes: 10080 }]
+};
+const zenNone = { status: 'notConfigured', windows: [], balanceUsd: null };
+
+test('fetchOpenCodeLimits: the usage API outranks the cookie scrape and the local estimate', async () => {
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1', opencodeLocalLimitsEnabled: true },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => goApiOk,
+      opencodeCollectGo: () => goLocalOk,
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => zenNone
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.status, 'ok');
+  assert.strictEqual(p.source, 'api');
+  assert.strictEqual(p.accountLabel, 'Go');
+  // 57 is the API's weekly figure; 11 is what both fallbacks reported.
+  assert.strictEqual(p.windows.find((w) => w.kind === 'weekly').usedPercent, 57);
+  // windows[].source stays within the two-value wire enum so older hubs keep
+  // ranking these above a local estimate.
+  assert.deepStrictEqual([...new Set(p.windows.map((w) => w.source))], ['web']);
+});
+
+test('fetchOpenCodeLimits: API quota needs no cookie at all', async () => {
+  let webCalled = false;
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => goApiOk,
+      opencodeFetchGoWeb: async () => { webCalled = true; return goWebOk; },
+      opencodeFetchZen: async () => { webCalled = true; return zenNone; }
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(webCalled, false);
+  assert.strictEqual(p.status, 'ok');
+  assert.strictEqual(p.source, 'api');
+  assert.strictEqual(p.accountKey, hashKey('opencode', 'go-api:abc123def456'));
+  assert.strictEqual(p.windows.length, 3);
+});
+
+test('fetchOpenCodeLimits: an account with no Go subscription falls through quietly', async () => {
+  // 403 EntitlementError arrives as notConfigured, so the cookie path still wins.
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => ({ status: 'notConfigured', windows: [], identity: '' }),
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => zenNone
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.status, 'ok');
+  assert.strictEqual(p.source, 'web');
+  assert.strictEqual(p.windows.find((w) => w.kind === 'weekly').usedPercent, 11);
+});
+
+test('fetchOpenCodeLimits: a stale API key surfaces instead of reading as unconfigured', async () => {
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => ({ status: 'unauthorized', windows: [], identity: '' })
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.status, 'unauthorized');
+  assert.strictEqual(p.source, 'api');
+});
+
+test('fetchOpenCodeLimits: a Zen balance does not downgrade the API source claim', async () => {
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => goApiOk,
+      opencodeFetchGoWeb: async () => ({ status: 'unavailable', windows: [], workspaceId: '' }),
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 7.5 })
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.source, 'api');
+  assert.strictEqual(p.balanceUsd, 7.5);
+  // The cookie still supplies the workspace identity that collapses devices.
+  assert.strictEqual(p.accountKey, p.webAccountKey);
+});
+
+test('aggregation keeps the API source claim instead of flattening it to Web', async () => {
+  // The renderer always reads stats through the device -> aggregate projection,
+  // so a source the merge overwrites is a source the user never sees.
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'sess=1' },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => goApiOk,
+      opencodeFetchGoWeb: async () => ({ status: 'unavailable', windows: [], workspaceId: '' }),
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 7.5 })
+    }
+  );
+  const aggregated = aggregateLimits([{ deviceId: 'dev-1', limits: summary }], 0, now403);
+  const p = aggregated.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.source, 'api');
+  assert.strictEqual(p.balanceUsd, 7.5);
+});
+
+test('aggregation still refuses to call a local estimate Web', async () => {
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeLocalLimitsEnabled: true },
+    { now: () => now403, opencodeCollectGo: () => goLocalOk }
+  );
+  const aggregated = aggregateLimits([{ deviceId: 'dev-1', limits: summary }], 0, now403);
+  assert.strictEqual(aggregated.providers.find((x) => x.provider === 'opencode').source, 'local');
+});
+
+test('an API-key profile is probed with its own key, not the local auth.json', async () => {
+  const seen = [];
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, apiKey: 'key-work' } }
+    },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; }
+    }
+  );
+  assert.deepStrictEqual(seen, ['key-work']);
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.source, 'api');
+  assert.strictEqual(p.windows.find((w) => w.kind === 'weekly').usedPercent, 57);
+});
+
+test('mixed API-key and cookie profiles each use their own credential', async () => {
+  const apiKeys = [];
+  const cookies = [];
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        work: { enabled: true, apiKey: 'key-work' },
+        personal: { enabled: true, cookie: 'sess=personal' }
+      }
+    },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async (d) => { apiKeys.push(d.apiKey); return goApiOk; },
+      opencodeFetchGoWeb: async (cookie) => { cookies.push(cookie); return goWebOk; },
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 3 })
+    }
+  );
+  assert.deepStrictEqual(apiKeys, ['key-work']);
+  assert.deepStrictEqual(cookies, ['sess=personal']);
+
+  const rows = summary.providers.filter((x) => x.provider === 'opencode');
+  assert.strictEqual(rows.length, 2);
+  const work = rows.find((r) => r.accountName === 'work');
+  const personal = rows.find((r) => r.accountName === 'personal');
+  assert.strictEqual(work.source, 'api');
+  assert.strictEqual(work.planLabel, 'Go');
+  // An API key reaches no balance, so this row must not borrow the cookie's.
+  assert.strictEqual(work.balanceUsd, null);
+  assert.strictEqual(personal.source, 'web');
+  assert.strictEqual(personal.balanceUsd, 3);
+  assert.notStrictEqual(work.accountKey, personal.accountKey);
+});
+
+test('an API profile keeps one identity across a failed refresh', async () => {
+  const collect = async (status) => {
+    const summary = await collectLimitsOnce(
+      {
+        limitProviders: 'opencode',
+        limitsEnabled: true,
+        opencodeProfiles: {
+          work: { enabled: true, apiKey: 'key-work' },
+          other: { enabled: true, apiKey: 'key-other' }
+        }
+      },
+      {
+        now: () => now403,
+        opencodeCollectGoApi: async (d) => (d.apiKey === 'key-work'
+          ? (status === 'ok' ? goApiOk : { status, windows: [], identity: '' })
+          : goApiOk)
+      }
+    );
+    return summary.providers.find((x) => x.accountName === 'work');
+  };
+  const healthy = await collect('ok');
+  const failed = await collect('unauthorized');
+  assert.strictEqual(failed.status, 'unauthorized');
+  assert.strictEqual(failed.accountKey, healthy.accountKey);
+});
+
+test('a disabled API profile never lends its key to another account', async () => {
+  const seen = [];
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        work: { enabled: false, apiKey: 'key-work' },
+        personal: { enabled: true, cookie: 'sess=personal' }
+      }
+    },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; },
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => zenNone
+    }
+  );
+  // One enabled profile means the single-account path, which still auto-detects
+  // the local key (that is the zero-config behaviour) but must never reach for
+  // the disabled profile's key.
+  assert.deepStrictEqual(seen, [undefined]);
+  assert.strictEqual(summary.providers.filter((x) => x.provider === 'opencode').length, 1);
 });

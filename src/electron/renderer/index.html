@@ -682,19 +682,32 @@
                   <div id="opencodeAddDetails" class="opencode-add-details accordion-animated-container hidden">
                     <div class="accordion-animation-inner opencode-add-body">
                       <div class="settings-actions">
-                        <button id="opencodeOpenBrowser" data-i18n="settings.opencode.openBrowser">Open OpenCode auth in browser</button>
+                        <button id="opencodeOpenBrowser" data-i18n="settings.opencode.openBrowserKeys">Open OpenCode keys in browser</button>
                       </div>
-                      <p class="settings-note">
-                        <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/auth</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
-                        <strong>2.</strong> <span data-i18n="settings.opencode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> opencode.ai.</span><br>
-                        <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>auth</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
-                        <strong>4.</strong> <span data-i18n="settings.opencode.step4">Paste it below and click Save.</span>
-                      </p>
+                      <div class="settings-row">
+                        <label for="opencodeCredentialKind" data-i18n="settings.opencode.credentialKind">Credential</label>
+                        <select id="opencodeCredentialKind">
+                          <option value="api" data-i18n="settings.opencode.kindApi">API key</option>
+                          <option value="cookie" data-i18n="settings.opencode.kindCookie">Cookie</option>
+                        </select>
+                      </div>
                       <div class="settings-row">
                         <label for="opencodeProfileName" data-i18n="settings.opencode.profileName">账号名称</label>
                         <input id="opencodeProfileName" type="text" data-i18n-placeholder="settings.opencode.profileNamePlaceholder" placeholder="例如: work、personal">
                       </div>
-                      <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="auth=..."></textarea>
+                      <div id="opencodeApiFields" class="opencode-credential-fields">
+                        <p class="settings-note" data-i18n="settings.opencode.apiHint">Paste an OpenCode Go API key. Go quota only.</p>
+                        <input id="opencodeApiKeyInput" type="password" spellcheck="false" placeholder="opencode-go-..." data-i18n-placeholder="settings.opencode.apiKeyPlaceholder" />
+                      </div>
+                      <div id="opencodeCookieFields" class="opencode-credential-fields hidden">
+                        <p class="settings-note">
+                          <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/auth</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
+                          <strong>2.</strong> <span data-i18n="settings.opencode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> opencode.ai.</span><br>
+                          <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>auth</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
+                          <strong>4.</strong> <span data-i18n="settings.opencode.step4">Paste it below and click Save.</span>
+                        </p>
+                        <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="auth=..." data-i18n-placeholder="settings.opencode.cookiePlaceholder"></textarea>
+                      </div>
                       <div class="settings-actions">
                         <button id="opencodeCookieSubmit" data-i18n="settings.opencode.saveProfile">保存</button>
                       </div>

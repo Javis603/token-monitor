@@ -20,6 +20,7 @@ const cursorAuth = require('./cursorAuth');
 const cursorProbe = require('./cursorProbe');
 const antigravityProbe = require('./antigravityProbe');
 const opencodeLimits = require('./opencodeLimits');
+const opencodeGoApi = require('./opencodeGoApi');
 const opencodeWeb = require('./opencodeWeb');
 const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
@@ -3149,6 +3150,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
   const collectGo = deps.opencodeCollectGo || ((d) => opencodeLimits.collectGo(d));
+  const collectGoApi = deps.opencodeCollectGoApi || ((d) => opencodeGoApi.collectGoApi(d));
   const fetchGoWeb = deps.opencodeFetchGoWeb || ((cookie, d) => opencodeWeb.fetchGoWeb(cookie, d));
   const fetchZen = deps.opencodeFetchZen || ((cookie, d) => opencodeWeb.fetchZen(cookie, d));
 
@@ -3157,9 +3159,14 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const envCookie = (deps.env || process.env).TOKEN_MONITOR_OPENCODE_COOKIE || '';
 
   let cookies = [];
+  // A profile carries exactly one credential: an API key (Go quota) or a cookie
+  // (Go plus Zen balance). The kind is inferred from which field is present, so
+  // profiles saved before API keys existed keep working untouched.
   if (explicitProfiles && Object.keys(explicitProfiles).length > 0) {
     for (const [name, p] of Object.entries(explicitProfiles)) {
-      if (p.enabled && p.cookie) cookies.push({ name, cookie: p.cookie });
+      if (!p.enabled) continue;
+      if (p.apiKey) cookies.push({ name, apiKey: p.apiKey });
+      else if (p.cookie) cookies.push({ name, cookie: p.cookie });
     }
   } else if (options.opencodeCookie) {
     cookies = [{ name: 'default', cookie: options.opencodeCookie }];
@@ -3170,6 +3177,10 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     cookies.push({ name: 'default (env)', cookie: envCookie });
   }
 
+  // Explicit profiles take over from the auto-detected local key exactly as they
+  // already take over from `opencodeCookie`: once the user manages the account
+  // list, nothing is added to it behind their back. The zero-config path is
+  // untouched below, where 0 or 1 profile still falls back to auth.json.
   const multiAccountMode = cookies.length > 1;
   const scope = options.limitRefreshScope?.provider === 'opencode'
     ? options.limitRefreshScope
@@ -3188,13 +3199,24 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     const goLocal = options.opencodeLocalLimitsEnabled === true
       ? collectGo({ env: deps.env || process.env, now: () => nowMs })
       : { status: 'notConfigured', windows: [] };
-    const cookie = cookies[0]?.cookie;
-    const [goWeb, zen] = cookie
-      ? await Promise.all([
-          fetchGoWeb(cookie, { now: () => nowMs }),
-          fetchZen(cookie, { now: () => nowMs, workspaceId: '' })
-        ])
-      : [null, null];
+    const primary = cookies[0] || {};
+    const cookie = primary.cookie;
+    // The cookie probes still run alongside a successful API read: Zen balance
+    // has no API, and goWeb is what resolves the workspace id that gives this
+    // account a cross-device identity. A profile that carries its own API key
+    // overrides auth.json, so a single explicitly-added account is read as that
+    // account rather than as whichever one happens to be logged in locally.
+    const [goApi, goWeb, zen] = await Promise.all([
+      collectGoApi({
+        env: deps.env || process.env,
+        now: () => nowMs,
+        fetch: deps.fetch,
+        signal: deps.signal,
+        ...(primary.apiKey ? { apiKey: primary.apiKey } : {})
+      }),
+      cookie ? fetchGoWeb(cookie, { now: () => nowMs }) : null,
+      cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '' }) : null
+    ]);
     const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
     const webAccountKey = webIdentity.accountKey;
 
@@ -3205,7 +3227,23 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     let accountKey = '';
     let balanceUsd = null;
 
-    if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
+    // Go quota resolves api → web → local. The official API needs no user setup
+    // and is the only source anchored on the real subscription month, so it
+    // outranks the cookie scrape; the local estimate stays last because it sees
+    // only this device's rows and under-reports whenever the same account is
+    // used elsewhere.
+    //
+    // API windows are tagged `web`, not `api`: windows[].source is a two-value
+    // wire enum ('web' | 'local') that hubs rank on, and a hub that predates
+    // this change would strip an unknown value and then rank the window *below*
+    // a local estimate. Both values mean the same thing here anyway — server
+    // truth from opencode.ai — and the finer provenance rides on the
+    // provider-level source below.
+    if (goApi.status === 'ok' && goApi.windows.length > 0) {
+      windows.push(...goApi.windows.map((window) => ({ ...window, source: 'web' })));
+      status = 'ok'; source = 'api'; accountLabel = 'Go';
+      accountKey = hashKey('opencode', goApi.identity || 'go-api');
+    } else if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
       windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok'; source = 'web'; accountLabel = 'Go';
       accountKey = hashKey('opencode', `go:${goWeb.workspaceId || ''}`);
@@ -3225,15 +3263,20 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       // that predate windows[].source. It may claim Web only when every quota
       // window is Web; otherwise an old Hub could turn a local estimate into a
       // Web observation when it strips component provenance.
-      if (!windows.some((window) => window.source === 'local')) source = 'web';
+      // 'api' already implies every quota window is server truth, so it keeps
+      // that stronger claim instead of being flattened to 'web' by a Zen window.
+      if (source !== 'api' && !windows.some((window) => window.source === 'local')) source = 'web';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
       if (!accountLabel) accountLabel = 'Zen';
       if (!accountKey) accountKey = hashKey('opencode', `zen:${zen.workspaceId || ''}`);
     } else if (status !== 'ok') {
-      const webFail = ['unauthorized', 'sourceRateLimited', 'unavailable'];
-      const surfaced = (goWeb && webFail.includes(goWeb.status) && goWeb.status)
-        || (zen && webFail.includes(zen.status) && zen.status);
-      if (surfaced) { status = surfaced; source = 'web'; }
+      const remoteFail = ['unauthorized', 'sourceRateLimited', 'unavailable'];
+      // Only reached when nothing produced windows. A stale API key would
+      // otherwise read as "not configured" and leave the user nothing to fix.
+      const surfaced = (remoteFail.includes(goApi.status) && { status: goApi.status, source: 'api' })
+        || (goWeb && remoteFail.includes(goWeb.status) && { status: goWeb.status, source: 'web' })
+        || (zen && remoteFail.includes(zen.status) && { status: zen.status, source: 'web' });
+      if (surfaced) { status = surfaced.status; source = surfaced.source; }
     }
 
     if (webAccountKey) accountKey = webAccountKey;
@@ -3257,9 +3300,9 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
 
   // Each enabled profile — query in parallel
   const results = await Promise.all(
-    cookies.map(({ name, cookie }) =>
-      fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, updatedAt)
-    )
+    cookies.map((profile) => (profile.apiKey
+      ? fetchOpenCodeApiProfile(profile, collectGoApi, nowMs, updatedAt, deps)
+      : fetchSingleOpenCodeProfile(profile.name, profile.cookie, fetchGoWeb, fetchZen, nowMs, updatedAt)))
   );
   for (const provider of results) {
     if (provider) providers.push(provider);
@@ -3273,6 +3316,49 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   }
 
   return providers;
+}
+
+// An API-key profile reaches the official Go usage endpoint and nothing else:
+// there is no Zen balance behind an API key, so this never produces balanceUsd
+// and never resolves a workspace id.
+async function fetchOpenCodeApiProfile(profile, collectGoApi, nowMs, updatedAt, deps = {}) {
+  const { name, apiKey } = profile;
+  // Derived from the key rather than from the probe result, so the account keeps
+  // one identity across a failed refresh instead of collapsing into the empty key.
+  const accountKey = hashKey('opencode', opencodeGoApi.goApiIdentity(apiKey));
+  const row = (status, windows) => normalizeLimitProvider({
+    provider: 'opencode',
+    accountKey,
+    accountName: name,
+    // Keep accountLabel as the profile name for pre-accountName renderers.
+    accountLabel: name,
+    planLabel: status === 'ok' ? 'Go' : '',
+    source: 'api',
+    sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
+    status,
+    updatedAt,
+    windows,
+    balanceUsd: null
+  });
+
+  try {
+    const result = await collectGoApi({
+      env: deps.env || process.env,
+      now: () => nowMs,
+      fetch: deps.fetch,
+      signal: deps.signal,
+      apiKey
+    });
+    if (result.status !== 'ok' || result.windows.length === 0) {
+      // A key that resolves but has no Go subscription reads as notConfigured
+      // upstream; surface that rather than an error the user cannot act on.
+      return row(result.status === 'ok' ? 'notConfigured' : result.status, []);
+    }
+    return row('ok', result.windows.map((window) => ({ ...window, source: 'web' })));
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
+    return row('unavailable', []);
+  }
 }
 
 async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, updatedAt) {

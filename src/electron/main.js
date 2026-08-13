@@ -117,6 +117,7 @@ const {
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
+const opencodeGoApi = require('../shared/opencodeGoApi');
 const openrouterLimits = require('../shared/openrouterLimits');
 const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
@@ -4040,11 +4041,18 @@ function currentWindowToggleShortcutStatus() {
 
 // Strip OpenCode session cookies from a profiles map before it reaches the
 // renderer; the UI only needs the profile name and enabled flag, not the value.
+// Default-deny: name every field allowed through instead of spreading the stored
+// profile. A spread hands any field added later to the renderer verbatim, which
+// is exactly how a credential leaks.
 function redactOpencodeProfilesForRenderer(profiles) {
   if (!profiles || typeof profiles !== 'object') return profiles;
   const out = {};
   for (const [name, profile] of Object.entries(profiles)) {
-    out[name] = { ...profile, cookie: profile && profile.cookie ? 'set' : '' };
+    out[name] = {
+      enabled: profile?.enabled !== false,
+      cookie: profile?.cookie ? 'set' : '',
+      apiKey: profile?.apiKey ? 'set' : ''
+    };
   }
   return out;
 }
@@ -6509,19 +6517,45 @@ app.whenReady().then(() => {
     }
     return { profiles: safe, hasEnvVar };
   });
-  ipcMain.handle('opencode:saveProfile', async (_event, name, raw) => {
-    const cookie = opencodeWeb.sanitizeCookieHeader(raw);
-    if (!cookie || !name) return { ok: false, error: 'Empty name or cookie' };
+  // `kind` defaults to 'cookie' so an older renderer calling with two arguments
+  // keeps its existing behavior.
+  ipcMain.handle('opencode:saveProfile', async (_event, name, raw, kind = 'cookie') => {
+    if (!name) return { ok: false, error: 'Empty name' };
     try {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, {}),
-        opencodeWeb.fetchZen(cookie, {})
-      ]);
-      if (opencodeWeb.summarizeLink(go, zen).expired) {
-        return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
+      let credential;
+      if (kind === 'api') {
+        const apiKey = String(raw || '').trim();
+        if (!apiKey) return { ok: false, error: 'Empty API key' };
+        const probe = await opencodeGoApi.fetchGoApi(apiKey, {});
+        if (probe.status === 'unauthorized') {
+          return { ok: false, error: 'OpenCode rejected the API key' };
+        }
+        // The key authenticates but the workspace has no Go plan, so this
+        // profile would render permanently empty. Say so instead of saving it.
+        if (probe.status === 'notConfigured') {
+          return { ok: false, error: 'That account has no OpenCode Go subscription' };
+        }
+        if (probe.status !== 'ok') {
+          return { ok: false, error: 'Could not reach the OpenCode usage API' };
+        }
+        credential = { apiKey, enabled: true };
+      } else {
+        const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+        if (!cookie) return { ok: false, error: 'Empty cookie' };
+        const [go, zen] = await Promise.all([
+          opencodeWeb.fetchGoWeb(cookie, {}),
+          opencodeWeb.fetchZen(cookie, {})
+        ]);
+        if (opencodeWeb.summarizeLink(go, zen).expired) {
+          return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
+        }
+        credential = { cookie, enabled: true };
       }
       const profiles = settings.opencodeProfiles || {};
-      profiles[name] = { cookie, enabled: true };
+      // Replace rather than merge: a profile carries exactly one credential, so
+      // switching an existing profile from cookie to API key must not leave the
+      // old cookie behind for the collector to pick up instead.
+      profiles[name] = credential;
       settings.opencodeProfiles = profiles;
       saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };

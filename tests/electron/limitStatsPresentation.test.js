@@ -10,13 +10,21 @@ const {
   projectLimitStatsForDisplay
 } = require('../../src/electron/limitStatsPresentation');
 const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
-const { collectLimitsOnce } = require('../../src/shared/limitCollector');
+const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limitCollector');
 const { aggregateLimits } = require('../../src/shared/limits');
 const { buildMacWidgetSnapshot } = require('../../src/shared/macWidgetSnapshot');
 const { formatTrayText } = require('../../src/shared/trayText');
 
 const projectRoot = path.join(__dirname, '..', '..');
 const updatedAt = '2026-08-09T08:03:00.000Z';
+
+// See tests/shared/limitCollector.opencode.test.js: the Go usage API needs no
+// configuration, so it must be stubbed out or it reads the developer's own
+// auth.json and probes opencode.ai.
+const collectLimitsOnce = (options, deps = {}) => collectLimitsOnceRaw(options, {
+  opencodeCollectGoApi: async () => ({ status: 'notConfigured', windows: [], identity: '' }),
+  ...deps
+});
 
 function opencodeProvider({
   accountKey = 'shared-account',

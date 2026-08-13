@@ -172,10 +172,24 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(details, /<div id="opencodeAddForm" class="opencode-add-form">/);
   assert.match(details, /<button id="opencodeAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="opencodeAddDetails">/);
   assert.match(details, /<div id="opencodeAddDetails" class="opencode-add-details accordion-animated-container hidden">/);
-  assert.match(details, /<button id="opencodeOpenBrowser"[\s\S]*data-i18n="settings\.opencode\.openBrowser">/);
+  // The browser button serves both credential types, so it lives above the
+  // selector rather than inside either block; the renderer relabels it.
+  assert.match(details, /<button id="opencodeOpenBrowser" data-i18n="settings\.opencode\.openBrowserKeys">/);
+  const cookieBlock = details.match(/<div id="opencodeCookieFields"[\s\S]*?<\/textarea>/)?.[0] || '';
+  assert.doesNotMatch(cookieBlock, /opencodeOpenBrowser/);
   assert.match(details, /<span data-i18n="settings\.opencode\.addProfile"/);
   assert.match(details, /<input id="opencodeProfileName" type="text"[\s\S]*data-i18n-placeholder="settings\.opencode\.profileNamePlaceholder"/);
-  assert.match(details, /<textarea id="opencodeCookieInput"[\s\S]*placeholder="auth=\.\.\."><\/textarea>/);
+  // Credential type is a labelled select like the other provider forms use, and
+  // API key is first so it is the default. Each type owns its own input.
+  assert.match(details, /<select id="opencodeCredentialKind">\s*<option value="api"/);
+  assert.match(details, /<option value="cookie" data-i18n="settings\.opencode\.kindCookie">/);
+  assert.match(details, /<input id="opencodeApiKeyInput" type="password"[\s\S]*data-i18n-placeholder="settings\.opencode\.apiKeyPlaceholder"/);
+  assert.match(details, /<textarea id="opencodeCookieInput"[\s\S]*data-i18n-placeholder="settings\.opencode\.cookiePlaceholder"><\/textarea>/);
+  // The cookie steps live inside the block that hides, so API mode never shows
+  // DevTools instructions. This stylesheet has no global `.hidden`.
+  assert.match(details, /<div id="opencodeCookieFields" class="opencode-credential-fields hidden">/);
+  const css = readRendererFile('styles.css');
+  assert.match(css, /\.opencode-credential-fields\.hidden \{ display: none; \}/);
   assert.match(details, /<div class="settings-actions">\s*<button id="opencodeCookieSubmit" data-i18n="settings\.opencode\.saveProfile">/);
   assert.match(details, /<div id="opencodeErrorMessage" class="settings-note error hidden"><\/div>/);
 
@@ -190,7 +204,8 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /addDetails\?\.classList\.toggle\('hidden'/);
   assert.match(setupBody, /document\.getElementById\('opencodeOpenBrowser'\)\?\.addEventListener\('click'/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/auth'\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(/);
+  assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(name, cookie, opencodeCredentialKind\)/);
+  assert.match(setupBody, /kindSelect\?\.addEventListener\('change', applyOpenCodeCredentialKind\)/);
   assert.match(setupBody, /renderOpenCodeProfiles\(\)/);
   assert.match(setupBody, /updateOpenCodeProfilesStatus\(\)/);
 });
@@ -984,6 +999,16 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  // That redactor must name the fields it forwards. A spread of the stored
+  // profile hands any field added later to the renderer verbatim, which is how
+  // the API key would have leaked when profiles gained one.
+  const opencodeRedactor = main.slice(
+    main.indexOf('function redactOpencodeProfilesForRenderer'),
+    main.indexOf('function redactOpenRouterProfilesForRenderer')
+  );
+  assert.doesNotMatch(opencodeRedactor, /\.\.\.profile/);
+  assert.match(opencodeRedactor, /cookie: profile\?\.cookie \? 'set' : ''/);
+  assert.match(opencodeRedactor, /apiKey: profile\?\.apiKey \? 'set' : ''/);
   assert.match(credentialStore, /kimiWebAccessToken: \['providers', 'kimi', 'webAccessToken'\]/);
   assert.match(body, /kimiWebAccessTokenConfigured: Boolean\(currentKimiWebAccessToken\(\)\)/);
   const mimoRendererShape = main.slice(
