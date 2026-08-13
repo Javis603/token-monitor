@@ -3165,8 +3165,11 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   if (explicitProfiles && Object.keys(explicitProfiles).length > 0) {
     for (const [name, p] of Object.entries(explicitProfiles)) {
       if (!p.enabled) continue;
-      if (p.apiKey) cookies.push({ name, apiKey: p.apiKey });
-      else if (p.cookie) cookies.push({ name, cookie: p.cookie });
+      // A profile may hold both: saving an API key onto a profile that already
+      // has a cookie is the user asserting they are one account, which is the
+      // only thing that licenses reading Go quota from the key while taking Zen
+      // balance and the workspace identity from the cookie.
+      if (p.apiKey || p.cookie) cookies.push({ name, apiKey: p.apiKey, cookie: p.cookie });
     }
   } else if (options.opencodeCookie) {
     cookies = [{ name: 'default', cookie: options.opencodeCookie }];
@@ -3202,18 +3205,27 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     const primary = cookies[0] || {};
     const cookie = primary.cookie;
     // Which key this account is read with:
-    //   explicit API profile -> its own key
-    //   cookie account       -> none ('' suppresses the ambient lookup)
-    //   nothing configured   -> undefined, i.e. the ambient auth.json/env key
+    //   profile carrying a key -> that key (with or without a cookie beside it)
+    //   any other configuration -> none ('' suppresses the ambient lookup)
+    //   nothing configured at all -> undefined, i.e. the ambient auth.json/env key
     //
-    // The ambient key is deliberately NOT paired with a cookie account. Pairing
-    // them asserts that whoever is signed in to OpenCode on this machine is the
-    // same account as the cookie, and nothing can verify that: the usage
+    // The ambient key is deliberately never paired with a credential the user
+    // configured. Pairing them asserts that whoever is signed in to OpenCode on
+    // this machine is the same account, and nothing can verify that: the usage
     // endpoint returns no workspace id to compare against the cookie's. Where
     // they differ the cookie's workspace identity wins further down
     // (`webAccountKey`), so the result would publish one account's quota — and
     // merge it across devices — under the other account's identity.
-    const primaryApiKey = primary.apiKey || (cookie ? '' : undefined);
+    //
+    // "Configured" means a profile map exists, not that something in it is
+    // enabled: disabling every account must leave the list empty, not fall back
+    // to whichever account happens to be logged in locally.
+    const hasConfiguredCredentials = Boolean(
+      (explicitProfiles && Object.keys(explicitProfiles).length > 0)
+      || options.opencodeCookie
+      || envCookie
+    );
+    const primaryApiKey = primary.apiKey || (hasConfiguredCredentials ? '' : undefined);
     const [goApi, goWeb, zen] = await Promise.all([
       collectGoApi({
         env: deps.env || process.env,
@@ -3312,9 +3324,17 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
 
   // Each enabled profile — query in parallel
   const results = await Promise.all(
-    cookies.map((profile) => (profile.apiKey
+    cookies.map((profile) => (profile.apiKey && !profile.cookie
       ? fetchOpenCodeApiProfile(profile, collectGoApi, nowMs, updatedAt, deps)
-      : fetchSingleOpenCodeProfile(profile.name, profile.cookie, fetchGoWeb, fetchZen, nowMs, updatedAt)))
+      : fetchSingleOpenCodeProfile(
+        profile.name,
+        profile.cookie,
+        fetchGoWeb,
+        fetchZen,
+        nowMs,
+        updatedAt,
+        { apiKey: profile.apiKey, collectGoApi, deps }
+      )))
   );
   for (const provider of results) {
     if (provider) providers.push(provider);
@@ -3373,18 +3393,32 @@ async function fetchOpenCodeApiProfile(profile, collectGoApi, nowMs, updatedAt, 
   }
 }
 
-async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, updatedAt) {
+// `api` carries an optional key explicitly associated with this cookie account,
+// i.e. both credentials saved under one profile name. That association is the
+// user's assertion that they are one account, which is what licenses reading Go
+// quota from the key while Zen balance and the workspace identity come from the
+// cookie. Without it the cookie account is read exactly as before.
+async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, updatedAt, api = {}) {
   const PROFILE_TIMEOUT_MS = 15000;
   let timer;
 
   try {
     const result = await Promise.race([
       (async () => {
-        const [goWeb, zen] = await Promise.all([
+        const [goWeb, zen, goApi] = await Promise.all([
           fetchGoWeb(cookie, { now: () => nowMs }),
-          fetchZen(cookie, { now: () => nowMs, workspaceId: '' })
+          fetchZen(cookie, { now: () => nowMs, workspaceId: '' }),
+          api.apiKey
+            ? api.collectGoApi({
+              env: api.deps?.env || process.env,
+              now: () => nowMs,
+              fetch: api.deps?.fetch,
+              signal: api.deps?.signal,
+              apiKey: api.apiKey
+            })
+            : null
         ]);
-        return { goWeb, zen };
+        return { goWeb, zen, goApi };
       })(),
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(new Error('timeout')), PROFILE_TIMEOUT_MS);
@@ -3392,13 +3426,19 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     ]);
     clearTimeout(timer);
 
-    const { goWeb, zen } = result;
+    const { goWeb, zen, goApi } = result;
     const windows = [];
     let status = 'notConfigured';
     let planLabel = '';
     let balanceUsd = null;
+    let source = 'web';
 
-    if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
+    if (goApi && goApi.status === 'ok' && goApi.windows.length > 0) {
+      windows.push(...goApi.windows.map((window) => ({ ...window, source: 'web' })));
+      status = 'ok';
+      planLabel = 'Go';
+      source = 'api';
+    } else if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
       windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok';
       planLabel = 'Go';
@@ -3414,7 +3454,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     }
 
     if (status !== 'ok') {
-      const failStatus = goWeb?.status || zen?.status || 'unauthorized';
+      const failStatus = goApi?.status || goWeb?.status || zen?.status || 'unauthorized';
       status = failStatus;
     }
 
@@ -3437,7 +3477,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       // New renderers use planLabel for Go/Zen and accountName for identity.
       accountLabel: name,
       planLabel,
-      source: 'web',
+      source,
       sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
       status,
       updatedAt,

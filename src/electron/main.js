@@ -118,6 +118,20 @@ const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
 const opencodeGoApi = require('../shared/opencodeGoApi');
+
+// The collector reaches the usage API behind a probe deadline; these settings
+// paths call it directly, so they need their own bound or a hung request leaves
+// the account panel spinning and "Save account" pending forever.
+const OPENCODE_API_PROBE_TIMEOUT_MS = 15_000;
+async function probeOpenCodeApiKey(apiKey) {
+  try {
+    return await opencodeGoApi.fetchGoApi(apiKey, {
+      signal: AbortSignal.timeout(OPENCODE_API_PROBE_TIMEOUT_MS)
+    });
+  } catch (_) {
+    return { status: 'unavailable', windows: [] };
+  }
+}
 const openrouterLimits = require('../shared/openrouterLimits');
 const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
@@ -6481,18 +6495,27 @@ app.whenReady().then(() => {
         // An API key reaches Go quota and nothing else, so it reports the same
         // shape as a cookie with the Zen half permanently absent. Without this
         // branch an API account is never probed and the panel sits at "0/1".
-        if (profile.apiKey) {
-          const probe = await opencodeGoApi.fetchGoApi(profile.apiKey, {});
+        // Only a cookie account can be probed for Zen, so a profile holding both
+        // falls through to the cookie path and its key is used by the collector.
+        if (profile.apiKey && !profile.cookie) {
+          const probe = await probeOpenCodeApiKey(profile.apiKey);
+          // The renderer checks `linked` before `error`, so anything short of a
+          // working key must not claim linked or it renders a bare "✓" with no
+          // plan behind it.
+          if (probe.status === 'ok') {
+            return [name, { linked: true, expired: false, go: true, zen: false, hasBalance: false, balanceUsd: null }];
+          }
+          if (probe.status === 'unauthorized') {
+            return [name, { linked: true, expired: true, go: false, zen: false, hasBalance: false, balanceUsd: null }];
+          }
           return [name, {
-            linked: true,
-            expired: probe.status === 'unauthorized',
-            go: probe.status === 'ok',
+            linked: false,
+            expired: false,
+            go: false,
             zen: false,
             hasBalance: false,
             balanceUsd: null,
-            ...(['unavailable', 'sourceRateLimited'].includes(probe.status)
-              ? { error: probe.status }
-              : {})
+            error: probe.status
           }];
         }
         const [go, zen] = await Promise.all([
@@ -6543,7 +6566,7 @@ app.whenReady().then(() => {
       if (kind === 'api') {
         const apiKey = String(raw || '').trim();
         if (!apiKey) return { ok: false, error: 'Empty API key' };
-        const probe = await opencodeGoApi.fetchGoApi(apiKey, {});
+        const probe = await probeOpenCodeApiKey(apiKey);
         if (probe.status === 'unauthorized') {
           return { ok: false, error: 'OpenCode rejected the API key' };
         }
@@ -6569,10 +6592,12 @@ app.whenReady().then(() => {
         credential = { cookie, enabled: true };
       }
       const profiles = settings.opencodeProfiles || {};
-      // Replace rather than merge: a profile carries exactly one credential, so
-      // switching an existing profile from cookie to API key must not leave the
-      // old cookie behind for the collector to pick up instead.
-      profiles[name] = credential;
+      // Saving one credential replaces only that kind and keeps the other. Two
+      // kinds under one profile name is how a user says "these are the same
+      // account", which is the only thing that licenses reading Go quota from
+      // the key while Zen balance comes from the cookie. Nothing associates them
+      // automatically: same machine is not evidence of same account.
+      profiles[name] = { ...(profiles[name] || {}), ...credential };
       settings.opencodeProfiles = profiles;
       saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
