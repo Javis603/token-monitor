@@ -931,6 +931,58 @@ test('an urgency tick never supersedes a refresh already queued for its scope', 
   }
 });
 
+// An account is addressable by several aliases, and callers enqueue whichever
+// one they hold: a profile refresh uses accountName while the row itself also
+// carries an accountKey. Comparing identity keys reads those as two accounts.
+test('queued work is matched by account alias, not by identity key', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 60, kimi: 10 };
+  const started = [];
+  let releaseKimi = null;
+  const row = (provider) => ({
+    provider,
+    accountKey: 'acct-key',
+    accountName: 'profile-one',
+    accountLabel: 'Account',
+    source: 'api',
+    status: 'ok',
+    updatedAt: new Date(clock.now()).toISOString(),
+    windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+  });
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      started.push(`${provider}:${context.reason}`);
+      if (provider !== 'kimi' || context.reason !== 'manual') return [row(provider)];
+      return new Promise((resolve) => { releaseKimi = () => resolve([row(provider)]); });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+
+    void runtime.refresh({ provider: 'kimi' }, 'manual');
+    await waitFor(() => started.includes('kimi:manual'), 'kimi probe holding the slot');
+    // Enqueued by name; the urgency scope for the same account resolves by key.
+    void runtime.refresh({ provider: 'claude', accountName: 'profile-one' }, 'profile-state');
+
+    clock.advance(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseKimi();
+
+    await waitFor(() => started.includes('claude:profile-state'), 'queued profile refresh');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(started.includes('claude:burn-rate'), false);
+  } finally {
+    releaseKimi?.();
+    runtime.stop();
+  }
+});
+
 test('fixed mode never schedules an early refresh', async () => {
   const clock = fakeClock(1_000);
   const used = { claude: 68, kimi: 10 };

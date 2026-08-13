@@ -418,11 +418,18 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         // tick, and a pending provider-wide refresh is about to return exactly
         // the reading being asked for. Another account's pending work is not a
         // reason to hold this one back.
+        //
+        // Compared through rowMatchesScope rather than by identity key, because
+        // an account is addressable by several aliases and callers pick whichever
+        // one they hold: a row carrying both accountKey and accountName produces
+        // the accountKey form here, while a profile refresh enqueues the name
+        // form. Key equality reads those as different accounts and lets the tick
+        // probe an account that is already queued.
         const lane = lanes.get(provider);
         const covered = lane
           && (lane.active
             || lane.pending.has(`${provider}:*`)
-            || lane.pending.has(scopeIdentityKey(scope)));
+            || [...lane.pending.values()].some((pending) => rowMatchesScope(scope, pending.scope)));
         if (covered) continue;
         // Held until the probe settles, not merely until it is dispatched. The
         // lane is latest-wins, so re-scheduling a scope whose probe is still
