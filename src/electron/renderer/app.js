@@ -8072,7 +8072,10 @@ async function refreshHubInfo() {
   } catch (_) { /* ignore */ }
 }
 
+let hubBuildStatusRequest = 0;
+
 async function refreshHubBuildStatus() {
+  const request = ++hubBuildStatusRequest;
   if (!window.tokenMonitor.getHubBuildStatus || state.settings?.hubMode !== 'client') {
     state.hubBuildStatus = null;
     renderHubBuildStatus();
@@ -8082,9 +8085,12 @@ async function refreshHubBuildStatus() {
   try {
     const result = await window.tokenMonitor.getHubBuildStatus();
     const currentUrl = String(state.settings.hubUrl || '').trim().replace(/\/$/, '');
-    if (currentUrl !== requestedUrl || (result?.hubUrl && result.hubUrl !== currentUrl)) return;
+    if (request !== hubBuildStatusRequest
+      || currentUrl !== requestedUrl
+      || (result?.hubUrl && result.hubUrl !== currentUrl)) return;
     state.hubBuildStatus = result;
   } catch (_) {
+    if (request !== hubBuildStatusRequest) return;
     state.hubBuildStatus = null;
   }
   renderHubBuildStatus();

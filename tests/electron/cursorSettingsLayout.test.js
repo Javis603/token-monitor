@@ -1167,6 +1167,9 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.match(app, /function renderHubBuildStatus\(\)/);
   assert.doesNotMatch(app, /await refreshHubBuildStatus\(\)/);
   assert.equal([...app.matchAll(/void refreshHubBuildStatus\(\)/g)].length, 4);
+  const refreshBody = functionBody(app, 'refreshHubBuildStatus', 'syncPeriodTabs');
+  assert.match(refreshBody, /const request = \+\+hubBuildStatusRequest/);
+  assert.equal([...refreshBody.matchAll(/request !== hubBuildStatusRequest/g)].length, 2);
   assert.match(preload, /getHubBuildStatus: \(\) => ipcRenderer\.invoke\('hub:getBuildStatus'\)/);
   assert.match(main, /ipcMain\.handle\('hub:getBuildStatus'/);
   assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 5);
