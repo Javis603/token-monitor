@@ -51,6 +51,22 @@ test('fixed period slots keep the existing three-button layout', () => {
   assert.equal(ranges.displayLabel('last7'), '7D');
 });
 
+test('token component breakdown preserves known values and isolates the unknown remainder', () => {
+  assert.deepEqual(ranges.tokenComponentBreakdown({
+    totalTokens: 150,
+    cacheReadTokens: 60,
+    outputTokens: 20,
+    unclassifiedTokens: 50
+  }), {
+    cacheRead: 60,
+    cacheMiss: 20,
+    output: 20,
+    unclassified: 50,
+    hitPct: 75,
+    missPct: 25
+  });
+});
+
 test('device inventory signatures are stable and identity-aware', () => {
   assert.equal(
     ranges.deviceInventorySignature([{ deviceId: 'new-device' }, { deviceId: 'old-device' }]),
@@ -167,6 +183,89 @@ test('live today replaces a lagging V1 history row without double counting', () 
   assert.equal(result.status, 'ready');
   assert.equal(result.period.totalTokens, 60);
   assert.deepEqual(result.period.clients, { claude: 10, codex: 50 });
+});
+
+test('fixed ranges expose exact History token components only when every selected usage row proves them', () => {
+  const exactDay = {
+    date: '2026-08-11',
+    tokens: 100,
+    cost: 1,
+    cacheReadTokens: 60,
+    cacheWriteTokens: 10,
+    outputTokens: 20,
+    unclassifiedTokens: 0,
+    tokenComponentsAvailable: true,
+    perClient: {
+      claude: {
+        tokens: 100, cost: 1,
+        unclassifiedTokens: 0,
+        cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20
+      }
+    },
+    perModel: {
+      opus: {
+        tokens: 100, cost: 1,
+        unclassifiedTokens: 0,
+        cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20
+      }
+    }
+  };
+  const exact = ranges.fixedPeriodSnapshot('last7', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [exactDay]
+  });
+  assert.equal(exact.period.capabilities.tokenComponents, true);
+  assert.equal(exact.period.cacheReadTokens, 60);
+  assert.equal(exact.period.cacheWriteTokens, 10);
+  assert.equal(exact.period.outputTokens, 20);
+  assert.equal(exact.period.clientCacheReads.claude, 60);
+  assert.equal(exact.period.modelOutputs.opus, 20);
+
+  const mixed = ranges.fixedPeriodSnapshot('last7', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [exactDay, day('2026-08-10', 50)]
+  });
+  assert.equal(mixed.period.totalTokens, 150);
+  assert.equal(mixed.period.capabilities.tokenComponents, false);
+  assert.equal(mixed.period.clientCacheReads.claude, 60);
+  assert.equal(mixed.period.modelOutputs.opus, 20);
+  assert.equal(mixed.period.unclassifiedTokens, 50);
+  assert.equal(mixed.period.clientUnclassifiedTokens.claude, 50);
+  assert.equal(mixed.period.modelUnclassifiedTokens.opus, 50);
+});
+
+test('live-only fixed ranges carry native token components through exact zero history days', () => {
+  const result = ranges.fixedPeriodSnapshot('last7', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [],
+    todayPeriod: {
+      totalTokens: 100,
+      costUsd: 1,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 10,
+      outputTokens: 20,
+      clients: { codex: 100 },
+      clientCosts: { codex: 1 },
+      clientCacheReads: { codex: 60 },
+      clientCacheWrites: { codex: 10 },
+      clientOutputs: { codex: 20 },
+      models: { gpt: 100 },
+      modelCosts: { gpt: 1 },
+      modelCacheReads: { gpt: 60 },
+      modelCacheWrites: { gpt: 10 },
+      modelOutputs: { gpt: 20 }
+    }
+  });
+  assert.equal(result.period.capabilities.tokenComponents, true);
+  assert.equal(result.period.cacheReadTokens, 60);
+  assert.equal(result.period.clientCacheWrites.codex, 10);
+  assert.equal(result.period.modelOutputs.gpt, 20);
 });
 
 test('historical cost-only usage participates in a fixed range', () => {

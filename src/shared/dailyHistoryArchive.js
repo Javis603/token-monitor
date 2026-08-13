@@ -25,6 +25,15 @@ function normalizeObservation(value) {
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
   const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
+  const cacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
+  const cacheWriteTokens = Math.max(0, Math.round(num(value.cacheWriteTokens ?? value.cache_write_tokens)));
+  const outputTokens = Math.max(0, Math.round(num(value.outputTokens ?? value.output_tokens)));
+  const componentTokens = cacheReadTokens + cacheWriteTokens + outputTokens;
+  // A zero-token synthetic observation has an exact zero component breakdown
+  // even when it predates the provenance field. Do not let bookkeeping-only
+  // rows make an otherwise exact fixed-range breakdown unavailable.
+  const tokenComponentsAvailable = componentTokens <= tokens
+    && (tokens === 0 || value.tokenComponentsAvailable === true);
   if (tokens === 0 && cost === 0 && messages === 0) return null;
   return {
     client,
@@ -35,6 +44,12 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
+    ...(tokenComponentsAvailable ? {
+      tokenComponentsAvailable: true,
+      ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+      ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+      ...(outputTokens > 0 ? { outputTokens } : {})
+    } : {}),
     ...(reasoningTokens > 0 ? { reasoningTokens } : {})
   };
 }
@@ -92,7 +107,14 @@ function observationsFromGraphs(graphs) {
         const candidate = normalizeObservation({
           ...raw,
           tokens: sumTokens(raw?.tokens, raw?.client),
-          reasoningTokens: raw?.tokens?.reasoning
+          reasoningTokens: raw?.tokens?.reasoning,
+          tokenComponentsAvailable: raw?.tokenComponentsAvailable !== false,
+          cacheReadTokens: raw?.tokens?.cacheRead ?? raw?.tokens?.cache_read,
+          cacheWriteTokens: raw?.tokens?.cacheWrite ?? raw?.tokens?.cache_write,
+          outputTokens: num(raw?.tokens?.output)
+            + (String(raw?.client || '').trim().toLowerCase() === REASONIX_CLIENT
+              ? num(raw?.tokens?.reasoning)
+              : 0)
         });
         if (!candidate) continue;
         const key = observationKey(candidate);
@@ -107,7 +129,12 @@ function observationsFromGraphs(graphs) {
           tokens: previous.tokens + candidate.tokens,
           cost: previous.cost + candidate.cost,
           messages: previous.messages + candidate.messages,
-          reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens)
+          reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens),
+          tokenComponentsAvailable: previous.tokenComponentsAvailable === true
+            && candidate.tokenComponentsAvailable === true,
+          cacheReadTokens: num(previous.cacheReadTokens) + num(candidate.cacheReadTokens),
+          cacheWriteTokens: num(previous.cacheWriteTokens) + num(candidate.cacheWriteTokens),
+          outputTokens: num(previous.outputTokens) + num(candidate.outputTokens)
         });
       }
       days.set(date, day);
@@ -250,9 +277,16 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
+    const sameTokens = num(observation.tokens) === num(previous.tokens);
     return [key, {
       ...observation,
       messages: Math.max(observation.messages, previous.messages),
+      ...(sameTokens && previous.tokenComponentsAvailable === true ? {
+        tokenComponentsAvailable: true,
+        cacheReadTokens: num(previous.cacheReadTokens),
+        cacheWriteTokens: num(previous.cacheWriteTokens),
+        outputTokens: num(previous.outputTokens)
+      } : {}),
       ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
         ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
         : {})
@@ -326,15 +360,20 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
           modelId: observation.modelId,
           ...(observation.providerId ? { providerId: observation.providerId } : {}),
           tokens: {
-            input: observation.tokens,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            // Archive observations store one already-aggregated token total.
-            // Re-emitting Reasonix's additive reasoning beside that total would
-            // count it twice when history parses the reconstructed graph.
-            reasoning: observation.client === REASONIX_CLIENT ? 0 : num(observation.reasoningTokens)
+            input: observation.tokenComponentsAvailable === true
+              ? Math.max(0, observation.tokens
+                - num(observation.outputTokens)
+                - num(observation.cacheReadTokens)
+                - num(observation.cacheWriteTokens))
+              : observation.tokens,
+            output: observation.tokenComponentsAvailable === true ? num(observation.outputTokens) : 0,
+            cacheRead: observation.tokenComponentsAvailable === true ? num(observation.cacheReadTokens) : 0,
+            cacheWrite: observation.tokenComponentsAvailable === true ? num(observation.cacheWriteTokens) : 0,
+            // Archive observations store one already-aggregated output family.
+            // Re-emitting reasoning separately would count it twice.
+            reasoning: 0
           },
+          tokenComponentsAvailable: observation.tokenComponentsAvailable === true,
           cost: observation.cost,
           messages: observation.messages
         }))

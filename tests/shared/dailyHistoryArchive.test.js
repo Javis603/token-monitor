@@ -66,7 +66,7 @@ test('capture preserves a larger prior observation as one coherent record', () =
   const [stored] = Object.values(next.days['2026-07-17'].observations);
   assert.deepEqual(stored, {
     client: 'claude', modelId: 'opus', providerId: 'anthropic',
-    tokens: 100, cost: 4, messages: 5, reasoningTokens: 7
+    tokens: 100, cost: 4, messages: 5, tokenComponentsAvailable: true, reasoningTokens: 7
   });
 });
 
@@ -80,8 +80,12 @@ test('capture updates identities independently without synthesizing token and co
   ]), { todayKey: '2026-07-18' });
   const restored = historyFrom(graphFromDailyHistoryArchive([], next, { todayKey: '2026-07-18' }));
   assert.equal(restored.daily[0].tokens, 160);
-  assert.deepEqual(restored.daily[0].perClient.claude, { tokens: 100, cost: 4, messages: 5 });
-  assert.deepEqual(restored.daily[0].perClient.codex, { tokens: 60, cost: 2.5, messages: 4 });
+  assert.deepEqual(restored.daily[0].perClient.claude, {
+    tokens: 100, cost: 4, messages: 5, unclassifiedTokens: 0
+  });
+  assert.deepEqual(restored.daily[0].perClient.codex, {
+    tokens: 60, cost: 2.5, messages: 4, unclassifiedTokens: 0
+  });
 });
 
 test('capture replaces the whole observation when usage grows and refreshes equal-usage pricing', () => {
@@ -95,7 +99,71 @@ test('capture replaces the whole observation when usage grows and refreshes equa
     client('claude', 'opus', 120, 5.2, 6)
   ]), { todayKey: '2026-07-18' });
   const [stored] = Object.values(repriced.days['2026-07-17'].observations);
-  assert.deepEqual(stored, { client: 'claude', modelId: 'opus', tokens: 120, cost: 5.2, messages: 6 });
+  assert.deepEqual(stored, {
+    client: 'claude', modelId: 'opus', tokens: 120, cost: 5.2, messages: 6,
+    tokenComponentsAvailable: true
+  });
+});
+
+test('archive preserves exact graph token components and marks legacy totals unavailable', () => {
+  const exact = captureDailyHistoryArchive({}, graph('2026-07-17', [{
+    client: 'claude',
+    modelId: 'opus',
+    tokens: { input: 10, output: 20, cacheRead: 60, cacheWrite: 10, reasoning: 0 },
+    cost: 1,
+    messages: 1
+  }]), { todayKey: '2026-07-18' });
+  const restoredExact = historyFrom(graphFromDailyHistoryArchive([], exact, {
+    todayKey: '2026-07-18'
+  }));
+  assert.equal(restoredExact.daily[0].tokenComponentsAvailable, true);
+  assert.equal(restoredExact.daily[0].cacheReadTokens, 60);
+  assert.equal(restoredExact.daily[0].cacheWriteTokens, 10);
+  assert.equal(restoredExact.daily[0].outputTokens, 20);
+  assert.equal(restoredExact.daily[0].perClient.claude.cacheReadTokens, 60);
+  assert.equal(restoredExact.daily[0].perModel.opus.outputTokens, 20);
+
+  const legacy = normalizeDailyHistoryArchive({
+    version: 1,
+    days: {
+      '2026-07-17': {
+        date: '2026-07-17',
+        observations: [{ client: 'claude', modelId: 'opus', tokens: 100, cost: 1, messages: 1 }]
+      }
+    }
+  });
+  const restoredLegacy = historyFrom(graphFromDailyHistoryArchive([], legacy, {
+    todayKey: '2026-07-18'
+  }));
+  assert.equal(restoredLegacy.daily[0].tokens, 100);
+  assert.equal(restoredLegacy.daily[0].tokenComponentsAvailable, false);
+  assert.equal(restoredLegacy.daily[0].unclassifiedTokens, 100);
+  assert.equal(restoredLegacy.daily[0].perClient.claude.unclassifiedTokens, 100);
+  assert.equal(restoredLegacy.daily[0].perModel.opus.unclassifiedTokens, 100);
+});
+
+test('legacy zero-token synthetic observations have an exact empty component breakdown', () => {
+  const archive = normalizeDailyHistoryArchive({
+    version: 1,
+    days: {
+      '2026-07-17': {
+        date: '2026-07-17',
+        observations: [{
+          client: 'claude',
+          modelId: '<synthetic>',
+          tokens: 0,
+          cost: 0,
+          messages: 1
+        }]
+      }
+    }
+  });
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-07-18'
+  }));
+
+  assert.equal(restored.daily[0].tokens, 0);
+  assert.equal(restored.daily[0].tokenComponentsAvailable, true);
 });
 
 test('live today snapshot wins over a smaller graph value after date rollover', () => {

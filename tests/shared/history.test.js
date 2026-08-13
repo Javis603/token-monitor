@@ -52,9 +52,9 @@ const SAMPLE = {
       activeTimeMs: 3600000,
       clients: [
         { client: 'claude', modelId: 'opus', providerId: 'anthropic',
-          tokens: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: 7 }, cost: 1.0, messages: 3 },
+          tokens: { input: 5, output: 20, cacheRead: 4, cacheWrite: 1, reasoning: 7 }, cost: 1.0, messages: 3 },
         { client: 'codex', modelId: 'gpt', providerId: 'openai',
-          tokens: { input: 5, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 0.5, messages: 1 }
+          tokens: { input: 2, output: 5, cacheRead: 2, cacheWrite: 1, reasoning: 0 }, cost: 0.5, messages: 1 }
       ]
     }
   ]
@@ -70,10 +70,31 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
   assert.equal(day.cost, 1.5);
   assert.equal(day.messages, 4);
   assert.equal(day.activeTimeMs, 3600000);
-  assert.deepEqual(day.perClient.claude, { tokens: 30, cost: 1.0, messages: 3 });
-  assert.deepEqual(day.perClient.codex, { tokens: 10, cost: 0.5, messages: 1 });
-  assert.deepEqual(day.perModel.opus, { tokens: 30, cost: 1.0 });
-  assert.deepEqual(day.perModel.gpt, { tokens: 10, cost: 0.5 });
+  assert.equal(day.cacheReadTokens, 6);
+  assert.equal(day.cacheWriteTokens, 2);
+  assert.equal(day.outputTokens, 25);
+  assert.equal(day.unclassifiedTokens, 0);
+  assert.equal(day.tokenComponentsAvailable, true);
+  assert.deepEqual(day.perClient.claude, {
+    tokens: 30, cost: 1.0, messages: 3,
+    unclassifiedTokens: 0,
+    cacheReadTokens: 4, cacheWriteTokens: 1, outputTokens: 20
+  });
+  assert.deepEqual(day.perClient.codex, {
+    tokens: 10, cost: 0.5, messages: 1,
+    unclassifiedTokens: 0,
+    cacheReadTokens: 2, cacheWriteTokens: 1, outputTokens: 5
+  });
+  assert.deepEqual(day.perModel.opus, {
+    tokens: 30, cost: 1.0,
+    unclassifiedTokens: 0,
+    cacheReadTokens: 4, cacheWriteTokens: 1, outputTokens: 20
+  });
+  assert.deepEqual(day.perModel.gpt, {
+    tokens: 10, cost: 0.5,
+    unclassifiedTokens: 0,
+    cacheReadTokens: 2, cacheWriteTokens: 1, outputTokens: 5
+  });
 });
 
 test('parseGraphResult is defensive about missing/garbage input', () => {
@@ -82,7 +103,10 @@ test('parseGraphResult is defensive about missing/garbage input', () => {
   assert.deepEqual(parseGraphResult({ contributions: 'x' }), { contributions: [] });
   const out = parseGraphResult({ contributions: [{ date: '2026-01-01' }] });
   assert.deepEqual(out.contributions[0], {
-    date: '2026-01-01', tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {}
+    date: '2026-01-01', tokens: 0, cost: 0, messages: 0,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0,
+    tokenComponentsAvailable: true,
+    activeTimeMs: 0, perClient: {}, perModel: {}
   });
 });
 

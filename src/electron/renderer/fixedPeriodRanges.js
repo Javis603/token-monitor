@@ -105,7 +105,35 @@
     target[key] = finiteNumber(target[key]) + finiteNumber(value);
   }
 
+  function tokenComponentBreakdown(value = {}) {
+    const total = Math.max(0, finiteNumber(value.totalTokens));
+    const unclassified = Math.min(total, Math.max(0, finiteNumber(value.unclassifiedTokens)));
+    const classified = total - unclassified;
+    const cacheRead = Math.min(classified, Math.max(0, finiteNumber(value.cacheReadTokens)));
+    const output = Math.min(classified - cacheRead, Math.max(0, finiteNumber(value.outputTokens)));
+    const cacheMiss = Math.max(0, classified - cacheRead - output);
+    const input = cacheRead + cacheMiss;
+    const hitPct = input > 0 ? Math.round((cacheRead / input) * 100) : 0;
+    return {
+      cacheRead,
+      cacheMiss,
+      output,
+      unclassified,
+      hitPct,
+      missPct: input > 0 ? 100 - hitPct : 0
+    };
+  }
+
+  function unclassifiedTokensFor(value) {
+    if (!value || typeof value !== 'object') return 0;
+    if (Object.prototype.hasOwnProperty.call(value, 'unclassifiedTokens')) {
+      return Math.max(0, finiteNumber(value.unclassifiedTokens));
+    }
+    return value.tokenComponentsAvailable === true ? 0 : Math.max(0, finiteNumber(value.tokens));
+  }
+
   function rowFromLivePeriod(period, date, previous = {}) {
+    const tokenComponentsAvailable = period?.capabilities?.tokenComponents !== false;
     const perClient = {};
     const clients = new Set([
       ...Object.keys(period?.clients || {}),
@@ -115,7 +143,13 @@
       perClient[client] = {
         tokens: finiteNumber(period?.clients?.[client]),
         cost: finiteNumber(period?.clientCosts?.[client]),
-        messages: finiteNumber(previous?.perClient?.[client]?.messages)
+        messages: finiteNumber(previous?.perClient?.[client]?.messages),
+        unclassifiedTokens: tokenComponentsAvailable ? 0 : finiteNumber(period?.clients?.[client]),
+        ...(tokenComponentsAvailable ? {
+          cacheReadTokens: finiteNumber(period?.clientCacheReads?.[client]),
+          cacheWriteTokens: finiteNumber(period?.clientCacheWrites?.[client]),
+          outputTokens: finiteNumber(period?.clientOutputs?.[client])
+        } : {})
       };
     }
     const perModel = {};
@@ -126,7 +160,13 @@
     for (const model of models) {
       perModel[model] = {
         tokens: finiteNumber(period?.models?.[model]),
-        cost: finiteNumber(period?.modelCosts?.[model])
+        cost: finiteNumber(period?.modelCosts?.[model]),
+        unclassifiedTokens: tokenComponentsAvailable ? 0 : finiteNumber(period?.models?.[model]),
+        ...(tokenComponentsAvailable ? {
+          cacheReadTokens: finiteNumber(period?.modelCacheReads?.[model]),
+          cacheWriteTokens: finiteNumber(period?.modelCacheWrites?.[model]),
+          outputTokens: finiteNumber(period?.modelOutputs?.[model])
+        } : {})
       };
     }
     return {
@@ -134,6 +174,11 @@
       date,
       tokens: finiteNumber(period?.totalTokens),
       cost: finiteNumber(period?.costUsd),
+      cacheReadTokens: tokenComponentsAvailable ? finiteNumber(period?.cacheReadTokens) : 0,
+      cacheWriteTokens: tokenComponentsAvailable ? finiteNumber(period?.cacheWriteTokens) : 0,
+      outputTokens: tokenComponentsAvailable ? finiteNumber(period?.outputTokens) : 0,
+      unclassifiedTokens: tokenComponentsAvailable ? 0 : finiteNumber(period?.totalTokens),
+      tokenComponentsAvailable,
       perClient,
       perModel
     };
@@ -163,7 +208,13 @@
     }
     const rows = [];
     for (let date = range.start; date <= range.end; date = dayKeyAddDays(date, 1)) {
-      rows.push(byDate.get(date) || { date, tokens: 0, cost: 0, perClient: {}, perModel: {} });
+      rows.push(byDate.get(date) || {
+        date, tokens: 0, cost: 0,
+        cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0,
+        unclassifiedTokens: 0,
+        tokenComponentsAvailable: true,
+        perClient: {}, perModel: {}
+      });
     }
     return rows;
   }
@@ -337,6 +388,14 @@
       if (!target[field][name]) target[field][name] = { tokens: 0, cost: 0 };
       target[field][name].tokens += finiteNumber(value?.tokens);
       target[field][name].cost += finiteNumber(value?.cost);
+      target[field][name].cacheReadTokens = finiteNumber(target[field][name].cacheReadTokens)
+        + finiteNumber(value?.cacheReadTokens);
+      target[field][name].cacheWriteTokens = finiteNumber(target[field][name].cacheWriteTokens)
+        + finiteNumber(value?.cacheWriteTokens);
+      target[field][name].outputTokens = finiteNumber(target[field][name].outputTokens)
+        + finiteNumber(value?.outputTokens);
+      target[field][name].unclassifiedTokens = finiteNumber(target[field][name].unclassifiedTokens)
+        + unclassifiedTokensFor(value);
       if (field === 'perClient') {
         target[field][name].messages = finiteNumber(target[field][name].messages)
           + finiteNumber(value?.messages);
@@ -356,6 +415,11 @@
             tokens: 0,
             cost: 0,
             activeTimeMs: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            outputTokens: 0,
+            unclassifiedTokens: 0,
+            tokenComponentsAvailable: true,
             perClient: {},
             perModel: {}
           });
@@ -364,6 +428,12 @@
         target.tokens += finiteNumber(row?.tokens);
         target.cost += finiteNumber(row?.cost);
         target.activeTimeMs += finiteNumber(row?.activeTimeMs);
+        target.cacheReadTokens += finiteNumber(row?.cacheReadTokens);
+        target.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
+        target.outputTokens += finiteNumber(row?.outputTokens);
+        target.unclassifiedTokens += unclassifiedTokensFor(row);
+        target.tokenComponentsAvailable = target.tokenComponentsAvailable
+          && row?.tokenComponentsAvailable === true;
         addDailyAttribution(target, 'perClient', row?.perClient);
         addDailyAttribution(target, 'perModel', row?.perModel);
       }
@@ -444,29 +514,69 @@
       costUsd: 0,
       clients: {},
       clientCosts: {},
+      clientCacheReads: {},
+      clientCacheWrites: {},
+      clientOutputs: {},
+      clientUnclassifiedTokens: {},
       models: {},
       modelCosts: {},
+      modelCacheReads: {},
+      modelCacheWrites: {},
+      modelOutputs: {},
+      modelUnclassifiedTokens: {},
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 0,
+      unclassifiedTokens: 0,
       sessions: {},
       projects: {},
       capabilities: { tokenComponents: false, attribution: true, clientModels: false },
       derivedFixedRange: true
     };
     const rows = dailyForRange(daily, range, options);
+    period.capabilities.tokenComponents = rows.every((row) => row?.tokenComponentsAvailable === true);
     for (const row of rows) {
       period.totalTokens += finiteNumber(row?.tokens);
       period.costUsd += finiteNumber(row?.cost);
+      period.cacheReadTokens += finiteNumber(row?.cacheReadTokens);
+      period.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
+      period.outputTokens += finiteNumber(row?.outputTokens);
+      period.unclassifiedTokens += unclassifiedTokensFor(row);
       for (const [client, value] of Object.entries(row?.perClient || {})) {
         addMap(period.clients, client, value?.tokens);
         addMap(period.clientCosts, client, value?.cost);
+        addMap(period.clientCacheReads, client, value?.cacheReadTokens);
+        addMap(period.clientCacheWrites, client, value?.cacheWriteTokens);
+        addMap(period.clientOutputs, client, value?.outputTokens);
+        addMap(period.clientUnclassifiedTokens, client, unclassifiedTokensFor(value));
       }
       for (const [model, value] of Object.entries(row?.perModel || {})) {
         addMap(period.models, model, value?.tokens);
         addMap(period.modelCosts, model, value?.cost);
+        addMap(period.modelCacheReads, model, value?.cacheReadTokens);
+        addMap(period.modelCacheWrites, model, value?.cacheWriteTokens);
+        addMap(period.modelOutputs, model, value?.outputTokens);
+        addMap(period.modelUnclassifiedTokens, model, unclassifiedTokensFor(value));
       }
     }
     period.totalTokens = Math.max(0, Math.round(period.totalTokens));
     period.costUsd = Number(period.costUsd.toFixed(6));
-    for (const map of [period.clients, period.models]) {
+    period.cacheReadTokens = Math.max(0, Math.round(period.cacheReadTokens));
+    period.cacheWriteTokens = Math.max(0, Math.round(period.cacheWriteTokens));
+    period.outputTokens = Math.max(0, Math.round(period.outputTokens));
+    period.unclassifiedTokens = Math.max(0, Math.round(period.unclassifiedTokens));
+    for (const map of [
+      period.clients,
+      period.clientCacheReads,
+      period.clientCacheWrites,
+      period.clientOutputs,
+      period.clientUnclassifiedTokens,
+      period.models,
+      period.modelCacheReads,
+      period.modelCacheWrites,
+      period.modelOutputs,
+      period.modelUnclassifiedTokens
+    ]) {
       for (const key of Object.keys(map)) map[key] = Math.max(0, Math.round(map[key]));
     }
     for (const map of [period.clientCosts, period.modelCosts]) {
@@ -528,6 +638,7 @@
     shouldWarmFixedPeriodHistory,
     slotForSelection,
     supportsBreakdown,
+    tokenComponentBreakdown,
     weekStartsOn
   };
 });

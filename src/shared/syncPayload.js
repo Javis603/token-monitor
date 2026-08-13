@@ -6,9 +6,66 @@ const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
 const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
+const SYNC_HISTORY_COMPONENT_DAYS = 30;
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function dayKeyAddDays(key, delta) {
+  const ms = Date.parse(`${String(key || '').slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms + delta * 86400000).toISOString().slice(0, 10);
+}
+
+function stripTokenComponents(value) {
+  if (!value || typeof value !== 'object') return value;
+  const rest = { ...value };
+  delete rest.cacheReadTokens;
+  delete rest.cacheWriteTokens;
+  delete rest.outputTokens;
+  delete rest.unclassifiedTokens;
+  delete rest.tokenComponentsAvailable;
+  return rest;
+}
+
+function historyForSync(history, periodWindows) {
+  if (!history || typeof history !== 'object' || !Array.isArray(history.daily)) return history;
+  const latestDailyKey = history.daily.reduce((latest, row) => {
+    const key = String(row?.date || '').slice(0, 10);
+    return key > latest ? key : latest;
+  }, '');
+  const todayKey = String(periodWindows?.today?.key || latestDailyKey).slice(0, 10);
+  const componentStart = dayKeyAddDays(todayKey, -(SYNC_HISTORY_COMPONENT_DAYS - 1));
+  if (!componentStart) return history;
+  return {
+    ...history,
+    daily: history.daily.map((row) => {
+      const date = String(row?.date || '').slice(0, 10);
+      if (date >= componentStart && date <= todayKey) return row;
+      const stripped = stripTokenComponents(row);
+      stripped.perClient = Object.fromEntries(Object.entries(row?.perClient || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      stripped.perModel = Object.fromEntries(Object.entries(row?.perModel || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      return stripped;
+    })
+  };
+}
+
+function historyWithoutTokenComponents(history) {
+  if (!history || typeof history !== 'object' || !Array.isArray(history.daily)) return history;
+  return {
+    ...history,
+    daily: history.daily.map((row) => {
+      const stripped = stripTokenComponents(row);
+      stripped.perClient = Object.fromEntries(Object.entries(row?.perClient || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      stripped.perModel = Object.fromEntries(Object.entries(row?.perModel || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      return stripped;
+    })
+  };
 }
 
 function projectEntries(period) {
@@ -121,6 +178,9 @@ function sessionsWithoutReasonix(sessions) {
 function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
+  if (summary.history && typeof summary.history === 'object') {
+    payload.history = historyForSync(summary.history, summary.periodWindows);
+  }
   // Reasonix native sessions are a local-only view. They contain provider
   // metadata and project labels that are intentionally not part of the device
   // wire contract, and uploading them would also make local paths/preview text
@@ -164,6 +224,12 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.history && typeof payload.history === 'object') {
+    // Component detail is additive. Never let it evict an existing project/session
+    // payload or turn a previously uploadable History V1 record into a 413.
+    payload.history = historyWithoutTokenComponents(payload.history);
+    body = JSON.stringify(payload);
+  }
   if (
     !options.omitAllTimeProjects
     && Buffer.byteLength(body, 'utf8') > maxBytes

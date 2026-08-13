@@ -30,6 +30,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   const html = read('index.html');
   const css = read('styles.css');
   const app = read('app.js');
+  const i18n = read('i18n.js');
   const boot = read('floatingBubbleBoot.js');
   assert.ok(html.indexOf('src="fixedPeriodRanges.js"') < html.indexOf('src="app.js"'));
   assert.match(html, /id="monthPeriodMenu" class="view-switcher-menu period-menu hidden"/);
@@ -73,6 +74,11 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(snapshotBuilder, /readySnapshotForSelection\([\s\S]*?state\.fixedPeriodSnapshot,[\s\S]*?state\.period/);
   assert.doesNotMatch(css, /\.period-menu button\s*\{/);
   assert.match(html, /id="fixedPeriodMessage"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.doesNotMatch(app, /periodRange\.tokenComponentsUnavailable/);
+  assert.match(app, /clientUnclassifiedTokens\?\.\[client\]/);
+  assert.match(app, /modelUnclassifiedTokens\?\.\[model\]/);
+  assert.match(app, /dashboard\.tooltip\.unclassified/);
+  assert.match(i18n, /'dashboard\.tooltip\.unclassified': '未分類'/);
 });
 
 test('the Settings default uses the standard title-control-description row', () => {

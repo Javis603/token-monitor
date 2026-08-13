@@ -35,6 +35,12 @@ function sumTokens(breakdown, client = '') {
     + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
 }
 
+function sumOutputTokens(breakdown, client = '') {
+  if (!breakdown || typeof breakdown !== 'object') return 0;
+  return num(breakdown.output)
+    + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
+}
+
 // Folds tokscale `graph` output (contributions[].clients[]) into a per-day shape where a
 // day's total always equals the sum of its perClient and perModel stacks.
 function parseGraphResult(raw) {
@@ -49,6 +55,11 @@ function parseGraphResult(raw) {
     let tokens = 0;
     let cost = 0;
     let messages = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
+    let outputTokens = 0;
+    let unclassifiedTokens = 0;
+    let tokenComponentsAvailable = true;
     const clientRows = Array.isArray(row.clients) ? row.clients : [];
     for (const c of clientRows) {
       if (!c || typeof c !== 'object') continue;
@@ -56,6 +67,11 @@ function parseGraphResult(raw) {
       const model = String(c.modelId || c.model || c.model_id || 'unknown');
       const t = sumTokens(c.tokens, client);
       const cst = num(c.cost);
+      const cacheRead = num(c.tokens?.cacheRead ?? c.tokens?.cache_read);
+      const cacheWrite = num(c.tokens?.cacheWrite ?? c.tokens?.cache_write);
+      const output = sumOutputTokens(c.tokens, client);
+      const componentsAvailable = c.tokenComponentsAvailable !== false;
+      const unclassified = t > 0 && !componentsAvailable ? t : 0;
       // Reasonix's `messages` field is a provider request count, not user turns.
       // Keep it out of Token Monitor's message/activity semantics; its tokens and
       // cost still contribute normally to the history totals.
@@ -63,16 +79,38 @@ function parseGraphResult(raw) {
       tokens += t;
       cost += cst;
       messages += msg;
-      const pc = perClient[client] || (perClient[client] = { tokens: 0, cost: 0, messages: 0 });
+      cacheReadTokens += cacheRead;
+      cacheWriteTokens += cacheWrite;
+      outputTokens += output;
+      unclassifiedTokens += unclassified;
+      tokenComponentsAvailable = tokenComponentsAvailable && (t === 0 || componentsAvailable);
+      const pc = perClient[client] || (perClient[client] = {
+        tokens: 0, cost: 0, messages: 0, unclassifiedTokens: 0
+      });
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
-      const pm = perModel[model] || (perModel[model] = { tokens: 0, cost: 0 });
+      if (cacheRead > 0) pc.cacheReadTokens = num(pc.cacheReadTokens) + cacheRead;
+      if (cacheWrite > 0) pc.cacheWriteTokens = num(pc.cacheWriteTokens) + cacheWrite;
+      if (output > 0) pc.outputTokens = num(pc.outputTokens) + output;
+      pc.unclassifiedTokens += unclassified;
+      const pm = perModel[model] || (perModel[model] = {
+        tokens: 0, cost: 0, unclassifiedTokens: 0
+      });
       pm.tokens += t; pm.cost += cst;
+      if (cacheRead > 0) pm.cacheReadTokens = num(pm.cacheReadTokens) + cacheRead;
+      if (cacheWrite > 0) pm.cacheWriteTokens = num(pm.cacheWriteTokens) + cacheWrite;
+      if (output > 0) pm.outputTokens = num(pm.outputTokens) + output;
+      pm.unclassifiedTokens += unclassified;
     }
     contributions.push({
       date,
       tokens,
       cost,
       messages,
+      cacheReadTokens,
+      cacheWriteTokens,
+      outputTokens,
+      unclassifiedTokens,
+      tokenComponentsAvailable,
       activeTimeMs: num(row.activeTimeMs ?? row.active_time_ms),
       perClient,
       perModel
@@ -139,17 +177,27 @@ function computeStreaks(days, todayKey) {
   return { currentStreak, longestStreak };
 }
 
-function addPerClient(target, source) {
+function addPerClient(target, source, includeTokenComponents = false) {
   for (const [client, v] of Object.entries(source || {})) {
     const t = target[client] || (target[client] = { tokens: 0, cost: 0, messages: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
+    if (includeTokenComponents) {
+      if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
+      if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
+      if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
+    }
   }
 }
 
-function addPerModel(target, source) {
+function addPerModel(target, source, includeTokenComponents = false) {
   for (const [model, v] of Object.entries(source || {})) {
     const t = target[model] || (target[model] = { tokens: 0, cost: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost);
+    if (includeTokenComponents) {
+      if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
+      if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
+      if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
+    }
   }
 }
 
@@ -238,10 +286,19 @@ function mergeDailyMaps(histories) {
   for (const h of histories) {
     for (const d of (h && Array.isArray(h.daily) ? h.daily : [])) {
       const cur = byDate.get(d.date)
-        || { date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+        || {
+          date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0,
+          cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0,
+          tokenComponentsAvailable: true,
+          perClient: {}, perModel: {}
+        };
       cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
-      addPerClient(cur.perClient, d.perClient);
-      addPerModel(cur.perModel, d.perModel);
+      cur.cacheReadTokens += num(d.cacheReadTokens);
+      cur.cacheWriteTokens += num(d.cacheWriteTokens);
+      cur.outputTokens += num(d.outputTokens);
+      cur.tokenComponentsAvailable = cur.tokenComponentsAvailable && d.tokenComponentsAvailable === true;
+      addPerClient(cur.perClient, d.perClient, true);
+      addPerModel(cur.perModel, d.perModel, true);
       byDate.set(d.date, cur);
     }
   }

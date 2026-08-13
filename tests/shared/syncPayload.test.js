@@ -58,6 +58,107 @@ test('syncPayload bounds uploads by omitting all-time sessions', () => {
   assert.equal(summary.allTime.sessions.old.totalTokens, 30);
 });
 
+test('syncPayload keeps component detail for fixed ranges without carrying it across all 370 days', () => {
+  const daily = Array.from({ length: 370 }, (_, index) => {
+    const date = new Date(Date.UTC(2025, 7, 9 + index)).toISOString().slice(0, 10);
+    const perClient = {};
+    const perModel = {};
+    for (let entry = 0; entry < 10; entry += 1) {
+      perClient[`client-${entry}`] = {
+        tokens: 123456,
+        cost: 1.234567,
+        messages: 12,
+        cacheReadTokens: 100000,
+        cacheWriteTokens: 10000,
+        outputTokens: 3456,
+        unclassifiedTokens: 0
+      };
+      perModel[`model-${entry}`] = {
+        tokens: 123456,
+        cost: 1.234567,
+        cacheReadTokens: 100000,
+        cacheWriteTokens: 10000,
+        outputTokens: 3456,
+        unclassifiedTokens: 0
+      };
+    }
+    return {
+      date,
+      tokens: 1234560,
+      cost: 12.34567,
+      messages: 120,
+      activeTimeMs: 12345,
+      cacheReadTokens: 1000000,
+      cacheWriteTokens: 100000,
+      outputTokens: 34560,
+      unclassifiedTokens: 0,
+      tokenComponentsAvailable: true,
+      perClient,
+      perModel
+    };
+  });
+  const summary = {
+    deviceId: 'component-heavy',
+    periodWindows: { today: { key: '2026-08-13', endsAt: '2026-08-14T00:00:00.000Z' } },
+    today: { totalTokens: 1 },
+    month: { totalTokens: 1 },
+    allTime: { totalTokens: 1 },
+    history: { daily, monthly: [], summary: {} },
+    limits: { providers: [] }
+  };
+
+  const { payload, bytes } = serializeSyncPayload(summary);
+  assert.ok(bytes <= SYNC_PAYLOAD_BUDGET_BYTES);
+  assert.equal(payload.history.daily.at(-1).tokenComponentsAvailable, true);
+  assert.equal(payload.history.daily.at(-30).perClient['client-0'].cacheReadTokens, 100000);
+  assert.equal(Object.hasOwn(payload.history.daily.at(-31), 'tokenComponentsAvailable'), false);
+  assert.equal(Object.hasOwn(payload.history.daily.at(-31), 'unclassifiedTokens'), false);
+  assert.equal(Object.hasOwn(payload.history.daily.at(-31).perModel['model-0'], 'outputTokens'), false);
+  assert.equal(summary.history.daily[0].tokenComponentsAvailable, true);
+});
+
+test('serializeSyncPayload drops additive History components before existing payload detail', () => {
+  const row = {
+    date: '2026-08-13',
+    tokens: 100,
+    cost: 1,
+    cacheReadTokens: 60,
+    cacheWriteTokens: 10,
+    outputTokens: 20,
+    unclassifiedTokens: 0,
+    tokenComponentsAvailable: true,
+    perClient: {
+      claude: {
+        tokens: 100, cost: 1,
+        cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20, unclassifiedTokens: 0
+      }
+    },
+    perModel: {
+      opus: {
+        tokens: 100, cost: 1,
+        cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20, unclassifiedTokens: 0
+      }
+    }
+  };
+  const summary = {
+    deviceId: 'dev-a',
+    periodWindows: { today: { key: '2026-08-13' } },
+    today: { totalTokens: 1, sessions: { keep: { totalTokens: 1 } } },
+    month: { totalTokens: 1, sessions: { keep: { totalTokens: 1 } } },
+    allTime: { totalTokens: 1, projects: { keep: { label: 'Keep', tokens: 1 } } },
+    history: { daily: [row], monthly: [], summary: {} }
+  };
+  const full = serializeSyncPayload(summary, { maxBytes: Number.MAX_SAFE_INTEGER });
+  const compact = serializeSyncPayload(summary, { maxBytes: full.bytes - 1 });
+
+  assert.ok(compact.bytes <= full.bytes - 1);
+  assert.equal(Object.hasOwn(compact.payload.history.daily[0], 'tokenComponentsAvailable'), false);
+  assert.equal(Object.hasOwn(compact.payload.history.daily[0], 'unclassifiedTokens'), false);
+  assert.ok(compact.payload.today.sessions.keep);
+  assert.ok(compact.payload.month.sessions.keep);
+  assert.ok(compact.payload.allTime.projects.keep);
+});
+
 test('syncPayload strips recomputable projects and keeps bounded all-time projects', () => {
   const summary = {
     today: { sessions: { a: { totalTokens: 1 } }, projects: { today: { tokens: 1 } } },
