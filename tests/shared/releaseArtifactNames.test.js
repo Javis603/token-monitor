@@ -85,14 +85,16 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
   assert.equal(intelBullets.length, 5);
   assert.ok(intelBullets.every((line) => line.split(intelDmg).length === 3));
   assert.ok(intelBullets.every((line) => line.includes(`/download/v${rootPackage.version}/`)));
-  const fullChangelogLines = releaseTemplate.split('\n').filter((line) => line.startsWith('**Full Changelog:**'));
-  assert.equal(fullChangelogLines.length, 1);
-  assert.match(fullChangelogLines[0], /\[v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+\]/);
-  assert.match(fullChangelogLines[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
-  assert.ok(fullChangelogLines[0].includes(`v${rootPackage.version}`));
+  const fullChangelogSummaries = releaseTemplate
+    .split('\n')
+    .filter((line) => line.startsWith('<summary><strong>Full Changelog:</strong>'));
+  assert.equal(fullChangelogSummaries.length, 1);
+  assert.match(fullChangelogSummaries[0], />v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a>/);
+  assert.match(fullChangelogSummaries[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
+  assert.ok(fullChangelogSummaries[0].includes(`v${rootPackage.version}`));
   assert.match(
     releaseTemplate,
-    /---\s*\*\*Full Changelog:\*\*[\s\S]*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
+    /---\s*<details>\s*<summary><strong>Full Changelog:<\/strong> <a href="[^"]+">v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a><\/summary>\s*<!-- github-generated-release-notes -->\s*<\/details>\s*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
   );
 });
 

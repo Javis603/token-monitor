@@ -266,6 +266,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
@@ -295,6 +296,10 @@ jobs:
             artifacts/token-monitor-mac-arm64/latest-mac.yml \
             artifacts/token-monitor-mac-x64/latest-mac.yml
           node scripts/verify-updater-artifact-names.js release-artifacts
+      - name: Add generated changelog details to release notes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/prepare-github-release-notes.js .github/RELEASE_TEMPLATE.md release-notes.md
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: |
@@ -306,4 +311,4 @@ jobs:
             release-artifacts/latest-mac.yml
             release-artifacts/latest-linux.yml
             release-artifacts/*.blockmap
-          body_path: .github/RELEASE_TEMPLATE.md
+          body_path: release-notes.md

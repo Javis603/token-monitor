@@ -108,7 +108,12 @@ https://github.com/junhoyeo/tokscale
 
 ---
 
-**Full Changelog:** [v0.42.1...v0.43.0](https://github.com/Javis603/token-monitor/compare/v0.42.1...v0.43.0)
+<details>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.42.1...v0.43.0">v0.42.1...v0.43.0</a></summary>
+
+<!-- github-generated-release-notes -->
+
+</details>
 
 <details>
 <summary>繁體中文 · 한국어 · 日本語</summary>
