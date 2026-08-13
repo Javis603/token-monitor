@@ -167,19 +167,6 @@ function targetPeriod(summary, periodName) {
   return summary[periodName];
 }
 
-function allocateIntegerTotal(total, weightedEntries) {
-  if (total <= 0 || weightedEntries.length === 0) return new Map();
-  const weightTotal = weightedEntries.reduce((sum, [, weight]) => sum + weight, 0);
-  const allocations = weightedEntries.map(([key, weight]) => {
-    const exact = total * weight / weightTotal;
-    return { key, value: Math.floor(exact), remainder: exact - Math.floor(exact) };
-  });
-  let remaining = total - allocations.reduce((sum, item) => sum + item.value, 0);
-  allocations.sort((a, b) => b.remainder - a.remainder || a.key.localeCompare(b.key));
-  for (let index = 0; index < remaining; index += 1) allocations[index].value += 1;
-  return new Map(allocations.map(({ key, value }) => [key, value]));
-}
-
 function addSessionBreakdown(period, session) {
   const client = session.client;
   const cacheRead = Math.max(0, Math.round(numberValue(session.cacheReadTokens)));
@@ -195,20 +182,22 @@ function addSessionBreakdown(period, session) {
     .filter(([, tokens]) => tokens > 0);
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
   if (totalModelTokens === 0) return;
+  if (modelTokens.length > 1) {
+    for (const [model, tokens] of modelTokens) {
+      period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + tokens;
+    }
+    period.capabilities.tokenComponents = false;
+    return;
+  }
 
-  const cacheReads = allocateIntegerTotal(cacheRead, modelTokens);
-  const cacheWrites = allocateIntegerTotal(cacheWrite, modelTokens);
-  const outputs = allocateIntegerTotal(output, modelTokens);
-
-  for (const [model] of modelTokens) {
-    const cr = cacheReads.get(model) || 0;
-    const cw = cacheWrites.get(model) || 0;
-    const ou = outputs.get(model) || 0;
+  for (const [model, tokens] of modelTokens) {
+    const cr = Math.min(tokens, cacheRead);
+    const cw = Math.min(tokens - cr, cacheWrite);
+    const ou = Math.min(tokens - cr - cw, output);
     if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
     if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
     if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
-    const modelTokensForSession = Math.max(0, Math.round(numberValue(session.models?.[model])));
-    const unclassified = Math.max(0, modelTokensForSession - cr - cw - ou);
+    const unclassified = Math.max(0, tokens - cr - cw - ou);
     if (unclassified > 0) {
       period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + unclassified;
       period.capabilities.tokenComponents = false;

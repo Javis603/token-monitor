@@ -75,8 +75,8 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.doesNotMatch(css, /\.period-menu button\s*\{/);
   assert.match(html, /id="fixedPeriodMessage"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.doesNotMatch(app, /periodRange\.tokenComponentsUnavailable/);
-  assert.match(app, /clientUnclassifiedTokens\?\.\[client\]/);
-  assert.match(app, /modelUnclassifiedTokens\?\.\[model\]/);
+  assert.match(app, /attributionComponent\(period, 'clientUnclassifiedTokens', client\)/);
+  assert.match(app, /attributionComponent\(period, 'modelUnclassifiedTokens', model\)/);
   assert.match(app, /dashboard\.tooltip\.unclassified/);
   assert.match(i18n, /'dashboard\.tooltip\.unclassified': '未分類'/);
 });

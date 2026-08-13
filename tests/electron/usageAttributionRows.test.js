@@ -5,7 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { attributionRows } = require('../../src/electron/renderer/usageAttributionRows');
+const {
+  attributionRows,
+  attributionValue,
+  UNATTRIBUTED_KEY
+} = require('../../src/electron/renderer/usageAttributionRows');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -33,10 +37,23 @@ test('attribution rows discard empty and invalid entries', () => {
   );
 });
 
+test('attribution rows expose totals without a tool or model identity as Unclassified', () => {
+  assert.deepEqual(
+    attributionRows({ codex: 100 }, { codex: 1 }, { totalValue: 200, totalCost: 3 }),
+    [
+      { key: 'codex', value: 100, cost: 1 },
+      { key: UNATTRIBUTED_KEY, value: 100, cost: 2, unattributed: true }
+    ]
+  );
+  assert.equal(attributionValue({ codex: 60 }, 90, UNATTRIBUTED_KEY), 30);
+  assert.equal(attributionValue({ codex: 60 }, 90, 'codex'), 60);
+});
+
 test('Tool and Model breakdowns consume the shared token-or-cost rows', () => {
   const index = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.ok(index.indexOf('usageAttributionRows.js') < index.indexOf('app.js'));
-  assert.match(app, /attributionRows\(period\?\.clients, period\?\.clientCosts\)/);
-  assert.match(app, /attributionRows\(period\?\.models, period\?\.modelCosts\)/);
+  assert.match(app, /attributionRows\(period\?\.clients, period\?\.clientCosts,/);
+  assert.match(app, /attributionRows\(period\?\.models, period\?\.modelCosts,/);
+  assert.match(app, /attributionValue\(/);
 });

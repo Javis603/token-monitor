@@ -132,7 +132,15 @@
     return value.tokenComponentsAvailable === true ? 0 : Math.max(0, finiteNumber(value.tokens));
   }
 
-  function liveComponentValues(totalValue, cacheReadValue, cacheWriteValue, outputValue, exact) {
+  function liveComponentValues(
+    totalValue,
+    cacheReadValue,
+    cacheWriteValue,
+    outputValue,
+    exact,
+    unclassifiedValue,
+    hasExplicitUnclassified = false
+  ) {
     const total = Math.max(0, finiteNumber(totalValue));
     const cacheReadTokens = Math.min(total, Math.max(0, finiteNumber(cacheReadValue)));
     const cacheWriteTokens = Math.min(
@@ -143,18 +151,23 @@
       total - cacheReadTokens - cacheWriteTokens,
       Math.max(0, finiteNumber(outputValue))
     );
+    const remainder = Math.max(0, total - cacheReadTokens - cacheWriteTokens - outputTokens);
     return {
       cacheReadTokens,
       cacheWriteTokens,
       outputTokens,
       unclassifiedTokens: exact
         ? 0
-        : Math.max(0, total - cacheReadTokens - cacheWriteTokens - outputTokens)
+        : hasExplicitUnclassified
+          ? Math.min(remainder, Math.max(0, finiteNumber(unclassifiedValue)))
+          : remainder
     };
   }
 
   function rowFromLivePeriod(period, date, previous = {}) {
     const tokenComponentsAvailable = period?.capabilities?.tokenComponents === true;
+    const hasClientUnclassified = Object.prototype.hasOwnProperty.call(period || {}, 'clientUnclassifiedTokens');
+    const hasModelUnclassified = Object.prototype.hasOwnProperty.call(period || {}, 'modelUnclassifiedTokens');
     const perClient = {};
     const clients = new Set([
       ...Object.keys(period?.clients || {}),
@@ -167,7 +180,9 @@
         period?.clientCacheReads?.[client],
         period?.clientCacheWrites?.[client],
         period?.clientOutputs?.[client],
-        tokenComponentsAvailable
+        tokenComponentsAvailable,
+        period?.clientUnclassifiedTokens?.[client],
+        hasClientUnclassified
       );
       perClient[client] = {
         tokens,
@@ -188,7 +203,9 @@
         period?.modelCacheReads?.[model],
         period?.modelCacheWrites?.[model],
         period?.modelOutputs?.[model],
-        tokenComponentsAvailable
+        tokenComponentsAvailable,
+        period?.modelUnclassifiedTokens?.[model],
+        hasModelUnclassified
       );
       perModel[model] = {
         tokens,
@@ -201,7 +218,9 @@
       period?.cacheReadTokens,
       period?.cacheWriteTokens,
       period?.outputTokens,
-      tokenComponentsAvailable
+      tokenComponentsAvailable,
+      period?.unclassifiedTokens,
+      Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens')
     );
     return {
       ...previous,

@@ -325,6 +325,51 @@ test('partial live provenance preserves known components and classifies only the
   assert.equal(result.period.modelUnclassifiedTokens.gpt, 10);
 });
 
+test('mixed live provenance keeps exact cache miss separate from explicit Unclassified usage', () => {
+  const result = ranges.fixedPeriodSnapshot('last7', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [],
+    todayPeriod: {
+      capabilities: { tokenComponents: false },
+      totalTokens: 200,
+      costUsd: 2,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 10,
+      outputTokens: 20,
+      unclassifiedTokens: 100,
+      clients: { codex: 100, claude: 100 },
+      clientCosts: { codex: 1, claude: 1 },
+      clientCacheReads: { codex: 60 },
+      clientCacheWrites: { codex: 10 },
+      clientOutputs: { codex: 20 },
+      clientUnclassifiedTokens: { claude: 100 },
+      models: { gpt: 100, opus: 100 },
+      modelCosts: { gpt: 1, opus: 1 },
+      modelCacheReads: { gpt: 60 },
+      modelCacheWrites: { gpt: 10 },
+      modelOutputs: { gpt: 20 },
+      modelUnclassifiedTokens: { opus: 100 }
+    }
+  });
+
+  assert.equal(result.period.totalTokens, 200);
+  assert.equal(result.period.unclassifiedTokens, 100);
+  assert.equal(result.period.clientUnclassifiedTokens.codex, 0);
+  assert.equal(result.period.clientUnclassifiedTokens.claude, 100);
+  assert.equal(result.period.modelUnclassifiedTokens.gpt, 0);
+  assert.equal(result.period.modelUnclassifiedTokens.opus, 100);
+  assert.equal(
+    result.period.clients.codex
+      - result.period.clientCacheReads.codex
+      - result.period.clientCacheWrites.codex
+      - result.period.clientOutputs.codex
+      - result.period.clientUnclassifiedTokens.codex,
+    10
+  );
+});
+
 test('historical cost-only usage participates in a fixed range', () => {
   const source = deviceSource({ deviceId: 'cost-only' });
   source.history.daily = [{

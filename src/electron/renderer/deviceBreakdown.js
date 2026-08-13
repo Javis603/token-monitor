@@ -5,6 +5,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorDeviceBreakdown = api;
 })(typeof window !== 'undefined' ? window : null, function createDeviceBreakdownApi() {
+  const UNATTRIBUTED_KEY = '__unattributed';
+
   function positiveEntries(value) {
     return Object.entries(value || {})
       .map(([key, amount]) => [key, Math.max(0, Number(amount || 0))])
@@ -14,7 +16,11 @@
   function deviceBreakdownForPeriod(device, periodName, options = {}) {
     const period = device?.periods?.[periodName] || {};
     const totalTokens = Math.max(0, Number(period.totalTokens || 0));
-    const tools = positiveEntries(period.clients).map(([client, value]) => {
+    const clientEntries = positiveEntries(period.clients);
+    const attributedTokens = clientEntries.reduce((sum, [, value]) => sum + value, 0);
+    const unattributedTokens = Math.max(0, totalTokens - attributedTokens);
+    if (unattributedTokens > 0) clientEntries.push([UNATTRIBUTED_KEY, unattributedTokens]);
+    const tools = clientEntries.map(([client, value]) => {
       const models = positiveEntries(period.clientModels?.[client]).map(([model, modelValue]) => {
         return {
           key: model,
@@ -26,7 +32,9 @@
       return {
         key: client,
         client,
-        name: options.clientLabels?.[client] || client,
+        name: client === UNATTRIBUTED_KEY
+          ? options.unattributedLabel || 'Unclassified'
+          : options.clientLabels?.[client] || client,
         value,
         percent: totalTokens > 0 ? value / totalTokens * 100 : 0,
         color: options.clientColors?.[client] || options.fallbackColor || '#73bdf5',

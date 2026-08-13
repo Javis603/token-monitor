@@ -236,17 +236,16 @@ function addSessionBreakdown(period, client, session) {
     .filter(([, tokens]) => tokens > 0);
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
   if (totalModelTokens === 0) return;
-
-  // A session is almost always one model; split proportionally for the rare mix.
-  for (const [model, tokens] of modelTokens) {
-    const share = modelTokens.length === 1 ? 1 : tokens / totalModelTokens;
-    const cr = Math.round(cacheRead * share);
-    const cw = Math.round(cacheWrite * share);
-    const ou = Math.round(output * share);
-    if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
-    if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
-    if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
-  }
+  // Session-level components have no client×model provenance. They are exact
+  // only when the session has one model; a multi-model split would be a guess.
+  if (modelTokens.length > 1) return;
+  const [[model, tokens]] = modelTokens;
+  const cr = Math.min(tokens, cacheRead);
+  const cw = Math.min(tokens - cr, cacheWrite);
+  const ou = Math.min(tokens - cr - cw, output);
+  if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
+  if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
+  if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
 }
 
 function shouldApplyPeriod(periodName, entry, now) {
