@@ -1,0 +1,126 @@
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const ROOT = path.resolve(__dirname, '..');
+const REGISTRY_PATH = path.join(ROOT, 'src', 'shared', 'hubBuildRegistry.json');
+
+// This is the portable Hub core copied into the standalone Worker repository.
+// Hash the canonical src/shared files, not their generated Worker copies, so a
+// generated header or line-ending change cannot create a false deployment alert.
+const WORKER_SHARED_MODULES = Object.freeze([
+  'limitProviders.js',
+  'limits.js',
+  'usage.js',
+  'history.js',
+  'reasonixPaths.js',
+  'reasonixSessionGuard.js',
+  'projectKey.js',
+  'syncUploadInterval.js',
+  'subscriptionDisplay.js',
+  'currency.js',
+  'clientHealth.js',
+  'hubBuild.js'
+]);
+
+const CORE_SOURCE_FILES = WORKER_SHARED_MODULES.map((name) => `src/shared/${name}`);
+const NODE_RUNTIME_SOURCE_FILES = Object.freeze([
+  'src/hub/server.js',
+  'src/shared/http.js',
+  'src/shared/config.js'
+]);
+const WORKER_RUNTIME_SOURCE_FILES = Object.freeze([
+  'worker/src/index.js',
+  'worker/wrangler.toml'
+]);
+
+function hashInputs(inputs) {
+  const hash = crypto.createHash('sha256');
+  for (const input of inputs) {
+    hash.update(input.name);
+    hash.update('\0');
+    hash.update(input.contents);
+    hash.update('\0');
+  }
+  return `sha256:${hash.digest('hex')}`;
+}
+
+function fileInputs(relativePaths) {
+  return relativePaths.map((relativePath) => ({
+    name: relativePath,
+    contents: fs.readFileSync(path.join(ROOT, relativePath))
+  }));
+}
+
+// The Worker's own package version follows desktop releases and is deliberately
+// excluded. Only build-affecting package fields belong in the deployment identity.
+function workerPackageBuildInput(packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'worker', 'package.json'), 'utf8'))) {
+  return JSON.stringify({
+    type: packageJson.type || '',
+    devDependencies: packageJson.devDependencies || {}
+  });
+}
+
+function currentHubSourceBuildIds() {
+  return {
+    core: hashInputs(fileInputs(CORE_SOURCE_FILES)),
+    'node-hub': hashInputs(fileInputs(NODE_RUNTIME_SOURCE_FILES)),
+    'cloudflare-worker': hashInputs([
+      ...fileInputs(WORKER_RUNTIME_SOURCE_FILES),
+      { name: 'worker/package.build.json', contents: workerPackageBuildInput() }
+    ])
+  };
+}
+
+function emptyRegistry() {
+  return {
+    schemaVersion: 1,
+    components: {
+      core: [],
+      'node-hub': [],
+      'cloudflare-worker': []
+    }
+  };
+}
+
+function readRegistry() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
+    if (parsed?.schemaVersion !== 1 || !parsed.components) throw new Error('unsupported Hub build registry');
+    return parsed;
+  } catch (error) {
+    if (error.code === 'ENOENT') return emptyRegistry();
+    throw error;
+  }
+}
+
+function latestEntry(registry, component) {
+  const entries = registry?.components?.[component];
+  return Array.isArray(entries) && entries.length > 0 ? entries.at(-1) : null;
+}
+
+function updatedRegistry(registry, buildIds) {
+  const next = JSON.parse(JSON.stringify(registry || emptyRegistry()));
+  for (const component of ['core', 'node-hub', 'cloudflare-worker']) {
+    if (!Array.isArray(next.components[component])) next.components[component] = [];
+    const current = latestEntry(next, component);
+    if (current?.buildId === buildIds[component]) continue;
+    next.components[component].push({
+      revision: Number(current?.revision || 0) + 1,
+      buildId: buildIds[component]
+    });
+  }
+  return next;
+}
+
+module.exports = {
+  REGISTRY_PATH,
+  WORKER_SHARED_MODULES,
+  currentHubSourceBuildIds,
+  latestEntry,
+  readRegistry,
+  updatedRegistry,
+  workerPackageBuildInput
+};

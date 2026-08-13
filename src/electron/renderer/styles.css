@@ -1574,8 +1574,10 @@ span.settings-note.settings-item-desc {
   font-size: 10px;
 }
 .hub-status.ok { color: var(--success); border-color: rgba(var(--success-rgb), 0.32); }
+.hub-status.warning { color: var(--orange); border-color: rgba(244, 160, 115, 0.4); }
 .hub-status.error { color: var(--red); border-color: rgba(244, 119, 136, 0.42); }
 .hub-status[hidden] { display: none; }
+.hub-build-status { line-height: 1.4; }
 .hub-address-list { display: grid; min-width: 0; gap: 5px; }
 .hub-address-header { color: var(--muted); font-size: 10px; }
 .hub-address-empty { color: var(--muted); font-size: 10px; line-height: 1.4; }

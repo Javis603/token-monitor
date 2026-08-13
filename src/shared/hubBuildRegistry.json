@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "components": {
+    "core": [
+      {
+        "revision": 1,
+        "buildId": "sha256:1ee9f50db3d80b492a9b9a5904c6ed3a05485aebf67a177b37c1f74202b8886f"
+      }
+    ],
+    "node-hub": [
+      {
+        "revision": 1,
+        "buildId": "sha256:e83d085b4a61dc429e47f3873be2a6fbcb214c5844e9c4a2477c23ec422becea"
+      }
+    ],
+    "cloudflare-worker": [
+      {
+        "revision": 1,
+        "buildId": "sha256:689070fc1e85157cc7e016291e8cc46baa01f328a17600691db487dd7a4caf2c"
+      }
+    ]
+  }
+}

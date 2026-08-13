@@ -12,6 +12,7 @@ const {
   subscriptionDocument
 } = require('../shared/subscriptionDisplay');
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
+const { currentHubBuild } = require('../shared/hubBuild');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
@@ -183,7 +184,9 @@ function createHub({
       return sendJson(res, 200, {
         ok: true,
         role: 'hub',
+        runtime: 'node-hub',
         version: store.version || 1,
+        hubBuild: currentHubBuild('node-hub'),
         deviceCount: Object.keys(store.devices).length,
         secretRequired: Boolean(secret),
         now: new Date().toISOString()

@@ -28,12 +28,23 @@ Example response:
 {
   "ok": true,
   "role": "hub",
+  "runtime": "cloudflare-worker",
   "version": 1,
+  "hubBuild": {
+    "schemaVersion": 1,
+    "runtime": "cloudflare-worker",
+    "coreRevision": 1,
+    "coreBuildId": "sha256:…",
+    "runtimeRevision": 1,
+    "runtimeBuildId": "sha256:…"
+  },
   "deviceCount": 2,
   "secretRequired": true,
   "now": "2026-05-18T00:00:00.000Z"
 }
 ```
+
+`version` remains the legacy Hub storage/API value and is not a deployment version. `hubBuild` is the content-derived deployment identity used by Token Monitor to compare the remote Hub with the core bundled by the app. `core*` identifies shared Node/Worker aggregation logic; `runtime*` identifies the Node Hub or Cloudflare Worker adapter. Product-only version bumps do not change either build ID. A health response without `hubBuild` is a legacy Hub and remains otherwise compatible.
 
 ## `POST /api/ingest`
 

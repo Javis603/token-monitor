@@ -1153,6 +1153,25 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
   assert.match(listenerSlice, /saveSettings\(\{ syncUploadIntervalMs: Number\(els\.syncUploadIntervalInput\.value\) \}\)/);
 });
 
+test('remote Hub build status is wired as a separate localized sync hint', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const i18n = readRendererFile('i18n.js');
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
+
+  assert.match(clientFields, /id="syncClientStatus"[\s\S]*id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.ok(html.indexOf('hubBuildPresentation.js') < html.indexOf('app.js'));
+  assert.match(app, /getHubBuildStatus/);
+  assert.match(app, /function renderHubBuildStatus\(\)/);
+  assert.match(preload, /getHubBuildStatus: \(\) => ipcRenderer\.invoke\('hub:getBuildStatus'\)/);
+  assert.match(main, /ipcMain\.handle\('hub:getBuildStatus'/);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 5);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 5);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.legacy':/g)].length, 0);
+});
+
 test('main settings normalize collection cadence and restart only the device runtime when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const collector = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'collector.js'), 'utf8');

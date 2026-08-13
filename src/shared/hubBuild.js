@@ -1,0 +1,72 @@
+'use strict';
+
+const registry = require('./hubBuildRegistry.json');
+
+const RUNTIMES = new Set(['node-hub', 'cloudflare-worker']);
+
+function latestEntry(component) {
+  const entries = registry?.components?.[component];
+  return Array.isArray(entries) && entries.length > 0 ? entries.at(-1) : null;
+}
+
+function normalizeRuntime(value) {
+  const runtime = String(value || '').trim().toLowerCase();
+  if (runtime === 'node' || runtime === 'hub') return 'node-hub';
+  if (runtime === 'worker') return 'cloudflare-worker';
+  return RUNTIMES.has(runtime) ? runtime : '';
+}
+
+function currentHubBuild(runtime) {
+  const normalizedRuntime = normalizeRuntime(runtime);
+  const core = latestEntry('core');
+  const adapter = latestEntry(normalizedRuntime);
+  if (!normalizedRuntime || !core || !adapter) return null;
+  return Object.freeze({
+    schemaVersion: registry.schemaVersion,
+    runtime: normalizedRuntime,
+    coreRevision: core.revision,
+    coreBuildId: core.buildId,
+    runtimeRevision: adapter.revision,
+    runtimeBuildId: adapter.buildId
+  });
+}
+
+function finiteRevision(value) {
+  const revision = Number(value);
+  return Number.isInteger(revision) && revision > 0 ? revision : null;
+}
+
+function compareHubBuild(remoteBuild, expectedBuild = null) {
+  if (!remoteBuild || typeof remoteBuild !== 'object') return { status: 'legacy', runtime: '' };
+  const runtime = normalizeRuntime(remoteBuild.runtime);
+  if (!runtime) return { status: 'unknown', runtime: '' };
+  const expected = expectedBuild || currentHubBuild(runtime);
+  if (!expected) return { status: 'unknown', runtime };
+
+  const remoteSchema = finiteRevision(remoteBuild.schemaVersion);
+  if (!remoteSchema) return { status: 'legacy', runtime };
+  if (remoteSchema > registry.schemaVersion) return { status: 'remoteNewer', runtime };
+  if (remoteSchema < registry.schemaVersion) return { status: 'updateAvailable', runtime };
+
+  const remoteCoreRevision = finiteRevision(remoteBuild.coreRevision);
+  const remoteRuntimeRevision = finiteRevision(remoteBuild.runtimeRevision);
+  if (!remoteCoreRevision || !remoteRuntimeRevision) return { status: 'unknown', runtime };
+
+  const directions = [
+    Math.sign(remoteCoreRevision - expected.coreRevision),
+    Math.sign(remoteRuntimeRevision - expected.runtimeRevision)
+  ];
+  const hasOlder = directions.includes(-1);
+  const hasNewer = directions.includes(1);
+  if (hasOlder && hasNewer) return { status: 'unknown', runtime };
+  if (hasOlder) return { status: 'updateAvailable', runtime };
+  if (hasNewer) return { status: 'remoteNewer', runtime };
+
+  const buildIdsMatch = remoteBuild.coreBuildId === expected.coreBuildId
+    && remoteBuild.runtimeBuildId === expected.runtimeBuildId;
+  return { status: buildIdsMatch ? 'current' : 'unknown', runtime };
+}
+
+const api = { compareHubBuild, currentHubBuild, normalizeRuntime };
+
+if (typeof module === 'object' && module.exports) module.exports = api;

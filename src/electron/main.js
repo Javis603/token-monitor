@@ -52,6 +52,7 @@ const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocal
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
+const { probeHubBuild } = require('./hubBuildStatus');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
@@ -2644,6 +2645,12 @@ function getHubInfo() {
     error: embeddedHubError,
     lanAddresses: lanIpv4Addresses()
   };
+}
+
+async function getHubBuildStatus() {
+  if (settings?.hubMode !== 'client') return { status: 'notConfigured', runtime: '', hubUrl: '' };
+  const hubUrl = String(settings.hubUrl || '').trim();
+  return probeHubBuild(hubUrl);
 }
 
 async function startEmbeddedHub() {
@@ -6161,6 +6168,7 @@ app.whenReady().then(() => {
     providerIds: Array.isArray(options?.providerIds) ? options.providerIds : null
   }));
   ipcMain.handle('hub:getInfo', () => getHubInfo());
+  ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
   ipcMain.handle('hub:regenerateSecret', () => {
     settings.hubHostSecret = generateHubSecret();
     saveSettings({ throwOnError: true });
