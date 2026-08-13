@@ -260,6 +260,58 @@ test('mergeHistories sums daily across devices and recomputes derived fields', (
   assert.equal(m.summary.activeTimeMs, 210000);
 });
 
+test('mergeHistories preserves known components beside legacy unclassified usage', () => {
+  const exact = {
+    daily: [{
+      date: '2026-06-07',
+      tokens: 100,
+      cost: 1,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 10,
+      outputTokens: 20,
+      unclassifiedTokens: 0,
+      tokenComponentsAvailable: true,
+      perClient: { claude: {
+        tokens: 100, cost: 1, messages: 1,
+        cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20,
+        unclassifiedTokens: 0
+      } },
+      perModel: { opus: {
+        tokens: 100, cost: 1,
+        cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20,
+        unclassifiedTokens: 0
+      } }
+    }],
+    monthly: [{ month: '2026-06', tokens: 100, cost: 1, perClient: {}, perModel: {} }],
+    summary: {}
+  };
+  const legacy = {
+    daily: [{
+      date: '2026-06-07',
+      tokens: 50,
+      cost: 0.5,
+      perClient: { claude: { tokens: 50, cost: 0.5, messages: 1 } },
+      perModel: { opus: { tokens: 50, cost: 0.5 } }
+    }],
+    monthly: [{ month: '2026-06', tokens: 50, cost: 0.5, perClient: {}, perModel: {} }],
+    summary: {}
+  };
+
+  const merged = mergeHistories([exact, legacy], { todayKey: '2026-06-07' });
+  const day = merged.daily[0];
+
+  assert.equal(day.tokens, 150);
+  assert.equal(day.cacheReadTokens, 60);
+  assert.equal(day.cacheWriteTokens, 10);
+  assert.equal(day.outputTokens, 20);
+  assert.equal(day.unclassifiedTokens, 50);
+  assert.equal(day.tokenComponentsAvailable, false);
+  assert.equal(day.perClient.claude.cacheReadTokens, 60);
+  assert.equal(day.perClient.claude.unclassifiedTokens, 50);
+  assert.equal(day.perModel.opus.outputTokens, 20);
+  assert.equal(day.perModel.opus.unclassifiedTokens, 50);
+});
+
 test('mergeHistories handles empty list', () => {
   const m = mergeHistories([], { todayKey: '2026-06-07' });
   assert.deepEqual(m.daily, []);

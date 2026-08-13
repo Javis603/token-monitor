@@ -159,6 +159,78 @@ test('serializeSyncPayload drops additive History components before existing pay
   assert.ok(compact.payload.allTime.projects.keep);
 });
 
+test('serializeSyncPayload keeps payload reductions monotonic across components and projects', () => {
+  const perClient = {};
+  const perModel = {};
+  for (let index = 0; index < 40; index += 1) {
+    perClient[`client-${index}`] = {
+      tokens: 100,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 10,
+      outputTokens: 20,
+      unclassifiedTokens: 0
+    };
+    perModel[`model-${index}`] = {
+      tokens: 100,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 10,
+      outputTokens: 20,
+      unclassifiedTokens: 0
+    };
+  }
+  const summary = {
+    deviceId: 'combined-reductions',
+    periodWindows: { today: { key: '2026-08-13' } },
+    today: { totalTokens: 1 },
+    month: { totalTokens: 1 },
+    allTime: {
+      totalTokens: 1,
+      projects: {
+        large: { label: 'x'.repeat(12_000), tokens: 1, clients: { claude: 1 } }
+      }
+    },
+    history: {
+      daily: [{
+        date: '2026-08-13',
+        tokens: 4_000,
+        cacheReadTokens: 2_400,
+        cacheWriteTokens: 400,
+        outputTokens: 800,
+        unclassifiedTokens: 0,
+        tokenComponentsAvailable: true,
+        perClient,
+        perModel
+      }],
+      monthly: [],
+      summary: {}
+    }
+  };
+  const unlimited = { maxBytes: Number.MAX_SAFE_INTEGER };
+  const withoutComponents = serializeSyncPayload(summary, {
+    ...unlimited,
+    omitHistoryTokenComponents: true
+  });
+  const withoutProjects = serializeSyncPayload(summary, {
+    ...unlimited,
+    omitAllTimeProjects: true
+  });
+  const withoutBoth = serializeSyncPayload(summary, {
+    ...unlimited,
+    omitHistoryTokenComponents: true,
+    omitAllTimeProjects: true
+  });
+  const singleReductionFloor = Math.min(withoutComponents.bytes, withoutProjects.bytes);
+  assert.ok(withoutBoth.bytes < singleReductionFloor);
+  const maxBytes = Math.floor((withoutBoth.bytes + singleReductionFloor) / 2);
+
+  const compact = serializeSyncPayload(summary, { maxBytes });
+
+  assert.ok(compact.bytes <= maxBytes);
+  assert.equal(compact.payload.allTimeProjectsOmitted, true);
+  assert.equal(Object.hasOwn(compact.payload.history.daily[0], 'tokenComponentsAvailable'), false);
+  assert.equal(Object.hasOwn(compact.payload.history.daily[0].perClient['client-0'], 'cacheReadTokens'), false);
+});
+
 test('syncPayload strips recomputable projects and keeps bounded all-time projects', () => {
   const summary = {
     today: { sessions: { a: { totalTokens: 1 } }, projects: { today: { tokens: 1 } } },

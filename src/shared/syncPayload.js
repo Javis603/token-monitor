@@ -175,11 +175,17 @@ function sessionsWithoutReasonix(sessions) {
   return removed ? sanitized : sessions;
 }
 
-function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
+function buildSyncPayload(summary, {
+  omitAllTimeProjects = false,
+  omitHistoryTokenComponents = false
+} = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
   if (summary.history && typeof summary.history === 'object') {
     payload.history = historyForSync(summary.history, summary.periodWindows);
+    if (omitHistoryTokenComponents) {
+      payload.history = historyWithoutTokenComponents(payload.history);
+    }
   }
   // Reasonix native sessions are a local-only view. They contain provider
   // metadata and project labels that are intentionally not part of the device
@@ -218,7 +224,12 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
 
 function serializeSyncPayload(summary, options = {}) {
   const maxBytes = Number.isFinite(options.maxBytes) ? options.maxBytes : SYNC_PAYLOAD_BUDGET_BYTES;
-  let payload = buildSyncPayload(summary, options);
+  const buildOptions = {
+    ...options,
+    omitAllTimeProjects: options.omitAllTimeProjects === true,
+    omitHistoryTokenComponents: options.omitHistoryTokenComponents === true
+  };
+  let payload = buildSyncPayload(summary, buildOptions);
   if (!payload || typeof payload !== 'object') {
     const body = JSON.stringify(payload);
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
@@ -227,15 +238,17 @@ function serializeSyncPayload(summary, options = {}) {
   if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.history && typeof payload.history === 'object') {
     // Component detail is additive. Never let it evict an existing project/session
     // payload or turn a previously uploadable History V1 record into a 413.
-    payload.history = historyWithoutTokenComponents(payload.history);
+    buildOptions.omitHistoryTokenComponents = true;
+    payload = buildSyncPayload(summary, buildOptions);
     body = JSON.stringify(payload);
   }
   if (
-    !options.omitAllTimeProjects
+    !buildOptions.omitAllTimeProjects
     && Buffer.byteLength(body, 'utf8') > maxBytes
     && projectEntries(payload?.allTime) > 0
   ) {
-    payload = buildSyncPayload(summary, { ...options, omitAllTimeProjects: true });
+    buildOptions.omitAllTimeProjects = true;
+    payload = buildSyncPayload(summary, buildOptions);
     body = JSON.stringify(payload);
   }
   if (Buffer.byteLength(body, 'utf8') > maxBytes) {

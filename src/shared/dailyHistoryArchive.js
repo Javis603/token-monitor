@@ -25,14 +25,28 @@ function normalizeObservation(value) {
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
   const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
-  const cacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
-  const cacheWriteTokens = Math.max(0, Math.round(num(value.cacheWriteTokens ?? value.cache_write_tokens)));
-  const outputTokens = Math.max(0, Math.round(num(value.outputTokens ?? value.output_tokens)));
+  const rawCacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
+  const rawCacheWriteTokens = Math.max(0, Math.round(num(value.cacheWriteTokens ?? value.cache_write_tokens)));
+  const rawOutputTokens = Math.max(0, Math.round(num(value.outputTokens ?? value.output_tokens)));
+  const rawComponentTokens = rawCacheReadTokens + rawCacheWriteTokens + rawOutputTokens;
+  const componentsFit = rawComponentTokens <= tokens;
+  const cacheReadTokens = componentsFit ? rawCacheReadTokens : 0;
+  const cacheWriteTokens = componentsFit ? rawCacheWriteTokens : 0;
+  const outputTokens = componentsFit ? rawOutputTokens : 0;
   const componentTokens = cacheReadTokens + cacheWriteTokens + outputTokens;
+  const hasExplicitUnclassified = Object.prototype.hasOwnProperty.call(value, 'unclassifiedTokens')
+    || Object.prototype.hasOwnProperty.call(value, 'unclassified_tokens');
+  const unclassifiedTokens = Math.min(Math.max(0, tokens - componentTokens), Math.max(0, Math.round(
+    hasExplicitUnclassified
+      ? num(value.unclassifiedTokens ?? value.unclassified_tokens)
+      : (value.tokenComponentsAvailable === true && componentsFit ? 0 : tokens)
+  )));
   // A zero-token synthetic observation has an exact zero component breakdown
   // even when it predates the provenance field. Do not let bookkeeping-only
   // rows make an otherwise exact fixed-range breakdown unavailable.
-  const tokenComponentsAvailable = componentTokens <= tokens
+  const tokenComponentsAvailable = componentsFit
+    && componentTokens + unclassifiedTokens <= tokens
+    && unclassifiedTokens === 0
     && (tokens === 0 || value.tokenComponentsAvailable === true);
   if (tokens === 0 && cost === 0 && messages === 0) return null;
   return {
@@ -44,6 +58,7 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
+    ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
     ...(tokenComponentsAvailable ? {
       tokenComponentsAvailable: true,
       ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
@@ -134,7 +149,8 @@ function observationsFromGraphs(graphs) {
             && candidate.tokenComponentsAvailable === true,
           cacheReadTokens: num(previous.cacheReadTokens) + num(candidate.cacheReadTokens),
           cacheWriteTokens: num(previous.cacheWriteTokens) + num(candidate.cacheWriteTokens),
-          outputTokens: num(previous.outputTokens) + num(candidate.outputTokens)
+          outputTokens: num(previous.outputTokens) + num(candidate.outputTokens),
+          unclassifiedTokens: num(previous.unclassifiedTokens) + num(candidate.unclassifiedTokens)
         });
       }
       days.set(date, day);
@@ -277,16 +293,20 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
-    const sameTokens = num(observation.tokens) === num(previous.tokens);
+    const previousUnclassified = Math.min(num(previous.tokens), num(previous.unclassifiedTokens));
+    const previousClassified = Math.max(0, num(previous.tokens) - previousUnclassified);
+    const retainedClassified = Math.min(num(observation.tokens), previousClassified);
+    const unclassifiedTokens = Math.max(0, num(observation.tokens) - retainedClassified);
     return [key, {
       ...observation,
       messages: Math.max(observation.messages, previous.messages),
-      ...(sameTokens && previous.tokenComponentsAvailable === true ? {
-        tokenComponentsAvailable: true,
+      ...(retainedClassified > 0 ? {
         cacheReadTokens: num(previous.cacheReadTokens),
         cacheWriteTokens: num(previous.cacheWriteTokens),
         outputTokens: num(previous.outputTokens)
       } : {}),
+      ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
+      ...(unclassifiedTokens === 0 ? { tokenComponentsAvailable: true } : {}),
       ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
         ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
         : {})
@@ -360,20 +380,21 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
           modelId: observation.modelId,
           ...(observation.providerId ? { providerId: observation.providerId } : {}),
           tokens: {
-            input: observation.tokenComponentsAvailable === true
-              ? Math.max(0, observation.tokens
-                - num(observation.outputTokens)
-                - num(observation.cacheReadTokens)
-                - num(observation.cacheWriteTokens))
-              : observation.tokens,
-            output: observation.tokenComponentsAvailable === true ? num(observation.outputTokens) : 0,
-            cacheRead: observation.tokenComponentsAvailable === true ? num(observation.cacheReadTokens) : 0,
-            cacheWrite: observation.tokenComponentsAvailable === true ? num(observation.cacheWriteTokens) : 0,
+            input: Math.max(0, observation.tokens
+              - num(observation.outputTokens)
+              - num(observation.cacheReadTokens)
+              - num(observation.cacheWriteTokens)),
+            output: num(observation.outputTokens),
+            cacheRead: num(observation.cacheReadTokens),
+            cacheWrite: num(observation.cacheWriteTokens),
             // Archive observations store one already-aggregated output family.
             // Re-emitting reasoning separately would count it twice.
             reasoning: 0
           },
           tokenComponentsAvailable: observation.tokenComponentsAvailable === true,
+          ...(num(observation.unclassifiedTokens) > 0
+            ? { unclassifiedTokens: num(observation.unclassifiedTokens) }
+            : {}),
           cost: observation.cost,
           messages: observation.messages
         }))

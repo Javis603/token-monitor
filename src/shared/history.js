@@ -68,7 +68,11 @@ function parseGraphResult(raw) {
       const cacheWrite = num(c.tokens?.cacheWrite ?? c.tokens?.cache_write);
       const output = sumOutputTokens(c.tokens, client);
       const componentsAvailable = c.tokenComponentsAvailable !== false;
-      const unclassified = t > 0 && !componentsAvailable ? t : 0;
+      const hasExplicitUnclassified = Object.prototype.hasOwnProperty.call(c, 'unclassifiedTokens')
+        || Object.prototype.hasOwnProperty.call(c, 'unclassified_tokens');
+      const unclassified = Math.min(t, Math.max(0, hasExplicitUnclassified
+        ? num(c.unclassifiedTokens ?? c.unclassified_tokens)
+        : (t > 0 && !componentsAvailable ? t : 0)));
       // Reasonix's `messages` field is a provider request count, not user turns.
       // Keep it out of Token Monitor's message/activity semantics; its tokens and
       // cost still contribute normally to the history totals.
@@ -80,7 +84,8 @@ function parseGraphResult(raw) {
       cacheWriteTokens += cacheWrite;
       outputTokens += output;
       unclassifiedTokens += unclassified;
-      tokenComponentsAvailable = tokenComponentsAvailable && (t === 0 || componentsAvailable);
+      tokenComponentsAvailable = tokenComponentsAvailable
+        && (t === 0 || (componentsAvailable && unclassified === 0));
       const pc = perClient[client] || (perClient[client] = {
         tokens: 0, cost: 0, messages: 0, unclassifiedTokens: 0
       });
@@ -182,6 +187,8 @@ function addPerClient(target, source, includeTokenComponents = false) {
       if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
       if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
       if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
+      const unclassifiedTokens = unclassifiedTokensFor(v);
+      if (unclassifiedTokens > 0) t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
     }
   }
 }
@@ -194,8 +201,21 @@ function addPerModel(target, source, includeTokenComponents = false) {
       if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
       if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
       if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
+      const unclassifiedTokens = unclassifiedTokensFor(v);
+      if (unclassifiedTokens > 0) t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
     }
   }
+}
+
+function unclassifiedTokensFor(value) {
+  if (!value || typeof value !== 'object') return 0;
+  if (Object.prototype.hasOwnProperty.call(value, 'unclassifiedTokens')) {
+    return Math.min(
+      Math.max(0, num(value.tokens)),
+      Math.max(0, num(value.unclassifiedTokens))
+    );
+  }
+  return value.tokenComponentsAvailable === true ? 0 : Math.max(0, num(value.tokens));
 }
 
 function activeTimeTotal(days) {
@@ -285,7 +305,7 @@ function mergeDailyMaps(histories) {
       const cur = byDate.get(d.date)
         || {
           date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0,
-          cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0,
+          cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0,
           tokenComponentsAvailable: true,
           perClient: {}, perModel: {}
         };
@@ -293,6 +313,7 @@ function mergeDailyMaps(histories) {
       cur.cacheReadTokens += num(d.cacheReadTokens);
       cur.cacheWriteTokens += num(d.cacheWriteTokens);
       cur.outputTokens += num(d.outputTokens);
+      cur.unclassifiedTokens += unclassifiedTokensFor(d);
       cur.tokenComponentsAvailable = cur.tokenComponentsAvailable && d.tokenComponentsAvailable === true;
       addPerClient(cur.perClient, d.perClient, true);
       addPerModel(cur.perModel, d.perModel, true);

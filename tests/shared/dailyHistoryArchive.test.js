@@ -185,6 +185,36 @@ test('live today snapshot wins over a smaller graph value after date rollover', 
   assert.equal(dayObservation(lowerLive, '2026-08-05').tokens, 645_957_554);
 });
 
+test('live rollover keeps graph components and classifies only the later delta as unknown', () => {
+  const exactGraph = graph('2026-08-05', [{
+    client: 'claude',
+    modelId: 'opus',
+    tokens: { input: 10, output: 20, cacheRead: 60, cacheWrite: 10, reasoning: 0 },
+    cost: 1,
+    messages: 1
+  }]);
+  let archive = captureDailyHistoryArchive({}, exactGraph, { todayKey: '2026-08-05' });
+  archive = captureLiveDailyHistory(archive, livePeriod(120, 1.2), {
+    todayKey: '2026-08-05'
+  });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-06'
+  }), '2026-08-06');
+  const day = restored.daily[0];
+
+  assert.equal(day.tokens, 120);
+  assert.equal(day.cacheReadTokens, 60);
+  assert.equal(day.cacheWriteTokens, 10);
+  assert.equal(day.outputTokens, 20);
+  assert.equal(day.unclassifiedTokens, 20);
+  assert.equal(day.tokenComponentsAvailable, false);
+  assert.equal(day.perClient.claude.cacheReadTokens, 60);
+  assert.equal(day.perClient.claude.unclassifiedTokens, 20);
+  assert.equal(day.perModel.opus.outputTokens, 20);
+  assert.equal(day.perModel.opus.unclassifiedTokens, 20);
+});
+
 test('live snapshot keeps model-less remainder under its original client', () => {
   const archive = captureLiveDailyHistory({}, {
     totalTokens: 150,
