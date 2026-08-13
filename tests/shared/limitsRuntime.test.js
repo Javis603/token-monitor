@@ -884,6 +884,53 @@ test('an urgency tick never aborts a probe another reason is still running', asy
   }
 });
 
+// A tick can land while the executor is saturated, so the lane is not active yet
+// but already holds queued work for this scope. Superseding it would replace a
+// real account refresh with a scheduler optimisation.
+test('an urgency tick never supersedes a refresh already queued for its scope', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 60, kimi: 10 };
+  const started = [];
+  let releaseKimi = null;
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      started.push(`${provider}:${context.reason}`);
+      const rows = [providerRow(provider, 'acct', 'Account', {
+        updatedAt: new Date(clock.now()).toISOString(),
+        windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+      })];
+      if (provider !== 'kimi' || context.reason !== 'manual') return rows;
+      return new Promise((resolve) => { releaseKimi = () => resolve(rows); });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+
+    // Occupies the single executor slot, so claude's own refresh can only queue.
+    void runtime.refresh({ provider: 'kimi' }, 'manual');
+    await waitFor(() => started.includes('kimi:manual'), 'kimi probe holding the slot');
+    void runtime.refresh({ provider: 'claude', accountKey: 'acct' }, 'account-state');
+
+    clock.advance(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseKimi();
+
+    await waitFor(() => started.some((entry) => entry.startsWith('claude:')
+      && !entry.endsWith(':startup') && !entry.endsWith(':interval')), 'queued claude probe');
+    assert.equal(started.includes('claude:account-state'), true);
+    assert.equal(started.includes('claude:burn-rate'), false);
+  } finally {
+    releaseKimi?.();
+    runtime.stop();
+  }
+});
+
 test('fixed mode never schedules an early refresh', async () => {
   const clock = fakeClock(1_000);
   const used = { claude: 68, kimi: 10 };

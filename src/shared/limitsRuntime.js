@@ -411,8 +411,19 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         // while the physical probe keeps running, so inFlight alone would let an
         // urgency tick abort an account refresh or a reset-boundary probe. The
         // attempt above was already recorded for this key, so it simply waits a
-        // floor rather than retrying against a busy lane.
-        if (lanes.get(provider)?.active) continue;
+        // floor rather than retrying against a lane that is already covered.
+        //
+        // Queued work counts too, and is matched by scope rather than by lane:
+        // a pending refresh for this same account would be superseded by the
+        // tick, and a pending provider-wide refresh is about to return exactly
+        // the reading being asked for. Another account's pending work is not a
+        // reason to hold this one back.
+        const lane = lanes.get(provider);
+        const covered = lane
+          && (lane.active
+            || lane.pending.has(`${provider}:*`)
+            || lane.pending.has(scopeIdentityKey(scope)));
+        if (covered) continue;
         // Held until the probe settles, not merely until it is dispatched. The
         // lane is latest-wins, so re-scheduling a scope whose probe is still
         // running aborts that probe: a provider slower than the floor would
