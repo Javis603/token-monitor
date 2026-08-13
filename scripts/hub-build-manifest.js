@@ -187,7 +187,10 @@ function updatedRegistry(registry, buildIds) {
 }
 
 module.exports = {
+  CORE_SOURCE_FILES,
+  NODE_RUNTIME_SOURCE_FILES,
   REGISTRY_PATH,
+  WORKER_RUNTIME_SOURCE_FILES,
   WORKER_SHARED_MODULES,
   WORKER_SHARED_PACKAGE,
   currentHubSourceBuildIds,
