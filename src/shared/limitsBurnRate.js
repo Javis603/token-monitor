@@ -40,6 +40,11 @@ function text(value) {
   return String(value ?? '').trim();
 }
 
+// Mirrors the provider key in limitResetBoundary.js rather than the runtime's
+// lane identity: this key only has to be stable and unique per account within
+// this module, and matching the other snapshot-driven scheduler keeps the two
+// reading the same way. A label rename restarts that window's history, which
+// self-heals on the next two samples.
 function providerIdentityKey(provider) {
   return [
     provider?.provider,
@@ -89,9 +94,13 @@ function recordLimitsSample(state, limits, nowMs) {
   if (!state) return;
   for (const provider of limits?.providers || []) {
     // A failed probe keeps the last good windows and re-publishes them under the
-    // failure status, so updatedAt is the only thing that says whether a probe
-    // actually landed. Reading a retained row as a fresh sample would score the
-    // failure as "nothing burned".
+    // failure status, so only a successful attempt is ever a measurement. The
+    // status check is what stops a seeded previousLimits row, retained through a
+    // failed startup probe, from becoming a baseline stamped with the current
+    // time: the next successful probe would then read a whole offline session's
+    // consumption as having happened since startup. updatedAt additionally keeps
+    // an unchanged successful row from being re-sampled on an unrelated rebuild.
+    if (text(provider?.status) !== 'ok') continue;
     const updatedAt = text(provider?.updatedAt);
     if (!updatedAt) continue;
     const identity = providerIdentityKey(provider);

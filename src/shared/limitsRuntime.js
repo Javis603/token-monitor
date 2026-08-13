@@ -400,7 +400,6 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       // Recorded for every key rather than only the dispatched ones, so a scope
       // skipped below still consumes its deadline instead of re-firing at once.
       recordLimitsUrgencyAttempt(burnState, due.keys, now());
-      const dispatched = [];
       for (const [index, scope] of (due.scopes || []).entries()) {
         const provider = providerId(scope.provider);
         const rows = snapshot.providers.filter((row) => row.provider === provider);
@@ -411,16 +410,18 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         // running aborts that probe: a provider slower than the floor would
         // otherwise never publish a reading, only cancelled requests.
         const key = due.keys[index];
-        dispatched.push(key);
         burnState.inFlight.add(key);
         void refresh(scope, 'burn-rate').finally(() => {
           burnState.inFlight.delete(key);
           scheduleUrgencyTimer();
         });
       }
-      // Only re-arm here for the scopes that did not start a probe; the rest
-      // re-arm from their own settle above.
-      if (dispatched.length === 0) scheduleUrgencyTimer();
+      // Re-armed unconditionally: whatever was just dispatched is now in
+      // inFlight and skipped, so this picks up the next provider due rather than
+      // leaving it to wait behind a probe that can legitimately run for two
+      // minutes. Lanes are per provider and the executor is concurrent, so there
+      // is nothing to serialise across them.
+      scheduleUrgencyTimer();
     }, due.delayMs);
   }
 
