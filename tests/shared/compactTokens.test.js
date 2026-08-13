@@ -60,3 +60,20 @@ test('tray formatting keeps its existing western precision while sharing localiz
   assert.equal(compactTokens.formatCompactTokens(1_234_567_890, 'western', 'en', { style: 'tray' }), '1.23B');
   assert.equal(compactTokens.formatCompactTokens(12_000, 'localized', 'zh-TW', { style: 'tray' }), '1.2萬');
 });
+
+test('compact value formatting can preserve an explicit display precision', () => {
+  assert.equal(
+    compactTokens.formatCompactValue(14_789.16, 'localized', 'zh-TW', {
+      fractionDigits: 2,
+      keepTrailingZeros: true
+    }),
+    '1.48萬'
+  );
+  assert.equal(
+    compactTokens.formatCompactValue(20_000, 'localized', 'zh-TW', {
+      fractionDigits: 2,
+      keepTrailingZeros: true
+    }),
+    '2.00萬'
+  );
+});

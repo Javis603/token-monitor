@@ -11789,8 +11789,9 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
     };
     if (showIcon) {
       const preferredIndex = item.icon === 'second' ? 1 : 0;
-      const iconRow = rows[preferredIndex]?.selection ? rows[preferredIndex] : rows.find((row) => row.selection);
-      const provider = item.icon === 'app' ? 'app' : iconRow?.selection?.provider || '';
+      const provider = item.icon === 'app'
+        ? 'app'
+        : trayLayoutApi.preferredRowProvider(rows, preferredIndex);
       const providerImage = trayProviderImages[provider];
       if (providerImage) {
         drawCustomTrayProviderImage(
@@ -11819,8 +11820,9 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
     const rows = item.rows.slice(0, 2);
     const showIcon = item.icon !== 'none';
     const preferredIndex = item.icon === 'second' ? 1 : 0;
-    const iconRow = rows[preferredIndex]?.selection ? rows[preferredIndex] : rows.find((row) => row.selection);
-    const provider = item.icon === 'app' ? 'app' : iconRow?.selection?.provider || '';
+    const provider = item.icon === 'app'
+      ? 'app'
+      : trayLayoutApi.preferredRowProvider(rows, preferredIndex);
     const iconSize = h;
     const iconGap = Math.max(2, Math.round(h * 0.08));
     const fontSize = Math.max(8, Math.round(h * 0.43));

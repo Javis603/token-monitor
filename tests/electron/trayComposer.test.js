@@ -8,11 +8,14 @@ const test = require('node:test');
 const trayLayoutApi = require('../../src/shared/trayLayout');
 const {
   accountModeSourcePatch,
+  costDisplayPatch,
   createTrayComposer,
   duplicateTrayLayoutItem,
+  handlePickerDocumentScroll,
   moveTrayLayoutItemByKey,
   periodItemPatch,
-  syncTrayComposerSurfaces
+  syncTrayComposerSurfaces,
+  usageScopePatch
 } = require('../../src/electron/renderer/trayComposer');
 
 function layoutWithIds(...ids) {
@@ -101,6 +104,45 @@ test('period updates target the item for single text and the source for stacked 
   assert.equal(stackedUpdated.rows[1].period, 'allTime');
 });
 
+test('cost display updates target a single item or one mixed-information row', () => {
+  const single = trayLayoutApi.createTrayLayoutItem('cost', { idFactory: () => 'single-cost' });
+  const singleUpdated = costDisplayPatch(single, 0, { costFormat: 'full', costDecimals: 'auto' });
+  assert.equal(singleUpdated.costFormat, 'full');
+  assert.equal(singleUpdated.costDecimals, 'auto');
+  assert.equal(singleUpdated.source.costFormat, undefined);
+
+  const stacked = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked-cost' });
+  const stackedUpdated = costDisplayPatch(stacked, 1, { costFormat: 'compact', costDecimals: 3 });
+  assert.equal(stackedUpdated.rows[0].costFormat, undefined);
+  assert.equal(stackedUpdated.rows[1].costFormat, 'compact');
+  assert.equal(stackedUpdated.rows[1].costDecimals, 3);
+
+  const normalized = trayLayoutApi.normalizeTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ ...stackedUpdated, rows: [stackedUpdated.rows[0], { ...stackedUpdated.rows[1], metric: 'cost' }] }]
+  });
+  assert.equal(normalized.items[0].rows[1].costFormat, 'compact');
+  assert.equal(normalized.items[0].rows[1].costDecimals, 3);
+});
+
+test('usage source updates target a single item or one mixed-information row', () => {
+  const single = trayLayoutApi.createTrayLayoutItem('tokens', { idFactory: () => 'single-tokens' });
+  const singleUpdated = usageScopePatch(single, 0, 'recent');
+  assert.equal(singleUpdated.usageScope, 'recent');
+  assert.equal(singleUpdated.source.usageScope, undefined);
+
+  const stacked = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked-tokens' });
+  const stackedUpdated = usageScopePatch(stacked, 1, 'recent');
+  assert.equal(stackedUpdated.rows[0].usageScope, undefined);
+  assert.equal(stackedUpdated.rows[1].usageScope, 'recent');
+
+  const normalized = trayLayoutApi.normalizeTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ ...stackedUpdated, rows: [stackedUpdated.rows[0], { ...stackedUpdated.rows[1], metric: 'tokens' }] }]
+  });
+  assert.equal(normalized.items[0].rows[1].usageScope, 'recent');
+});
+
 test('keyboard movement returns the reordered layout and respects boundaries', () => {
   const layout = layoutWithIds('first', 'selected', 'last');
   const moved = moveTrayLayoutItemByKey(trayLayoutApi, layout, 'selected', 'ArrowRight');
@@ -111,6 +153,43 @@ test('keyboard movement returns the reordered layout and respects boundaries', (
   const boundary = moveTrayLayoutItemByKey(trayLayoutApi, moved.layout, 'selected', 'ArrowRight');
   assert.equal(boundary.moved, false);
   assert.deepEqual(boundary.layout, moved.layout);
+});
+
+test('an open picker follows outer scroll updates while its trigger stays connected', () => {
+  const menu = { contains: (target) => target === 'menu-scroll' };
+  const connected = {
+    menu,
+    owner: { isConnected: true },
+    trigger: { isConnected: true }
+  };
+  const calls = [];
+  const actions = {
+    close: () => calls.push('close'),
+    reposition: () => calls.push('reposition')
+  };
+
+  assert.equal(handlePickerDocumentScroll(connected, 'menu-scroll', actions), 'ignore');
+  assert.deepEqual(calls, []);
+  assert.equal(handlePickerDocumentScroll(connected, 'settings-scroll', actions), 'reposition');
+  assert.deepEqual(calls, ['reposition']);
+  assert.equal(
+    handlePickerDocumentScroll(
+      { ...connected, trigger: { isConnected: false } },
+      'settings-scroll',
+      actions
+    ),
+    'close'
+  );
+  assert.deepEqual(calls, ['reposition', 'close']);
+  assert.equal(
+    handlePickerDocumentScroll(
+      { ...connected, owner: { isConnected: false } },
+      'settings-scroll',
+      actions
+    ),
+    'close'
+  );
+  assert.deepEqual(calls, ['reposition', 'close', 'close']);
 });
 
 test('composer visibility destroys hidden surfaces and creates newly visible surfaces', () => {

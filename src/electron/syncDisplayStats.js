@@ -2,6 +2,7 @@
 
 const { aggregateDevices } = require('../shared/usage');
 const { deviceHistoryRevision } = require('../shared/history');
+const { pickRecentUsageActivity } = require('../shared/trayText');
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -19,8 +20,21 @@ function attachLocalNativeViews(stats, localDevice) {
   // data can never look like it came from another device.
   delete stats.nativeSessions;
   delete stats.nativeProjects;
+  delete stats.localRecentUsageActivity;
   if (hasOwn(localDevice, 'nativeSessions')) stats.nativeSessions = localDevice.nativeSessions;
   if (hasOwn(localDevice, 'nativeProjects')) stats.nativeProjects = localDevice.nativeProjects;
+  // The tray's recent provider is a local-only presentation projection. Build
+  // it here, before the renderer sees cross-device aggregate sessions, and
+  // never add it to the device record or Hub payload.
+  const activity = pickRecentUsageActivity({
+    periods: localDevice?.periods || {
+      today: localDevice?.today,
+      month: localDevice?.month,
+      allTime: localDevice?.allTime
+    },
+    nativeSessions: localDevice?.nativeSessions
+  });
+  if (activity) stats.localRecentUsageActivity = activity;
   return stats;
 }
 

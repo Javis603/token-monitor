@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { aggregateDevices } = require('../../src/shared/usage');
+const { pickRecentUsageProviderId } = require('../../src/shared/trayText');
 const {
   attachLocalPresentationNativeViews,
   composeLocalSyncStats
@@ -34,6 +35,16 @@ function limits(updatedAt, remainingPercent) {
       updatedAt,
       windows: [{ kind: 'session', label: 'Session', usedPercent: 100 - remainingPercent }]
     }]
+  };
+}
+
+function usagePeriod(client, lastUsedAt, totalTokens = 1) {
+  return {
+    totalTokens,
+    clients: { [client]: totalTokens },
+    sessions: {
+      [`${client}:${lastUsedAt}`]: { client, sessionId: `${client}:session`, lastUsedAt, totalTokens }
+    }
   };
 }
 
@@ -89,6 +100,79 @@ test('composeLocalSyncStats can render a local device before the first hub snaps
   assert.equal(result.periods.today.totalTokens, 25);
   assert.equal(result.devices.length, 1);
   assert.equal(result.devices[0].deviceId, 'local');
+});
+
+test('sync presentation selects recent activity from the local device, not a newer remote session', () => {
+  const nowMs = Date.parse('2026-07-16T10:02:00.000Z');
+  const local = device('local', 10, {
+    today: usagePeriod('openclaw', '2026-07-16T10:00:00.000Z', 10)
+  });
+  const remote = device('remote', 20, {
+    today: usagePeriod('claude', '2026-07-16T10:01:00.000Z', 20)
+  });
+
+  const result = composeLocalSyncStats(aggregateDevices([local, remote], 0, nowMs), local, { nowMs });
+
+  assert.equal(pickRecentUsageProviderId(result), 'openclaw');
+  assert.equal(result.periods.today.clients.claude, 20);
+  assert.equal(result.periods.today.clients.openclaw, 10);
+});
+
+test('local Reasonix activity wins independently of a newer remote generic session', () => {
+  const nowMs = Date.parse('2026-07-16T10:04:00.000Z');
+  const local = device('local', 10, {
+    nativeSessions: {
+      today: {
+        reasonix: { client: 'reasonix', lastMessageAt: '2026-07-16T10:02:00.000Z' }
+      },
+      month: {},
+      allTime: {}
+    }
+  });
+  const remote = device('remote', 20, {
+    today: usagePeriod('claude', '2026-07-16T10:03:00.000Z', 20)
+  });
+
+  const result = composeLocalSyncStats(aggregateDevices([local, remote], 0, nowMs), local, { nowMs });
+
+  assert.equal(pickRecentUsageProviderId(result), 'reasonix');
+});
+
+test('remote activity cannot invent a recent provider when the local device has none', () => {
+  const nowMs = Date.parse('2026-07-16T10:04:00.000Z');
+  const local = device('local', 0);
+  const remote = device('remote', 20, {
+    today: usagePeriod('claude', '2026-07-16T10:03:00.000Z', 20)
+  });
+
+  const result = composeLocalSyncStats(aggregateDevices([local, remote], 0, nowMs), local, { nowMs });
+
+  assert.equal(pickRecentUsageProviderId(result), null);
+  assert.equal(Object.hasOwn(result, 'localRecentUsageActivity'), false);
+});
+
+test('Reasonix metadata updates cannot override newer local message activity', () => {
+  const nowMs = Date.parse('2026-07-16T10:11:00.000Z');
+  const local = device('local', 10, {
+    today: usagePeriod('claude', '2026-07-16T10:00:00.000Z', 10),
+    nativeSessions: {
+      today: {
+        reasonix: {
+          client: 'reasonix',
+          createdAt: '2026-07-16T09:00:00.000Z',
+          lastMessageAt: '2026-07-16T09:00:00.000Z',
+          lastUsedAt: '2026-07-16T10:10:00.000Z',
+          updatedAt: '2026-07-16T10:10:00.000Z'
+        }
+      },
+      month: {},
+      allTime: {}
+    }
+  });
+
+  const result = composeLocalSyncStats(null, local, { nowMs });
+
+  assert.equal(pickRecentUsageProviderId(result), 'claude');
 });
 
 test('the local cold-start presentation restores native views from the anchor seed', () => {

@@ -44,3 +44,25 @@ test('compact currency preserves fractional precision after crossing a unit thre
   assert.equal(formatCompactCurrencyFromUsd(99_999_499.5, 'USD', 'localized', 'zh-TW'), '$9999.9萬');
   assert.equal(formatCompactCurrencyFromUsd(99_999_500, 'USD', 'localized', 'zh-TW'), '$1億');
 });
+
+test('compact currency supports explicit display precision without changing auto precision', () => {
+  assert.equal(
+    formatCompactCurrencyFromUsd(14_789.16, 'USD', 'localized', 'zh-TW', { fractionDigits: 2 }),
+    '$1.48萬'
+  );
+  assert.equal(
+    formatCompactCurrencyFromUsd(20_000, 'USD', 'localized', 'zh-TW', { fractionDigits: 2 }),
+    '$2.00萬'
+  );
+  assert.equal(
+    formatCompactCurrencyFromUsd(0.0049, 'USD', 'western', 'en', { fractionDigits: 'auto' }),
+    '$0.0049'
+  );
+  assert.equal(
+    formatCompactCurrencyFromUsd(0.0049, 'USD', 'western', 'en', {
+      compact: false,
+      fractionDigits: 2
+    }),
+    '$0.00'
+  );
+});

@@ -18,6 +18,7 @@ const {
 } = require('../shared/credentialStore');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
+const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
@@ -3397,7 +3398,7 @@ function injectLocalDeviceStatus(stats) {
 }
 
 function macWidgetConfiguration() {
-  if (process.platform !== 'darwin') return null;
+  if (!macWidgetRuntimeSupported()) return null;
   if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
 
   let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
@@ -3438,6 +3439,13 @@ function macWidgetConfiguration() {
     })()
   };
   return cachedMacWidgetConfiguration;
+}
+
+function macWidgetRuntimeSupported(
+  platform = process.platform,
+  osRelease = platform === 'darwin' ? os.release() : ''
+) {
+  return macWidgetRuntimeSupport({ platform, osRelease }).supported;
 }
 
 function historyResolverOptions() {
@@ -3526,7 +3534,7 @@ function captureMacWidgetWork({ stats, owner }) {
 }
 
 function ensureMacWidgetSnapshotController() {
-  if (process.platform !== 'darwin') return null;
+  if (!macWidgetRuntimeSupported()) return null;
   if (macWidgetSnapshotController) return macWidgetSnapshotController;
   macWidgetSnapshotController = createMacWidgetSnapshotController({
     startPaused: !macWidgetPublicationReady,
@@ -3572,6 +3580,7 @@ function ensureMacWidgetSnapshotController() {
     reloadSnapshot: (work, options) => requestMacWidgetReload({
       widgetKind: work.widgetKind,
       isCurrent: options.isCurrent,
+      runtimeSupported: macWidgetRuntimeSupported(),
       logger: (message) => console.warn(message)
     }),
     logger: (message) => console.warn(message)
@@ -3598,7 +3607,7 @@ function refreshMacWidgetHistorySource() {
 }
 
 function scheduleMacWidgetSnapshot(stats, producerOwner) {
-  if (process.platform !== 'darwin' || !stats) return false;
+  if (!macWidgetRuntimeSupported() || !stats) return false;
   return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
 }
 
@@ -5637,17 +5646,25 @@ function rebuildWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
-  const widgetRecoveryAbort = new AbortController();
-  const abortWidgetRecovery = () => widgetRecoveryAbort.abort();
-  app.once('before-quit', abortWidgetRecovery);
-  const widgetRecovery = recoverMacWidgetLaunchServicesRegistration({
+  const widgetRuntime = macWidgetRuntimeSupport({
     platform: process.platform,
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    userDataPath: app.getPath('userData'),
-    signal: widgetRecoveryAbort.signal,
-    logger: (message) => console.warn(message)
+    osRelease: process.platform === 'darwin' ? os.release() : ''
   });
+  const widgetRuntimeSupported = widgetRuntime.supported;
+  const widgetRecoveryAbort = widgetRuntimeSupported ? new AbortController() : null;
+  const abortWidgetRecovery = () => widgetRecoveryAbort?.abort();
+  if (widgetRecoveryAbort) app.once('before-quit', abortWidgetRecovery);
+  const widgetRecovery = widgetRuntimeSupported
+    ? recoverMacWidgetLaunchServicesRegistration({
+      platform: process.platform,
+      runtimeSupported: true,
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      userDataPath: app.getPath('userData'),
+      signal: widgetRecoveryAbort.signal,
+      logger: (message) => console.warn(message)
+    })
+    : Promise.resolve({ status: 'skipped', reason: widgetRuntime.reason });
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -5665,11 +5682,11 @@ app.whenReady().then(() => {
   if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
-  ensureMacWidgetDemand();
+  if (widgetRuntimeSupported) ensureMacWidgetDemand();
   startMode();
   void widgetRecovery.finally(() => {
-    app.removeListener('before-quit', abortWidgetRecovery);
-    if (!widgetRecoveryAbort.signal.aborted) {
+    if (widgetRecoveryAbort) app.removeListener('before-quit', abortWidgetRecovery);
+    if (!widgetRecoveryAbort?.signal.aborted) {
       macWidgetPublicationReady = true;
       macWidgetSnapshotController?.resume();
     }

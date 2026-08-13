@@ -52,6 +52,10 @@ const {
   widgetArtifactPaths
 } = require('../../scripts/macos-packaging');
 const { normalizeWidgetURLScheme } = require('../../src/shared/macWidgetConfig');
+const {
+  MAC_APP_MIN_VERSION,
+  MAC_WIDGET_MIN_VERSION
+} = require('../../src/shared/macSystemRequirements');
 const { projectLimitStatsForDisplay } = require('../../src/electron/limitStatsPresentation');
 
 function functionSource(name, nextName) {
@@ -239,19 +243,18 @@ test('starts the runtime immediately and holds only Widget publication until hos
   assert.ok(readyStart >= 0 && readyEnd > readyStart, 'ready callback should exist');
   const readySource = mainSource.slice(readyStart, readyEnd);
   const settingsIndex = readySource.indexOf('ensureSettingsLoaded();');
-  const recoveryStartIndex = readySource.indexOf(
-    'const widgetRecovery = recoverMacWidgetLaunchServicesRegistration({'
-  );
+  const supportIndex = readySource.indexOf('const widgetRuntime = macWidgetRuntimeSupport({');
+  const recoveryStartIndex = readySource.indexOf('const widgetRecovery = widgetRuntimeSupported');
   const windowIndex = readySource.indexOf('createWindow();');
   const modeIndex = readySource.indexOf('startMode();');
   const recoveryCompletionIndex = readySource.indexOf('void widgetRecovery.finally(() => {');
-  assert.ok(settingsIndex >= 0 && recoveryStartIndex > settingsIndex);
+  assert.ok(settingsIndex >= 0 && supportIndex > settingsIndex && recoveryStartIndex > supportIndex);
   assert.ok(windowIndex > recoveryStartIndex);
   assert.ok(modeIndex > windowIndex && recoveryCompletionIndex > modeIndex);
   assert.doesNotMatch(readySource, /await widgetRecovery/);
   assert.match(
     readySource,
-    /startMode\(\);\s*void widgetRecovery\.finally\(\(\) => \{\s*app\.removeListener\('before-quit', abortWidgetRecovery\);\s*if \(!widgetRecoveryAbort\.signal\.aborted\) \{\s*macWidgetPublicationReady = true;\s*macWidgetSnapshotController\?\.resume\(\);\s*\}\s*\}\);/
+    /startMode\(\);\s*void widgetRecovery\.finally\(\(\) => \{\s*if \(widgetRecoveryAbort\) app\.removeListener\('before-quit', abortWidgetRecovery\);\s*if \(!widgetRecoveryAbort\?\.signal\.aborted\) \{\s*macWidgetPublicationReady = true;\s*macWidgetSnapshotController\?\.resume\(\);\s*\}\s*\}\);/
   );
   assert.match(mainSource, /let macWidgetPublicationReady = false;/);
   assert.match(
@@ -259,16 +262,16 @@ test('starts the runtime immediately and holds only Widget publication until hos
     /createMacWidgetSnapshotController\(\{\s*startPaused: !macWidgetPublicationReady,/
   );
   assert.match(readySource, /platform: process\.platform/);
+  assert.match(readySource, /runtimeSupported: true/);
   assert.match(readySource, /isPackaged: app\.isPackaged/);
   assert.match(readySource, /resourcesPath: process\.resourcesPath/);
   assert.match(readySource, /userDataPath: app\.getPath\('userData'\)/);
 });
 
-function executeMacWidgetRecoveryWiring() {
-  const bootstrapStart = mainSource.indexOf('const widgetRecoveryAbort = new AbortController();');
-  const loggerIndex = mainSource.indexOf('logger: (message) => console.warn(message)', bootstrapStart);
-  const recoveryCallEnd = mainSource.indexOf('});', loggerIndex) + 3;
-  assert.ok(bootstrapStart >= 0 && loggerIndex > bootstrapStart && recoveryCallEnd > loggerIndex, 'recovery bootstrap should exist');
+function executeMacWidgetRecoveryWiring(runtimeSupported = true) {
+  const bootstrapStart = mainSource.indexOf('const widgetRuntime = macWidgetRuntimeSupport({');
+  const recoveryCallEnd = mainSource.indexOf('\n  session.defaultSession', bootstrapStart);
+  assert.ok(bootstrapStart >= 0 && recoveryCallEnd > bootstrapStart, 'recovery bootstrap should exist');
   const finallyStart = mainSource.indexOf('void widgetRecovery.finally(() => {');
   const finallyEnd = mainSource.indexOf('\n  });', finallyStart) + '\n  });'.length;
   assert.ok(finallyStart >= 0 && finallyEnd > finallyStart, 'recovery settle should exist');
@@ -280,7 +283,9 @@ function executeMacWidgetRecoveryWiring() {
   let beforeQuitHandler;
   const context = vm.createContext({
     AbortController,
+    Promise,
     console: { warn() {} },
+    os: { release: () => (runtimeSupported ? '23.0.0' : '22.0.0') },
     process: { platform: 'darwin', resourcesPath: '/acceptance/resources' },
     app: {
       isPackaged: true,
@@ -292,6 +297,10 @@ function executeMacWidgetRecoveryWiring() {
       calls.recoveryOptions = options;
       return recoveryPromise;
     },
+    macWidgetRuntimeSupport: () => ({
+      supported: runtimeSupported,
+      reason: runtimeSupported ? null : 'unsupported-os'
+    }),
     macWidgetPublicationReady: false,
     macWidgetSnapshotController: { resume: () => { calls.resumed += 1; } }
   });
@@ -305,6 +314,7 @@ function executeMacWidgetRecoveryWiring() {
       const options = calls.recoveryOptions;
       assert.ok(options, 'recovery should be invoked with the packaged wiring options');
       assert.equal(options.platform, 'darwin');
+      assert.equal(options.runtimeSupported, true);
       assert.equal(options.isPackaged, true);
       assert.equal(options.resourcesPath, '/acceptance/resources');
       assert.equal(options.userDataPath, '/acceptance/user-data');
@@ -330,6 +340,16 @@ test('main wiring resumes Widget publication when host registration settles on a
     assert.equal(execution.calls.resumed, 1, `${outcome.status} settle should resume the snapshot controller`);
     assert.deepEqual(execution.calls.removeListener, ['before-quit']);
   }
+});
+
+test('main wiring does not initialize Widget recovery below macOS 14', async () => {
+  const execution = executeMacWidgetRecoveryWiring(false);
+  assert.equal(execution.calls.recoveryOptions, undefined);
+  assert.deepEqual(execution.calls.once, []);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(execution.context.macWidgetPublicationReady, true);
+  assert.equal(execution.calls.resumed, 1);
+  assert.deepEqual(execution.calls.removeListener, []);
 });
 
 test('main wiring holds Widget publication when the app quits before registration settles', async () => {
@@ -455,6 +475,7 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   assert.equal(normal.extraFiles, undefined);
   assert.equal(normal.extraResources, undefined);
   assert.equal(normal.extendInfo.CFBundleURLTypes, undefined);
+  assert.equal(normal.minimumSystemVersion, MAC_APP_MIN_VERSION);
   assert.equal(packageJson.scripts.predistMac, undefined);
   assert.equal(packageJson.scripts['predist:mac'], undefined);
 
@@ -475,6 +496,7 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   fs.rmSync(artifactRoot, { recursive: true, force: true });
 
   const mac = widget;
+  assert.equal(mac.minimumSystemVersion, MAC_APP_MIN_VERSION);
   assert.deepEqual(mac.extendInfo.CFBundleURLTypes[0].CFBundleURLSchemes, ['token-monitor']);
   assert.equal(mac.extraFiles[0].to, 'PlugIns/TokenMonitorWidget.appex');
   assert.equal(mac.extraResources[0].to, 'token-monitor-widget.json');
@@ -485,6 +507,8 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   assert.match(packageJson.scripts['dist:mac:widget'], /TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 TOKEN_MONITOR_WIDGET_ARCH=arm64 electron-builder/);
   assert.match(packageJson.scripts['dist:mac:widget:x64'], /TOKEN_MONITOR_WIDGET_ARCH=x64/);
   assert.match(packageJson.scripts['pack:mac:widget:x64'], /--mac --x64 --dir/);
+  assert.equal(packageJson.build.mac.minimumSystemVersion, MAC_APP_MIN_VERSION);
+  assert.match(widgetProject, new RegExp(`MACOSX_DEPLOYMENT_TARGET = ${MAC_WIDGET_MIN_VERSION.replace('.', '\\.')}\\;`));
 });
 
 test('preserves generic macOS packaging config and fails fast on signing ownership conflicts', () => {
