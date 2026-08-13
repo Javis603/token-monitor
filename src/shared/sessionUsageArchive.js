@@ -207,6 +207,12 @@ function addSessionBreakdown(period, session) {
     if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
     if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
     if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
+    const modelTokensForSession = Math.max(0, Math.round(numberValue(session.models?.[model])));
+    const unclassified = Math.max(0, modelTokensForSession - cr - cw - ou);
+    if (unclassified > 0) {
+      period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + unclassified;
+      period.capabilities.tokenComponents = false;
+    }
   }
 }
 
@@ -223,16 +229,17 @@ function addArchivedSession(period, session) {
   const cacheWrite = Math.max(0, Math.round(numberValue(archived.cacheWriteTokens)));
   const output = Math.max(0, Math.round(numberValue(archived.outputTokens)));
 
-  // Session archives created before component provenance cannot distinguish a
-  // real zero from detail that was never recorded. Retain known fields below,
-  // while making the aggregate period classify only the unproven remainder as
-  // unknown.
-  if (tokens > 0) period.capabilities.tokenComponents = false;
   period.totalTokens += tokens;
   period.costUsd += cost;
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
+  const unclassified = Math.max(0, tokens - cacheRead - cacheWrite - output);
+  if (unclassified > 0) {
+    period.unclassifiedTokens += unclassified;
+    period.clientUnclassifiedTokens[archived.client] = (period.clientUnclassifiedTokens[archived.client] || 0) + unclassified;
+    period.capabilities.tokenComponents = false;
+  }
   if (tokens > 0) period.clients[archived.client] = (period.clients[archived.client] || 0) + tokens;
   if (cost > 0) period.clientCosts[archived.client] = (period.clientCosts[archived.client] || 0) + cost;
 

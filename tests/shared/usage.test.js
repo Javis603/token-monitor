@@ -395,12 +395,22 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
     trackedClients: ['codex', 'hermes'],
     updatedAt: '2026-05-30T12:00:00.000Z',
     today: {
+      capabilities: { tokenComponents: true },
       totalTokens: 150,
       costUsd: 1.5,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 15,
+      outputTokens: 30,
       clients: { hermes: 100, codex: 50 },
       clientCosts: { hermes: 1.25, codex: 0.25 },
+      clientCacheReads: { hermes: 60, codex: 20 },
+      clientCacheWrites: { hermes: 10, codex: 5 },
+      clientOutputs: { hermes: 20, codex: 10 },
       models: { 'claude-3-5-sonnet': 100, 'gpt-5': 50 },
       modelCosts: { 'claude-3-5-sonnet': 1.25, 'gpt-5': 0.25 },
+      modelCacheReads: { 'claude-3-5-sonnet': 60, 'gpt-5': 20 },
+      modelCacheWrites: { 'claude-3-5-sonnet': 10, 'gpt-5': 5 },
+      modelOutputs: { 'claude-3-5-sonnet': 20, 'gpt-5': 10 },
       clientModels: { hermes: { 'claude-3-5-sonnet': 100 }, codex: { 'gpt-5': 50 } },
       clientModelCosts: { hermes: { 'claude-3-5-sonnet': 1.25 }, codex: { 'gpt-5': 0.25 } },
       sessions: {
@@ -431,12 +441,22 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
     trackedClients: ['codex'],
     updatedAt: '2026-05-30T12:01:00.000Z',
     today: {
+      capabilities: { tokenComponents: true },
       totalTokens: 75,
       costUsd: 0.5,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 5,
+      outputTokens: 15,
       clients: { codex: 75 },
       clientCosts: { codex: 0.5 },
+      clientCacheReads: { codex: 30 },
+      clientCacheWrites: { codex: 5 },
+      clientOutputs: { codex: 15 },
       models: { 'gpt-5': 75 },
       modelCosts: { 'gpt-5': 0.5 },
+      modelCacheReads: { 'gpt-5': 30 },
+      modelCacheWrites: { 'gpt-5': 5 },
+      modelOutputs: { 'gpt-5': 15 },
       clientModels: { codex: { 'gpt-5': 75 } },
       clientModelCosts: { codex: { 'gpt-5': 0.5 } },
       sessions: {
@@ -461,6 +481,11 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
   assert.equal(merged.periods.today.models['gpt-5'], 75);
   assert.equal(merged.periods.today.models['claude-3-5-sonnet'], 100);
   assert.equal(merged.periods.today.clientModels.hermes['claude-3-5-sonnet'], 100);
+  assert.equal(merged.periods.today.capabilities.tokenComponents, true);
+  assert.equal(merged.periods.today.cacheReadTokens, 90);
+  assert.equal(merged.periods.today.clientCacheReads.hermes, 60);
+  assert.equal(merged.periods.today.modelOutputs['claude-3-5-sonnet'], 20);
+  assert.equal(merged.periods.today.unclassifiedTokens, 0);
   assert.equal(merged.periods.today.sessions['hermes:h1'].totalTokens, 100);
   assert.equal(merged.periods.today.sessions['codex:c1'], undefined);
   assert.deepEqual(JSON.parse(JSON.stringify(merged.periods.today.projects['shared app'])), {

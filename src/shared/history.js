@@ -38,27 +38,33 @@ function sumOutputTokens(breakdown, client = '') {
     + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
 }
 
-function exactComponentValues(value, totalTokens) {
+function componentValues(value, totalTokens, exact) {
   const cacheReadTokens = Math.max(0, num(value?.cacheReadTokens));
   const cacheWriteTokens = Math.max(0, num(value?.cacheWriteTokens));
   const outputTokens = Math.max(0, num(value?.outputTokens));
   if (cacheReadTokens + cacheWriteTokens + outputTokens > totalTokens) return null;
-  return { cacheReadTokens, cacheWriteTokens, outputTokens };
+  const unclassifiedTokens = Math.min(
+    totalTokens - cacheReadTokens - cacheWriteTokens - outputTokens,
+    Math.max(0, num(value?.unclassifiedTokens
+      ?? (exact ? 0 : totalTokens - cacheReadTokens - cacheWriteTokens - outputTokens)))
+  );
+  return { cacheReadTokens, cacheWriteTokens, outputTokens, unclassifiedTokens };
 }
 
-function applyExactComponentSummary(summary, totalTokens, perClient, perModel) {
-  if (summary?.tokenComponentsAvailable !== true) return null;
-  const totals = exactComponentValues(summary, totalTokens);
+function applyComponentSummary(summary, totalTokens, perClient, perModel) {
+  if (!summary || typeof summary !== 'object') return null;
+  const exact = summary.tokenComponentsAvailable === true;
+  const totals = componentValues(summary, totalTokens, exact);
   if (!totals) return null;
   const clients = {};
   for (const [key, value] of Object.entries(perClient)) {
-    const components = exactComponentValues(summary.perClient?.[key], num(value.tokens));
+    const components = componentValues(summary.perClient?.[key], num(value.tokens), exact);
     if (!components) return null;
     clients[key] = components;
   }
   const models = {};
   for (const [key, value] of Object.entries(perModel)) {
-    const components = exactComponentValues(summary.perModel?.[key], num(value.tokens));
+    const components = componentValues(summary.perModel?.[key], num(value.tokens), exact);
     if (!components) return null;
     models[key] = components;
   }
@@ -130,29 +136,31 @@ function parseGraphResult(raw) {
       if (output > 0) pm.outputTokens = num(pm.outputTokens) + output;
       pm.unclassifiedTokens += unclassified;
     }
-    const exactSummary = applyExactComponentSummary(
+    const componentSummary = applyComponentSummary(
       row.tokenComponentSummary,
       tokens,
       perClient,
       perModel
     );
-    if (exactSummary) {
-      cacheReadTokens = exactSummary.totals.cacheReadTokens;
-      cacheWriteTokens = exactSummary.totals.cacheWriteTokens;
-      outputTokens = exactSummary.totals.outputTokens;
-      unclassifiedTokens = 0;
-      tokenComponentsAvailable = true;
+    if (componentSummary) {
+      cacheReadTokens = componentSummary.totals.cacheReadTokens;
+      cacheWriteTokens = componentSummary.totals.cacheWriteTokens;
+      outputTokens = componentSummary.totals.outputTokens;
+      unclassifiedTokens = componentSummary.totals.unclassifiedTokens;
+      tokenComponentsAvailable = unclassifiedTokens === 0;
       for (const [client, value] of Object.entries(perClient)) {
-        value.cacheReadTokens = exactSummary.clients[client].cacheReadTokens;
-        value.cacheWriteTokens = exactSummary.clients[client].cacheWriteTokens;
-        value.outputTokens = exactSummary.clients[client].outputTokens;
-        value.unclassifiedTokens = 0;
+        value.cacheReadTokens = componentSummary.clients[client].cacheReadTokens;
+        value.cacheWriteTokens = componentSummary.clients[client].cacheWriteTokens;
+        value.outputTokens = componentSummary.clients[client].outputTokens;
+        value.unclassifiedTokens = componentSummary.clients[client].unclassifiedTokens;
+        tokenComponentsAvailable = tokenComponentsAvailable && value.unclassifiedTokens === 0;
       }
       for (const [model, value] of Object.entries(perModel)) {
-        value.cacheReadTokens = exactSummary.models[model].cacheReadTokens;
-        value.cacheWriteTokens = exactSummary.models[model].cacheWriteTokens;
-        value.outputTokens = exactSummary.models[model].outputTokens;
-        value.unclassifiedTokens = 0;
+        value.cacheReadTokens = componentSummary.models[model].cacheReadTokens;
+        value.cacheWriteTokens = componentSummary.models[model].cacheWriteTokens;
+        value.outputTokens = componentSummary.models[model].outputTokens;
+        value.unclassifiedTokens = componentSummary.models[model].unclassifiedTokens;
+        tokenComponentsAvailable = tokenComponentsAvailable && value.unclassifiedTokens === 0;
       }
     }
     contributions.push({

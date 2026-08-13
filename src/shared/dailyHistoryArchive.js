@@ -69,15 +69,21 @@ function normalizeObservation(value) {
   };
 }
 
-function normalizeComponentValues(value, totalTokens) {
+function normalizeComponentValues(value, totalTokens, exact) {
   const cacheReadTokens = Math.max(0, Math.round(num(value?.cacheReadTokens)));
   const cacheWriteTokens = Math.max(0, Math.round(num(value?.cacheWriteTokens)));
   const outputTokens = Math.max(0, Math.round(num(value?.outputTokens)));
   if (cacheReadTokens + cacheWriteTokens + outputTokens > totalTokens) return null;
+  const unclassifiedTokens = Math.min(
+    totalTokens - cacheReadTokens - cacheWriteTokens - outputTokens,
+    Math.max(0, Math.round(num(value?.unclassifiedTokens
+      ?? (exact ? 0 : totalTokens - cacheReadTokens - cacheWriteTokens - outputTokens))))
+  );
   return {
     ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
     ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
-    ...(outputTokens > 0 ? { outputTokens } : {})
+    ...(outputTokens > 0 ? { outputTokens } : {}),
+    ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {})
   };
 }
 
@@ -95,15 +101,16 @@ function observationTokenMaps(observations) {
 }
 
 function normalizeComponentSummary(value, observations) {
-  if (value?.tokenComponentsAvailable !== true) return null;
+  if (!value || typeof value !== 'object') return null;
+  const exact = value.tokenComponentsAvailable === true;
   const tokenMaps = observationTokenMaps(observations);
-  const totals = normalizeComponentValues(value, tokenMaps.totalTokens);
+  const totals = normalizeComponentValues(value, tokenMaps.totalTokens, exact);
   if (!totals) return null;
 
   const normalizeMap = (source, tokensByKey) => {
     const result = {};
     for (const [key, tokens] of Object.entries(tokensByKey)) {
-      const normalized = normalizeComponentValues(source?.[key], tokens);
+      const normalized = normalizeComponentValues(source?.[key], tokens, exact);
       if (!normalized) return null;
       if (Object.keys(normalized).length > 0) result[key] = normalized;
     }
@@ -113,7 +120,10 @@ function normalizeComponentSummary(value, observations) {
   const perModel = normalizeMap(value.perModel, tokenMaps.perModel);
   if (!perClient || !perModel) return null;
   return {
-    tokenComponentsAvailable: true,
+    tokenComponentsAvailable: exact
+      && num(totals.unclassifiedTokens) === 0
+      && Object.values(perClient).every((entry) => num(entry.unclassifiedTokens) === 0)
+      && Object.values(perModel).every((entry) => num(entry.unclassifiedTokens) === 0),
     ...totals,
     perClient,
     perModel
@@ -322,21 +332,28 @@ function periodLiveDay(period, date) {
     );
   }
 
-  const componentSummary = period.capabilities?.tokenComponents === true
+  const hasKnownComponents = num(period.cacheReadTokens)
+    + num(period.cacheWriteTokens)
+    + num(period.outputTokens) > 0;
+  const componentSummary = totalTokens > 0
+    && (period.capabilities?.tokenComponents === true || hasKnownComponents)
     ? {
-        tokenComponentsAvailable: true,
+        tokenComponentsAvailable: period.capabilities?.tokenComponents === true,
         cacheReadTokens: num(period.cacheReadTokens),
         cacheWriteTokens: num(period.cacheWriteTokens),
         outputTokens: num(period.outputTokens),
+        unclassifiedTokens: num(period.unclassifiedTokens),
         perClient: Object.fromEntries([...clientIds].map((client) => [client, {
           cacheReadTokens: num(period.clientCacheReads?.[client]),
           cacheWriteTokens: num(period.clientCacheWrites?.[client]),
-          outputTokens: num(period.clientOutputs?.[client])
+          outputTokens: num(period.clientOutputs?.[client]),
+          unclassifiedTokens: num(period.clientUnclassifiedTokens?.[client])
         }])),
         perModel: Object.fromEntries(Object.keys(period.models || {}).map((model) => [model, {
           cacheReadTokens: num(period.modelCacheReads?.[model]),
           cacheWriteTokens: num(period.modelCacheWrites?.[model]),
-          outputTokens: num(period.modelOutputs?.[model])
+          outputTokens: num(period.modelOutputs?.[model]),
+          unclassifiedTokens: num(period.modelUnclassifiedTokens?.[model])
         }]))
       }
     : null;
@@ -359,6 +376,7 @@ function dayCost(day) {
 
 function dayComponentQuality(day) {
   if (day?.componentSummary?.tokenComponentsAvailable === true) return 2;
+  if (day?.componentSummary) return 1;
   const usage = Object.values(day?.observations || {}).filter((observation) => num(observation.tokens) > 0);
   if (usage.length === 0 || usage.every((observation) => observation.tokenComponentsAvailable === true)) return 2;
   return usage.some((observation) => (

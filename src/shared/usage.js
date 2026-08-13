@@ -121,6 +121,7 @@ function emptyPeriod() {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     outputTokens: 0,
+    unclassifiedTokens: 0,
     // tokscale's per-entry `performance` block, summed. `timedDurationMs` is the sum of
     // per-message durations (NOT a wall-clock span — concurrent sessions count twice), and
     // `timedTokens` covers only the messages that carried a duration, and `timedOutputTokens`
@@ -147,11 +148,13 @@ function emptyPeriod() {
     clientCacheReads: {},
     clientCacheWrites: {},
     clientOutputs: {},
+    clientUnclassifiedTokens: {},
     models: {},
     modelCosts: {},
     modelCacheReads: {},
     modelCacheWrites: {},
     modelOutputs: {},
+    modelUnclassifiedTokens: {},
     clientModels: {},
     clientModelCosts: {},
     projects: Object.create(null),
@@ -564,6 +567,18 @@ function normalizePeriod(input, options = {}) {
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
+  const knownComponentTokens = Math.min(
+    period.totalTokens,
+    period.cacheReadTokens + period.cacheWriteTokens + period.outputTokens
+  );
+  period.unclassifiedTokens = Math.min(
+    period.totalTokens - knownComponentTokens,
+    Math.max(0, Math.round(asNumber(
+      input.unclassifiedTokens
+      ?? input.unclassified_tokens
+      ?? (period.capabilities.tokenComponents ? 0 : period.totalTokens - knownComponentTokens)
+    )))
+  );
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
   // Capped at outputTokens because the gate makes that a physical bound: output is counted
   // whole or not at all, so a period cannot have timed more output than it produced. The
@@ -582,6 +597,20 @@ function normalizePeriod(input, options = {}) {
         if (input.clientCacheReads?.[client]) period.clientCacheReads[key] = (period.clientCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheReads[client])));
         if (input.clientCacheWrites?.[client]) period.clientCacheWrites[key] = (period.clientCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheWrites[client])));
         if (input.clientOutputs?.[client]) period.clientOutputs[key] = (period.clientOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.clientOutputs[client])));
+        const known = Math.min(
+          period.clients[key],
+          asNumber(period.clientCacheReads[key])
+            + asNumber(period.clientCacheWrites[key])
+            + asNumber(period.clientOutputs[key])
+        );
+        const hasExplicitUnclassified = hasOwn(input, 'clientUnclassifiedTokens');
+        const unclassified = Math.min(
+          period.clients[key] - known,
+          Math.max(0, Math.round(asNumber(hasExplicitUnclassified
+            ? input.clientUnclassifiedTokens?.[client]
+            : (period.capabilities.tokenComponents ? 0 : period.clients[key] - known))))
+        );
+        if (unclassified > 0) period.clientUnclassifiedTokens[key] = unclassified;
       }
     }
   }
@@ -599,6 +628,20 @@ function normalizePeriod(input, options = {}) {
         if (input.modelCacheReads?.[model]) period.modelCacheReads[key] = (period.modelCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheReads[model])));
         if (input.modelCacheWrites?.[model]) period.modelCacheWrites[key] = (period.modelCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheWrites[model])));
         if (input.modelOutputs?.[model]) period.modelOutputs[key] = (period.modelOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.modelOutputs[model])));
+        const known = Math.min(
+          period.models[key],
+          asNumber(period.modelCacheReads[key])
+            + asNumber(period.modelCacheWrites[key])
+            + asNumber(period.modelOutputs[key])
+        );
+        const hasExplicitUnclassified = hasOwn(input, 'modelUnclassifiedTokens');
+        const unclassified = Math.min(
+          period.models[key] - known,
+          Math.max(0, Math.round(asNumber(hasExplicitUnclassified
+            ? input.modelUnclassifiedTokens?.[model]
+            : (period.capabilities.tokenComponents ? 0 : period.models[key] - known))))
+        );
+        if (unclassified > 0) period.modelUnclassifiedTokens[key] = unclassified;
       }
     }
   }
@@ -646,6 +689,13 @@ function normalizePeriod(input, options = {}) {
   period.projects = projectsEnabled
     ? (hasOwn(input, 'projects') ? normalizeProjects(input.projects) : projectRollupFromSessions(period.sessions))
     : Object.create(null);
+  if (
+    period.unclassifiedTokens > 0
+    || Object.keys(period.clientUnclassifiedTokens).length > 0
+    || Object.keys(period.modelUnclassifiedTokens).length > 0
+  ) {
+    period.capabilities.tokenComponents = false;
+  }
   return period;
 }
 
@@ -710,6 +760,7 @@ function fallbackUsagePeriod(json) {
   // across cache read/write and output. Preserve that distinction through the
   // hub instead of letting normalizePeriod's zero defaults imply a cache miss.
   period.capabilities.tokenComponents = period.totalTokens === 0;
+  period.unclassifiedTokens = period.totalTokens;
   return period;
 }
 
@@ -822,11 +873,34 @@ function normalizeDeviceRecord(record) {
   return normalized;
 }
 
-function addClientModelUsage(target, client, models, costs) {
+function addClientModelUsage(target, source, client) {
+  const models = source.clientModels?.[client];
+  const costs = source.clientModelCosts?.[client];
   for (const [model, tokens] of Object.entries(models || {})) {
     target.models[model] = (target.models[model] || 0) + tokens;
     if (!target.clientModels[client]) target.clientModels[client] = {};
     target.clientModels[client][model] = (target.clientModels[client][model] || 0) + tokens;
+
+    // Model component maps are not client×model maps. They can be carried only
+    // when this preserved client owns the whole source model bucket; otherwise
+    // retain the model total and mark just that contribution unknown.
+    if (asNumber(source.models?.[model]) === asNumber(tokens)) {
+      const cacheRead = Math.min(tokens, asNumber(source.modelCacheReads?.[model]));
+      const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.modelCacheWrites?.[model]));
+      const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.modelOutputs?.[model]));
+      const unclassified = Math.min(
+        tokens - cacheRead - cacheWrite - output,
+        asNumber(source.modelUnclassifiedTokens?.[model])
+      );
+      if (cacheRead > 0) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + cacheRead;
+      if (cacheWrite > 0) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + cacheWrite;
+      if (output > 0) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + output;
+      if (unclassified > 0) target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + unclassified;
+      if (unclassified > 0) target.capabilities.tokenComponents = false;
+    } else if (tokens > 0) {
+      target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + tokens;
+      target.capabilities.tokenComponents = false;
+    }
   }
   for (const [model, cost] of Object.entries(costs || {})) {
     target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
@@ -885,7 +959,23 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       target.clients[client] = tokens;
       preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
-      addClientModelUsage(target, client, source.clientModels?.[client], source.clientModelCosts?.[client]);
+      const cacheRead = Math.min(tokens, asNumber(source.clientCacheReads?.[client]));
+      const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.clientCacheWrites?.[client]));
+      const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.clientOutputs?.[client]));
+      const unclassified = Math.min(
+        tokens - cacheRead - cacheWrite - output,
+        asNumber(source.clientUnclassifiedTokens?.[client])
+      );
+      target.cacheReadTokens += cacheRead;
+      target.cacheWriteTokens += cacheWrite;
+      target.outputTokens += output;
+      target.unclassifiedTokens += unclassified;
+      if (cacheRead > 0) target.clientCacheReads[client] = cacheRead;
+      if (cacheWrite > 0) target.clientCacheWrites[client] = cacheWrite;
+      if (output > 0) target.clientOutputs[client] = output;
+      if (unclassified > 0) target.clientUnclassifiedTokens[client] = unclassified;
+      if (unclassified > 0) target.capabilities.tokenComponents = false;
+      addClientModelUsage(target, source, client);
       addClientSessionUsage(target, client, source.sessions, restoredSessions, projectsEnabled);
     }
     if (!projectsEnabled) continue;
@@ -1035,6 +1125,7 @@ function addPeriodInto(target, source) {
   target.cacheReadTokens += source.cacheReadTokens;
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
+  target.unclassifiedTokens += source.unclassifiedTokens;
   target.timedTokens += source.timedTokens;
   target.timedOutputTokens += source.timedOutputTokens;
   target.timedDurationMs += source.timedDurationMs;
@@ -1043,6 +1134,7 @@ function addPeriodInto(target, source) {
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];
     if (source.clientCacheWrites?.[client]) target.clientCacheWrites[client] = (target.clientCacheWrites[client] || 0) + source.clientCacheWrites[client];
     if (source.clientOutputs?.[client]) target.clientOutputs[client] = (target.clientOutputs[client] || 0) + source.clientOutputs[client];
+    if (source.clientUnclassifiedTokens?.[client]) target.clientUnclassifiedTokens[client] = (target.clientUnclassifiedTokens[client] || 0) + source.clientUnclassifiedTokens[client];
   }
   for (const [client, cost] of Object.entries(source.clientCosts)) target.clientCosts[client] = (target.clientCosts[client] || 0) + cost;
   for (const [model, tokens] of Object.entries(source.models)) {
@@ -1050,6 +1142,7 @@ function addPeriodInto(target, source) {
     if (source.modelCacheReads?.[model]) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + source.modelCacheReads[model];
     if (source.modelCacheWrites?.[model]) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + source.modelCacheWrites[model];
     if (source.modelOutputs?.[model]) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + source.modelOutputs[model];
+    if (source.modelUnclassifiedTokens?.[model]) target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + source.modelUnclassifiedTokens[model];
   }
   for (const [model, cost] of Object.entries(source.modelCosts)) target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
   for (const [client, models] of Object.entries(source.clientModels)) {

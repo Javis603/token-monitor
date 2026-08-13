@@ -98,30 +98,42 @@ function liveSummaryWithoutHermes() {
     today: {
       totalTokens: 50,
       costUsd: 0.25,
+      outputTokens: 30,
+      capabilities: { tokenComponents: true },
       clients: { codex: 50 },
       clientCosts: { codex: 0.25 },
+      clientOutputs: { codex: 30 },
       models: { 'gpt-5': 50 },
       modelCosts: { 'gpt-5': 0.25 },
+      modelOutputs: { 'gpt-5': 30 },
       clientModels: { codex: { 'gpt-5': 50 } },
       clientModelCosts: { codex: { 'gpt-5': 0.25 } }
     },
     month: {
       totalTokens: 150,
       costUsd: 0.75,
+      outputTokens: 90,
+      capabilities: { tokenComponents: true },
       clients: { codex: 150 },
       clientCosts: { codex: 0.75 },
+      clientOutputs: { codex: 90 },
       models: { 'gpt-5': 150 },
       modelCosts: { 'gpt-5': 0.75 },
+      modelOutputs: { 'gpt-5': 90 },
       clientModels: { codex: { 'gpt-5': 150 } },
       clientModelCosts: { codex: { 'gpt-5': 0.75 } }
     },
     allTime: {
       totalTokens: 300,
       costUsd: 0.75,
+      outputTokens: 180,
+      capabilities: { tokenComponents: true },
       clients: { codex: 300 },
       clientCosts: { codex: 0.75 },
+      clientOutputs: { codex: 180 },
       models: { 'gpt-5': 300 },
       modelCosts: { 'gpt-5': 0.75 },
+      modelOutputs: { 'gpt-5': 180 },
       clientModels: { codex: { 'gpt-5': 300 } },
       clientModelCosts: { codex: { 'gpt-5': 0.75 } }
     }
@@ -201,7 +213,8 @@ test('archived client usage restores the cache/output breakdown from its session
   assert.equal(summary.allTime.modelCacheReads['claude-3-5-sonnet'], 700);
   assert.equal(summary.allTime.modelCacheWrites['claude-3-5-sonnet'], 110);
   assert.equal(summary.allTime.modelOutputs['claude-3-5-sonnet'], 90);
-  assert.equal(summary.allTime.capabilities.tokenComponents, false);
+  assert.equal(summary.allTime.capabilities.tokenComponents, true);
+  assert.equal(summary.allTime.unclassifiedTokens, 0);
 });
 
 test('archived client usage is ignored and pruned once the client is tracked again', () => {

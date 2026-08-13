@@ -123,10 +123,14 @@ function summaryAfterOpenCodeDelete() {
     today: {
       totalTokens: 50,
       costUsd: 0.25,
+      outputTokens: 30,
+      capabilities: { tokenComponents: true },
       clients: { codex: 50 },
       clientCosts: { codex: 0.25 },
+      clientOutputs: { codex: 30 },
       models: { 'gpt-5': 50 },
       modelCosts: { 'gpt-5': 0.25 },
+      modelOutputs: { 'gpt-5': 30 },
       clientModels: { codex: { 'gpt-5': 50 } },
       clientModelCosts: { codex: { 'gpt-5': 0.25 } },
       sessions: {
@@ -147,10 +151,14 @@ function summaryAfterOpenCodeDelete() {
     month: {
       totalTokens: 50,
       costUsd: 0.25,
+      outputTokens: 30,
+      capabilities: { tokenComponents: true },
       clients: { codex: 50 },
       clientCosts: { codex: 0.25 },
+      clientOutputs: { codex: 30 },
       models: { 'gpt-5': 50 },
       modelCosts: { 'gpt-5': 0.25 },
+      modelOutputs: { 'gpt-5': 30 },
       clientModels: { codex: { 'gpt-5': 50 } },
       clientModelCosts: { codex: { 'gpt-5': 0.25 } },
       sessions: {}
@@ -158,10 +166,14 @@ function summaryAfterOpenCodeDelete() {
     allTime: {
       totalTokens: 50,
       costUsd: 0.25,
+      outputTokens: 30,
+      capabilities: { tokenComponents: true },
       clients: { codex: 50 },
       clientCosts: { codex: 0.25 },
+      clientOutputs: { codex: 30 },
       models: { 'gpt-5': 50 },
       modelCosts: { 'gpt-5': 0.25 },
+      modelOutputs: { 'gpt-5': 30 },
       clientModels: { codex: { 'gpt-5': 50 } },
       clientModelCosts: { codex: { 'gpt-5': 0.25 } },
       sessions: {}
@@ -187,6 +199,9 @@ test('captures and reapplies missing sessions for any client without double-coun
   assert.equal(visible.today.models['claude-3-5-sonnet'], 100);
   assert.equal(visible.today.modelCacheReads['claude-3-5-sonnet'], 50);
   assert.equal(visible.today.capabilities.tokenComponents, false);
+  assert.equal(visible.today.unclassifiedTokens, 10);
+  assert.equal(visible.today.clientUnclassifiedTokens.opencode, 10);
+  assert.equal(visible.today.modelUnclassifiedTokens['claude-3-5-sonnet'], 10);
   assert.equal(visible.today.sessions['opencode:o1'].archived, true);
   assert.equal(visible.today.sessions['opencode:o1'].totalTokens, 100);
   assert.equal(visible.today.sessions['codex:c1'].archived, undefined);

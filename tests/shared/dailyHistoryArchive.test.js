@@ -251,6 +251,48 @@ test('live-only archive preserves native day, client, and model components', () 
   assert.equal(day.perModel.opus.outputTokens, 20);
 });
 
+test('live archive round-trip preserves known components in a partial native period', () => {
+  const archive = captureLiveDailyHistory({}, {
+    capabilities: { tokenComponents: false },
+    totalTokens: 200,
+    costUsd: 2,
+    cacheReadTokens: 60,
+    cacheWriteTokens: 10,
+    outputTokens: 20,
+    unclassifiedTokens: 110,
+    clients: { codex: 100, wsl: 100 },
+    clientCosts: { codex: 1, wsl: 1 },
+    clientCacheReads: { codex: 60 },
+    clientCacheWrites: { codex: 10 },
+    clientOutputs: { codex: 20 },
+    clientUnclassifiedTokens: { codex: 10, wsl: 100 },
+    models: { gpt: 100, unknown: 100 },
+    modelCosts: { gpt: 1, unknown: 1 },
+    modelCacheReads: { gpt: 60 },
+    modelCacheWrites: { gpt: 10 },
+    modelOutputs: { gpt: 20 },
+    modelUnclassifiedTokens: { gpt: 10, unknown: 100 },
+    clientModels: { codex: { gpt: 100 }, wsl: { unknown: 100 } },
+    clientModelCosts: { codex: { gpt: 1 }, wsl: { unknown: 1 } }
+  }, { todayKey: '2026-08-05' });
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-05'
+  }), '2026-08-05');
+  const day = restored.daily[0];
+
+  assert.equal(day.tokens, 200);
+  assert.equal(day.cacheReadTokens, 60);
+  assert.equal(day.cacheWriteTokens, 10);
+  assert.equal(day.outputTokens, 20);
+  assert.equal(day.unclassifiedTokens, 110);
+  assert.equal(day.tokenComponentsAvailable, false);
+  assert.equal(day.perClient.codex.cacheReadTokens, 60);
+  assert.equal(day.perClient.codex.unclassifiedTokens, 10);
+  assert.equal(day.perClient.wsl.unclassifiedTokens, 100);
+  assert.equal(day.perModel.gpt.outputTokens, 20);
+  assert.equal(day.perModel.unknown.unclassifiedTokens, 100);
+});
+
 test('equal-token live capture upgrades an earlier aggregate-only snapshot', () => {
   let archive = captureLiveDailyHistory({}, {
     ...livePeriod(100, 1),
