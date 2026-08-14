@@ -204,7 +204,13 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /addDetails\?\.classList\.toggle\('hidden'/);
   assert.match(setupBody, /document\.getElementById\('opencodeOpenBrowser'\)\?\.addEventListener\('click'/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/auth'\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(name, cookie, opencodeCredentialKind\)/);
+  // The add form asks before binding: main refuses a name that already holds a
+  // different credential, and the form offers the confirmation rather than
+  // retrying with merge on its own.
+  assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(\s*name,\s*cookie,\s*opencodeCredentialKind,\s*\{ merge \}\s*\)/);
+  assert.match(setupBody, /await submit\(false\);/);
+  assert.match(setupBody, /if \(result\.nameTaken && mergeBtn\)/);
+  assert.match(setupBody, /mergeBtn\.onclick = \(\) => submit\(true\);/);
   assert.match(setupBody, /kindSelect\?\.addEventListener\('change', applyOpenCodeCredentialKind\)/);
   // The account name is required, not defaulted. Saving one credential keeps the
   // other under that name and the collector reads that as "same account", so a
@@ -257,8 +263,14 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   assert.match(renderBody, /const multiCredential = credentials\.length > 1;/);
   assert.match(renderBody, /opencodeCredentialRow\(name, kind, label\)/);
   assert.match(renderBody, /detail\.classList\.toggle\('is-open', open\)/);
-  // Naming the auto-detected credential is what lets it join an account.
-  assert.match(renderBody, /saveProfile\(name, '', 'ambient'\)/);
+  // Naming the auto-detected credential is what lets it join an account, and a
+  // name that already exists is a binding, so it waits for the confirmation
+  // instead of merging on a blur that happened to land on that name.
+  assert.match(renderBody, /saveProfile\(name, '', 'ambient', \{ merge \}\)/);
+  assert.match(renderBody, /await applyNaming\(name, false\)/);
+  assert.match(renderBody, /mergeBtn\.addEventListener\('click', \(\) => applyNaming\(pendingName, true\)\)/);
+  // Its status element cannot be produced by sanitizing any account name.
+  assert.match(renderBody, /infoSpan\.id = 'opencodeAmbientInfo'/);
   // Merging is confirmed with a button the user chooses, not a repeated keypress.
   assert.match(renderBody, /settings\.opencode\.mergeInto/);
   assert.doesNotMatch(renderBody, /mergeConfirm/);
@@ -276,7 +288,13 @@ test('OpenCode disabled profiles still count in the account summary', () => {
 
   const statusBody = functionBody(app, 'updateOpenCodeProfilesStatus', 'renderCursorStatus');
   assert.match(statusBody, /const configuredProfileCount = state\.opencodeProfileCount \|\| 0;/);
-  assert.match(statusBody, /Math\.max\(Object\.keys\(profiles\)\.length, configuredProfileCount\)/);
+  // The auto-detected account arrives in its own field, so both halves of the
+  // summary have to include it or a zero-config machine reports "0/0" beside
+  // live quota.
+  assert.match(statusBody, /if \(status\.ambient\) entries\.push\(\['opencodeAmbientInfo', status\.ambient\]\)/);
+  assert.match(statusBody, /renderOpenCodeProfilesStatusSummary\(profiles, status\.ambient\)/);
+  assert.match(statusBody, /const statuses = \[\.\.\.Object\.values\(profiles\), \.\.\.\(ambient \? \[ambient\] : \[\]\)\];/);
+  assert.match(statusBody, /Math\.max\(statuses\.length, configuredProfileCount\)/);
   assert.match(statusBody, /t\('settings\.opencode\.connected', \{ linked: linkedCount, total: totalCount \}\)/);
 });
 
@@ -1393,7 +1411,10 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   );
   assert.ok(status, 'status handler should exist');
   assert.match(status, /opencodeAmbientKeyActive\(profiles\)/);
-  assert.match(status, /OPENCODE_AMBIENT_ACCOUNT_KEY/);
+  // Account names are user-chosen, so any sentinel key inside `profiles` is one
+  // a user can type; the synthetic entry rides in its own field instead.
+  assert.match(status, /const value = \{\s*profiles: result,\s*ambient,/);
+  assert.doesNotMatch(status, /result\[[^\]]*[Aa]mbient/);
   // A profile that only names the ambient key stores no credential of its own,
   // so a `cookie || apiKey` filter drops it and its row never leaves the
   // placeholder while the collector is reading live quota from that same key.
@@ -1431,26 +1452,24 @@ test('OpenCode credentials are named, merged and removed one at a time', () => {
   assert.match(save, /credential = \{ useAmbientKey: true, enabled: true \}/);
   assert.doesNotMatch(save, /useAmbientKey: true, apiKey/);
 
-  const rename = main.slice(
-    main.indexOf("ipcMain.handle('opencode:renameProfile'"),
-    main.indexOf("ipcMain.handle('opencode:setProfileEnabled'") > main.indexOf("ipcMain.handle('opencode:renameProfile'")
-      ? main.indexOf("ipcMain.handle('opencode:setProfileEnabled'")
-      : main.length
+  // Every operation that could bind or destroy a credential goes through the
+  // shared profile algebra, so the rule is one testable function rather than
+  // four handlers that have to agree. Its behaviour is covered for real in
+  // tests/shared/opencodeProfiles.test.js; what matters here is that no handler
+  // reaches around it.
+  const handlers = main.slice(
+    main.indexOf("ipcMain.handle('opencode:saveProfile'"),
+    main.indexOf("ipcMain.handle('openrouter:getProfiles'")
   );
-  // Renaming onto an existing account asserts they are the same OpenCode
-  // account, so it needs the same explicit confirmation as any other binding.
-  assert.match(rename, /options\.merge !== true/);
-  assert.match(rename, /nameTaken: true/);
-  assert.match(rename, /profiles\[newName\] = \{ \.\.\.\(profiles\[newName\] \|\| \{\}\), \.\.\.profiles\[oldName\] \}/);
-
-  const remove = main.slice(
-    main.indexOf("ipcMain.handle('opencode:removeCredential'"),
-    main.indexOf("ipcMain.handle('opencode:renameProfile'")
-  );
-  assert.ok(remove, 'removeCredential handler should exist');
-  assert.match(remove, /api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey'/);
-  // An account with nothing left is a name, not an account.
-  assert.match(remove, /if \(!remaining\.apiKey && !remaining\.cookie && !remaining\.useAmbientKey\) delete profiles\[name\]/);
+  for (const call of [
+    /opencodeProfiles\.saveCredential\(\s*settings\.opencodeProfiles \|\| \{\},\s*name,\s*credential,\s*\{ merge: options\.merge === true \}/,
+    /opencodeProfiles\.removeCredential\(settings\.opencodeProfiles \|\| \{\}, name, kind\)/,
+    /opencodeProfiles\.moveCredential\(/,
+    /opencodeProfiles\.renameProfile\(/
+  ]) assert.match(handlers, call);
+  // The rule is not re-implemented alongside the module that owns it.
+  assert.doesNotMatch(handlers, /options\.merge !== true/);
+  assert.doesNotMatch(handlers, /api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey'/);
 });
 
 test('the OpenCode local fallback toggle is relocated once, not once per render', () => {

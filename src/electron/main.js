@@ -118,6 +118,7 @@ const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
 const opencodeWeb = require('../shared/opencodeWeb');
 const opencodeGoApi = require('../shared/opencodeGoApi');
+const opencodeProfiles = require('../shared/opencodeProfiles');
 
 // The collector reaches the usage API behind a probe deadline; these settings
 // paths call it directly, so they need their own bound or a hung request leaves
@@ -127,8 +128,6 @@ const OPENCODE_API_PROBE_TIMEOUT_MS = 15_000;
 // Reserved key for the auto-detected account in the status map. It is not a
 // stored profile, so it can never collide with one: it is only added when the
 // profile map is empty.
-const OPENCODE_AMBIENT_ACCOUNT_KEY = '__ambient';
-
 // Mirrors fetchOpenCodeLimits: the auto-detected key is its own account until an
 // account claims it, either by referencing it or by storing the same key.
 function opencodeAmbientKeyActive(profiles) {
@@ -6578,9 +6577,15 @@ app.whenReady().then(() => {
     // Zero configuration still has an account behind it. Without probing the key
     // OpenCode stored for itself, the panel reports "not set up" while the limits
     // card is showing live quota read from that very key.
+    //
+    // It rides in its own field rather than under a reserved name inside
+    // `profiles`: account names are user-chosen, so any sentinel key is one a
+    // user can also type, and the synthetic entry would then overwrite their
+    // account's real status (and collide with its DOM id in the renderer).
+    let ambient = null;
     if (opencodeAmbientKeyActive(profiles)) {
       const probe = await probeOpenCodeApiKey(opencodeGoApi.readGoApiKey(process.env));
-      result[OPENCODE_AMBIENT_ACCOUNT_KEY] = {
+      ambient = {
         linked: probe.status === 'ok',
         expired: probe.status === 'unauthorized',
         go: probe.status === 'ok',
@@ -6591,7 +6596,11 @@ app.whenReady().then(() => {
         ...(probe.status === 'ok' || probe.status === 'unauthorized' ? {} : { error: probe.status })
       };
     }
-    const value = { profiles: result, linked: Object.values(result).some(s => s.linked) };
+    const value = {
+      profiles: result,
+      ambient,
+      linked: Object.values(result).some(s => s.linked) || Boolean(ambient?.linked)
+    };
     opencodeStatusCache = { value, at: now };
     return value;
   });
@@ -6620,7 +6629,7 @@ app.whenReady().then(() => {
   });
   // `kind` defaults to 'cookie' so an older renderer calling with two arguments
   // keeps its existing behavior.
-  ipcMain.handle('opencode:saveProfile', async (_event, name, raw, kind = 'cookie') => {
+  ipcMain.handle('opencode:saveProfile', async (_event, name, raw, kind = 'cookie', options = {}) => {
     // Trimmed, so whitespace cannot create an account name that renders blank
     // and that nobody could ever type again to attach a second credential.
     name = String(name || '').trim();
@@ -6669,14 +6678,22 @@ app.whenReady().then(() => {
         }
         credential = { cookie, enabled: true };
       }
-      const profiles = settings.opencodeProfiles || {};
-      // Saving one credential replaces only that kind and keeps the other. Two
+      // Saving one credential replaces only that kind and keeps the others. Two
       // kinds under one profile name is how a user says "these are the same
       // account", which is the only thing that licenses reading Go quota from
       // the key while Zen balance comes from the cookie. Nothing associates them
-      // automatically: same machine is not evidence of same account.
-      profiles[name] = { ...(profiles[name] || {}), ...credential };
-      settings.opencodeProfiles = profiles;
+      // automatically — same machine is not evidence of same account — so the
+      // binding is refused here until the caller confirms it, whichever UI path
+      // asked. A blur that happens to land on an existing name must not be able
+      // to make that claim on the user's behalf.
+      const result = opencodeProfiles.saveCredential(
+        settings.opencodeProfiles || {},
+        name,
+        credential,
+        { merge: options.merge === true }
+      );
+      if (!result.ok) return result;
+      settings.opencodeProfiles = result.profiles;
       saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-save');
@@ -6709,22 +6726,12 @@ app.whenReady().then(() => {
   // account removes all of them; this is how a binding is undone without
   // losing the credential the user wanted to keep.
   ipcMain.handle('opencode:removeCredential', async (_event, name, kind) => {
-    const profiles = settings.opencodeProfiles || {};
-    const profile = profiles[name];
-    if (!profile) return { ok: false, error: 'Profile not found' };
-    const field = { api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey' }[kind];
-    if (!field) return { ok: false, error: `Unknown credential kind: ${kind}` };
-    if (!profile[field]) return { ok: false, error: 'Credential not found' };
-
-    const remaining = { ...profile };
-    delete remaining[field];
-    if (field === 'cookie' && settings.opencodeCookie === profile.cookie) {
+    const result = opencodeProfiles.removeCredential(settings.opencodeProfiles || {}, name, kind);
+    if (!result.ok) return result;
+    if (result.removedCookie && settings.opencodeCookie === result.removedCookie) {
       settings.opencodeCookie = '';
     }
-    // An account with no credentials left is an empty name, not an account.
-    if (!remaining.apiKey && !remaining.cookie && !remaining.useAmbientKey) delete profiles[name];
-    else profiles[name] = remaining;
-    settings.opencodeProfiles = profiles;
+    settings.opencodeProfiles = result.profiles;
     try {
       saveSettings({ throwOnError: true });
     } catch (error) {
@@ -6741,29 +6748,17 @@ app.whenReady().then(() => {
   // account: moving it to a fresh name splits it off, moving it onto an
   // existing name binds it there. The value never crosses to the renderer.
   ipcMain.handle('opencode:moveCredential', async (_event, name, kind, targetName, options = {}) => {
-    const profiles = settings.opencodeProfiles || {};
-    const profile = profiles[name];
-    if (!profile) return { ok: false, error: 'Profile not found' };
-    const field = { api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey' }[kind];
-    if (!field) return { ok: false, error: `Unknown credential kind: ${kind}` };
-    if (!profile[field]) return { ok: false, error: 'Credential not found' };
-
+    const result = opencodeProfiles.moveCredential(
+      settings.opencodeProfiles || {},
+      name,
+      kind,
+      targetName,
+      { merge: options.merge === true }
+    );
+    if (!result.ok) return result;
+    if (result.unchanged) return { ok: true };
     const target = String(targetName || '').trim();
-    if (!target) return { ok: false, error: 'Empty name' };
-    if (target === name) return { ok: true };
-    // Landing on an account that already exists asserts they are one account,
-    // so it needs the same confirmation as any other binding.
-    if (profiles[target] && options.merge !== true) {
-      return { ok: false, error: 'Profile name already exists', nameTaken: true };
-    }
-
-    const source = { ...profile };
-    const value = source[field];
-    delete source[field];
-    if (!source.apiKey && !source.cookie && !source.useAmbientKey) delete profiles[name];
-    else profiles[name] = source;
-    profiles[target] = { ...(profiles[target] || { enabled: true }), [field]: value };
-    settings.opencodeProfiles = profiles;
+    settings.opencodeProfiles = result.profiles;
     try {
       saveSettings({ throwOnError: true });
     } catch (error) {
@@ -6783,15 +6778,14 @@ app.whenReady().then(() => {
   // quota from one credential while identity comes from another. Without it an
   // existing name is refused, so the assertion is never made by accident.
   ipcMain.handle('opencode:renameProfile', async (_event, oldName, newName, options = {}) => {
-    if (!newName || oldName === newName) return { ok: false, error: 'Invalid name' };
-    const profiles = settings.opencodeProfiles || {};
-    if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
-    if (profiles[newName] && options.merge !== true) {
-      return { ok: false, error: 'Profile name already exists', nameTaken: true };
-    }
-    profiles[newName] = { ...(profiles[newName] || {}), ...profiles[oldName] };
-    delete profiles[oldName];
-    settings.opencodeProfiles = profiles;
+    const result = opencodeProfiles.renameProfile(
+      settings.opencodeProfiles || {},
+      oldName,
+      newName,
+      { merge: options.merge === true }
+    );
+    if (!result.ok) return result;
+    settings.opencodeProfiles = result.profiles;
     try {
       saveSettings({ throwOnError: true });
     } catch (error) {

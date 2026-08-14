@@ -13405,19 +13405,26 @@ function renderOpenCodeProfiles() {
       nameInput.placeholder = t('settings.opencode.ambientName');
       nameInput.title = t('settings.opencode.nameAmbient');
 
-      const endNaming = async (save) => {
-        const name = nameInput.value.trim();
-        if (!save || !name) {
-          nameInput.value = '';
-          return;
-        }
+      // Typing an existing account's name binds the auto-detected key into that
+      // account. That claim is confirmed, never inferred: the main process
+      // refuses it without `merge`, so a blur landing on a name that happens to
+      // exist offers the button instead of quietly merging.
+      const mergeBtn = document.createElement('button');
+      mergeBtn.className = 'credential-merge-btn hidden';
+      let pendingName = '';
+      const applyNaming = async (name, merge) => {
         // 'ambient' stores a reference rather than the key, so a key rotated
-        // inside OpenCode keeps being read live. An existing name merges,
-        // which is exactly the "these are one account" assertion.
-        const result = await window.tokenMonitor.opencode.saveProfile(name, '', 'ambient');
+        // inside OpenCode keeps being read live.
+        const result = await window.tokenMonitor.opencode.saveProfile(name, '', 'ambient', { merge });
         if (!result.ok) {
+          if (result.nameTaken) {
+            pendingName = name;
+            mergeBtn.textContent = t('settings.opencode.mergeInto', { name });
+            mergeBtn.classList.remove('hidden');
+            return;
+          }
           const errorEl = document.getElementById('opencodeErrorMessage');
-          errorEl.textContent = result.error || t('settings.opencode.saveFailedShort');
+          errorEl.textContent = opencodeSaveErrorText(result);
           errorEl.classList.remove('hidden');
           return;
         }
@@ -13425,6 +13432,16 @@ function renderOpenCodeProfiles() {
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
       };
+      const endNaming = async (save) => {
+        const name = nameInput.value.trim();
+        if (!save || !name) {
+          nameInput.value = '';
+          mergeBtn.classList.add('hidden');
+          return;
+        }
+        await applyNaming(name, false);
+      };
+      mergeBtn.addEventListener('click', () => applyNaming(pendingName, true));
       nameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') endNaming(true);
         if (e.key === 'Escape') endNaming(false);
@@ -13434,13 +13451,16 @@ function renderOpenCodeProfiles() {
       const detail = document.createElement('span');
       detail.className = 'profile-detail';
       detail.textContent = t('settings.opencode.ambientDetail');
-      nameBox.append(nameInput, detail);
+      nameBox.append(nameInput, mergeBtn, detail);
 
       const rightBox = document.createElement('span');
       rightBox.className = 'profile-right';
       const infoSpan = document.createElement('span');
       infoSpan.className = 'profile-info';
-      infoSpan.id = 'opencode-info-__ambient';
+      // Not `opencode-info-<name>`: that shape is generated from user-chosen
+      // account names, so a profile named the same as any sentinel would take
+      // this row's status.
+      infoSpan.id = 'opencodeAmbientInfo';
       infoSpan.textContent = '...';
       rightBox.append(infoSpan);
       item.append(document.createElement('span'), nameBox, rightBox);
@@ -13509,7 +13529,7 @@ function renderOpenCodeProfiles() {
             mergeBtn.classList.remove('hidden');
             return;
           }
-          errorEl.textContent = result.error || t('settings.opencode.saveFailedShort');
+          errorEl.textContent = opencodeSaveErrorText(result);
           errorEl.classList.remove('hidden');
           return;
         }
@@ -13630,6 +13650,20 @@ function renderOpenCodeProfiles() {
   });
 }
 
+// A merge that would land two credentials of the same kind on one account is
+// refused rather than resolved: confirming that two accounts are the same is a
+// different question from choosing which of two cookies to keep.
+function opencodeSaveErrorText(result) {
+  if (result?.credentialConflict) {
+    return t('settings.opencode.credentialConflict', {
+      kind: t(result.kind === 'cookie' ? 'settings.opencode.kindCookie'
+        : result.kind === 'ambient' ? 'settings.opencode.ambientName'
+          : 'settings.opencode.kindApi')
+    });
+  }
+  return result?.error || t('settings.opencode.saveFailedShort');
+}
+
 // One credential inside an expanded account. Renaming moves it to another
 // account name, which is what splits a binding apart or forms a new one;
 // deleting drops just this credential and leaves the rest of the account.
@@ -13678,7 +13712,7 @@ function opencodeCredentialRow(accountName, kind, label) {
         mergeBtn.classList.remove('hidden');
         return;
       }
-      errorEl().textContent = result.error || t('settings.opencode.saveFailedShort');
+      errorEl().textContent = opencodeSaveErrorText(result);
       errorEl().classList.remove('hidden');
       return;
     }
@@ -13730,9 +13764,17 @@ async function updateOpenCodeProfilesStatus() {
   const status = await api.status();
   const profiles = status.profiles || {};
 
-  for (const [name, s] of Object.entries(profiles)) {
-    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const infoEl = document.getElementById('opencode-info-' + safeName);
+  // The auto-detected key has no account name, so it arrives in its own field
+  // and lands on its own element rather than one keyed by a name a user could
+  // also type.
+  const entries = Object.entries(profiles).map(([name, s]) => [
+    'opencode-info-' + name.replace(/[^a-zA-Z0-9_-]/g, '_'),
+    s
+  ]);
+  if (status.ambient) entries.push(['opencodeAmbientInfo', status.ambient]);
+
+  for (const [elementId, s] of entries) {
+    const infoEl = document.getElementById(elementId);
     if (!infoEl) continue;
 
     if (s.expired) {
@@ -13753,15 +13795,19 @@ async function updateOpenCodeProfilesStatus() {
     }
   }
 
-  renderOpenCodeProfilesStatusSummary(profiles);
+  renderOpenCodeProfilesStatusSummary(profiles, status.ambient);
 }
 
-function renderOpenCodeProfilesStatusSummary(profiles) {
+// `ambient` counts toward both halves: it is a row in the list and it is what
+// the limits card reads on a machine with nothing configured, so leaving it out
+// reports "0/0" beside live quota.
+function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
   const totalEl = document.getElementById('opencodeCookieStatus');
   if (totalEl) {
-    const linkedCount = Object.values(profiles).filter(s => s.linked).length;
+    const statuses = [...Object.values(profiles), ...(ambient ? [ambient] : [])];
+    const linkedCount = statuses.filter(s => s.linked).length;
     const configuredProfileCount = state.opencodeProfileCount || 0;
-    const totalCount = Math.max(Object.keys(profiles).length, configuredProfileCount);
+    const totalCount = Math.max(statuses.length, configuredProfileCount);
     if (totalCount > 0) {
       totalEl.textContent = t('settings.opencode.connected', { linked: linkedCount, total: totalCount });
     } else {
@@ -14640,17 +14686,37 @@ function setupCursorAccountUI() {
         return;
       }
 
-      const result = await window.tokenMonitor.opencode.saveProfile(name, cookie, opencodeCredentialKind);
-      if (result.ok) {
-        input.value = '';
-        nameInput.value = '';
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      } else {
-        errorEl.textContent = result.error || t('settings.opencode.saveFailedShort');
+      // A name that already holds a different credential kind binds the two into
+      // one account, so the main process refuses it and the form asks first.
+      // The confirmation replaces the submit button rather than appearing beside
+      // it: the next click has different consequences from the one just made.
+      const mergeBtn = document.getElementById('opencodeCredentialMerge');
+      const submit = async (merge) => {
+        const result = await window.tokenMonitor.opencode.saveProfile(
+          name,
+          cookie,
+          opencodeCredentialKind,
+          { merge }
+        );
+        if (result.ok) {
+          input.value = '';
+          nameInput.value = '';
+          mergeBtn?.classList.add('hidden');
+          renderOpenCodeProfiles();
+          updateOpenCodeProfilesStatus();
+          renderSettingsSummaries();
+          return;
+        }
+        if (result.nameTaken && mergeBtn) {
+          mergeBtn.textContent = t('settings.opencode.mergeInto', { name });
+          mergeBtn.classList.remove('hidden');
+          mergeBtn.onclick = () => submit(true);
+          return;
+        }
+        errorEl.textContent = opencodeSaveErrorText(result);
         errorEl.classList.remove('hidden');
-      }
+      };
+      await submit(false);
     });
   }
 
