@@ -104,15 +104,30 @@ test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
   }
 });
 
-test('Command Code watches only its recursive transcript tree', () => {
-  const tmp = withTmpHome([path.join('.commandcode', 'projects')]);
+test('Command Code watches its transcript tree and prunes non-transcript events', () => {
+  const workspace = path.join('.commandcode', 'projects', 'workspace');
+  const tmp = withTmpHome([workspace]);
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
-    const { watchPathsForClients } = freshCollector();
+    const { watchPathsForClients, watchIgnoreMatcher } = freshCollector();
     const projects = path.join(tmp, '.commandcode', 'projects');
+    const workspaceDir = path.join(tmp, workspace);
+    const transcript = path.join(workspaceDir, 'session.jsonl');
+    const checkpoint = path.join(workspaceDir, 'session.checkpoints.jsonl');
+    const metadata = path.join(workspaceDir, 'metadata.json');
+    fs.writeFileSync(transcript, '');
+    fs.writeFileSync(checkpoint, '');
+    fs.writeFileSync(metadata, '');
 
     assert.deepEqual(watchPathsForClients('commandcode'), [projects]);
+    const ignored = watchIgnoreMatcher('commandcode');
+    assert.equal(ignored(projects), false);
+    assert.equal(ignored(workspaceDir), false);
+    assert.equal(ignored(transcript), false);
+    assert.equal(ignored(checkpoint), true);
+    assert.equal(ignored(metadata), true);
+    assert.equal(ignored(path.join(workspaceDir, 'removed.jsonl')), false);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];

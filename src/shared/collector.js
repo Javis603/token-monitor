@@ -1706,6 +1706,21 @@ function watchPolicyEntries(clientsCsv) {
     }
   );
 
+  // Command Code recursively stores session transcripts below projects/, but
+  // checkpoint streams use the same JSONL suffix and are explicitly skipped by
+  // Tokscale. Keep directories for traversal and ordinary JSONL files (including
+  // removed paths), while pruning checkpoints and unrelated project metadata.
+  bound('commandcode', candidates.commandcode || [], (_parts, resolved) => {
+    const name = path.basename(resolved);
+    if (name.endsWith('.jsonl') && !name.endsWith('.checkpoints.jsonl')) return false;
+    try {
+      if (fs.statSync(resolved).isDirectory()) return false;
+    } catch (_) {
+      // Removed transcript paths are handled by the suffix check above.
+    }
+    return true;
+  });
+
   bound('opencode', candidates.opencode || [], (parts) => {
     if (parts.length === 1) {
       // Keep the root's readdir visible for newly created channel DBs, but
