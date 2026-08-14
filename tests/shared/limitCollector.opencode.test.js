@@ -4,6 +4,7 @@ const assert = require('node:assert');
 const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limitCollector');
 const { hashKey } = require('../../src/shared/hashKey');
 const { aggregateLimits } = require('../../src/shared/limits');
+const { goApiIdentity } = require('../../src/shared/opencodeGoApi');
 
 // The Go usage API is a zero-config path: left unstubbed it would read the
 // developer's real auth.json and probe opencode.ai, and the ambient key would
@@ -1037,4 +1038,64 @@ test('a missing key still leaves room for the local estimate', async () => {
   const p = summary.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.status, 'ok');
   assert.strictEqual(p.source, 'local');
+});
+
+test('a profile referencing the auto-detected key resolves it live', async () => {
+  // The reference is stored, not the key: a key rotated inside OpenCode is
+  // picked up on the next tick instead of going stale at 401.
+  const seen = [];
+  const collect = async (ambient) => collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, useAmbientKey: true, cookie: 'sess=work' } }
+    },
+    {
+      now: () => now403,
+      opencodeReadGoApiKey: () => ambient,
+      opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; },
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 9 })
+    }
+  );
+
+  const before = await collect('key-one');
+  const after = await collect('key-two');
+  assert.deepStrictEqual(seen, ['key-one', 'key-two']);
+  // A cookie pins the workspace identity, so rotating the key does not make the
+  // account look like a different one.
+  const id = (s) => s.providers.find((x) => x.provider === 'opencode').accountKey;
+  assert.strictEqual(id(before), id(after));
+
+  const p = after.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.source, 'api');
+  assert.strictEqual(p.balanceUsd, 9);
+  // Only one row: claiming the key removes the separate auto-detected account.
+  assert.strictEqual(after.providers.filter((x) => x.provider === 'opencode').length, 1);
+});
+
+test('an account holding only a key identifies itself by that key', async () => {
+  // The single unified profile path has to give a key-only account the same
+  // identity the cookie path gives a workspace, or the two devices holding that
+  // key never group.
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        work: { enabled: true, apiKey: 'key-work' },
+        other: { enabled: true, cookie: 'sess=other' }
+      }
+    },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => goApiOk,
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => zenNone
+    }
+  );
+  const work = summary.providers.find((x) => x.accountName === 'work');
+  assert.strictEqual(work.source, 'api');
+  assert.strictEqual(work.accountKey, hashKey('opencode', goApiIdentity('key-work')));
+  assert.strictEqual(work.balanceUsd, null);
 });

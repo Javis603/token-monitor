@@ -129,18 +129,13 @@ const OPENCODE_API_PROBE_TIMEOUT_MS = 15_000;
 // profile map is empty.
 const OPENCODE_AMBIENT_ACCOUNT_KEY = '__ambient';
 
-// Mirrors the collector's credential selection rather than approximating it:
-// the ambient key is read only when nothing at all is configured, so the panel
-// must apply the same three conditions or it will claim an auto-detected
-// account the collector is not actually using. See fetchOpenCodeLimits.
+// Mirrors fetchOpenCodeLimits: the auto-detected key is its own account until an
+// account claims it, either by referencing it or by storing the same key.
 function opencodeAmbientKeyActive(profiles) {
   const ambientKey = opencodeGoApi.readGoApiKey(process.env);
   if (!ambientKey) return false;
-  // Tracked as its own account whenever it exists, and hidden only once a saved
-  // account carries the same key — the point at which the user has said the two
-  // are one account. Suppressing it because some other account is enabled would
-  // drop the zero-config path the moment anything is configured.
-  return !Object.values(profiles || {}).some((p) => p?.apiKey === ambientKey);
+  return !Object.values(profiles || {})
+    .some((p) => p?.useAmbientKey || p?.apiKey === ambientKey);
 }
 
 async function probeOpenCodeApiKey(apiKey) {
@@ -6608,7 +6603,12 @@ app.whenReady().then(() => {
     // the list can show what a profile actually holds.
     const safe = {};
     for (const [name, p] of Object.entries(profiles)) {
-      safe[name] = { enabled: p.enabled, hasApiKey: Boolean(p.apiKey), hasCookie: Boolean(p.cookie) };
+      safe[name] = {
+        enabled: p.enabled,
+        hasApiKey: Boolean(p.apiKey),
+        hasCookie: Boolean(p.cookie),
+        usesAmbientKey: Boolean(p.useAmbientKey)
+      };
     }
     return { profiles: safe, hasEnvVar, hasAmbientKey };
   });
@@ -6622,10 +6622,20 @@ app.whenReady().then(() => {
     // Reject anything else rather than treating it as a cookie: an unrecognized
     // kind would store the value in the wrong field and read as a credential it
     // is not.
-    if (kind !== 'api' && kind !== 'cookie') return { ok: false, error: `Unknown credential kind: ${kind}` };
+    if (!['api', 'cookie', 'ambient'].includes(kind)) {
+      return { ok: false, error: `Unknown credential kind: ${kind}` };
+    }
     try {
       let credential;
-      if (kind === 'api') {
+      if (kind === 'ambient') {
+        // Naming the auto-detected credential. A reference is stored, never the
+        // key itself, so a key rotated inside OpenCode is still picked up live
+        // instead of going stale at 401 behind a snapshot.
+        if (!opencodeGoApi.readGoApiKey(process.env)) {
+          return { ok: false, error: 'No OpenCode credential found on this machine' };
+        }
+        credential = { useAmbientKey: true, enabled: true };
+      } else if (kind === 'api') {
         const apiKey = String(raw || '').trim();
         if (!apiKey) return { ok: false, error: 'Empty API key' };
         const probe = await probeOpenCodeApiKey(apiKey);
@@ -6689,12 +6699,50 @@ app.whenReady().then(() => {
     });
     return { ok: true };
   });
-  ipcMain.handle('opencode:renameProfile', async (_event, oldName, newName) => {
+  // Removes one credential from an account, leaving the others. Deleting the
+  // account removes all of them; this is how a binding is undone without
+  // losing the credential the user wanted to keep.
+  ipcMain.handle('opencode:removeCredential', async (_event, name, kind) => {
+    const profiles = settings.opencodeProfiles || {};
+    const profile = profiles[name];
+    if (!profile) return { ok: false, error: 'Profile not found' };
+    const field = { api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey' }[kind];
+    if (!field) return { ok: false, error: `Unknown credential kind: ${kind}` };
+    if (!profile[field]) return { ok: false, error: 'Credential not found' };
+
+    const remaining = { ...profile };
+    delete remaining[field];
+    if (field === 'cookie' && settings.opencodeCookie === profile.cookie) {
+      settings.opencodeCookie = '';
+    }
+    // An account with no credentials left is an empty name, not an account.
+    if (!remaining.apiKey && !remaining.cookie && !remaining.useAmbientKey) delete profiles[name];
+    else profiles[name] = remaining;
+    settings.opencodeProfiles = profiles;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist OpenCode credential removal' };
+    }
+    opencodeStatusCache = { value: null, at: 0 };
+    void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'credential-remove', {
+      clear: true
+    });
+    return { ok: true };
+  });
+  // `merge` is the caller confirming that renaming onto an existing account
+  // asserts the two are the same OpenCode account — the same claim as saving a
+  // second credential under one name, and the only thing that licenses reading
+  // quota from one credential while identity comes from another. Without it an
+  // existing name is refused, so the assertion is never made by accident.
+  ipcMain.handle('opencode:renameProfile', async (_event, oldName, newName, options = {}) => {
     if (!newName || oldName === newName) return { ok: false, error: 'Invalid name' };
     const profiles = settings.opencodeProfiles || {};
     if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
-    if (profiles[newName]) return { ok: false, error: 'Profile name already exists' };
-    profiles[newName] = profiles[oldName];
+    if (profiles[newName] && options.merge !== true) {
+      return { ok: false, error: 'Profile name already exists', nameTaken: true };
+    }
+    profiles[newName] = { ...(profiles[newName] || {}), ...profiles[oldName] };
     delete profiles[oldName];
     settings.opencodeProfiles = profiles;
     try {

@@ -3169,19 +3169,20 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const explicitProfiles = options.opencodeProfiles;
   const envCookie = (deps.env || process.env).TOKEN_MONITOR_OPENCODE_COOKIE || '';
 
+  // An account is a name, and credentials belong to a name. A profile may hold
+  // any of: a cookie (Go quota plus Zen balance), a stored API key (Go quota),
+  // or a reference to the key OpenCode keeps in auth.json. Sharing a name is
+  // the user's own assertion that they are one account, which is the only thing
+  // that licenses reading quota from one credential while identity and balance
+  // come from another. The reference is stored rather than the key itself, so a
+  // key rotated inside OpenCode is picked up on the next tick.
+  const ambientKey = readGoApiKey(deps.env || process.env);
   let cookies = [];
-  // A profile carries up to two credentials: an API key (Go quota) and/or a
-  // cookie (Go quota plus Zen balance). Both under one name is the user's own
-  // assertion that they are the same account. The kind is inferred from which
-  // fields are present, so profiles saved before API keys keep working.
   if (explicitProfiles && Object.keys(explicitProfiles).length > 0) {
     for (const [name, p] of Object.entries(explicitProfiles)) {
       if (!p.enabled) continue;
-      // A profile may hold both: saving an API key onto a profile that already
-      // has a cookie is the user asserting they are one account, which is the
-      // only thing that licenses reading Go quota from the key while taking Zen
-      // balance and the workspace identity from the cookie.
-      if (p.apiKey || p.cookie) cookies.push({ name, apiKey: p.apiKey, cookie: p.cookie });
+      const apiKey = p.apiKey || (p.useAmbientKey ? ambientKey : '');
+      if (apiKey || p.cookie) cookies.push({ name, apiKey, cookie: p.cookie });
     }
   } else if (options.opencodeCookie) {
     cookies = [{ name: 'default', cookie: options.opencodeCookie }];
@@ -3192,19 +3193,13 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     cookies.push({ name: 'default (env)', cookie: envCookie });
   }
 
-  // The key OpenCode stores for itself is an account too, so it is always
-  // tracked — same rule as the env cookie above, and skipped once a profile
-  // carries it. It is deliberately its own entry rather than being folded into
-  // a configured account: nothing can prove the locally signed-in account is
-  // the account behind a cookie, since the usage endpoint returns no workspace
-  // id to compare. Two rows for what may be one account is a display
-  // imprecision where every number shown is still its own source's truth;
-  // folding them would publish one account's quota under the other's identity,
-  // and suppressing it would silently drop the zero-config path the moment any
-  // account exists. A user who knows they are the same account says so by
-  // saving the key under that account's name, which merges them here.
-  const ambientKey = readGoApiKey(deps.env || process.env);
-  if (ambientKey && !cookies.some((c) => c.apiKey === ambientKey)) {
+  // The auto-detected key is an unnamed credential until someone names it. It is
+  // tracked on its own so the zero-config path never disappears, and dropped as
+  // soon as a profile claims it — either by referencing it or by storing the
+  // same key — because from then on it belongs to that account.
+  const ambientClaimed = Boolean(explicitProfiles && Object.values(explicitProfiles)
+    .some((p) => p?.useAmbientKey || (ambientKey && p?.apiKey === ambientKey)));
+  if (ambientKey && !ambientClaimed) {
     cookies.push({ name: OPENCODE_AMBIENT_ACCOUNT_NAME, apiKey: ambientKey, ambient: true });
   }
 
@@ -3338,19 +3333,19 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   // ── Multi-account (2+ cookies): separate per-profile providers ────────────
   const providers = [];
 
-  // Each enabled profile — query in parallel
+  // Each enabled profile — query in parallel. One path for every credential
+  // combination: an account holding only a key is the same shape with no cookie,
+  // and keeping it as a separate function is what let the two drift apart.
   const results = await Promise.all(
-    cookies.map((profile) => (profile.apiKey && !profile.cookie
-      ? fetchOpenCodeApiProfile(profile, collectGoApi, nowMs, updatedAt, deps)
-      : fetchSingleOpenCodeProfile(
-        profile.name,
-        profile.cookie,
-        fetchGoWeb,
-        fetchZen,
-        nowMs,
-        updatedAt,
-        { apiKey: profile.apiKey, collectGoApi, deps }
-      )))
+    cookies.map((profile) => fetchOpenCodeProfile(
+      profile.name,
+      profile.cookie,
+      fetchGoWeb,
+      fetchZen,
+      nowMs,
+      updatedAt,
+      { apiKey: profile.apiKey, collectGoApi, deps }
+    ))
   );
   for (const provider of results) {
     if (provider) providers.push(provider);
@@ -3366,55 +3361,12 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   return providers;
 }
 
-// An API-key profile reaches the official Go usage endpoint and nothing else:
-// there is no Zen balance behind an API key, so this never produces balanceUsd
-// and never resolves a workspace id.
-async function fetchOpenCodeApiProfile(profile, collectGoApi, nowMs, updatedAt, deps = {}) {
-  const { name, apiKey } = profile;
-  // Derived from the key rather than from the probe result, so the account keeps
-  // one identity across a failed refresh instead of collapsing into the empty key.
-  const accountKey = hashKey('opencode', opencodeGoApi.goApiIdentity(apiKey));
-  const row = (status, windows) => normalizeLimitProvider({
-    provider: 'opencode',
-    accountKey,
-    accountName: name,
-    // Keep accountLabel as the profile name for pre-accountName renderers.
-    accountLabel: name,
-    planLabel: status === 'ok' ? 'Go' : '',
-    source: 'api',
-    sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
-    status,
-    updatedAt,
-    windows,
-    balanceUsd: null
-  });
-
-  try {
-    const result = await collectGoApi({
-      env: deps.env || process.env,
-      now: () => nowMs,
-      fetch: deps.fetch,
-      signal: deps.signal,
-      apiKey
-    });
-    if (result.status !== 'ok' || result.windows.length === 0) {
-      // A key that resolves but has no Go subscription reads as notConfigured
-      // upstream; surface that rather than an error the user cannot act on.
-      return row(result.status === 'ok' ? 'notConfigured' : result.status, []);
-    }
-    return row('ok', result.windows.map((window) => ({ ...window, source: 'web' })));
-  } catch (error) {
-    if (opencodeGoApi.isAbortError(error, deps.signal)) throw error;
-    return row('unavailable', []);
-  }
-}
-
-// `api` carries an optional key explicitly associated with this cookie account,
-// i.e. both credentials saved under one profile name. That association is the
-// user's assertion that they are one account, which is what licenses reading Go
-// quota from the key while Zen balance and the workspace identity come from the
-// cookie. Without it the cookie account is read exactly as before.
-async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, updatedAt, api = {}) {
+// One account, whichever credentials it holds. `cookie` and `api.apiKey` are
+// each optional: sharing a name is the user's assertion that they are the same
+// account, which is what licenses reading Go quota from the key while Zen
+// balance and the workspace identity come from the cookie. An account holding
+// only one of them is the same shape with the other absent.
+async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, updatedAt, api = {}) {
   const PROFILE_TIMEOUT_MS = 15000;
   let timer;
 
@@ -3422,8 +3374,8 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     const result = await Promise.race([
       (async () => {
         const [goWeb, zen, goApi] = await Promise.all([
-          fetchGoWeb(cookie, { now: () => nowMs }),
-          fetchZen(cookie, { now: () => nowMs, workspaceId: '' }),
+          cookie ? fetchGoWeb(cookie, { now: () => nowMs }) : null,
+          cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '' }) : null,
           api.apiKey
             ? api.collectGoApi({
               env: api.deps?.env || process.env,
@@ -3479,21 +3431,24 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
       status = failStatus;
     }
 
-    // Stable accountKey derived from workspaceId (preferred) or cookie hash,
-    // not from the user-editable profile name — so the same account is
-    // consistently identified across machines and renames.
-    let accountKey = webIdentity.accountKey;
-    if (!accountKey) {
+    // The key's own identity, published whenever this account holds one. The
+    // same key on another device that has no cookie identifies itself by that
+    // key alone, so without this the two devices never group into one account.
+    const keyIdentity = api.apiKey
+      ? hashKey('opencode', opencodeGoApi.goApiIdentity(api.apiKey))
+      : '';
+
+    // Stable accountKey derived from workspaceId (preferred), then the key, then
+    // the cookie hash — never from the user-editable profile name, so the same
+    // account is identified consistently across machines and renames. The key
+    // ranks above the cookie hash because it is the same string on every device,
+    // while a cookie is per-browser-session.
+    let accountKey = webIdentity.accountKey || keyIdentity;
+    if (!accountKey && cookie) {
       const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
       accountKey = hashKey('opencode', `cookie:${cookieHash}`);
     }
-
-    // A bound key must also be published as an alias. The same key on another
-    // device with no cookie identifies itself by that key alone, and without the
-    // alias the two devices would never group into one account.
-    const boundKeyAlias = api.apiKey
-      ? hashKey('opencode', opencodeGoApi.goApiIdentity(api.apiKey))
-      : '';
+    const boundKeyAlias = accountKey === keyIdentity ? '' : keyIdentity;
 
     return normalizeLimitProvider({
       provider: 'opencode',
@@ -3518,11 +3473,17 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     // which the bare catch would have turned into a stale `unavailable` row and
     // published over whatever superseded it. The lane is latest-wins.
     if (opencodeGoApi.isAbortError(error, api.deps?.signal)) throw error;
-    const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
+    // Same identity ranking as the success path, so a timeout does not hand the
+    // account a different accountKey than the one already on the Hub.
+    let accountKey = api.apiKey ? hashKey('opencode', opencodeGoApi.goApiIdentity(api.apiKey)) : '';
+    if (!accountKey && cookie) {
+      const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
+      accountKey = hashKey('opencode', `cookie:${cookieHash}`);
+    }
     return normalizeLimitProvider({
-      provider: 'opencode', accountKey: hashKey('opencode', `cookie:${cookieHash}`),
-      webAccountKey: hashKey('opencode', `cookie:${cookieHash}`),
-      accountName: name, accountLabel: name, planLabel: '', source: 'web',
+      provider: 'opencode', accountKey, webAccountKey: accountKey,
+      accountName: name, accountLabel: name, planLabel: '',
+      source: api.apiKey && !cookie ? 'api' : 'web',
       sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL, status: 'unavailable',
       updatedAt, windows: [], balanceUsd: null
     });
@@ -3970,7 +3931,7 @@ module.exports = {
   fetchOpenCodeLimits,
   fetchOpenRouterLimits: openrouterLimits.fetchOpenRouterLimits,
   fetchThirdPartyLimits: thirdPartyLimits.fetchThirdPartyLimits,
-  fetchSingleOpenCodeProfile,
+  fetchOpenCodeProfile,
   claudeWebCookie,
   normalizeClaudeWebCookieInput,
   fetchClaudeLimits,

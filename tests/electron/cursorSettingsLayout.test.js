@@ -1364,7 +1364,7 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   // account whenever it exists, and is hidden only once a saved account carries
   // that same key — the point at which the user has said they are one account.
   assert.match(gate, /opencodeGoApi\.readGoApiKey\(process\.env\)/);
-  assert.match(gate, /p\?\.apiKey === ambientKey/);
+  assert.match(gate, /p\?\.useAmbientKey \|\| p\?\.apiKey === ambientKey/);
 
   const status = main.slice(
     main.indexOf("ipcMain.handle('opencode:status'"),
@@ -1381,5 +1381,45 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   // hasEnvVar keeps meaning "environment cookie". Folding the ambient key into
   // it would make a later reader assume an env var that is not set.
   assert.match(profilesHandler, /const hasEnvVar = Boolean\(process\.env\.TOKEN_MONITOR_OPENCODE_COOKIE\);/);
-  assert.match(profilesHandler, /hasApiKey: Boolean\(p\.apiKey\), hasCookie: Boolean\(p\.cookie\)/);
+  // Which credential kinds an account holds crosses to the renderer; none of
+  // their values do.
+  assert.match(profilesHandler, /hasApiKey: Boolean\(p\.apiKey\)/);
+  assert.match(profilesHandler, /hasCookie: Boolean\(p\.cookie\)/);
+  assert.match(profilesHandler, /usesAmbientKey: Boolean\(p\.useAmbientKey\)/);
+});
+
+test('OpenCode credentials are named, merged and removed one at a time', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+
+  const save = main.slice(
+    main.indexOf("ipcMain.handle('opencode:saveProfile'"),
+    main.indexOf("ipcMain.handle('opencode:setProfileEnabled'")
+  );
+  assert.ok(save, 'saveProfile handler should exist');
+  // Naming the auto-detected credential stores a reference, never the key, so a
+  // key rotated inside OpenCode is still read live instead of going stale.
+  assert.match(save, /\['api', 'cookie', 'ambient'\]\.includes\(kind\)/);
+  assert.match(save, /credential = \{ useAmbientKey: true, enabled: true \}/);
+  assert.doesNotMatch(save, /useAmbientKey: true, apiKey/);
+
+  const rename = main.slice(
+    main.indexOf("ipcMain.handle('opencode:renameProfile'"),
+    main.indexOf("ipcMain.handle('opencode:setProfileEnabled'") > main.indexOf("ipcMain.handle('opencode:renameProfile'")
+      ? main.indexOf("ipcMain.handle('opencode:setProfileEnabled'")
+      : main.length
+  );
+  // Renaming onto an existing account asserts they are the same OpenCode
+  // account, so it needs the same explicit confirmation as any other binding.
+  assert.match(rename, /options\.merge !== true/);
+  assert.match(rename, /nameTaken: true/);
+  assert.match(rename, /profiles\[newName\] = \{ \.\.\.\(profiles\[newName\] \|\| \{\}\), \.\.\.profiles\[oldName\] \}/);
+
+  const remove = main.slice(
+    main.indexOf("ipcMain.handle('opencode:removeCredential'"),
+    main.indexOf("ipcMain.handle('opencode:renameProfile'")
+  );
+  assert.ok(remove, 'removeCredential handler should exist');
+  assert.match(remove, /api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey'/);
+  // An account with nothing left is a name, not an account.
+  assert.match(remove, /if \(!remaining\.apiKey && !remaining\.cookie && !remaining\.useAmbientKey\) delete profiles\[name\]/);
 });
