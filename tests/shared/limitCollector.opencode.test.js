@@ -896,10 +896,11 @@ test('a single API account keeps its identity when the probe fails', async () =>
   assert.notStrictEqual(failed.accountKey, '');
 });
 
-test('disabling every account does not resurrect the ambient one', async () => {
-  // "Configured" must mean a profile map exists, not that something in it is
-  // enabled: otherwise turning every account off falls back to whichever
-  // account happens to be signed in locally.
+test('disabling every account falls back to the auto-detected one', async () => {
+  // A disabled account contributes no credential, so there is nothing for the
+  // ambient key to be mis-paired with: it stands alone under its own identity.
+  // Gating on "a profile map exists" instead would make turning every account
+  // off also turn off the zero-config path, which is not what that asks for.
   const seen = [];
   const summary = await collectLimitsOnce(
     {
@@ -912,18 +913,19 @@ test('disabling every account does not resurrect the ambient one', async () => {
     },
     {
       now: () => now403,
-      // Faithful to the real collectGoApi: an explicit '' means "no credential"
-      // and never reaches the network. A stub that ignores apiKey would assert
-      // a state production cannot reach.
+      // Faithful to the real collectGoApi: undefined resolves the ambient key,
+      // '' suppresses it. A stub ignoring apiKey would assert a state that
+      // production cannot reach.
       opencodeCollectGoApi: async (d) => {
         seen.push(d.apiKey);
-        return d.apiKey ? goApiOk : { status: 'notConfigured', windows: [], identity: '' };
+        return d.apiKey === undefined ? goApiOk : { status: 'notConfigured', windows: [], identity: '' };
       }
     }
   );
-  assert.deepStrictEqual(seen, ['']);
+  assert.deepStrictEqual(seen, [undefined]);
   const p = summary.providers.find((x) => x.provider === 'opencode');
-  assert.strictEqual(p.status, 'notConfigured');
+  assert.strictEqual(p.status, 'ok');
+  assert.strictEqual(p.source, 'api');
 });
 
 test('a runtime cancellation of a bound account is not published as a row', async () => {

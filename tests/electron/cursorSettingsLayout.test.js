@@ -1360,9 +1360,10 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
     main.indexOf('async function probeOpenCodeApiKey')
   );
   assert.ok(gate, 'ambient gate should exist');
-  // It must mirror the collector's selection, which uses the ambient key only
-  // when nothing at all is configured.
-  assert.match(gate, /Object\.keys\(profiles \|\| \{\}\)\.length > 0/);
+  // It must mirror the collector's selection, which gates on enabled
+  // credentials: a disabled account supplies nothing to the collector, so the
+  // ambient key is what actually answers and the panel has to say so.
+  assert.match(gate, /p\?\.enabled && \(p\.apiKey \|\| p\.cookie\)/);
   assert.match(gate, /hasEnvCookie \|\| settings\.opencodeCookie/);
   assert.match(gate, /opencodeGoApi\.readGoApiKey\(process\.env\)/);
 

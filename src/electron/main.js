@@ -134,7 +134,11 @@ const OPENCODE_AMBIENT_ACCOUNT_KEY = '__ambient';
 // must apply the same three conditions or it will claim an auto-detected
 // account the collector is not actually using. See fetchOpenCodeLimits.
 function opencodeAmbientKeyActive(profiles, hasEnvCookie) {
-  if (Object.keys(profiles || {}).length > 0) return false;
+  // Enabled credentials only: a stored but disabled account supplies nothing to
+  // the collector, so the ambient key is what actually answers and the panel has
+  // to say so.
+  const enabled = Object.values(profiles || {}).filter((p) => p?.enabled && (p.apiKey || p.cookie));
+  if (enabled.length > 0) return false;
   if (hasEnvCookie || settings.opencodeCookie) return false;
   return Boolean(opencodeGoApi.readGoApiKey(process.env));
 }

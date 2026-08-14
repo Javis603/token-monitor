@@ -3223,15 +3223,13 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     // (`webAccountKey`), so the result would publish one account's quota — and
     // merge it across devices — under the other account's identity.
     //
-    // "Configured" means a profile map exists, not that something in it is
-    // enabled: disabling every account must leave the list empty, not fall back
-    // to whichever account happens to be logged in locally.
-    const hasConfiguredCredentials = Boolean(
-      (explicitProfiles && Object.keys(explicitProfiles).length > 0)
-      || options.opencodeCookie
-      || envCookie
-    );
-    const primaryApiKey = primary.apiKey || (hasConfiguredCredentials ? '' : undefined);
+    // The gate is what is *enabled*, not whether a profile map exists. A stored
+    // but disabled account contributes no credential to pair with, so the
+    // ambient key stands alone under its own identity and nothing can be
+    // mis-attributed. Gating on the map instead makes turning every account off
+    // also turn off the zero-config path, which is not what disabling an
+    // account asks for.
+    const primaryApiKey = primary.apiKey || (cookie ? '' : undefined);
     const [goApi, goWeb, zen] = await Promise.all([
       collectGoApi({
         env: deps.env || process.env,
