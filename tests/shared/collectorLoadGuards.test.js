@@ -104,6 +104,22 @@ test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
   }
 });
 
+test('Command Code watches only its recursive transcript tree', () => {
+  const tmp = withTmpHome([path.join('.commandcode', 'projects')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchPathsForClients } = freshCollector();
+    const projects = path.join(tmp, '.commandcode', 'projects');
+
+    assert.deepEqual(watchPathsForClients('commandcode'), [projects]);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but prunes logs', () => {
   const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
   const tmp = withTmpHome([path.join('.local', 'share', 'mimocode'), orcaRoot]);
