@@ -813,6 +813,14 @@ test('extractUsageFromTokscale normalizes CodeBuddy and WorkBuddy client ids', (
   assert.equal(period.clients.workbuddy, 12);
 });
 
+test('extractUsageFromTokscale keeps the canonical Command Code client id', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Command Code', model: 'deepseek/deepseek-v4-flash', totalTokens: 19 }
+  ]);
+
+  assert.equal(period.clients.commandcode, 19);
+});
+
 test('normalizeClientName keeps kilo distinct from kilocode and maps Oh My Pi to pi', () => {
   const period = extractUsageFromTokscale([
     { client: 'kilo', model: 'x', totalTokens: 5 },

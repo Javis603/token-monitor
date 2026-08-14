@@ -1296,6 +1296,7 @@ function clientSourceRoots(clientsCsv) {
     ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
+  add('commandcode', ['commandcode-projects', path.join(home, '.commandcode', 'projects')]);
   // MiMo Code: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
   // copy (scanner.rs `discover_micode_dbs_in_dirs`), and that copy can hold
   // sessions the XDG one is missing. Watch both so an orca-driven install still
@@ -1711,6 +1712,21 @@ function watchPolicyEntries(clientsCsv) {
       return true;
     }
   );
+
+  // Command Code recursively stores session transcripts below projects/, but
+  // checkpoint streams use the same JSONL suffix and are explicitly skipped by
+  // Tokscale. Keep directories for traversal and ordinary JSONL files (including
+  // removed paths), while pruning checkpoints and unrelated project metadata.
+  bound('commandcode', candidates.commandcode || [], (_parts, resolved) => {
+    const name = path.basename(resolved);
+    if (name.endsWith('.jsonl') && !name.endsWith('.checkpoints.jsonl')) return false;
+    try {
+      if (fs.statSync(resolved).isDirectory()) return false;
+    } catch (_) {
+      // Removed transcript paths are handled by the suffix check above.
+    }
+    return true;
+  });
 
   bound('opencode', candidates.opencode || [], (parts) => {
     if (parts.length === 1) {

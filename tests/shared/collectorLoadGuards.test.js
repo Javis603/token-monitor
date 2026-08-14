@@ -104,6 +104,37 @@ test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
   }
 });
 
+test('Command Code watches its transcript tree and prunes non-transcript events', () => {
+  const workspace = path.join('.commandcode', 'projects', 'workspace');
+  const tmp = withTmpHome([workspace]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchPathsForClients, watchIgnoreMatcher } = freshCollector();
+    const projects = path.join(tmp, '.commandcode', 'projects');
+    const workspaceDir = path.join(tmp, workspace);
+    const transcript = path.join(workspaceDir, 'session.jsonl');
+    const checkpoint = path.join(workspaceDir, 'session.checkpoints.jsonl');
+    const metadata = path.join(workspaceDir, 'metadata.json');
+    fs.writeFileSync(transcript, '');
+    fs.writeFileSync(checkpoint, '');
+    fs.writeFileSync(metadata, '');
+
+    assert.deepEqual(watchPathsForClients('commandcode'), [projects]);
+    const ignored = watchIgnoreMatcher('commandcode');
+    assert.equal(ignored(projects), false);
+    assert.equal(ignored(workspaceDir), false);
+    assert.equal(ignored(transcript), false);
+    assert.equal(ignored(checkpoint), true);
+    assert.equal(ignored(metadata), true);
+    assert.equal(ignored(path.join(workspaceDir, 'removed.jsonl')), false);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but prunes logs', () => {
   const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
   const tmp = withTmpHome([path.join('.local', 'share', 'mimocode'), orcaRoot]);
