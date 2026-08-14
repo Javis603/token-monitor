@@ -223,16 +223,60 @@ test('a bound auto-detected reference stops resolving once the key changes', () 
   assert.equal(ambientKeyFor(bound, 'sk-other', 'go-api:bbb'), '');
 });
 
-test('a reference stored before identities were recorded keeps resolving', () => {
-  // There is no way to reconstruct what it was bound to, so refusing to resolve
-  // it would break existing installs to guard against a case we cannot detect.
-  assert.equal(ambientKeyFor({ useAmbientKey: true }, 'sk-current', 'go-api:aaa'), 'sk-current');
+// `useAmbientKey` ships with this feature, so there is no released state that
+// stores an unpinned reference. Accepting one would not be compatibility with
+// anything; it would be a standing bypass of the rule above.
+test('a reference with no pin resolves nothing', () => {
+  assert.equal(ambientKeyFor({ useAmbientKey: true }, 'sk-current', 'go-api:aaa'), '');
+  assert.equal(ambientKeyFor({ useAmbientKey: true, cookie: 'auth=b' }, 'sk-current', 'go-api:aaa'), '');
 });
 
 test('ambientKeyFor resolves nothing without a reference or without a key', () => {
   assert.equal(ambientKeyFor({ cookie: 'auth=b' }, 'sk-current', 'go-api:aaa'), '');
   assert.equal(ambientKeyFor({ useAmbientKey: true }, '', ''), '');
   assert.equal(ambientKeyFor(null, 'sk-current', 'go-api:aaa'), '');
+});
+
+// The pin is part of the credential, not metadata sitting beside it. Moving the
+// reference without it would leave an unpinned reference on the destination,
+// which is exactly the state `ambientKeyFor` refuses to resolve, and would put
+// the rotation protection back where it was before it existed.
+test('moving the auto-detected reference carries its pin with it', () => {
+  const profiles = {
+    work: { cookie: 'auth=b', useAmbientKey: true, ambientKeyIdentity: 'go-api:aaa', enabled: true }
+  };
+  const result = moveCredential(profiles, 'work', 'ambient', 'personal');
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.profiles.work, { cookie: 'auth=b', enabled: true });
+  assert.equal(result.profiles.personal.useAmbientKey, true);
+  assert.equal(result.profiles.personal.ambientKeyIdentity, 'go-api:aaa');
+  // And the moved credential still resolves only for the key it was bound to.
+  assert.equal(ambientKeyFor(result.profiles.personal, 'sk-a', 'go-api:aaa'), 'sk-a');
+  assert.equal(ambientKeyFor(result.profiles.personal, 'sk-c', 'go-api:ccc'), '');
+});
+
+// An orphaned pin is not litter: a later merge spreads the source over the
+// destination, so it would overwrite the pin of a real reference it merges into.
+test('removing the auto-detected reference removes its pin too', () => {
+  const profiles = {
+    work: { cookie: 'auth=b', useAmbientKey: true, ambientKeyIdentity: 'go-api:aaa', enabled: true }
+  };
+  const result = removeCredential(profiles, 'work', 'ambient');
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.profiles.work, { cookie: 'auth=b', enabled: true });
+});
+
+test('a merge cannot carry an orphaned pin onto a real reference', () => {
+  // Constructed directly rather than through removeCredential, which no longer
+  // produces it: the merge must not depend on that being the only source.
+  const profiles = {
+    stale: { cookie: 'auth=b', ambientKeyIdentity: 'go-api:aaa', enabled: true },
+    live: { useAmbientKey: true, ambientKeyIdentity: 'go-api:bbb', enabled: true }
+  };
+  const result = renameProfile(profiles, 'stale', 'live', { merge: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.profiles.live.ambientKeyIdentity, 'go-api:bbb');
+  assert.equal(ambientKeyFor(result.profiles.live, 'sk-b', 'go-api:bbb'), 'sk-b');
 });
 
 test('every operation leaves the caller a fresh map instead of mutating theirs', () => {

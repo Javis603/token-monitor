@@ -3175,8 +3175,9 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   // or a reference to the key OpenCode keeps in auth.json. Sharing a name is
   // the user's own assertion that they are one account, which is the only thing
   // that licenses reading quota from one credential while identity and balance
-  // come from another. The reference is stored rather than the key itself, so a
-  // key rotated inside OpenCode is picked up on the next tick.
+  // come from another. The reference is stored rather than the key itself, so the
+  // key is re-read every tick; it resolves only while it is still the key the
+  // reference was bound to.
   const ambientKey = readGoApiKey(deps.env || process.env);
   const ambientIdentity = ambientKey ? opencodeGoApi.goApiIdentity(ambientKey) : '';
   const ambientFor = (p) => opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity);

@@ -13796,7 +13796,12 @@ async function updateOpenCodeProfilesStatus() {
     const infoEl = document.getElementById(elementId);
     if (!infoEl) continue;
 
-    if (s.expired) {
+    if (s.needsRebind) {
+      // The key this reference was bound to is no longer the one on the machine.
+      // Nothing is broken and nothing expired; the account just has to be told
+      // whether the key now present is the same account.
+      infoEl.textContent = t('settings.opencode.needsRebind');
+    } else if (s.expired) {
       infoEl.textContent = t('settings.opencode.statusExpired');
     } else if (s.linked) {
       const parts = [];

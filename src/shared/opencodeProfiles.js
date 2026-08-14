@@ -17,8 +17,24 @@
 
 const CREDENTIAL_FIELDS = { api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey' };
 
+// A credential is a set of properties, not always a single field. The
+// auto-detected reference carries the identity of the key it was bound to, and
+// that pin is the whole of its rotation protection: separating the two leaves an
+// unpinned reference, which is a state nothing is allowed to create. Declared as
+// a table so a credential that grows another property later is one entry here
+// rather than a third place that has to remember.
+const CREDENTIAL_COMPANIONS = { ambient: ['ambientKeyIdentity'] };
+
 function credentialField(kind) {
   return Object.prototype.hasOwnProperty.call(CREDENTIAL_FIELDS, kind) ? CREDENTIAL_FIELDS[kind] : '';
+}
+
+// Every property belonging to one credential. They move, and are removed,
+// together or not at all.
+function credentialProperties(kind) {
+  const field = credentialField(kind);
+  if (!field) return [];
+  return [field, ...(CREDENTIAL_COMPANIONS[kind] || [])];
 }
 
 function credentialKind(field) {
@@ -34,6 +50,19 @@ function credentialKinds(profile) {
 
 function hasAnyCredential(profile) {
   return credentialKinds(profile).length > 0;
+}
+
+// A companion without its credential is meaningless, and worse than meaningless
+// in a merge: the source is spread over the destination, so a stray pin would
+// land on top of the pin of a real reference. Dropping them keeps the rule
+// "a companion only ever travels with its credential" true in both directions.
+function withoutOrphanCompanions(profile) {
+  const clean = { ...profile };
+  for (const [kind, companions] of Object.entries(CREDENTIAL_COMPANIONS)) {
+    if (clean[CREDENTIAL_FIELDS[kind]]) continue;
+    for (const property of companions) delete clean[property];
+  }
+  return clean;
 }
 
 function cloneProfiles(profiles) {
@@ -85,11 +114,15 @@ function saveCredential(profiles, name, credential, options = {}) {
 // quota under this one's workspace identity, which is precisely what nothing is
 // allowed to assert automatically.
 //
-// A reference stored before this was recorded has no identity to compare, so it
-// keeps resolving; there is no way to reconstruct what it was bound to.
+// A reference with no pin resolves nothing. There is no released version that
+// stores one — `useAmbientKey` arrives with this feature — so treating a missing
+// pin as "trust whatever key is here now" would not be compatibility with
+// anything, it would be shipping the bypass on purpose. The account falls back
+// to its other credentials and the key returns as its own auto-detected row,
+// which the user can re-attach; that write records a pin.
 function ambientKeyFor(profile, ambientKey, ambientIdentity) {
   if (!profile?.useAmbientKey || !ambientKey) return '';
-  if (profile.ambientKeyIdentity && profile.ambientKeyIdentity !== ambientIdentity) return '';
+  if (!profile.ambientKeyIdentity || profile.ambientKeyIdentity !== ambientIdentity) return '';
   return ambientKey;
 }
 
@@ -121,11 +154,14 @@ function moveCredential(profiles, name, kind, targetName, options = {}) {
   }
 
   const remaining = { ...source };
-  const value = remaining[field];
-  delete remaining[field];
+  const moved = {};
+  for (const property of credentialProperties(kind)) {
+    if (property in remaining) moved[property] = remaining[property];
+    delete remaining[property];
+  }
   if (hasAnyCredential(remaining)) next[name] = remaining;
   else delete next[name];
-  next[target] = { enabled: true, ...(destination || {}), [field]: value };
+  next[target] = { enabled: true, ...(destination || {}), ...moved };
   // No `removedCookie`: a move keeps the credential, so the legacy single-cookie
   // mirror in settings still points at something that exists.
   return { ok: true, profiles: next };
@@ -149,7 +185,11 @@ function renameProfile(profiles, oldName, newName, options = {}) {
       return { ok: false, error: 'Credential already exists', credentialConflict: true, kind: conflict };
     }
   }
-  next[target] = { enabled: true, ...(destination || {}), ...source };
+  next[target] = {
+    enabled: true,
+    ...withoutOrphanCompanions(destination || {}),
+    ...withoutOrphanCompanions(source)
+  };
   delete next[oldName];
   return { ok: true, profiles: next };
 }
@@ -166,7 +206,10 @@ function removeCredential(profiles, name, kind) {
   const next = cloneProfiles(profiles);
   const remaining = { ...profile };
   const removed = remaining[field];
-  delete remaining[field];
+  // Companions go too. An orphaned `ambientKeyIdentity` is not merely litter: a
+  // later merge spreads the source over the destination, so it would overwrite
+  // the pin of a real reference on the account being merged into.
+  for (const property of credentialProperties(kind)) delete remaining[property];
   if (hasAnyCredential(remaining)) next[name] = remaining;
   else delete next[name];
   return { ok: true, profiles: next, removedCookie: field === 'cookie' ? removed : '' };
@@ -175,6 +218,7 @@ function removeCredential(profiles, name, kind) {
 module.exports = {
   CREDENTIAL_FIELDS,
   credentialField,
+  credentialProperties,
   credentialKinds,
   hasAnyCredential,
   ambientKeyFor,

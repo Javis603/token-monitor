@@ -1048,7 +1048,14 @@ test('a profile referencing the auto-detected key resolves it live', async () =>
     {
       limitProviders: 'opencode',
       limitsEnabled: true,
-      opencodeProfiles: { work: { enabled: true, useAmbientKey: true, cookie: 'sess=work' } }
+      opencodeProfiles: {
+        work: {
+          enabled: true,
+          useAmbientKey: true,
+          ambientKeyIdentity: goApiIdentity('key-one'),
+          cookie: 'sess=work'
+        }
+      }
     },
     {
       now: () => now403,

@@ -6510,12 +6510,28 @@ app.whenReady().then(() => {
     const ambientKey = opencodeGoApi.readGoApiKey(process.env);
     const ambientIdentity = ambientKey ? opencodeGoApi.goApiIdentity(ambientKey) : '';
     const profileKey = (p) => p.apiKey || opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity);
-    const entries = Object.entries(profiles).filter(([, p]) => (p.cookie || profileKey(p)) && p.enabled);
+    // A reference that no longer resolves still has to answer for its row. It
+    // has a credential the user stored, so filtering it out here would leave the
+    // row on its placeholder forever with nothing saying what to do about it.
+    const needsRebind = (p) => Boolean(p.useAmbientKey) && !profileKey(p) && !p.cookie;
+    const entries = Object.entries(profiles)
+      .filter(([, p]) => (p.cookie || profileKey(p) || needsRebind(p)) && p.enabled);
 
     // Query all profiles in parallel
     const results = await Promise.all(
       entries.map(async ([name, profile]) => {
         const apiKey = profileKey(profile);
+        if (needsRebind(profile)) {
+          return [name, {
+            linked: false,
+            expired: false,
+            go: false,
+            zen: false,
+            hasBalance: false,
+            balanceUsd: null,
+            needsRebind: true
+          }];
+        }
         // An API key reaches Go quota and nothing else, so it reports the same
         // shape as a cookie with the Zen half permanently absent. Without this
         // branch an API account is never probed and the panel sits at "0/1".
@@ -6648,8 +6664,8 @@ app.whenReady().then(() => {
       let credential;
       if (kind === 'ambient') {
         // Naming the auto-detected credential. A reference is stored, never the
-        // key itself, so a key rotated inside OpenCode is still picked up live
-        // instead of going stale at 401 behind a snapshot.
+        // key itself, so the key is re-read every tick rather than going stale
+        // at 401 behind a snapshot.
         const ambientKey = opencodeGoApi.readGoApiKey(process.env);
         if (!ambientKey) {
           return { ok: false, error: 'No OpenCode credential found on this machine' };
@@ -6660,8 +6676,7 @@ app.whenReady().then(() => {
         // key: the value itself is never stored for this credential kind.
         credential = {
           useAmbientKey: true,
-          ambientKeyIdentity: opencodeGoApi.goApiIdentity(ambientKey),
-          enabled: true
+          ambientKeyIdentity: opencodeGoApi.goApiIdentity(ambientKey)
         };
       } else if (kind === 'api') {
         const apiKey = String(raw || '').trim();
@@ -6678,7 +6693,7 @@ app.whenReady().then(() => {
         if (probe.status !== 'ok') {
           return { ok: false, error: 'Could not reach the OpenCode usage API' };
         }
-        credential = { apiKey, enabled: true };
+        credential = { apiKey };
       } else {
         const cookie = opencodeWeb.sanitizeCookieHeader(raw);
         if (!cookie) return { ok: false, error: 'Empty cookie' };
@@ -6689,7 +6704,7 @@ app.whenReady().then(() => {
         if (opencodeWeb.summarizeLink(go, zen).expired) {
           return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
         }
-        credential = { cookie, enabled: true };
+        credential = { cookie };
       }
       // Saving one credential replaces only that kind and keeps the others. Two
       // kinds under one profile name is how a user says "these are the same

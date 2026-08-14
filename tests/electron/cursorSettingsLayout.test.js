@@ -1439,7 +1439,11 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   // placeholder while the collector is reading live quota from that same key.
   // Both the filter and the probe resolve the key the way the collector does.
   assert.match(status, /const profileKey = \(p\) => p\.apiKey \|\| opencodeProfiles\.ambientKeyFor\(p, ambientKey, ambientIdentity\);/);
-  assert.match(status, /\.filter\(\(\[, p\]\) => \(p\.cookie \|\| profileKey\(p\)\) && p\.enabled\)/);
+  // A reference whose pin no longer matches keeps its row and says so, rather
+  // than being filtered out and leaving the row on its placeholder forever.
+  assert.match(status, /const needsRebind = \(p\) => Boolean\(p\.useAmbientKey\) && !profileKey\(p\) && !p\.cookie;/);
+  assert.match(status, /\.filter\(\(\[, p\]\) => \(p\.cookie \|\| profileKey\(p\) \|\| needsRebind\(p\)\) && p\.enabled\)/);
+  assert.match(status, /needsRebind: true/);
   assert.match(status, /const apiKey = profileKey\(profile\);/);
   assert.doesNotMatch(status, /probeOpenCodeApiKey\(profile\.apiKey\)/);
 
