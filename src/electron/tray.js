@@ -209,7 +209,17 @@ function createTray({
     onQuit,
     onRefresh,
     onSetTrayContent,
-    onSetWindowPresentation,
+    // Non-tray presentation changes can keep an existing Linux tray alive,
+    // so re-export the D-Bus menu after the callback mutates settings.
+    onSetWindowPresentation: (value) => {
+      try {
+        return typeof onSetWindowPresentation === 'function'
+          ? onSetWindowPresentation(value)
+          : undefined;
+      } finally {
+        refreshContextMenu();
+      }
+    },
     onSwitchCodexAccount,
     translate: translateMenu
   }));

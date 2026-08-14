@@ -321,6 +321,40 @@ test('Windows tray keeps building its menu when right-clicked', () => {
   assert.equal(calls.popups[0].template[0].label, 'Refreshing…');
 });
 
+test('Linux tray re-exports the checked window presentation after a menu action', () => {
+  const calls = trayCalls();
+  let state = {
+    locale: 'en',
+    trayContent: 'tokens',
+    trayMode: false,
+    windowBehavior: 'floating'
+  };
+  createTray({
+    electron: fakeTrayElectron(calls),
+    getMenuState: () => state,
+    onSetWindowPresentation(value) {
+      state = {
+        ...state,
+        trayMode: value === 'tray',
+        ...(value === 'tray' ? {} : { windowBehavior: value })
+      };
+    },
+    onToggle() {},
+    platform: 'linux'
+  });
+
+  const presentationItems = calls.contextMenus[0].template
+    .find((item) => item.label === 'Window Presentation').submenu;
+  assert.deepEqual(presentationItems.map((item) => item.checked), [false, true, false, false]);
+
+  presentationItems.find((item) => item.label === 'Normal Window').click();
+
+  assert.equal(calls.contextMenus.length, 2);
+  const refreshedItems = calls.contextMenus[1].template
+    .find((item) => item.label === 'Window Presentation').submenu;
+  assert.deepEqual(refreshedItems.map((item) => item.checked), [false, false, true, false]);
+});
+
 test('tray menu actions publish both in-flight transitions', async () => {
   let inFlight = false;
   let finish;
