@@ -36,6 +36,7 @@ const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
+const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
@@ -1356,6 +1357,12 @@ function clientSourceRoots(clientsCsv) {
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
+  ]);
+  // DeepSeek Harness (DSH) — zstd JSONL session transcripts at
+  // `<dshHome>/sessions/` (default `~/.dsh`, overridable via `DSH_HOME`).
+  add('dsh', [
+    DSH_SOURCE_CHECK_ID,
+    resolveDshSessionsDir({ env: process.env, homeDir: home, platform: process.platform })
   ]);
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
