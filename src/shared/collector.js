@@ -17,7 +17,7 @@ const {
   deriveClientOverall
 } = require('./clientHealth');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
-const { customPricingPath } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleConfigDir } = require('./tokscaleConfig');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -214,6 +214,93 @@ const PROMA_PRICING_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const PROMA_PRICING_LOOKUP_TIMEOUT_MS = 3000;
 const promaPricingCache = new Map();
 
+// tokscale maintains its own pricing catalog cache under its config dir
+// (cache/pricing-{litellm,openrouter,models-dev}.json): the `tokscale pricing`
+// command refreshes these over the network and falls back to them when offline
+// — but that fallback costs 20-30s of network timeouts, far past the 3s lookup
+// budget (PROMA_PRICING_LOOKUP_TIMEOUT_MS), which is why dsh/proma costs show
+// zero on machines without catalog access. Read the same local files directly
+// (zero network) as the offline fallback: when the command fails, the catalog
+// it would have fallen back to is already on disk.
+const TOKSCALE_PRICING_CATALOG_FILES = ['pricing-litellm.json', 'pricing-openrouter.json', 'pricing-models-dev.json'];
+
+// Parsed catalog, keyed by model id, invalidated by the files' size+mtime.
+let tokscaleCatalogCache = { revision: '', byModel: null };
+
+function tokscalePricingCatalogDir() {
+  return path.join(tokscaleConfigDir(), 'cache');
+}
+
+// Catalog keys are usually "<provider>/<model>"; usage rows carry the bare
+// model id, so strip any provider prefix (deepseek/deepseek-v4-flash ->
+// deepseek-v4-flash, opencode-go/deepseek-v4-pro -> deepseek-v4-pro).
+function normalizeCatalogModelKey(key) {
+  const raw = String(key || '').trim();
+  if (!raw) return '';
+  const parts = raw.split('/');
+  return (parts[parts.length - 1] || '').trim().toLowerCase();
+}
+
+function normalizeCatalogPricing(value) {
+  const pick = (key) => {
+    const n = Number(value[key]);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  };
+  const pricing = {
+    inputCostPerToken: pick('input_cost_per_token'),
+    outputCostPerToken: pick('output_cost_per_token'),
+    cacheReadInputTokenCost: pick('cache_read_input_token_cost'),
+    cacheCreationInputTokenCost: pick('cache_creation_input_token_cost')
+  };
+  return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
+}
+
+// Parse (once per file-revision) the tokscale pricing catalog cache into a
+// Map<modelId, pricing>. First source wins so litellm stays authoritative.
+function tokscalePricingCatalog(options = {}) {
+  const dir = options.configDir || tokscalePricingCatalogDir();
+  const files = TOKSCALE_PRICING_CATALOG_FILES.map((name) => path.join(dir, name));
+  const revision = files.map((file) => {
+    try {
+      const stat = fs.statSync(file);
+      return `${stat.size}:${stat.mtimeMs}`;
+    } catch (_) {
+      return '';
+    }
+  }).join('|');
+  if (tokscaleCatalogCache.revision === revision && tokscaleCatalogCache.byModel) return tokscaleCatalogCache.byModel;
+  const byModel = new Map();
+  for (const file of files) {
+    let doc;
+    try {
+      doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (_) {
+      continue; // missing or malformed cache file
+    }
+    const data = doc && typeof doc === 'object' && doc.data && typeof doc.data === 'object' ? doc.data : null;
+    if (!data) continue;
+    for (const [key, value] of Object.entries(data)) {
+      if (!value || typeof value !== 'object') continue;
+      const modelId = normalizeCatalogModelKey(key);
+      if (!modelId || byModel.has(modelId)) continue;
+      const pricing = normalizeCatalogPricing(value);
+      if (pricing) byModel.set(modelId, pricing);
+    }
+  }
+  tokscaleCatalogCache = { revision, byModel };
+  return byModel;
+}
+
+function readTokscalePricingCatalog(modelId, options = {}) {
+  const key = String(modelId || '').trim().toLowerCase();
+  if (!key) return null;
+  return tokscalePricingCatalog(options).get(key) || null;
+}
+
+function resetTokscaleCatalogCache() {
+  tokscaleCatalogCache = { revision: '', byModel: null };
+}
+
 function promaPricingRevision() {
   try { return fs.statSync(customPricingPath()).mtimeMs; } catch (_) { return 0; }
 }
@@ -255,12 +342,16 @@ async function resolveModelPricing(rows, options = {}) {
       if (cached.pricing) pricingByModel[modelId] = cached.pricing;
       continue;
     }
-    let pricing = null;
+    let pricing;
     try {
       pricing = normalizePromaPricing(await lookup(modelId, commandTimeoutMs));
     } catch (_) {
       // An unknown model, offline lookup, or custom channel must remain
-      // cost-unavailable instead of inheriting an unrelated catalog price.
+      // cost-unavailable instead of inheriting an unrelated catalog price —
+      // but when the lookup itself failed (timeout/offline), the price the
+      // command would have fallen back to is tokscale's local catalog cache,
+      // which is on disk without any network round trip.
+      pricing = readTokscalePricingCatalog(modelId, options);
     }
     promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
     if (pricing) pricingByModel[modelId] = pricing;
@@ -3109,6 +3200,9 @@ module.exports = {
   resolvePlatformBinary,
   resolvePromaPricing,
   resetPromaPricingCache,
+  readTokscalePricingCatalog,
+  resetTokscaleCatalogCache,
+  tokscalePricingCatalog,
   resolveWatchUsePolling,
   selfSyncSourceRootsForClients,
   // The process-wide sync throttle this module drives. Exported so a test can
